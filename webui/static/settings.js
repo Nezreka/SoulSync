@@ -1772,6 +1772,10 @@ async function loadSettingsData() {
         document.getElementById('prefer-explicit').checked = settings.content_filter?.prefer_explicit === true;
         syncPreferExplicitState();
 
+        // Prefer a version (off = ''), lives under soulseek with the other match settings
+        const _pvEl = document.getElementById('preferred-version');
+        if (_pvEl) _pvEl.value = settings.soulseek?.preferred_version || '';
+
         // Populate Genre Whitelist
         const gwEnabled = settings.genre_whitelist?.enabled === true;
         document.getElementById('genre-whitelist-enabled').checked = gwEnabled;
@@ -4457,6 +4461,7 @@ async function saveSettings(quiet = false) {
             search_min_delay_seconds: parseInt(document.getElementById('soulseek-search-min-delay-seconds').value) || 0,
             min_peer_upload_speed: parseInt(document.getElementById('soulseek-min-peer-speed').value) || 0,
             max_peer_queue: parseInt(document.getElementById('soulseek-max-peer-queue').value) || 0,
+            preferred_version: document.getElementById('preferred-version')?.value || '',
             download_timeout: (parseInt(document.getElementById('soulseek-download-timeout').value) || 10) * 60,
             auto_clear_searches: document.getElementById('soulseek-auto-clear-searches').checked
         },

@@ -155,6 +155,28 @@ def expected_duration_for_check(expected_ms: Any, is_local_import: bool) -> Opti
         return None
 
 
+def duration_reference_for_context(expected_ms: Any, context: Any) -> Any:
+    """The duration the integrity check should measure against.
+
+    Normally that's the source's own duration. But when we deliberately took a
+    different version than the source asked for (Settings → prefer a version),
+    the source's number describes another recording — an extended mix runs
+    minutes past the radio edit Spotify listed, so checking against it would
+    quarantine every file the setting went and found on purpose.
+
+    The download stamps the length the peer advertised on the context. That
+    still catches a truncated transfer, which is what the check is for. A
+    stamped None means the peer advertised nothing, so there's no honest
+    reference and the duration leg is skipped (size + parse legs still run).
+
+    Pure helper. No I/O. Returns ``expected_ms`` untouched when no version was
+    swapped, so the ordinary path is unaffected.
+    """
+    if isinstance(context, dict) and '_preferred_version_duration_ms' in context:
+        return context.get('_preferred_version_duration_ms') or None
+    return expected_ms
+
+
 @dataclass
 class IntegrityResult:
     """Outcome of an integrity check.

@@ -1,7 +1,6 @@
 import re
 import requests
 import time
-import threading
 from typing import Dict, List, Optional, Any
 from functools import wraps
 from dataclasses import dataclass
@@ -11,26 +10,18 @@ from core.metadata.cache import get_metadata_cache
 
 logger = get_logger("deezer_client")
 
-# Global rate limiting variables
-_last_api_call_time = 0
-_api_call_lock = threading.Lock()
-MIN_API_INTERVAL = 1.0  # 1 second between API calls (Deezer soft limit: 50 req/5s)
-
 def rate_limited(func):
-    """Decorator to enforce rate limiting on Deezer API calls"""
+    """Enforce the shared Deezer budget on an API call.
+
+    Was a private one-call-per-second gate that only these nine methods obeyed,
+    while the playlist album loops called ``session.get`` straight past it. Ten
+    modules hit Deezer against ONE quota, so the budget has to be one thing —
+    see core/deezer_throttle.py for why the number is what it is.
+    """
     @wraps(func)
     def wrapper(*args, **kwargs):
-        global _last_api_call_time
-
-        with _api_call_lock:
-            current_time = time.time()
-            time_since_last_call = current_time - _last_api_call_time
-
-            if time_since_last_call < MIN_API_INTERVAL:
-                sleep_time = MIN_API_INTERVAL - time_since_last_call
-                time.sleep(sleep_time)
-
-            _last_api_call_time = time.time()
+        from core.deezer_throttle import wait_for_slot
+        wait_for_slot()
 
         from core.api_call_tracker import api_call_tracker
         api_call_tracker.record_call('deezer')
@@ -117,7 +108,7 @@ def _is_full_track_payload(payload: Optional[Dict[str, Any]]) -> bool:
     return 'track_position' in payload and 'contributors' in payload
 
 
-def resolve_album_track_positions(session, base_url, album_ids, cache=None, sleep_s=0.2):
+def resolve_album_track_positions(session, base_url, album_ids, cache=None, progress_cb=None):
     """Build ``{str(track_id): track_position}`` for a set of Deezer album ids.
 
     Deezer PLAYLIST and SEARCH track objects (and even the album object's embedded
@@ -125,10 +116,21 @@ def resolve_album_track_positions(session, base_url, album_ids, cache=None, slee
     ``/track/<id>`` carry it. So numbering playlist tracks by their playlist index
     silently poisons the real album track number, which then rides onto the
     downloaded file's tag. This resolves the authoritative position per album
-    (cache-first, best-effort — a failed album just isn't in the map)."""
-    import time as _time
+    (cache-first, best-effort — a failed album just isn't in the map).
+
+    Pacing is the shared Deezer budget's job now (core/deezer_throttle.py); this
+    used to take a ``sleep_s`` nobody else could see or account for."""
     positions: Dict[str, int] = {}
-    for aid in album_ids:
+    _total = len(album_ids)
+    for _done, aid in enumerate(album_ids, start=1):
+        # Narrate: on a big playlist this pass is minutes of rate-limited
+        # requests and the caller is showing a spinner. Best-effort — a
+        # progress callback must never break metadata resolution.
+        if progress_cb and (_done % 5 == 0 or _done == _total):
+            try:
+                progress_cb(_done, _total)
+            except Exception as _cb_err:   # noqa: BLE001
+                logger.debug("track-position progress callback failed: %s", _cb_err)
         aid = str(aid)
         at_list = None
         if cache:
@@ -140,11 +142,24 @@ def resolve_album_track_positions(session, base_url, album_ids, cache=None, slee
                 at_list = None
         if at_list is None:
             try:
-                if sleep_s:
-                    _time.sleep(sleep_s)   # respect Deezer rate limits
+                # Shared budget rather than a private sleep. The old fixed 0.2s
+                # was invisible to every other Deezer caller and to the call
+                # tracker, so a playlist load and the enrichment worker each
+                # believed they had the quota to themselves.
+                from core.deezer_throttle import wait_for_slot, is_quota_error, note_quota_exceeded
+                wait_for_slot()
+                from core.api_call_tracker import api_call_tracker
+                api_call_tracker.record_call('deezer')
                 r = session.get(f"{base_url}/album/{aid}/tracks", params={'limit': 500}, timeout=10)
                 if getattr(r, 'ok', False):
-                    at_list = (r.json() or {}).get('data', [])
+                    _payload = r.json() or {}
+                    # Deezer answers 200 and puts the quota failure in the body,
+                    # so `r.ok` alone walks straight past it.
+                    if is_quota_error(_payload):
+                        note_quota_exceeded()
+                        logger.warning("Deezer quota exceeded resolving album track positions — backing off")
+                        break
+                    at_list = _payload.get('data', [])
                     if cache and at_list is not None:
                         try:
                             cache.store_entity('deezer', 'album_tracks', aid, {'data': at_list})
@@ -349,7 +364,20 @@ class DeezerClient:
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'SoulSync/1.0',
-            'Accept': 'application/json'
+            'Accept': 'application/json',
+            # Deezer localises genre NAMES by the caller's IP, so a german-hosted
+            # server got "Filme/Videospiele" where 173 should read "Films/Games"
+            # (#1157, PfannkuchenWolf). That breaks two things: one library ends
+            # up with both spellings, because the album path takes the api's name
+            # verbatim while the search path falls back to the english
+            # _DEEZER_GENRE_MAP; and strict genre filtering matches nothing,
+            # since the whitelist is english.
+            #
+            # Only genre names move with this header — album/artist/track
+            # payloads come back byte-identical in en and de. 11 of deezer's 28
+            # genres translate. Same header the deezer DOWNLOAD client has always
+            # sent; this one was the odd one out.
+            'Accept-Language': 'en-US,en;q=0.9',
         })
         self._access_token = None
         self._load_token()

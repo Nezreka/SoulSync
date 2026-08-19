@@ -17,7 +17,7 @@ needs ~9 callbacks/refs and direct injection beats hidden imports.
 
 from __future__ import annotations
 
-import logging
+from utils.logging_config import get_logger
 import os
 import shutil
 import time
@@ -45,7 +45,7 @@ from core.runtime_state import (
     tasks_lock,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger("downloads.post_processing")
 
 
 _AUDIO_EXTENSIONS = {

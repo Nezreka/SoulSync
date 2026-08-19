@@ -88,7 +88,7 @@ def _build_deps(
     try_source_reuse=lambda *a, **kw: False,
     store_batch_source=None,
     try_staging_match=lambda *a, **kw: False,
-    get_valid_candidates=lambda r, t, q: [],
+    get_valid_candidates=lambda r, t, q, p=None: [],
     attempt_download_with_candidates=lambda *a, **kw: False,
     on_download_completed=None,
     recover_worker_slot=None,
@@ -397,7 +397,7 @@ def test_first_query_success_returns_after_storing_source():
     deps, _ = _build_deps(
         soulseek=_FakeClient(results=['raw1', 'raw2']),
         matching=_FakeMatchEngine(queries=['Pink Floyd Money']),
-        get_valid_candidates=lambda r, t, q: [{'username': 'u1', 'filename': 'song.flac'}],
+        get_valid_candidates=lambda r, t, q, p=None: [{'username': 'u1', 'filename': 'song.flac'}],
         attempt_download_with_candidates=_attempt_success,
         store_batch_source=rec('store'),
     )
@@ -446,7 +446,7 @@ def test_results_but_no_valid_candidates_stores_raw_for_review():
     deps, _ = _build_deps(
         soulseek=_FakeClient(results=[f'raw{i}' for i in range(30)]),
         matching=_FakeMatchEngine(queries=['q1']),
-        get_valid_candidates=lambda r, t, q: [],  # nothing passes filter
+        get_valid_candidates=lambda r, t, q, p=None: [],  # nothing passes filter
     )
     tw.download_track_worker('t1', 'b1', deps)
     # Status: not_found
@@ -461,7 +461,7 @@ def test_attempt_download_failure_falls_through_to_next_query():
     deps, _ = _build_deps(
         soulseek=_FakeClient(results=['r1']),
         matching=_FakeMatchEngine(queries=['q1', 'q2']),
-        get_valid_candidates=lambda r, t, q: [{'x': 1}],  # both queries get candidates
+        get_valid_candidates=lambda r, t, q, p=None: [{'x': 1}],  # both queries get candidates
         attempt_download_with_candidates=lambda *a, **kw: False,  # but download fails
     )
     tw.download_track_worker('t1', 'b1', deps)
@@ -521,7 +521,7 @@ def test_hybrid_fallback_tries_secondary_sources():
     deps, _ = _build_deps(
         soulseek=sk,
         matching=_FakeMatchEngine(queries=['q1']),
-        get_valid_candidates=lambda r, t, q: [{'x': 1}] if r else [],
+        get_valid_candidates=lambda r, t, q, p=None: [{'x': 1}] if r else [],
         attempt_download_with_candidates=_attempt_yt_success,
     )
     tw.download_track_worker('t1', 'b1', deps)
@@ -688,7 +688,7 @@ def test_search_records_searched_queries():
     deps, _ = _build_deps(
         soulseek=sk,
         matching=_FakeMatchEngine(queries=['q1']),
-        get_valid_candidates=lambda r, t, q: [],  # no candidates → loop completes
+        get_valid_candidates=lambda r, t, q, p=None: [],  # no candidates → loop completes
     )
     tw.download_track_worker('t1', 'b1', deps)
     assert 'q1' in download_tasks['t1'].get('searched_queries', set())
@@ -852,7 +852,7 @@ def test_ytsearch_fallback_after_catalog_matcher_miss():
     orch = _FakeClient(subclients={'youtube': yt})
     seen = []
 
-    def _valid(results, track, query):
+    def _valid(results, track, query, profile_id=None):
         seen.append(results)
         if results is extra:
             return [{'username': 'youtube', 'filename': 'remix'}]
@@ -882,7 +882,7 @@ def test_worker_catalog_miss_falls_through_to_ytsearch():
     )
     attempted = []
 
-    def _valid(results, track, query):
+    def _valid(results, track, query, profile_id=None):
         if results is extra:
             return [{'username': 'youtube', 'filename': 'remix'}]
         return []

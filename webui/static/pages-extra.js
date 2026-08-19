@@ -893,6 +893,11 @@ async function _serverSelectTrack(trackIndex, mode, newTrackId, el) {
     try {
         let response;
         if (mode === 'replace') {
+            // Same source_* fields the add branch below sends (#1159): without
+            // them the backend persisted nothing, so a corrected bad match
+            // reverted on the next compare — the sync's cached auto-match kept
+            // winning and the hand-picked track showed up in Extras.
+            const srcTrackR = track.source_track || {};
             response = await fetch(`/api/server/playlist/${_serverEditorState.playlistId}/replace-track`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -900,6 +905,10 @@ async function _serverSelectTrack(trackIndex, mode, newTrackId, el) {
                     old_track_id: track.server_track?.id,
                     new_track_id: newTrackId,
                     playlist_name: _serverEditorState.playlistName,
+                    source_track_id: srcTrackR.source_track_id || '',
+                    source_title: srcTrackR.name || '',
+                    source_artist: srcTrackR.artist || '',
+                    source: srcTrackR.source || _serverEditorState.mirroredPlaylist?.source || '',
                 })
             });
         } else {

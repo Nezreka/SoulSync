@@ -32,6 +32,7 @@ from any background worker.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, List, Optional, Tuple
 
@@ -263,7 +264,9 @@ def resolve_library_file_path_with_diagnostic(
     sibling = _resolve_via_sibling_album_folder(path_parts, base_dirs)
     if sibling:
         return sibling, attempt
-    return None, attempt
+    # Filename wrong as well as the album folder — Navidrome synthesizes the
+    # whole path from tags, so no exact segment is left to match on (#1127).
+    return _resolve_via_synthesized_filename(path_parts, base_dirs), attempt
 
 
 def _resolve_via_sibling_album_folder(
@@ -338,8 +341,152 @@ def _resolve_via_sibling_album_folder(
     return None
 
 
+# A leading track / disc-track number on a filename: "01 - ", "01-01 - ",
+# "1-01 ", "01. ", "01_". Anchored at the start and followed by a separator, so
+# a title that simply BEGINS with digits ("1979.flac", "99 Luftballons.flac")
+# keeps its name — those have no separator run after the number.
+_LEADING_TRACK_NUM = re.compile(
+    r"^\d{1,3}[-_.]\d{1,3}[\s._-]+"   # disc-track: "01-01 - ", "1-01 ", "01-01. "
+    r"|^\d{1,3}\s*[-_.]\s*"           # track + a real separator: "01 - ", "01.", "01_"
+)
+
+
+def _strip_track_number(basename: str) -> str:
+    """Name with any leading track / disc-track numbering removed, lowercased.
+
+    ``"01-01 - E-Pro"``, ``"01 - E-Pro"`` and ``"E-Pro"`` all reduce to
+    ``"e-pro"``. Works on a full filename too, but the resolver hands it the
+    extension-less stem so the extension stays a separate, explicit rule.
+
+    Only the ANCHORED leading run goes — the title itself may contain dashes
+    ("E-Pro") or start with digits ("1979", "99 Luftballons"), and collapsing
+    those onto a shared identity is how the wrong file gets deleted.
+    """
+    stripped = _LEADING_TRACK_NUM.sub("", basename or "", count=1).strip()
+    return (stripped or (basename or "")).lower()
+
+
+def _resolve_via_synthesized_filename(
+    path_parts: List[str], base_dirs: List[str]
+) -> Optional[str]:
+    """Last resort for a reported path whose FILENAME is wrong too (#1127).
+
+    ``_resolve_via_sibling_album_folder`` assumes the basename is real and only
+    the album folder is wrong. For Navidrome that assumption doesn't hold: the
+    Subsonic ``path`` is synthesized from tags end to end, filename included, so
+    the DB holds ``Beck/Guero/01-01 - E-Pro.flac`` while a single-disc album
+    organised by SoulSync's own template is on disk as
+    ``Beck/Beck - Guero/01 - E-Pro.flac``. SoulSync never writes a ``01-``
+    disc prefix on a single-disc album (#981), so that leading ``01-`` can only
+    have come from the tag — which is exactly what the second reporter noticed.
+
+    With both the album folder AND the filename wrong there is nothing left to
+    match on exactly, so this compares the filename with its leading track /
+    disc-track numbering removed, plus the extension, across every album folder
+    under the artist.
+
+    Runs ONLY after every exact strategy has already failed, so it can never
+    change a path that resolves today — it can only turn a None into a hit.
+
+    Conservative by design: exactly ONE file across all album folders may match,
+    and the extension must be identical. Dead File Cleaner DELETES what this
+    resolves, so an ambiguous guess is far worse than failing.
+    """
+    if len(path_parts) < 3:
+        return None
+    basename = path_parts[-1]
+    artist_segment = path_parts[-3]
+    if not basename or not artist_segment or artist_segment in (".", ".."):
+        return None
+
+    # Stem and extension compared separately. Folding the extension into the
+    # stem also works, but then the extension rule is implicit and a later
+    # change to the stripping could drop it without anything noticing.
+    wanted_base, wanted_ext = os.path.splitext(basename)
+    wanted_stem = _strip_track_number(wanted_base)
+    if not wanted_stem or not wanted_ext:
+        return None
+
+    matches: List[str] = []
+    for base in base_dirs:
+        artist_dir = os.path.join(base, artist_segment)
+        if not os.path.isdir(artist_dir):
+            continue
+        try:
+            artist_entries = list(os.scandir(artist_dir))
+        except OSError as e:
+            logger.debug("synthesized-name scan failed for %s: %s", artist_dir, e)
+            continue
+        # is_dir() stats, and a broken symlink raises. Skip that one entry
+        # rather than abandoning the whole artist — same as the sibling step.
+        album_dirs = []
+        for e in artist_entries:
+            try:
+                if e.is_dir():
+                    album_dirs.append(e)
+            except OSError:
+                continue
+        for album_dir in album_dirs:
+            try:
+                entries = list(os.scandir(album_dir.path))
+            except OSError:
+                continue
+            for entry in entries:
+                try:
+                    if not entry.is_file():
+                        continue
+                except OSError:
+                    continue
+                entry_base, entry_ext = os.path.splitext(entry.name)
+                if entry_ext.lower() != wanted_ext.lower():
+                    continue
+                if _strip_track_number(entry_base) != wanted_stem:
+                    continue
+                if entry.path not in matches:
+                    matches.append(entry.path)
+
+    if not matches:
+        return None
+    # Same reasoning as the sibling-album step: one library reachable through
+    # several base dirs yields the same file repeatedly, which is not a
+    # conflict. Compare (album folder, filename) so a genuine second copy under
+    # a different album still refuses.
+    identities = {
+        (os.path.basename(os.path.dirname(m)), os.path.basename(m)) for m in matches
+    }
+    if len(identities) == 1:
+        logger.debug(
+            "resolved %r via synthesized-filename fallback: %s", basename, matches[0])
+        return matches[0]
+    logger.debug(
+        "synthesized-filename fallback found %d distinct files for %r under %r "
+        "(%s) — ambiguous, refusing to guess",
+        len(identities), basename, artist_segment, sorted(identities))
+    return None
+
+
 __all__ = [
     "ResolveAttempt",
     "resolve_library_file_path",
     "resolve_library_file_path_with_diagnostic",
+    "resolve_via_last_resort_fallbacks",
 ]
+
+
+def resolve_via_last_resort_fallbacks(
+    file_path: Any, base_dirs: List[str]
+) -> Optional[str]:
+    """Both interior-segment fallbacks, for callers with their own base-dir logic.
+
+    ``web_server.py::_resolve_library_file_path`` is a near-duplicate resolver
+    with its own confusable-tolerant scan, and it never had the #1127 sibling
+    step at all — so the same library resolved from a repair job and failed from
+    the web server. One entry point, both callers, no drift.
+
+    Expects every exact strategy to have failed already.
+    """
+    if not isinstance(file_path, str) or not file_path or not base_dirs:
+        return None
+    path_parts = file_path.replace("\\", "/").split("/")
+    return (_resolve_via_sibling_album_folder(path_parts, base_dirs)
+            or _resolve_via_synthesized_filename(path_parts, base_dirs))

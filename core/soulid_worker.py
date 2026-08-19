@@ -317,6 +317,9 @@ class SoulIDWorker:
             try:
                 import requests as req
                 query = f"{artist_name} {verify_track}"
+                # shared deezer budget — this call used to bypass it entirely
+                from core.deezer_throttle import wait_for_slot
+                wait_for_slot()
                 resp = req.get('https://api.deezer.com/search', params={'q': query, 'limit': 5}, timeout=10)
                 if resp.ok:
                     for item in resp.json().get('data', []):

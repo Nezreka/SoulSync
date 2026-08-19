@@ -31,7 +31,7 @@ status updater, DB) all injected via `CandidatesDeps`.
 
 from __future__ import annotations
 
-import logging
+from utils.logging_config import get_logger
 import os
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -44,7 +44,60 @@ from core.runtime_state import (
     tasks_lock,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger("downloads.candidates")
+
+
+def preferred_version_stamp(candidate, preferred_version):
+    """Whether this pick is a version we went after on purpose, and what to
+    measure its length against.
+
+    Returns ``(version, duration_ms)``. ``version`` is ``''`` for every ordinary
+    download, so nothing is written to the context and the import gates run
+    exactly as they always have.
+
+    It fills in only when the user asked for a version (Settings → prefer a
+    version) AND the matching engine confirmed this file is that version OF
+    THIS SONG. Carrying the label is not enough — "Song Two (Extended Mix)" can
+    still be walked to as a fallback candidate, and loosening the import gates
+    for a file the preference never chose is exactly the wrong trade.
+
+    Downstream it does two jobs, both because the file is deliberately a
+    different recording than the source describes:
+      - the source's duration belongs to the other cut (an extended mix runs
+        minutes past the radio edit Spotify listed), so integrity would
+        quarantine a file we went looking for;
+      - AcoustID's version gate compares the source title's version against the
+        fingerprinted recording's, and would call the difference a wrong song.
+
+    ``duration_ms`` is the length the peer advertised, which still catches a
+    truncated transfer. None means the peer advertised nothing, so there's no
+    honest reference and the duration leg gets skipped rather than guessed at.
+
+    Pure helper. No I/O, no config reads — the caller passes the preference in.
+    """
+    if not preferred_version:
+        return '', None
+    picked = getattr(candidate, 'version_type', 'original')
+    if picked != preferred_version or picked == 'original':
+        return '', None
+    if not getattr(candidate, 'preferred_version_hit', False):
+        return '', None
+    advertised = getattr(candidate, 'duration', None)
+    try:
+        advertised = int(advertised) if advertised else None
+    except (TypeError, ValueError):
+        advertised = None
+    return picked, (advertised if advertised and advertised > 0 else None)
+
+
+def _preferred_version_hit(r):
+    """1 when the matching engine stamped this file as the version the user
+    asked for, 0 otherwise.
+
+    Nothing stamps it on any other flow, so the term is 0 for every candidate
+    and the orders below are byte-for-byte what they were.
+    """
+    return 1 if getattr(r, 'preferred_version_hit', False) else 0
 
 
 # Streaming plugins identify themselves via ``TrackResult.username``. Soulseek
@@ -139,13 +192,27 @@ def order_candidates(candidates, *, quality_first=False, targets=None,
     use the profile rank. The legacy ``quality_score`` puts FLAC at 1.0 and
     Opus at 0.3, so a confidence-first walk would download Soulseek even when
     YouTube itag 774 matches the top target.
+
+    The asked-for version leads BOTH keys. A preference picks the RECORDING,
+    and a different recording is a different song, while confidence and quality
+    both rank files OF THE SAME song — so neither gets to outvote it. This is
+    also the sort that decides what actually downloads: the matching engine
+    ranks the preferred version first and this used to re-sort it straight back
+    down, so the setting looked applied and changed nothing.
+
+    Ordering only. The quality profile filters upstream, so a preferred version
+    that fails the user's quality ladder never arrives here to be ordered — the
+    preference chooses between candidates the profile already accepted.
     """
     rows = list(candidates)
     use_quality = quality_first or _is_mixed_source_pool(rows)
     if use_quality:
-        key = lambda r: _quality_first_sort_key(r, targets or [], source_order)
+        key = lambda r: (
+            (_preferred_version_hit(r),)
+            + _quality_first_sort_key(r, targets or [], source_order)
+        )
     else:
-        key = _priority_sort_key
+        key = lambda r: (_preferred_version_hit(r),) + _priority_sort_key(r)
     return sorted(rows, key=key, reverse=True)
 
 
@@ -443,6 +510,23 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                         "track_info": track_info,  # Add track_info for playlist folder mode
                         "_download_username": username,  # Source username for AcoustID skip logic
                     }
+                    try:
+                        from core.matching_engine import MusicMatchingEngine
+                        _took, _adv_ms = preferred_version_stamp(
+                            candidate, MusicMatchingEngine._preferred_version())
+                        if _took:
+                            matched_downloads_context[context_key]['_preferred_version_taken'] = _took
+                            matched_downloads_context[context_key]['_preferred_version_duration_ms'] = _adv_ms
+                            logger.info(
+                                "[Context] Took preferred version '%s' on purpose — length checked "
+                                "against the peer's %s, and AcoustID may report it as '%s'",
+                                _took,
+                                f"{_adv_ms}ms" if _adv_ms else "(none advertised)",
+                                _took,
+                            )
+                    except Exception as _pref_err:
+                        logger.debug("[Context] preferred-version stamp skipped: %s", _pref_err)
+
                     if user_manual_pick:
                         # The user explicitly picked this candidate via the
                         # candidates modal — trust their metadata judgement

@@ -190,7 +190,7 @@ class _SoulseekQuality:
     def __init__(self):
         self.batches = []
 
-    def filter_results_by_quality_preference(self, cands):
+    def filter_results_by_quality_preference(self, cands, profile_id=None):
         self.batches.append([getattr(c, 'username', None) for c in cands])
         return list(cands)
 

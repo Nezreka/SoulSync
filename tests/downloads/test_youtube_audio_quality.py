@@ -1168,7 +1168,7 @@ def test_get_valid_candidates_probes_youtube_when_soulseek_is_first(monkeypatch)
             probed.extend(candidates)
 
     class _Slsk:
-        def filter_results_by_quality_preference(self, cands):
+        def filter_results_by_quality_preference(self, cands, profile_id=None):
             slsk_batches.append([getattr(c, 'username', None) for c in cands])
             return list(cands)
 
@@ -1232,7 +1232,7 @@ def test_mixed_pool_walk_picks_youtube_774_over_soulseek_flac(monkeypatch):
                 c.set_quality(AudioQuality('opus', bitrate=256))
 
     class _Slsk:
-        def filter_results_by_quality_preference(self, cands):
+        def filter_results_by_quality_preference(self, cands, profile_id=None):
             return list(cands)
 
     class _Orch:

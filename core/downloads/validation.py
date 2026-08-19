@@ -5,13 +5,13 @@ Body is byte-identical to the original. ``matching_engine`` and
 constructed in web_server.py and referenced by name throughout
 the body.
 """
-import logging
+from utils.logging_config import get_logger
 import re
 
 from core.settings import config_manager
 from core.imports.file_integrity import resolve_duration_tolerance
 
-logger = logging.getLogger(__name__)
+logger = get_logger("downloads.validation")
 
 # Injected at runtime via init().
 matching_engine = None
@@ -33,9 +33,13 @@ def init(matching_engine_obj, download_orchestrator_obj):
     download_orchestrator = download_orchestrator_obj
 
 
-def _youtube_probe_targets():
+def _youtube_probe_targets(profile_id=None):
     """Profile targets for YouTube itag probing. None if the DB is unavailable."""
     try:
+        from core.quality.selection import load_profile_by_id, targets_from_profile
+        if profile_id:
+            targets, _ = targets_from_profile(load_profile_by_id(profile_id))
+            return targets
         from core.quality.selection import load_profile_targets
         targets, _ = load_profile_targets()
         return targets
@@ -43,7 +47,7 @@ def _youtube_probe_targets():
         return None
 
 
-def _filter_youtube_by_quality(candidates):
+def _filter_youtube_by_quality(candidates, profile_id=None):
     """Pre-download: keep YouTube hits the quality profile would accept.
 
     Called from ``get_valid_candidates`` after match scoring (and on the
@@ -77,11 +81,18 @@ def _filter_youtube_by_quality(candidates):
     band = youtube_quality_rank_band(yt)
     if youtube is not None and hasattr(youtube, 'refresh_claimed_quality'):
         try:
-            youtube.refresh_claimed_quality(band, targets=_youtube_probe_targets())
+            youtube.refresh_claimed_quality(band, targets=_youtube_probe_targets(profile_id))
         except Exception as e:  # noqa: BLE001 - ranking still uses the search claim
             logger.info("YouTube format probe skipped (%s: %s)", type(e).__name__, e)
-    from core.quality.selection import rank_for_profile
-    ranked, _ = rank_for_profile(band)
+    if profile_id:
+        from core.quality.selection import (
+            load_profile_by_id, rank_with_targets, targets_from_profile,
+        )
+        targets, fallback_enabled = targets_from_profile(load_profile_by_id(profile_id))
+        ranked, _ = rank_with_targets(band, targets, fallback_enabled=fallback_enabled)
+    else:
+        from core.quality.selection import rank_for_profile
+        ranked, _ = rank_for_profile(band)
     if not ranked:
         if other:
             return list(other)
@@ -217,12 +228,18 @@ def _title_words_are_expected(candidate_title, expected_title, expected_artists)
     return all(word in allowed for word in cand.split())
 
 
-def get_valid_candidates(results, spotify_track, query):
+def get_valid_candidates(results, spotify_track, query, profile_id=None):
     """Score each source with its own checker, then return match-passing hits.
 
     Streaming/torrent rows use title/artist/duration. Soulseek peers use the
     file-path matcher. A mixed best-quality pool must not pick one recipe from
     ``results[0]`` and apply it to every source.
+
+    ``profile_id`` is the item's own quality profile, taken from the wishlist
+    row's ``quality_profile_id``. It reaches the Soulseek quality filter so a
+    per-item profile decides what is CONSIDERED, not just what survives the
+    import guard (#1150). None means the app-wide default, which is what manual
+    downloads and staging imports want.
     """
     if not results:
         return []
@@ -242,7 +259,7 @@ def get_valid_candidates(results, spotify_track, query):
         scored = _score_streaming_candidates(streaming, spotify_track)
         if scored:
             if any(getattr(r, 'username', None) == 'youtube' for r in scored):
-                scored = _filter_youtube_by_quality(scored)
+                scored = _filter_youtube_by_quality(scored, profile_id)
             accepted.extend(scored)
         elif any(getattr(r, 'username', None) == 'youtube' for r in streaming):
             # YouTube artist data is unreliable; Tidal/Qobuz/etc. do not fall through.
@@ -250,7 +267,7 @@ def get_valid_candidates(results, spotify_track, query):
             logger.warning(
                 "[Youtube] No streaming results passed validation — falling through to filename matching"
             )
-            accepted.extend(_match_filename_candidates(yt, spotify_track))
+            accepted.extend(_match_filename_candidates(yt, spotify_track, profile_id))
         else:
             logger.warning(
                 "[Streaming] No streaming results passed validation "
@@ -258,7 +275,7 @@ def get_valid_candidates(results, spotify_track, query):
             )
 
     if p2p:
-        accepted.extend(_match_filename_candidates(p2p, spotify_track))
+        accepted.extend(_match_filename_candidates(p2p, spotify_track, profile_id))
     return accepted
 
 
@@ -446,7 +463,7 @@ def _score_streaming_candidates(results, spotify_track):
     return []
 
 
-def _match_filename_candidates(results, spotify_track):
+def _match_filename_candidates(results, spotify_track, profile_id=None):
     """Soulseek path matcher, or YouTube structured-score fallthrough."""
     # Uses the existing, powerful matching engine for scoring (Soulseek P2P results)
     _max_q = config_manager.get('soulseek.max_peer_queue', 0) or 0
@@ -460,7 +477,9 @@ def _match_filename_candidates(results, spotify_track):
     if is_streaming_source:
         source_label = initial_candidates[0].username.title()
         if any(getattr(c, 'username', None) == 'youtube' for c in initial_candidates):
-            quality_filtered_candidates = _filter_youtube_by_quality(initial_candidates)
+            quality_filtered_candidates = _filter_youtube_by_quality(
+                initial_candidates, profile_id,
+            )
             if not quality_filtered_candidates:
                 logger.error("[Quality Filter] No YouTube candidates match quality profile - download will fail per user preferences")
                 return []
@@ -470,7 +489,8 @@ def _match_filename_candidates(results, spotify_track):
     else:
         # Filter by user's quality profile before artist verification (Soulseek only)
         # Use existing download_orchestrator to avoid re-initializing (which accesses download_path filesystem)
-        quality_filtered_candidates = download_orchestrator.client('soulseek').filter_results_by_quality_preference(initial_candidates)
+        quality_filtered_candidates = download_orchestrator.client('soulseek').filter_results_by_quality_preference(
+            initial_candidates, profile_id=profile_id)
 
         # IMPORTANT: Respect empty results from quality filter
         # If user has strict quality requirements (e.g., FLAC-only with fallback disabled),

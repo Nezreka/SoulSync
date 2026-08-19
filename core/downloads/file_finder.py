@@ -30,7 +30,7 @@ timed out (#715).
 
 from __future__ import annotations
 
-import logging
+from utils.logging_config import get_logger
 import os
 import re
 from difflib import SequenceMatcher
@@ -38,7 +38,7 @@ from typing import Optional, Tuple
 
 from unidecode import unidecode
 
-logger = logging.getLogger(__name__)
+logger = get_logger("downloads.file_finder")
 
 
 AUDIO_EXTENSIONS = frozenset({

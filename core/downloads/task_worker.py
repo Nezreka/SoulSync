@@ -54,7 +54,7 @@ def _cand_user_file(candidate):
     return getattr(candidate, 'username', None), getattr(candidate, 'filename', None)
 
 
-def _youtube_ytsearch_fallback(deps, query, track, tracks_result):
+def _youtube_ytsearch_fallback(deps, query, track, tracks_result, profile_id=None):
     """ytsearch after a YouTube Music catalog batch that the matcher rejected.
 
     Catalog ``filter=songs`` misses remixes/lives that only exist as videos.
@@ -89,7 +89,7 @@ def _youtube_ytsearch_fallback(deps, query, track, tracks_result):
         "YouTube catalog missed the matcher; ytsearch returned %d rows",
         len(extra),
     )
-    return deps.get_valid_candidates(extra, track, query) or None
+    return deps.get_valid_candidates(extra, track, query, profile_id) or None
 
 
 def _candidate_ordering(track_info: Optional[dict] = None):
@@ -230,7 +230,7 @@ class TaskWorkerDeps:
     try_source_reuse: Callable                    # (task_id, batch_id, track) -> bool
     store_batch_source: Callable                  # (batch_id, username, filename) -> None
     try_staging_match: Callable                   # (task_id, batch_id, track) -> bool
-    get_valid_candidates: Callable                # (results, spotify_track, query) -> list
+    get_valid_candidates: Callable                # (results, spotify_track, query, profile_id=None) -> list
     attempt_download_with_candidates: Callable    # (task_id, candidates, track, batch_id) -> bool
     on_download_completed: Callable               # (batch_id, task_id, success) -> None
     recover_worker_slot: Callable                 # (batch_id, task_id) -> None
@@ -477,6 +477,11 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         # across every source for each query, so order the candidate walk by the
         # user's profile quality rank (best→worst). Computed once per task.
         _best_quality, _quality_targets = _candidate_ordering(track_data)
+        # The item's own quality profile, if it has one (wishlist rows carry it).
+        # Ordering above already honours it; the Soulseek quality FILTER didn't,
+        # so per-item profiles changed what survived import but not what was
+        # considered in the first place (#1150). None = app-wide default.
+        _profile_id = track_data.get('quality_profile_id') if isinstance(track_data, dict) else None
 
         # 2. Sequential Query Search (matches GUI's start_search_worker_parallel logic)
         search_diagnostics = []  # Track what happened per query for detailed error messages
@@ -585,14 +590,13 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 if tracks_result:
                     result_count = len(tracks_result)
                     # Validate candidates using GUI's get_valid_candidates logic
-                    candidates = deps.get_valid_candidates(tracks_result, track, query)
+                    candidates = deps.get_valid_candidates(tracks_result, track, query, _profile_id)
                     if not candidates:
                         # Catalog-first YouTube can return official songs that
                         # all fail the matcher (obscure remix, live, etc.).
                         # ytsearch still finds those as videos.
                         extra = _youtube_ytsearch_fallback(
-                            deps, query, track, tracks_result,
-                        )
+                            deps, query, track, tracks_result, _profile_id)
                         if extra:
                             candidates = extra
                     if candidates:
@@ -698,7 +702,12 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                             fb_results, _ = deps.run_async(fb_client.search(fb_query, timeout=20))
                             if not fb_results:
                                 continue
-                            fb_candidates = deps.get_valid_candidates(fb_results, track, fb_query)
+                            fb_candidates = deps.get_valid_candidates(fb_results, track, fb_query, _profile_id)
+                            if not fb_candidates:
+                                extra = _youtube_ytsearch_fallback(
+                                    deps, fb_query, track, fb_results, _profile_id)
+                                if extra:
+                                    fb_candidates = extra
                             if fb_candidates:
                                 logger.warning(f"[Hybrid Fallback] {fallback_source} found {len(fb_candidates)} valid candidates!")
                                 with tasks_lock:
