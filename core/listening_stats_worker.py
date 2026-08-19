@@ -215,6 +215,27 @@ class ListeningStatsWorker:
                 self.stats['tracks_updated'] += len(updates)
                 logger.info(f"Updated play counts for {len(updates)} tracks")
 
+        # Step 2b: Per-user curation signals (favourites / ratings / playlist
+        # membership). Rides this poll because it needs the same clients on the
+        # same cadence. Wrapped so a curation failure can never take down play
+        # counts or scrobbling — and because a failed sweep deliberately leaves
+        # the previous signals and stamp alone, which ages out and makes the
+        # Expired Download Cleaner keep everything rather than delete it.
+        self.current_item = f"Reading curation signals from {active_server}..."
+        try:
+            from core.library.curation_sync import (
+                navidrome_user_credentials,
+                sync_curation_signals,
+            )
+            per_user = {}
+            if active_server == 'navidrome':
+                # Subsonic can only report one user's stars per credential.
+                per_user['navidrome'] = navidrome_user_credentials(self.db)
+            sync_curation_signals(self.db, {active_server: client},
+                                  user_credentials=per_user)
+        except Exception as e:
+            logger.warning(f"Curation signal sync failed for {active_server}: {e}")
+
         # Step 3: Scrobble new events to ListenBrainz and Last.fm
         self.current_item = "Scrobbling to external services..."
         self._scrobble_new_events()

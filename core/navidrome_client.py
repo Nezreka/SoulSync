@@ -351,18 +351,27 @@ class NavidromeClient(MediaServerClient):
             self.username = None
             self.password = None
 
-    def _generate_auth_params(self) -> Dict[str, str]:
-        """Generate authentication parameters for Subsonic API"""
-        if not self.username or not self.password:
+    def _generate_auth_params(self, username: str = None, password: str = None) -> Dict[str, str]:
+        """Generate authentication parameters for Subsonic API.
+
+        ``username``/``password`` override the configured account. Subsonic
+        scopes starred items and ratings to the AUTHENTICATED user and offers
+        no admin impersonation for them, so reading another user's curation
+        genuinely requires their own credentials (playlists are the exception —
+        ``getPlaylists`` takes an admin-only ``username`` parameter).
+        """
+        user = username or self.username
+        secret = password if username else (password or self.password)
+        if not user or not secret:
             return {}
 
         # Generate random salt (at least 6 characters)
         salt = secrets.token_hex(8)
         # Calculate token: md5(password + salt)
-        token = hashlib.md5((self.password + salt).encode()).hexdigest()
+        token = hashlib.md5((secret + salt).encode()).hexdigest()
 
         return {
-            'u': self.username,
+            'u': user,
             't': token,
             's': salt,
             'v': '1.16.1',  # API version
@@ -440,16 +449,24 @@ class NavidromeClient(MediaServerClient):
         'startScan',
     })
 
-    def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None,
+                      as_user: Optional[tuple] = None) -> Optional[Dict[str, Any]]:
         """Make authenticated request to Navidrome Subsonic API.
-        Uses POST for write operations (avoids URL length limits with large playlists)."""
+        Uses POST for write operations (avoids URL length limits with large playlists).
+
+        ``as_user`` is an optional ``(username, password)`` pair used INSTEAD of
+        the configured account for this one call. It does not mutate the
+        client, so concurrent callers cannot see each other's identity — the
+        opposite of the ``_apply_profile_library`` pattern, which sets
+        ``client.user_id`` on the shared singleton and leaks it to everyone.
+        """
         if not self.base_url or not self.username:
             return None
 
         url = f"{self.base_url}/rest/{endpoint}"
 
         # Add authentication parameters
-        auth_params = self._generate_auth_params()
+        auth_params = self._generate_auth_params(*(as_user or (None, None)))
         if params:
             auth_params.update(params)
 
@@ -1045,6 +1062,94 @@ class NavidromeClient(MediaServerClient):
             logger.error(f"Error getting Navidrome track play counts: {e}")
             return {}
             return {}
+
+    def get_curation_signals(self, users=None):
+        """What each user deliberately CHOSE about a track.
+
+        Returns ``{username: [{path, favorite, rating, in_playlist}, ...]}``.
+
+        ``users`` is an optional list of ``(username, password)`` pairs. Subsonic
+        scopes ``getStarred2`` and ratings to the AUTHENTICATED user with no
+        admin impersonation, so reading someone else's favourites really does
+        need their own credentials — which is exactly what Cremonies described.
+        With no list we read the configured account only.
+
+        Playlist membership is the exception: ``getPlaylists`` accepts an
+        admin-only ``username`` parameter, so one admin credential can see
+        whose playlists contain what.
+
+        A user whose read fails is OMITTED rather than stored as empty — an
+        empty set means "they like nothing", which would withdraw protection,
+        and a transient failure must never do that.
+        """
+        if not self.ensure_connection():
+            return {}
+
+        accounts = list(users or [])
+        if not accounts:
+            accounts = [(self.username, self.password)]
+
+        signals = {}
+        for username, password in accounts:
+            if not username:
+                continue
+            as_user = (username, password) if password else None
+            per_track = {}
+            ok = False
+
+            # Favourites + ratings for this user.
+            try:
+                starred = self._make_request('getStarred2', as_user=as_user)
+            except Exception as e:
+                logger.warning(f"Navidrome curation: getStarred2 failed for {username}: {e}")
+                starred = None
+            if starred:
+                ok = True
+                songs = (starred.get('starred2') or {}).get('song') or []
+                for song in songs if isinstance(songs, list) else [songs]:
+                    path = (song or {}).get('path') or ''
+                    if not path:
+                        continue
+                    entry = per_track.setdefault(
+                        path, {'path': path, 'favorite': False,
+                               'rating': None, 'in_playlist': False})
+                    entry['favorite'] = True
+                    if song.get('userRating') is not None:
+                        entry['rating'] = song.get('userRating')
+
+            # Playlist membership, read with the ADMIN account (this client's
+            # configured credentials) on that user's behalf.
+            try:
+                listing = self._make_request('getPlaylists', {'username': username})
+            except Exception as e:
+                logger.debug(f"Navidrome curation: getPlaylists failed for {username}: {e}")
+                listing = None
+            for playlist in ((listing or {}).get('playlists') or {}).get('playlist', []) or []:
+                pid = (playlist or {}).get('id')
+                if not pid:
+                    continue
+                try:
+                    detail = self._make_request('getPlaylist', {'id': pid})
+                except Exception as e:
+                    logger.debug(f"Navidrome curation: getPlaylist {pid} failed: {e}")
+                    continue
+                if not detail:
+                    continue
+                ok = True
+                entries = (detail.get('playlist') or {}).get('entry') or []
+                for song in entries if isinstance(entries, list) else [entries]:
+                    path = (song or {}).get('path') or ''
+                    if not path:
+                        continue
+                    entry = per_track.setdefault(
+                        path, {'path': path, 'favorite': False,
+                               'rating': None, 'in_playlist': False})
+                    entry['in_playlist'] = True
+
+            if ok:
+                signals[str(username)] = list(per_track.values())
+        logger.info(f"Navidrome curation: signals for {len(signals)} user(s)")
+        return signals
 
     def get_all_playlists(self) -> List[PlaylistInfo]:
         """Get all playlists from Navidrome server"""

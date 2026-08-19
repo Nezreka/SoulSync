@@ -1147,6 +1147,84 @@ class JellyfinClient(MediaServerClient):
             logger.error(f"Error getting Jellyfin track play counts: {e}")
             return {}
 
+    def get_curation_signals(self):
+        """What every user on this server deliberately CHOSE about each track.
+
+        Returns ``{username: [{path, favorite, rating, in_playlist}, ...]}``.
+
+        Jellyfin's ``UserData`` is per-user, but an admin API key can read any
+        user's, so one credential covers the whole server — no per-user
+        passwords needed (unlike Subsonic). We ask each user for their
+        favourites and their rated items separately rather than walking the
+        whole library per user: on a big library that would be N full scans.
+
+        Paths are returned raw; the caller normalises them. A user whose query
+        fails is OMITTED rather than recorded as empty — an empty list means
+        "they like nothing", which would withdraw protection from their
+        tracks, and a transient error must never do that.
+        """
+        if not self.ensure_connection():
+            return {}
+
+        try:
+            users = self.get_available_users()
+        except Exception as e:
+            logger.error(f"Jellyfin curation: could not enumerate users: {e}")
+            return {}
+
+        signals = {}
+        for user in users or []:
+            user_id = user.get('id')
+            name = user.get('name') or user_id
+            if not user_id:
+                continue
+            per_track = {}
+            ok = False
+            for params in (
+                # Favourites
+                {'IsFavorite': True},
+                # Anything the user has rated. Jellyfin has no "is rated"
+                # filter, so this asks for items carrying UserData and keeps
+                # the ones with a rating set.
+                {'IsFavorite': False},
+            ):
+                query = {
+                    'IncludeItemTypes': 'Audio',
+                    'Fields': 'UserData,Path',
+                    'Recursive': True,
+                    'Limit': 10000,
+                    **params,
+                }
+                if self.music_library_id:
+                    query['ParentId'] = self.music_library_id
+                try:
+                    response = self._make_request(f'/Users/{user_id}/Items', query)
+                except Exception as e:
+                    logger.warning(f"Jellyfin curation: query failed for {name}: {e}")
+                    continue
+                if not response or 'Items' not in response:
+                    continue
+                ok = True
+                for item in response['Items']:
+                    path = item.get('Path') or ''
+                    if not path:
+                        continue
+                    user_data = item.get('UserData') or {}
+                    favorite = bool(user_data.get('IsFavorite'))
+                    rating = user_data.get('Rating')
+                    if not favorite and rating in (None, ''):
+                        continue  # neither chosen nor rated — nothing to record
+                    entry = per_track.setdefault(
+                        path, {'path': path, 'favorite': False,
+                               'rating': None, 'in_playlist': False})
+                    entry['favorite'] = entry['favorite'] or favorite
+                    if rating not in (None, ''):
+                        entry['rating'] = rating
+            if ok:
+                signals[str(name)] = list(per_track.values())
+        logger.info(f"Jellyfin curation: signals for {len(signals)} user(s)")
+        return signals
+
     def clear_cache(self):
         """Clear all caches to force fresh data on next request"""
         self._album_cache.clear()
