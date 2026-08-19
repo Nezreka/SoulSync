@@ -241,8 +241,15 @@ class SoulIDWorker:
             # Look up canonical artist ID from Deezer + iTunes using track verification
             canonical_id = self._lookup_canonical_artist_id(name, verify_track)
 
+            # Which of the three derivations produced this id. Only 'canonical'
+            # is reproducible on another install; the album fallback depends on
+            # what THIS library happens to own, so two nodes holding the same
+            # artist compute different ids. Recorded so a consumer can tell how
+            # much to trust the key instead of guessing from the outside.
+            soul_id_path = None
             if canonical_id:
                 soul_id = generate_soul_id(name, str(canonical_id))
+                soul_id_path = 'canonical'
                 self.current_item = f"Artist: {name} (id:{canonical_id})"
             else:
                 # Fallback: use name + first album title alphabetically
@@ -255,16 +262,19 @@ class SoulIDWorker:
                 album_row = cursor.fetchone()
                 if album_row:
                     soul_id = generate_soul_id(name, album_row[0])
+                    soul_id_path = 'album'
                     self.current_item = f"Artist: {name} (album fallback)"
                 else:
                     soul_id = generate_soul_id(name)
+                    soul_id_path = 'name'
 
             if not soul_id:
                 soul_id = f'soul_unnamed_{artist_id}'
+                soul_id_path = None
 
             cursor.execute(
-                "UPDATE artists SET soul_id = ? WHERE id = ? AND (soul_id IS NULL OR soul_id = '')",
-                (soul_id, artist_id)
+                "UPDATE artists SET soul_id = ?, soul_id_path = ? WHERE id = ? AND (soul_id IS NULL OR soul_id = '')",
+                (soul_id, soul_id_path, artist_id)
             )
             conn.commit()
             self.stats['artists_processed'] += 1

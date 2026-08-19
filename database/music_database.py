@@ -36,6 +36,47 @@ def _row_value(row, column: str, default=None):
         return default
     return default if value is None else value
 
+# ── MetaSync export column sets ──────────────────────────────────────────
+#
+# Named explicitly, never SELECT *: column ORDER differs between a fresh
+# install and an upgraded one, and a future column must not silently join the
+# export. ``id`` is selected only so the route can build the keyset cursor —
+# the allowlist serializers in api/serializers.py drop it before it is served,
+# because a media-server primary key is install-local and meaningless off-box.
+_EXPORT_PROVIDER_STATUSES = (
+    'musicbrainz_match_status', 'spotify_match_status', 'itunes_match_status',
+    'deezer_match_status', 'audiodb_match_status', 'tidal_match_status',
+    'qobuz_match_status', 'jiosaavn_match_status', 'amazon_match_status',
+)
+
+_EXPORT_ARTIST_COLUMNS = (
+    'id', 'soul_id', 'soul_id_path', 'name', 'genres', 'updated_at',
+    'musicbrainz_id', 'spotify_artist_id', 'itunes_artist_id', 'deezer_id',
+    'discogs_id', 'amazon_id', 'tidal_id', 'qobuz_id', 'audiodb_id',
+    'genius_id', 'jiosaavn_id',
+    *_EXPORT_PROVIDER_STATUSES, 'discogs_match_status', 'genius_match_status',
+)
+
+_EXPORT_ALBUM_COLUMNS = (
+    'id', 'soul_id', 'title', 'year', 'release_date', 'track_count',
+    'record_type', 'label', 'genres', 'updated_at',
+    'musicbrainz_release_id', 'spotify_album_id', 'itunes_album_id',
+    'deezer_id', 'discogs_id', 'amazon_id', 'tidal_id', 'qobuz_id',
+    'audiodb_id', 'jiosaavn_id', 'bandcamp_url', 'upc',
+    'canonical_source', 'canonical_album_id', 'canonical_score',
+    *_EXPORT_PROVIDER_STATUSES, 'discogs_match_status', 'bandcamp_match_status',
+)
+
+_EXPORT_TRACK_COLUMNS = (
+    'id', 'soul_id', 'album_soul_id', 'title', 'track_number', 'disc_number',
+    'duration', 'bpm', 'explicit', 'year', 'isrc', 'updated_at',
+    'musicbrainz_recording_id', 'spotify_track_id', 'itunes_track_id',
+    'deezer_id', 'amazon_id', 'tidal_id', 'qobuz_id', 'audiodb_id',
+    'genius_id', 'jiosaavn_id', 'bandcamp_url',
+    *_EXPORT_PROVIDER_STATUSES, 'genius_match_status', 'bandcamp_match_status',
+)
+
+
 # Import matching engine for enhanced similarity logic
 try:
     from core.matching_engine import MusicMatchingEngine
@@ -5058,6 +5099,17 @@ class MusicDatabase:
             if 'soul_id' not in artist_cols:
                 cursor.execute("ALTER TABLE artists ADD COLUMN soul_id TEXT DEFAULT NULL")
                 logger.info("Added soul_id column to artists table")
+            # Which derivation produced the artist soul_id: 'canonical' (name +
+            # a provider's artist id), 'album' (name + the alphabetically-first
+            # album title IN THIS LIBRARY) or 'name' (name alone). Only
+            # 'canonical' is reproducible on another install — the album
+            # fallback depends on what that user happens to own, so two
+            # libraries holding the same artist derive different ids. Nothing
+            # recorded how much to trust a given artist soul_id before this.
+            # NULL means unknown (generated before this column existed).
+            if 'soul_id_path' not in artist_cols:
+                cursor.execute("ALTER TABLE artists ADD COLUMN soul_id_path TEXT DEFAULT NULL")
+                logger.info("Added soul_id_path column to artists table")
 
             # Albums: soul_id
             cursor.execute("PRAGMA table_info(albums)")
@@ -17899,6 +17951,113 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"API: Error listing albums: {e}")
             return {"albums": [], "total": 0}
+
+    # ── MetaSync export ──────────────────────────────────────────────────
+
+    def api_export_entities(self, entity: str, cursor: str = "",
+                            since: str = "", limit: int = 500) -> List[Dict[str, Any]]:
+        """Page through artists/albums/tracks for the MetaSync export.
+
+        Keyset pagination, NOT offset: these tables are large and the
+        enrichment workers shift rows under a walk, so OFFSET both skips and
+        duplicates rows mid-export. ``id`` is TEXT on all three tables, so the
+        ``>`` comparison and the ORDER BY share one lexicographic order — which
+        is all a complete walk needs (numeric-looking ids sort as text, and
+        that is fine because both halves agree).
+
+        Columns are named explicitly rather than ``SELECT *``: column ORDER
+        differs between a fresh install and an upgraded one. Every value is
+        read through ``_row_value`` so a database lagging the code by a
+        migration yields None instead of failing the whole export.
+
+        Rows with no usable ``soul_id`` are skipped, including the
+        ``soul_unnamed_*`` fallback (soulid_worker :263 / :580) which embeds
+        the library primary key — a Plex ratingKey or Jellyfin GUID. Those are
+        install-local and must never leave the box.
+
+        Read-only.
+        """
+        specs = {
+            'artist': (_EXPORT_ARTIST_COLUMNS, "FROM artists t", ""),
+            'album': (
+                _EXPORT_ALBUM_COLUMNS,
+                "FROM albums t LEFT JOIN artists ar ON ar.id = t.artist_id",
+                ", ar.name AS artist_name",
+            ),
+            # ar.name, never t.track_artist: soulid_worker._process_tracks
+            # computes the track soul_id from the JOINED artist name, so an
+            # importer normalizing any other string derives a different key
+            # than the one stored in the row.
+            'track': (
+                _EXPORT_TRACK_COLUMNS,
+                ("FROM tracks t JOIN artists ar ON ar.id = t.artist_id "
+                 "LEFT JOIN albums al ON al.id = t.album_id"),
+                ", ar.name AS artist_name, al.title AS album_title",
+            ),
+        }
+        if entity not in specs:
+            raise ValueError(f"unknown entity {entity!r} (expected artist, album or track)")
+
+        columns, from_clause, extra_select = specs[entity]
+        try:
+            limit = max(1, min(1000, int(limit)))
+        except (TypeError, ValueError):
+            limit = 500
+
+        # Select only columns this database actually has. _row_value covers a
+        # missing column when READING a row, but naming one in the SQL fails
+        # the whole query with "no such column" — so an install that lags a
+        # migration (or predates soul_id_path) would export nothing at all.
+        # The absent ones still appear in the payload, as None.
+        table = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}[entity]
+
+        # The soul_unnamed_ filter lives in SQL, not in the Python loop below,
+        # and that placement is load-bearing: dropping rows AFTER the LIMIT
+        # would return a short page, and the route reads `len(items) == limit`
+        # to decide whether to keep walking — so a batch containing unnamed
+        # rows would end the export early and silently lose everything after
+        # it. ESCAPE because `_` is LIKE's single-character wildcard.
+        where = [
+            "t.soul_id IS NOT NULL",
+            "t.soul_id != ''",
+            r"t.soul_id NOT LIKE 'soul\_unnamed\_%' ESCAPE '\'",
+        ]
+        params: list = []
+        if cursor:
+            where.append("t.id > ?")
+            params.append(str(cursor))
+        if since:
+            where.append("t.updated_at >= ?")
+            params.append(str(since))
+
+        try:
+            conn = self._get_connection()
+            db_cursor = conn.cursor()
+            db_cursor.execute(f"PRAGMA table_info({table})")
+            present = {r[1] for r in db_cursor.fetchall()}
+            live_cols = [c for c in columns if c in present]
+
+            select_cols = ", ".join(f"t.{c}" for c in live_cols) + extra_select
+            sql = (f"SELECT {select_cols} {from_clause} "
+                   f"WHERE {' AND '.join(where)} ORDER BY t.id ASC LIMIT ?")
+            db_cursor.execute(sql, params + [limit])
+            rows = db_cursor.fetchall()
+        except Exception as e:
+            logger.error(f"API: Error exporting {entity}s: {e}")
+            raise
+
+        out: List[Dict[str, Any]] = []
+        joined = ('artist_name', 'album_title')
+        for row in rows:
+            soul_id = _row_value(row, 'soul_id')
+            if not soul_id or str(soul_id).startswith('soul_unnamed_'):
+                continue
+            item = {c: _row_value(row, c) for c in columns}
+            for extra in joined:
+                if extra in extra_select:
+                    item[extra] = _row_value(row, extra)
+            out.append(item)
+        return out
 
     # ── Mirrored Playlists ───────────────────────────────────────────────
 

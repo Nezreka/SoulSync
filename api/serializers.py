@@ -80,6 +80,9 @@ def serialize_artist(obj, fields: Optional[Set[str]] = None) -> dict:
         "server_source": d.get("server_source"),
         "created_at": _isoformat(d.get("created_at")),
         "updated_at": _isoformat(d.get("updated_at")),
+        # Cross-install identity (soulid_worker). Exposed because it is the
+        # only id in the row that means the same thing on another install.
+        "soul_id": d.get("soul_id"),
         # External IDs
         "musicbrainz_id": d.get("musicbrainz_id"),
         "spotify_artist_id": d.get("spotify_artist_id"),
@@ -150,6 +153,8 @@ def serialize_album(obj, fields: Optional[Set[str]] = None) -> dict:
         "updated_at": _isoformat(d.get("updated_at")),
         "upc": d.get("upc"),
         "copyright": d.get("copyright"),
+        # Cross-install identity (soulid_worker).
+        "soul_id": d.get("soul_id"),
         # External IDs
         "musicbrainz_release_id": d.get("musicbrainz_release_id"),
         "spotify_album_id": d.get("spotify_album_id"),
@@ -209,6 +214,10 @@ def serialize_track(obj, fields: Optional[Set[str]] = None) -> dict:
         "updated_at": _isoformat(d.get("updated_at")),
         "isrc": d.get("isrc"),
         "copyright": d.get("copyright"),
+        # Cross-install identity (soulid_worker). ``soul_id`` is the song
+        # (artist + title); ``album_soul_id`` pins this specific release.
+        "soul_id": d.get("soul_id"),
+        "album_soul_id": d.get("album_soul_id"),
         # External IDs
         "musicbrainz_recording_id": d.get("musicbrainz_recording_id"),
         "spotify_track_id": d.get("spotify_track_id"),
@@ -425,4 +434,129 @@ def serialize_recent_release(obj, fields: Optional[Set[str]] = None) -> dict:
         "track_count": d.get("track_count"),
         "added_date": _isoformat(d.get("added_date")),
     }
+    return filter_fields(result, fields)
+
+
+# ── MetaSync export serializers ───────────────────────────────
+
+# ALLOWLIST, not blocklist. Each field is named explicitly so that a column
+# added to artists/albums/tracks next year cannot silently join the export.
+# serialize_track/_album/_artist are deliberately NOT reused: they return
+# file_path, thumb_url, genius_lyrics and other things that must never leave
+# the box.
+#
+# Never exported, and why:
+#   id / artist_id / album_id ....... media-server primary keys, install-local
+#   file_path / file_size / bitrate . local filesystem layout
+#   thumb_url / banner_url .......... leak the media server's address
+#   lyrics, summaries, bios, wikis .. publisher-owned prose, re-fetchable by id
+#   play_count / last_played ........ listening behaviour
+#   server_source / verification_status / repair_* / quality_profile_id
+#                                     local state, meaningless to a peer
+#
+# soul_id is the network KEY, never a claimable payload id — which is why it
+# is not listed among the provider ids. Serving it as both would let
+# network-sourced identity be laundered back in as a local observation.
+
+_METASYNC_ARTIST_IDS = (
+    "musicbrainz_id", "spotify_artist_id", "itunes_artist_id", "deezer_id",
+    "discogs_id", "amazon_id", "tidal_id", "qobuz_id", "audiodb_id",
+    "genius_id", "jiosaavn_id",
+)
+
+_METASYNC_ALBUM_IDS = (
+    "musicbrainz_release_id", "spotify_album_id", "itunes_album_id",
+    "deezer_id", "discogs_id", "amazon_id", "tidal_id", "qobuz_id",
+    "audiodb_id", "jiosaavn_id", "bandcamp_url", "upc",
+)
+
+_METASYNC_TRACK_IDS = (
+    "musicbrainz_recording_id", "spotify_track_id", "itunes_track_id",
+    "deezer_id", "amazon_id", "tidal_id", "qobuz_id", "audiodb_id",
+    "genius_id", "jiosaavn_id", "bandcamp_url",
+)
+
+# The provider whose *_match_status governs each id column. MetaSync only
+# publishes ids whose status is 'matched' and drops the rest, so these are
+# load-bearing, not decoration.
+_METASYNC_ID_PROVIDER = {
+    "musicbrainz_id": "musicbrainz", "musicbrainz_release_id": "musicbrainz",
+    "musicbrainz_recording_id": "musicbrainz",
+    "spotify_artist_id": "spotify", "spotify_album_id": "spotify",
+    "spotify_track_id": "spotify",
+    "itunes_artist_id": "itunes", "itunes_album_id": "itunes",
+    "itunes_track_id": "itunes",
+    "deezer_id": "deezer", "discogs_id": "discogs", "amazon_id": "amazon",
+    "tidal_id": "tidal", "qobuz_id": "qobuz", "audiodb_id": "audiodb",
+    "genius_id": "genius", "jiosaavn_id": "jiosaavn",
+    "bandcamp_url": "bandcamp",
+}
+
+
+def _metasync_ids(d: dict, id_columns) -> dict:
+    """Each permitted provider id plus the match status that governs it."""
+    out = {}
+    for column in id_columns:
+        out[column] = d.get(column)
+        provider = _METASYNC_ID_PROVIDER.get(column)
+        if provider:
+            status_key = f"{provider}_match_status"
+            out[status_key] = d.get(status_key)
+    return out
+
+
+def serialize_metasync_artist(obj, fields: Optional[Set[str]] = None) -> dict:
+    d = _to_dict(obj)
+    result = {
+        "soul_id": d.get("soul_id"),
+        # 'canonical' | 'album' | 'name' | None. Only 'canonical' is
+        # reproducible on another install (see the artists migration).
+        "soul_id_path": d.get("soul_id_path"),
+        "name": d.get("name"),
+        "genres": _parse_genres(d.get("genres")),
+        "updated_at": _isoformat(d.get("updated_at")),
+    }
+    result.update(_metasync_ids(d, _METASYNC_ARTIST_IDS))
+    return filter_fields(result, fields)
+
+
+def serialize_metasync_album(obj, fields: Optional[Set[str]] = None) -> dict:
+    d = _to_dict(obj)
+    result = {
+        "soul_id": d.get("soul_id"),
+        "title": d.get("title"),
+        "artist_name": d.get("artist_name"),
+        "year": d.get("year"),
+        "release_date": d.get("release_date"),
+        "track_count": d.get("track_count"),
+        "record_type": d.get("record_type"),
+        "label": d.get("label"),
+        "genres": _parse_genres(d.get("genres")),
+        "updated_at": _isoformat(d.get("updated_at")),
+        "canonical_source": d.get("canonical_source"),
+        "canonical_album_id": d.get("canonical_album_id"),
+        "canonical_score": d.get("canonical_score"),
+    }
+    result.update(_metasync_ids(d, _METASYNC_ALBUM_IDS))
+    return filter_fields(result, fields)
+
+
+def serialize_metasync_track(obj, fields: Optional[Set[str]] = None) -> dict:
+    d = _to_dict(obj)
+    result = {
+        "soul_id": d.get("soul_id"),
+        "album_soul_id": d.get("album_soul_id"),
+        "title": d.get("title"),
+        "artist_name": d.get("artist_name"),
+        "album_title": d.get("album_title"),
+        "track_number": d.get("track_number"),
+        "disc_number": d.get("disc_number"),
+        "duration": d.get("duration"),
+        "bpm": d.get("bpm"),
+        "explicit": _bool_or_none(d.get("explicit")),
+        "year": d.get("year"),
+        "isrc": d.get("isrc"),
+        "updated_at": _isoformat(d.get("updated_at")),
+    }
+    result.update(_metasync_ids(d, _METASYNC_TRACK_IDS))
     return filter_fields(result, fields)
