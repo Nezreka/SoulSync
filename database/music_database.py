@@ -7346,6 +7346,21 @@ class MusicDatabase:
                     cursor.execute("DELETE FROM artists WHERE server_source = ?", (server_source,))
                     artists_deleted = cursor.rowcount
 
+                    # Stamp the rebuild. Wiping the library destroys every local
+                    # signal about a track — play_count above all — while
+                    # library_history keeps each download's original created_at,
+                    # so afterwards a much-loved track reads to the Expired
+                    # Download Cleaner as "old and never played". Recording WHEN
+                    # the library was rebuilt lets that job treat everything
+                    # downloaded before it as out of scope, permanently. Written
+                    # in the same transaction as the delete so a crash can never
+                    # leave the wipe applied without the stamp.
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO metadata (key, value, updated_at) "
+                        "VALUES (?, ?, CURRENT_TIMESTAMP)",
+                        ('library_rebuilt_at', datetime.now().isoformat()),
+                    )
+
                     conn.commit()
 
                     # Only VACUUM if we deleted a significant amount of data
@@ -17178,18 +17193,43 @@ class MusicDatabase:
             logger.error(f"Error getting watchlist scan run events for {run_id}: {e}")
             return []
 
+    @staticmethod
+    def _path_suffix_key(path, segments: int = 2):
+        """Normalised trailing path segments, for matching the SAME file across
+        two path namespaces: ``library_history.file_path`` is where SoulSync put
+        the file, ``tracks.file_path`` is what the media server reported after
+        scanning it. On Docker/NAS installs those share no prefix, but the
+        album folder and filename survive intact."""
+        text = str(path or '').replace('\\', '/').strip().rstrip('/')
+        if not text:
+            return ''
+        parts = [p for p in text.split('/') if p]
+        return '/'.join(parts[-segments:]).casefold()
+
     def get_origin_cleanup_candidates(self):
         """Origin-tracked downloads (watchlist/playlist) annotated with the
         matching library track's play_count, for the Expired Download Cleaner.
-        play_count is 0 when no library track matches the recorded path
-        (orphan history row → treated as not-listened)."""
+
+        ``play_count`` is None — meaning UNKNOWN, not zero — when no library
+        track can be matched to the download. The caller must treat that as
+        "cannot tell" and keep the file: this job deletes the user's data, and
+        an unmatched row is exactly the state a orphaned/renamed/not-yet-scanned
+        track is in.
+
+        Matching is exact-path first, then a trailing-segment fallback. The
+        exact join alone silently failed on every install where SoulSync's
+        paths differ from the media server's (Docker, NAS) — play_count read 0
+        for every candidate and the "you played it" protection never fired at
+        all. Where a suffix is ambiguous the HIGHEST play count wins, because
+        ambiguity must fail toward keeping the file.
+        """
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT lh.id, lh.origin, lh.origin_context, lh.created_at,
                        lh.file_path, lh.title, lh.artist_name,
-                       COALESCE(t.play_count, 0) AS play_count
+                       t.play_count AS play_count
                 FROM library_history lh
                 LEFT JOIN tracks t ON t.file_path = lh.file_path
                 WHERE lh.event_type = 'download'
@@ -17197,7 +17237,27 @@ class MusicDatabase:
             """)
             cols = ['id', 'origin', 'origin_context', 'created_at',
                     'file_path', 'title', 'artist_name', 'play_count']
-            return [dict(zip(cols, row, strict=True)) for row in cursor.fetchall()]
+            rows = [dict(zip(cols, row, strict=True)) for row in cursor.fetchall()]
+
+            # Only pay for the fallback map when the exact join actually missed.
+            unmatched = [r for r in rows if r['play_count'] is None and r['file_path']]
+            if unmatched:
+                suffix_plays = {}
+                cursor.execute(
+                    "SELECT file_path, COALESCE(play_count, 0) FROM tracks "
+                    "WHERE file_path IS NOT NULL AND file_path != ''")
+                for track_path, plays in cursor.fetchall():
+                    key = self._path_suffix_key(track_path)
+                    if not key:
+                        continue
+                    previous = suffix_plays.get(key)
+                    if previous is None or plays > previous:
+                        suffix_plays[key] = plays
+                for row in unmatched:
+                    matched = suffix_plays.get(self._path_suffix_key(row['file_path']))
+                    if matched is not None:
+                        row['play_count'] = matched
+            return rows
         except Exception as e:
             logger.debug(f"Error getting origin cleanup candidates: {e}")
             return []

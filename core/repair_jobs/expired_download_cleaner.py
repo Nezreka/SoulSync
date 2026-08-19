@@ -16,8 +16,9 @@ uses (resolve path → remove file → drop track row → drop history row).
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 
-from core.library.expired_cleanup import RETENTION_OPTIONS, select_expired
+from core.library.expired_cleanup import RETENTION_OPTIONS, parse_ts, select_expired
 from core.library.path_resolver import resolve_library_file_path
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
@@ -139,12 +140,38 @@ class ExpiredDownloadCleanerJob(RepairJob):
         except Exception as e:
             logger.debug("expired cleanup: watchlist lookup failed: %s", e)
 
+        # Anything downloaded before the library database was last rebuilt is
+        # permanently out of scope. A rebuild wipes tracks/albums/artists —
+        # destroying play_count, the only per-track protection — while
+        # library_history keeps the original created_at, so without this a
+        # much-played track reads as "old and never played" and gets deleted.
+        # No stamp (never rebuilt) means nothing is grandfathered.
+        # A database that doesn't track rebuilds at all has nothing to
+        # grandfather (normal operation). A read that FAILS is different: we
+        # cannot tell whether a rebuild happened, so grandfather everything
+        # rather than risk deleting across one we couldn't see.
+        rebuilt_at = None
+        _read_stamp = getattr(context.db, 'get_preference', None)
+        if callable(_read_stamp):
+            try:
+                rebuilt_at = parse_ts(_read_stamp('library_rebuilt_at'))
+            except Exception as e:
+                logger.warning(
+                    "expired cleanup: could not read the library-rebuild stamp "
+                    "(%s) — treating every download as pre-rebuild and keeping it", e)
+                rebuilt_at = datetime.now(timezone.utc)
+
         for c in candidates:
             ctx = (c.get('origin_context') or '').strip().casefold()
             origin = (c.get('origin') or '').strip().lower()
             c['protected'] = bool(
                 (origin == 'playlist' and ctx and ctx in mirrored_names) or
                 (origin == 'watchlist' and ctx and ctx in watched_names))
+            if rebuilt_at is not None:
+                created = parse_ts(c.get('created_at'))
+                # An unparseable date is already kept by the pure core; treat
+                # it as grandfathered too so the reason reported is honest.
+                c['grandfathered'] = created is None or created <= rebuilt_at
 
         expired = select_expired(candidates, watchlist_retention=wl,
                                  playlist_retention=pl, min_plays=min_plays)
