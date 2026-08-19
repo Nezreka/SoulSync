@@ -1178,50 +1178,44 @@ class JellyfinClient(MediaServerClient):
             name = user.get('name') or user_id
             if not user_id:
                 continue
+            # ONE pass per user. Jellyfin has no "has a rating" filter, so
+            # ratings can only be found by looking at items — and asking twice
+            # (IsFavorite true, then false) scanned the whole library in two
+            # halves while depending on IsFavorite=False being a supported
+            # filter value. One unfiltered pass covers both, at the same cost.
+            query = {
+                'IncludeItemTypes': 'Audio',
+                'Fields': 'UserData,Path',
+                'Recursive': True,
+                'Limit': 10000,
+            }
+            if self.music_library_id:
+                query['ParentId'] = self.music_library_id
+            try:
+                response = self._make_request(f'/Users/{user_id}/Items', query)
+            except Exception as e:
+                logger.warning(f"Jellyfin curation: query failed for {name}: {e}")
+                continue
+            if not response or 'Items' not in response:
+                continue
+
             per_track = {}
-            ok = False
-            for params in (
-                # Favourites
-                {'IsFavorite': True},
-                # Anything the user has rated. Jellyfin has no "is rated"
-                # filter, so this asks for items carrying UserData and keeps
-                # the ones with a rating set.
-                {'IsFavorite': False},
-            ):
-                query = {
-                    'IncludeItemTypes': 'Audio',
-                    'Fields': 'UserData,Path',
-                    'Recursive': True,
-                    'Limit': 10000,
-                    **params,
-                }
-                if self.music_library_id:
-                    query['ParentId'] = self.music_library_id
-                try:
-                    response = self._make_request(f'/Users/{user_id}/Items', query)
-                except Exception as e:
-                    logger.warning(f"Jellyfin curation: query failed for {name}: {e}")
+            for item in response['Items']:
+                path = item.get('Path') or ''
+                if not path:
                     continue
-                if not response or 'Items' not in response:
-                    continue
-                ok = True
-                for item in response['Items']:
-                    path = item.get('Path') or ''
-                    if not path:
-                        continue
-                    user_data = item.get('UserData') or {}
-                    favorite = bool(user_data.get('IsFavorite'))
-                    rating = user_data.get('Rating')
-                    if not favorite and rating in (None, ''):
-                        continue  # neither chosen nor rated — nothing to record
-                    entry = per_track.setdefault(
-                        path, {'path': path, 'favorite': False,
-                               'rating': None, 'in_playlist': False})
-                    entry['favorite'] = entry['favorite'] or favorite
-                    if rating not in (None, ''):
-                        entry['rating'] = rating
-            if ok:
-                signals[str(name)] = list(per_track.values())
+                user_data = item.get('UserData') or {}
+                favorite = bool(user_data.get('IsFavorite'))
+                rating = user_data.get('Rating')
+                if not favorite and rating in (None, ''):
+                    continue  # neither chosen nor rated — nothing to record
+                entry = per_track.setdefault(
+                    path, {'path': path, 'favorite': False,
+                           'rating': None, 'in_playlist': False})
+                entry['favorite'] = entry['favorite'] or favorite
+                if rating not in (None, ''):
+                    entry['rating'] = rating
+            signals[str(name)] = list(per_track.values())
         logger.info(f"Jellyfin curation: signals for {len(signals)} user(s)")
         return signals
 

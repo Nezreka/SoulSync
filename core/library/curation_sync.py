@@ -29,6 +29,17 @@ from utils.logging_config import get_logger
 logger = get_logger("library.curation_sync")
 
 
+def _accepts_users(reader) -> bool:
+    """Whether a client's ``get_curation_signals`` takes per-user credentials.
+    Jellyfin reads every user with one admin key and has no such parameter."""
+    try:
+        import inspect
+
+        return 'users' in inspect.signature(reader).parameters
+    except (TypeError, ValueError):
+        return False
+
+
 def normalize_signals(raw: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
     """Turn a client's raw ``{user: [{path, ...}]}`` into storage rows keyed by
     ``track_key``. Rows with no usable path are dropped; a user whose rows all
@@ -37,9 +48,11 @@ def normalize_signals(raw: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[Di
     out: Dict[str, List[Dict[str, Any]]] = {}
     for user, rows in (raw or {}).items():
         cleaned = []
+        offered = 0
         for row in rows or []:
             if not isinstance(row, dict):
                 continue
+            offered += 1
             key = path_suffix_key(row.get('path'))
             if not key:
                 continue
@@ -50,8 +63,76 @@ def normalize_signals(raw: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[Di
                 'in_playlist': bool(row.get('in_playlist')),
                 'source_path': row.get('path'),
             })
+        if offered and not cleaned:
+            # The server returned rows for this user and NONE of them carried a
+            # usable path — e.g. Jellyfin omitting Path because the key lacks
+            # the rights, or a server shape we don't parse. Storing that as an
+            # empty set would read as "they like nothing" and withdraw
+            # protection from everything they starred. Treat it as a failed
+            # read and leave their stored signals alone.
+            logger.warning("curation sync: %s returned %d row(s) with no usable "
+                           "path — leaving their stored signals untouched",
+                           user, offered)
+            continue
         out[str(user)] = cleaned
     return out
+
+
+#: How long stored signals stay good enough to skip a sweep. Retention windows
+#: are measured in weeks, so half-hourly freshness buys nothing and costs a
+#: per-user server scan every poll. Comfortably inside the cleaner's 48h
+#: staleness limit, so a couple of missed sweeps still cannot strand it.
+SWEEP_INTERVAL_HOURS = 6.0
+
+
+def curation_sweep_due(config_manager, db, now=None) -> bool:
+    """Whether a curation sweep should run at all right now.
+
+    Two separate questions, and the first one matters most: **is anyone using
+    this?** The Expired Download Cleaner is an opt-in repair job that ships
+    disabled, but the sweep rides the listening-stats poll, which runs on
+    virtually every install. Without this gate every user would pay per-user
+    server scans every 30 minutes to feed a feature they never turned on.
+
+    Then: is the stored data still fresh enough? Signals older than
+    ``SWEEP_INTERVAL_HOURS`` get refreshed; anything newer is left alone.
+    """
+    if config_manager is None:
+        return False
+    try:
+        # Defaults MUST match how the repair worker reads the same keys
+        # (core/repair_worker.py:366 and :456): master_enabled defaults ON,
+        # the job's own enabled falls back to its default_enabled (False for
+        # this job), and settings fall back to its default_settings. Getting
+        # master_enabled's default wrong the other way would leave the sweep
+        # silently never running on installs that simply have no such key,
+        # while the job itself happily ran.
+        if not config_manager.get('repair.master_enabled', True):
+            return False
+        job = config_manager.get('repair.jobs.expired_download_cleaner', {})
+        if not isinstance(job, dict) or not job.get('enabled', False):
+            return False
+        settings = job.get('settings') or {}
+        if not isinstance(settings, dict):
+            settings = {}
+        if not settings.get('use_curation_signals', True):
+            return False
+    except Exception as e:
+        logger.debug("curation sweep gate: config unreadable (%s) — not sweeping", e)
+        return False
+
+    try:
+        from datetime import datetime, timezone
+
+        from core.library.expired_cleanup import parse_ts
+        last = parse_ts(db.get_curation_sync_at())
+        if last is None:
+            return True  # never swept and the feature is on — do it now
+        now = now or datetime.now(timezone.utc)
+        return (now - last).total_seconds() / 3600.0 >= SWEEP_INTERVAL_HOURS
+    except Exception as e:
+        logger.debug("curation sweep gate: stamp unreadable (%s) — sweeping", e)
+        return True
 
 
 def navidrome_user_credentials(db) -> List[tuple]:
@@ -112,12 +193,13 @@ def sync_curation_signals(db, clients: Dict[str, Any],
         # mutating a shared singleton's identity is how one user's view leaks
         # into every other caller.
         accounts = (user_credentials or {}).get(server) or []
+        # Ask by SIGNATURE, not by catching TypeError: a TypeError raised deep
+        # inside a client's own logic would otherwise be mistaken for "doesn't
+        # take credentials" and silently retried without them, hiding a real
+        # bug and reading the wrong user's data.
+        wants_users = accounts and _accepts_users(reader)
         try:
-            raw = (reader(users=accounts) if accounts else reader()) or {}
-        except TypeError:
-            # Client doesn't accept per-user credentials (Jellyfin reads every
-            # user with one admin key, so it has no need for them).
-            raw = reader() or {}
+            raw = (reader(users=accounts) if wants_users else reader()) or {}
         except Exception as e:
             logger.warning("curation sync: %s failed, leaving its stored signals "
                            "untouched: %s", server, e)

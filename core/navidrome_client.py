@@ -363,6 +363,13 @@ class NavidromeClient(MediaServerClient):
         user = username or self.username
         secret = password if username else (password or self.password)
         if not user or not secret:
+            # No usable identity. Returning {} would send an UNAUTHENTICATED
+            # request that fails confusingly at the server; the caller treats
+            # an empty dict as "cannot authenticate" and skips the call.
+            if username and not password:
+                logger.warning("Navidrome: no password for user %r — skipping "
+                               "their request rather than sending it unauthenticated",
+                               username)
             return {}
 
         # Generate random salt (at least 6 characters)
@@ -467,6 +474,8 @@ class NavidromeClient(MediaServerClient):
 
         # Add authentication parameters
         auth_params = self._generate_auth_params(*(as_user or (None, None)))
+        if not auth_params:
+            return None  # no usable credentials — don't send an anonymous call
         if params:
             auth_params.update(params)
 
