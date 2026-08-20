@@ -1,5 +1,27 @@
 # keep what people actually like (Cremonies)
 
+> **STATUS: all phases shipped Aug 19 2026** (6dbf3c399, 30c686815, 464135b48,
+> 73fec7cb5, 050146605, 94c1dddb7). Nothing here is outstanding except live
+> testing against a real server — every reader is covered by stubbed HTTP only.
+>
+> **Scope decision (Boulder, Aug 19).** The job covers anything the watchlist
+> added to the wishlist, anything a playlist added to the wishlist, AND manual
+> playlist syncs — a playlist-organize run gets the same `playlist` origin
+> whether automation or a person started it. Manual downloads (search, artist
+> page, single track) get no origin at all and can never be touched.
+>
+> Agreed as correct for now: the playlist chose the track, not the user, and an
+> actively-mirrored playlist is exempt anyway. If that changes, the hook already
+> exists — automation passes an `automation_id` through
+> `_run_playlist_organize_download`, so an automation-only variant is a small
+> change, not a redesign.
+>
+> **Two things never verified against a live server:** whether Subsonic really
+> has no admin route to another user's starred items (if it does, Navidrome
+> collapses to one credential and per-user passwords become optional), and
+> Jellyfin's rating scale (left unscaled on purpose — see the comment in
+> `jellyfin_client.get_curation_signals`; the error only ever costs disk space).
+
 > "Do all automated song downloads stay forever or is there a rating/favorite
 > system to keep the ones you like? I like this idea of a discovery playlist
 > that updates but that doesn't mean I want to keep all the songs forever."
