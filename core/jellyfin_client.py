@@ -1214,6 +1214,18 @@ class JellyfinClient(MediaServerClient):
                            'rating': None, 'in_playlist': False})
                 entry['favorite'] = entry['favorite'] or favorite
                 if rating not in (None, ''):
+                    # Passed through UNSCALED on purpose. Plex is definitively
+                    # 0-10 and is halved to the 0-5 the decision core uses;
+                    # Jellyfin's UserData.Rating scale is not something we can
+                    # confirm without a live server, so it is left alone.
+                    #
+                    # That choice is deliberate rather than lazy: if Jellyfin
+                    # turns out to be 0-10, an unscaled value clears the
+                    # threshold too easily and we KEEP tracks we might not have
+                    # needed to — the safe direction. Halving on a wrong guess
+                    # would do the opposite and delete something a user rated
+                    # highly. Worth confirming against a real server, but the
+                    # error here only ever costs disk space.
                     entry['rating'] = rating
             signals[str(name)] = list(per_track.values())
         logger.info(f"Jellyfin curation: signals for {len(signals)} user(s)")
