@@ -32,9 +32,25 @@ from utils.logging_config import get_logger
 
 logger = get_logger("downloads.atomic_album_publish")
 
-# The staging tree lives as a hidden sibling of the transfer dir so it shares the
-# transfer dir's filesystem (publish becomes an atomic rename) yet sits OUTSIDE
-# the folder Plex/Jellyfin/Navidrome actually scan.
+# The staging tree lives as a hidden folder INSIDE the transfer dir.
+#
+# It used to be a SIBLING, on the reasoning that a sibling shares the transfer
+# dir's filesystem (so publish is an atomic rename) while sitting outside the
+# folder media servers scan. That reasoning fails for nearly every Docker user,
+# because the transfer dir is itself a bind mount:
+#
+#     D:/Music:/app/Transfer   →  sibling is /app  →  the CONTAINER's own layer
+#
+# which is a different filesystem, is usually not writable, and is thrown away
+# when the container is recreated. It produced a hard failure, not a degrade —
+# mkdir raised PermissionError, the track never left downloads, and the user
+# saw "File verification failed: expected file at 08 - Alabama.flac but it was
+# not found after processing" with every file still sitting in /app/downloads.
+#
+# Inside the transfer dir is the only location that is same-filesystem and
+# writable BY CONSTRUCTION: if the library is not writable, there is nothing to
+# publish into anyway. The dot prefix keeps it out of media-server scans, and
+# SoulSync's own scan prunes dot-directories for the same reason.
 _STAGING_DIRNAME = ".soulsync_atomic_staging"
 
 _AUDIO_EXTS = {'.flac', '.mp3', '.m4a', '.mp4', '.ogg', '.oga', '.opus',
@@ -42,10 +58,25 @@ _AUDIO_EXTS = {'.flac', '.mp3', '.m4a', '.mp4', '.ogg', '.oga', '.opus',
 
 
 def staging_root_for_batch(transfer_dir: str, batch_id: str) -> str:
-    """The private staging root for a batch — a hidden sibling of the transfer
-    dir (same filesystem → atomic publish; not under the scanned library)."""
-    parent = os.path.dirname(os.path.normpath(transfer_dir))
-    return os.path.join(parent, _STAGING_DIRNAME, str(batch_id))
+    """The private staging root for a batch — a hidden folder INSIDE the
+    transfer dir (same filesystem → atomic publish; dot-prefixed so scanners
+    skip it). See the note on _STAGING_DIRNAME for why not a sibling."""
+    return os.path.join(os.path.normpath(transfer_dir), _STAGING_DIRNAME, str(batch_id))
+
+
+def is_staged_path(path: str, transfer_dir: str) -> bool:
+    """True when ``path`` is already inside the staging tree.
+
+    Load-bearing now that staging lives UNDER the transfer dir: without it,
+    ``to_staging_path`` would happily map an already-staged file into a staging
+    mirror of itself, one level deeper on every pass."""
+    try:
+        path_n = os.path.normpath(os.path.abspath(path))
+        root_n = os.path.normpath(os.path.abspath(
+            os.path.join(os.path.normpath(transfer_dir), _STAGING_DIRNAME)))
+    except (OSError, ValueError):
+        return False
+    return path_n == root_n or path_n.startswith(root_n + os.sep)
 
 
 def to_staging_path(final_path: str, transfer_dir: str, staging_root: str) -> Optional[str]:
@@ -61,6 +92,10 @@ def to_staging_path(final_path: str, transfer_dir: str, staging_root: str) -> Op
         return None
     prefix = transfer_n + os.sep
     if not final_n.startswith(prefix):
+        return None
+    # Already staged — mapping it again would nest a staging mirror inside the
+    # staging tree. Only reachable since staging moved under the transfer dir.
+    if is_staged_path(final_n, transfer_n):
         return None
     rel = final_n[len(prefix):]
     return os.path.join(staging_root, rel)
