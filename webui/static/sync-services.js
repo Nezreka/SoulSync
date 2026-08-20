@@ -2727,9 +2727,10 @@ async function loadDeezerPlaylist() {
     }
 
     // Extract playlist ID from URL
-    // Supports: deezer.com/playlist/{id}, deezer.com/{locale}/playlist/{id}, or raw numeric ID
+    // Supports: deezer.com/playlist/{id}, deezer.com/{locale}/playlist/{id}
+    // (locale may carry a region, /en-us/), or raw numeric ID.
     let playlistId = null;
-    const urlMatch = rawUrl.match(/deezer\.com\/(?:[a-z]{2}\/)?playlist\/(\d+)/i);
+    const urlMatch = rawUrl.match(/deezer\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?playlist\/(\d+)/i);
     if (urlMatch) {
         playlistId = urlMatch[1];
     } else if (/^\d+$/.test(rawUrl)) {
@@ -2737,6 +2738,15 @@ async function loadDeezerPlaylist() {
     }
 
     if (!playlistId) {
+        // A share link (link.deezer.com/s/..., deezer.page.link/...) is what
+        // Deezer's own Share button copies. It carries no id until a redirect
+        // is followed, which the browser cannot do cross-origin — so say what
+        // to do rather than implying their share link is malformed.
+        if (/^(?:https?:\/\/)?(?:link\.deezer\.com\/|deezer\.page\.link\/)/i.test(rawUrl.trim())) {
+            showToast('That is a Deezer share link, which hides the playlist id. Open it in a '
+                      + 'browser and paste the deezer.com/playlist/... address it lands on.', 'error');
+            return;
+        }
         showToast('Invalid Deezer playlist URL. Expected format: deezer.com/playlist/{id}', 'error');
         return;
     }

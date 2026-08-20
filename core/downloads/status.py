@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Optional
 
+from core.downloads.live_detail import build_live_detail, resolve_source_label
 from core.downloads.source_policy import (
     RELEASE_SOURCE_NAMES as _RELEASE_SOURCE_NAMES,
     STREAMING_SOURCE_NAMES as _STREAMING_SOURCE_NAMES,
@@ -261,6 +262,16 @@ def _apply_engine_state_fallback(
     task_status['progress'] = _engine_progress_pct(record)
 
 
+def _attach_live_detail(task_status: dict, task: dict, live_info: Optional[dict]) -> None:
+    """Decorate one per-task payload with its live_detail (#1156).
+
+    Uses the FINAL status already written to task_status (the builder mutates
+    it after reading the raw task), so the detail matches the badge shown."""
+    detail = build_live_detail(task, live_info, task_status.get('status') or '')
+    if detail:
+        task_status['live_detail'] = detail
+
+
 def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: dict, deps: StatusDeps) -> dict:
     """Build status payload for a single batch.
 
@@ -371,6 +382,7 @@ def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: d
                 _apply_engine_state_fallback(
                     task_id, task, task_status, batch_id, deps,
                 )
+                _attach_live_detail(task_status, task, None)
                 batch_tasks.append(task_status)
                 continue
 
@@ -513,6 +525,10 @@ def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: d
                         _apply_engine_state_fallback(
                             task_id, task, task_status, batch_id, deps,
                         )
+            _live_row = None
+            if task_filename and task_username:
+                _live_row = live_transfers_lookup.get(deps.make_context_key(task_username, task_filename))
+            _attach_live_detail(task_status, task, _live_row)
             batch_tasks.append(task_status)
         batch_tasks.sort(key=lambda x: x['track_index'])
         response_data['tasks'] = batch_tasks
@@ -662,12 +678,56 @@ def _normalize_identity_part(value: Any) -> str:
     return str(value or '').strip().casefold()
 
 
-def _download_identity(title: Any, artist: Any, album: Any) -> tuple[str, str, str]:
+def download_identity(title: Any, artist: Any, album: Any) -> tuple[str, str, str]:
+    """The triple that decides whether two download rows are the same song.
+
+    Public because the cross-batch dedup in ``task_worker`` has to agree with
+    what this view shows: if the two disagreed, a task could skip against a
+    "sibling" the user sees as a different track."""
     return (
         _normalize_identity_part(title),
         _normalize_identity_part(artist),
         _normalize_identity_part(album),
     )
+
+
+def track_info_identity(track_info: Any) -> tuple[str, str, str]:
+    """``download_identity`` for a raw ``track_info`` payload."""
+    return download_identity(*normalize_track_fields(track_info))
+
+
+def normalize_track_fields(track_info: Any) -> tuple[str, str, str]:
+    """``(title, artist, album)`` out of a task's ``track_info``.
+
+    The payload arrives in several shapes (Spotify API, wishlist row, a
+    hand-built dict), so the field precedence and the list/dict artist handling
+    live here once rather than at each reader.
+    """
+    if not isinstance(track_info, dict):
+        return '', '', ''
+    title = (track_info.get('title') or track_info.get('name')
+             or track_info.get('track_name') or '')
+
+    # Artist can be: string, list of strings, list of dicts with 'name'
+    raw_artist = (track_info.get('artist') or track_info.get('artist_name')
+                  or track_info.get('artists') or '')
+    if isinstance(raw_artist, list):
+        parts = []
+        for a in raw_artist:
+            parts.append(a.get('name', '') if isinstance(a, dict) else str(a))
+        artist = ', '.join(p for p in parts if p)
+    elif isinstance(raw_artist, dict):
+        artist = raw_artist.get('name', '')
+    else:
+        artist = str(raw_artist) if raw_artist else ''
+
+    # Album can be: string or dict with 'name'
+    raw_album = track_info.get('album') or track_info.get('album_name') or ''
+    if isinstance(raw_album, dict):
+        album = raw_album.get('name', '')
+    else:
+        album = str(raw_album) if raw_album else ''
+    return title, artist, album
 
 
 def _history_timestamp(value: Any) -> float:
@@ -717,6 +777,7 @@ def _build_history_download_item(entry: dict) -> dict:
         'file_path': entry.get('file_path') or '',
         'verification_status': entry.get('verification_status'),
         'is_persistent_history': True,
+        'download_source': source,
     }
 
 
@@ -739,29 +800,7 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
             album = ''
             artwork = ''
             if isinstance(track_info, dict):
-                title = track_info.get('title') or track_info.get('name') or track_info.get('track_name') or ''
-
-                # Artist can be: string, list of strings, list of dicts with 'name'
-                raw_artist = track_info.get('artist') or track_info.get('artist_name') or track_info.get('artists') or ''
-                if isinstance(raw_artist, list):
-                    parts = []
-                    for a in raw_artist:
-                        if isinstance(a, dict):
-                            parts.append(a.get('name', ''))
-                        else:
-                            parts.append(str(a))
-                    artist = ', '.join(p for p in parts if p)
-                elif isinstance(raw_artist, dict):
-                    artist = raw_artist.get('name', '')
-                else:
-                    artist = str(raw_artist) if raw_artist else ''
-
-                # Album can be: string or dict with 'name'
-                raw_album = track_info.get('album') or track_info.get('album_name') or ''
-                if isinstance(raw_album, dict):
-                    album = raw_album.get('name', '')
-                else:
-                    album = str(raw_album) if raw_album else ''
+                title, artist, album = normalize_track_fields(track_info)
 
                 artwork = track_info.get('artwork_url') or track_info.get('image_url') or track_info.get('album_art') or ''
                 # Try album images
@@ -773,14 +812,15 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                             artwork = images[0].get('url', '') if isinstance(images[0], dict) else str(images[0])
 
             status = task.get('status', 'queued')
-            live_identities.add(_download_identity(title, artist, album))
+            live_identities.add(download_identity(title, artist, album))
             # Determine download progress percentage
             progress = 0
+            live_info = None
             if status == 'completed':
                 progress = 100
             elif status == 'post_processing':
                 progress = 95
-            elif status in ('downloading', 'searching'):
+            elif status in ('downloading', 'searching', 'queued'):
                 # Check live transfer data for real progress
                 task_filename = task.get('filename') or track_info.get('filename')
                 task_username = task.get('username') or track_info.get('username')
@@ -790,7 +830,7 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                     if live_info:
                         progress = live_info.get('percentComplete', 0)
 
-            items.append({
+            item = {
                 'task_id': task_id,
                 'title': title,
                 'artist': artist,
@@ -821,7 +861,13 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                 'timestamp': task.get('status_change_time', 0),
                 'priority': _STATUS_PRIORITY.get(status, 9),
                 'is_persistent_history': False,
-            })
+                # Where it came from, for LIVE rows too (#1156): the label used
+                # to appear only once the row aged into persistent history, so
+                # a just-completed download never said "YouTube"/"Tidal".
+                'download_source': resolve_source_label(task.get('username')),
+            }
+            _attach_live_detail(item, task, live_info)
+            items.append(item)
 
     # --- Unverified history (unconditional, no limit) ---
     # Always load every library_history row that still needs human confirmation
@@ -839,7 +885,7 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
 
         for entry in unverified_entries:
             item = _build_history_download_item(entry)
-            identity = _download_identity(item.get('title'), item.get('artist'), item.get('album'))
+            identity = download_identity(item.get('title'), item.get('artist'), item.get('album'))
             if identity in live_identities:
                 continue
             items.append(item)
@@ -862,7 +908,7 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
             if len(items) >= limit or appended_history >= history_limit:
                 break
             item = _build_history_download_item(entry)
-            identity = _download_identity(item.get('title'), item.get('artist'), item.get('album'))
+            identity = download_identity(item.get('title'), item.get('artist'), item.get('album'))
             if identity in live_identities:
                 continue
             items.append(item)
@@ -931,6 +977,7 @@ def _build_album_bundle_status(batch: dict) -> dict:
         'seeders': batch.get('album_bundle_seeders'),
         'grabs': batch.get('album_bundle_grabs'),
         'count': batch.get('album_bundle_count'),
+        'query': batch.get('album_bundle_query'),
     }
     return {key: value for key, value in status.items() if value is not None}
 

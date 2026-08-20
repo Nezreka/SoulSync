@@ -20,6 +20,7 @@ import {
   extractSpotifyPublicId,
   historyWithEntry,
   historyWithout,
+  isDeezerShareUrl,
   pillDisplayName,
 } from './-sync.urls';
 
@@ -241,5 +242,35 @@ describe('gaps the PR review proved unpinned', () => {
     expect(URL_HISTORY_SOURCES.deezer.icon).toBe('🎵');
     expect(URL_HISTORY_SOURCES['spotify-public'].icon).toBe('🎧');
     expect(URL_HISTORY_SOURCES['itunes-link'].icon).toBe('♪');
+  });
+});
+
+describe('deezer URL shapes people actually paste (#TheHomeGuy share link)', () => {
+  it('accepts a locale with a region', () => {
+    expect(extractDeezerPlaylistId('https://www.deezer.com/en-us/playlist/1234567890')).toBe(
+      '1234567890',
+    );
+  });
+
+  it('still accepts a plain language locale', () => {
+    expect(extractDeezerPlaylistId('https://www.deezer.com/en/playlist/1234567890')).toBe(
+      '1234567890',
+    );
+  });
+
+  it('accepts a URL pasted without its scheme', () => {
+    expect(extractDeezerPlaylistId('www.deezer.com/playlist/1234567890')).toBe('1234567890');
+    expect(extractDeezerPlaylistId('deezer.com/playlist/1234567890')).toBe('1234567890');
+  });
+
+  it('recognises the share links the Deezer app copies', () => {
+    expect(isDeezerShareUrl('https://link.deezer.com/s/30abcXYZ')).toBe(true);
+    expect(isDeezerShareUrl('link.deezer.com/s/30abcXYZ')).toBe(true);
+    expect(isDeezerShareUrl('https://deezer.page.link/abc123')).toBe(true);
+  });
+
+  it('does not mistake a normal playlist URL for a share link', () => {
+    expect(isDeezerShareUrl('https://www.deezer.com/playlist/123')).toBe(false);
+    expect(isDeezerShareUrl('')).toBe(false);
   });
 });

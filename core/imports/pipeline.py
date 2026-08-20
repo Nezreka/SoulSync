@@ -727,12 +727,33 @@ def _maybe_stage_album_track(context, final_path):
                         config_manager.get('soulseek.transfer_path', './Transfer'))
                     album_folder = os.path.dirname(final_path)
                     if album_folder_is_fresh(album_folder):
-                        batch['_atomic_active'] = True
-                        batch['_atomic_transfer_dir'] = transfer_dir
-                        batch['_atomic_staging_root'] = staging_root_for_batch(transfer_dir, batch_id)
-                        logger.info("[Atomic Publish] Batch %s: STAGING album until complete "
-                                    "(album=%r, transfer=%s)", batch_id,
-                                    os.path.basename(album_folder), transfer_dir)
+                        _staging_root = staging_root_for_batch(transfer_dir, batch_id)
+                        # Prove we can actually WRITE there before committing the
+                        # batch to staging. This used to be assumed, and when the
+                        # assumption failed the download failed with it: mkdir
+                        # raised PermissionError deep inside safe_move_file, the
+                        # track never left downloads, and the user got "File
+                        # verification failed: expected file at ... but it was not
+                        # found after processing". A feature that cannot stage
+                        # must degrade to today's direct publish, never take the
+                        # download down with it.
+                        try:
+                            os.makedirs(_staging_root, exist_ok=True)
+                            _staging_ok = os.access(_staging_root, os.W_OK)
+                        except OSError as _stage_err:
+                            _staging_ok = False
+                            logger.warning(
+                                "[Atomic Publish] Batch %s: cannot create staging dir %s (%s) "
+                                "— publishing directly instead. The album may be visible to "
+                                "your media server before every track lands.",
+                                batch_id, _staging_root, _stage_err)
+                        if _staging_ok:
+                            batch['_atomic_active'] = True
+                            batch['_atomic_transfer_dir'] = transfer_dir
+                            batch['_atomic_staging_root'] = _staging_root
+                            logger.info("[Atomic Publish] Batch %s: STAGING album until complete "
+                                        "(album=%r, transfer=%s)", batch_id,
+                                        os.path.basename(album_folder), transfer_dir)
                     else:
                         logger.info("[Atomic Publish] Batch %s: album folder already has tracks "
                                     "(completeness fill) — publishing directly: %s",

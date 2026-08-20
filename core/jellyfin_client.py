@@ -1147,6 +1147,90 @@ class JellyfinClient(MediaServerClient):
             logger.error(f"Error getting Jellyfin track play counts: {e}")
             return {}
 
+    def get_curation_signals(self):
+        """What every user on this server deliberately CHOSE about each track.
+
+        Returns ``{username: [{path, favorite, rating, in_playlist}, ...]}``.
+
+        Jellyfin's ``UserData`` is per-user, but an admin API key can read any
+        user's, so one credential covers the whole server — no per-user
+        passwords needed (unlike Subsonic). We ask each user for their
+        favourites and their rated items separately rather than walking the
+        whole library per user: on a big library that would be N full scans.
+
+        Paths are returned raw; the caller normalises them. A user whose query
+        fails is OMITTED rather than recorded as empty — an empty list means
+        "they like nothing", which would withdraw protection from their
+        tracks, and a transient error must never do that.
+        """
+        if not self.ensure_connection():
+            return {}
+
+        try:
+            users = self.get_available_users()
+        except Exception as e:
+            logger.error(f"Jellyfin curation: could not enumerate users: {e}")
+            return {}
+
+        signals = {}
+        for user in users or []:
+            user_id = user.get('id')
+            name = user.get('name') or user_id
+            if not user_id:
+                continue
+            # ONE pass per user. Jellyfin has no "has a rating" filter, so
+            # ratings can only be found by looking at items — and asking twice
+            # (IsFavorite true, then false) scanned the whole library in two
+            # halves while depending on IsFavorite=False being a supported
+            # filter value. One unfiltered pass covers both, at the same cost.
+            query = {
+                'IncludeItemTypes': 'Audio',
+                'Fields': 'UserData,Path',
+                'Recursive': True,
+                'Limit': 10000,
+            }
+            if self.music_library_id:
+                query['ParentId'] = self.music_library_id
+            try:
+                response = self._make_request(f'/Users/{user_id}/Items', query)
+            except Exception as e:
+                logger.warning(f"Jellyfin curation: query failed for {name}: {e}")
+                continue
+            if not response or 'Items' not in response:
+                continue
+
+            per_track = {}
+            for item in response['Items']:
+                path = item.get('Path') or ''
+                if not path:
+                    continue
+                user_data = item.get('UserData') or {}
+                favorite = bool(user_data.get('IsFavorite'))
+                rating = user_data.get('Rating')
+                if not favorite and rating in (None, ''):
+                    continue  # neither chosen nor rated — nothing to record
+                entry = per_track.setdefault(
+                    path, {'path': path, 'favorite': False,
+                           'rating': None, 'in_playlist': False})
+                entry['favorite'] = entry['favorite'] or favorite
+                if rating not in (None, ''):
+                    # Passed through UNSCALED on purpose. Plex is definitively
+                    # 0-10 and is halved to the 0-5 the decision core uses;
+                    # Jellyfin's UserData.Rating scale is not something we can
+                    # confirm without a live server, so it is left alone.
+                    #
+                    # That choice is deliberate rather than lazy: if Jellyfin
+                    # turns out to be 0-10, an unscaled value clears the
+                    # threshold too easily and we KEEP tracks we might not have
+                    # needed to — the safe direction. Halving on a wrong guess
+                    # would do the opposite and delete something a user rated
+                    # highly. Worth confirming against a real server, but the
+                    # error here only ever costs disk space.
+                    entry['rating'] = rating
+            signals[str(name)] = list(per_track.values())
+        logger.info(f"Jellyfin curation: signals for {len(signals)} user(s)")
+        return signals
+
     def clear_cache(self):
         """Clear all caches to force fresh data on next request"""
         self._album_cache.clear()

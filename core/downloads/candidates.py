@@ -362,6 +362,8 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
         task = download_tasks.get(task_id)
         if not task:
             return False
+        # for the live status payload (#1156): "candidate 2/14"
+        task['candidate_count'] = len(candidates)
         used_sources = task.get('used_sources', set())
         # User-initiated manual picks (candidates modal) bypass quarantine
         # gates downstream. The user already accepted the risk by choosing
@@ -741,6 +743,21 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                             download_tasks[task_id]['download_id'] = download_id
                             download_tasks[task_id]['username'] = username
                             download_tasks[task_id]['filename'] = filename
+                            # what won, for the live status payload (#1156) —
+                            # the peer's queue/slot stats explain a 'Queued,
+                            # Remotely' better than any status word can
+                            try:
+                                download_tasks[task_id]['picked_candidate'] = {
+                                    'quality': getattr(candidate, 'quality', '') or '',
+                                    'bitrate': getattr(candidate, 'bitrate', None),
+                                    'size': getattr(candidate, 'size', None),
+                                    'confidence': round(float(getattr(candidate, 'confidence', 0) or 0), 2),
+                                    'queue_length': getattr(candidate, 'queue_length', None),
+                                    'free_upload_slots': getattr(candidate, 'free_upload_slots', None),
+                                    'upload_speed': getattr(candidate, 'upload_speed', None),
+                                }
+                            except Exception as _picked_exc:
+                                logger.debug("picked_candidate detail failed: %s", _picked_exc)
 
                 if _cancelled_after_start:
                     # Free the worker slot OUTSIDE tasks_lock: on_download_completed

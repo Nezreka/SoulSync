@@ -85,6 +85,7 @@ INSERT INTO tracks  VALUES(102,11,1,'One Dance',1,200000,'/m/single.flac',900,50
 _MIGRATED_COLUMNS = {
     "artists": [
         "soul_id TEXT",
+        "soul_id_path TEXT",
         "discogs_bio TEXT",
         "discogs_members TEXT",
         "discogs_urls TEXT",

@@ -31,14 +31,38 @@ def _move(src, dst):
 
 # --- path math --------------------------------------------------------------
 
-def test_staging_root_is_hidden_sibling_of_transfer(tmp_path):
+def test_staging_root_is_hidden_and_inside_transfer(tmp_path):
+    """INSIDE the transfer dir, not beside it.
+
+    A sibling was chosen for same-filesystem atomic renames, but for a Docker
+    user the transfer dir IS a bind mount — D:/Music:/app/Transfer makes the
+    sibling /app, the container's own layer: different filesystem, usually not
+    writable, discarded on recreate. It failed hard rather than degrading
+    (PermissionError on mkdir → the track never left downloads → "File
+    verification failed ... not found after processing").
+
+    Inside the transfer dir is same-filesystem and writable by construction:
+    if the library is not writable there is nothing to publish into anyway.
+    """
     transfer = tmp_path / "media" / "music"
     root = ap.staging_root_for_batch(str(transfer), "batch-123")
-    # Sibling of the transfer dir (shares its parent → same filesystem), hidden,
-    # and NOT under the transfer dir Plex scans.
     assert os.path.basename(os.path.dirname(root)) == ap._STAGING_DIRNAME
     assert root.endswith(os.path.join(ap._STAGING_DIRNAME, "batch-123"))
-    assert not os.path.normpath(root).startswith(os.path.normpath(str(transfer)) + os.sep)
+    assert os.path.normpath(root).startswith(os.path.normpath(str(transfer)) + os.sep)
+    # Dot-prefixed so media servers (and SoulSync's own scan) skip it.
+    assert ap._STAGING_DIRNAME.startswith('.')
+
+
+def test_an_already_staged_path_is_not_staged_again(tmp_path):
+    """Only reachable since staging moved under the transfer dir: without the
+    guard, a staged file maps into a staging mirror of itself, one level
+    deeper every pass."""
+    transfer = str(tmp_path / "music")
+    root = ap.staging_root_for_batch(transfer, "b1")
+    staged = os.path.join(root, "Artist", "Album", "01.flac")
+    assert ap.to_staging_path(staged, transfer, root) is None
+    assert ap.is_staged_path(staged, transfer)
+    assert not ap.is_staged_path(os.path.join(transfer, "Artist", "Album", "01.flac"), transfer)
 
 
 def test_to_staging_maps_relative_structure(tmp_path):

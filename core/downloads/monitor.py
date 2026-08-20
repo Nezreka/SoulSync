@@ -77,6 +77,35 @@ def _resolve_download_source(username):
     return 'soulseek'
 
 
+def _cancel_on_giveup(task, deferred_ops, trigger):
+    """Drop the transfer in slskd when we stop tracking the task.
+
+    Every RETRY path already cancels before searching again, but the give-up
+    paths only marked the task failed — so the enqueue lived on in slskd
+    forever, holding one of the user's download slots (sassmastawillis:
+    "removing all queued manually resumes downloads and frees up new slots").
+    Same bug 611b64f2b fixed for the album stall-guard, one layer down.
+
+    Safe to call exactly once per give-up: the monitor loop skips tasks whose
+    status isn't 'downloading'/'queued', so a failed task is never re-examined.
+    The identity fields are deliberately NOT popped — a terminal row still
+    shows its source in the UI.
+    """
+    ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
+    username = task.get('username') or ti.get('username')
+    download_id = task.get('download_id')
+    if username and download_id:
+        deferred_ops.append(('cancel_download', download_id, username, trigger))
+        return
+    if username or download_id:
+        # Half an identity is the state that used to leak silently — say so.
+        logger.warning(
+            "[CancelTrigger:monitor.%s] giving up but cannot cancel in slskd "
+            "(download_id=%r username=%r) — a queued transfer may be left behind",
+            trigger, download_id, username,
+        )
+
+
 def _remaining_fallback_sources(exhausted):
     """Sources in the configured hybrid chain that haven't exhausted their
     per-source budget yet.
@@ -879,6 +908,7 @@ class WebUIDownloadMonitor:
                 tried_sources = task.get('used_sources', set())
                 sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
                 logger.error("Task failed after 3 error retry attempts")
+                _cancel_on_giveup(task, deferred_ops, 'errored_state_giveup')
                 task['status'] = 'failed'
                 # Tidal-specific error: check if this was a quality issue.
                 # task['username'] is popped on error-retry (line ~2866) so we can't rely on it;
@@ -985,6 +1015,7 @@ class WebUIDownloadMonitor:
                         tried_sources = task.get('used_sources', set())
                         sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
                         logger.error("Task failed after 3 retry attempts (queue timeout)")
+                        _cancel_on_giveup(task, deferred_ops, 'queued_state_giveup')
                         task['status'] = 'failed'
                         task['error_message'] = f'Download stayed queued too long 3 times for "{track_label}"{sources_str} — peers may be offline or have full queues'
                         # Clear timers to prevent further retry loops
@@ -1073,6 +1104,7 @@ class WebUIDownloadMonitor:
                         tried_sources = task.get('used_sources', set())
                         sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
                         logger.error("Task failed after 3 retry attempts (0% progress timeout)")
+                        _cancel_on_giveup(task, deferred_ops, 'zero_progress_giveup')
                         task['status'] = 'failed'
                         task['error_message'] = f'Download stuck at 0% three times for "{track_label}"{sources_str} — peers may have connection issues'
                         # Clear timers to prevent further retry loops
@@ -1175,6 +1207,7 @@ class WebUIDownloadMonitor:
                         tried_sources = task.get('used_sources', set())
                         sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
                         logger.error(f"Task failed after 3 retry attempts (unknown state '{state_str}')")
+                        _cancel_on_giveup(task, deferred_ops, 'unknown_state_giveup')
                         task['status'] = 'failed'
                         task['error_message'] = f'Download stuck in "{state_str}" state 3 times for "{track_label}"{sources_str}'
                         task.pop('queued_start_time', None)

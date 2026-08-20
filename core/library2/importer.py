@@ -740,6 +740,7 @@ class _ArtistResolver:
                 "style=COALESCE(?, style), mood=COALESCE(?, mood), "
                 "label=COALESCE(?, label), banner_url=COALESCE(?, banner_url), "
                 "aliases=?, soul_id=COALESCE(?, soul_id), "
+                "soul_id_path=COALESCE(?, soul_id_path), "
                 "server_source=COALESCE(?, server_source), "
                 "server_id=COALESCE(?, server_id), "
                 "added_at=COALESCE(?, added_at), legacy_artist_id=?, "
@@ -751,7 +752,8 @@ class _ArtistResolver:
                  fields["genres"],
                  fields["summary"], fields["style"], fields["mood"],
                  fields["label"], fields["banner_url"], fields["aliases"],
-                 fields["soul_id"], fields.get("server_source"),
+                 fields["soul_id"], fields.get("soul_id_path"),
+                 fields.get("server_source"),
                  fields.get("server_id"), fields.get("added_at"),
                  legacy_id, run_id, existing),
             )
@@ -764,17 +766,18 @@ class _ArtistResolver:
         self.cursor.execute(
             "INSERT INTO lib2_artists(name, name_key, sort_name, spotify_id, musicbrainz_id, "
             "external_ids, image_url, art_locked, genres, summary, style, mood, label, "
-            "banner_url, aliases, soul_id, server_source, server_id, "
+            "banner_url, aliases, soul_id, soul_id_path, server_source, server_id, "
             "legacy_artist_id, quality_profile_id, "
             "legacy_import_run_id, monitored, added_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
             "       COALESCE(?, CURRENT_TIMESTAMP))",
             (fields["name"], normalize_name(fields["name"]),
              fields["sort_name"], spotify_col, mbid_col, external_json,
              fields["image_url"], fields.get("art_locked") or 0,
              fields["genres"], fields["summary"],
              fields["style"], fields["mood"], fields["label"], fields["banner_url"],
-             fields["aliases"], fields["soul_id"], fields.get("server_source"),
+             fields["aliases"], fields["soul_id"], fields.get("soul_id_path"),
+             fields.get("server_source"),
              fields.get("server_id"), legacy_id,
              self.default_profile_id, run_id, 0, fields.get("added_at")),
         )
@@ -1135,7 +1138,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "qobuz_artist_id", "qobuz_id", "thumb_url", "banner_url",
                 "genres", "summary", "style", "mood", "label", "aliases",
                 "art_locked",
-                "soul_id",
+                "soul_id", "soul_id_path",
                 "lastfm_bio", "lastfm_listeners", "lastfm_tags",
                 "lastfm_similar", "lastfm_url", "genius_description",
                 "genius_alt_names", "genius_url", "discogs_bio",
@@ -1207,6 +1210,11 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 # it already spent an API round-trip on has to arrive with the
                 # row rather than wait for the mirror's backlog sweep to notice.
                 "soul_id": _pick(row, "soul_id"),
+                # Which derivation produced that id. Worthless to re-derive
+                # later (the album fallback depends on what the library owned
+                # at the time), so it has to travel with the id or it is gone
+                # when the legacy tables go.
+                "soul_id_path": _pick(row, "soul_id_path"),
             }, run_id)
             # Last.fm/Genius/Discogs bio/listeners/similar/tags — provider
             # enrichment content, not identity, so it's merged separately

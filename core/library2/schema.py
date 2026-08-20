@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS lib2_artists (
     quality_profile_explicit INTEGER NOT NULL DEFAULT 0,
     canonical_artist_id INTEGER REFERENCES lib2_artists(id) ON DELETE SET NULL, -- self-ref; NULL = canonical/standalone. Set = alias of that row (§40 registry: same real artist under a different, unlinked provider identity — see core/library2/artist_aliases.py)
     soul_id TEXT,                                     -- deterministic content id every SoulSync node computes alike (core/soulid_worker.py); Hydrabase's key, not a provider's answer
+    soul_id_path TEXT,                                -- which derivation produced soul_id: 'canonical' | 'album' | 'name' (only 'canonical' is reproducible off-install)
     server_source TEXT,                               -- compatibility projection; durable media identities live in lib2_media_server_mappings
     server_id TEXT,                                   -- compatibility projection of the last observed server id
     legacy_artist_id INTEGER,                         -- source row in legacy `artists`
@@ -513,6 +514,12 @@ _ADDED_COLUMNS = (
     ("lib2_tracks", "soul_id", "ALTER TABLE lib2_tracks ADD COLUMN soul_id TEXT"),
     ("lib2_tracks", "album_soul_id",
      "ALTER TABLE lib2_tracks ADD COLUMN album_soul_id TEXT"),
+    # Which of the three derivations produced the artist soul_id
+    # ('canonical' | 'album' | 'name' | NULL). Only 'canonical' is reproducible
+    # on another install, so a consumer of the key can tell how much to trust it
+    # instead of guessing from the outside.
+    ("lib2_artists", "soul_id_path",
+     "ALTER TABLE lib2_artists ADD COLUMN soul_id_path TEXT"),
 )
 
 

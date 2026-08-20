@@ -907,6 +907,9 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             result['fallback'] = True
             return result
 
+        # narrate the selection step (#1156), same as the torrent plugin
+        _emit('selecting', count=len(candidates), query=query)
+
         # #1149 applies to the hybrid chain too, not just torrents: the same
         # profile veto, so a lossy NZB is not the thing that satisfies a
         # lossless-only profile after the torrent path correctly refused.

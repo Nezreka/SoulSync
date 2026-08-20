@@ -63,6 +63,187 @@ def _row_value(row, column: str, default=None):
         return default
     return default if value is None else value
 
+# ── MetaSync export column sets ──────────────────────────────────────────
+#
+# Named explicitly, never SELECT *: column ORDER differs between a fresh
+# install and an upgraded one, and a future column must not silently join the
+# export. ``id`` is selected only so the route can build the keyset cursor —
+# the allowlist serializers in api/serializers.py drop it before it is served,
+# because a media-server primary key is install-local and meaningless off-box.
+_EXPORT_PROVIDER_STATUSES = (
+    'musicbrainz_match_status', 'spotify_match_status', 'itunes_match_status',
+    'deezer_match_status', 'audiodb_match_status', 'tidal_match_status',
+    'qobuz_match_status', 'jiosaavn_match_status', 'amazon_match_status',
+)
+
+_EXPORT_ARTIST_COLUMNS = (
+    'id', 'soul_id', 'soul_id_path', 'name', 'genres', 'updated_at',
+    'musicbrainz_id', 'spotify_artist_id', 'itunes_artist_id', 'deezer_id',
+    'discogs_id', 'amazon_id', 'tidal_id', 'qobuz_id', 'audiodb_id',
+    'genius_id', 'jiosaavn_id',
+    *_EXPORT_PROVIDER_STATUSES, 'discogs_match_status', 'genius_match_status',
+)
+
+_EXPORT_ALBUM_COLUMNS = (
+    'id', 'soul_id', 'title', 'year', 'release_date', 'track_count',
+    'record_type', 'label', 'genres', 'updated_at',
+    'musicbrainz_release_id', 'spotify_album_id', 'itunes_album_id',
+    'deezer_id', 'discogs_id', 'amazon_id', 'tidal_id', 'qobuz_id',
+    'audiodb_id', 'jiosaavn_id', 'bandcamp_url', 'upc',
+    'canonical_source', 'canonical_album_id', 'canonical_score',
+    *_EXPORT_PROVIDER_STATUSES, 'discogs_match_status', 'bandcamp_match_status',
+)
+
+_EXPORT_TRACK_COLUMNS = (
+    'id', 'soul_id', 'album_soul_id', 'title', 'track_number', 'disc_number',
+    'duration', 'bpm', 'explicit', 'year', 'isrc', 'updated_at',
+    'musicbrainz_recording_id', 'spotify_track_id', 'itunes_track_id',
+    'deezer_id', 'amazon_id', 'tidal_id', 'qobuz_id', 'audiodb_id',
+    'genius_id', 'jiosaavn_id', 'bandcamp_url',
+    *_EXPORT_PROVIDER_STATUSES, 'genius_match_status', 'bandcamp_match_status',
+)
+
+
+# The catalogue is Library v2, so the export projects lib2 rows back under the
+# legacy field names the MetaSync wire format already uses. Two provider ids sit
+# in dedicated columns and every other one lives in ``external_ids``
+# (core/library2/provider_ids), which is why the long tail is json_extract.
+#
+# Each entry is (payload field, SQL expression, physical column it needs). The
+# third element keeps upstream's "an install lagging a migration still exports"
+# guarantee: a column the database does not have yet is served as NULL instead of
+# failing the whole query with "no such column".
+def _export_json_id(provider: str) -> str:
+    return f"json_extract(t.external_ids, '$.{provider}')"
+
+
+_EXPORT_ARTIST_PROJECTION = (
+    ('id', 't.id', 'id'),
+    ('soul_id', 't.soul_id', 'soul_id'),
+    ('soul_id_path', 't.soul_id_path', 'soul_id_path'),
+    ('name', 't.name', 'name'),
+    ('genres', 't.genres', 'genres'),
+    ('updated_at', 't.updated_at', 'updated_at'),
+    ('musicbrainz_id', 't.musicbrainz_id', 'musicbrainz_id'),
+    ('spotify_artist_id', 't.spotify_id', 'spotify_id'),
+    ('itunes_artist_id', _export_json_id('itunes'), 'external_ids'),
+    ('deezer_id', _export_json_id('deezer'), 'external_ids'),
+    ('discogs_id', _export_json_id('discogs'), 'external_ids'),
+    ('amazon_id', _export_json_id('amazon'), 'external_ids'),
+    ('tidal_id', _export_json_id('tidal'), 'external_ids'),
+    ('qobuz_id', _export_json_id('qobuz'), 'external_ids'),
+    ('audiodb_id', _export_json_id('audiodb'), 'external_ids'),
+    ('genius_id', _export_json_id('genius'), 'external_ids'),
+    ('jiosaavn_id', _export_json_id('jiosaavn'), 'external_ids'),
+)
+
+_EXPORT_ALBUM_PROJECTION = (
+    ('id', 't.id', 'id'),
+    ('soul_id', 't.soul_id', 'soul_id'),
+    ('title', 't.title', 'title'),
+    ('year', 't.year', 'year'),
+    ('release_date', 't.release_date', 'release_date'),
+    ('track_count', 't.track_count', 'track_count'),
+    # lib2 calls it album_type; the wire format calls it record_type.
+    ('record_type', 't.album_type', 'album_type'),
+    ('label', 't.label', 'label'),
+    ('genres', 't.genres', 'genres'),
+    ('updated_at', 't.updated_at', 'updated_at'),
+    ('upc', 't.upc', 'upc'),
+    ('canonical_source', 't.canonical_source', 'canonical_source'),
+    ('canonical_album_id', 't.canonical_album_id', 'canonical_album_id'),
+    ('canonical_score', 't.canonical_score', 'canonical_score'),
+    ('musicbrainz_release_id', 't.musicbrainz_id', 'musicbrainz_id'),
+    ('spotify_album_id', 't.spotify_id', 'spotify_id'),
+    ('itunes_album_id', _export_json_id('itunes'), 'external_ids'),
+    ('deezer_id', _export_json_id('deezer'), 'external_ids'),
+    ('discogs_id', _export_json_id('discogs'), 'external_ids'),
+    ('amazon_id', _export_json_id('amazon'), 'external_ids'),
+    ('tidal_id', _export_json_id('tidal'), 'external_ids'),
+    ('qobuz_id', _export_json_id('qobuz'), 'external_ids'),
+    ('audiodb_id', _export_json_id('audiodb'), 'external_ids'),
+    ('jiosaavn_id', _export_json_id('jiosaavn'), 'external_ids'),
+    ('bandcamp_url', _export_json_id('bandcamp'), 'external_ids'),
+)
+
+_EXPORT_TRACK_PROJECTION = (
+    ('id', 't.id', 'id'),
+    ('soul_id', 't.soul_id', 'soul_id'),
+    ('album_soul_id', 't.album_soul_id', 'album_soul_id'),
+    ('title', 't.title', 'title'),
+    ('track_number', 't.track_number', 'track_number'),
+    ('disc_number', 't.disc_number', 'disc_number'),
+    ('duration', 't.duration', 'duration'),
+    ('bpm', 't.bpm', 'bpm'),
+    ('explicit', 't.explicit', 'explicit'),
+    # lib2 keeps the year on the release, not the recording.
+    ('year', 'al.year', None),
+    ('isrc', 't.isrc', 'isrc'),
+    ('updated_at', 't.updated_at', 'updated_at'),
+    ('musicbrainz_recording_id', 't.musicbrainz_id', 'musicbrainz_id'),
+    ('spotify_track_id', 't.spotify_id', 'spotify_id'),
+    ('itunes_track_id', _export_json_id('itunes'), 'external_ids'),
+    ('deezer_id', _export_json_id('deezer'), 'external_ids'),
+    ('amazon_id', _export_json_id('amazon'), 'external_ids'),
+    ('tidal_id', _export_json_id('tidal'), 'external_ids'),
+    ('qobuz_id', _export_json_id('qobuz'), 'external_ids'),
+    ('audiodb_id', _export_json_id('audiodb'), 'external_ids'),
+    ('genius_id', _export_json_id('genius'), 'external_ids'),
+    ('jiosaavn_id', _export_json_id('jiosaavn'), 'external_ids'),
+    ('bandcamp_url', _export_json_id('bandcamp'), 'external_ids'),
+)
+
+_EXPORT_SPECS = {
+    'artist': {
+        'columns': _EXPORT_ARTIST_COLUMNS,
+        'projection': _EXPORT_ARTIST_PROJECTION,
+        'table': 'lib2_artists',
+        'from': 'FROM lib2_artists t',
+        'joined': (),
+    },
+    'album': {
+        'columns': _EXPORT_ALBUM_COLUMNS,
+        'projection': _EXPORT_ALBUM_PROJECTION,
+        'table': 'lib2_albums',
+        'from': 'FROM lib2_albums t JOIN lib2_artists ar ON ar.id = t.primary_artist_id',
+        'joined': (('artist_name', 'ar.name'),),
+    },
+    # ar.name off the album's primary artist, never lib2_track_artists: the
+    # SoulID worker hashes a track from the JOINED album-artist name
+    # (core/soulid_worker PENDING_TRACKS_SQL), so exporting the featured credit
+    # would describe the row under a name that derives a different key than the
+    # soul_id shipped beside it.
+    'track': {
+        'columns': _EXPORT_TRACK_COLUMNS,
+        'projection': _EXPORT_TRACK_PROJECTION,
+        'table': 'lib2_tracks',
+        'from': ('FROM lib2_tracks t '
+                 'JOIN lib2_albums al ON al.id = t.album_id '
+                 'JOIN lib2_artists ar ON ar.id = al.primary_artist_id'),
+        'joined': (('artist_name', 'ar.name'), ('album_title', 'al.title')),
+    },
+}
+
+
+def _export_status_fields(entity: str, columns) -> Dict[str, tuple]:
+    """``{provider: (status field, id field)}`` for one entity.
+
+    Derived from ``match_status.SERVICES`` — the same declaration the provider
+    chips and the enrichment workers read — so a provider added there cannot go
+    missing here, and only providers whose id actually appears in the export
+    allowlist get a status (Last.fm has no exported id, so it has no status).
+    """
+    from core.library2.match_status import SERVICES
+
+    fields = {}
+    for service, _label, id_columns in SERVICES:
+        id_field = id_columns.get(entity)
+        status_field = f"{service}_match_status"
+        if id_field and id_field in columns and status_field in columns:
+            fields[service] = (status_field, id_field)
+    return fields
+
+
 # Import matching engine for enhanced similarity logic
 try:
     from core.matching_engine import MusicMatchingEngine
@@ -431,6 +612,35 @@ class MusicDatabase:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Per-user curation signals read back off the media server —
+            # what people deliberately CHOSE about a track (favourited,
+            # rated, added to a playlist), as opposed to play_count which
+            # only records what happened. Feeds the Expired Download
+            # Cleaner's keep decision.
+            #
+            # Keyed by ``track_key`` (normalised trailing path segments, see
+            # _path_suffix_key) rather than the media server's item id on
+            # purpose: item ids change when the library is rebuilt, and
+            # SoulSync's stored path and the server's differ on Docker/NAS.
+            # The path suffix survives both.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS curation_signals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    server TEXT NOT NULL,
+                    user_key TEXT NOT NULL,
+                    track_key TEXT NOT NULL,
+                    favorite INTEGER DEFAULT 0,
+                    rating REAL,
+                    in_playlist INTEGER DEFAULT 0,
+                    source_path TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(server, user_key, track_key)
+                )
+            """)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_curation_track_key "
+                "ON curation_signals (track_key)")
 
             # Migration ledger — a single, readable record of which one-time
             # migrations have run. ADDITIVE backstop only: existing migrations
@@ -5136,6 +5346,17 @@ class MusicDatabase:
             if 'soul_id' not in artist_cols:
                 cursor.execute("ALTER TABLE artists ADD COLUMN soul_id TEXT DEFAULT NULL")
                 logger.info("Added soul_id column to artists table")
+            # Which derivation produced the artist soul_id: 'canonical' (name +
+            # a provider's artist id), 'album' (name + the alphabetically-first
+            # album title IN THIS LIBRARY) or 'name' (name alone). Only
+            # 'canonical' is reproducible on another install — the album
+            # fallback depends on what that user happens to own, so two
+            # libraries holding the same artist derive different ids. Nothing
+            # recorded how much to trust a given artist soul_id before this.
+            # NULL means unknown (generated before this column existed).
+            if 'soul_id_path' not in artist_cols:
+                cursor.execute("ALTER TABLE artists ADD COLUMN soul_id_path TEXT DEFAULT NULL")
+                logger.info("Added soul_id_path column to artists table")
 
             # Albums: soul_id
             cursor.execute("PRAGMA table_info(albums)")
@@ -7578,6 +7799,21 @@ class MusicDatabase:
                     tracks_deleted = detached['tracks_removed']
                     albums_deleted = detached['albums_removed']
                     artists_deleted = detached['artists_removed']
+
+                    # Stamp the rebuild. Wiping the library destroys every local
+                    # signal about a track — play_count above all — while
+                    # library_history keeps each download's original created_at,
+                    # so afterwards a much-loved track reads to the Expired
+                    # Download Cleaner as "old and never played". Recording WHEN
+                    # the library was rebuilt lets that job treat everything
+                    # downloaded before it as out of scope, permanently. Written
+                    # in the same transaction as the delete so a crash can never
+                    # leave the wipe applied without the stamp.
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO metadata (key, value, updated_at) "
+                        "VALUES (?, ?, CURRENT_TIMESTAMP)",
+                        ('library_rebuilt_at', datetime.now().isoformat()),
+                    )
 
                     conn.commit()
 
@@ -17250,18 +17486,114 @@ class MusicDatabase:
             logger.error(f"Error getting watchlist scan run events for {run_id}: {e}")
             return []
 
+    @staticmethod
+    def _path_suffix_key(path, segments: int = 2):
+        """Normalised trailing path segments — see
+        ``core.library.expired_cleanup.path_suffix_key``. Imported lazily so
+        the pure module stays the single definition without this module
+        gaining an import-time dependency on it."""
+        from core.library.expired_cleanup import path_suffix_key
+        return path_suffix_key(path, segments)
+
+    # ── Curation signals (media-server favourites / ratings / playlists) ──
+
+    CURATION_SYNC_KEY = 'curation_signals_synced_at'
+
+    def replace_curation_signals(self, server: str, user_key: str, signals) -> int:
+        """Replace one user's curation signals for one server, atomically.
+
+        Replace rather than merge: an unstarred track must actually lose its
+        protection, and a merge would keep it protected forever. The delete and
+        the insert share a transaction so a crash can never leave the user with
+        no signals — which would read as "nobody wants any of this".
+
+        ``signals`` items need ``track_key``; ``favorite``, ``rating``,
+        ``in_playlist`` and ``source_path`` are optional.
+        """
+        rows = [s for s in (signals or []) if isinstance(s, dict) and s.get('track_key')]
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM curation_signals WHERE server = ? AND user_key = ?",
+                    (str(server), str(user_key)))
+                cursor.executemany(
+                    "INSERT OR REPLACE INTO curation_signals "
+                    "(server, user_key, track_key, favorite, rating, in_playlist, "
+                    " source_path, updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP)",
+                    [(str(server), str(user_key), s['track_key'],
+                      1 if s.get('favorite') else 0,
+                      s.get('rating'),
+                      1 if s.get('in_playlist') else 0,
+                      s.get('source_path'))
+                     for s in rows])
+                conn.commit()
+            return len(rows)
+        except Exception as e:
+            logger.error(f"Error storing curation signals for {server}/{user_key}: {e}")
+            return 0
+
+    def get_curation_signals_by_track_key(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Every stored signal, grouped by track_key, for the cleanup decision."""
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT track_key, server, user_key, favorite, rating, in_playlist "
+                "FROM curation_signals")
+            for track_key, server, user_key, favorite, rating, in_playlist in cursor.fetchall():
+                grouped.setdefault(track_key, []).append({
+                    'server': server,
+                    'user': user_key,
+                    'favorite': bool(favorite),
+                    'rating': rating,
+                    'in_playlist': bool(in_playlist),
+                })
+        except Exception as e:
+            logger.debug(f"Error reading curation signals: {e}")
+        return grouped
+
+    def mark_curation_sync(self) -> None:
+        """Record that a curation sweep completed successfully."""
+        try:
+            self.set_preference(self.CURATION_SYNC_KEY, datetime.now().isoformat())
+        except Exception as e:
+            logger.debug(f"Error stamping curation sync: {e}")
+
+    def get_curation_sync_at(self):
+        """When the last successful curation sweep finished, or None."""
+        try:
+            return self.get_preference(self.CURATION_SYNC_KEY)
+        except Exception as e:
+            logger.debug(f"Error reading curation sync stamp: {e}")
+            return None
+
     def get_origin_cleanup_candidates(self):
         """Origin-tracked downloads (watchlist/playlist) annotated with the
         matching library track's play_count, for the Expired Download Cleaner.
-        play_count is 0 when no library track matches the recorded path
-        (orphan history row → treated as not-listened)."""
+
+        ``play_count`` is None — meaning UNKNOWN, not zero — when no library
+        track can be matched to the download. The caller must treat that as
+        "cannot tell" and keep the file: this job deletes the user's data, and
+        an unmatched row is exactly the state a orphaned/renamed/not-yet-scanned
+        track is in.
+
+        Matching is exact-path first, then a trailing-segment fallback. The
+        exact join alone silently failed on every install where SoulSync's
+        paths differ from the media server's (Docker, NAS) — play_count read 0
+        for every candidate and the "you played it" protection never fired at
+        all. Where a suffix is ambiguous the HIGHEST play count wins, because
+        ambiguity must fail toward keeping the file.
+        """
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT lh.id, lh.origin, lh.origin_context, lh.created_at,
                        lh.file_path, lh.title, lh.artist_name,
-                       COALESCE(MAX(t.play_count), 0) AS play_count
+                       MAX(t.play_count) AS play_count
                 FROM library_history lh
                 LEFT JOIN lib2_track_files f ON f.path = lh.file_path
                 LEFT JOIN lib2_tracks t ON t.id = f.track_id
@@ -17271,7 +17603,29 @@ class MusicDatabase:
             """)
             cols = ['id', 'origin', 'origin_context', 'created_at',
                     'file_path', 'title', 'artist_name', 'play_count']
-            return [dict(zip(cols, row, strict=True)) for row in cursor.fetchall()]
+            rows = [dict(zip(cols, row, strict=True)) for row in cursor.fetchall()]
+
+            # Only pay for the fallback map when the exact join actually missed.
+            unmatched = [r for r in rows if r['play_count'] is None and r['file_path']]
+            if unmatched:
+                suffix_plays = {}
+                cursor.execute(
+                    "SELECT f.path, COALESCE(t.play_count, 0) "
+                    "FROM lib2_track_files f "
+                    "JOIN lib2_tracks t ON t.id = f.track_id "
+                    "WHERE f.path IS NOT NULL AND f.path != ''")
+                for track_path, plays in cursor.fetchall():
+                    key = self._path_suffix_key(track_path)
+                    if not key:
+                        continue
+                    previous = suffix_plays.get(key)
+                    if previous is None or plays > previous:
+                        suffix_plays[key] = plays
+                for row in unmatched:
+                    matched = suffix_plays.get(self._path_suffix_key(row['file_path']))
+                    if matched is not None:
+                        row['play_count'] = matched
+            return rows
         except Exception as e:
             logger.debug(f"Error getting origin cleanup candidates: {e}")
             return []
@@ -18039,6 +18393,142 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"API: Error listing albums: {e}")
             return {"albums": [], "total": 0}
+
+    # ── MetaSync export ──────────────────────────────────────────────────
+
+    def api_export_entities(self, entity: str, cursor: str = "",
+                            since: str = "", limit: int = 500) -> List[Dict[str, Any]]:
+        """Page through artists/albums/tracks for the MetaSync export.
+
+        Reads the Library-v2 catalogue (``lib2_*``), which is where the SoulID
+        worker writes and therefore the only place a ``soul_id`` exists at all.
+        The payload keeps the legacy field names — they are the wire format the
+        sidecar and its peers already speak, and renaming them would break every
+        peer to describe an internal table change.
+
+        Keyset pagination, NOT offset: these tables are large and the
+        enrichment workers shift rows under a walk, so OFFSET both skips and
+        duplicates rows mid-export. lib2 ids are INTEGER, so ``>`` and the
+        ORDER BY share one numeric order and a complete walk is guaranteed.
+
+        Columns are named explicitly rather than ``SELECT *``, and a column the
+        database does not have yet is served as NULL rather than failing the
+        whole query, so an install lagging a migration still exports.
+
+        Rows with no usable ``soul_id`` are skipped, including the
+        ``soul_unnamed_*`` fallback which embeds the catalogue primary key —
+        install-local, and it must never leave the box.
+
+        Read-only.
+        """
+        spec = _EXPORT_SPECS.get(entity)
+        if spec is None:
+            raise ValueError(f"unknown entity {entity!r} (expected artist, album or track)")
+
+        columns = spec['columns']
+        try:
+            limit = max(1, min(1000, int(limit)))
+        except (TypeError, ValueError):
+            limit = 500
+
+        # The soul_unnamed_ filter lives in SQL, not in the Python loop below,
+        # and that placement is load-bearing: dropping rows AFTER the LIMIT
+        # would return a short page, and the route reads `len(items) == limit`
+        # to decide whether to keep walking — so a batch containing unnamed
+        # rows would end the export early and silently lose everything after
+        # it. ESCAPE because `_` is LIKE's single-character wildcard.
+        where = [
+            "t.soul_id IS NOT NULL",
+            "t.soul_id != ''",
+            r"t.soul_id NOT LIKE 'soul\_unnamed\_%' ESCAPE '\'",
+        ]
+        params: list = []
+        if cursor:
+            # The cursor is this table's INTEGER primary key, round-tripped
+            # through the route's opaque base64. Anything else is a malformed
+            # token, not a reason to hand back the whole library from row one.
+            try:
+                params.append(int(str(cursor).strip()))
+            except (TypeError, ValueError) as e:
+                raise ValueError("cursor is not a valid export cursor") from e
+            where.append("t.id > ?")
+        if since:
+            where.append("t.updated_at >= ?")
+            params.append(str(since))
+
+        try:
+            conn = self._get_connection()
+            db_cursor = conn.cursor()
+            db_cursor.execute(f"PRAGMA table_info({spec['table']})")
+            present = {r[1] for r in db_cursor.fetchall()}
+            select_parts = [
+                f"{expression} AS {field}"
+                if needs is None or needs in present
+                else f"NULL AS {field}"
+                for field, expression, needs in spec['projection']
+            ]
+            select_parts += [f"{expression} AS {field}"
+                             for field, expression in spec['joined']]
+            sql = (f"SELECT {', '.join(select_parts)} {spec['from']} "
+                   f"WHERE {' AND '.join(where)} ORDER BY t.id ASC LIMIT ?")
+            db_cursor.execute(sql, params + [limit])
+            rows = db_cursor.fetchall()
+            statuses = self._export_match_statuses(
+                db_cursor, entity, [_row_value(r, 'id') for r in rows])
+        except Exception as e:
+            logger.error(f"API: Error exporting {entity}s: {e}")
+            raise
+
+        status_fields = _export_status_fields(entity, columns)
+        out: List[Dict[str, Any]] = []
+        for row in rows:
+            soul_id = _row_value(row, 'soul_id')
+            if not soul_id or str(soul_id).startswith('soul_unnamed_'):
+                continue
+            item = {c: _row_value(row, c) for c in columns}
+            for field, _expression in spec['joined']:
+                item[field] = _row_value(row, field)
+            attempts = statuses.get(_row_value(row, 'id'), {})
+            for service, (status_field, id_field) in status_fields.items():
+                # A stored id IS the match — the same rule the provider chips
+                # use (core/library2/match_status._native_chips). The attempt
+                # ledger only answers for rows with no id: what was tried and
+                # how it ended. Never tried at all reads as 'pending', which is
+                # the vocabulary the legacy columns used.
+                if str(item.get(id_field) or '').strip():
+                    item[status_field] = 'matched'
+                else:
+                    item[status_field] = attempts.get(service) or 'pending'
+            out.append(item)
+        return out
+
+    @staticmethod
+    def _export_match_statuses(db_cursor, entity: str, ids) -> Dict[Any, Dict[str, str]]:
+        """Per-entity ``{provider: status}`` from the attempt ledger.
+
+        One query for the whole page rather than one per row — the export walks
+        the entire library, so a per-row lookup would be a second full table
+        scan's worth of round trips. A database without the ledger (or a page
+        with nothing in it) simply reports nothing, and every provider then
+        falls back to 'pending'.
+        """
+        wanted = [i for i in ids if i is not None]
+        if not wanted:
+            return {}
+        marks = ','.join('?' * len(wanted))
+        try:
+            db_cursor.execute(
+                f"SELECT entity_id, service, status FROM lib2_provider_attempts "
+                f"WHERE entity_type = ? AND entity_id IN ({marks})",
+                [entity] + list(wanted))
+            rows = db_cursor.fetchall()
+        except Exception as e:
+            logger.debug(f"API: export match statuses unavailable: {e}")
+            return {}
+        result: Dict[Any, Dict[str, str]] = {}
+        for entity_id, service, status in rows:
+            result.setdefault(entity_id, {})[service] = status
+        return result
 
     # ── Mirrored Playlists ───────────────────────────────────────────────
 

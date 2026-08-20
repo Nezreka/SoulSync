@@ -4,6 +4,7 @@ import type {
   AdlBatchHistoryEntry,
   AdlDownloadsResponse,
   AdlQuarantineEntry,
+  AdlTaskDetail,
   AdlVerificationConfig,
 } from './-adl.types';
 
@@ -31,6 +32,23 @@ export async function fetchDownloads(): Promise<AdlDownloadsResponse> {
     return data?.success ? data : {};
   } catch {
     return {};
+  }
+}
+
+/**
+ * Per-task detail for an expanded terminal row (#1156) — merges the live task
+ * with its library_history record (source, quality, AcoustID verdict, file
+ * path, expected-vs-downloaded). Null on any failure: the expansion degrades
+ * to the fields the row already carries rather than erroring.
+ */
+export async function fetchTaskDetail(taskId: string): Promise<AdlTaskDetail | null> {
+  try {
+    const data = await readJson<{ success?: boolean; detail?: AdlTaskDetail }>(
+      apiClient.get(`downloads/task/${encodeURIComponent(taskId)}/detail`),
+    );
+    return data?.success && data.detail ? data.detail : null;
+  } catch {
+    return null;
   }
 }
 

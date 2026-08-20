@@ -22,6 +22,18 @@ function openDownloadOriginsModal(tab) {
                     <div>
                         <h2 class="origin-modal-title">Download Origins</h2>
                         <p class="origin-modal-sub">What your watchlist and playlist syncs have downloaded.</p>
+                        <!-- Anyone reading this list is already asking "do these
+                             stay forever?" — and the answer is a repair job that
+                             ships disabled and is buried among ~20 others, which
+                             is why the feature keeps getting requested as if it
+                             did not exist. A plain href because Tools is a React
+                             route and this modal is vanilla; a full load is
+                             heavier than a soft nav but cannot break. -->
+                        <p class="origin-modal-sub origin-modal-hint">
+                            Want these cleaned up automatically? The
+                            <a href="/tools" class="origin-modal-link">Expired Download Cleaner</a>
+                            removes ones nobody played or favourited, after a retention window you set.
+                        </p>
                     </div>
                     <button class="origin-modal-close" onclick="closeDownloadOriginsModal()" aria-label="Close">✕</button>
                 </div>

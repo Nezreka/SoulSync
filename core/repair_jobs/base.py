@@ -109,19 +109,47 @@ def build_artist_file_scope(db: Any, artist_id: int, artist_name: str = "") -> D
         conn.close()
 
 
-def skip_deleted_quarantine(root: str, dirs: list, transfer_folder: str) -> None:
-    """In-place prune of the ``<transfer>/deleted`` quarantine from an ``os.walk``
-    ``dirs`` list (topdown walks only).
+def is_internal_transfer_dir(path: str, transfer_folder: str) -> bool:
+    """True for a SoulSync-owned folder inside the library that no maintenance
+    job may treat as library content.
 
-    Removed duplicates / dead files are MOVED into ``<transfer>/deleted`` rather
-    than hard-deleted (recoverable; the reorganizer already skips it, #746). The
-    transfer-walking repair jobs must not re-scan that quarantine, or a
-    just-de-duplicated file immediately reappears as an orphan/finding on the next
-    pass. Anchored to the top-level ``<transfer>/deleted`` so a legitimately-named
-    ``deleted`` folder deeper in the library is untouched."""
-    deleted_root = os.path.normpath(os.path.join(transfer_folder, 'deleted'))
+    Two of them, for different reasons:
+
+    * ``<transfer>/deleted`` — the recoverable quarantine removed duplicates and
+      dead files are moved into (#746). Re-scanning it makes a just-removed file
+      reappear as a finding on the next pass.
+    * ``<transfer>/.soulsync_atomic_staging`` — a half-downloaded album, mid
+      atomic publish. These files are deliberately not in the database yet, so
+      the orphan detector would call every one of them an orphan, and the empty
+      folder cleaner would delete the tree out from under an in-flight publish.
+
+    Path-based rather than name-based so it works for bottom-up walks too, where
+    pruning ``dirs`` in place does nothing.
+    """
+    try:
+        target = os.path.normpath(os.path.abspath(path))
+        base = os.path.normpath(os.path.abspath(transfer_folder))
+    except (OSError, ValueError):
+        return False
+    for name in ('deleted', '.soulsync_atomic_staging'):
+        owned = os.path.join(base, name)
+        if target == owned or target.startswith(owned + os.sep):
+            return True
+    return False
+
+
+def skip_deleted_quarantine(root: str, dirs: list, transfer_folder: str) -> None:
+    """In-place prune of SoulSync's own folders from an ``os.walk`` ``dirs``
+    list (topdown walks only).
+
+    Named for the quarantine it originally guarded; it now also prunes the
+    atomic-publish staging tree, which lives inside the transfer dir since the
+    sibling location proved unwritable on Docker. Both are anchored to the
+    top level, so a legitimately-named ``deleted`` folder deeper in the library
+    is untouched.
+    """
     dirs[:] = [d for d in dirs
-               if os.path.normpath(os.path.join(root, d)) != deleted_root]
+               if not is_internal_transfer_dir(os.path.join(root, d), transfer_folder)]
 
 
 @dataclass

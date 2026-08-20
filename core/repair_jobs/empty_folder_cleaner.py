@@ -24,7 +24,7 @@ from typing import Iterable, List
 
 from core.library.residual_files import JUNK_FILES, is_disposable, is_junk  # noqa: F401 — JUNK_FILES/is_junk re-exported
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import is_internal_transfer_dir, JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.empty_folder_cleaner")
@@ -117,6 +117,14 @@ class EmptyFolderCleanerJob(RepairJob):
                 continue                      # never the library root itself
             if os.path.islink(dirpath):
                 continue                      # don't delete symlinked dirs
+            if is_internal_transfer_dir(dirpath, root):
+                # SoulSync's own folders: the recoverable `deleted` quarantine
+                # and the atomic-publish staging tree. Staging is full of
+                # legitimately-empty album dirs while an album is still landing
+                # — deleting them pulls the tree out from under an in-flight
+                # publish. A bottom-up walk cannot prune `dirnames`, so the skip
+                # has to be here.
+                continue
             result.scanned += 1
 
             surviving = [d for d in dirnames

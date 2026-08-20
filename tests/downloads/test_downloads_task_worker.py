@@ -57,7 +57,7 @@ class _FakeClient:
     def client(self, name):
         return self._client_map.get(name)
 
-    async def search(self, query, timeout=30, exclude_sources=None):
+    async def search(self, query, timeout=30, exclude_sources=None, progress_callback=None):
         self.search_calls.append((query, timeout))
         self.exclude_calls.append(exclude_sources)
         return (self._results, None)
@@ -504,7 +504,7 @@ def test_cancellation_mid_query_returns_without_completion():
     _seed_task()
     rec = _Recorder()
 
-    def _cancel_during_search(query, timeout=30, exclude_sources=None):
+    def _cancel_during_search(query, timeout=30, exclude_sources=None, progress_callback=None):
         download_tasks['t1']['status'] = 'cancelled'
 
         async def _empty():
@@ -705,6 +705,39 @@ def test_quarantine_retry_still_excludes_budget_exhausted_source():
     tw.download_track_worker('t1', 'b1', deps)
     assert sk.search_calls
     assert all(ex and 'soulseek' in ex for ex in sk.exclude_calls)
+
+
+def test_search_ticker_never_takes_tasks_lock():
+    """#1156 regression: the live search ticker runs ON the shared async-loop
+    thread, and other threads hold tasks_lock while BLOCKING on that loop
+    (candidates.py's cancel-after-start does run_async inside the lock). A
+    ticker that acquires tasks_lock would deadlock every download in the
+    process. The fake search invokes the callback WHILE HOLDING tasks_lock —
+    if the ticker tries to take it, the worker thread hangs and the watchdog
+    join catches it."""
+    import threading
+
+    from core.runtime_state import tasks_lock
+
+    class _CallbackUnderLock(_FakeClient):
+        async def search(self, query, timeout=30, exclude_sources=None, progress_callback=None):
+            if progress_callback:
+                with tasks_lock:
+                    progress_callback([object()] * 3, [], 2)
+            return ([], None)
+
+    _seed_task('t1')
+    deps, _ = _build_deps(soulseek=_CallbackUnderLock(),
+                          matching=_FakeMatchEngine(queries=['q1']))
+    worker = threading.Thread(target=tw.download_track_worker,
+                              args=('t1', None, deps), daemon=True)
+    worker.start()
+    worker.join(timeout=10)
+    assert not worker.is_alive(), 'search ticker deadlocked on tasks_lock'
+    # ...and the tick landed: peer count kept through the post-search merge.
+    live = download_tasks['t1'].get('search_live') or {}
+    assert live.get('responses') == 2
+    assert live.get('results') == 0, 'final split replaces the running total'
 
 
 def test_search_records_searched_queries():

@@ -5,7 +5,10 @@ Lifted verbatim from the inline three-pass matcher in
 two #768 fixes live in importable, covered code:
 
   Pass 0  user-confirmed overrides (``sync_match_cache``), applied first.
-  Pass 1  exact normalized-title match.
+  Pass 1  exact normalized-title match, gated on artist agreement — or on
+          duration corroboration when the artist strings share nothing
+          (#1164: title alone pinned "XO" by John Mayer to "XO" by Eden
+          Project at 100%).
   Pass 2  fuzzy match on ``"artist title"`` (SequenceMatcher >= 0.75).
   Extra   server tracks no source claimed -> ``match_status='extra'``.
 
@@ -39,6 +42,20 @@ from core.text.source_title import canonical_source_track
 
 _FUZZY_THRESHOLD = 0.75
 
+# Pass-1 artist gate (#1164). Same normalized title is NOT the same track:
+# a playlist with "XO" by John Mayer matched the library's "XO" by Eden
+# Project and the badge said 100%. The threshold is deliberately loose —
+# it only has to tell "Eden Project" from "John Mayer", while letting
+# spelling drift ("Beyonce"/"Beyoncé") through; containment handles the
+# channel shapes ("The Killers" in "The KillersVEVO").
+_ARTIST_AGREE_THRESHOLD = 0.6
+# When the artist strings share nothing ("mgk" vs "Machine Gun Kelly",
+# aliases and channel names), equal-length recordings are accepted as the
+# same track — but reported below 1.0, because it is a corroborated guess,
+# not a certainty.
+_DURATION_TOLERANCE_MS = 5000
+_DURATION_RESCUE_CONFIDENCE = 0.9
+
 _FEAT_RE = re.compile(r'\s*[\(\[](?:feat|ft)\.?[^\)\]]*[\)\]]', re.IGNORECASE)
 _REMASTER_RE = re.compile(
     r'\s*[\(\[](?:\d{4}\s+)?remaster(?:ed)?(?:\s+version)?\s*[\)\]]', re.IGNORECASE)
@@ -68,6 +85,34 @@ def _src_entry(src: Dict[str, Any], position_fallback: int) -> Dict[str, Any]:
         # manual "Find & add" override against it.
         'source_track_id': src.get('source_track_id', '') or '',
     }
+
+
+def _artists_agree(src_artist: str, svr_artist: str) -> bool:
+    """Whether two artist strings plausibly name the same artist.
+
+    Vacuously true when either side is empty — there is no information to
+    refute with (file imports often carry no artist), and refusing to match
+    would regress every artist-less source that title-matched before."""
+    a = (src_artist or '').lower().strip()
+    b = (svr_artist or '').lower().strip()
+    if not a or not b:
+        return True
+    if a in b or b in a:
+        return True
+    return SequenceMatcher(None, a, b).ratio() >= _ARTIST_AGREE_THRESHOLD
+
+
+def _durations_agree(src_ms: Any, svr_ms: Any) -> bool:
+    """True only when BOTH durations are known and within tolerance —
+    an unknown duration corroborates nothing."""
+    try:
+        a = int(src_ms or 0)
+        b = int(svr_ms or 0)
+    except (TypeError, ValueError):
+        return False
+    if a <= 0 or b <= 0:
+        return False
+    return abs(a - b) <= _DURATION_TOLERANCE_MS
 
 
 def _resolved_artist(src: Dict[str, Any]) -> str:
@@ -118,15 +163,34 @@ def reconcile_playlist(
 
         # Pass 1: exact normalized-title match — try the raw source title AND
         # the canonicalized one (strips "Artist - " prefix / channel artist).
+        # A bare title hit is not enough on its own (#1164): the artist has to
+        # agree too, or — when the artist strings share nothing (aliases,
+        # channel names) — the durations have to corroborate. Among several
+        # unused same-title server tracks this also picks the artist-agreeing
+        # one instead of blindly the first, so two "XO"s pair with the right
+        # owners instead of crossing.
         canon_title, _canon_artist = canonical_source_track(src_name, src_artist)
         candidates = {norm_title(src_name), norm_title(canon_title)}
         best_idx = -1
+        confidence = 1.0
+        duration_idx = -1
         for j, svr_norm in enumerate(server_norm):
             if j in used_server_indices:
                 continue
-            if svr_norm in candidates:
+            if svr_norm not in candidates:
+                continue
+            svr_artist = server_tracks[j].get('artist', '')
+            if _artists_agree(src_artist, svr_artist) or (
+                    _canon_artist and _canon_artist != src_artist
+                    and _artists_agree(_canon_artist, svr_artist)):
                 best_idx = j
                 break
+            if duration_idx < 0 and _durations_agree(
+                    src.get('duration_ms'), server_tracks[j].get('duration')):
+                duration_idx = j
+        if best_idx < 0 and duration_idx >= 0:
+            best_idx = duration_idx
+            confidence = _DURATION_RESCUE_CONFIDENCE
 
         if best_idx >= 0:
             used_server_indices.add(best_idx)
@@ -134,7 +198,7 @@ def reconcile_playlist(
                 'source_track': src_entry,
                 'server_track': server_tracks[best_idx],
                 'match_status': 'matched',
-                'confidence': 1.0,
+                'confidence': confidence,
                 'server_index': best_idx,
             })
         else:

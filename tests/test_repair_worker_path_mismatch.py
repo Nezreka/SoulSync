@@ -6,6 +6,11 @@ _fix_path_mismatch must move the ABSOLUTE paths so it works for libraries NOT
 rooted under transfer_path (Plex/media-server, Docker host<->container splits) —
 the case that used to hit the "Path escapes transfer folder" guard and silently
 do nothing (both single-fix and Fix All share this handler).
+
+Subjects are ``lib2:<id>``. A bare integer is a LEGACY back-reference by
+contract (T-12), and this handler refuses it — a finding persisted before its
+job moved to native subjects would otherwise mutate the legacy twin of a track
+whose real row is in ``lib2_tracks``. The last test pins that refusal.
 """
 import os
 
@@ -57,7 +62,7 @@ def test_abs_paths_outside_transfer_are_moved(tmp_path):
         'from_abs': str(src),
         'to_abs': str(dst),
     }
-    res = w._fix_path_mismatch('track', '10', str(src), details)
+    res = w._fix_path_mismatch('track', 'lib2:10', str(src), details)
     assert res['success'] is True, res
     assert dst.is_file() and not src.exists()
     with db._get_connection() as conn:
@@ -78,7 +83,7 @@ def test_media_server_path_updates_db_by_track_id(tmp_path):
     _insert_track(db, 20, "/plex/media/Artist/Wrong Folder/song.flac")
 
     details = {'from': 'x', 'to': 'y', 'from_abs': str(src), 'to_abs': str(dst)}
-    res = w._fix_path_mismatch('track', '20', str(src), details)
+    res = w._fix_path_mismatch('track', 'lib2:20', str(src), details)
     assert res['success'] is True, res
     assert dst.is_file() and not src.exists()
     with db._get_connection() as conn:
@@ -91,7 +96,7 @@ def test_legacy_finding_without_abs_outside_transfer_is_guarded(tmp_path):
     are rejected with a clear 're-scan' message — never silently mangled."""
     _db, w = _worker(tmp_path)
     details = {'from': '/abs/outside/song.flac', 'to': '/abs/outside/new.flac'}
-    res = w._fix_path_mismatch('track', '11', '/abs/outside/song.flac', details)
+    res = w._fix_path_mismatch('track', 'lib2:11', '/abs/outside/song.flac', details)
     assert res['success'] is False
     assert 'escapes transfer folder' in res['error']
 
@@ -107,6 +112,26 @@ def test_legacy_finding_under_transfer_still_works(tmp_path):
         f.write("x")
     _insert_track(db, 12, src)
     details = {'from': 'A/Wrong/s.flac', 'to': 'A/Album/01 - s.flac'}   # no _abs
-    res = w._fix_path_mismatch('track', '12', src, details)
+    res = w._fix_path_mismatch('track', 'lib2:12', src, details)
     assert res['success'] is True, res
     assert os.path.isfile(dst) and not os.path.exists(src)
+
+
+def test_a_bare_integer_subject_is_refused_as_pre_library_v2(tmp_path):
+    """The contract itself. A bare id reaching this handler means the finding
+    predates native subjects; applying it would move a file on behalf of the
+    LEGACY twin of some other track. It is refused and flagged stale so the
+    next scan can raise it against the right row."""
+    db, w = _worker(tmp_path)
+    src = os.path.join(w.transfer_folder, "A", "Wrong", "s.flac")
+    os.makedirs(os.path.dirname(src), exist_ok=True)
+    with open(src, "w") as f:
+        f.write("x")
+    _insert_track(db, 13, src)
+
+    res = w._fix_path_mismatch(
+        'track', '13', src, {'from': 'A/Wrong/s.flac', 'to': 'A/Album/01 - s.flac'})
+
+    assert res['success'] is False
+    assert res['stale_subject'] is True
+    assert os.path.isfile(src), 'a refused finding must not have touched the file'

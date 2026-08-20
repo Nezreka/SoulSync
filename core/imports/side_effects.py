@@ -189,26 +189,11 @@ def record_library_history_download(context: Dict[str, Any]) -> None:
     try:
         search_result = context.get("original_search_result") or context.get("search_result") or {}
         username = search_result.get("username", context.get("_download_username", ""))
-        source_map = {
-            "youtube": "YouTube",
-            "tidal": "Tidal",
-            "qobuz": "Qobuz",
-            "hifi": "HiFi",
-            "deezer_dl": "Deezer",
-            "lidarr": "Lidarr",
-            "soundcloud": "SoundCloud",
-            "amazon": "Amazon",
-            "staging": "Staging",
-            "torrent": "Torrent",
-            "usenet": "Usenet",
-            # Auto-import isn't a download source, but flows through the
-            # same post-process pipeline (file lands → record provenance
-            # + history → write to library DB). Tagging it as "Auto-Import"
-            # in history avoids mislabeling staging-folder imports as
-            # Soulseek downloads.
-            "auto_import": "Auto-Import",
-        }
-        download_source = source_map.get(username, "Soulseek")
+        # One canonical username→label map (core/downloads/live_detail.py),
+        # shared with the live status payloads so a live row and its later
+        # history row can never disagree on a source's name (#1156).
+        from core.downloads.live_detail import SOURCE_LABELS
+        download_source = SOURCE_LABELS.get(username, "Soulseek")
 
         ti = context.get("track_info") or context.get("search_result") or {}
         artist_name = _primary_track_artist_name(ti)
@@ -308,8 +293,8 @@ def registered_lib2_file_id(context: Dict[str, Any]) -> Optional[int]:
         if conn is not None:
             try:
                 conn.close()
-            except Exception:
-                pass
+            except Exception as close_err:
+                logger.debug("library v2 file lookup close failed: %s", close_err)
 
 
 def require_library_v2_registration(context: Dict[str, Any]) -> None:

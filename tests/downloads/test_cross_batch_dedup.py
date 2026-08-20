@@ -58,22 +58,49 @@ def test_finds_completed_sibling_with_same_identity():
 def test_ignores_sibling_still_in_flight():
     # A sibling that is only searching/downloading hasn't obtained the file yet —
     # skipping against it could strand this track if that sibling later fails.
-    download_tasks['owner'] = {'status': 'searching', 'track_info': _TI}
-    download_tasks['dup'] = {'status': 'pending', 'track_info': _TI}
+    download_tasks['owner'] = {'status': 'searching', 'track_info': _TI,
+                               'batch_id': 'bA'}
+    download_tasks['dup'] = {'status': 'pending', 'track_info': _TI,
+                             'batch_id': 'bB'}
     owner_id, owner = tw._find_owning_sibling('dup', _track())
     assert owner_id is None
 
 
 def test_ignores_different_track():
     other = dict(_TI, name='Time')
-    download_tasks['owner'] = {'status': 'completed', 'track_info': other}
-    download_tasks['dup'] = {'status': 'pending', 'track_info': _TI}
+    download_tasks['owner'] = {'status': 'completed', 'track_info': other,
+                               'batch_id': 'bA'}
+    download_tasks['dup'] = {'status': 'pending', 'track_info': _TI,
+                             'batch_id': 'bB'}
     owner_id, _ = tw._find_owning_sibling('dup', _track())
     assert owner_id is None
 
 
 def test_excludes_self():
-    download_tasks['dup'] = {'status': 'completed', 'track_info': _TI}
+    download_tasks['dup'] = {'status': 'completed', 'track_info': _TI,
+                             'batch_id': 'bB'}
+    owner_id, _ = tw._find_owning_sibling('dup', _track())
+    assert owner_id is None
+
+
+def test_ignores_a_twin_inside_the_same_batch():
+    """One batch's queue is the caller's own list — a repeat in it is their
+    choice, and the batch's own bookkeeping owns that decision."""
+    download_tasks['owner'] = {'status': 'completed', 'track_info': _TI,
+                               'batch_id': 'bA'}
+    download_tasks['dup'] = {'status': 'pending', 'track_info': _TI,
+                             'batch_id': 'bA'}
+    owner_id, _ = tw._find_owning_sibling('dup', _track())
+    assert owner_id is None
+
+
+def test_a_hand_started_download_is_never_deduped():
+    """No batch means the user asked for this one directly (a re-download for a
+    better rip, say). Answering that with "you already have it" would undo an
+    action they deliberately took."""
+    download_tasks['owner'] = {'status': 'completed', 'track_info': _TI,
+                               'batch_id': 'bA'}
+    download_tasks['dup'] = {'status': 'pending', 'track_info': _TI}
     owner_id, _ = tw._find_owning_sibling('dup', _track())
     assert owner_id is None
 
