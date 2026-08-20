@@ -18,8 +18,11 @@ from __future__ import annotations
 
 import pytest
 
+from types import SimpleNamespace
+
 from core.jellyfin_client import JellyfinClient
 from core.navidrome_client import NavidromeClient
+from core.plex_client import PlexClient, _plex_track_path
 
 
 # ── Navidrome ─────────────────────────────────────────────────────────────
@@ -186,3 +189,89 @@ def test_jellyfin_user_enumeration_failure_returns_nothing(jf):
 
     jf.get_available_users = _boom
     assert jf.get_curation_signals() == {}
+
+
+# ── Plex ──────────────────────────────────────────────────────────────────
+#
+# Single-user by necessity: Plex ratings belong to the account whose token the
+# client holds, and reading a home/managed user's needs account switching that
+# SoulSync has no support for. So this protects "tracks the owner rated", not
+# "tracks anyone likes" — a smaller promise than the other two servers make.
+
+def _plex_track(path, rating=None):
+    part = SimpleNamespace(file=path)
+    media = SimpleNamespace(parts=[part])
+    return SimpleNamespace(media=[media], userRating=rating, ratingKey="1")
+
+
+@pytest.fixture
+def plex():
+    client = PlexClient.__new__(PlexClient)
+    client.ensure_connection = lambda: True
+    client._can_query = lambda: True
+    client.server = SimpleNamespace(friendlyName="Home", playlists=lambda: [])
+    return client
+
+
+def test_plex_path_helper_digs_out_the_file():
+    assert _plex_track_path(_plex_track("/music/a.flac")) == "/music/a.flac"
+
+
+def test_plex_path_helper_survives_a_half_loaded_object():
+    assert _plex_track_path(SimpleNamespace()) == ""
+    assert _plex_track_path(SimpleNamespace(media=[SimpleNamespace(parts=[])])) == ""
+
+
+def test_plex_reports_ratings_halved_to_the_five_point_scale(plex):
+    """Plex stores 0-10; the decision core works in 0-5, where 3 is the
+    'above 2 stars' threshold."""
+    plex._all_tracks = lambda: [_plex_track("/music/a.flac", rating=8)]
+    signals = plex.get_curation_signals()
+    assert signals["Home"][0]["rating"] == 4.0
+
+
+def test_plex_skips_unrated_tracks(plex):
+    plex._all_tracks = lambda: [_plex_track("/music/a.flac"),
+                                _plex_track("/music/b.flac", rating=6)]
+    paths = [r["path"] for r in plex.get_curation_signals()["Home"]]
+    assert paths == ["/music/b.flac"]
+
+
+def test_plex_marks_playlist_membership(plex):
+    plex._all_tracks = lambda: []
+    plex.server = SimpleNamespace(
+        friendlyName="Home",
+        playlists=lambda: [SimpleNamespace(
+            playlistType="audio",
+            items=lambda: [_plex_track("/music/c.flac")])])
+    row = plex.get_curation_signals()["Home"][0]
+    assert row["in_playlist"] is True and row["path"] == "/music/c.flac"
+
+
+def test_plex_ignores_video_playlists(plex):
+    plex._all_tracks = lambda: []
+    plex.server = SimpleNamespace(
+        friendlyName="Home",
+        playlists=lambda: [SimpleNamespace(
+            playlistType="video",
+            items=lambda: [_plex_track("/movies/x.mkv")])])
+    assert plex.get_curation_signals()["Home"] == []
+
+
+def test_plex_a_failed_rating_read_returns_nothing(plex):
+    def _boom():
+        raise RuntimeError("plex down")
+
+    plex._all_tracks = _boom
+    assert plex.get_curation_signals() == {}
+
+
+def test_plex_a_failed_playlist_read_keeps_the_ratings(plex):
+    """Losing playlists must not lose the ratings already gathered."""
+    plex._all_tracks = lambda: [_plex_track("/music/a.flac", rating=10)]
+
+    def _boom():
+        raise RuntimeError("nope")
+
+    plex.server = SimpleNamespace(friendlyName="Home", playlists=_boom)
+    assert plex.get_curation_signals()["Home"][0]["rating"] == 5.0

@@ -72748,6 +72748,19 @@ body.em-scroll-lock { overflow: hidden; }
     color: rgba(255, 255, 255, 0.4);
 }
 
+/* Pointer to the Expired Download Cleaner — the job people keep asking to be
+   built because it is buried among ~20 repair jobs and ships disabled. */
+.origin-modal-hint {
+    margin-top: 6px;
+}
+.origin-modal-link {
+    color: rgb(var(--accent-rgb));
+    text-decoration: underline dotted;
+}
+.origin-modal-link:hover {
+    text-decoration: underline;
+}
+
 .origin-modal-close {
     width: 32px;
     height: 32px;

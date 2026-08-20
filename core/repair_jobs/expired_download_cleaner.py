@@ -33,6 +33,48 @@ from utils.logging_config import get_logger
 logger = get_logger("repair_jobs.expired_download_cleaner")
 
 
+def _deletion_rationale(entry, min_plays, curated_keys) -> str:
+    """Why this download is being proposed for deletion, in the user's terms.
+
+    A finding that says "past retention, not active, not replayed" when the job
+    also checked curation and the rebuild stamp is telling the user something
+    untrue about a decision to delete their file. This states what was actually
+    examined, including whether curation was consulted at all — "nobody
+    favourited it" and "we did not look" are very different claims.
+    """
+    plays = entry.get('play_count')
+    bits = ['past retention', 'not in an active playlist or watchlist']
+    if plays is None:
+        bits.append('play count unknown')
+    else:
+        bits.append(f'played {plays}x (keep at {min_plays})')
+    if curated_keys is None:
+        bits.append('curation signals not in use')
+    else:
+        bits.append('not favourited, rated or playlisted by anyone')
+    return ', '.join(bits)
+
+
+def _kept_summary(candidates, expired) -> str:
+    """One line saying what was SPARED and why — the reassurance a job that
+    deletes files owes the person reading its log."""
+    expired_ids = {id(e) for e in expired}
+    reasons = {'curated': 0, 'protected': 0, 'grandfathered': 0, 'played': 0}
+    for c in candidates:
+        if id(c) in expired_ids:
+            continue
+        if c.get('protected'):
+            reasons['protected'] += 1
+        elif c.get('curated'):
+            reasons['curated'] += 1
+        elif c.get('grandfathered'):
+            reasons['grandfathered'] += 1
+        else:
+            reasons['played'] += 1
+    parts = [f'{n} {name}' for name, n in reasons.items() if n]
+    return ', '.join(parts) if parts else 'none'
+
+
 def delete_origin_download(db, entry, config_manager) -> dict:
     """Delete one origin-tracked download: the file on disk (resolved through
     the shared resolver), its library track row, and the history entry. A file
@@ -294,9 +336,15 @@ class ExpiredDownloadCleanerJob(RepairJob):
                         entity_id=str(entry.get('id')),
                         file_path=entry.get('file_path'),
                         title=f'Expired: {entry.get("title") or "Unknown"}',
+                        # Say what was actually CHECKED, not a fixed phrase.
+                        # The old wording ("past retention, not active, not
+                        # replayed") predates the curation and rebuild checks
+                        # and no longer described the real criteria — which
+                        # matters on a finding whose whole job is to justify
+                        # deleting someone's file.
                         description=(f'"{entry.get("title")}" by {entry.get("artist_name") or "Unknown"} '
                                      f'— via {entry.get("origin")} ({entry.get("origin_context") or "?"}), '
-                                     f'past retention, not active, not replayed.'),
+                                     f'{_deletion_rationale(entry, min_plays, curated_keys)}.'),
                         details={
                             'history_id': entry.get('id'),
                             'file_path': entry.get('file_path'),
@@ -315,9 +363,10 @@ class ExpiredDownloadCleanerJob(RepairJob):
             if context.update_progress and (i + 1) % 5 == 0:
                 context.update_progress(i + 1, len(expired))
 
-        logger.info("[Expired Cleaner] %d candidates, %d expired (%s)",
+        logger.info("[Expired Cleaner] %d candidates, %d expired (%s) — kept: %s",
                     len(candidates), len(expired),
-                    "findings created (dry run)" if dry_run else "auto-deleted")
+                    "findings created (dry run)" if dry_run else "auto-deleted",
+                    _kept_summary(candidates, expired))
         return result
 
     def estimate_scope(self, context: JobContext) -> int:

@@ -30,6 +30,24 @@ logger = get_logger("plex_client")
 ALL_LIBRARIES_SENTINEL = '__all_libraries__'
 
 
+def _plex_track_path(track) -> str:
+    """The on-disk path of a Plex track, or ''.
+
+    plexapi exposes it as ``track.media[0].parts[0].file``, and every hop can
+    be missing on a partially-loaded object — so this stays defensive rather
+    than letting one odd track abort a whole sweep.
+    """
+    try:
+        for media in (getattr(track, 'media', None) or []):
+            for part in (getattr(media, 'parts', None) or []):
+                path = getattr(part, 'file', None)
+                if path:
+                    return str(path)
+    except Exception:   # noqa: BLE001 - a bad object must not break the sweep
+        return ''
+    return ''
+
+
 class PlexClient(MediaServerClient):
     def __init__(self):
         self.server: Optional[PlexServer] = None
@@ -1184,6 +1202,74 @@ class PlexClient(MediaServerClient):
         except Exception as e:
             logger.error(f"Error getting Plex track play counts: {e}")
             return {}
+
+    def get_curation_signals(self):
+        """What the account SoulSync is connected as has chosen about a track.
+
+        Returns ``{account_name: [{path, favorite, rating, in_playlist}, ...]}``
+        in the same shape Jellyfin and Navidrome use.
+
+        **Single-user, and that is a real limitation.** Plex ratings belong to
+        the account whose token this client holds — the owner. Reading a home
+        or managed user's ratings needs account switching (MyPlexAccount /
+        switchUser), which SoulSync has no support for anywhere: one token, one
+        PlexServer, no user enumeration. So on Plex this protects "tracks the
+        owner rated", not Cremonies' "tracks anyone likes". Better than the
+        nothing that came before it, but a smaller promise than the other two
+        servers make.
+
+        Plex has no favourite flag for tracks either, so ``userRating`` is the
+        only signal — 0-10 in Plex's scale, halved to the 0-5 the decision core
+        expects. Playlist membership is read from the server's audio playlists.
+        """
+        if not self.ensure_connection() or not self._can_query():
+            return {}
+
+        account = 'plex'
+        try:
+            account = str(getattr(self.server, 'friendlyName', '') or 'plex')
+        except Exception as e:
+            logger.debug(f"Plex curation: could not read account name: {e}")
+
+        per_track = {}
+        try:
+            for track in self._all_tracks():
+                rating = getattr(track, 'userRating', None)
+                if rating in (None, ''):
+                    continue
+                path = _plex_track_path(track)
+                if not path:
+                    continue
+                try:
+                    # Plex stores 0-10; the decision core works in 0-5.
+                    scaled = float(rating) / 2.0
+                except (TypeError, ValueError):
+                    continue
+                per_track[path] = {'path': path, 'favorite': False,
+                                   'rating': scaled, 'in_playlist': False}
+        except Exception as e:
+            logger.error(f"Plex curation: reading ratings failed: {e}")
+            return {}
+
+        # Playlist membership — a track someone bothered to put in a playlist
+        # is wanted, same as on the other servers.
+        try:
+            for playlist in (self.server.playlists() or []):
+                if (getattr(playlist, 'playlistType', '') or '') != 'audio':
+                    continue
+                for item in playlist.items():
+                    path = _plex_track_path(item)
+                    if not path:
+                        continue
+                    entry = per_track.setdefault(
+                        path, {'path': path, 'favorite': False,
+                               'rating': None, 'in_playlist': False})
+                    entry['in_playlist'] = True
+        except Exception as e:
+            logger.warning(f"Plex curation: reading playlists failed: {e}")
+
+        logger.info(f"Plex curation: {len(per_track)} signal(s) for {account}")
+        return {account: list(per_track.values())}
 
     def get_all_artists(self) -> List[PlexArtist]:
         """Get all artists from the music library.
