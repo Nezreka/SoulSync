@@ -8,6 +8,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { forgetAccountPlaylists } from '../-sync.account-cache';
 import { fetchAccountPlaylist } from '../-sync.api';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { useSourceVertical } from '../-sync.use-vertical';
@@ -38,6 +39,10 @@ function stubFetch(): void {
 }
 
 afterEach(() => {
+  // The account cache is module-level, so it outlives a test. Left alone it
+  // would hand the NEXT case a pre-loaded tab, and the failure would depend on
+  // file order — the worst kind to debug.
+  forgetAccountPlaylists();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   delete (window as { showToast?: unknown }).showToast;
@@ -551,5 +556,67 @@ describe('shared helpers', () => {
     );
     expect(hydrate).toHaveBeenCalledTimes(1);
     expect(hydrate).toHaveBeenCalledWith('known', expect.objectContaining({ phase: 'discovered' }));
+  });
+});
+
+describe('Specialmed: playlists survive leaving the page', () => {
+  it('a remounted tab shows what it already loaded, and does NOT re-fetch', async () => {
+    stubFetch();
+    responder = (url) => {
+      if (url === '/api/tidal/playlists') {
+        return [{ id: 't1', name: 'My Mix 1', track_count: 3, owner: 'Me' }];
+      }
+      if (url === '/api/tidal/playlists/states') return {};
+      if (url === '/api/tidal/playlist/t1') return { tracks: [] };
+      return {};
+    };
+
+    const first = render(<TidalHarness />);
+    fireEvent.click(screen.getByText('🔄 Refresh'));
+    await waitFor(() => expect(screen.getByText('My Mix 1')).toBeInTheDocument());
+
+    // Leave /sync — React unmounts the tab and its state goes with it.
+    first.unmount();
+    const callsBefore = calls.length;
+
+    render(<TidalHarness />);
+    // The rows are back immediately, with no placeholder in between...
+    expect(screen.getByText('My Mix 1')).toBeInTheDocument();
+    expect(
+      screen.queryByText("Click 'Refresh' to load your Tidal playlists."),
+    ).not.toBeInTheDocument();
+    // ...and crucially without paying for the account fetch again, which for
+    // Tidal is the multi-minute crawl this whole report is about.
+    expect(calls.length).toBe(callsBefore);
+  });
+
+  it('a tab that has never loaded still shows the placeholder and fetches nothing', () => {
+    stubFetch();
+    render(<TidalHarness />);
+    expect(screen.getByText("Click 'Refresh' to load your Tidal playlists.")).toBeInTheDocument();
+    expect(calls).toEqual([]);
+  });
+
+  it('Refresh still re-fetches even when rows are remembered', async () => {
+    stubFetch();
+    responder = (url) => {
+      if (url === '/api/tidal/playlists') {
+        return [{ id: 't1', name: 'My Mix 1', track_count: 0, owner: 'Me' }];
+      }
+      if (url === '/api/tidal/playlists/states') return {};
+      if (url === '/api/tidal/playlist/t1') return { tracks: [] };
+      return {};
+    };
+    const first = render(<TidalHarness />);
+    fireEvent.click(screen.getByText('🔄 Refresh'));
+    await waitFor(() => expect(screen.getByText('My Mix 1')).toBeInTheDocument());
+    first.unmount();
+
+    render(<TidalHarness />);
+    const before = calls.filter((c) => c.url === '/api/tidal/playlists').length;
+    fireEvent.click(screen.getByText('🔄 Refresh'));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url === '/api/tidal/playlists').length).toBe(before + 1),
+    );
   });
 });
