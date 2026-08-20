@@ -53,6 +53,27 @@ def file_path_in_scope(path: Any, allowed_paths: Optional[frozenset[str]]) -> bo
     return key is not None and key in allowed_paths
 
 
+def scoped_file_subjects(context: Any, subjects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Narrow a ``active_file_subjects`` list to this run's file allowlist.
+
+    ``None`` scope is library-wide and returns the list untouched; an explicitly
+    empty allowlist returns nothing, never everything. This is the single place
+    the file scope is actually applied for the subject-driven jobs -- before it
+    existed the scope was resolved, stored, logged, and read by nobody, so
+    running a destructive job "for one artist" produced library-wide findings
+    that were one "Fix All" away from touching files outside the request.
+    """
+    allowed = get_scope_file_paths(context)
+    if allowed is None:
+        return subjects
+    if not allowed:
+        return []
+    return [
+        subject for subject in subjects
+        if file_path_in_scope(subject.get("path"), allowed)
+    ]
+
+
 def build_artist_file_scope(db: Any, artist_id: int, artist_name: str = "") -> Dict[str, Any]:
     """Resolve a lib2 artist to exact linked file paths for repair jobs."""
     artist_id = int(artist_id)
@@ -222,6 +243,18 @@ class RepairJob(ABC):
     # Whether this job's scan honors JobContext.scope['artist_name'] (user-
     # triggered runs from a Library artist page). Library-wide otherwise.
     supports_artist_scope: bool = False
+    # Whether this job's scan honors JobContext.scope['file_paths'] -- the
+    # exact allowlist `build_artist_file_scope` resolves for a user-triggered
+    # run from a Library artist page.
+    #
+    # This exists because the scope used to be built, passed, logged and read
+    # by NOBODY: `get_scope_file_paths`/`file_path_in_scope` had zero
+    # production callers, so "run Library Reorganize for this artist" walked
+    # and moved the WHOLE library while the API response and the log line both
+    # claimed 180 files. A job that does not declare this now has the scope
+    # REFUSED rather than silently widened -- the same fail-closed posture
+    # `get_scope_file_paths` already takes for an empty list.
+    supports_file_scope: bool = False
 
     @abstractmethod
     def scan(self, context: JobContext) -> JobResult:

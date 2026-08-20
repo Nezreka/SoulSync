@@ -5,7 +5,10 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional
 
 from core.metadata import registry as metadata_registry
-from core.metadata.album_tracks import get_artist_albums_for_source
+from core.metadata.album_tracks import (
+    _normalize_artist_name,
+    get_artist_albums_for_source,
+)
 from core.metadata.lookup import MetadataLookupOptions
 from core.metadata.types import Album
 from utils.logging_config import get_logger
@@ -76,10 +79,6 @@ def _get_source_chain_for_lookup(options: MetadataLookupOptions) -> List[str]:
         source_chain = source_chain[:1]
 
     return source_chain
-
-
-def _normalize_artist_name(value: Any) -> str:
-    return (value or '').strip().casefold()
 
 
 def _normalize_secondary_types(value: Any) -> List[str]:

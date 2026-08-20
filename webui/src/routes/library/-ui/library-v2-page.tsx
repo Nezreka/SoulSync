@@ -18,6 +18,7 @@ import { thumb } from '@/platform/artwork-thumb';
 import { getShellBridge } from '@/platform/shell/bridge';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
+import { bitrateKbps } from '../-bitrate';
 import {
   analyzeLibraryV2TrackReplayGain,
   blacklistLibraryV2Source,
@@ -135,12 +136,14 @@ import {
   type DiscographyFilterState,
   type DiscographyOwnership,
 } from './discography-filters';
+import { ExportArtistsModal } from './export-modal';
 import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
 import { QualityProfileModal, QualityProfilePicker } from './quality-profile-modal';
 import { ReassignModal } from './reassign-modal';
 import { AlbumReorganizeModal, ArtistReorganizeAllModal } from './reorganize-modal';
 import { RetagModal } from './retag-modal';
+import { WatchAllModal } from './watch-all-modal';
 
 /** Row/toolbar action dispatch: the label drives the behaviour, the optional
  *  entity ref carries WHICH lib2 track/album the action is for so grabs keep
@@ -443,11 +446,7 @@ function BitrateDisplay({ file }: { file: LibraryV2Track['file'] | null | undefi
   const showBitrate = prefsQuery.data?.track_table.quality_show_bitrate ?? true;
   if (!showBitrate) return null;
 
-  const kbps = file.bitrate
-    ? file.bitrate > 5000
-      ? Math.round(file.bitrate / 1000)
-      : file.bitrate
-    : null;
+  const kbps = bitrateKbps(file.bitrate);
 
   if (!kbps) return null;
 
@@ -3415,11 +3414,7 @@ export function ManageTracksDuplicatesTab({ artistId }: { artistId: number }) {
   function fileText(side: { file: { format: string | null; bitrate: number | null } | null }) {
     if (!side.file) return 'no file';
     const fmt = (side.file.format ?? '').toUpperCase();
-    const kbps = side.file.bitrate
-      ? side.file.bitrate > 5000
-        ? Math.round(side.file.bitrate / 1000)
-        : side.file.bitrate
-      : null;
+    const kbps = bitrateKbps(side.file.bitrate);
     return [fmt, kbps ? `${kbps} kbps` : null].filter(Boolean).join(' / ') || 'file';
   }
 
@@ -3576,7 +3571,7 @@ export function ArtistFilesTab({ artistId }: { artistId: number }) {
     }
     // bitrate is stored inconsistently (bps for some sources, already kbps
     // for others) — same heuristic as QualityDisplay/fileText elsewhere.
-    const kbps = f.bitrate ? (f.bitrate > 5000 ? Math.round(f.bitrate / 1000) : f.bitrate) : null;
+    const kbps = bitrateKbps(f.bitrate);
     if (kbps) parts.push(`${kbps}kbps`);
     return parts.filter(Boolean).join(' · ') || '—';
   }
@@ -4190,6 +4185,7 @@ function ArtistIndexView() {
         </div>
         <div className={styles.headerActions}>
           <GlobalAutomaticSearchButton />
+          <MonitorAllUnmonitoredButton />
           <ImportButton hasArtists={artists.length > 0} />
         </div>
       </header>
@@ -5053,6 +5049,7 @@ function ArtistToolsMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [showSubmenu, setShowSubmenu] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const wrapRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
@@ -5072,7 +5069,7 @@ function ArtistToolsMenu({
       <ActionButton
         icon="organize"
         label="Files/Tools"
-        title="Preview Retag, Reorganize All, Library Health & Repair, Manual Import, Enrich"
+        title="Preview Retag, Reorganize All, Library Health & Repair, Manual Import, Enrich, Export Artists"
         onClick={() => setOpen((v) => !v)}
       />
       {open ? (
@@ -5117,6 +5114,20 @@ function ArtistToolsMenu({
           >
             Manual Import
           </button>
+          {/* Export Artists lives in here rather than in the page header: it is
+              a whole-roster utility people reach for occasionally, not part of
+              the artist workflow, and the header is already the place for the
+              two global ACTIONS (Automatic Search, Monitor All). */}
+          <button
+            type="button"
+            className={styles.overflowMenuItem}
+            onClick={() => {
+              setShowExport(true);
+              setOpen(false);
+            }}
+          >
+            Export Artists…
+          </button>
           <div
             className={styles.submenuContainer}
             onMouseEnter={() => setShowSubmenu(true)}
@@ -5148,6 +5159,9 @@ function ArtistToolsMenu({
             ) : null}
           </div>
         </div>
+      ) : null}
+      {showExport ? (
+        <ExportArtistsModal initialScope="library" onClose={() => setShowExport(false)} />
       ) : null}
     </span>
   );
@@ -10750,6 +10764,39 @@ export function describeLibraryV2ArtworkCacheProgress(state: LibraryV2ImportStat
  * then the existing Wishlist processor sees one complete missing+upgrade
  * queue. Starting the processor first creates a race where the just-enqueued
  * upgrades can miss the active cycle. */
+/** Monitor every unmonitored artist that has a provider id.
+ *
+ * Lives next to Automatic Search because it is the same kind of thing: one
+ * global action over the whole library. It opens a modal rather than acting
+ * directly, and that modal needs a SECOND, explicit confirmation before it
+ * fires -- this adds potentially thousands of artists to the monitor list in
+ * one go, each of which then starts fetching a discography, and it sits one
+ * pixel from a button people click routinely.
+ *
+ * "Monitor" is this page's word; the API and the tables still say watchlist.
+ */
+function MonitorAllUnmonitoredButton() {
+  const canWrite = useLibraryV2CanWrite();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        type="button"
+        className={styles.btnGhost}
+        data-requires-write=""
+        disabled={!canWrite}
+        title="Start monitoring every artist in your library that isn't monitored yet"
+        onClick={() => setOpen(true)}
+      >
+        <SvgIcon name="monitor" />
+        Monitor All
+      </button>
+      {open ? <WatchAllModal onClose={() => setOpen(false)} /> : null}
+    </>
+  );
+}
+
 export function GlobalAutomaticSearchButton() {
   const queryClient = useQueryClient();
   const canWrite = useLibraryV2CanWrite();

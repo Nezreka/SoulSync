@@ -33,7 +33,7 @@ from typing import Optional, Tuple
 
 from core.library.path_resolver import resolve_library_file_path
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, scoped_file_subjects
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.audio_corruption")
@@ -144,6 +144,7 @@ class AudioCorruptionDetectorJob(RepairJob):
     }
     setting_options: dict = {}
     auto_fix = False
+    supports_file_scope = True
 
     def _setting_int(self, context: JobContext, key: str, default: int) -> int:
         cm = getattr(context, 'config_manager', None)
@@ -170,9 +171,9 @@ class AudioCorruptionDetectorJob(RepairJob):
         try:
             from core.library2.maintenance_subjects import active_file_subjects
 
-            for subject in active_file_subjects(
+            for subject in scoped_file_subjects(context, active_file_subjects(
                 context.db, context.config_manager,
-            ):
+            )):
                 file_path = str(subject["path"])
                 native_subjects[file_path] = subject
                 rows.append({
@@ -330,9 +331,9 @@ class AudioCorruptionDetectorJob(RepairJob):
             from core.library2.maintenance_subjects import active_file_subjects
 
             count += sum(
-                1 for subject in active_file_subjects(
+                1 for subject in scoped_file_subjects(context, active_file_subjects(
                     context.db, context.config_manager,
-                ) if str(subject.get("path") or "").lower().endswith(".flac")
+                )) if str(subject.get("path") or "").lower().endswith(".flac")
             )
         except Exception as exc:
             logger.debug("Could not estimate indexed FLAC scope: %s", exc)

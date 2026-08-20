@@ -14,12 +14,6 @@ from typing import Any, Dict, List, Mapping, Optional
 from core.library2.provider_ids import source_ids_from_values
 
 
-def _enabled(config_manager: Any) -> bool:
-    from core.library2.feature import library_v2_enabled
-
-    return library_v2_enabled(config_manager)
-
-
 def _table_exists(conn: Any, table: str) -> bool:
     return conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
@@ -62,8 +56,6 @@ def active_file_subjects(
 ) -> List[Dict[str, Any]]:
     """Return every indexed Library-v2 file with full entity/provider context."""
 
-    if not _enabled(config_manager):
-        return []
     conn = database._get_connection()
     try:
         if not _table_exists(conn, "lib2_track_files"):
@@ -162,8 +154,6 @@ def active_album_subjects(
 ) -> List[Dict[str, Any]]:
     """Return native releases with provider IDs and an optional file anchor."""
 
-    if not _enabled(config_manager):
-        return []
     conn = database._get_connection()
     try:
         if not _table_exists(conn, "lib2_albums"):
@@ -266,8 +256,6 @@ def subject_details(subject: Mapping[str, Any]) -> Dict[str, Any]:
 def count_active_files(database: Any, config_manager: Any) -> int:
     """Cheap native scope count used by job progress estimates."""
 
-    if not _enabled(config_manager):
-        return 0
     conn = database._get_connection()
     try:
         if not _table_exists(conn, "lib2_track_files"):

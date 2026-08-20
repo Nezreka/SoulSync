@@ -64,6 +64,12 @@ STALE_SUBJECT_CASES = {
     'genre_enrichment': {'added_genres': ['Rock']},
     'comma_artist_split': {'split_artists': ['A', 'B'], 'combined_name': 'A, B'},
     'track_number_mismatch': {'correct_track_num': 3},
+    # `path_mismatch` names a lib2 track. It used to be absent from the set,
+    # so the handler read a bare id as a NATIVE id while the sync layer read
+    # the same id as a legacy back-reference -- the file moved, one track's row
+    # was re-pointed, and a different track's history recorded it.
+    'path_mismatch': {'from': 'old/a.flac', 'to': 'new/a.flac',
+                      'from_abs': '/m/old/a.flac', 'to_abs': '/m/new/a.flac'},
 }
 
 STALE_SUBJECT_ENTITY_TYPES = {

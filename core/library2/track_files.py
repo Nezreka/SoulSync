@@ -98,27 +98,40 @@ def primary_file_row(conn, track_id: int) -> Optional[Dict[str, Any]]:
     return dict(row) if row else None
 
 
+#: Ids per `IN (...)` list. SQLite's default SQLITE_MAX_VARIABLE_NUMBER has been
+#: 32,766 since 3.32, and a stock `python:3.x` Docker image ships that default --
+#: so one bind variable per track hard-errored (`too many SQL variables`, HTTP
+#: 500, permanent) above roughly 33,000 rows. The same 500-row chunking is
+#: already applied in core/library2/scan.py.
+_IN_CHUNK = 500
+
+
 def primary_file_rows(conn, track_ids: Iterable[int]) -> Dict[int, Dict[str, Any]]:
-    """Load each track's ADR-03 primary file in one query."""
+    """Load each track's ADR-03 primary file, chunked so it cannot exceed the
+    SQLite bind-variable ceiling (perf-audit PERF-02)."""
     ids = sorted({int(track_id) for track_id in track_ids})
     if not ids:
         return {}
-    marks = ",".join("?" for _ in ids)
-    rows = conn.execute(
-        f"""SELECT * FROM (
-                SELECT tf.*,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY tf.track_id
-                           ORDER BY {primary_order('tf')}
-                       ) AS lib2_primary_rank
-                  FROM lib2_track_files tf
-                 WHERE tf.track_id IN ({marks})
-                   AND COALESCE(tf.file_state,'active')<>'deleted'
-            ) ranked
-            WHERE lib2_primary_rank=1""",
-        ids,
-    ).fetchall()
-    return {int(row["track_id"]): dict(row) for row in rows}
+    out: Dict[int, Dict[str, Any]] = {}
+    for start in range(0, len(ids), _IN_CHUNK):
+        chunk = ids[start:start + _IN_CHUNK]
+        marks = ",".join("?" for _ in chunk)
+        for row in conn.execute(
+            f"""SELECT * FROM (
+                    SELECT tf.*,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY tf.track_id
+                               ORDER BY {primary_order('tf')}
+                           ) AS lib2_primary_rank
+                      FROM lib2_track_files tf
+                     WHERE tf.track_id IN ({marks})
+                       AND COALESCE(tf.file_state,'active')<>'deleted'
+                ) ranked
+                WHERE lib2_primary_rank=1""",
+            chunk,
+        ):
+            out[int(row["track_id"])] = dict(row)
+    return out
 
 
 def writable_file_rows(conn, track_id: int) -> list:
@@ -232,7 +245,8 @@ def track_id_for_path(conn, file_path: Any) -> Optional[int]:
     return int(rows[0][0]) if len(rows) == 1 else None
 
 
-def repoint_file_path(conn, old_path: str, new_path: str) -> int:
+def repoint_file_path(conn, old_path: str, new_path: str,
+                      track_id: Optional[int] = None) -> int:
     """Follow a file that moved on disk, matched by the path we stored for it.
 
     The by-path handle is the only one some callers have: the atomic album
@@ -241,14 +255,27 @@ def repoint_file_path(conn, old_path: str, new_path: str) -> int:
     from "done" — the two used to be indistinguishable, and the first is how a
     row ends up naming a path inside a staging tree that is about to be deleted.
     Does not commit.
+
+    ``deleted`` rows are excluded and ``track_id`` narrows further when the
+    caller has one. Without either, a path that was deleted (row retired to
+    ``file_state='deleted'`` with the path kept as the audit record) and then
+    re-imported had BOTH rows rewritten: the tombstone ended up naming a file it
+    never pointed at, and the returned rowcount of 2 lied to the caller whose
+    only reason for reading it is to distinguish those two cases.
     """
     old_path = str(old_path or "")
     new_path = str(new_path or "")
     if not old_path or not new_path or old_path == new_path:
         return 0
+    params: tuple = (new_path, old_path)
+    scope = ""
+    if track_id is not None:
+        scope = " AND track_id=?"
+        params = (*params, int(track_id))
     cursor = conn.execute(
         "UPDATE lib2_track_files SET path=?, updated_at=CURRENT_TIMESTAMP "
-        "WHERE path=?", (new_path, old_path))
+        "WHERE path=? AND COALESCE(file_state,'active')<>'deleted'" + scope,
+        params)
     return int(cursor.rowcount or 0)
 
 

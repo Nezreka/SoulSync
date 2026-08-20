@@ -321,6 +321,38 @@ def test_status_and_prune(db):
     assert _outbox_rows(conn) == []
 
 
+def test_prune_keeps_the_row_that_supersedes_a_stuck_one(db):
+    """dd28-13's protection is re-derived from history at drain time, so the
+    history has to survive the pruner.
+
+    Row 1 = wishlist_add(T) is stuck failed. Row 2 = wishlist_remove(T)
+    succeeded, and is the ONLY evidence that row 1 is obsolete. Pruning row 2
+    and then hitting "Retry failed" replays the add and resurrects the wishlist
+    entry the user removed.
+    """
+    flaky, conn = db
+    track = flaky.ids["track"]
+    MO.enqueue_tracks(conn, [track], True)          # row 1: add
+    conn.commit()
+    conn.execute("UPDATE lib2_mirror_outbox SET status='failed', attempts=?",
+                 (MO.MAX_ATTEMPTS,))
+    MO.enqueue_tracks(conn, [track], False)         # row 2: remove
+    conn.commit()
+    MO.drain(flaky)                                 # row 2 -> done
+    conn.commit()
+
+    assert MO.prune_done(conn, keep=0) == 0
+    conn.commit()
+
+    statuses = {row["status"] for row in _outbox_rows(conn)}
+    assert statuses == {"failed", "done"}
+
+    # And with the stuck row gone, the done row is prunable again.
+    conn.execute("DELETE FROM lib2_mirror_outbox WHERE status='failed'")
+    conn.commit()
+    assert MO.prune_done(conn, keep=0) == 1
+
+
 def test_replay_is_idempotent_when_marking_crashes(db):
     """If the process dies between executing an op and marking it done, the
     replay must not corrupt state — wishlist add is an upsert (P1-09/P1-10)."""

@@ -31,6 +31,8 @@ import type {
   LibraryV2WantedRow,
 } from './-library-v2.types';
 
+import { bitrateKbps } from './-bitrate';
+
 export const LIBRARY_V2_QUERY_KEY = ['library-v2'] as const;
 
 interface EnabledResponse {
@@ -2014,7 +2016,7 @@ export function rankSearchResultQuality(r: SourceSearchResult): number {
   const lossless = q.includes('flac') || q.includes('alac') || q.includes('wav');
   if (lossless && bitDepth > 16) return 4;
   if (lossless) return 3;
-  const kbps = r.bitrate ? (r.bitrate > 5000 ? r.bitrate / 1000 : r.bitrate) : 0;
+  const kbps = bitrateKbps(r.bitrate) ?? 0;
   if (kbps >= 256 || q.includes('320')) return 2;
   if (q) return 1;
   return 0;
@@ -2100,6 +2102,17 @@ export async function startSourceDownload(
     quality_check: options.qualityCheck !== false,
     ...lib2EntityFields(entity),
   };
+  // The track payload is rebuilt field by field rather than passed through,
+  // and it used to omit two the server reads: `bitrate` (web_server.py:7732,
+  // recorded on the download row) and `album_name` (:7730, and the import
+  // pipeline's album folder). A track result carries its album in `album`, not
+  // `album_title` -- only album results use that key -- which is how the field
+  // went missing on exactly the path that needs it (frontend-audit FE-03).
+  //
+  // Still an explicit allowlist, not a spread of the whole result: the server
+  // sanitizes client metadata (`sanitize_client_import_metadata`), and a blind
+  // passthrough would send provider internals and `_source_metadata` with every
+  // grab.
   const json =
     result.result_type === 'album'
       ? {
@@ -2115,14 +2128,43 @@ export async function startSourceDownload(
           size: result.size,
           title: result.title,
           artist: result.artist,
+          album_name: result.album ?? result.album_title ?? undefined,
           quality: result.quality,
+          bitrate: result.bitrate ?? undefined,
+          sample_rate: result.sample_rate ?? undefined,
+          bit_depth: result.bit_depth ?? undefined,
+          duration: result.duration ?? undefined,
           ...checks,
         };
-  const payload = await readJson<{ success?: boolean; error?: string; blocked?: boolean }>(
-    apiClient.post('download', { json, timeout: 30_000 }),
-  );
-  if (payload.blocked) throw new Error('This artist is blocklisted.');
+  /**
+   * `throwHttpErrors: false` for the same reason `refreshLibraryV2` uses it
+   * (iss29-C02): the meaning is in the BODY, not the status. A blocklisted
+   * artist answers 409 with `{success:false, blocked:true, blocked_entity_type,
+   * blocked_name}` -- no `error`, no `message`. ky is created with `retry: 0`
+   * and default `throwHttpErrors`, so `readJson` threw an HTTPError before
+   * `payload.blocked` was ever evaluated: the blocklist branch below was
+   * unreachable, and the user saw a bare HTTP status string instead of being
+   * told which artist is blocked and why.
+   */
+  const payload = await readJson<{
+    success?: boolean;
+    error?: string;
+    message?: string;
+    blocked?: boolean;
+    blocked_entity_type?: string;
+    blocked_name?: string;
+  }>(apiClient.post('download', { json, timeout: 30_000, throwHttpErrors: false }));
+  if (payload.blocked) {
+    const what = payload.blocked_name
+      ? `${payload.blocked_entity_type || 'This'} "${payload.blocked_name}"`
+      : 'This artist';
+    throw new Error(`${what} is blocklisted. Remove it from the blocklist to download.`);
+  }
   if (payload.error) throw new Error(payload.error);
+  // A non-2xx with neither `blocked` nor `error` must still fail -- without
+  // this, dropping throwHttpErrors turns every other server error into a
+  // silent success.
+  if (payload.success === false) throw new Error(payload.message || 'Download was refused');
 }
 
 /** Auto-grab: search and download the best result (for non-interactive "Search"). */

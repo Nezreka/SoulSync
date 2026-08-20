@@ -1,6 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
+import { useModalA11y } from '@/components/dialog/use-modal-a11y';
+
 import type { LibraryV2ArtCandidate } from '../-library-v2.types';
 
 import {
@@ -38,6 +40,7 @@ export function AlbumArtPickerModal({
   albumTitle: string;
   onClose: () => void;
 }) {
+  const a11yRef = useModalA11y<HTMLDivElement>(onClose);
   const queryClient = useQueryClient();
   // iss27-03: a 5-minute server cache can pin a partial result from a
   // transient provider hiccup — bumping this forces `?refresh=1`, a fresh
@@ -90,6 +93,8 @@ export function AlbumArtPickerModal({
     <div className={styles.modalBackdrop} role="presentation" onClick={onClose}>
       <div
         className={`${styles.modal} ${styles.modalWide}`}
+        ref={a11yRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}
@@ -169,6 +174,7 @@ export function ArtistImagePickerModal({
   artistName: string;
   onClose: () => void;
 }) {
+  const a11yRef = useModalA11y<HTMLDivElement>(onClose);
   const queryClient = useQueryClient();
   // iss27-03: see the matching comment in AlbumArtPickerModal above.
   const [refreshNonce, setRefreshNonce] = useState(0);
@@ -216,6 +222,8 @@ export function ArtistImagePickerModal({
     <div className={styles.modalBackdrop} role="presentation" onClick={onClose}>
       <div
         className={`${styles.modal} ${styles.modalWide}`}
+        ref={a11yRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}

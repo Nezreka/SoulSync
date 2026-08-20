@@ -330,6 +330,17 @@ def preview_entity_files(
                 item["reason"] = _absent_reason(real_path, config_manager)
             elif not os.path.isfile(real_path):
                 item["reason"] = "not_a_regular_file"
+            elif not fuzzy_resolved_path_is_deletable(
+                    row["stored_path"], real_path, config_manager):
+                # The resolver GUESSED this path. It suffix-walks the transfer
+                # folder first, and falls back to matching a sibling album
+                # folder or a synthesized filename -- so a stored path that no
+                # longer exists (share remounted, folder renamed) can resolve
+                # onto a freshly downloaded replacement awaiting import, and
+                # confirming the dialog would unlink that instead of the
+                # library file. The maintenance path already applies this rule;
+                # the user-facing ADR-05 dialog did not.
+                item["reason"] = "resolved_path_is_a_guess"
             else:
                 try:
                     stat = os.stat(real_path)

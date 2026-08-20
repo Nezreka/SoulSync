@@ -5,7 +5,9 @@ from __future__ import annotations
 import os
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import (
+    JobContext, JobResult, RepairJob, file_path_in_scope, get_scope_file_paths,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.library_reorganize")
@@ -27,6 +29,7 @@ class LibraryReorganizeJob(RepairJob):
     default_settings = {"dry_run": True}
     setting_options = {"dry_run": [True, False]}
     auto_fix = True
+    supports_file_scope = True
 
     def _dry_run(self, context: JobContext) -> bool:
         if not context.config_manager:
@@ -42,10 +45,18 @@ class LibraryReorganizeJob(RepairJob):
 
     @staticmethod
     def _albums(context: JobContext) -> list[dict]:
+        """Albums that own files, narrowed to the run's file scope.
+
+        The scope is derived from the allowlist rather than from an artist
+        name: an unfiltered album query was how "run this for one artist" set
+        the whole library moving. `allowed is None` is library-wide; an empty
+        allowlist scans nothing (base.get_scope_file_paths' fail-closed rule).
+        """
+        allowed = get_scope_file_paths(context)
         conn = context.db._get_connection()
         try:
             rows = conn.execute(
-                """SELECT al.id, al.title, al.legacy_album_id,
+                """SELECT al.id, al.title,
                           al.primary_artist_id AS artist_id,
                           COALESCE(ar.name, 'Unknown Artist') AS artist_name
                      FROM lib2_albums al
@@ -57,22 +68,22 @@ class LibraryReorganizeJob(RepairJob):
                     )
                     ORDER BY al.id"""
             ).fetchall()
-            return [dict(row) for row in rows]
-        finally:
-            conn.close()
-
-    @staticmethod
-    def _track_map(context: JobContext, album_id: int) -> dict[str, int]:
-        conn = context.db._get_connection()
-        try:
-            return {
-                str(row["legacy_track_id"]): int(row["id"])
+            albums = [dict(row) for row in rows]
+            if allowed is None:
+                return albums
+            if not allowed:
+                return []
+            in_scope = {
+                int(row[0])
                 for row in conn.execute(
-                    "SELECT id, legacy_track_id FROM lib2_tracks WHERE album_id=?",
-                    (int(album_id),),
+                    """SELECT DISTINCT t.album_id, f.path
+                         FROM lib2_tracks t
+                         JOIN lib2_track_files f ON f.track_id=t.id
+                        WHERE f.path IS NOT NULL AND f.path<>''"""
                 ).fetchall()
-                if row["legacy_track_id"] is not None
+                if file_path_in_scope(row[1], allowed)
             }
+            return [album for album in albums if int(album["id"]) in in_scope]
         finally:
             conn.close()
 
@@ -94,32 +105,17 @@ class LibraryReorganizeJob(RepairJob):
             if context.check_stop():
                 break
             album_id = int(album["id"])
-            if album.get("legacy_album_id") is None:
-                # Provider-only discography albums do not own files under the
-                # normal importer. If an external writer attached one, make the
-                # unsupported state visible instead of silently dropping it.
-                if context.create_finding:
-                    inserted = context.create_finding(
-                        job_id=self.job_id,
-                        finding_type="reorganize_unavailable",
-                        severity="warning",
-                        entity_type="album",
-                        # T-12: prefixed, because a bare number is read as a
-                        # LEGACY id and resolved through lib2_albums
-                        # .legacy_album_id — which can name a different row.
-                        entity_id=f"lib2:{album_id}",
-                        file_path=None,
-                        title=f'Cannot reorganize: {album["title"]}',
-                        description="The file-owning album has no planner back-reference; re-import it to repair identity.",
-                        details={
-                            "lib2_album_id": album_id,
-                            "library_v2_native": True,
-                            "library_v2": {"album_ids": [album_id]},
-                        },
-                    )
-                    result.findings_created += int(bool(inserted))
-                    result.findings_skipped_dedup += int(not inserted)
-                continue
+            # There is deliberately no `legacy_album_id IS NOT NULL` gate here.
+            # That back-reference is written ONLY by the one-shot upgrade
+            # importer; the post-download catalogue writer (autolink) never
+            # sets it. So every album acquired after the migration -- and every
+            # album on a fresh install -- is lib2-native with a NULL back-ref,
+            # and it does own files (the EXISTS filter in `_albums` proves it).
+            # Gating on it emitted one permanently unfixable `reorganize_
+            # unavailable` warning per album (no fix handler, no UI treatment)
+            # and reorganized nothing, advising a re-import that cannot help.
+            # The bridge validates the album id itself; nothing downstream
+            # consults the legacy back-reference.
             mode = "api"
             try:
                 preview = preview_album_reorganize(
@@ -149,11 +145,22 @@ class LibraryReorganizeJob(RepairJob):
                 and not track.get("unchanged") and track.get("file_exists")
             ]
             if dry_run:
-                lib2_tracks = self._track_map(context, album_id)
                 for track in mismatched:
-                    legacy_track_id = track.get("track_id")
-                    lib2_track_id = lib2_tracks.get(str(legacy_track_id))
-                    if lib2_track_id is None:
+                    # `track_id` is ALREADY the lib2 id: the preview is built
+                    # from `SELECT t.* FROM lib2_tracks t` (core/library_
+                    # reorganize.load_album_and_tracks) and there is no legacy
+                    # hop anywhere in the bridge. It used to be looked up in a
+                    # map keyed by `legacy_track_id`, which missed every time
+                    # -- zero findings, one error per mis-pathed track -- and,
+                    # where a lib2 id happened to equal some other track's
+                    # legacy id, silently created the finding against the WRONG
+                    # track and baked that id into its details permanently.
+                    try:
+                        lib2_track_id = int(track.get("track_id"))
+                    except (TypeError, ValueError):
+                        result.errors += 1
+                        continue
+                    if lib2_track_id <= 0:
                         result.errors += 1
                         continue
                     current_path = track.get("current_path") or ""
@@ -175,7 +182,6 @@ class LibraryReorganizeJob(RepairJob):
                             "album_id": str(album_id),
                             "lib2_album_id": album_id,
                             "lib2_track_id": lib2_track_id,
-                            "legacy_track_id": legacy_track_id,
                             "source": preview.get("source"),
                             "library_v2_native": True,
                             "library_v2": {

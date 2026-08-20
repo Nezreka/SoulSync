@@ -233,11 +233,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     Either omitted means that endpoint reports no in-flight status.
     """
 
-    def _enabled() -> bool:
-        from core.library2.feature import library_v2_enabled
-
-        return library_v2_enabled(config_get=config_get)
-
     def _page_allowed() -> bool:
         if profile_page_allowed_getter is None:
             return True
@@ -248,8 +243,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return False
 
     def _guard():
-        if not _enabled():
-            return jsonify({"success": False, "error": "Library v2 is disabled"}), 403
+        # There is no "is Library v2 enabled" check: it always is
+        # (core/library2/feature.py returns True unconditionally), so the 403
+        # that stood here was unreachable and no client ever handled its shape.
+        # The PROFILE permission 403 below is the live one.
         if not _page_allowed():
             return jsonify({
                 "success": False,
@@ -356,7 +353,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # actually do.
         return jsonify({
             "success": True,
-            "enabled": _enabled() and _page_allowed(),
+            # Library v2 is always enabled; what actually varies is whether
+            # THIS profile may see the page.
+            "enabled": _page_allowed(),
             "can_write": _profile() == ADMIN_PROFILE_ID,
         })
 
@@ -1513,13 +1512,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 from core.library2.artist_aliases import resolve_alias_group
                 group = resolve_alias_group(conn, artist_id) or [artist_id]
                 marks = ",".join("?" for _ in group)
+                # UNION, not `OR` across two joined tables. An `OR` whose
+                # branches live in different tables defeats both indexes, so
+                # SQLite fell back to scanning lib2_tracks in full -- 108 ms at
+                # 320k tracks where each branch on its own is an index seek
+                # (perf-audit PERF-08). Each half is now separately indexable
+                # and UNION does the de-duplication DISTINCT used to.
                 rows = conn.execute(
-                    f"""SELECT DISTINCT t.id, t.title, t.monitored
+                    f"""SELECT t.id, t.title, t.monitored
                           FROM lib2_tracks t
-                          LEFT JOIN lib2_track_artists ta ON ta.track_id = t.id
-                          LEFT JOIN lib2_albums al ON al.id = t.album_id
+                          JOIN lib2_track_artists ta ON ta.track_id = t.id
                          WHERE ta.artist_id IN ({marks})
-                            OR al.primary_artist_id IN ({marks})""",
+                        UNION
+                        SELECT t.id, t.title, t.monitored
+                          FROM lib2_tracks t
+                          JOIN lib2_albums al ON al.id = t.album_id
+                         WHERE al.primary_artist_id IN ({marks})""",
                     tuple(group) * 2).fetchall()
                 # A monitored row wins over an unmonitored duplicate of the
                 # same recording — the question is "is this wanted", not

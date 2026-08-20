@@ -619,15 +619,34 @@ def _partial_album_rows(conn, *, cached: Optional[bool] = None) -> List[Any]:
     ).fetchall()
 
 
-def _precache_max_workers(config_manager, default: int = 3) -> int:
-    """Shared pool-size knob with ``core.auto_import_worker`` — same config
-    key, same default, so one setting controls all background lib2 workers."""
+def _precache_max_workers(config_manager, default: int = 8) -> int:
+    """Pool size for the metadata precache stages.
+
+    This used to read ``auto_import.max_workers`` -- the knob that also governs
+    DOWNLOAD concurrency -- with a default of 3. That conflation is why nobody
+    ever raised it: three workers making one provider call per uncached album
+    is `26,310 x 0.5 s / 3` = ~73 minutes on a large migrated library, which is
+    the reported "grinds for 30+ minutes", and it was the DEFAULT rather than a
+    pathological case (perf-audit PERF-12). Raising it meant also raising how
+    many songs download at once, which is a different resource entirely.
+
+    So it gets its own key. ``library_v2.precache_workers`` wins if set;
+    otherwise the shared download knob is honoured only when the user raised it
+    above this default, so an explicit high setting is never quietly lowered.
+    """
     if config_manager is None:
         return default
     try:
-        return max(1, int(config_manager.get("auto_import.max_workers", default)))
+        explicit = config_manager.get("library_v2.precache_workers", None)
+        if explicit is not None:
+            return max(1, int(explicit))
+    except Exception as exc:  # noqa: BLE001 - a bad knob must not stop a precache
+        logger.debug("precache_workers read failed, using default: %s", exc)
+    try:
+        shared = int(config_manager.get("auto_import.max_workers", default))
     except Exception:  # noqa: BLE001
         return default
+    return max(1, default, shared)
 
 
 def _resolve_stage(database, config_manager, album_ids: List[int], *,

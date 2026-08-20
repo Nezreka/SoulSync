@@ -1,6 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
+import { useModalA11y } from '@/components/dialog/use-modal-a11y';
+
 import {
   fetchLibraryV2JobStatus,
   fetchLibraryV2TagPreview,
@@ -48,6 +50,7 @@ export function RetagModal({
   title: string;
   onClose: () => void;
 }) {
+  const a11yRef = useModalA11y<HTMLDivElement>(onClose);
   const queryClient = useQueryClient();
   const previewQuery = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'tag-preview', entity, id],
@@ -140,6 +143,8 @@ export function RetagModal({
     <div className={styles.modalBackdrop} role="presentation" onClick={onClose}>
       <div
         className={`${styles.modal} ${styles.modalWide}`}
+        ref={a11yRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}

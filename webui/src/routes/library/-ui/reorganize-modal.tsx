@@ -1,6 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
+import { useModalA11y } from '@/components/dialog/use-modal-a11y';
+
 import type { LibraryV2ReorganizeQueueItem } from '../-library-v2.types';
 
 import {
@@ -155,6 +157,7 @@ export function AlbumReorganizeModal({
   albumTitle: string;
   onClose: () => void;
 }) {
+  const a11yRef = useModalA11y<HTMLDivElement>(onClose);
   const queryClient = useQueryClient();
   const [source, setSource] = useState<string | null>(null);
   const [mode, setMode] = useState<'api' | 'tags'>('api');
@@ -204,6 +207,8 @@ export function AlbumReorganizeModal({
     <div className={styles.modalBackdrop} role="presentation" onClick={onClose}>
       <div
         className={`${styles.modal} ${styles.modalWide}`}
+        ref={a11yRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}
@@ -365,6 +370,7 @@ export function ArtistReorganizeAllModal({
   artistName: string;
   onClose: () => void;
 }) {
+  const a11yRef = useModalA11y<HTMLDivElement>(onClose);
   const queryClient = useQueryClient();
   const [source, setSource] = useState<string | null>(null);
   const [mode, setMode] = useState<'api' | 'tags'>('api');
@@ -402,6 +408,8 @@ export function ArtistReorganizeAllModal({
     <div className={styles.modalBackdrop} role="presentation" onClick={onClose}>
       <div
         className={styles.modal}
+        ref={a11yRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}

@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { useModalA11y } from '@/components/dialog/use-modal-a11y';
+
 import type { LibraryV2QualityProfile, LibraryV2QualityProfileSource } from '../-library-v2.types';
 
 import {
@@ -145,10 +147,13 @@ export function QualityProfileModal({
   title: string;
   onClose: () => void;
 }) {
+  const a11yRef = useModalA11y<HTMLDivElement>(onClose);
   return (
     <div className={styles.modalBackdrop} role="presentation" onClick={onClose}>
       <div
         className={styles.modal}
+        ref={a11yRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}

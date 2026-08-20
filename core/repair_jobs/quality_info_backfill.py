@@ -96,8 +96,6 @@ class QualityInfoBackfillJob(RepairJob):
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
-        from core.library2.feature import library_v2_enabled
-        library_v2_enabled(context.config_manager)
 
         from core.library2.scan import rescan_files
 

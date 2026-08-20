@@ -9,7 +9,7 @@ from core.library2.maintenance_subjects import (
 from collections import defaultdict
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, scoped_file_subjects
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.live_commentary_cleaner")
@@ -99,6 +99,7 @@ class LiveCommentaryCleanerJob(RepairJob):
         'scope': 'tracks',  # 'tracks' or 'albums'
     }
     auto_fix = False
+    supports_file_scope = True
 
     def _get_settings(self, context: JobContext) -> dict:
         if not context.config_manager:
@@ -127,7 +128,7 @@ class LiveCommentaryCleanerJob(RepairJob):
         if not enabled_types:
             return result
         scan_album_titles = settings.get("scan_album_titles", True)
-        subjects = active_file_subjects(context.db, context.config_manager)
+        subjects = scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager))
         for subject in subjects:
             if context.check_stop():
                 return result

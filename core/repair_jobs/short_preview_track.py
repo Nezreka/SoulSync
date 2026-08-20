@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, scoped_file_subjects
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.short_preview")
@@ -80,6 +80,7 @@ class ShortPreviewTrackJob(RepairJob):
     }
     setting_options: Dict[str, list] = {}
     auto_fix = False
+    supports_file_scope = True
 
     def _setting_bool(self, context: JobContext, key: str, default: bool) -> bool:
         cm = getattr(context, "config_manager", None)
@@ -135,9 +136,9 @@ class ShortPreviewTrackJob(RepairJob):
         try:
             from core.library2.maintenance_subjects import active_file_subjects
 
-            for subject in active_file_subjects(
+            for subject in scoped_file_subjects(context, active_file_subjects(
                 context.db, context.config_manager,
-            ):
+            )):
                 duration = subject.get("duration") or 0
                 if duration > max_dur_ms or (duration <= 0 and not verify_zero):
                     continue
@@ -312,9 +313,9 @@ class ShortPreviewTrackJob(RepairJob):
             from core.library2.maintenance_subjects import active_file_subjects
 
             return sum(
-                1 for subject in active_file_subjects(
+                1 for subject in scoped_file_subjects(context, active_file_subjects(
                     context.db, context.config_manager,
-                ) if int(subject.get("duration") or 0) <= max_dur_ms
+                )) if int(subject.get("duration") or 0) <= max_dur_ms
                 and (verify_zero or int(subject.get("duration") or 0) > 0)
             )
         except Exception:

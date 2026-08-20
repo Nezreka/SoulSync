@@ -168,8 +168,14 @@ class TestTheBatchFirstQueue:
 class TestTheBatchChildren:
     def test_only_unattempted_children_are_offered(self, spotify):
         conn = spotify.db._get_connection()
-        conn.execute("INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
-                     "VALUES(1,'Creatures','album')")
+        album = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
+            "VALUES(1,'Creatures','album')").lastrowid
+        # The album needs a track (and, via own_every_track, a file): the batch
+        # queue offers only the OWNED library, so a bare album row is a
+        # discography entry the worker must not spend API budget on.
+        conn.execute("INSERT INTO lib2_tracks(album_id,title,track_number) "
+                     "VALUES(?,'Ghosts',1)", (album,))
         conn.commit()
         conn.close()
         spotify._mark_status('album', 1, 'matched')
@@ -185,8 +191,11 @@ class TestTheBatchChildren:
 
     def test_a_failed_album_batch_records_every_pending_child(self, spotify):
         conn = spotify.db._get_connection()
-        conn.execute("INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
-                     "VALUES(1,'Creatures','album')")
+        album = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
+            "VALUES(1,'Creatures','album')").lastrowid
+        conn.execute("INSERT INTO lib2_tracks(album_id,title,track_number) "
+                     "VALUES(?,'Ghosts',1)", (album,))
         conn.commit()
         conn.close()
 

@@ -189,9 +189,14 @@ def materialize_wishlist_intent(
             return None
         if int(profile_id) != ADMIN_PROFILE_ID:
             return None
-        from core.settings import config_manager
-        from core.library2.feature import library_v2_enabled
-        library_v2_enabled(config_manager)
+        # The `library_v2_enabled(config_manager)` call that stood here was a
+        # side-effect-only no-op: the function returns True unconditionally
+        # (the cutover is not reversible through config) and its one-time
+        # deprecation warning only ever fires when the key is set FALSY --
+        # which on a default install it never is, so the flag stays unset
+        # and this paid for a config read forever, on a path that runs per
+        # completed download / per wishlist item. One call at boot
+        # (core/library2/bootstrap.py) delivers 100% of the warning.
         from database.music_database import get_database
         db = get_database()
         conn = db._get_connection()

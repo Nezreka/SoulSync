@@ -433,12 +433,67 @@ def retry_failed(conn) -> int:
 
 
 def prune_done(conn, *, keep: int = 500) -> int:
-    """Trim old completed rows so the table can't grow unbounded. Caller commits."""
+    """Trim old completed rows so the table can't grow unbounded. Caller commits.
+
+    A ``done`` row is never pruned while a NON-TERMINAL row (``pending`` /
+    ``failed``) with an older id exists for the same entity. ``_superseded_ids``
+    decides "this stuck row is obsolete" by finding a later row for the same
+    entity key -- including a ``done`` one -- so pruning that later row destroys
+    the only evidence of the supersede. Row 100 = wishlist_add(T) failed; row
+    101 = wishlist_remove(T) succeeded; prune 101, hit "Retry failed", and the
+    drain replays 100 and resurrects the entry the user removed. That is exactly
+    the dd28-13 failure the supersede logic exists to prevent.
+    """
+    # The entity key lives inside the JSON payload, so the "is this row still
+    # load-bearing?" question is answered in Python rather than in the DELETE.
+    protected = _ids_superseding_stuck_rows(conn)
+    exclude = ""
+    params: list = [keep]
+    if protected:
+        exclude = f" AND id NOT IN ({','.join('?' for _ in protected)})"
+        params.extend(sorted(protected))
     cur = conn.execute(
         "DELETE FROM lib2_mirror_outbox WHERE status='done' AND id NOT IN ("
-        "SELECT id FROM lib2_mirror_outbox WHERE status='done' ORDER BY id DESC LIMIT ?)",
-        (keep,))
+        "SELECT id FROM lib2_mirror_outbox WHERE status='done' "
+        "ORDER BY id DESC LIMIT ?)" + exclude,
+        params)
     return cur.rowcount
+
+
+def _ids_superseding_stuck_rows(conn) -> set:
+    """Ids of rows that are the reason some older non-terminal row is obsolete.
+
+    Deleting one of these silently re-arms it: the next ``drain`` re-derives
+    "is row X superseded?" from history, finds nothing later for that entity,
+    and executes it.
+    """
+    stuck: Dict[tuple, int] = {}
+    for row in conn.execute(
+        "SELECT id, op, payload FROM lib2_mirror_outbox "
+        "WHERE status IN ('pending','failed')"
+    ):
+        try:
+            key = _entity_key(row["op"], json.loads(row["payload"] or "{}"))
+        except (TypeError, ValueError):
+            continue
+        if key is None:
+            continue
+        stuck[key] = min(stuck.get(key, int(row["id"])), int(row["id"]))
+    if not stuck:
+        return set()
+
+    protected: set = set()
+    for row in conn.execute(
+        "SELECT id, op, payload FROM lib2_mirror_outbox WHERE id > ?",
+        (min(stuck.values()),),
+    ):
+        try:
+            key = _entity_key(row["op"], json.loads(row["payload"] or "{}"))
+        except (TypeError, ValueError):
+            continue
+        if key is not None and key in stuck and int(row["id"]) > stuck[key]:
+            protected.add(int(row["id"]))
+    return protected
 
 
 __all__ = [

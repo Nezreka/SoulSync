@@ -345,13 +345,26 @@
   stroke: none;
 }
 
+/* NOT absolutely positioned.
+ *
+ * It used to be `position: absolute; top: calc(100% + 4px)`, which put it
+ * outside the row box -- and the track table's wrapper sets
+ * `overflow-x: hidden`. Per CSS, an `overflow` that is not `visible` on ONE
+ * axis computes the other to `auto`, so both axes clip: the message rendered,
+ * screen readers announced it (role="alert"), and a sighted user saw nothing
+ * at all. A monitor toggle that silently fails is exactly the case this text
+ * exists for (frontend-audit FE-02).
+ *
+ * In flow it cannot be clipped by an ancestor, at the cost of nudging the row
+ * wider on the rare occasion it appears. The full error stays in `title`. */
 .monitorError {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 4px);
-  right: 0;
-  width: max-content;
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 6px;
   max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 5px 7px;
   border: 1px solid rgba(239, 68, 68, 0.45);
   border-radius: 6px;

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 
+import { useModalA11y } from '@/components/dialog/use-modal-a11y';
+
 import type { ReassignAlbum, ReassignArtist, ReassignPreview, ReassignSource } from './reassign';
 
 import {
@@ -48,6 +50,17 @@ const STEP_LABELS: Record<Step, string> = {
   preview: 'Review',
 };
 
+/** A remote URL is interpolated into a CSS `url('...')` string, so a quote or
+ *  a backslash in it would terminate the literal early and let the rest be read
+ *  as CSS. Provider image URLs are third-party data (frontend-audit FE-10).
+ *  `CSS.escape` is the wrong tool -- it escapes identifiers, not URL strings. */
+function cssUrl(url: string): string {
+  return `url('${url
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/[\n\r]/g, '')}')`;
+}
+
 export function ReassignModal({
   albumId,
   albumTitle,
@@ -64,6 +77,7 @@ export function ReassignModal({
   onClose: () => void;
   onApplied?: () => void;
 }) {
+  const a11yRef = useModalA11y<HTMLDivElement>(onClose);
   const [sources, setSources] = useState<ReassignSource[] | null>(null);
   const [source, setSource] = useState<string | null>(null);
   const [step, setStep] = useState<Step>('artist');
@@ -174,13 +188,21 @@ export function ReassignModal({
     step === 'preview' && !busy && Boolean(preview?.success) && Boolean(preview?.mapped_count);
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="reid-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay" role="presentation" onClick={onClose}>
+      <div
+        ref={a11yRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Reassign album to a different artist"
+        className="reid-modal"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="reid-hero">
           <div className="reid-hero-decor">
             <div
               className="reid-hero-bg"
-              style={imageUrl ? { backgroundImage: `url('${imageUrl}')` } : undefined}
+              style={imageUrl ? { backgroundImage: cssUrl(imageUrl) } : undefined}
             />
             <div className="reid-hero-overlay" />
           </div>
@@ -190,7 +212,7 @@ export function ReassignModal({
           <div className="reid-hero-content">
             <div
               className={`reid-hero-art${imageUrl ? '' : ' empty'}`}
-              style={imageUrl ? { backgroundImage: `url('${imageUrl}')` } : undefined}
+              style={imageUrl ? { backgroundImage: cssUrl(imageUrl) } : undefined}
             />
             <div className="reid-hero-meta">
               <div className="reid-hero-eyebrow">Reassign album</div>
@@ -287,9 +309,7 @@ export function ReassignModal({
                 <div key={row.id} className="reid-result" onClick={() => void pickArtist(row)}>
                   <div
                     className={`reid-result-art${row.image_url ? '' : ' empty'}`}
-                    style={
-                      row.image_url ? { backgroundImage: `url('${row.image_url}')` } : undefined
-                    }
+                    style={row.image_url ? { backgroundImage: cssUrl(row.image_url) } : undefined}
                   />
                   <div className="reid-result-info">
                     <div className="reid-result-title">{row.name}</div>
@@ -320,9 +340,7 @@ export function ReassignModal({
                 <div key={row.id} className="reid-result" onClick={() => void pickAlbum(row)}>
                   <div
                     className={`reid-result-art${row.image_url ? '' : ' empty'}`}
-                    style={
-                      row.image_url ? { backgroundImage: `url('${row.image_url}')` } : undefined
-                    }
+                    style={row.image_url ? { backgroundImage: cssUrl(row.image_url) } : undefined}
                   />
                   <div className="reid-result-info">
                     <div className="reid-result-title">{row.name}</div>

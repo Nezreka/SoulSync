@@ -253,13 +253,27 @@ def test_the_existing_orphan_backlog_is_cleared_once(tmp_path):
         ensure_library_v2_schema(c)
         _settled(c)
         ensure_provider_attempt_schema(c.cursor())
-        _artist(c, "Alive")
+        # Owned, because progress_breakdown counts the universe the queue
+        # actually works on -- a bare artist row with no files behind it is
+        # a discography entry no worker will ever enrich.
+        _owned_artist(c, "Alive")
         c.execute("DROP TRIGGER trg_lib2_artists_delete_provider_attempts")
         for orphan in (900, 901):
             record_attempt(c, entity_type="artist", entity_id=orphan,
                            service="spotify", status="matched")
 
-        assert progress_breakdown(c, "spotify", entity_types=("artist",))["artists"]["percent"] == 100
+        # The backlog is real rows pointing at artists that no longer exist.
+        # (It used to be visible through progress_breakdown as a 100% bar for a
+        # library with one unenriched artist. That symptom is gone on its own:
+        # the breakdown now joins attempts through the entity table and scopes
+        # both halves to the owned library, so an orphan cannot be counted as
+        # progress. The rows themselves still have to be purged, which is what
+        # this test is actually about.)
+        assert c.execute(
+            "SELECT COUNT(*) FROM lib2_provider_attempts").fetchone()[0] == 2
+        assert progress_breakdown(c, "spotify", entity_types=("artist",))["artists"] == {
+            "matched": 0, "total": 1, "percent": 0,
+        }
 
         ensure_provider_attempt_schema(c.cursor())
 

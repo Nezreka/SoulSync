@@ -286,3 +286,69 @@ class TestTheChildrenOfABatch:
 
         assert attempt_state(conn, entity_type="album", entity_id=settled
                              )["spotify"]["status"] == "matched"
+
+
+class TestTheBatchPathRespectsOwnership:
+    """The single-item path was owned-filtered; the batch path was not.
+
+    v2 keeps a watched artist's discography and the wishlist in the same tables
+    as the owned library, so without the filter the batch queue handed the
+    worker every provider-only release: API budget spent matching things the
+    user does not own, which then became `matched` parents and seeded
+    track_batch work of their own -- while the UI, reading the owned-filtered
+    `pending_count`, showed 0 pending / 100%.
+    """
+
+    def test_pending_children_offers_only_owned_albums(self, conn):
+        artist = _artist(conn, provider_id="sp-a")
+        owned = _album(conn, artist, title="Owned")
+        for n in range(3):
+            _album(conn, artist, title=f"Discography {n}", owned=False)
+
+        children = pending_children(
+            conn, "spotify", "artist", artist, child="album")
+
+        assert [c["title"] for c in children] == ["Owned"]
+
+    def test_a_parent_whose_only_pending_children_are_unowned_is_not_batched(
+            self, conn):
+        artist = _artist(conn, provider_id="sp-a")
+        owned = _album(conn, artist, title="Owned")
+        _settle(conn, owned)
+        _matched(conn, "artist", artist)
+        for n in range(3):
+            _album(conn, artist, title=f"Discography {n}", owned=False)
+
+        # Nothing owned is left to do, so the queue must be empty rather than
+        # offering an album_batch of the three discography rows.
+        assert next_batch_pending(conn, "spotify") is None
+
+    def test_pending_children_offers_only_owned_tracks(self, conn):
+        artist = _artist(conn, provider_id="sp-a")
+        album = _album(conn, artist, provider_id="sp-al", owned=False)
+        owned = _track(conn, album, title="Owned Track", number=1)
+        # A track with no file row is catalogued but not owned.
+        conn.execute(
+            "INSERT INTO lib2_tracks(album_id,title,track_number) VALUES(?,?,?)",
+            (album, "Wishlist Track", 2))
+
+        children = pending_children(
+            conn, "spotify", "album", album, child="track")
+
+        assert [c["title"] for c in children] == ["Owned Track"]
+
+
+class TestProgressCountsTheSameUniverseTheQueueWorksOn:
+    def test_discography_rows_do_not_inflate_the_denominator(self, conn):
+        from core.library2.worker_queue import progress_breakdown
+
+        artist = _artist(conn, provider_id="sp-a")
+        owned = _album(conn, artist, title="Owned")
+        for n in range(4):
+            _album(conn, artist, title=f"Discography {n}", owned=False)
+        _matched(conn, "album", owned)
+
+        albums = progress_breakdown(conn, "spotify")["albums"]
+
+        # 1 owned album, matched. A total of 5 could never reach 100%.
+        assert albums == {"matched": 1, "total": 1, "percent": 100}

@@ -36,6 +36,10 @@ logger = get_logger("repair_worker")
 # bridge is drained. Small enough that a process death costs at most this many
 # rescans/history entries, large enough not to open a connection per file.
 _CHANGE_SYNC_BATCH = 25
+#: How many flushes a failing change is retried across before it is dropped.
+_CHANGE_SYNC_MAX_ATTEMPTS = 3
+#: A claim older than this is treated as abandoned (process died mid-fix).
+_FIX_CLAIM_TIMEOUT_MINUTES = 30
 
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
 
@@ -295,6 +299,7 @@ NATIVE_SUBJECT_FINDING_TYPES = frozenset({
     'metadata_gap',
     'missing_cover_art',
     'genre_enrichment',
+    'path_mismatch',
     'short_preview_track',
     'track_number_mismatch',
     'unwanted_content',
@@ -1106,18 +1111,25 @@ class RepairWorker:
                 return
             batch = list(reported_changes)
             reported_changes.clear()
-            try:
-                from core.library2.maintenance_sync import sync_repair_change
+            from core.library2.maintenance_sync import sync_repair_change
 
-                for change in batch:
-                    dedup_key = (
-                        change.get('finding_type'), change.get('action'),
-                        change.get('entity_type'), str(change.get('entity_id')),
-                        str(change.get('file_path')),
-                    )
-                    if dedup_key in seen_changes:
-                        continue
-                    seen_changes.add(dedup_key)
+            for change in batch:
+                dedup_key = (
+                    change.get('finding_type'), change.get('action'),
+                    change.get('entity_type'), str(change.get('entity_id')),
+                    str(change.get('file_path')),
+                )
+                if dedup_key in seen_changes:
+                    continue
+                # The try/except is INSIDE the loop on purpose. Wrapping the
+                # whole loop meant one transient failure -- `database is
+                # locked` being the obvious one -- aborted every remaining
+                # change in the batch. Their files had already been mutated on
+                # disk, but nothing rescanned them, invalidated their artwork
+                # or wrote their history, the buffer was already cleared so
+                # there was no retry anchor, and the run reported exactly ONE
+                # error for all of them.
+                try:
                     sync_repair_change(
                         self.db,
                         self._config_manager,
@@ -1130,12 +1142,25 @@ class RepairWorker:
                         details=change.get('details'),
                         result=change.get('result'),
                     )
-            except Exception as e:
-                logger.error(
-                    "Library-v2 post-job sync failed for %s: %s", job_id, e,
-                    exc_info=True,
-                )
-                sync_errors[0] += 1
+                except Exception as e:
+                    logger.error(
+                        "Library-v2 post-job sync failed for %s (%s %s): %s",
+                        job_id, change.get('finding_type'),
+                        change.get('entity_id'), e, exc_info=True,
+                    )
+                    sync_errors[0] += 1
+                    # Hand it back so the next flush retries it -- not marked
+                    # seen, so the retry is not deduped away. Bounded, because
+                    # a permanently broken change would otherwise be retried
+                    # (and logged with a traceback) on every later flush.
+                    attempts = int(change.get('_sync_attempts') or 0) + 1
+                    if attempts < _CHANGE_SYNC_MAX_ATTEMPTS:
+                        change['_sync_attempts'] = attempts
+                        reported_changes.append(change)
+                    else:
+                        seen_changes.add(dedup_key)
+                    continue
+                seen_changes.add(dedup_key)
 
         def _report_change(**change):
             """Collect successful in-scan mutations for the post-job bridge.
@@ -1254,6 +1279,11 @@ class RepairWorker:
         ``scope`` (e.g. ``{'artist_name': 'Drake'}``) narrows the run for jobs
         that declare ``supports_artist_scope``; others ignore it and run
         library-wide as always.
+
+        A ``file_paths`` scope is REFUSED (``ValueError``) for a job that does
+        not declare ``supports_file_scope``. Silently widening it to the whole
+        library is how "run Library Reorganize for this artist" came to move
+        every file in the library while the API answered ``scope_files: 180``.
         """
         from core.repair_jobs import JOB_ID_MIGRATIONS
 
@@ -1262,6 +1292,15 @@ class RepairWorker:
         if job_id not in self._jobs:
             logger.warning("Unknown job: %s", job_id)
             return False
+
+        if scope and "file_paths" in scope:
+            job = self._jobs[job_id]
+            if not getattr(job, "supports_file_scope", False):
+                raise ValueError(
+                    f"{getattr(job, 'display_name', job_id)} cannot be scoped to "
+                    "a single artist's files — it would run library-wide. Run it "
+                    "from Library Health & Repair instead."
+                )
 
         with self._force_run_lock:
             if scope:
@@ -1771,15 +1810,40 @@ class RepairWorker:
             self.transfer_folder = self._resolve_path(raw)
 
         conn = None
+        claimed = False
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
+            # Claim the finding ATOMICALLY before running its handler. Reading
+            # the row as pending and only transitioning it after the handler
+            # returned left a window in which a background "Fix All" and a
+            # user's single Fix click could both execute the same fix -- two
+            # ffmpeg transcodes writing one output path, and a duplicate file
+            # row from the SELECT/INSERT race in _link_new_output_file.
+            # `status` deliberately stays 'pending' (see the fix_claimed_at
+            # migration); a claim older than the timeout is treated as
+            # abandoned so a crash mid-fix cannot wedge the row forever.
+            cursor.execute(
+                """UPDATE repair_findings
+                      SET fix_claimed_at = CURRENT_TIMESTAMP
+                    WHERE id = ? AND status = 'pending'
+                      AND (fix_claimed_at IS NULL
+                           OR fix_claimed_at < datetime('now', ?))""",
+                (finding_id, f'-{_FIX_CLAIM_TIMEOUT_MINUTES} minutes'),
+            )
+            if cursor.rowcount != 1:
+                conn.commit()
+                return {
+                    'success': False,
+                    'error': 'Finding not found, already resolved, or being fixed',
+                }
             cursor.execute("""
                 SELECT id, job_id, finding_type, entity_type, entity_id,
                        file_path, details_json
-                FROM repair_findings WHERE id = ? AND status = 'pending'
+                FROM repair_findings WHERE id = ?
             """, (finding_id,))
             row = cursor.fetchone()
+            conn.commit()
             if not row:
                 return {'success': False, 'error': 'Finding not found or already resolved'}
 
@@ -1787,6 +1851,7 @@ class RepairWorker:
             details = json.loads(details_json) if details_json else {}
             conn.close()
             conn = None
+            claimed = True
 
             # Pass fix_action through to handler via details
             if fix_action:
@@ -1866,6 +1931,28 @@ class RepairWorker:
         except Exception as e:
             logger.error("Error fixing finding %s: %s", finding_id, e, exc_info=True)
             return {'success': False, 'error': str(e)}
+        finally:
+            if conn:
+                conn.close()
+            # Release the claim on every path that leaves the row pending --
+            # a failed fix, a sync error, or an exception. resolve_finding
+            # already moved the row off `pending` in the success paths, so
+            # clearing it there is a harmless no-op rather than a special case.
+            if claimed:
+                self._release_fix_claim(finding_id)
+
+    def _release_fix_claim(self, finding_id: int) -> None:
+        """Clear the in-progress marker set by :meth:`fix_finding`."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            conn.execute(
+                "UPDATE repair_findings SET fix_claimed_at = NULL WHERE id = ?",
+                (finding_id,),
+            )
+            conn.commit()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Could not release fix claim on %s: %s", finding_id, e)
         finally:
             if conn:
                 conn.close()
@@ -4051,6 +4138,15 @@ class RepairWorker:
 
     def _fix_path_mismatch(self, entity_type, entity_id, file_path, details):
         """Move a file from its current location to the expected template path."""
+        # A `path_mismatch` names a catalogue row, so it earns the same
+        # stale-subject refusal the other ten catalogue handlers apply. Without
+        # it, a finding persisted before the T-12 prefixing carried a bare
+        # integer that this handler read as a native id and the sync layer read
+        # as a legacy back-reference -- two different tracks.
+        stale = _stale_legacy_subject(entity_id)
+        if stale:
+            return stale
+
         rel_from = details.get('from', '')
         rel_to = details.get('to', '')
         if not rel_from or not rel_to:
@@ -4138,8 +4234,14 @@ class RepairWorker:
                 lib2_track_id = details.get('lib2_track_id')
                 if lib2_track_id is None:
                     lib2_track_id = _lib2_id(entity_id)
-                if lib2_track_id is None and entity_type == 'track':
-                    lib2_track_id = entity_id
+                # A BARE integer is deliberately NOT accepted as a lib2 id.
+                # `_stale_legacy_subject` and `maintenance_sync._legacy_backref
+                # _ids` both read one as a legacy back-reference (T-12), so
+                # taking it as a native id here re-pointed one track's file
+                # onto a DIFFERENT track's row while the sync layer recorded
+                # the change against a third -- a split-brain write. Such a
+                # finding is refused above instead, and the next scan raises it
+                # again against a `lib2:<id>` subject.
                 try:
                     lib2_track_id = int(lib2_track_id) if lib2_track_id is not None else None
                 except (TypeError, ValueError):

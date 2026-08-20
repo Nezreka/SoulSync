@@ -125,6 +125,10 @@ def list_missing(conn: Any, *, search: str = "", page: int = 1, limit: int = 75,
     return [_row_dict(r) for r in rows], int(total)
 
 
+#: Candidate rows held in memory at once while evaluating upgrade candidacy.
+_EVALUATION_CHUNK = 2000
+
+
 def list_cutoff_unmet(conn: Any, *, search: str = "", page: int = 1, limit: int = 75,
                       profile_id: int = ADMIN_PROFILE_ID) -> Tuple[List[Dict[str, Any]], int]:
     """Wanted tracks with a file that doesn't meet their quality profile's
@@ -146,57 +150,63 @@ def list_cutoff_unmet(conn: Any, *, search: str = "", page: int = 1, limit: int 
     )
     params: Dict[str, Any] = {"profile_id": int(profile_id), **like_params}
 
-    candidates = conn.execute(
+    # `evaluate_file` genuinely cannot run in SQL, so every wanted+owned track
+    # has to be looked at -- but they must not all be RESIDENT at once. This
+    # used to `fetchall()` the whole library and then hand every id to
+    # `primary_file_rows` in one `IN (...)`: 36 MB of transient Python objects
+    # at 14k tracks, extrapolating to ~800 MB per concurrent request at 320k,
+    # on top of the bind-variable ceiling that made it a hard 500 (PERF-02).
+    #
+    # The cursor is walked in chunks instead. Peak memory is one chunk plus the
+    # SURVIVORS, and survivors are by definition the upgrade candidates -- a
+    # small fraction of a library, and the only thing `total` needs.
+    cursor = conn.execute(
         f"""{_ROW_SELECT}
         {_ROW_FROM}
         {where}
         ORDER BY ar.sort_name COLLATE NOCASE, ar.name COLLATE NOCASE,
                  al.title COLLATE NOCASE, t.disc_number, t.track_number""",
         params,
-    ).fetchall()
-    if not candidates:
-        return [], 0
+    )
 
-    track_ids = [int(r["track_id"]) for r in candidates]
-    files = primary_file_rows(conn, track_ids)
-
-    profile_ids = sorted({
-        int(r["effective_profile_id"]) for r in candidates
-        if r["effective_profile_id"] is not None
-    })
     profile_rows: Dict[int, Dict[str, Any]] = {}
-    if profile_ids:
-        marks = ",".join("?" for _ in profile_ids)
-        for prow in conn.execute(
-            f"SELECT * FROM quality_profiles WHERE id IN ({marks})", profile_ids
-        ):
-            profile_rows[int(prow["id"])] = dict(prow)
-
     targets_cache: Dict[Any, Tuple[List[Any], str, int]] = {}
 
     def _targets_for(pid: Any) -> Tuple[List[Any], str, int]:
         if pid not in targets_cache:
+            if pid is not None and pid not in profile_rows:
+                prow = conn.execute(
+                    "SELECT * FROM quality_profiles WHERE id=?", (int(pid),)
+                ).fetchone()
+                if prow is not None:
+                    profile_rows[int(pid)] = dict(prow)
             targets_cache[pid] = profile_targets(profile_rows.get(pid))
         return targets_cache[pid]
 
     unmet: List[Dict[str, Any]] = []
-    for row in candidates:
-        pid = int(row["effective_profile_id"]) if row["effective_profile_id"] is not None else None
-        targets, policy, cutoff_index = _targets_for(pid)
-        file_row = files.get(int(row["track_id"]))
-        ev = evaluate_file(file_row, targets, policy, cutoff_index)
-        if ev["upgrade_candidate"] is not True:
-            continue
-        entry = _row_dict(row)
-        entry["meets_profile"] = ev["meets_profile"]
-        entry["file"] = {
-            "format": file_row.get("format") if file_row else None,
-            "bitrate": file_row.get("bitrate") if file_row else None,
-            "sample_rate": file_row.get("sample_rate") if file_row else None,
-            "bit_depth": file_row.get("bit_depth") if file_row else None,
-            "quality_tier": file_row.get("quality_tier") if file_row else None,
-        }
-        unmet.append(entry)
+    while True:
+        chunk = cursor.fetchmany(_EVALUATION_CHUNK)
+        if not chunk:
+            break
+        files = primary_file_rows(conn, [int(r["track_id"]) for r in chunk])
+        for row in chunk:
+            pid = (int(row["effective_profile_id"])
+                   if row["effective_profile_id"] is not None else None)
+            targets, policy, cutoff_index = _targets_for(pid)
+            file_row = files.get(int(row["track_id"]))
+            ev = evaluate_file(file_row, targets, policy, cutoff_index)
+            if ev["upgrade_candidate"] is not True:
+                continue
+            entry = _row_dict(row)
+            entry["meets_profile"] = ev["meets_profile"]
+            entry["file"] = {
+                "format": file_row.get("format") if file_row else None,
+                "bitrate": file_row.get("bitrate") if file_row else None,
+                "sample_rate": file_row.get("sample_rate") if file_row else None,
+                "bit_depth": file_row.get("bit_depth") if file_row else None,
+                "quality_tier": file_row.get("quality_tier") if file_row else None,
+            }
+            unmet.append(entry)
 
     total = len(unmet)
     offset = (page - 1) * limit

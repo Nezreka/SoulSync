@@ -598,12 +598,16 @@ def _mark_all_albums_partial(conn, expected_track_count: int = 2) -> list:
     return album_ids
 
 
+_PARTIAL_ALBUMS = 6
+
+
 def test_precache_tracklists_runs_resolves_concurrently(legacy_db_factory):
-    """6 partial albums, default pool size 3 — peak in-flight resolves must
-    reach 3, proving real concurrency rather than a one-at-a-time loop."""
+    """Peak in-flight resolves must reach the pool size (or the number of
+    albums, whichever is smaller), proving real concurrency rather than a
+    one-at-a-time loop."""
     from core.library2.importer import import_legacy_library
 
-    legacy_db = legacy_db_factory(n_albums=6)
+    legacy_db = legacy_db_factory(n_albums=_PARTIAL_ALBUMS)
     import_legacy_library(legacy_db)
     conn = legacy_db._get_connection()
     _mark_all_albums_partial(conn)
@@ -634,9 +638,13 @@ def test_precache_tracklists_runs_resolves_concurrently(legacy_db_factory):
         t = threading.Thread(target=run)
         t.start()
         time.sleep(0.3)
-        assert peak[0] == 3, (
-            f"Expected 3 concurrent tracklist resolves (default max_workers), "
-            f"peaked at {peak[0]} — precache_tracklists looks serial."
+        from core.library2.completeness import _precache_max_workers
+        # Capped by the fixture: concurrency cannot exceed the work available.
+        expected = min(_precache_max_workers(None), _PARTIAL_ALBUMS)
+        assert peak[0] == expected, (
+            f"Expected {expected} concurrent tracklist resolves (default "
+            f"precache pool over {_PARTIAL_ALBUMS} albums), peaked at "
+            f"{peak[0]} — precache_tracklists looks serial."
         )
         proceed.set()
         t.join(timeout=5)
@@ -645,8 +653,16 @@ def test_precache_tracklists_runs_resolves_concurrently(legacy_db_factory):
 
 
 def test_precache_tracklists_max_workers_caps_concurrency(legacy_db_factory, monkeypatch):
-    """config auto_import.max_workers=2 must cap concurrent resolves at 2,
-    even with more than 2 pending partial albums."""
+    """`library_v2.precache_workers=2` must cap concurrent resolves at 2, even
+    with more than 2 pending partial albums.
+
+    The knob used to be `auto_import.max_workers` -- the one that also governs
+    how many songs download at once. Sharing it is why the default sat at 3 and
+    nobody raised it: three workers x one provider call per uncached album is
+    over an hour on a migrated library, and raising it meant also saturating
+    the downloader (PERF-12). The download knob is still honoured, but only
+    upward: it can raise this pool, never throttle it below its own default.
+    """
     from core.library2.importer import import_legacy_library
 
     legacy_db = legacy_db_factory(n_albums=6)
@@ -673,7 +689,7 @@ def test_precache_tracklists_max_workers_caps_concurrency(legacy_db_factory, mon
 
     config = MagicMock()
     config.get = MagicMock(
-        side_effect=lambda key, default: 2 if key == "auto_import.max_workers" else default
+        side_effect=lambda key, default: 2 if key == "library_v2.precache_workers" else default
     )
 
     result = {}
@@ -685,7 +701,8 @@ def test_precache_tracklists_max_workers_caps_concurrency(legacy_db_factory, mon
     t.start()
     time.sleep(0.3)
     assert peak[0] == 2, (
-        f"auto_import.max_workers=2 should cap concurrency at 2, peaked at {peak[0]}"
+        f"library_v2.precache_workers=2 should cap concurrency at 2, "
+        f"peaked at {peak[0]}"
     )
     proceed.set()
     t.join(timeout=5)
@@ -723,3 +740,29 @@ def test_precache_tracklists_reports_one_monotonic_combined_stage(
     assert [current for _, current, _ in events] == sorted(
         current for _, current, _ in events
     )
+
+
+def test_the_download_knob_can_raise_the_precache_pool_but_not_throttle_it():
+    """A user who raised `auto_import.max_workers` meant "use my bandwidth",
+    so it still applies. One who left it low did not mean "spend an hour on
+    metadata"."""
+    from unittest.mock import MagicMock
+
+    from core.library2.completeness import _precache_max_workers
+
+    default = _precache_max_workers(None)
+
+    low = MagicMock()
+    low.get = MagicMock(
+        side_effect=lambda key, d=None: 2 if key == "auto_import.max_workers" else d)
+    assert _precache_max_workers(low) == default
+
+    high = MagicMock()
+    high.get = MagicMock(
+        side_effect=lambda key, d=None: 32 if key == "auto_import.max_workers" else d)
+    assert _precache_max_workers(high) == 32
+
+    explicit = MagicMock()
+    explicit.get = MagicMock(
+        side_effect=lambda key, d=None: 1 if key == "library_v2.precache_workers" else d)
+    assert _precache_max_workers(explicit) == 1

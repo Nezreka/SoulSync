@@ -269,11 +269,19 @@ def progress_breakdown(conn, service: str, *,
     out: Dict[str, Dict[str, int]] = {}
     key = str(service).strip().lower()
     for entity_type in entity_types:
+        # Both halves are scoped to the OWNED library, matching the universe
+        # the queue actually works on (`_pending_sql`). Counting every row in
+        # the table meant a library with any discography or wishlist rows had a
+        # denominator the worker would never reach, so the bar could not hit
+        # 100% however long it ran.
         row = conn.execute(
             f"""
-            SELECT (SELECT COUNT(*) FROM {_TABLES[entity_type]}) AS total,
-                   (SELECT COUNT(*) FROM lib2_provider_attempts
-                     WHERE entity_type=:entity AND service=:service) AS processed
+            SELECT (SELECT COUNT(*) FROM {_TABLES[entity_type]} e
+                     WHERE {owned_sql(entity_type, "e")}) AS total,
+                   (SELECT COUNT(*) FROM lib2_provider_attempts a
+                     JOIN {_TABLES[entity_type]} e ON e.id = a.entity_id
+                    WHERE a.entity_type=:entity AND a.service=:service
+                      AND {owned_sql(entity_type, "e")}) AS processed
             """,
             {"entity": entity_type, "service": key},
         ).fetchone()
@@ -319,6 +327,13 @@ _CHILD = {
 
 def _batch_parent(conn, service: str, child: str) -> Optional[Any]:
     """A settled parent, holding a provider id, with at least one child due."""
+    # The ownership filter `_pending_sql` applies is needed here too. The
+    # single-item path was owned-filtered and the BATCH path was not, so a
+    # watchlisted artist with one owned album and sixty provider-only
+    # discography releases handed the worker all sixty: it spent API budget
+    # matching releases the user does not own, which then became `matched`
+    # parents and seeded track_batch work of their own -- while the UI read the
+    # owned-filtered pending_count and showed 0 pending / 100%.
     spec = _CHILD[child]
     parent_table = _TABLES[spec["parent_type"]]
     parent_id_sql = _provider_id_sql("p", service)
@@ -346,7 +361,8 @@ def _batch_parent(conn, service: str, child: str) -> Optional[Any]:
                  LEFT JOIN lib2_provider_attempts ca
                         ON ca.entity_type = :child_type AND ca.entity_id = c.id
                        AND ca.service = :service
-                WHERE {child_link} AND ca.entity_id IS NULL)
+                WHERE {child_link} AND ca.entity_id IS NULL
+                  AND {owned_sql(child, "c")})
          ORDER BY p.id LIMIT 1
         """,
         {"parent_type": spec["parent_type"], "child_type": child,
@@ -410,7 +426,11 @@ def next_batch_pending(conn, service: str, *,
 
 def pending_children(conn, service: str, parent_type: str, parent_id: Any, *,
                      child: str) -> list:
-    """The children of one parent that this provider has not looked at yet."""
+    """The children of one parent that this provider has not looked at yet.
+
+    Owned children only -- see `_batch_parent`. Without this the batch path
+    enriched a watched artist's whole discography.
+    """
     spec = _CHILD[child]
     columns = ", ".join(("e.id", f"e.{spec['title']}", *(
         f"e.{extra}" for extra in spec["extra"])))
@@ -422,6 +442,7 @@ def pending_children(conn, service: str, parent_type: str, parent_id: Any, *,
                  ON a.entity_type = :child_type AND a.entity_id = e.id
                 AND a.service = :service
          WHERE {spec["parent_join"]} AND a.entity_id IS NULL
+           AND {owned_sql(child, "e")}
          ORDER BY e.id
         """,
         {"child_type": child, "service": str(service).strip().lower(),

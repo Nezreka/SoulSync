@@ -117,3 +117,96 @@ def test_dedup_scopes_actionable_single_path_but_keeps_album_candidates_global()
     assert created == 1
     assert findings[0]["entity_id"] == "1"
     assert findings[0]["details"]["album_track"]["id"] == 3
+
+
+# ── the scope must be READ, not just built ─────────────────────────────────
+#
+# These primitives had zero production callers: the endpoint resolved an
+# artist's files, `run_job_now` stored the scope, the log line reported it —
+# and every job then ran library-wide. "Reorganize this artist" moved the whole
+# library while the API answered `scope_files: 180` (bug-audit BUG-13).
+
+
+def _reorg_db(tmp_path):
+    db_path = str(tmp_path / "scope.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    from core.library2.schema import ensure_library_v2_schema
+    ensure_library_v2_schema(conn)
+    conn.execute("INSERT INTO lib2_artists(id, name) VALUES(1, 'Wanted'), (2, 'Other')")
+    conn.execute("INSERT INTO lib2_albums(id, primary_artist_id, title) "
+                 "VALUES(10, 1, 'Mine'), (20, 2, 'Theirs')")
+    conn.execute("INSERT INTO lib2_tracks(id, album_id, title, track_number) "
+                 "VALUES(100, 10, 'A', 1), (200, 20, 'B', 1)")
+    conn.execute("INSERT INTO lib2_track_files(id, track_id, path) "
+                 "VALUES(1000, 100, '/music/Wanted/Mine/a.flac'), "
+                 "      (2000, 200, '/music/Other/Theirs/b.flac')")
+    conn.commit()
+    conn.close()
+
+    class _Db:
+        database_path = db_path
+
+        def _get_connection(self):
+            opened = sqlite3.connect(db_path)
+            opened.row_factory = sqlite3.Row
+            return opened
+
+    return _Db()
+
+
+def test_library_reorganize_albums_honour_the_file_allowlist(tmp_path):
+    from core.repair_jobs.library_reorganize import LibraryReorganizeJob
+
+    db = _reorg_db(tmp_path)
+    ctx = SimpleNamespace(db=db, scope={
+        "artist_id": 1, "artist_name": "Wanted",
+        "file_paths": ["/music/Wanted/Mine/a.flac"],
+    })
+
+    assert [a["id"] for a in LibraryReorganizeJob._albums(ctx)] == [10]
+
+
+def test_library_reorganize_is_library_wide_without_a_scope(tmp_path):
+    from core.repair_jobs.library_reorganize import LibraryReorganizeJob
+
+    db = _reorg_db(tmp_path)
+    ctx = SimpleNamespace(db=db, scope=None)
+
+    assert [a["id"] for a in LibraryReorganizeJob._albums(ctx)] == [10, 20]
+
+
+def test_an_empty_allowlist_scans_nothing_rather_than_everything(tmp_path):
+    from core.repair_jobs.library_reorganize import LibraryReorganizeJob
+
+    db = _reorg_db(tmp_path)
+    ctx = SimpleNamespace(db=db, scope={"artist_name": "Empty", "file_paths": []})
+
+    assert LibraryReorganizeJob._albums(ctx) == []
+
+
+def test_a_job_that_cannot_honour_a_file_scope_refuses_it(tmp_path):
+    """Fail closed: the alternative is a library-wide run the user did not ask
+    for, reported back to them as scoped."""
+    import pytest
+
+    from core.repair_worker import RepairWorker
+
+    worker = RepairWorker.__new__(RepairWorker)
+    worker._jobs = {
+        "scoped": SimpleNamespace(supports_file_scope=True, display_name="Scoped"),
+        "unscoped": SimpleNamespace(supports_file_scope=False, display_name="Unscoped"),
+    }
+    worker._ensure_jobs_loaded = lambda: None
+    worker._force_run_lock = __import__("threading").Lock()
+    worker._force_run_scopes = {}
+    worker._force_run_queue = []
+
+    scope = {"artist_name": "A", "file_paths": ["/music/a.flac"]}
+    assert worker.run_job_now("scoped", scope=scope) is True
+
+    with pytest.raises(ValueError, match="cannot be scoped"):
+        worker.run_job_now("unscoped", scope=scope)
+
+    # An artist-NAME-only scope is not a file scope and stays allowed.
+    assert worker.run_job_now("unscoped", scope={"artist_name": "A"}) is True

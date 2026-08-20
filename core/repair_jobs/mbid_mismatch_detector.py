@@ -27,7 +27,7 @@ from typing import Optional
 
 from core.library.path_resolver import resolve_library_file_path
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, scoped_file_subjects
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.mbid_mismatch")
@@ -309,7 +309,7 @@ def _native_subjects(context: JobContext):
     """
     from core.library2.maintenance_subjects import active_file_subjects
 
-    return active_file_subjects(context.db, context.config_manager)
+    return scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager))
 
 
 def _resolved_path(subject, context: JobContext) -> Optional[str]:
@@ -349,6 +349,7 @@ class MbidMismatchDetectorJob(RepairJob):
         'similarity_threshold': 0.55,
     }
     auto_fix = False
+    supports_file_scope = True
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()

@@ -5,6 +5,7 @@ import { DialogFrame, DialogHeader } from '@/components/dialog';
 
 import type { LibraryV2QualityProfile, LibraryV2RankedTarget } from '../-library-v2.types';
 
+import { bitrateKbps } from '../-bitrate';
 import {
   fetchLibraryV2AlbumHistory,
   fetchLibraryV2TrackHistory,
@@ -30,7 +31,7 @@ function resultFacts(r: SourceSearchResult): {
 } {
   const fmt = ((r.result_type === 'album' ? r.dominant_quality : r.quality) ?? '').toLowerCase();
   const bitrate = r.bitrate ?? firstTrackNumber(r, 'bitrate');
-  const kbps = bitrate ? (bitrate > 5000 ? Math.round(bitrate / 1000) : bitrate) : null;
+  const kbps = bitrateKbps(bitrate);
   return {
     fmt,
     kbps,
@@ -158,7 +159,7 @@ function resultQuality(r: SourceSearchResult) {
   const bitrate = r.bitrate ?? firstTrackNumber(r, 'bitrate');
   const rawSampleRate = r.sample_rate ?? firstTrackNumber(r, 'sample_rate');
   const rawBitDepth = r.bit_depth ?? firstTrackNumber(r, 'bit_depth');
-  const kbps = bitrate ? (bitrate > 5000 ? Math.round(bitrate / 1000) : bitrate) : null;
+  const kbps = bitrateKbps(bitrate);
   const bitDepth = rawBitDepth ? `${rawBitDepth} Bit` : null;
   const sampleRate = rawSampleRate
     ? `${Number((rawSampleRate / 1000).toFixed(rawSampleRate % 1000 === 0 ? 0 : 1))} kHz`

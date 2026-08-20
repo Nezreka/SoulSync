@@ -1041,6 +1041,14 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         ensure_wanted_schema(cursor)
     except Exception as e:  # noqa: BLE001
         logger.error("wanted-projection schema failed (will retry next start): %s", e)
+    # Cached per-artist counts, used only as the ORDER BY key for the artist
+    # list's two count-based sorts (perf-audit PERF-01/PERF-04). Populated
+    # lazily by list_artists; empty here is the correct initial state.
+    try:
+        from core.library2.artist_rollup import ensure_artist_rollup_schema
+        ensure_artist_rollup_schema(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("artist roll-up schema failed (will retry next start): %s", e)
     # Release editions + recordings (audit P1-04 / ADR-04, §14.2 Schritt 3):
     # additive shadow model — one default edition per album, one recording +
     # release track per track; recordings merge on hard IDs only.

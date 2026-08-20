@@ -52,6 +52,11 @@ logger = get_logger("library2.wanted")
 
 PROJECTION_VERSION = 2
 
+#: Ids per `IN (...)` list. SQLite's stock SQLITE_MAX_VARIABLE_NUMBER is
+#: 32,766, and every one of these lists is built from a caller-supplied
+#: track set that can be a whole artist (perf-audit PERF-07).
+_IN_CHUNK = 500
+
 LIB2_WANTED_TRACKS_DDL = """
 CREATE TABLE IF NOT EXISTS lib2_wanted_tracks (
     profile_id INTEGER NOT NULL DEFAULT 1,
@@ -131,9 +136,29 @@ def recompute_wanted(conn: Any, *, profile_id: int = 1,
     if track_ids is not None:
         if not track_ids:
             return stats
-        marks = ",".join("?" for _ in track_ids)
+        # A scoped call gets one bind variable per track, and its callers can
+        # hand it a whole artist -- `POST /<entity>/<eid>/quality-profile` and
+        # the monitor route both do. Past SQLite's 32,766-variable default that
+        # is a hard 500, so a big artist could neither be given a quality
+        # profile nor be monitored. Recurse over chunks instead; the scoped path
+        # writes per track, so splitting it changes nothing but the statement
+        # size, and the caller still owns the transaction.
+        unique_ids = sorted({int(t) for t in track_ids})
+        if len(unique_ids) > _IN_CHUNK:
+            for start in range(0, len(unique_ids), _IN_CHUNK):
+                part = recompute_wanted(
+                    conn, profile_id=profile_id,
+                    track_ids=unique_ids[start:start + _IN_CHUNK],
+                )
+                for key in ("projected", "wanted", "pruned", "flag_mismatches"):
+                    stats[key] += int(part.get(key, 0))
+                changed_track_ids.extend(part.get("changed_track_ids") or [])
+            stats["changed_track_ids"] = changed_track_ids
+            stats["written"] = len(changed_track_ids)
+            return stats
+        marks = ",".join("?" for _ in unique_ids)
         scope_sql = f" WHERE t.id IN ({marks})"
-        scope_args = [int(t) for t in track_ids]
+        scope_args = unique_ids
     else:
         cur = conn.execute(
             "DELETE FROM lib2_wanted_tracks WHERE profile_id=? AND track_id "
@@ -309,15 +334,18 @@ def track_wanted_states(
     normalized = sorted({int(track_id) for track_id in track_ids})
     if not normalized:
         return {}
-    marks = ",".join("?" for _ in normalized)
-    rows = conn.execute(
-        f"""SELECT t.id, w.wanted, w.projection_version
-              FROM lib2_tracks t
-              LEFT JOIN lib2_wanted_tracks w
-                     ON w.track_id=t.id AND w.profile_id=?
-             WHERE t.id IN ({marks})""",
-        (int(profile_id), *normalized),
-    ).fetchall()
+    rows = []
+    for start in range(0, len(normalized), _IN_CHUNK):   # PERF-07, see _IN_CHUNK
+        chunk = normalized[start:start + _IN_CHUNK]
+        marks = ",".join("?" for _ in chunk)
+        rows.extend(conn.execute(
+            f"""SELECT t.id, w.wanted, w.projection_version
+                  FROM lib2_tracks t
+                  LEFT JOIN lib2_wanted_tracks w
+                         ON w.track_id=t.id AND w.profile_id=?
+                 WHERE t.id IN ({marks})""",
+            (int(profile_id), *chunk),
+        ).fetchall())
     found = {int(row["id"]): row for row in rows}
     incomplete = [
         track_id for track_id, row in found.items()

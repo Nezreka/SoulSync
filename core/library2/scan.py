@@ -81,8 +81,15 @@ def _file_rows_in_scope(
 
 def _persist_missing_observation(
     database, file_id: int, *, root_healthy: bool, allow_confirm: bool = True,
+    conn=None,
 ) -> None:
     """Persist one missing-path observation in a short transaction.
+
+    ``conn`` lets the caller supply a connection it owns.  The transaction stays
+    exactly as short -- one ``commit()`` per observation -- but the scan loop no
+    longer pays ``sqlite3.connect`` + a full schema parse per file.  That is
+    ~3.8 ms on this project's 700-object schema, i.e. ~19 minutes of pure
+    connection setup on a 300k-file rescan (perf-audit PERF-10).
 
     ``allow_confirm=False`` caps the row at ``missing_suspected`` no matter how
     many misses it has: pathdrift25-01: a stale *filename* leaves the parent
@@ -95,7 +102,8 @@ def _persist_missing_observation(
         return
     from core.library2.track_files import set_file_state
 
-    conn = database._get_connection()
+    owned = conn is None
+    conn = database._get_connection() if owned else conn
     try:
         row = conn.execute(
             "SELECT file_state, missing_scan_count FROM lib2_track_files WHERE id=?",
@@ -122,7 +130,8 @@ def _persist_missing_observation(
         set_file_state(conn, int(file_id), state)
         conn.commit()
     finally:
-        conn.close()
+        if owned:
+            conn.close()
 
 
 def _persist_verification_observation(conn, file_id: int, file_tags: Dict[str, Any]) -> None:
@@ -163,12 +172,17 @@ def _persist_present_observation(
     quality: Any = None,
     size: Optional[int] = None,
     tier: Optional[str] = None,
+    conn=None,
 ) -> bool:
-    """Persist one completed file observation in a short transaction."""
+    """Persist one completed file observation in a short transaction.
+
+    See ``_persist_missing_observation`` for why ``conn`` exists (PERF-10).
+    """
     from core.library2.tag_cache import persist_tag_cache
     from core.library2.track_files import set_file_state
 
-    conn = database._get_connection()
+    owned = conn is None
+    conn = database._get_connection() if owned else conn
     try:
         row = conn.execute(
             "SELECT file_state FROM lib2_track_files WHERE id=?", (int(file_id),)
@@ -209,7 +223,8 @@ def _persist_present_observation(
         conn.commit()
         return quality is not None
     finally:
-        conn.close()
+        if owned:
+            conn.close()
 
 
 def rescan_files(
@@ -258,9 +273,65 @@ def rescan_files(
         conn.close()
 
     total = len(rows)
+    _rescan_loop(database, rows, total, progress=progress, stats=stats)
+    logger.info("Library v2 file rescan: %(scanned)d probed, %(updated)d updated, "
+                "%(missing)d paths absent", stats)
+    return stats
+
+
+#: How many files' observations are buffered before one connection flushes them.
+#: Opening a connection costs a full parse of this project's ~700-object schema
+#: (measured 3.8 ms), so a per-file connection spent ~19 minutes on connection
+#: setup alone in a 300k-file rescan (perf-audit PERF-10).  Buffering keeps that
+#: cost amortised WITHOUT holding a connection open across the file I/O, which
+#: is the invariant `test_rescan_closes_snapshot_connection_before_file_io`
+#: exists to protect: probing a file is slow and unpredictable (network mounts,
+#: mutagen), and a connection open across it pins the WAL.
+_OBSERVATION_FLUSH_BATCH = 100
+
+
+def _flush_observations(database, pending, stats) -> None:
+    """Apply one buffered batch on a single connection, then close it.
+
+    Each observation still commits on its own, so the write lock is held for
+    exactly as long as it was per file — only the connection is shared.
+    """
+    if not pending:
+        return
+    conn = database._get_connection()
+    try:
+        for kind, payload in pending:
+            if kind == "missing":
+                _persist_missing_observation(database, conn=conn, **payload)
+            elif _persist_present_observation(database, conn=conn, **payload):
+                stats["updated"] += 1
+    finally:
+        conn.close()
+    pending.clear()
+
+
+def _rescan_loop(database, rows, total, *, progress, stats) -> None:
+    """The per-file body of :func:`rescan_files`.
+
+    File I/O happens with **no** database connection open; the resulting
+    observations are buffered and flushed in batches (see
+    ``_OBSERVATION_FLUSH_BATCH``).
+    """
+    from core.imports.file_ops import probe_audio_quality
+    from core.library2.path_drift import has_drift_candidate
+    from core.library2.paths import (
+        missing_path_root_is_healthy,
+        resolve_lib2_path,
+    )
+    from core.library2.status import quality_tier
+    from core.library2.tag_cache import read_tag_snapshot
+
+    pending: list = []
     for i, row in enumerate(rows):
         if progress and i % 25 == 0:
             progress("scan", i, total)
+        if len(pending) >= _OBSERVATION_FLUSH_BATCH:
+            _flush_observations(database, pending, stats)
         path = resolve_lib2_path(row["path"])
         if not path:
             stats["missing"] += 1
@@ -277,12 +348,11 @@ def rescan_files(
             )
             if drifted:
                 stats["path_drift"] += 1
-            _persist_missing_observation(
-                database,
-                row["id"],
-                root_healthy=root_healthy,
-                allow_confirm=not drifted,
-            )
+            pending.append(("missing", {
+                "file_id": row["id"],
+                "root_healthy": root_healthy,
+                "allow_confirm": not drifted,
+            }))
             continue
 
         stats["scanned"] += 1
@@ -300,18 +370,14 @@ def rescan_files(
             except OSError:
                 pass
             tier = quality_tier(quality.format, quality.bitrate, quality.bit_depth)
-        if _persist_present_observation(
-            database,
-            row["id"],
-            file_tags=file_tags,
-            quality=quality,
-            size=size,
-            tier=tier,
-        ):
-            stats["updated"] += 1
-    logger.info("Library v2 file rescan: %(scanned)d probed, %(updated)d updated, "
-                "%(missing)d paths absent", stats)
-    return stats
+        pending.append(("present", {
+            "file_id": row["id"],
+            "file_tags": file_tags,
+            "quality": quality,
+            "size": size,
+            "tier": tier,
+        }))
+    _flush_observations(database, pending, stats)
 
 
 __all__ = ["MISSING_CONFIRMATION_SCANS", "rescan_files"]

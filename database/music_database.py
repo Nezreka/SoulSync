@@ -47,6 +47,7 @@ _database_sidecar_warnings = set()
 _database_initialization_lock = threading.Lock()
 
 
+
 def _row_value(row, column: str, default=None):
     """Read a column off a sqlite3.Row that may not have it.
 
@@ -328,7 +329,30 @@ class MusicDatabase:
                 # Docker Desktop bind mounts can briefly fail while SQLite opens the
                 # sidecar WAL/SHM files; retrying avoids surfacing transient 500s.
                 connection.execute("PRAGMA foreign_keys = ON")
+                # PERF-05 in the audit claimed this pragma costs 6.4 ms of a
+                # 6.45 ms connection setup and proposed deleting it. Measured
+                # here, that is wrong: it is simply the first statement that
+                # OPENS the database file, so it was being charged for the file
+                # open plus the schema parse. `foreign_keys` and `busy_timeout`
+                # cost 0.02 ms because they never touch the file; `SELECT 1`
+                # costs 3.83 ms, `journal_mode` 3.85 ms, and the two together
+                # 3.82 ms -- NOT additive. The same pragma against a one-table
+                # database is 0.11 ms. The cost is parsing this project's ~700
+                # sqlite_master objects, and every caller pays it on its first
+                # real query regardless. Only a connection POOL removes it.
+                #
+                # Caching this per path was tried and reverted: it buys nothing
+                # measurable, and it silently leaves a database in `delete` mode
+                # whenever a path is reused by a NEW file -- which is exactly
+                # what a test suite does.
                 connection.execute("PRAGMA journal_mode = WAL")
+                # Per-connection, and NOT persistent, so it must be re-set every
+                # time. FULL fsyncs the WAL on every COMMIT; NORMAL is the safe
+                # pairing with WAL (crash-safe against process death, only the
+                # last transactions are at risk on power loss). core/settings.py
+                # already made exactly this trade for the far smaller config DB;
+                # the music DB does thousands of times more writes (PERF-11).
+                connection.execute("PRAGMA synchronous = NORMAL")
                 connection.execute("PRAGMA busy_timeout = 30000")  # 30 second timeout
                 return connection
             except sqlite3.OperationalError as e:
@@ -6712,6 +6736,24 @@ class MusicDatabase:
                 # refused to fix just sat there pending with no reason anywhere.
                 cursor.execute("ALTER TABLE repair_findings ADD COLUMN last_error TEXT")
                 logger.info("Added last_error column to repair_findings")
+
+            if 'fix_claimed_at' not in finding_cols:
+                # A fix-in-progress marker, so `fix_finding` can claim a row
+                # ATOMICALLY. Reading a row as pending and only resolving it
+                # after the handler returned left a window in which a bulk
+                # "Fix All" and a user's single Fix click both ran the same
+                # handler -- two concurrent ffmpeg transcodes onto one output
+                # path, or a duplicate file row from the racing SELECT/INSERT
+                # in _link_new_output_file.
+                #
+                # Deliberately NOT a new `status` value: `status` is filtered in
+                # a dozen places, and a finding that vanished from the list
+                # mid-fix would be a worse bug than the race. The row stays
+                # `pending`; only the claim is new. A stale claim (process died
+                # mid-fix) expires, so nothing wedges permanently.
+                cursor.execute(
+                    "ALTER TABLE repair_findings ADD COLUMN fix_claimed_at TIMESTAMP")
+                logger.info("Added fix_claimed_at column to repair_findings")
 
             cursor.execute("PRAGMA table_info(repair_job_runs)")
             run_cols = {c[1] for c in cursor.fetchall()}

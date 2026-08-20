@@ -15,7 +15,7 @@ from core.quality.lossless import (
     lossy_output_would_overwrite_source,
 )
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, scoped_file_subjects
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.lossy_converter")
@@ -69,6 +69,7 @@ class LossyConverterJob(RepairJob):
         'delete_original': False,  # Blasphemy Mode — delete FLAC after conversion
     }
     auto_fix = False
+    supports_file_scope = True
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -97,9 +98,9 @@ class LossyConverterJob(RepairJob):
         try:
             from core.library2.maintenance_subjects import active_file_subjects
 
-            for subject in active_file_subjects(
+            for subject in scoped_file_subjects(context, active_file_subjects(
                 context.db, context.config_manager,
-            ):
+            )):
                 file_path = str(subject["path"])
                 ext = os.path.splitext(file_path)[1].lower()
                 if ext not in LOSSLESS_CANDIDATE_EXTENSIONS:
@@ -275,9 +276,9 @@ class LossyConverterJob(RepairJob):
             from core.library2.maintenance_subjects import active_file_subjects
 
             count += sum(
-                1 for subject in active_file_subjects(
+                1 for subject in scoped_file_subjects(context, active_file_subjects(
                     context.db, context.config_manager,
-                ) if os.path.splitext(str(subject.get("path") or ""))[1].lower()
+                )) if os.path.splitext(str(subject.get("path") or ""))[1].lower()
                 in LOSSLESS_CANDIDATE_EXTENSIONS
             )
         except Exception as exc:

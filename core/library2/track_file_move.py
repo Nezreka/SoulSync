@@ -64,8 +64,17 @@ def move_track_file(db, conn, from_track_id: int, to_track_id: int,
     # moves with it so the source cannot be left half-consolidated. Schema
     # triggers keep exactly one primary on the target throughout the UPDATE.
     from core.library2.track_files import primary_order
+    # A `deleted` row is a TOMBSTONE, not a file: `remove_entity_file_records`
+    # keeps it deliberately as the audit record, path and all. Reading one as a
+    # real file broke this both ways -- the target check refused the move
+    # forever with "remove or dedup it first" when there was nothing left to
+    # remove, and a source whose only row was a tombstone passed the "has a
+    # file to move" check, re-homed the tombstone, and then demonitored the
+    # source with USER provenance on the strength of a file that is not there.
+    # Every other read in this module family already applies this guard.
+    live_files = "COALESCE(file_state,'active') <> 'deleted'"
     file_rows = conn.execute(
-        f"SELECT id, path FROM lib2_track_files WHERE track_id=? "
+        f"SELECT id, path FROM lib2_track_files WHERE track_id=? AND {live_files} "
         f"ORDER BY {primary_order()}",
         (from_track_id,),
     ).fetchall()
@@ -73,8 +82,8 @@ def move_track_file(db, conn, from_track_id: int, to_track_id: int,
         raise MoveError("Source track has no file to move", status=409)
 
     target_has_file = conn.execute(
-        "SELECT 1 FROM lib2_track_files "
-        "WHERE track_id=? LIMIT 1",
+        f"SELECT 1 FROM lib2_track_files "
+        f"WHERE track_id=? AND {live_files} LIMIT 1",
         (to_track_id,),
     ).fetchone()
     if target_has_file:
@@ -82,9 +91,9 @@ def move_track_file(db, conn, from_track_id: int, to_track_id: int,
             "Target track already has a file — remove or dedup it first", status=409)
 
     conn.execute(
-        """UPDATE lib2_track_files
+        f"""UPDATE lib2_track_files
               SET track_id=?, updated_at=CURRENT_TIMESTAMP
-            WHERE track_id=?""",
+            WHERE track_id=? AND {live_files}""",
         (to_track_id, from_track_id),
     )
     if pair["reverse_existing"]:

@@ -84,9 +84,20 @@ def _build_lock(
                     _build_locks[key] = (lock, references)
 
 
+#: Directories this process has already created, so `artwork_dir` stops issuing
+#: a `mkdir` on every call. `artwork_file`/`thumb_file` both go through it and
+#: the artwork endpoint calls them 3-5 times per request, so a 75-image page was
+#: making ~225-375 pointless mkdir syscalls -- 4 us each on tmpfs, but 0.1-1 ms
+#: on an overlay or network filesystem (perf-audit PERF-14).
+_artwork_dirs: set = set()
+
+
 def artwork_dir(database) -> Path:
     d = Path(database.database_path).parent / "lib2_artwork"
-    d.mkdir(parents=True, exist_ok=True)
+    key = str(d)
+    if key not in _artwork_dirs:
+        d.mkdir(parents=True, exist_ok=True)
+        _artwork_dirs.add(key)
     return d
 
 
@@ -97,6 +108,10 @@ def artwork_file(database, kind: str, entity_id: int) -> Path:
 def thumb_file(database, kind: str, entity_id: int) -> Path:
     return artwork_dir(database) / f"{kind}_{int(entity_id)}_t.jpg"
 
+
+#: Upper bound on the artwork-version memo (see artwork_version). Python dicts
+#: preserve insertion order, so trimming from the front is an LRU-by-first-seen.
+_MAX_CACHED_VERSIONS = 20000
 
 _entity_versions: Dict[tuple[str, str, int], tuple[int, int]] = {}
 _entity_generations: Dict[tuple[str, str, int], int] = {}
@@ -160,6 +175,16 @@ def artwork_version(database, kind: str, entity_id: int) -> int:
     with _entity_versions_guard:
         if _entity_generations.get(key, 0) == marker:
             _entity_versions[key] = (marker, mtime)
+            # Bounded. Both dicts only ever grew -- one entry per
+            # (db_path, kind, entity_id) ever touched, each holding its own copy
+            # of the database-path string. At 320k tracks / 26k albums / 12k
+            # artists that is ~640k entries pinned for the lifetime of a
+            # long-lived gunicorn worker (perf-audit PERF-15). Dropping the
+            # oldest entries only costs a re-stat.
+            if len(_entity_versions) > _MAX_CACHED_VERSIONS:
+                for stale in list(_entity_versions)[:_MAX_CACHED_VERSIONS // 4]:
+                    _entity_versions.pop(stale, None)
+                    _entity_generations.pop(stale, None)
     return mtime
 
 

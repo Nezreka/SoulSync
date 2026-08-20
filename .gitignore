@@ -52,3 +52,10 @@ docker-compose.local-image.yml
 # …except GitHub Actions: CI gates (route-tree drift, tests) only run if
 # the workflows are actually committed.
 !.github/
+
+# Transient single-file streaming cache (basic-search "Play"). Cleared per use,
+# never persistent — and a 7.3 MB copyrighted MP3 was committed from here once.
+Stream/
+
+# Config backups. `config/config.json.bak` was committed with a real LAN IP in it.
+*.bak

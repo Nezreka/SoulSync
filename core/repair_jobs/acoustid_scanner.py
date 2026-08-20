@@ -15,7 +15,7 @@ from difflib import SequenceMatcher
 from typing import Any, Dict, Optional
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, scoped_file_subjects
 from utils.logging_config import get_logger
 from core.matching.audio_verification import evaluate, fingerprint_is_ambiguous, Decision
 from core.matching.acoustid_candidates import duration_mismatches_strongly
@@ -57,6 +57,7 @@ class AcoustIDScannerJob(RepairJob):
         'batch_size': 200,
     }
     auto_fix = False  # User chooses fix action per finding
+    supports_file_scope = True
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -663,7 +664,7 @@ class AcoustIDScannerJob(RepairJob):
     def _load_db_tracks(self, context: JobContext) -> dict:
         tracks: Dict[str, Dict[str, Any]] = {}
         try:
-            for subject in active_file_subjects(context.db, context.config_manager):
+            for subject in scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager)):
                 key = f"lib2:{subject['track_id']}"
                 current = tracks.get(key)
                 if current is not None and not subject.get("is_primary"):
@@ -721,7 +722,7 @@ class AcoustIDScannerJob(RepairJob):
         try:
             return len({
                 int(subject["track_id"])
-                for subject in active_file_subjects(context.db, context.config_manager)
+                for subject in scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager))
                 if subject.get("is_primary")
             })
         except Exception:

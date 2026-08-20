@@ -290,7 +290,7 @@ function _handleShellLinkClick(event) {
             notifyPageWillChange(navPageId);
             showReactHost(navPageId);
             setActivePageChrome(navPageId);
-            void getWebRouter().navigateToHref(navRoute.path);
+            navigateOrFollow(getWebRouter(), navRoute.path, pathname);
             return;
         }
         void navigateToPage(navPageId);
@@ -336,7 +336,30 @@ function _handleReactRouteLinkClick(event, pathname, anchor) {
     notifyPageWillChange(targetPage);
     showReactHost(targetPage);
     setActivePageChrome(targetPage);
-    void router.navigateToHref(`${pathname}${anchor.search || ''}${anchor.hash || ''}`);
+    navigateOrFollow(router, `${pathname}${anchor.search || ''}${anchor.hash || ''}`, anchor.href);
+}
+
+/** Navigate, and if the router rejects it, fall back to a real page load.
+ *
+ * These call sites `preventDefault()` the click first, so a rejected promise
+ * used to leave a dead link: the browser did not follow it, the router did not
+ * take it, and `void` discarded the reason. `location.assign` is the honest
+ * fallback -- the user asked to go somewhere, so go there, even if it costs a
+ * full reload (frontend-audit FE-09).
+ */
+function navigateOrFollow(router, href, fallbackHref) {
+    try {
+        const result = router.navigateToHref(href);
+        if (result && typeof result.catch === 'function') {
+            result.catch((error) => {
+                console.error('SPA navigation to', href, 'failed:', error);
+                window.location.assign(fallbackHref ?? href);
+            });
+        }
+    } catch (error) {
+        console.error('SPA navigation to', href, 'threw:', error);
+        window.location.assign(fallbackHref ?? href);
+    }
 }
 
 function _handleArtistDetailLinkClick(event, pathname, anchor) {

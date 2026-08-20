@@ -76,11 +76,17 @@ def _stub_preview(monkeypatch, tmp_path: Path):
     dst = tmp_path / 'new' / 'track.flac'
 
     def _preview(db, config_manager, album_id, mode='api'):
+        # `track_id` is the LIB2 track id. The preview is built by
+        # core/library_reorganize.load_album_and_tracks, which selects
+        # `t.* FROM lib2_tracks t` and copies `track['id']` into `track_id`.
+        # This stub used to return the LEGACY id (400), which encoded a
+        # contract production never produces -- and so proved a mapping step
+        # that made the job find nothing in real use.
         return {
             'status': 'planned',
             'source': 'tags',
             'tracks': [{
-                'track_id': 400, 'title': 'Real Track', 'matched': True,
+                'track_id': 4, 'title': 'Real Track', 'matched': True,
                 'unchanged': False, 'file_exists': True,
                 'current_path': 'old/track.flac', 'new_path': 'new/track.flac',
                 'current_path_abs': str(src), 'new_path_abs': str(dst),
@@ -124,8 +130,16 @@ def test_the_finding_does_not_link_the_decoy_track(reorg_db, tmp_path, monkeypat
     )
 
 
-def test_unreorganizable_album_finding_names_the_native_album(
+def test_a_lib2_native_album_is_reorganized_not_refused(
         reorg_db, tmp_path, monkeypatch):
+    """`legacy_album_id IS NULL` is the normal case, not an error case.
+
+    That back-reference is written only by the one-shot upgrade importer. Every
+    album downloaded after the migration -- and every album on a fresh install
+    -- is lib2-native and has none, while still owning files. The job used to
+    refuse those with a `reorganize_unavailable` warning that had no fix
+    handler and no UI, so the feature was inert on any post-cutover library.
+    """
     _stub_preview(monkeypatch, tmp_path)
     conn = reorg_db._get_connection()
     conn.execute("UPDATE lib2_albums SET legacy_album_id=NULL WHERE id=7")
@@ -135,5 +149,34 @@ def test_unreorganizable_album_finding_names_the_native_album(
 
     LibraryReorganizeJob().scan(_ctx(reorg_db, findings))
 
-    assert [f['finding_type'] for f in findings] == ['reorganize_unavailable']
-    assert findings[0]['entity_id'] == 'lib2:7'
+    assert [f['finding_type'] for f in findings] == ['path_mismatch']
+    assert findings[0]['entity_id'] == 'lib2:4'
+
+
+def test_a_missing_track_id_is_an_error_not_a_wrong_link(
+        reorg_db, tmp_path, monkeypatch):
+    """A preview row without a usable id must not silently link somewhere."""
+    src = tmp_path / 'old' / 'track.flac'
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(b'audio')
+
+    def _preview(db, config_manager, album_id, mode='api'):
+        return {
+            'status': 'planned', 'source': 'tags',
+            'tracks': [{
+                'track_id': None, 'title': 'Real Track', 'matched': True,
+                'unchanged': False, 'file_exists': True,
+                'current_path': 'old/track.flac', 'new_path': 'new/track.flac',
+                'current_path_abs': str(src),
+                'new_path_abs': str(tmp_path / 'new' / 'track.flac'),
+            }],
+        }
+
+    import core.library2.reorganize_bridge as bridge
+    monkeypatch.setattr(bridge, 'preview_album_reorganize', _preview)
+    findings = []
+
+    result = LibraryReorganizeJob().scan(_ctx(reorg_db, findings))
+
+    assert findings == []
+    assert result.errors == 1

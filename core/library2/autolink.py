@@ -588,8 +588,15 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
     """
     try:
         from core.settings import config_manager
-        from core.library2.feature import library_v2_enabled
-        library_v2_enabled(config_manager)
+        # The `library_v2_enabled(config_manager)` call that followed this
+        # import was a side-effect-only no-op: the function returns True
+        # unconditionally (the cutover is not reversible through config) and
+        # its one-time deprecation warning only ever fires when the key is set
+        # FALSY -- which on a default install it never is, so the flag stays
+        # unset and the call paid for a config read forever, on a path that
+        # runs per completed download. One call at boot
+        # (core/library2/bootstrap.py) delivers 100% of the warning.
+        # The import itself stays: `config_manager` is used further down.
 
         file_path = context.get("_final_processed_path") or context.get("_final_path")
         if not file_path:

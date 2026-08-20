@@ -576,8 +576,6 @@ def sync_watchlist_removal(
     raises — a reverse-sync hiccup must not fail the user's watchlist removal.
     """
     try:
-        from core.library2.feature import library_v2_enabled
-        library_v2_enabled(config_manager)
         if not _is_admin_profile(profile_id):
             return {"matched": 0, "demonitored": 0}
         if not descriptor:
@@ -602,8 +600,6 @@ def sync_wishlist_removal(
 ) -> Dict[str, int]:
     """Feature-gated, best-effort adapter for user-facing Wishlist removes."""
     try:
-        from core.library2.feature import library_v2_enabled
-        library_v2_enabled(config_manager)
         if not _is_admin_profile(profile_id) or not descriptors:
             return {"matched": 0, "demonitored": 0, "tracks_mirrored": 0}
         return demonitor_lib2_tracks_for_removed_wishlist(
@@ -629,8 +625,6 @@ def sync_wishlist_addition(
     reach this adapter.
     """
     try:
-        from core.library2.feature import library_v2_enabled
-        library_v2_enabled(config_manager)
         if not _is_admin_profile(profile_id) or not descriptors:
             return {"matched": 0, "monitored": 0}
         return monitor_lib2_tracks_for_added_wishlist(

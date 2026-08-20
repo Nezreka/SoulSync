@@ -57,6 +57,12 @@ def _extract_lookup_value(value: Any, *names: str, default: Any = None) -> Any:
 
 
 def _normalize_artist_name(value: Any) -> str:
+    """The single definition of the artist-name fold for this package.
+
+    `discography.py` carried a byte-identical copy; it imports this module
+    already, so the shared definition lives on THIS side of that edge. The
+    reverse direction is a circular import.
+    """
     return (value or '').strip().casefold()
 
 

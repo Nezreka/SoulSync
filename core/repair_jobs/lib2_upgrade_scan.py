@@ -72,8 +72,6 @@ class Lib2UpgradeScanJob(RepairJob):
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
-        from core.library2.feature import library_v2_enabled
-        library_v2_enabled(context.config_manager)
 
         from core.library2.wishlist_mirror import (
             mirror_projected_tracks_wishlist,

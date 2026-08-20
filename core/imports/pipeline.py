@@ -279,10 +279,10 @@ def _retire_lib2_path_after_redownload(old_path: str, new_path: str) -> None:
     were already in the catalog, so the retirement has to happen here too.
     """
     try:
-        from core.library2.feature import library_v2_enabled
+        # No feature gate: `library_v2_enabled()` returns True unconditionally
+        # (core/library2/feature.py), so the `if not ...: return` that stood here
+        # was unreachable.
         from core.settings import config_manager as _cm
-        if not library_v2_enabled(_cm):
-            return
         from core.library2.track_files import retire_replaced_files
         from database.music_database import get_database
 

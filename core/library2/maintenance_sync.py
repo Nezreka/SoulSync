@@ -68,12 +68,6 @@ def ensure_maintenance_event_schema(cursor: Any) -> None:
     )
 
 
-def library_v2_enabled(config_manager: Any) -> bool:
-    from core.library2.feature import library_v2_enabled as cutover_enabled
-
-    return cutover_enabled(config_manager)
-
-
 def _table_exists(conn: Any, table: str) -> bool:
     return conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
@@ -169,6 +163,97 @@ def _legacy_backref_ids(conn: Any, entity_type: str, entity_id: Any) -> List[int
     return _as_ints(row[0] for row in rows)
 
 
+def _may_have_catalogue_row(entity_type: str, entity_id: Any) -> bool:
+    """Can this subject possibly correspond to a ``lib2_track_files`` row?
+
+    Two finding shapes provably cannot, and both used to fall through into the
+    path-mapping fallback below and pay for a whole-library filesystem walk to
+    prove the obvious:
+
+    - ``orphan_file`` (``entity_type='file'``, ``entity_id=None``) — an orphan
+      is *defined* as a file on disk that the catalogue does not know. The
+      exact-path query above having found nothing IS the finding.
+    - ``empty_folder`` (``entity_type='folder'``) — the subject is a directory,
+      and ``lib2_track_files.path`` only ever holds files.
+
+    A scan producing 2,000 orphans against 50,000 file rows did 100 million
+    path resolutions, each with at least one ``stat``, to return an empty link
+    set every time (perf/bug-audit BUG-01).
+    """
+    if entity_type == "folder":
+        return False
+    if entity_type == "file" and _native_entity_id(entity_id) is None \
+            and not str(entity_id or "").strip():
+        return False
+    return True
+
+
+def _files_by_mapped_path(
+    conn: Any, candidate_paths: set, *, config_manager: Any,
+) -> List[int]:
+    """File ids whose stored path *resolves* onto one of ``candidate_paths``.
+
+    The stored path is the legacy/media-server view of the filesystem, so on a
+    path-mapped setup it never equals the path a repair job observed — hence a
+    resolver pass rather than a second equality test.
+
+    Bounded on purpose. This used to read every non-deleted row in
+    ``lib2_track_files`` and call ``resolve_lib2_path`` on each, per finding.
+    A rename or a path mapping changes directories, essentially never the
+    basename, so probing by basename narrows the candidate set from the whole
+    library to a handful of rows before any filesystem call happens.
+    """
+    wanted = {_normal_path(path) for path in candidate_paths}
+    wanted.discard(None)
+    if not wanted:
+        return []
+    found: List[int] = []
+    try:
+        from core.library2.paths import resolve_lib2_path
+
+        # Stored paths keep whichever separator the writer used, so probe both
+        # -- the same two-pattern idiom track_files.find_track_id_by_path uses.
+        basenames = {
+            os.path.basename(str(path).replace("\\", "/").rstrip("/"))
+            for path in candidate_paths
+        }
+        basenames.discard("")
+        if not basenames:
+            return []
+        rows = []
+        for name in sorted(basenames):
+            escaped = _like_escape(name)
+            rows.extend(conn.execute(
+                "SELECT id, path FROM lib2_track_files "
+                "WHERE path IS NOT NULL AND path<>'' "
+                "  AND COALESCE(file_state,'active')<>'deleted' "
+                "  AND (path=? OR path LIKE ? ESCAPE '^' OR path LIKE ? ESCAPE '^')",
+                (name, f"%/{escaped}", f"%\\{escaped}"),
+            ).fetchall())
+        for row in rows:
+            if _normal_path(row["path"]) in wanted:
+                found.append(int(row["id"]))
+                continue
+            resolved = resolve_lib2_path(row["path"], config_manager=config_manager)
+            if _normal_path(resolved) in wanted:
+                found.append(int(row["id"]))
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("mapped path subject resolution failed: %s", exc)
+    return found
+
+
+def _like_escape(value: str) -> str:
+    """Escape LIKE wildcards so a filename containing % or _ still matches.
+
+    Uses ``^`` as the escape character rather than a backslash, because the
+    patterns themselves contain a literal backslash (the Windows separator) and
+    a backslash escape would then have to escape itself inside a Python string
+    inside a SQL string. ``^`` is not special to LIKE and is vanishingly rare in
+    a filename -- and it is escaped here too, so even that case is correct.
+    """
+    return (value.replace("^", "^^").replace("%", "^%").replace("_", "^_"))
+
+
 def _resolve_links(
     conn: Any,
     *,
@@ -220,21 +305,10 @@ def _resolve_links(
             path_list,
         ).fetchall()
         files.update(int(row[0]) for row in rows)
-    if candidate_paths and not files:
-        wanted = {_normal_path(path) for path in candidate_paths}
-        wanted.discard(None)
-        try:
-            from core.library2.paths import resolve_lib2_path
-
-            for row in conn.execute(
-                "SELECT id, path FROM lib2_track_files WHERE path IS NOT NULL "
-                "AND path<>'' AND COALESCE(file_state,'active')<>'deleted'"
-            ).fetchall():
-                resolved = resolve_lib2_path(row["path"], config_manager=config_manager)
-                if _normal_path(row["path"]) in wanted or _normal_path(resolved) in wanted:
-                    files.add(int(row["id"]))
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("mapped path subject resolution failed: %s", exc)
+    if candidate_paths and not files and _may_have_catalogue_row(entity_type, entity_id):
+        files.update(
+            _files_by_mapped_path(conn, candidate_paths, config_manager=config_manager)
+        )
 
     # iss29-E03: everything identified up to HERE was named concretely — an
     # explicit lib2 file id in the finding details, or a path the change itself
@@ -351,8 +425,6 @@ def annotate_finding_details(
     """Attach stable native identities without creating catalogue rows."""
 
     payload = dict(details or {})
-    if not library_v2_enabled(config_manager):
-        return payload
     conn = database._get_connection()
     try:
         if not _table_exists(conn, "lib2_track_files"):
@@ -518,8 +590,6 @@ def sync_repair_change(
 ) -> Dict[str, Any]:
     """Finalize one successful native repair mutation."""
 
-    if not library_v2_enabled(config_manager):
-        return {"enabled": False, "reason": "feature_disabled", "converged": False}
     details, result = dict(details or {}), dict(result or {})
     conn = database._get_connection()
     try:
@@ -625,7 +695,23 @@ def sync_repair_change(
             from core.library2.wanted import ensure_wanted_schema, recompute_wanted
 
             ensure_wanted_schema(conn.cursor())
-            recompute_wanted(conn.cursor(), profile_id=ADMIN_PROFILE_ID)
+            # Scope the recompute to the tracks this change can possibly have
+            # touched. The unscoped call is a whole-library rebuild: its own
+            # docstring measures that as "a multi-minute write lock" at 300k
+            # tracks, plus a full prune -- and it ran once PER FIXED FINDING.
+            # "Fix All" over 500 dead-file findings therefore held the single
+            # SQLite writer for hours while every enrichment worker, config
+            # save and media-server scan piled up behind it. A delete of one
+            # file can only change the wanted state of its own tracks, and the
+            # scoped variant already exists (track_file_move.py:129).
+            # The global rebuild stays as the fallback for a change with no
+            # resolved track subject, which is the only case that can be
+            # library-wide.
+            recompute_wanted(
+                conn.cursor(),
+                profile_id=ADMIN_PROFILE_ID,
+                track_ids=links["tracks"] or None,
+            )
             conn.commit()
             changed_fields.add("wanted")
             if links["tracks"]:
@@ -676,6 +762,5 @@ __all__ = [
     "LIB2_MAINTENANCE_EVENTS_DDL",
     "annotate_finding_details",
     "ensure_maintenance_event_schema",
-    "library_v2_enabled",
     "sync_repair_change",
 ]

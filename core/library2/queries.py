@@ -59,47 +59,38 @@ def _media_server_sources_many(conn, entity_type: str, entity_ids: List[int]
     return result
 
 
-def _artist_page_order(sort: str) -> str:
-    """Choose page ids before running the expensive catalog roll-ups."""
+# The two count-based artist sorts read their ordering key from
+# `lib2_artist_rollup` (see core/library2/artist_rollup.py for the measurements
+# that forced that design). Both used to be a correlated scalar subquery
+# injected straight into ORDER BY, so SQLite re-ran them per artist row:
+# `sort=albums` was measured at 11.5 s and (on the audit's bigger fixture)
+# 46.6 s, with no timeout guard, for one click on a column header
+# (perf-audit PERF-01/PERF-04).
+_ORDER_ROLLUP_COLUMNS = {"albums": "album_count", "tracks": "track_count"}
 
-    if sort == "albums":
-        return """
-            (SELECT COUNT(*)
-               FROM (
-                    SELECT aa.album_id
-                      FROM lib2_album_artists aa
-                      JOIN lib2_artists member ON member.id=aa.artist_id
-                     WHERE COALESCE(member.canonical_artist_id, member.id)=a.id
-                    UNION
-                    SELECT t.album_id
-                      FROM lib2_track_artists ta
-                      JOIN lib2_tracks t ON t.id=ta.track_id
-                      JOIN lib2_artists member ON member.id=ta.artist_id
-                     WHERE COALESCE(member.canonical_artist_id, member.id)=a.id
-               ) candidate
-               JOIN lib2_albums al ON al.id=candidate.album_id
-              WHERE al.album_type <> 'single'
-                AND (al.origin='library' OR al.monitored=1)
-            ) DESC, a.name COLLATE NOCASE, a.id
-        """
-    if sort == "tracks":
-        return """
-            (SELECT COUNT(DISTINCT t.id)
-               FROM lib2_track_artists ta
-               JOIN lib2_tracks t ON t.id=ta.track_id
-               JOIN lib2_artists member ON member.id=ta.artist_id
-               LEFT JOIN lib2_wanted_tracks w
-                      ON w.track_id=t.id AND w.profile_id=1
-              WHERE COALESCE(member.canonical_artist_id, member.id)=a.id
-                AND (COALESCE(w.wanted, t.monitored)=1 OR EXISTS (
-                    SELECT 1 FROM lib2_track_files tf
-                     WHERE tf.track_id=t.id
-                       AND COALESCE(tf.file_state, 'active')
-                           NOT IN ('missing_confirmed','deleted')
-                ))
-            ) DESC, a.name COLLATE NOCASE, a.id
-        """
-    return _SORTS.get(sort, _SORTS["name"]) + ", a.id"
+
+def _artist_page_order(sort: str) -> Tuple[str, str, str, str]:
+    """How to order the artist page, and what it costs to compute.
+
+    Returns ``(page_join, page_order, outer_order, needs_rollup)``:
+
+    - ``page_join``    -- join added to the page-id selection.
+    - ``page_order``   -- ORDER BY used while choosing the page's artists.
+    - ``outer_order``  -- ORDER BY on the final projection, which can only
+      reference columns carried through ``page_artists``.
+    - ``needs_rollup`` -- the roll-up column, or "" for the cheap sorts.
+    """
+    column = _ORDER_ROLLUP_COLUMNS.get(sort)
+    if column:
+        return (
+            "LEFT JOIN lib2_artist_rollup ar ON ar.artist_id=a.id",
+            f"COALESCE(ar.{column}, 0) DESC, a.name COLLATE NOCASE, a.id",
+            "a._order_count DESC, a.name COLLATE NOCASE, a.id",
+            column,
+        )
+    plain = _SORTS.get(sort, _SORTS["name"]) + ", a.id"
+    return "", plain, plain, ""
+
 
 def _json_dict(raw: Any) -> Dict[str, Any]:
     if not raw:
@@ -448,7 +439,13 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
     the artist table (default off), so the caller may switch it off and get
     ``total_size_bytes = 0`` for a value nothing renders.
     """
-    order = _artist_page_order(sort)
+    page_join, page_order, outer_order, rollup_column = _artist_page_order(sort)
+    if rollup_column:
+        # Rebuilt only when missing or stale; a few minutes of drift moves an
+        # artist by a row, which is the whole reason a cache is acceptable for
+        # an ordering key but not for a rendered number.
+        from core.library2.artist_rollup import ensure_fresh_artist_rollup
+        ensure_fresh_artist_rollup(conn)
     page = max(1, int(page))
     limit = max(1, min(int(limit), 500))
     offset = (page - 1) * limit
@@ -470,11 +467,29 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
         # The two branches below are exactly equivalent to the COALESCE — the
         # outer query already restricts `a` to canonical rows — and each one is
         # an index lookup.
+        # ...and the two branches are kept APART. Written as one EXISTS with an
+        # `OR` inside, SQLite could use neither index and fell back to scanning
+        # lib2_artists once per candidate artist: 21.7 s on a 12k-artist
+        # catalogue for a search matching ten of them (the PERF-08 shape).
+        #
+        # The second branch is not a subquery at all. `member.canonical_artist_id
+        # IS NULL AND member.id = a.id` can only be satisfied by `a` itself,
+        # because the outer query already restricts `a` to canonical rows -- so
+        # it is a plain column test on the row being examined.
+        # The alias branch is an `IN (...)` over a subquery that has no
+        # correlation, so SQLite evaluates it ONCE. Written as a correlated
+        # `EXISTS (... WHERE member.canonical_artist_id = a.id ...)` it is
+        # re-run per candidate artist, and whether that is a seek or a scan
+        # depends entirely on how selective ANALYZE believes
+        # `idx_lib2_artists_canonical` to be -- on a library with few aliases
+        # SQLite sees one distinct value, picks the scan, and the search
+        # becomes 12,000 x 12,000: measured at 7.5 s for the count alone,
+        # doubled because the same WHERE also drives the page query.
         clauses.append(
-            "EXISTS (SELECT 1 FROM lib2_artists member "
-            "WHERE (member.canonical_artist_id = a.id "
-            "       OR (member.canonical_artist_id IS NULL AND member.id = a.id)) "
-            "AND member.name LIKE :like ESCAPE '\\')"
+            "(a.name LIKE :like ESCAPE '\\' "
+            " OR a.id IN (SELECT member.canonical_artist_id FROM lib2_artists member "
+            "              WHERE member.canonical_artist_id IS NOT NULL "
+            "                AND member.name LIKE :like ESCAPE '\\'))"
         )
         # ...and escape the wildcards. Without ESCAPE, a user typing `%` or `_`
         # was writing pattern syntax rather than searching for the character.
@@ -501,41 +516,49 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
     # single ADR-03 primary file exactly once.  perf25-03: the window function
     # over every file of the page plus the SUM on top of it is the heaviest
     # part of the statement, so it is only assembled when the caller wants it.
+    # The scoping used to be an `EXISTS (...)` on a bare `FROM lib2_track_files`,
+    # which the planner served by SCANNING the whole file table and evaluating
+    # the EXISTS per row -- 21.7 s on a 288k-track library for a search that
+    # matched ten artists (perf-audit PERF-03's shape, here in list_artists).
+    # Resolving the page's track ids first and CROSS JOINing from them forces
+    # the small side to lead. DISTINCT matters: a track credited to two artists
+    # on the page would otherwise enter twice and split its own ROW_NUMBER
+    # partition, double-counting the file in the SUM below.
     size_cte = f""",
+        page_tracks AS (
+            SELECT DISTINCT ta.track_id
+              FROM canonical_members cm
+              CROSS JOIN lib2_track_artists ta ON ta.artist_id=cm.member_id
+        ),
         track_primary_files AS (
             SELECT tf.track_id, tf.size,
                    ROW_NUMBER() OVER (
                        PARTITION BY tf.track_id ORDER BY {primary_order('tf')}
                    ) AS rank
-              FROM lib2_track_files tf
-             WHERE EXISTS (
-                   SELECT 1
-                     FROM lib2_track_artists ta
-                     JOIN canonical_members cm ON cm.member_id=ta.artist_id
-                     JOIN page_artists pa ON pa.id=cm.canonical_id
-                    WHERE ta.track_id=tf.track_id
-             )
-               AND COALESCE(tf.file_state, 'active') <> 'deleted'
+              FROM page_tracks pt
+              CROSS JOIN lib2_track_files tf ON tf.track_id=pt.track_id
+             WHERE COALESCE(tf.file_state, 'active') <> 'deleted'
         ),
         artist_size AS (
             SELECT cm.canonical_id AS artist_id,
                    COALESCE(SUM(pf.size), 0) AS total_size_bytes
-              FROM lib2_track_artists ta
-              JOIN canonical_members cm ON cm.member_id=ta.artist_id
-              JOIN page_artists pa ON pa.id=cm.canonical_id
+              FROM canonical_members cm
+              CROSS JOIN lib2_track_artists ta ON ta.artist_id=cm.member_id
               JOIN track_primary_files pf ON pf.track_id=ta.track_id AND pf.rank=1
              GROUP BY cm.canonical_id
         )""" if include_size else ""
     size_select = "COALESCE(asz.total_size_bytes, 0)" if include_size else "0"
     size_join = "LEFT JOIN artist_size asz ON asz.artist_id=a.id" if include_size else ""
+    order_count_col = f"COALESCE(ar.{rollup_column}, 0)" if rollup_column else "0"
 
     rows = conn.execute(
         f"""
         WITH page_artists AS MATERIALIZED (
-            SELECT a.*
+            SELECT a.*, {order_count_col} AS _order_count
               FROM lib2_artists a
+              {page_join}
               {where}
-             ORDER BY {order}
+             ORDER BY {page_order}
              LIMIT :limit OFFSET :offset
         ),
         -- perf25-03: only alias members that fold into an artist ON THIS PAGE
@@ -548,17 +571,24 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
              WHERE COALESCE(member.canonical_artist_id, member.id)
                    IN (SELECT id FROM page_artists)
         ),
+        -- perf25-03 scoped these to `page_artists`, but the PLANNER IGNORED
+        -- it: `canonical_members` is a MATERIALIZED CTE with no index, so
+        -- SQLite estimated its cardinality high and drove the join from
+        -- lib2_track_artists instead -- a full scan of the largest junction
+        -- table, twice, plus one of lib2_track_files, on every artist page.
+        -- CROSS JOIN is an explicit join-order constraint in SQLite, so the
+        -- ~78-row page CTE leads and the junction is SEEKed through
+        -- idx_lib2_track_artists_artist. `page_artists` is dropped from these
+        -- joins because `canonical_members` is already page-scoped.
         artist_albums AS (
             SELECT cm.canonical_id AS artist_id, aa.album_id
-              FROM lib2_album_artists aa
-              JOIN canonical_members cm ON cm.member_id=aa.artist_id
-              JOIN page_artists pa ON pa.id=cm.canonical_id
+              FROM canonical_members cm
+              CROSS JOIN lib2_album_artists aa ON aa.artist_id=cm.member_id
             UNION
             SELECT cm.canonical_id AS artist_id, t.album_id
-              FROM lib2_track_artists ta
+              FROM canonical_members cm
+              CROSS JOIN lib2_track_artists ta ON ta.artist_id=cm.member_id
               JOIN lib2_tracks t ON t.id=ta.track_id
-              JOIN canonical_members cm ON cm.member_id=ta.artist_id
-              JOIN page_artists pa ON pa.id=cm.canonical_id
         ),
         album_stats AS (
             SELECT aa.artist_id,
@@ -584,9 +614,8 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
                         AND COALESCE(tf.file_state, 'active')
                             NOT IN ('missing_confirmed','deleted')
                        THEN t.id END) AS track_files_present
-              FROM lib2_track_artists ta
-              JOIN canonical_members cm ON cm.member_id=ta.artist_id
-              JOIN page_artists pa ON pa.id=cm.canonical_id
+              FROM canonical_members cm
+              CROSS JOIN lib2_track_artists ta ON ta.artist_id=cm.member_id
               JOIN lib2_tracks t ON t.id=ta.track_id
               LEFT JOIN lib2_wanted_tracks w
                      ON w.track_id=t.id AND w.profile_id=1
@@ -605,7 +634,7 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
         LEFT JOIN album_stats als ON als.artist_id=a.id
         LEFT JOIN track_stats ts ON ts.artist_id=a.id
         {size_join}
-        ORDER BY {order}
+        ORDER BY {outer_order}
         """,
         {**params, "limit": limit, "offset": offset},
     ).fetchall()
@@ -763,12 +792,21 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
               JOIN lib2_tracks t ON t.id=ta.track_id
              WHERE ta.artist_id IN ({group_marks})
         ),
+        -- Scoped to THIS artist's albums. Neither this CTE nor album_size
+        -- below used to be, so opening any artist page ranked every file row
+        -- in the library and grouped every album in the database: 491 ms for a
+        -- ONE-album artist at 320k tracks, and the same 491 ms for a
+        -- 105-album artist -- the cost was entirely library-wide (PERF-03).
+        -- `list_artists` had the identical defect and it was fixed there
+        -- (perf25-03); this one was missed.
         track_primary_files AS (
             SELECT tf.track_id, tf.size,
                    ROW_NUMBER() OVER (
                        PARTITION BY tf.track_id ORDER BY {primary_order('tf')}
                    ) AS rank
-              FROM lib2_track_files tf
+              FROM artist_albums aa2
+              JOIN lib2_tracks t2 ON t2.album_id=aa2.album_id
+              JOIN lib2_track_files tf ON tf.track_id=t2.id
              WHERE COALESCE(tf.file_state, 'active') <> 'deleted'
         ),
         -- I8: disk-space roll-up per album, computed separately from the
@@ -776,7 +814,8 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         -- per track, so a SUM(size) sharing it would double-count).
         album_size AS (
             SELECT t.album_id, COALESCE(SUM(pf.size), 0) AS total_size_bytes
-              FROM lib2_tracks t
+              FROM artist_albums aa3
+              JOIN lib2_tracks t ON t.album_id=aa3.album_id
               JOIN track_primary_files pf ON pf.track_id=t.id AND pf.rank=1
              GROUP BY t.album_id
         )

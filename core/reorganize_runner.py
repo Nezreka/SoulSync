@@ -139,8 +139,6 @@ def build_runner(
         config_manager = get_config_manager() if get_config_manager is not None else None
         db = get_database()
         with db._get_connection() as conn:
-            from core.library2.feature import library_v2_enabled
-            library_v2_enabled(config_manager)
             previous_path = None
             has_v2_files = bool(conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' "

@@ -1493,3 +1493,68 @@ def test_album_scoped_delete_retires_only_the_file_the_repair_removed(legacy_db)
     assert all(state != "deleted" for state in survivors), (
         f"the rest of the album was retired too: {survivors}"
     )
+
+
+# ── BUG-01: the path-mapping fallback must be BOUNDED ───────────────────────
+#
+# `_resolve_links` falls back to a resolver pass when a finding names a path the
+# catalogue does not store verbatim (path-mapped / media-server installs). That
+# fallback used to read EVERY non-deleted row in `lib2_track_files` and call
+# `resolve_lib2_path` on each — per finding. A scan producing 2,000 orphans
+# against 50,000 file rows did 100 million path resolutions, each with at least
+# one `stat` over the network, to return an empty link set every single time.
+
+
+def _paths_db(tmp_path, paths):
+    import sqlite3
+    from core.library2.schema import ensure_library_v2_schema
+
+    conn = sqlite3.connect(str(tmp_path / "paths.db"))
+    conn.row_factory = sqlite3.Row
+    ensure_library_v2_schema(conn)
+    artist = conn.execute("INSERT INTO lib2_artists(name) VALUES('A')").lastrowid
+    album = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id,title) VALUES(?,'X')",
+        (artist,)).lastrowid
+    ids = {}
+    for path in paths:
+        track = conn.execute(
+            "INSERT INTO lib2_tracks(album_id,title) VALUES(?,?)", (album, path)).lastrowid
+        ids[path] = conn.execute(
+            "INSERT INTO lib2_track_files(track_id,path,is_primary,file_state) "
+            "VALUES(?,?,1,'active')", (track, path)).lastrowid
+    conn.commit()
+    return conn, ids
+
+
+def test_mapped_path_lookup_probes_by_basename_not_by_full_scan(tmp_path):
+    from core.library2.maintenance_sync import _files_by_mapped_path
+
+    paths = [
+        "/music/Artist/Album/01 - Song.flac",
+        r"D:\Music\Artist\Album\02 - Other.flac",   # Windows separator
+        "/music/Artist/Album/100% Real_Deal.flac",  # LIKE wildcards in the name
+        "/music/Other/Album/01 - Song.flac",        # same basename, other folder
+    ]
+    conn, ids = _paths_db(tmp_path, paths)
+    try:
+        for probe in paths[:3]:
+            found = _files_by_mapped_path(conn, {probe}, config_manager=None)
+            assert found == [ids[probe]], probe
+    finally:
+        conn.close()
+
+
+def test_a_subject_that_cannot_have_a_catalogue_row_never_probes(tmp_path):
+    """An orphan file is DEFINED as one the catalogue does not know, and an
+    empty-folder subject is a directory — `lib2_track_files.path` only ever
+    holds files. Both used to pay for the whole-library walk to prove it."""
+    from core.library2.maintenance_sync import _may_have_catalogue_row
+
+    assert _may_have_catalogue_row("file", None) is False      # orphan_file
+    assert _may_have_catalogue_row("folder", "/music/Empty") is False  # empty_folder
+    # A real catalogue subject still probes.
+    assert _may_have_catalogue_row("file", "lib2:5") is True
+    assert _may_have_catalogue_row("track", "lib2:5") is True
+    # ...and so does a bare legacy back-reference, which may resolve.
+    assert _may_have_catalogue_row("file", "123") is True

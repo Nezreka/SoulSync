@@ -1,13 +1,32 @@
-"""Legacy → lib2 mirror for enrichment writes (iss32-E01).
+"""Legacy → lib2 mirror for enrichment writes (iss32-E01). SUPERSEDED — see below.
+
+.. warning::
+
+   **This module is not installed and not called on any running install.** It
+   is kept only as the documented rollback path for an installation that
+   upgraded from the pre-v2 catalogue; nothing in production imports it,
+   ``ensure_legacy_mirror_schema`` has no caller, so ``lib2_legacy_dirty`` and
+   the ``trg_lib2_mirror_*`` triggers are never created, and it is deliberately
+   absent from ``ensure_library_v2_schema``'s orchestration list. The same goes
+   for ``enrich.resync_entity_from_legacy`` / ``mirror_divergence`` /
+   ``iter_mirror_divergences``, which are reachable only from
+   ``reconcile_divergent`` here.
+
+   Do NOT read the paragraph below as a description of the current system. It
+   was written before the worker migration and states the OPPOSITE of what is
+   now true: all fourteen provider workers write ``lib2_*`` directly, and
+   ``tests/library2/test_legacy_usage_ratchet.py`` pins runtime legacy access
+   at ``reads: 0, writes: 0``. A mirror from legacy into lib2 has nothing left
+   to carry, because nothing writes the legacy side.
 
 Nezreka's requirement is not negotiable: *"i don't want to lose any enrichment
 functionality or data in the move to v2. v2 should get filled the same way v1
 does now. every artist and album, artwork, genres, bios, provider ids, all
 twelve workers."*
 
-Today the twelve metadata workers write the LEGACY row and nothing carries the
-result into ``lib2_*``. ``resync_entity_from_legacy`` exists for exactly this
-and has no production caller.
+*Historical (pre-cutover):* the twelve metadata workers wrote the LEGACY row and
+nothing carried the result into ``lib2_*``. ``resync_entity_from_legacy`` existed
+for exactly that.
 
 **Why triggers and not calls.** The obvious fix — call the resync after
 ``_run_single_enrichment`` — only covers the manual single-entity Enrich from

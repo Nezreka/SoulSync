@@ -16,7 +16,7 @@ import os
 
 from core.library.path_resolver import resolve_library_file_path
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, scoped_file_subjects
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.missing_lyrics")
@@ -51,6 +51,7 @@ class MissingLyricsJob(RepairJob):
     default_interval_hours = 48
     default_settings = {}
     auto_fix = False
+    supports_file_scope = True
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -75,9 +76,9 @@ class MissingLyricsJob(RepairJob):
         try:
             from core.library2.maintenance_subjects import active_file_subjects
 
-            for subject in active_file_subjects(
+            for subject in scoped_file_subjects(context, active_file_subjects(
                 context.db, context.config_manager,
-            ):
+            )):
                 file_path = str(subject["path"])
                 native_subjects[file_path] = subject
                 rows.append((

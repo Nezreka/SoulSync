@@ -1041,17 +1041,12 @@ def _catalogue_name_key(name):
     return normalize_name(str(name or ""))
 
 
-def docker_resolve_path(path_str):
-    """
-    Resolve absolute paths for Docker container access
-    In Docker, Windows drive paths (E:/) need to be mapped to WSL mount points (/mnt/e/)
-    """
-    if os.path.exists('/.dockerenv') and len(path_str) >= 3 and path_str[1] == ':' and path_str[0].isalpha():
-        # Convert Windows path (E:/path) to WSL mount path (/mnt/e/path)
-        drive_letter = path_str[0].lower()
-        rest_of_path = path_str[2:].replace('\\', '/')  # Remove E: and convert backslashes
-        return f"/host/mnt/{drive_letter}{rest_of_path}"
-    return path_str
+# Resolve Docker-hosted Windows paths (E:/…) into container paths (/host/mnt/e/…).
+# This file used to carry its own byte-identical copy of the function while
+# ALSO importing the canonical one 18,000 lines further down — two definitions
+# of one rule, and the local one shadowed the import for every call site above
+# it. Import the shared implementation once, at module scope.
+from core.imports.paths import docker_resolve_path
 
 def extract_filename(full_path):
     """
@@ -7394,8 +7389,6 @@ def _audit_manual_skip(context_key, title, artist, skip_checks, profile_id=1):
     Best-effort: failures never block the download.
     """
     try:
-        from core.library2.feature import library_v2_enabled
-        library_v2_enabled(config_manager)
         from core.library2.manual_skips import record_manual_skip
         record_manual_skip(
             get_database(),
@@ -19564,7 +19557,6 @@ def _try_version_mismatch_fallback_for_worker(expected_title, expected_artist, t
     from core.imports.version_mismatch_fallback import try_accept_version_mismatch_fallback
     from core.imports.quarantine import approve_quarantine_entry, list_quarantine_entries
     from core.settings import config_manager
-    from core.imports.paths import docker_resolve_path
     import os
     try:
         download_path = docker_resolve_path(
@@ -29633,13 +29625,35 @@ def export_library_artists():
 
             counts = {}
             if include_contents:
-                for table, key in (('albums', 'album_count'), ('tracks', 'track_count')):
+                # Counts roll up the OWNED v2 catalogue. Two things this must not
+                # do, both of which it used to: read legacy `albums`/`tracks` (the
+                # cutover ported the roster query above but not this roll-up, and
+                # because the empty legacy tables still exist the query "worked"
+                # and returned nothing), and count every catalogue row (v2 keeps
+                # discography and wishlist releases beside the owned ones, where
+                # legacy was the owned library by construction).
+                from core.library2.sql_util import owned_sql
+                roll_ups = (
+                    ('album_count', f"""
+                        SELECT al.primary_artist_id, COUNT(*)
+                          FROM lib2_albums al
+                         WHERE {owned_sql('album', 'al')}
+                      GROUP BY al.primary_artist_id"""),
+                    ('track_count', f"""
+                        SELECT al.primary_artist_id, COUNT(*)
+                          FROM lib2_tracks t
+                          JOIN lib2_albums al ON al.id = t.album_id
+                         WHERE {owned_sql('track', 't')}
+                      GROUP BY al.primary_artist_id"""),
+                )
+                for key, sql in roll_ups:
                     try:
-                        for aid, n in cur.execute(
-                                f"SELECT artist_id, COUNT(*) FROM {table} GROUP BY artist_id"):
+                        for aid, n in cur.execute(sql):
                             counts.setdefault(str(aid), {})[key] = n
-                    except Exception:  # noqa: S110 — counts are best-effort
-                        pass
+                    except Exception as e:
+                        # Still best-effort, but never silently again: a null
+                        # count column is exactly how the legacy read survived.
+                        logger.warning("Library export %s roll-up failed: %s", key, e)
         finally:
             conn.close()
 
@@ -31761,6 +31775,24 @@ def _autostart_library_v2_bootstrap_import():
         )
     except Exception as e:
         logger.debug(f"lib2 bootstrap claim reclaim skipped: {e}")
+
+    # The delete journal writes `status='deleting'` BEFORE the unlink precisely
+    # so a process that dies mid-run leaves a state that can be settled rather
+    # than a file that is gone with nothing saying so. That recovery only ever
+    # ran when a *new* delete was started, which on most installs is never — so
+    # a container restart during a delete wedged the operation in `executing`
+    # forever and left the catalogue asserting a file that may already be gone.
+    # It belongs here, next to the other crash-recovery reclaim.
+    try:
+        from core.library2.file_delete import reconcile_incomplete_deletes
+        settled = reconcile_incomplete_deletes(get_database())
+        if settled:
+            logger.info(
+                "Library v2 delete journal: settled %d item(s) left by an "
+                "interrupted delete", settled,
+            )
+    except Exception as e:
+        logger.warning(f"lib2 delete-journal recovery skipped: {e}")
 
     # iss32-M03: the whole-library convergence passes that used to run inside
     # `_initialize_database`'s single transaction, on the startup path. Here
@@ -41733,7 +41765,11 @@ try:
 except Exception:
     logger.warning("could not start the video download monitor at boot", exc_info=True)
 
-# Library Manager v2 (opt-in) — UI-facing read API mounted on /api/library/v2/*.
+# Library Manager v2 — the UI-facing API mounted on /api/library/v2/*.
+# NOT opt-in: the cutover happened, lib2_* is the maintained catalogue, and
+# zero runtime SQL touches the legacy tables (enforced by
+# tests/library2/test_legacy_usage_ratchet.py against a 0-reads/0-writes
+# baseline). See core/library2/__init__.py.
 # Library V2 is the native, non-disableable catalogue surface.
 from api.library_v2 import register_library_v2_routes as _register_library_v2_routes
 

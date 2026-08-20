@@ -19,7 +19,7 @@ from mutagen.oggvorbis import OggVorbis
 from mutagen.mp4 import MP4
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import get_scope_artist, JobContext, JobResult, RepairJob
+from core.repair_jobs.base import get_scope_artist, JobContext, JobResult, RepairJob, scoped_file_subjects
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.album_tag_consistency")
@@ -168,6 +168,7 @@ class AlbumTagConsistencyJob(RepairJob):
         'check_mb_release_id': True,
     }
     auto_fix = False
+    supports_file_scope = True
 
     def _get_settings(self, context: JobContext) -> dict:
         """Get job settings from config, merged with defaults."""
@@ -180,7 +181,7 @@ class AlbumTagConsistencyJob(RepairJob):
     def estimate_scope(self, context: JobContext) -> int:
         try:
             counts: Dict[int, int] = {}
-            for subject in active_file_subjects(context.db, context.config_manager):
+            for subject in scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager)):
                 counts[int(subject["album_id"])] = counts.get(int(subject["album_id"]), 0) + 1
             return sum(1 for count in counts.values() if count >= 2)
         except Exception:
@@ -206,9 +207,9 @@ class AlbumTagConsistencyJob(RepairJob):
             from core.library2.paths import resolve_lib2_path
 
             albums = {}
-            for subject in active_file_subjects(
+            for subject in scoped_file_subjects(context, active_file_subjects(
                 context.db, context.config_manager,
-            ):
+            )):
                 albums.setdefault(subject['album_id'], []).append(subject)
         except Exception as e:
             logger.warning("V2 subject enumeration failed: %s", e)

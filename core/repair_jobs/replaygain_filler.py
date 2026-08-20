@@ -22,7 +22,7 @@ from typing import Any, Dict, Optional
 
 from core.library.path_resolver import resolve_library_file_path
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, scoped_file_subjects
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.replaygain_filler")
@@ -93,6 +93,7 @@ class ReplayGainFillerJob(RepairJob):
         'rescan_existing': False,
     }
     auto_fix = False
+    supports_file_scope = True
 
     # Flood guard for rescan_existing: a whole library re-flag lands in batches
     # of this many findings per scan run (the cap is LOGGED, never silent).
@@ -123,9 +124,9 @@ class ReplayGainFillerJob(RepairJob):
         try:
             from core.library2.maintenance_subjects import active_file_subjects
 
-            for subject in active_file_subjects(
+            for subject in scoped_file_subjects(context, active_file_subjects(
                 context.db, context.config_manager,
-            ):
+            )):
                 file_path = str(subject["path"])
                 native_subjects[file_path] = subject
                 rows.append((

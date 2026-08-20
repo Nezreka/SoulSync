@@ -153,7 +153,23 @@ def test_list_artists_materializes_requested_page_before_catalog_rollups(
     assert rollup_sql.index("page_artists AS MATERIALIZED") < rollup_sql.index(
         "artist_albums AS"
     )
-    assert rollup_sql.count("JOIN page_artists") >= 5
+    # Every roll-up must be reachable only through the page-scoped CTEs. The
+    # check used to count `JOIN page_artists` occurrences, which stopped being
+    # the mechanism: `canonical_members` is itself page-scoped (its WHERE
+    # restricts to artists on the page), and the roll-ups now CROSS JOIN from
+    # it so SQLite cannot reorder the junction table to the front (PERF-06).
+    # What matters is the property, so assert the PLAN: no full scan of the
+    # big junction/file tables.
+    plan = "\n".join(
+        row[3] for row in imported_conn.execute(
+            "EXPLAIN QUERY PLAN " + rollup_sql,
+            {"limit": 1, "offset": 0},
+        )
+    )
+    for table in ("lib2_track_artists", "lib2_album_artists", "lib2_track_files"):
+        assert f"SCAN {table}" not in plan, (
+            f"{table} is being scanned in full:\n{plan}"
+        )
 
 
 def test_list_artists_aggregate_sorts_choose_page_before_rollups(imported_conn):
