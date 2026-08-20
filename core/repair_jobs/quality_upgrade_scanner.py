@@ -22,7 +22,7 @@ file's own tags are used and the finding is filed as a loose 'file'.
 import os
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import skip_deleted_quarantine, JobContext, JobResult, RepairJob
 # Same v3 quality primitives the download import guard and Quality Upgrade
 # Finder use. Module-level (not a local import inside scan()) so tests can
 # monkeypatch them the same way tests/repair_jobs/test_quality_upgrade.py does.
@@ -257,6 +257,10 @@ class QualityUpgradeScannerJob(RepairJob):
         seen = set()
         for base in base_dirs:
             for root, _dirs, files in os.walk(base):
+                # Never scan SoulSync's own folders — a staged, half-landed
+                # album would be probed and flagged for "upgrade" before it is
+                # even in the library.
+                skip_deleted_quarantine(root, _dirs, base)
                 if context.check_stop():
                     return result
                 for fname in files:

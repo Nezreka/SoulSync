@@ -9,6 +9,7 @@ import logging
 
 from core.settings import config_manager
 from core.runtime_state import add_activity_item
+from core.repair_jobs.base import skip_deleted_quarantine
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +72,11 @@ def _run_duplicate_cleaner():
 
         total_files = 0
         for _root, dirs, files in os.walk(transfer_folder):
-            # Skip the deleted folder itself
-            if 'deleted' in dirs:
-                dirs.remove('deleted')
+            # SoulSync's own folders: the `deleted` quarantine and the
+            # atomic-publish staging tree. Staging holds a half-downloaded
+            # album whose tracks are ALSO about to exist in the library — the
+            # textbook false duplicate, and this job deletes files.
+            skip_deleted_quarantine(_root, dirs, transfer_folder)
             total_files += len(files)
 
         logger.warning(f"[Duplicate Cleaner] Found {total_files} total files to scan")
@@ -91,9 +94,7 @@ def _run_duplicate_cleaner():
         audio_extensions = {'.flac', '.mp3', '.m4a', '.aac', '.opus', '.ogg', '.wav', '.ape', '.wma', '.alac', '.aiff', '.aif', '.dsf', '.dff'}
 
         for root, dirs, files in os.walk(transfer_folder):
-            # Skip the deleted folder
-            if 'deleted' in dirs:
-                dirs.remove('deleted')
+            skip_deleted_quarantine(root, dirs, transfer_folder)
 
             for file in files:
                 files_scanned += 1
