@@ -10,6 +10,7 @@ import type { UrlHistoryEntry } from './-sync.urls';
 
 import {
   extractDeezerPlaylistId,
+  isDeezerShareUrl,
   extractITunesLinkId,
   extractSpotifyPublicId,
   URL_HISTORY_SOURCES,
@@ -43,6 +44,17 @@ export function deezerInputResult(
   if (!rawUrl) return { ok: false, error: 'Please paste a Deezer playlist URL' };
   const id = extractDeezerPlaylistId(rawUrl);
   if (!id) {
+    // A share link is valid — it just hides its id behind a redirect the
+    // browser cannot follow cross-origin. Say what to do instead of implying
+    // Deezer's own Share button produces a malformed URL.
+    if (isDeezerShareUrl(rawUrl)) {
+      return {
+        ok: false,
+        error:
+          'That is a Deezer share link, which hides the playlist id. Open it in a ' +
+          'browser and paste the deezer.com/playlist/... address it lands on.',
+      };
+    }
     return {
       ok: false,
       error: 'Invalid Deezer playlist URL. Expected format: deezer.com/playlist/{id}',

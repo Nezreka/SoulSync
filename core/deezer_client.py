@@ -1477,8 +1477,19 @@ class DeezerClient:
         Supported formats:
             https://www.deezer.com/playlist/1234567890
             https://www.deezer.com/en/playlist/1234567890
+            https://www.deezer.com/en-us/playlist/1234567890
             https://deezer.com/playlist/1234567890
+            www.deezer.com/playlist/1234567890      (no scheme — as pasted)
+            deezer.com/playlist/1234567890
             1234567890
+
+        NOT handled here, on purpose: the share links Deezer's own "Share →
+        Copy link" button produces (``link.deezer.com/s/…``,
+        ``deezer.page.link/…``). Those carry no id at all — the id only exists
+        after following a redirect, which is a network call and does not belong
+        in a pure parser. ``is_share_url`` recognises them so callers can
+        resolve or explain, instead of the user being told their perfectly
+        valid link is "invalid".
 
         Args:
             url: Deezer playlist URL or numeric ID
@@ -1495,12 +1506,54 @@ class DeezerClient:
         if url.isdigit():
             return url
 
-        # URL pattern: optional www, optional locale segment, /playlist/{id}
+        # Optional scheme (people paste "deezer.com/..." without it), optional
+        # www, optional locale — which can carry a region, e.g. /en-us/.
         match = re.match(
-            r'https?://(?:www\.)?deezer\.com/(?:[a-z]{2}/)?playlist/(\d+)',
-            url
+            r'(?:https?://)?(?:www\.)?deezer\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?playlist/(\d+)',
+            url,
+            re.IGNORECASE,
         )
         if match:
             return match.group(1)
 
         return None
+
+    @staticmethod
+    def is_share_url(url: str) -> bool:
+        """True for a Deezer share link, which hides its playlist id behind a
+        redirect (``link.deezer.com/s/…``, ``deezer.page.link/…``).
+
+        These are what the Share button in Deezer's apps actually copies, so
+        they are the FIRST thing a user pastes — and rejecting them with
+        "Expected format: deezer.com/playlist/{id}" tells someone their own
+        app's share link is malformed."""
+        if not url or not isinstance(url, str):
+            return False
+        return bool(re.match(
+            r'(?:https?://)?(?:link\.deezer\.com/|deezer\.page\.link/)',
+            url.strip(), re.IGNORECASE))
+
+    @staticmethod
+    def resolve_playlist_url(url: str, timeout: int = 10) -> Optional[str]:
+        """Playlist id from any Deezer URL, following a share-link redirect.
+
+        Pure parsing first; only a recognised share link costs a network call.
+        Returns None if it cannot be resolved — the caller decides what to say.
+        """
+        direct = DeezerClient.parse_playlist_url(url)
+        if direct:
+            return direct
+        if not DeezerClient.is_share_url(url):
+            return None
+        target = (url or '').strip()
+        if not target.lower().startswith('http'):
+            target = f'https://{target}'
+        try:
+            import requests
+
+            resp = requests.head(target, allow_redirects=True, timeout=timeout)
+            final = resp.url or ''
+        except Exception as e:
+            logger.debug(f"Deezer share-link resolve failed for {target}: {e}")
+            return None
+        return DeezerClient.parse_playlist_url(final)

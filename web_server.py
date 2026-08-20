@@ -26180,9 +26180,17 @@ def get_deezer_playlist(playlist_id):
     try:
         from core.deezer_client import DeezerClient
 
-        # Parse URL if needed
-        parsed_id = DeezerClient.parse_playlist_url(playlist_id)
+        # Resolve, don't just parse: Deezer's own Share button copies a
+        # link.deezer.com/s/… short link that carries no id until it is
+        # followed. Telling a user their app's share link is "invalid" is the
+        # kind of error that makes the feature look broken.
+        parsed_id = DeezerClient.resolve_playlist_url(playlist_id)
         if not parsed_id:
+            if DeezerClient.is_share_url(playlist_id):
+                return jsonify({"error":
+                                "That Deezer share link could not be resolved. Open it "
+                                "in a browser and paste the deezer.com/playlist/... "
+                                "address instead."}), 400
             return jsonify({"error": "Invalid Deezer playlist ID or URL"}), 400
 
         client = _get_deezer_client()

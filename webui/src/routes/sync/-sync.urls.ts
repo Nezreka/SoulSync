@@ -52,8 +52,25 @@ export function pillDisplayName(name: string): string {
  * sync-services.js 8783-8784, shared with the Deezer-link parse head).
  */
 export function extractDeezerPlaylistId(url: string): string | null {
-  const match = url.match(/deezer\.com\/(?:[a-z]{2}\/)?playlist\/(\d+)/i);
+  // The locale segment can carry a region (/en-us/), not just a language.
+  const match = url.match(/deezer\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?playlist\/(\d+)/i);
   return match ? match[1] : /^\d+$/.test(url) ? url : null;
+}
+
+/**
+ * A Deezer share link — what the Share button in Deezer's own apps copies.
+ *
+ * These carry no playlist id at all; it only exists after following a
+ * redirect, which the browser cannot do cross-origin. So the id cannot be
+ * extracted here, and the URL cannot be forwarded to the API either (it would
+ * have to ride in a path segment, and it contains slashes).
+ *
+ * Recognising them is still worth it: telling someone their own app's share
+ * link is "Invalid... Expected format: deezer.com/playlist/{id}" reads as the
+ * feature being broken, when the fix is one step they have no way to guess.
+ */
+export function isDeezerShareUrl(url: string): boolean {
+  return /^(?:https?:\/\/)?(?:link\.deezer\.com\/|deezer\.page\.link\/)/i.test((url || '').trim());
 }
 
 /**
