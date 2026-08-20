@@ -10781,9 +10781,15 @@ function MonitorAllUnmonitoredButton() {
 
   return (
     <>
+      {/* Same class pair as Automatic Search, which it sits next to. `.btnGhost`
+          alone is NOT enough: `.automaticSearchButton` is what constrains the
+          icon to 15x15 and makes the button an inline-flex row, so without it
+          the SVG renders at its natural size and the button towers over its
+          neighbour. (The class name is historical — the rule itself is the
+          generic "ghost button with a leading icon" in this header.) */}
       <button
         type="button"
-        className={styles.btnGhost}
+        className={`${styles.btnGhost} ${styles.automaticSearchButton}`}
         data-requires-write=""
         disabled={!canWrite}
         title="Start monitoring every artist in your library that isn't monitored yet"
