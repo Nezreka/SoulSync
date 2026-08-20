@@ -51,6 +51,7 @@ import {
   fetchSpotifyPlaylistTracks,
   fetchSpotifyPlaylists,
 } from '../-sync.api';
+import { DEEZER_PLAYLIST_PROGRESS_EVENT } from '../-sync.events';
 import { AccountDetailsModal } from './account-details-modal';
 import { AccountPlaylistCard } from './account-playlist-card';
 
@@ -59,7 +60,11 @@ import { AccountPlaylistCard } from './account-playlist-card';
  * the same seam as ss:discovery-progress and ss:repair-progress, used because
  * `socket` is a module-scoped `let` in core.js that no route can subscribe to.
  */
-export const DEEZER_PLAYLIST_PROGRESS_EVENT = 'ss:deezer-playlist-progress';
+// Lives in -sync.events now that BOTH deezer tabs (this one and the
+// paste-a-link one) listen for the same frames — a shared event that lives
+// inside one component's file is how two consumers quietly drift apart.
+// Re-exported here so existing importers of this module keep working.
+export { DEEZER_PLAYLIST_PROGRESS_EVENT };
 
 /** One frame of it: how far through resolving a playlist's albums we are. */
 export interface DeezerPlaylistProgress {
@@ -159,7 +164,6 @@ export function SpotifyTab({ selectedIds, onToggleSelect, registerRows }: Accoun
       window.hideLoadingOverlay?.();
     }
   }, []);
-
 
   return (
     <div>

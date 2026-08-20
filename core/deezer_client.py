@@ -1374,7 +1374,7 @@ class DeezerClient:
             return None
 
     @rate_limited
-    def get_playlist(self, playlist_id) -> Optional[Dict[str, Any]]:
+    def get_playlist(self, playlist_id, progress_cb=None) -> Optional[Dict[str, Any]]:
         """
         Get a playlist with all its tracks by ID.
 
@@ -1435,7 +1435,22 @@ class DeezerClient:
                 _cache = get_metadata_cache()
             except Exception:
                 _cache = None
-            track_positions = resolve_album_track_positions(self.session, self.BASE_URL, album_ids, _cache)
+            # Narrate this pass. It is ~1 rate-limited request per unique album
+            # — around 1,000 of them on a 1500-track playlist, so minutes of
+            # apparent silence while the button just says "Loading...". The
+            # resolver has always accepted a progress_cb; this path simply
+            # never passed one, so the ARL playlists narrated and the
+            # paste-a-link ones did not. Best-effort by construction: a
+            # callback that throws is swallowed inside the resolver.
+            def _say(done, total):
+                if progress_cb:
+                    progress_cb(done, total, 'track numbers')
+
+            if progress_cb:
+                _say(0, len(album_ids))
+            track_positions = resolve_album_track_positions(
+                self.session, self.BASE_URL, album_ids, _cache,
+                progress_cb=_say if progress_cb else None)
 
             # Normalize tracks
             tracks: List[Dict[str, Any]] = []

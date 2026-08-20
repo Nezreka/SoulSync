@@ -26193,11 +26193,31 @@ def get_deezer_playlist(playlist_id):
                                 "address instead."}), 400
             return jsonify({"error": "Invalid Deezer playlist ID or URL"}), 400
 
+        # Narrate the wait, exactly as the ARL playlist endpoint does. A
+        # 1500-track playlist resolves ~1,000 unique albums for real track
+        # numbers, which is minutes — and this path emitted nothing at all, so
+        # the button sat on "Loading..." with no logs and no frames. Same event
+        # and shape as the ARL one, so the existing core.js bridge and the
+        # DeezerPlaylistProgress consumer both work unchanged.
+        def _emit_progress(done, total, phase):
+            try:
+                socketio.emit('deezer:playlist_progress', {
+                    'playlist_id': str(parsed_id),
+                    'done': done,
+                    'total': total,
+                    'phase': phase,
+                })
+            except Exception as emit_err:   # noqa: BLE001 - narration must never break the fetch
+                logger.debug("deezer playlist progress emit failed: %s", emit_err)
+
         client = _get_deezer_client()
-        playlist = client.get_playlist(parsed_id)
+        playlist = client.get_playlist(parsed_id, progress_cb=_emit_progress)
 
         if not playlist:
             return jsonify({"error": "Deezer playlist not found"}), 404
+
+        logger.info(f"Loaded {len(playlist.get('tracks', []))} tracks from Deezer playlist: "
+                    f"{playlist.get('name')}")
 
         return jsonify(playlist)
 
