@@ -7213,8 +7213,19 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 
 /* Desktop-Only Optimizations */
 @media (min-width: 769px) {
+    /* Tracks --sidebar-w instead of restating 1200px, for the same reason the
+       sidebar rules below do (#1155). A flat 1200px floor is what made the
+       collapse toggle look useless in a narrow window: collapsing frees 172px
+       of sidebar, but the CONTAINER refused to shrink below 1200px, so the
+       page stayed exactly as wide as before and the right-hand content stayed
+       off-screen — wishx's "there is a minimum page width hardcoded
+       somewhere". It is this line.
+
+       Expanded this evaluates to 240 + 960 = 1200px, byte-identical to the old
+       behaviour. Collapsed it becomes 68 + 960 = 1028px, which is what lets a
+       ~1080px window finally fit the whole page. */
     .main-container {
-        min-width: 1200px;
+        min-width: calc(var(--sidebar-w) + 960px);
     }
 
     /* These have to track --sidebar-w, not restate it. min-width pins a flex
