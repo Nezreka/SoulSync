@@ -353,12 +353,20 @@ export function DeezerLinkTab({
       }
       setBusy(true);
       setProgress(null);
-      // Only ever rewrites the button TEXT, so if the frames never arrive
-      // (older server, socket down) the load still completes normally — the
-      // wait just goes back to being silent.
+      // Full-screen overlay, not just the button label: a few words changing
+      // inside a small button is easy to miss, and this wait is minutes long.
+      // Same overlay the Deezer ACCOUNT tab already uses for the identical
+      // wait, so the two paths now look the same.
+      const label = 'Loading Deezer playlist';
+      window.showLoadingOverlay?.(`${label}...`);
+      // Only ever rewrites TEXT, so if the frames never arrive (older server,
+      // socket down) the load still completes normally and the overlay still
+      // clears in the finally — the wait just goes back to being silent.
       const onProgress = (event: Event) => {
         const frame = (event as CustomEvent<DeezerPlaylistProgressFrame>).detail;
-        setProgress(deezerProgressLabel(frame, checked.id));
+        const text = deezerProgressLabel(frame, checked.id);
+        setProgress(text);
+        if (text) window.showLoadingOverlay?.(`${label} — ${text}`);
       };
       window.addEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT, onProgress);
       try {
@@ -398,6 +406,7 @@ export function DeezerLinkTab({
         );
       } finally {
         window.removeEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT, onProgress);
+        window.hideLoadingOverlay?.();
         setProgress(null);
         setBusy(false);
       }

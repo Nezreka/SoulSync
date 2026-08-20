@@ -19680,6 +19680,14 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     padding: 30px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     position: relative;
+    /* The modal is a flex column capped at 90vh. A flex item's default is
+       flex-shrink: 1, so once the track table makes the content taller than
+       the cap, the browser shrinks EVERY shrinkable child proportionally —
+       and the header, having no content of its own to resist with, collapses
+       until the title is sliced in half and the close button is crowded off
+       the top edge. It reads like `overflow: hidden` on the header, but there
+       is no such rule; the header is simply being squashed. */
+    flex-shrink: 0;
 }
 
 .youtube-discovery-modal .modal-header h2 {
@@ -19890,6 +19898,10 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    /* Same reason as the header: the Close button must not be squeezed away
+       when the track list is long. The body (flex: 1) is the only child that
+       should give ground. */
+    flex-shrink: 0;
 }
 
 .youtube-discovery-modal .modal-footer-left {
