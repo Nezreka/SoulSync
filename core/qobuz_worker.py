@@ -10,6 +10,7 @@ from database.music_database import MusicDatabase
 from core.qobuz_client import _qobuz_is_rate_limited
 from core.worker_utils import idle_backoff_seconds, interruptible_sleep
 from core.library2.worker_support import (
+    MATCHED,
     accept_artist_match,
     honor_stored_match,
     provider_id_conflict,
@@ -429,14 +430,20 @@ class QobuzWorker:
         """Process an album: search Qobuz, verify, fetch full details, store metadata"""
         # Issue #501: honor manual matches. Pre-fix this just marked
         # status='matched' without refreshing metadata.
-        if honor_stored_match(
+        _stored = honor_stored_match(
             self.db, entity_type='album', entity_id=album_id,
             service='qobuz',
             fetch=self.client.get_album,
             on_match=self._refresh_album_via_stored_id,
             log_prefix='Qobuz',
-        ):
-            self.stats['matched'] += 1
+        )
+        if _stored:
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
+            if _stored == MATCHED:
+                self.stats['matched'] += 1
             return
 
         result = self.client.search_album(artist_name, album_name)
@@ -491,14 +498,20 @@ class QobuzWorker:
     def _process_track(self, track_id: int, track_name: str, artist_name: str, item: Dict[str, Any]):
         """Process a track: search Qobuz, verify, fetch full details, store metadata"""
         # Issue #501: honor manual matches.
-        if honor_stored_match(
+        _stored = honor_stored_match(
             self.db, entity_type='track', entity_id=track_id,
             service='qobuz',
             fetch=self.client.get_track,
             on_match=self._refresh_track_via_stored_id,
             log_prefix='Qobuz',
-        ):
-            self.stats['matched'] += 1
+        )
+        if _stored:
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
+            if _stored == MATCHED:
+                self.stats['matched'] += 1
             return
 
         result = self.client.search_track(artist_name, track_name)

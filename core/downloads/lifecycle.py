@@ -97,18 +97,26 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> None:
 
         db = MusicDatabase()
 
-        def _db_update(staged_path: str, final_path: str) -> None:
+        def _db_update(staged_path: str, final_path: str) -> int:
             # The tracks were imported FROM staging, so the Library-v2 file row
             # holds the staging path — inside the tree this publish is about to
             # delete. Repointing only the legacy row left it naming a file that
             # exists nowhere, which is also the one state path_drift_reconcile
             # cannot repair (it finds the file by that stored path).
+            #
+            # L2-002: the rowcount is returned, not discarded. repoint_file_path
+            # reports it precisely so a caller can tell "the catalogue did not
+            # know this file" from "done", and that first case IS the state
+            # above — a row naming a staging path that is about to stop
+            # existing. The publish treats a zero for an audio file as a failed
+            # publish and rolls the album back.
             from core.library2.track_files import repoint_file_path
 
             conn = db._get_connection()
             try:
-                repoint_file_path(conn, staged_path, final_path)
+                repointed = repoint_file_path(conn, staged_path, final_path)
                 conn.commit()
+                return repointed
             finally:
                 conn.close()
 

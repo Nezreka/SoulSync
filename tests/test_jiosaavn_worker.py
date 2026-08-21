@@ -293,44 +293,30 @@ class TestJioSaavnWorkerQueue:
         assert item["type"] == "artist"
 
 
-class TestJioSaavnDbMigration:
-    def test_jiosaavn_columns_exist(self, db):
+class TestJioSaavnCatalogueSlot:
+    """The worker's id has somewhere to land.
+
+    It used to be three ``jiosaavn_*`` columns per legacy table. JioSaavn has no
+    dedicated column on the lib2 rows, so its id lives in ``external_ids`` under
+    its own namespace and ``provider_id_sql`` is what resolves it — the same
+    indirection every provider without a column goes through.
+    """
+
+    def test_the_id_resolves_to_an_external_ids_slot(self, db):
+        from core.library2.provider_ids import provider_id_sql
+
+        expression = provider_id_sql("jiosaavn", alias="a")
+        assert expression == "json_extract(a.external_ids, '$.jiosaavn')"
+
         with db._get_connection() as conn:
-            for table in ("artists", "albums", "tracks"):
-                cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
-                assert "jiosaavn_id" in cols
-                assert "jiosaavn_match_status" in cols
-                assert "jiosaavn_last_attempted" in cols
-
-    def test_repair_columns_survive_deezer_migration_failure(self, db):
-        """#964 regression: the repair-worker columns live in their OWN try block, so
-        a failure in the Deezer-column migration must NOT skip them — the repair
-        worker queries repair_status on every run and errors out if it's missing."""
-        with db._get_connection() as conn:
-            real = conn.cursor()
-            # Simulate a pre-migration tracks table lacking the repair columns.
-            real.execute("DROP TABLE IF EXISTS tracks")
-            real.execute("CREATE TABLE tracks (id INTEGER PRIMARY KEY, title TEXT)")
+            conn.execute(
+                "INSERT INTO lib2_artists (name, external_ids) VALUES (?, ?)",
+                ("A-ha", '{"jiosaavn": "js-1"}'))
             conn.commit()
-
-            class _FailDeezerCursor:
-                """Aborts the Deezer half at its first statement; delegates the rest
-                (the repair block never touches an 'artists' PRAGMA/ALTER)."""
-                def execute(self, sql, *args):
-                    if "artists" in sql.lower():
-                        raise RuntimeError("simulated Deezer migration failure")
-                    return real.execute(sql, *args)
-                def fetchall(self):
-                    return real.fetchall()
-                def fetchone(self):
-                    return real.fetchone()
-
-            db._add_deezer_columns(_FailDeezerCursor())
-            conn.commit()
-
-            cols = {row[1] for row in real.execute("PRAGMA table_info(tracks)")}
-            assert "repair_status" in cols
-            assert "repair_last_checked" in cols
+            stored = conn.execute(
+                f"SELECT {provider_id_sql('jiosaavn', alias='a')} FROM lib2_artists a"
+            ).fetchone()[0]
+        assert stored == "js-1"
 
 
 def test_jiosaavn_in_service_entity_support():

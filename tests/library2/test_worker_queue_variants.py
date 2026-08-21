@@ -256,3 +256,39 @@ class TestTheStatusBreakdown:
 
         assert counts == {"matched": 0, "not_found": 0, "error": 0,
                           "pending": 1, "total": 1}
+
+
+class TestTheBreakdownCountsOnlyTheOwnedLibrary:
+    """L2-016 — ``next_pending`` filters to the physically owned library;
+    ``status_counts`` counted the whole table. A watched artist's discography or
+    a wishlist row therefore showed as pending work the queue could never hand
+    out, so the progress bar sat below 100% forever."""
+
+    def _provider_only(self, conn, name):
+        """An artist with a provider id but no file anywhere — discography."""
+        return conn.execute(
+            "INSERT INTO lib2_artists(name, sort_name, spotify_id, external_ids) "
+            "VALUES(?,?,?,'{}')", (name, name, "sp-ghost"),
+        ).lastrowid
+
+    def test_a_provider_only_artist_is_not_pending_work(self, conn):
+        done = _artist(conn, "Owned", spotify_id="sp-1")
+        record_attempt(conn, entity_type="artist", entity_id=done,
+                       service="similar_artists", status="matched")
+        self._provider_only(conn, "Discography Only")
+
+        assert next_pending(conn, "similar_artists", entity_types=("artist",),
+                            require_provider_id=True) is None
+        counts = status_counts(conn, "similar_artists", "artist",
+                               require_provider_id=True)
+        assert counts["pending"] == 0
+        assert counts["total"] == 1
+
+    def test_it_still_narrows_by_provider_id(self, conn):
+        _artist(conn, "Matched", spotify_id="sp-1")
+        _artist(conn, "Unmatched")
+
+        counts = status_counts(conn, "similar_artists", "artist",
+                               require_provider_id=True)
+
+        assert counts["total"] == 1

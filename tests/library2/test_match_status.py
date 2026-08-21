@@ -332,3 +332,80 @@ def test_artist_enrichment_coverage_is_empty_without_tracks(imported_conn):
     from core.library2.match_status import artist_enrichment_coverage
 
     assert artist_enrichment_coverage(conn, artist_id) == {"total_tracks": 0}
+
+
+class TestManualMatchKeepsTheAttemptLedgerInStep:
+    """L2-004 — the chip reads the entity's id, the enrichment queue reads
+    ``lib2_provider_attempts``. A manual match wrote only the first, so the two
+    disagreed in both directions."""
+
+    @staticmethod
+    def _owned_artist(conn, name="Rone"):
+        from core.library2.provider_attempts import (
+            ensure_provider_attempt_schema, record_attempt,
+        )
+        ensure_provider_attempt_schema(conn.cursor())
+        # Settle everything the seed already holds so the queue's answer is
+        # about the artist under test and nothing else.
+        for row in conn.execute("SELECT id FROM lib2_artists").fetchall():
+            record_attempt(conn, entity_type="artist", entity_id=int(row[0]),
+                           service="spotify", status="matched")
+        artist = conn.execute(
+            "INSERT INTO lib2_artists(name, sort_name) VALUES(?,?)", (name, name),
+        ).lastrowid
+        album = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
+            "VALUES(?,'Tohu Bohu','album')", (artist,)).lastrowid
+        track = conn.execute(
+            "INSERT INTO lib2_tracks(album_id,title) VALUES(?,'Bora')", (album,)).lastrowid
+        conn.execute(
+            "INSERT INTO lib2_track_files(track_id,path,is_primary,file_state) "
+            "VALUES(?,?,1,'active')", (track, f"/music/{track}.flac"))
+        return artist
+
+    def test_setting_an_id_settles_the_queue_entry(self, imported_conn):
+        from core.library2.worker_queue import next_pending
+
+        conn = imported_conn
+        artist = self._owned_artist(conn)
+        assert next_pending(conn, "spotify", entity_types=("artist",))["id"] == artist
+
+        MS.set_library_v2_match(conn, "artist", artist, "spotify", "sp-manual")
+
+        row = conn.execute(
+            "SELECT status, detail FROM lib2_provider_attempts "
+            "WHERE entity_type='artist' AND entity_id=? AND service='spotify'",
+            (artist,)).fetchone()
+        assert row["status"] == "matched"
+        # …and the worker no longer picks the entity it was just told about.
+        picked = next_pending(conn, "spotify", entity_types=("artist",))
+        assert picked is None or picked["id"] != artist
+
+    def test_clearing_an_id_makes_the_entity_selectable_again(self, imported_conn):
+        from core.library2.worker_queue import next_pending
+
+        conn = imported_conn
+        artist = self._owned_artist(conn)
+        MS.set_library_v2_match(conn, "artist", artist, "spotify", "sp-manual")
+
+        MS.set_library_v2_match(conn, "artist", artist, "spotify", None)
+
+        assert conn.execute(
+            "SELECT COUNT(*) FROM lib2_provider_attempts "
+            "WHERE entity_type='artist' AND entity_id=? AND service='spotify'",
+            (artist,)).fetchone()[0] == 0
+        # No retry window has to expire first: it is unanswered, not failed.
+        assert next_pending(conn, "spotify", entity_types=("artist",))["id"] == artist
+
+    def test_a_missing_ledger_table_does_not_break_the_match(self, imported_conn):
+        conn = imported_conn
+        artist = conn.execute(
+            "INSERT INTO lib2_artists(name, sort_name) VALUES('Old','Old')",
+        ).lastrowid
+        conn.execute("DROP TABLE IF EXISTS lib2_provider_attempts")
+
+        MS.set_library_v2_match(conn, "artist", artist, "spotify", "sp-1")
+
+        assert conn.execute(
+            "SELECT spotify_id FROM lib2_artists WHERE id=?", (artist,),
+        ).fetchone()[0] == "sp-1"

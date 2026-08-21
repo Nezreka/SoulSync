@@ -75,7 +75,15 @@ def scoped_file_subjects(context: Any, subjects: List[Dict[str, Any]]) -> List[D
 
 
 def build_artist_file_scope(db: Any, artist_id: int, artist_name: str = "") -> Dict[str, Any]:
-    """Resolve a lib2 artist to exact linked file paths for repair jobs."""
+    """Resolve a lib2 artist to exact linked file paths for repair jobs.
+
+    The scope has to be the artist the user is looking at, which is the merged
+    alias group the detail page shows — not one row of it (L2-015). It also has
+    to be the files that exist: a tombstoned path is not something a scoped
+    AcoustID/corruption/ReplayGain/reorganize run can do anything with except
+    report errors about. Track credits count as well as album credits, for the
+    same reason the detail page lists those releases.
+    """
     artist_id = int(artist_id)
     if artist_id <= 0:
         raise ValueError("artist_id must be positive")
@@ -86,17 +94,25 @@ def build_artist_file_scope(db: Any, artist_id: int, artist_name: str = "") -> D
         ).fetchone()
         if artist is None:
             raise ValueError("Library v2 artist not found")
+        from core.library2.artist_aliases import resolve_alias_group
+        group = resolve_alias_group(conn, artist_id)
+        marks = ",".join("?" for _ in group)
         paths = [
             row[0]
             for row in conn.execute(
-                """SELECT DISTINCT tf.path
-                     FROM lib2_album_artists aa
-                     JOIN lib2_tracks t ON t.album_id=aa.album_id
-                     JOIN lib2_track_files tf ON tf.track_id=t.id
-                    WHERE aa.artist_id=?
-                      AND tf.path IS NOT NULL AND tf.path<>''
-                    ORDER BY tf.path""",
-                (artist_id,),
+                f"""SELECT DISTINCT tf.path
+                      FROM lib2_track_files tf
+                      JOIN lib2_tracks t ON t.id=tf.track_id
+                     WHERE tf.path IS NOT NULL AND TRIM(tf.path)<>''
+                       AND COALESCE(tf.file_state,'active')='active'
+                       AND (EXISTS (SELECT 1 FROM lib2_album_artists aa
+                                     WHERE aa.album_id=t.album_id
+                                       AND aa.artist_id IN ({marks}))
+                            OR EXISTS (SELECT 1 FROM lib2_track_artists ta
+                                        WHERE ta.track_id=t.id
+                                          AND ta.artist_id IN ({marks})))
+                     ORDER BY tf.path""",
+                [*group, *group],
             ).fetchall()
         ]
         resolved_name = str(artist_name or artist[0] or "").strip()

@@ -3805,3 +3805,104 @@ def test_ui_preferences_write_still_works_normally(api):
 
     assert response.status_code == 200
     assert response.get_json()["success"] is True
+
+
+# ---------------------------------------------------------------------------
+# L2-009: the manual import needs its own lease guard
+# ---------------------------------------------------------------------------
+
+
+def _quiet_import(monkeypatch, *, on_import=None):
+    """Patch the manual import down to a run that reports no progress at all."""
+    from core.library2 import artwork, completeness, importer, tag_cache
+
+    def _import(*_a, **_kw):
+        if on_import is not None:
+            on_import()
+        return {"artists": 1, "albums": 1, "tracks": 1}
+
+    monkeypatch.setattr(importer, "import_legacy_library", _import)
+    monkeypatch.setattr(completeness, "precache_tracklists", lambda *a, **kw: 0)
+    monkeypatch.setattr(tag_cache, "precache_tag_cache", lambda *a, **kw: {})
+    monkeypatch.setattr(artwork, "precache_all_artwork",
+                        lambda *a, **kw: {"artists": 0, "albums": 0})
+
+
+def _reset_import_state():
+    from api import library_v2 as api_module
+    api_module._import_state.update(running=False, stage=None, current=0, total=0,
+                                    stats=None, error=None, finished_at=None)
+    api_module._reset_artwork_cache_state()
+
+
+def _await_idle(client, timeout=3):
+    deadline = time.monotonic() + timeout
+    state = None
+    while time.monotonic() < deadline:
+        state = client.get("/api/library/v2/import/status").get_json()
+        if state and not state["running"]:
+            return state
+        time.sleep(0.01)
+    return state
+
+
+def test_manual_import_holds_the_lease_without_any_progress_callback(api, monkeypatch):
+    """The endpoint's heartbeat rides on progress reports, and the post-import
+    stages report every few dozen items. A silent stage longer than the 600s
+    stale window let a second process take the claim mid-run."""
+    from core.library2 import bootstrap as lib2_bootstrap
+
+    client, _db, _ids = api
+    beats = []
+
+    class _RecordingKeepalive:
+        def __init__(self, database, owner_token, interval):
+            self.owner_token = owner_token
+            beats.append(self)
+            self.started = False
+            self.stopped = False
+
+        def start(self):
+            self.started = True
+            return self
+
+        def stop(self):
+            self.stopped = True
+
+    monkeypatch.setattr(lib2_bootstrap, "ClaimKeepalive", _RecordingKeepalive)
+    _quiet_import(monkeypatch)
+    _reset_import_state()
+
+    assert client.post("/api/library/v2/import", json={}).status_code == 200
+    state = _await_idle(client)
+
+    assert state is not None and state["stage"] == "done"
+    assert len(beats) == 1
+    assert beats[0].started and beats[0].stopped
+
+
+def test_a_lost_lease_fails_the_manual_import_instead_of_reporting_done(api, monkeypatch):
+    """``mark_done`` returning False means another process owns the persisted
+    run. Ignoring it put two finalizers on the same library while the UI showed
+    a clean success."""
+    from core.library2 import artwork
+    from core.library2 import bootstrap as lib2_bootstrap
+
+    client, _db, _ids = api
+    artwork_calls = []
+
+    monkeypatch.setattr(lib2_bootstrap, "mark_done", lambda *a, **kw: False)
+    monkeypatch.setattr(lib2_bootstrap, "mark_failed", lambda *a, **kw: True)
+    _quiet_import(monkeypatch)
+    monkeypatch.setattr(
+        artwork, "precache_all_artwork",
+        lambda *a, **kw: artwork_calls.append(1) or {"artists": 0, "albums": 0})
+    _reset_import_state()
+
+    assert client.post("/api/library/v2/import", json={}).status_code == 200
+    state = _await_idle(client)
+
+    assert state is not None
+    assert state["stage"] == "failed"
+    assert "lease" in (state["error"] or "").lower()
+    assert artwork_calls == []

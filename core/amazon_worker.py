@@ -8,7 +8,7 @@ from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.amazon_client import AmazonClient
 from core.worker_utils import idle_backoff_seconds, interruptible_sleep
-from core.library2.worker_support import honor_stored_match
+from core.library2.worker_support import MATCHED, honor_stored_match
 from core.amazon_outage import is_source_outage, next_poll_delay_seconds
 
 logger = get_logger("amazon_worker")
@@ -275,13 +275,19 @@ class AmazonWorker:
         self._update_track(track_id, api_data, stored_id)
 
     def _process_album(self, album_id: int, album_name: str, artist_name: str, item: Dict[str, Any]):
-        if honor_stored_match(
+        _stored = honor_stored_match(
             self.db, entity_type='album', entity_id=album_id, service='amazon',
             fetch=lambda asin: self.client.get_album(asin, include_tracks=False),
             on_match=self._refresh_album_via_stored_id,
             log_prefix='Amazon',
-        ):
-            self.stats['matched'] += 1
+        )
+        if _stored:
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
+            if _stored == MATCHED:
+                self.stats['matched'] += 1
             return
         # A stored/manual id whose provider refresh temporarily failed must not
         # fall through to fuzzy search and be replaced by a different result.
@@ -323,13 +329,19 @@ class AmazonWorker:
             logger.debug(f"No match for album '{album_name}'")
 
     def _process_track(self, track_id: int, track_name: str, artist_name: str, item: Dict[str, Any]):
-        if honor_stored_match(
+        _stored = honor_stored_match(
             self.db, entity_type='track', entity_id=track_id, service='amazon',
             fetch=self.client.get_track_details,
             on_match=self._refresh_track_via_stored_id,
             log_prefix='Amazon',
-        ):
-            self.stats['matched'] += 1
+        )
+        if _stored:
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
+            if _stored == MATCHED:
+                self.stats['matched'] += 1
             return
         if self._get_existing_id('track', track_id):
             logger.debug(

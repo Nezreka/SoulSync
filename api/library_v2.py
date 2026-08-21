@@ -5168,6 +5168,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # instead of starting the whole migration again.
             _progress.lib2_resume_aware = True
 
+            # L2-009: the heartbeat above only beats when a stage reports, and
+            # the post-import stages report every 20 albums / 50 files by design.
+            # A slow or wedged NAS makes those gaps outlast the 600s stale window,
+            # and a second process then takes the lease while this run is still
+            # writing. Hold it for the lifetime of the run instead, exactly as
+            # the automatic bootstrap does.
+            keepalive = lib2_bootstrap.ClaimKeepalive(
+                get_database(), bootstrap_owner,
+                lib2_bootstrap.KEEPALIVE_INTERVAL_SECONDS).start()
             try:
                 stats = import_legacy_library(get_database(), reset=reset, progress=_progress,
                                               profile_id=active_profile)
@@ -5180,15 +5189,25 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 run_post_import_precache(get_database(), config_manager,
                                          progress=_progress)
 
+                # Stop beating before settling the claim so no beat can land
+                # after it.
+                keepalive.stop()
+                # A lost lease is a hard failure, not a footnote: something else
+                # owns the persisted run, so reporting "done" and starting
+                # artwork here would put two finalizers on the same library.
+                if not lib2_bootstrap.mark_done(
+                    get_database(), bootstrap_owner,
+                    watermark=lib2_bootstrap.source_watermark(get_database()),
+                ):
+                    raise RuntimeError(
+                        "Library import lease was lost before completion — "
+                        "another process owns this run")
+
                 # Artwork is optional presentation data: rows, monitoring,
                 # tracklists, tag facts and §63 dedup/namespace repairs are all
                 # committed already.  Mark the import complete and let artwork
                 # continue independently so the UI can browse immediately.
                 _import_state.update(stage="done", current=0, total=0)
-                lib2_bootstrap.mark_done(
-                    get_database(), bootstrap_owner,
-                    watermark=lib2_bootstrap.source_watermark(get_database()),
-                )
                 _start_artwork_cache(get_database, config_manager)
             except Exception as e:  # noqa: BLE001
                 logger.error("Library v2 import failed: %s", e, exc_info=True)
@@ -5198,6 +5217,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 except Exception as mark_err:  # noqa: BLE001
                     logger.debug("lib2 bootstrap mark_failed skipped: %s", mark_err)
             finally:
+                keepalive.stop()
                 _import_state.update(running=False, finished_at=_t.time())
 
         threading.Thread(target=_run, name="lib2-import", daemon=True).start()

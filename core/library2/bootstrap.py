@@ -574,6 +574,13 @@ class _ClaimKeepalive:
         self._thread.join(timeout=10)
 
 
+# Public name for the same guard outside this module. The manual import
+# endpoint needs it for exactly the reason the autostart does (L2-009): its own
+# heartbeat rides on progress callbacks, and the post-import precache stages
+# deliberately report only every few dozen items.
+ClaimKeepalive = _ClaimKeepalive
+
+
 def mark_done(database: Any, owner_token: str, *, watermark: Optional[str] = None) -> bool:
     conn = database._get_connection()
     try:
@@ -777,6 +784,19 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
     if not owner_token:
         return {"skipped": "already_running"}
 
+    # Nothing to migrate. Since the compatibility tables stopped being created,
+    # a fresh install reports zero source rows because the tables are ABSENT,
+    # not because they are empty — and the importer's projection would fail on
+    # a table that has none of its required columns. ``waiting_for_source`` is
+    # the state written for exactly this: the skip above honours it while the
+    # watermark is unchanged, and an upgrade whose legacy rows do exist changes
+    # the watermark and runs normally. A resume checkpoint always wins: a run
+    # interrupted mid-walk must finish, whatever the source counts today.
+    if not resume and not source_row_count(current_watermark):
+        mark_waiting_for_source(database, owner_token, watermark=current_watermark)
+        logger.info("Library v2 bootstrap: no legacy catalogue to import")
+        return {"skipped": "empty_source"}
+
     if resume:
         logger.info("Library v2 bootstrap import resuming at %s row %s",
                     resume.stage, resume.rowid)
@@ -856,6 +876,8 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
 
 
 __all__ = [
+    "ClaimKeepalive",
+    "KEEPALIVE_INTERVAL_SECONDS",
     "PROGRESS_LOG_INTERVAL_SECONDS",
     "bootstrap_is_active",
     "ensure_bootstrap_schema",

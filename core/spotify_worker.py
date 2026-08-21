@@ -16,6 +16,7 @@ from core.worker_utils import (
     release_titles,
 )
 from core.library2.worker_support import (
+    MATCHED,
     honor_stored_match,
     owned_album_titles,
     provider_id_conflict,
@@ -681,13 +682,19 @@ class SpotifyWorker:
         # refresh metadata via that ID and skip search-by-name — which
         # would otherwise overwrite the manual match with whatever
         # name-search returned.
-        if honor_stored_match(
+        _stored = honor_stored_match(
             self.db, entity_type='album', entity_id=album_id, service='spotify',
             fetch=self.client.get_album,
             on_match=self._refresh_album_via_stored_id,
             log_prefix='Spotify',
-        ):
-            self.stats['matched'] += 1
+        )
+        if _stored:
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
+            if _stored == MATCHED:
+                self.stats['matched'] += 1
             return
 
         query = f"{artist_name} {album_name}" if artist_name else album_name
@@ -731,13 +738,19 @@ class SpotifyWorker:
         artist_name = item.get('artist', '')
 
         # Issue #501: honor manual matches (see _process_album_individual).
-        if honor_stored_match(
+        _stored = honor_stored_match(
             self.db, entity_type='track', entity_id=track_id, service='spotify',
             fetch=self.client.get_track_details,
             on_match=self._refresh_track_via_stored_id,
             log_prefix='Spotify',
-        ):
-            self.stats['matched'] += 1
+        )
+        if _stored:
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
+            if _stored == MATCHED:
+                self.stats['matched'] += 1
             return
 
         query = f"{artist_name} {track_name}" if artist_name else track_name

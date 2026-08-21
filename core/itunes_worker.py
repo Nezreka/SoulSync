@@ -17,6 +17,7 @@ from core.worker_utils import (
     release_titles,
 )
 from core.library2.worker_support import (
+    MATCHED,
     accept_artist_match,
     honor_stored_match,
     owned_album_titles,
@@ -484,13 +485,19 @@ class iTunesWorker:
 
         # Issue #501: honor manual matches (see SpotifyWorker for full
         # explanation — same pattern across every per-source worker).
-        if honor_stored_match(
+        _stored = honor_stored_match(
             self.db, entity_type='album', entity_id=album_id, service='itunes',
             fetch=self.client.get_album,
             on_match=self._refresh_album_via_stored_id,
             log_prefix='iTunes',
-        ):
-            self.stats['matched'] += 1
+        )
+        if _stored:
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
+            if _stored == MATCHED:
+                self.stats['matched'] += 1
             return
 
         query = f"{artist_name} {album_name}" if artist_name else album_name
@@ -524,13 +531,19 @@ class iTunesWorker:
         artist_name = item.get('artist', '')
 
         # Issue #501: honor manual matches.
-        if honor_stored_match(
+        _stored = honor_stored_match(
             self.db, entity_type='track', entity_id=track_id, service='itunes',
             fetch=self.client.get_track_details,
             on_match=self._refresh_track_via_stored_id,
             log_prefix='iTunes',
-        ):
-            self.stats['matched'] += 1
+        )
+        if _stored:
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
+            if _stored == MATCHED:
+                self.stats['matched'] += 1
             return
 
         query = f"{artist_name} {track_name}" if artist_name else track_name

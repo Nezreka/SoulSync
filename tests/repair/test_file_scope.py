@@ -33,21 +33,32 @@ class _NonClosingConnection:
         pass
 
 
-def test_build_artist_file_scope_uses_lib2_links_and_keeps_empty_scope_explicit():
+_SCOPE_DDL = """
+    CREATE TABLE lib2_artists(id INTEGER PRIMARY KEY, name TEXT,
+                              canonical_artist_id INTEGER);
+    CREATE TABLE lib2_album_artists(album_id INTEGER, artist_id INTEGER);
+    CREATE TABLE lib2_track_artists(track_id INTEGER, artist_id INTEGER);
+    CREATE TABLE lib2_tracks(id INTEGER PRIMARY KEY, album_id INTEGER);
+    CREATE TABLE lib2_track_files(track_id INTEGER, path TEXT, file_state TEXT);
+"""
+
+
+def _scope_db(script: str):
     conn = sqlite3.connect(":memory:")
-    conn.executescript("""
-        CREATE TABLE lib2_artists(id INTEGER PRIMARY KEY, name TEXT);
-        CREATE TABLE lib2_album_artists(album_id INTEGER, artist_id INTEGER);
-        CREATE TABLE lib2_tracks(id INTEGER PRIMARY KEY, album_id INTEGER);
-        CREATE TABLE lib2_track_files(track_id INTEGER, path TEXT);
-        INSERT INTO lib2_artists VALUES(1, 'Artist'), (2, 'Empty');
+    conn.row_factory = sqlite3.Row
+    conn.executescript(_SCOPE_DDL + script)
+    return _DB(_NonClosingConnection(conn))
+
+
+def test_build_artist_file_scope_uses_lib2_links_and_keeps_empty_scope_explicit():
+    db = _scope_db("""
+        INSERT INTO lib2_artists(id,name) VALUES(1, 'Artist'), (2, 'Empty');
         INSERT INTO lib2_album_artists VALUES(10, 1);
         INSERT INTO lib2_tracks VALUES(100, 10), (101, 10);
         INSERT INTO lib2_track_files VALUES
-            (100, '/music/Artist/Album/a.flac'),
-            (101, '/music/Artist/Album/b.flac');
+            (100, '/music/Artist/Album/a.flac', 'active'),
+            (101, '/music/Artist/Album/b.flac', 'active');
     """)
-    db = _DB(_NonClosingConnection(conn))
 
     scope = build_artist_file_scope(db, 1)
     assert scope == {
@@ -210,3 +221,59 @@ def test_a_job_that_cannot_honour_a_file_scope_refuses_it(tmp_path):
 
     # An artist-NAME-only scope is not a file scope and stays allowed.
     assert worker.run_job_now("unscoped", scope={"artist_name": "A"}) is True
+
+
+# ---------------------------------------------------------------------------
+# L2-015: the scope is the artist the user sees, and the files that exist
+# ---------------------------------------------------------------------------
+
+
+def test_the_scope_covers_the_whole_alias_group():
+    """The detail page merges canonical + aliases. Scoping to the canonical row
+    alone ran AcoustID/corruption/ReplayGain/reorganize over part of what the
+    user was looking at."""
+    db = _scope_db("""
+        INSERT INTO lib2_artists(id,name,canonical_artist_id)
+            VALUES(1,'Röyksopp',NULL), (2,'Royksopp',1);
+        INSERT INTO lib2_album_artists VALUES(10, 1), (11, 2);
+        INSERT INTO lib2_tracks VALUES(100, 10), (110, 11);
+        INSERT INTO lib2_track_files VALUES
+            (100, '/music/canonical.flac', 'active'),
+            (110, '/music/alias.flac', 'active');
+    """)
+
+    for entry_point in (1, 2):  # canonical deep link and alias deep link alike
+        assert build_artist_file_scope(db, entry_point)["file_paths"] == [
+            "/music/alias.flac", "/music/canonical.flac",
+        ]
+
+
+def test_inactive_files_are_left_out():
+    """A tombstoned path is nothing a scoped run can act on; including it only
+    produced irrelevant findings and errors — and in an alias group it could be
+    the ONLY path in scope while the real file was skipped."""
+    db = _scope_db("""
+        INSERT INTO lib2_artists(id,name,canonical_artist_id)
+            VALUES(1,'Röyksopp',NULL), (2,'Royksopp',1);
+        INSERT INTO lib2_album_artists VALUES(10, 1), (11, 2);
+        INSERT INTO lib2_tracks VALUES(100, 10), (110, 11);
+        INSERT INTO lib2_track_files VALUES
+            (100, '/music/tombstoned.flac', 'deleted'),
+            (110, '/music/alias.flac', 'active');
+    """)
+
+    assert build_artist_file_scope(db, 1)["file_paths"] == ["/music/alias.flac"]
+
+
+def test_a_track_only_credit_is_in_scope():
+    """A featured credit puts the release on the artist's page, so a scoped run
+    started from that page has to reach its file too."""
+    db = _scope_db("""
+        INSERT INTO lib2_artists(id,name) VALUES(1,'Guest');
+        INSERT INTO lib2_album_artists VALUES(10, 99);
+        INSERT INTO lib2_tracks VALUES(100, 10);
+        INSERT INTO lib2_track_artists VALUES(100, 1);
+        INSERT INTO lib2_track_files VALUES(100, '/music/feature.flac', 'active');
+    """)
+
+    assert build_artist_file_scope(db, 1)["file_paths"] == ["/music/feature.flac"]

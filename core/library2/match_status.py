@@ -186,6 +186,39 @@ def album_match_bundle(
     return result
 
 
+def _sync_attempt_ledger(
+    conn: Any, canonical: str, entity_id: int, service: str, value: Optional[str],
+) -> None:
+    """Keep ``lib2_provider_attempts`` in step with a manually set/cleared id.
+
+    Setting an id settles that (entity, service) pair — the user has answered
+    the question the worker would ask. Clearing it makes the pair unanswered
+    again, which is a *deleted* row rather than a failure status: the queue's
+    "never attempted" half is what should pick it up next, ahead of the retry
+    backlog, and no retry window should have to expire first.
+    """
+    try:
+        from core.library2 import provider_attempts
+
+        if not provider_attempts._table_exists(conn, "lib2_provider_attempts"):
+            return
+        if value:
+            provider_attempts.record_attempt(
+                conn, entity_type=canonical, entity_id=entity_id,
+                service=service, status="matched", detail="manual match",
+            )
+        else:
+            conn.execute(
+                "DELETE FROM lib2_provider_attempts "
+                "WHERE entity_type=? AND entity_id=? AND service=?",
+                (canonical, entity_id, service),
+            )
+    except ValueError:
+        # A provider the ledger does not know (it also covers derived workers
+        # that carry no id). The id write above still stands.
+        logger.debug("no attempt ledger for provider %s", service)
+
+
 def set_library_v2_match(
     conn: Any,
     entity_type: str,
@@ -232,6 +265,15 @@ def set_library_v2_match(
     conn.execute(
         f"UPDATE {table} SET {', '.join(assignments)} WHERE id=?", params,
     )
+
+    # The provider-attempt ledger is what the enrichment queue reads, and it is
+    # a separate table from the id we just wrote. Leaving it behind made the two
+    # disagree in both directions (L2-004): a manual PUT showed a matched chip
+    # with no ledger row, so ``next_pending()`` handed the freshly matched entity
+    # straight back to the worker; a manual DELETE cleared the id but left a
+    # stale ``matched`` row, so the queue never offered that entity again. Same
+    # transaction as the id, so the two can never be half-applied.
+    _sync_attempt_ledger(conn, canonical, int(entity_id), service, value)
 
     provenance_type = f"lib2_{canonical}"
     if value:

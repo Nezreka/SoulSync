@@ -166,9 +166,9 @@ class TestProviderEnrichment:
     Bandcamp label alike, and re-fetching them is thousands of API calls the
     user already paid for.
 
-    The declaration lives in ``enrich._ENRICHMENT_PAYLOAD``, which the trigger
-    mirror and the divergence audit already read. The migration reads the same
-    one, so a provider added there is carried by all three."""
+    The declaration lives in ``enrich._ENRICHMENT_PAYLOAD``. The migration is
+    its only reader now, so a provider added there is carried by the upgrade
+    without a second edit."""
 
     def test_album_payload_crosses(self, migrated_legacy_db, imported):
         _set(migrated_legacy_db,

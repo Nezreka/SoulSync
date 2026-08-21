@@ -263,6 +263,7 @@ class SoulIDWorker:
 
         # One-time migration: reset artist soul IDs when algorithm changes
         self._migrate_artist_soul_ids()
+        self._migrate_artist_soul_id_paths()
 
         while not self.should_stop:
             try:
@@ -342,7 +343,14 @@ class SoulIDWorker:
                 soul_id_path = None
 
             cursor.execute(
-                "UPDATE lib2_artists SET soul_id = ?, soul_id_path = ? "
+                # updated_at moves with every soul_id write (L2-011): a row
+                # with no soul_id is filtered OUT of the MetaSync export
+                # entirely, so minting one is the moment that row starts
+                # existing for consumers. Without the touch, a full walk that
+                # ran before this worker meant the row never appeared in any
+                # later incremental either.
+                "UPDATE lib2_artists SET soul_id = ?, soul_id_path = ?, "
+                "updated_at = CURRENT_TIMESTAMP "
                 "WHERE id = ? AND (soul_id IS NULL OR soul_id = '')",
                 (soul_id, soul_id_path, artist_id)
             )
@@ -590,7 +598,8 @@ class SoulIDWorker:
                 if not soul_id:
                     soul_id = f'soul_unnamed_{album_id}'
                 cursor.execute(
-                    "UPDATE lib2_albums SET soul_id = ? "
+                    "UPDATE lib2_albums SET soul_id = ?, "
+                    "updated_at = CURRENT_TIMESTAMP "
                     "WHERE id = ? AND (soul_id IS NULL OR soul_id = '')",
                     (soul_id, album_id)
                 )
@@ -643,7 +652,8 @@ class SoulIDWorker:
                 if not song_soul_id:
                     song_soul_id = f'soul_unnamed_{track_id}'
                 cursor.execute(
-                    "UPDATE lib2_tracks SET soul_id = ?, album_soul_id = ? "
+                    "UPDATE lib2_tracks SET soul_id = ?, album_soul_id = ?, "
+                    "updated_at = CURRENT_TIMESTAMP "
                     "WHERE id = ? AND (soul_id IS NULL OR soul_id = '')",
                     (song_soul_id, album_soul_id or None, track_id)
                 )
@@ -670,6 +680,98 @@ class SoulIDWorker:
 
     # ── Migrations ──
 
+    # How a stored id was derived, when the row predates the column. Kept
+    # separate from the id-algorithm marker so an install that is already on the
+    # current algorithm still gets its paths (L2-014).
+    PATH_MIGRATION_KEY = 'soulid_artist_path_version'
+    PATH_MIGRATION_VERSION = 'lib2_v1'
+
+    def _migrate_artist_soul_id_paths(self):
+        """Fill ``lib2_artists.soul_id_path`` for ids that predate the column.
+
+        The column is additive, so existing rows start NULL — and nothing ever
+        fills them: the worker only looks at artists with NO soul_id, and the
+        id-algorithm migration returns early on an install already reading the
+        current version. MetaSync/Hydrabase could therefore never tell a
+        provider-canonical, reproducible artist key from a library-dependent
+        album/name fallback (L2-014).
+
+        Regenerating the ids to find out is not on the table: a soul_id is the
+        shared content key peers have already traded claims about. Each path is
+        PROVEN locally instead by recomputing it — a name-only or album-derived
+        id reproduces exactly — and anything that reproduces neither is recorded
+        as ``unknown`` rather than assumed canonical. An album deleted since the
+        id was minted looks identical from here, and guessing would upgrade that
+        key's trustworthiness on no evidence.
+        """
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            columns = {r[1] for r in cursor.execute("PRAGMA table_info(lib2_artists)")}
+            if 'soul_id_path' not in columns:
+                return
+
+            cursor.execute("SELECT value FROM metadata WHERE key = ? LIMIT 1",
+                           (self.PATH_MIGRATION_KEY,))
+            row = cursor.fetchone()
+            if row and row[0] == self.PATH_MIGRATION_VERSION:
+                return
+
+            cursor.execute(r"""
+                SELECT id, soul_id, name FROM lib2_artists
+                 WHERE soul_id IS NOT NULL AND soul_id != ''
+                   AND soul_id NOT LIKE 'soul\_unnamed\_%' ESCAPE '\'
+                   AND soul_id_path IS NULL
+                   AND name IS NOT NULL AND name != ''
+            """)
+            pending = cursor.fetchall()
+
+            resolved = {'name': 0, 'album': 0, 'unknown': 0}
+            for artist_id, stored, name in pending:
+                path = 'unknown'
+                if stored and stored == generate_soul_id(name):
+                    path = 'name'
+                else:
+                    # Every owned album, not just today's alphabetically-first
+                    # one: the library may have gained or lost releases since
+                    # the id was minted, and only an exact reproduction proves
+                    # the path.
+                    cursor.execute("""
+                        SELECT al.title FROM lib2_albums al
+                         WHERE al.primary_artist_id = ?
+                           AND al.title IS NOT NULL AND al.title != ''
+                    """, (artist_id,))
+                    for (title,) in cursor.fetchall():
+                        if stored == generate_soul_id(name, title):
+                            path = 'album'
+                            break
+                resolved[path] += 1
+                cursor.execute(
+                    "UPDATE lib2_artists SET soul_id_path = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (path, artist_id))
+
+            cursor.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
+                (self.PATH_MIGRATION_KEY, self.PATH_MIGRATION_VERSION))
+            conn.commit()
+            if pending:
+                logger.info(
+                    "SoulID path migration: %d artist(s) — %d name, %d album, "
+                    "%d unproven", len(pending), resolved['name'],
+                    resolved['album'], resolved['unknown'])
+        except Exception as e:
+            logger.error(f"SoulID path migration failed: {e}")
+            if conn:
+                try:
+                    conn.rollback()
+                except Exception as _e:
+                    logger.debug("rollback failed: %s", _e)
+        finally:
+            if conn:
+                conn.close()
+
     def _migrate_artist_soul_ids(self):
         """One-time reset: clear all artist soul IDs when algorithm changes.
         Uses a versioned metadata flag to run only once per algorithm version.
@@ -694,7 +796,9 @@ class SoulIDWorker:
                 return  # Already on latest version
 
             # Reset all artist soul IDs for regeneration
-            cursor.execute("UPDATE lib2_artists SET soul_id = NULL WHERE soul_id IS NOT NULL")
+            cursor.execute("UPDATE lib2_artists SET soul_id = NULL, "
+                           "updated_at = CURRENT_TIMESTAMP "
+                           "WHERE soul_id IS NOT NULL")
             reset_count = cursor.rowcount
 
             # Mark current version

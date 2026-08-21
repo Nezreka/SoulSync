@@ -1101,14 +1101,34 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 f'SELECT COUNT(*) FROM "{table}" WHERE rowid<=?', (after_rowid,)
             ).fetchone()[0])
 
+        if resume is not None:
+            # A previous attempt of THIS run may have wiped the catalogue after
+            # snapshotting the user's album intent. That snapshot is on disk
+            # (L2-008); the in-process dict below starts empty on every restart.
+            from core.library2.monitor_rules import load_album_monitor_intent
+            preserved_album_intent = load_album_monitor_intent(
+                conn, run_id, profile_id=profile_id or 1
+            )
+
         if reset:
             # Local ids change across a destructive rebuild. Preserve deliberate
             # album intent by provider/stable identity, never by surrogate id.
-            from core.library2.monitor_rules import snapshot_album_monitor_intent
+            from core.library2.monitor_rules import (
+                load_album_monitor_intent, persist_album_monitor_intent,
+                snapshot_album_monitor_intent,
+            )
             from core.library2.stable_ids import backfill_stable_ids
             backfill_stable_ids(cursor)
-            preserved_album_intent = snapshot_album_monitor_intent(
-                conn, profile_id=profile_id
+            # Anything an earlier rebuild wiped but never restored is still
+            # outstanding; live rules win where both know a release.
+            preserved_album_intent = {
+                **load_album_monitor_intent(conn, profile_id=profile_id or 1),
+                **snapshot_album_monitor_intent(conn, profile_id=profile_id),
+            }
+            # Same transaction as the deletes below: the snapshot and the wipe
+            # become durable together, so no crash can leave one without the other.
+            persist_album_monitor_intent(
+                conn, run_id, preserved_album_intent, profile_id=profile_id or 1
             )
             # lib2_manual_skips deliberately survives a reset: it's an audit of
             # user decisions about FILES, not derived library state.
@@ -1703,6 +1723,18 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         )
         from core.library2.provider_attempts import backfill_from_legacy
         stats["provider_attempts"] = backfill_from_legacy(conn)
+        # L2-013: the walks above only wrote the compatibility columns
+        # (server_source/server_id). The mapping backfill runs at startup and in
+        # ensure_library_v2_schema — both BEFORE these inserts — so after a
+        # successful first-run upgrade lib2_media_server_mappings was still
+        # empty, and the consumers that read only the mapping table (native
+        # media_server_sources / recognition chips, the Navidrome lookup by
+        # lib2_track_id) had nothing until the next restart. Converge it here,
+        # where the rows it describes actually exist.
+        from core.library2.media_mappings import backfill_legacy_mappings
+        stats["media_server_mappings"] = backfill_legacy_mappings(
+            cursor, connection=conn, batch_size=IMPORT_BATCH_SIZE,
+            on_batch=wal_checkpointer.batch_committed)
         conn.commit()
         checkpoint(FINALIZE_STAGE, 4, _FINALIZE_STEPS)
         # Mint provider-less stable ids for everything this run inserted
@@ -1712,12 +1744,16 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                             progress=finalize_progress,
                             on_batch=wal_checkpointer.batch_committed)
         from core.library2.monitor_rules import (
+            clear_album_monitor_intent,
             project_entity_monitor_rules,
             restore_album_monitor_intent,
         )
         stats["album_monitor_intent_restored"] = restore_album_monitor_intent(
             conn, preserved_album_intent, profile_id=profile_id
         )
+        # Only now, with the intent back on real rows in this transaction, may
+        # the on-disk copy go — a crash before this point resumes from it.
+        clear_album_monitor_intent(conn, run_id, profile_id=profile_id or 1)
         conn.commit()
         # Import-derived monitored flags are provenance 'legacy_import', never
         # mistaken for deliberate user choices (audit P1-13/P1-14). Recorded
@@ -1838,6 +1874,53 @@ def _artist_spotify_from_payload(artist: Any) -> Optional[str]:
     return None
 
 
+# The wishlist's payload column is called ``spotify_data`` for historical
+# reasons only: the contract has been provider-neutral for a long time and a
+# Deezer/iTunes row stores that provider's ids in exactly the same fields
+# (``core/wishlist/payloads.py`` stamps the real one into ``source``). Reading
+# them as Spotify ids wrote a foreign id into ``spotify_id`` and split every
+# such track off its existing library row (L2-007).
+def _wishlist_provider(payload: Dict[str, Any], source_info: Any) -> str:
+    """The provider namespace a wishlist row's ids actually belong to."""
+    from core.downloads.origin import _parse_source_info
+    from core.library2.provider_ids import normalize_provider_name
+    from core.metadata.registry import METADATA_SOURCE_PRIORITY
+
+    known = set(METADATA_SOURCE_PRIORITY) | {"spotify"}
+    for raw in (payload.get("source"),
+                _parse_source_info(source_info).get("source")):
+        provider = normalize_provider_name(raw)
+        if provider in known:
+            return provider
+    # 'webui_modal', 'unknown', a missing value: the payload came through the
+    # Spotify-shaped path, which is what the column was built for.
+    return "spotify"
+
+
+def _provider_id_fields(provider: str, provider_id: Optional[str]) -> Tuple[Optional[str], str]:
+    """``(spotify_id_column_value, external_ids_json)`` for one provider id."""
+    identifier = str(provider_id).strip() if provider_id not in (None, "") else ""
+    if not identifier:
+        return None, "{}"
+    if provider == "spotify":
+        return identifier, json.dumps({"spotify": identifier}, separators=(",", ":"))
+    return None, json.dumps({provider: identifier}, separators=(",", ":"))
+
+
+def _row_provider_ids(row, key: str = "external_ids") -> Dict[str, str]:
+    """Every provider id a lib2 row carries, column and JSON alike."""
+    from core.library2.provider_ids import parse_external_ids
+
+    ids = parse_external_ids(row[key])
+    try:
+        spotify = row["spotify_id"]
+    except (IndexError, KeyError):
+        spotify = None
+    if spotify:
+        ids.setdefault("spotify", str(spotify))
+    return ids
+
+
 def _album_type_from_payload(album: Dict[str, Any], total_tracks: int) -> str:
     typ = str(album.get("album_type") or album.get("type") or "").lower()
     if typ in {"album", "single", "ep", "compilation", "live"}:
@@ -1867,9 +1950,11 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
     clause, params = _profile_filter(cursor, "wishlist_tracks", profile_id)
     quality_select = ("quality_profile_id" if "quality_profile_id" in wishlist_columns
                       else "NULL AS quality_profile_id")
+    source_select = ("source_info" if "source_info" in wishlist_columns
+                     else "NULL AS source_info")
     rows = cursor.execute(
         "SELECT id, spotify_track_id, spotify_data, source_type, date_added, "
-        + quality_select + " FROM wishlist_tracks"
+        + quality_select + ", " + source_select + " FROM wishlist_tracks"
         + (f" WHERE {clause}" if clause else "")
         + " ORDER BY id",
         params,
@@ -1898,25 +1983,31 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
 
     created_or_updated = 0
     assigned_profiles: Dict[Tuple[int, str], Tuple[int, int]] = {}
-    album_by_spotify: Dict[Tuple[int, str], int] = {}
+    # Keyed by (parent, provider, id) rather than by a bare id: a Deezer 123 and
+    # a Spotify 123 are different records, and collapsing them is exactly how a
+    # foreign-namespace wishlist row used to attach to the wrong library row.
+    album_by_provider: Dict[Tuple[int, str, str], int] = {}
     album_by_identity: Dict[Tuple[int, str, str], int] = {}
     for album_row in cursor.execute(
-        "SELECT id, primary_artist_id, title, album_type, spotify_id FROM lib2_albums"
+        "SELECT id, primary_artist_id, title, album_type, spotify_id, external_ids "
+        "FROM lib2_albums"
     ).fetchall():
         album_id = int(album_row["id"])
         artist_id = int(album_row["primary_artist_id"])
-        if album_row["spotify_id"]:
-            album_by_spotify[(artist_id, str(album_row["spotify_id"]))] = album_id
+        for source, value in _row_provider_ids(album_row).items():
+            album_by_provider.setdefault((artist_id, source, value), album_id)
         album_by_identity[
             (artist_id, release_title_key(album_row["title"]), album_row["album_type"])
         ] = album_id
-    track_by_spotify = {
-        (int(track_row["album_id"]), str(track_row["spotify_id"])): int(track_row["id"])
-        for track_row in cursor.execute(
-            "SELECT id, album_id, spotify_id FROM lib2_tracks "
-            "WHERE spotify_id IS NOT NULL AND spotify_id<>''"
-        ).fetchall()
-    }
+    track_by_provider: Dict[Tuple[int, str, str], int] = {}
+    for track_row in cursor.execute(
+        "SELECT id, album_id, spotify_id, external_ids FROM lib2_tracks "
+        "WHERE (spotify_id IS NOT NULL AND spotify_id<>'') "
+        "   OR (external_ids IS NOT NULL AND external_ids NOT IN ('', '{}'))"
+    ).fetchall():
+        for source, value in _row_provider_ids(track_row).items():
+            track_by_provider.setdefault(
+                (int(track_row["album_id"]), source, value), int(track_row["id"]))
     for row in rows:
         try:
             payload = json.loads(row["spotify_data"] or "{}")
@@ -1930,11 +2021,12 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
         title = payload.get("name")
         if not track_id or not title:
             continue
+        provider = _wishlist_provider(payload, row["source_info"])
         quality_profile_id = _track_profile(row)
 
         album = payload.get("album") if isinstance(payload.get("album"), dict) else {}
         album_title = album.get("name") or title
-        album_spotify = album.get("id")
+        album_provider_id = album.get("id")
         total_tracks = int(album.get("total_tracks") or 1)
         album_type = _album_type_from_payload(album, total_tracks)
         release_date = album.get("release_date")
@@ -1948,42 +2040,48 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
         album_artists_payload = album.get("artists") if isinstance(album.get("artists"), list) else []
         primary_payload = (album_artists_payload or artists_payload or [{"name": "Unknown Artist"}])[0]
         primary_name = _artist_name_from_payload(primary_payload) or "Unknown Artist"
-        primary_spotify = _artist_spotify_from_payload(primary_payload)
+        primary_provider_id = _artist_spotify_from_payload(primary_payload)
 
         # monitored=0 here is safe only because apply_monitoring_from_watchlist_
         # wishlist() runs AFTER seeding and re-derives artist flags from the
         # watchlist — a wishlisted song must never monitor the whole artist.
-        artist_id = resolver.get_or_create_by_name(primary_name, spotify_id=primary_spotify)
+        # The resolver owns the id merge (into the right namespace); this only
+        # has the monitoring flag to say.
+        artist_id = resolver.get_or_create_by_name(
+            primary_name,
+            provider_ids=({provider: primary_provider_id}
+                          if primary_provider_id else None),
+        )
         cursor.execute(
             """
             UPDATE lib2_artists
-               SET spotify_id = COALESCE(NULLIF(spotify_id, ''), ?),
-                   monitored = 0,
+               SET monitored = 0,
                    updated_at = CURRENT_TIMESTAMP
              WHERE id = ?
             """,
-            (primary_spotify, artist_id),
+            (artist_id,),
         )
 
         album_id = (
-            album_by_spotify.get((artist_id, str(album_spotify)))
-            if album_spotify else None
+            album_by_provider.get((artist_id, provider, str(album_provider_id)))
+            if album_provider_id else None
         )
         if album_id is None:
             album_id = album_by_identity.get(
                 (artist_id, release_title_key(album_title), album_type)
             )
 
-        album_fields = (
-            artist_id, album_title, album_type, release_date, year,
-            album_spotify, album_image, total_tracks, total_tracks,
-        )
+        album_spotify, album_external = _provider_id_fields(
+            provider, album_provider_id)
         if album_id is not None:
             cursor.execute(
                 """
                 UPDATE lib2_albums
                    SET title=?, album_type=?, release_date=?, year=?,
                        spotify_id=COALESCE(NULLIF(spotify_id, ''), ?),
+                       -- new ids as the base, the stored ones patched over the
+                       -- top: adopt what is missing, never overwrite what is there
+                       external_ids=json_patch(?, COALESCE(NULLIF(external_ids,''),'{}')),
                        image_url=COALESCE(NULLIF(image_url, ''), ?),
                        track_count=COALESCE(track_count, ?),
                        expected_track_count=MAX(COALESCE(expected_track_count, 0), ?),
@@ -1991,31 +2089,34 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
                  WHERE id=?
                 """,
                 (album_title, album_type, release_date, year, album_spotify,
-                 album_image, total_tracks, total_tracks, album_id),
+                 album_external, album_image, total_tracks, total_tracks, album_id),
             )
         else:
             cursor.execute(
                 """
                 INSERT INTO lib2_albums(primary_artist_id, title, album_type,
-                    release_date, year, spotify_id, image_url, track_count,
-                    expected_track_count, monitored, quality_profile_id)
-                VALUES(?,?,?,?,?,?,?,?,?,0,?)
+                    release_date, year, spotify_id, external_ids, image_url,
+                    track_count, expected_track_count, monitored, quality_profile_id)
+                VALUES(?,?,?,?,?,?,?,?,?,?,0,?)
                 """,
-                (*album_fields, default_profile_id),
+                (artist_id, album_title, album_type, release_date, year,
+                 album_spotify, album_external, album_image, total_tracks,
+                 total_tracks, default_profile_id),
             )
             album_id = cursor.lastrowid
         album_by_identity[
             (artist_id, release_title_key(album_title), album_type)
         ] = album_id
-        if album_spotify:
-            album_by_spotify[(artist_id, str(album_spotify))] = album_id
+        if album_provider_id:
+            album_by_provider[
+                (artist_id, provider, str(album_provider_id))] = album_id
         cursor.execute(
             "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
             "VALUES(?,?, 'primary')",
                 (album_id, artist_id),
         )
 
-        existing_track_id = track_by_spotify.get((int(album_id), track_id))
+        existing_track_id = track_by_provider.get((int(album_id), provider, track_id))
         preserved_explicit_rule = None
         if existing_track_id is not None:
             preserved_explicit_rule = cursor.execute(
@@ -2037,6 +2138,7 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
         track_number = payload.get("track_number")
         disc_number = payload.get("disc_number") or 1
         duration = payload.get("duration_ms")
+        track_spotify, track_external = _provider_id_fields(provider, track_id)
         if existing_track_id is not None:
             lib2_track_id = existing_track_id
             cursor.execute(
@@ -2055,15 +2157,15 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
             cursor.execute(
                 """
                 INSERT INTO lib2_tracks(album_id, title, track_number, disc_number,
-                    duration, spotify_id, quality_profile_id,
+                    duration, spotify_id, external_ids, quality_profile_id,
                     quality_profile_explicit, monitored)
-                VALUES(?,?,?,?,?,?,?,1,1)
+                VALUES(?,?,?,?,?,?,?,?,1,1)
                 """,
-                (album_id, title, track_number, disc_number, duration, track_id,
-                 quality_profile_id),
+                (album_id, title, track_number, disc_number, duration,
+                 track_spotify, track_external, quality_profile_id),
             )
             lib2_track_id = cursor.lastrowid
-            track_by_spotify[(int(album_id), track_id)] = lib2_track_id
+            track_by_provider[(int(album_id), provider, track_id)] = lib2_track_id
             created_or_updated += 1
 
         # Presence in the admin Wishlist is concrete track-level wanted
@@ -2290,6 +2392,49 @@ def _profile_filter(cursor, table: str, profile_id: Optional[int]) -> Tuple[str,
     return "profile_id = ?", (effective_profile_id,)
 
 
+def _int_or_none(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _known_quality_profiles(cursor) -> set:
+    """Ids that actually exist, so a dangling watchlist profile cannot be
+    adopted onto an artist and later fail the ON DELETE RESTRICT reference."""
+    if not _table_exists(cursor, "quality_profiles"):
+        return set()
+    return {int(row[0]) for row in cursor.execute("SELECT id FROM quality_profiles")}
+
+
+def _adopt_watchlist_profile(cursor, artist_id: int, artist_name: Any, matches,
+                             known_profiles: set, assign_quality_profile) -> None:
+    """Carry a watchlist row's explicit quality profile onto the lib2 artist.
+
+    Conflict rule for an identity that several watchlist rows claim: adopt only
+    when they agree. Two rows asking for different profiles is a user-visible
+    contradiction the import has no basis to resolve, and picking one at random
+    would silently apply a profile to a whole discography. Those artists stay on
+    the app-wide default, which is what they had before this ran.
+    """
+    wanted = {entry["quality_profile_id"] for entry in matches
+              if entry.get("quality_profile_id") is not None}
+    if not wanted:
+        return
+    if len(wanted) > 1:
+        logger.warning(
+            "Watchlist rows for %r disagree on quality profile %s — keeping the default",
+            artist_name, sorted(wanted))
+        return
+    profile_id = wanted.pop()
+    if known_profiles and profile_id not in known_profiles:
+        logger.warning(
+            "Watchlist quality profile %s for %r no longer exists — keeping the default",
+            profile_id, artist_name)
+        return
+    assign_quality_profile(cursor, "artists", artist_id, profile_id)
+
+
 def apply_monitoring_from_watchlist_wishlist(cursor, profile_id: Optional[int] = None) -> None:
     """Make ``monitored`` reflect reality instead of defaulting everything to on.
 
@@ -2327,8 +2472,15 @@ def apply_monitoring_from_watchlist_wishlist(cursor, profile_id: Optional[int] =
         present_id_columns = [
             column for column in identity_columns if column in watchlist_columns
         ]
+        # The watchlist row's own quality profile is part of the monitoring
+        # intent, not decoration: it is the profile the user picked for
+        # everything this artist releases from now on. Importing only
+        # ``monitored=1`` silently reset that to the app-wide default (L2-006).
+        profile_select = (", quality_profile_id"
+                          if "quality_profile_id" in watchlist_columns else "")
         wl = cursor.execute(
-            f"SELECT artist_name{''.join(', ' + col for col in present_id_columns)} "
+            f"SELECT artist_name{''.join(', ' + col for col in present_id_columns)}"
+            f"{profile_select} "
             "FROM watchlist_artists" + (f" WHERE {clause}" if clause else ""),
             params,
         ).fetchall()
@@ -2339,8 +2491,13 @@ def apply_monitoring_from_watchlist_wishlist(cursor, profile_id: Optional[int] =
                 for column in present_id_columns
                 if row[column] is not None and str(row[column]).strip()
             },
+            "quality_profile_id": (
+                _int_or_none(row["quality_profile_id"]) if profile_select else None
+            ),
         } for row in wl]
+        known_profiles = _known_quality_profiles(cursor)
         from core.library2.monitor_sync import _artist_identity_matches
+        from core.library2.profile_lookup import assign_quality_profile
         from core.library2.provider_ids import source_ids_from_values
         for artist in cursor.execute(
             "SELECT id, name, spotify_id, musicbrainz_id, external_ids FROM lib2_artists"
@@ -2350,17 +2507,23 @@ def apply_monitoring_from_watchlist_wishlist(cursor, profile_id: Optional[int] =
                 musicbrainz_id=artist["musicbrainz_id"],
                 external_ids=artist["external_ids"],
             )
-            if any(
-                _artist_identity_matches(
+            matches = [
+                entry for entry in watchlist_entries
+                if _artist_identity_matches(
                     artist["name"], artist_ids,
                     entry["name"], entry["provider_ids"],
                 )
-                for entry in watchlist_entries
-            ):
-                cursor.execute(
-                    "UPDATE lib2_artists SET monitored=1 WHERE id=?",
-                    (artist["id"],),
-                )
+            ]
+            if not matches:
+                continue
+            cursor.execute(
+                "UPDATE lib2_artists SET monitored=1 WHERE id=?",
+                (artist["id"],),
+            )
+            _adopt_watchlist_profile(
+                cursor, int(artist["id"]), artist["name"], matches,
+                known_profiles, assign_quality_profile,
+            )
 
     # Tracks ← wishlist. Do not reset non-wishlist tracks: monitored also powers
     # Lidarr-style upgrade checks after a file has already been downloaded.

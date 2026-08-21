@@ -7,9 +7,11 @@ AcoustID badge — the second copy imports as "already owned"). Instead the
 slower task short-circuits to ``already_owned`` before searching, inheriting the
 owner's verification so its row stays consistent.
 
-We only short-circuit against a sibling that has already SUCCEEDED
-(completed / post-processing / already_owned) — never one still in flight, so a
-failed peer can never strand this track undownloaded.
+We only short-circuit against a sibling that has already SUCCEEDED and is
+terminal (completed / already_owned) with a file to show for it — never one
+still in flight and never one in post-processing, whose integrity/quality/
+AcoustID gates can still fail it, so a failed peer can never strand this track
+undownloaded (L2-003).
 """
 
 from __future__ import annotations
@@ -48,6 +50,7 @@ def _track():
 
 def test_finds_completed_sibling_with_same_identity():
     download_tasks['owner'] = {'status': 'completed', 'track_info': _TI,
+                               'filename': 'Money.flac',
                                'verification_status': 'verified', 'batch_id': 'bA'}
     download_tasks['dup'] = {'status': 'pending', 'track_info': _TI, 'batch_id': 'bB'}
     owner_id, owner = tw._find_owning_sibling('dup', _track())
@@ -69,7 +72,7 @@ def test_ignores_sibling_still_in_flight():
 def test_ignores_different_track():
     other = dict(_TI, name='Time')
     download_tasks['owner'] = {'status': 'completed', 'track_info': other,
-                               'batch_id': 'bA'}
+                               'filename': 'Time.flac', 'batch_id': 'bA'}
     download_tasks['dup'] = {'status': 'pending', 'track_info': _TI,
                              'batch_id': 'bB'}
     owner_id, _ = tw._find_owning_sibling('dup', _track())
@@ -78,7 +81,7 @@ def test_ignores_different_track():
 
 def test_excludes_self():
     download_tasks['dup'] = {'status': 'completed', 'track_info': _TI,
-                             'batch_id': 'bB'}
+                             'filename': 'Money.flac', 'batch_id': 'bB'}
     owner_id, _ = tw._find_owning_sibling('dup', _track())
     assert owner_id is None
 
@@ -87,7 +90,7 @@ def test_ignores_a_twin_inside_the_same_batch():
     """One batch's queue is the caller's own list — a repeat in it is their
     choice, and the batch's own bookkeeping owns that decision."""
     download_tasks['owner'] = {'status': 'completed', 'track_info': _TI,
-                               'batch_id': 'bA'}
+                               'filename': 'Money.flac', 'batch_id': 'bA'}
     download_tasks['dup'] = {'status': 'pending', 'track_info': _TI,
                              'batch_id': 'bA'}
     owner_id, _ = tw._find_owning_sibling('dup', _track())
@@ -99,10 +102,96 @@ def test_a_hand_started_download_is_never_deduped():
     better rip, say). Answering that with "you already have it" would undo an
     action they deliberately took."""
     download_tasks['owner'] = {'status': 'completed', 'track_info': _TI,
-                               'batch_id': 'bA'}
+                               'filename': 'Money.flac', 'batch_id': 'bA'}
     download_tasks['dup'] = {'status': 'pending', 'track_info': _TI}
     owner_id, _ = tw._find_owning_sibling('dup', _track())
     assert owner_id is None
+
+
+# ---------------------------------------------------------------------------
+# L2-003: what may NOT be deduped away
+# ---------------------------------------------------------------------------
+
+
+def test_ignores_sibling_still_in_post_processing():
+    """The file is on disk but the import gates have not run. Integrity,
+    quality and AcoustID can still quarantine, requeue or fail that owner —
+    a task that stood down against it would be left with nothing."""
+    download_tasks['owner'] = {'status': 'post_processing', 'track_info': _TI,
+                               'filename': 'Money.flac', 'batch_id': 'bA'}
+    download_tasks['dup'] = {'status': 'pending', 'track_info': _TI, 'batch_id': 'bB'}
+    owner_id, _ = tw._find_owning_sibling('dup', _track())
+    assert owner_id is None
+
+
+def test_ignores_terminal_sibling_with_no_file():
+    download_tasks['owner'] = {'status': 'completed', 'track_info': _TI,
+                               'batch_id': 'bA'}
+    download_tasks['dup'] = {'status': 'pending', 'track_info': _TI, 'batch_id': 'bB'}
+    owner_id, _ = tw._find_owning_sibling('dup', _track())
+    assert owner_id is None
+
+
+def test_collaboration_credits_still_dedup():
+    """The requesting side used to be built from the FIRST artist only while
+    the sibling side joined all of them, so every collaboration was a false
+    negative and got downloaded twice."""
+    collab = {'id': 'sp-9', 'name': 'Under Pressure',
+              'artists': ['Queen', 'David Bowie'], 'album': 'Hot Space',
+              'duration_ms': 248000}
+    download_tasks['owner'] = {'status': 'completed', 'track_info': collab,
+                               'filename': 'up.flac', 'batch_id': 'bA'}
+    download_tasks['dup'] = {'status': 'pending', 'track_info': collab, 'batch_id': 'bB'}
+    from core.spotify_client import Track as SpotifyTrack
+    track = SpotifyTrack(id='sp-9', name='Under Pressure',
+                         artists=['Queen', 'David Bowie'], album='Hot Space',
+                         duration_ms=248000, popularity=0)
+    owner_id, _ = tw._find_owning_sibling('dup', track)
+    assert owner_id == 'owner'
+
+
+def test_same_metadata_different_provider_ids_is_not_the_same_recording():
+    """Remaster vs original: identical title/artist/album, different ids in the
+    same namespace. The id is authoritative in both directions."""
+    mine = {'id': 'dz-1', 'source': 'deezer', 'name': 'Money',
+            'artists': ['Pink Floyd'], 'album': 'DSOTM'}
+    theirs = dict(mine, id='dz-2')
+    download_tasks['owner'] = {'status': 'completed', 'track_info': theirs,
+                               'filename': 'money.flac', 'batch_id': 'bA'}
+    download_tasks['dup'] = {'status': 'pending', 'track_info': mine, 'batch_id': 'bB'}
+    from core.spotify_client import Track as SpotifyTrack
+    track = SpotifyTrack(id='dz-1', name='Money', artists=['Pink Floyd'],
+                         album='DSOTM', duration_ms=0, popularity=0)
+    assert tw._find_owning_sibling('dup', track)[0] is None
+    # Same id in the same namespace still dedups.
+    download_tasks['owner']['track_info'] = dict(mine)
+    assert tw._find_owning_sibling('dup', track)[0] == 'owner'
+
+
+def test_alternate_take_with_a_very_different_duration_is_not_deduped():
+    live = dict(_TI, duration_ms=_TI['duration_ms'] + 60000)
+    live.pop('id')
+    mine = dict(_TI)
+    mine.pop('id')
+    download_tasks['owner'] = {'status': 'completed', 'track_info': live,
+                               'filename': 'money-live.flac', 'batch_id': 'bA'}
+    download_tasks['dup'] = {'status': 'pending', 'track_info': mine, 'batch_id': 'bB'}
+    assert tw._find_owning_sibling('dup', _track())[0] is None
+
+
+def test_higher_quality_profile_request_is_not_deduped_against_a_lower_one():
+    """A wishlist upgrade carries its own quality_profile_id. Standing it down
+    against a copy fetched under a different profile silently cancels the very
+    upgrade the user asked for."""
+    low = dict(_TI, quality_profile_id=1)
+    high = dict(_TI, quality_profile_id=2)
+    download_tasks['owner'] = {'status': 'completed', 'track_info': low,
+                               'filename': 'money.mp3', 'batch_id': 'bA'}
+    download_tasks['dup'] = {'status': 'pending', 'track_info': high, 'batch_id': 'bB'}
+    assert tw._find_owning_sibling('dup', _track())[0] is None
+    # Same profile on both sides: dedup as before.
+    download_tasks['owner']['track_info'] = dict(high)
+    assert tw._find_owning_sibling('dup', _track())[0] == 'owner'
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +239,7 @@ def _deps(rec):
 def test_worker_skips_redownload_when_sibling_already_owns():
     download_tasks['owner'] = {'status': 'completed', 'track_info': _TI,
                                'verification_status': 'verified', 'quality': 'FLAC',
-                               'batch_id': 'bA'}
+                               'filename': 'Money.flac', 'batch_id': 'bA'}
     download_tasks['dup'] = {'status': 'pending', 'track_info': _TI, 'batch_id': 'bB'}
     rec = _Rec()
     deps = _deps(rec)

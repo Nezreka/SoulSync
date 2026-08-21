@@ -2070,3 +2070,304 @@ def test_import_never_maps_foreign_shaped_ids_into_spotify_namespace(legacy_db):
     assert artist_ids.get("itunes") == "1315147"
     assert "spotify" not in artist_ids
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# L2-007: the wishlist payload column is provider-neutral despite its name
+# ---------------------------------------------------------------------------
+
+
+def _deezer_wishlist_db(conn, *, source_key="source"):
+    conn.execute("""
+        CREATE TABLE wishlist_tracks(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            spotify_track_id TEXT NOT NULL,
+            spotify_data TEXT NOT NULL,
+            source_type TEXT DEFAULT 'manual',
+            source_info TEXT,
+            date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    payload = {
+        "id": "123",
+        "name": "Deezer Song",
+        "artists": [{"id": "456", "name": "Deezer Artist"}],
+        "album": {
+            "id": "789",
+            "name": "Deezer Album",
+            "album_type": "album",
+            "total_tracks": 1,
+            "artists": [{"id": "456", "name": "Deezer Artist"}],
+        },
+        "track_number": 1,
+        "disc_number": 1,
+        "duration_ms": 200000,
+    }
+    source_info = None
+    if source_key == "source":
+        payload["source"] = "deezer"
+    else:
+        source_info = json.dumps({"source": "deezer"})
+    conn.execute(
+        "INSERT INTO wishlist_tracks(spotify_track_id, spotify_data, source_info) "
+        "VALUES(?,?,?)", ("123", json.dumps(payload), source_info))
+    conn.commit()
+
+
+def test_deezer_wishlist_ids_do_not_land_in_spotify_columns(legacy_db):
+    """A numeric Deezer id written into ``spotify_id`` matched nothing later and
+    parked the artist/album under ``legacy_unknown``."""
+    conn = sqlite3.connect(legacy_db.path)
+    _deezer_wishlist_db(conn)
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = sqlite3.connect(legacy_db.path)
+    conn.row_factory = sqlite3.Row
+    try:
+        track = conn.execute(
+            "SELECT * FROM lib2_tracks WHERE title='Deezer Song'").fetchone()
+        album = conn.execute(
+            "SELECT * FROM lib2_albums WHERE title='Deezer Album'").fetchone()
+        artist = conn.execute(
+            "SELECT * FROM lib2_artists WHERE name='Deezer Artist'").fetchone()
+        assert track["spotify_id"] in (None, "")
+        assert json.loads(track["external_ids"])["deezer"] == "123"
+        assert album["spotify_id"] in (None, "")
+        assert json.loads(album["external_ids"])["deezer"] == "789"
+        assert artist["spotify_id"] in (None, "")
+        assert json.loads(artist["external_ids"])["deezer"] == "456"
+    finally:
+        conn.close()
+
+
+def test_the_provider_can_also_come_from_source_info(legacy_db):
+    conn = sqlite3.connect(legacy_db.path)
+    _deezer_wishlist_db(conn, source_key="source_info")
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = sqlite3.connect(legacy_db.path)
+    conn.row_factory = sqlite3.Row
+    try:
+        track = conn.execute(
+            "SELECT * FROM lib2_tracks WHERE title='Deezer Song'").fetchone()
+        assert json.loads(track["external_ids"])["deezer"] == "123"
+    finally:
+        conn.close()
+
+
+def test_a_spotify_wishlist_row_still_uses_the_spotify_column(legacy_db):
+    conn = sqlite3.connect(legacy_db.path)
+    conn.execute("""
+        CREATE TABLE wishlist_tracks(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            spotify_track_id TEXT NOT NULL,
+            spotify_data TEXT NOT NULL,
+            source_type TEXT DEFAULT 'manual',
+            source_info TEXT,
+            date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    payload = {
+        "id": "sp_t", "name": "Spotify Song", "source": "webui_modal",
+        "artists": [{"id": "sp_a", "name": "Spotify Artist"}],
+        "album": {"id": "sp_al", "name": "Spotify Album", "album_type": "album",
+                  "total_tracks": 1,
+                  "artists": [{"id": "sp_a", "name": "Spotify Artist"}]},
+    }
+    conn.execute(
+        "INSERT INTO wishlist_tracks(spotify_track_id, spotify_data) VALUES(?,?)",
+        ("sp_t", json.dumps(payload)))
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = sqlite3.connect(legacy_db.path)
+    conn.row_factory = sqlite3.Row
+    try:
+        assert conn.execute(
+            "SELECT spotify_id FROM lib2_tracks WHERE title='Spotify Song'"
+        ).fetchone()[0] == "sp_t"
+    finally:
+        conn.close()
+
+
+def test_an_existing_deezer_track_is_reused_not_duplicated(legacy_db):
+    """The same recording already in the library from a Deezer-tagged file must
+    end up as ONE lib2 track, not a second wanted row."""
+    conn = sqlite3.connect(legacy_db.path)
+    _deezer_wishlist_db(conn)
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+    # A second import must be idempotent — the wishlist row now matches the
+    # track it created the first time round via the deezer namespace.
+    import_legacy_library(legacy_db, reset=False)
+
+    conn = sqlite3.connect(legacy_db.path)
+    try:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM lib2_tracks WHERE title='Deezer Song'"
+        ).fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# L2-008: a crash mid-reset must not eat the intent the reset promised to keep
+# ---------------------------------------------------------------------------
+
+
+class _CrashAfterFirstCheckpoint:
+    """A resume-aware progress callback that dies once, recording where."""
+
+    lib2_resume_aware = True
+
+    def __init__(self):
+        self.seen = None
+
+    def __call__(self, stage, current, total, rowid=None, run_id=None, **kw):
+        if self.seen is None and rowid is not None:
+            self.seen = (stage, int(rowid), run_id)
+            raise RuntimeError("simulated crash right after a committed checkpoint")
+
+
+def test_reset_intent_survives_a_crash_between_the_wipe_and_the_restore(legacy_db):
+    """The walk checkpoints commit, so the catalogue wipe is durable long before
+    the restore runs. Keeping the snapshot only in a local variable meant the
+    resumed process started with an empty dict and re-imported the album as
+    monitored, losing the user's explicit choice for good."""
+    from core.library2.importer import ResumePoint
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+
+    import_legacy_library(legacy_db)
+    conn = legacy_db._get_connection()
+    album_id = conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'").fetchone()[0]
+    record_rule(conn, "album", album_id, False, PROVENANCE_USER)
+    conn.commit()
+    conn.close()
+
+    crash = _CrashAfterFirstCheckpoint()
+    with pytest.raises(RuntimeError):
+        import_legacy_library(legacy_db, reset=True, progress=crash)
+    assert crash.seen is not None
+    stage, rowid, run_id = crash.seen
+
+    # The wipe is on disk; the snapshot has to be too.
+    conn = legacy_db._get_connection()
+    outstanding = conn.execute(
+        "SELECT COUNT(*) FROM lib2_import_intent_snapshot WHERE run_id=?",
+        (run_id,)).fetchone()[0]
+    conn.close()
+    assert outstanding == 1
+
+    stats = import_legacy_library(
+        legacy_db, resume=ResumePoint(stage, rowid, run_id))
+
+    conn = legacy_db._get_connection()
+    row = conn.execute(
+        """SELECT al.monitored, r.monitored AS rule_monitored, r.provenance
+             FROM lib2_albums al
+             JOIN lib2_monitor_rules r
+               ON r.entity_type='album' AND r.entity_id=al.id AND r.profile_id=1
+            WHERE al.title='Views'""").fetchone()
+    leftover = conn.execute(
+        "SELECT COUNT(*) FROM lib2_import_intent_snapshot").fetchone()[0]
+    conn.close()
+
+    assert stats["album_monitor_intent_restored"] == 1
+    assert dict(row) == {"monitored": 0, "rule_monitored": 0,
+                         "provenance": "user_explicit"}
+    # Restored means consumed — the snapshot must not linger and re-apply later.
+    assert leftover == 0
+
+
+def test_a_fresh_rebuild_after_a_lost_one_still_carries_the_old_intent(legacy_db):
+    """Not every interrupted rebuild gets resumed. If the next run is another
+    reset, the rules table it snapshots is the empty one the crash left behind,
+    so the outstanding snapshot has to be folded in."""
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+
+    import_legacy_library(legacy_db)
+    conn = legacy_db._get_connection()
+    album_id = conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'").fetchone()[0]
+    record_rule(conn, "album", album_id, False, PROVENANCE_USER)
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(RuntimeError):
+        import_legacy_library(legacy_db, reset=True,
+                              progress=_CrashAfterFirstCheckpoint())
+
+    stats = import_legacy_library(legacy_db, reset=True)
+
+    conn = legacy_db._get_connection()
+    row = conn.execute(
+        """SELECT r.monitored, r.provenance FROM lib2_monitor_rules r
+             JOIN lib2_albums al ON al.id=r.entity_id
+            WHERE r.entity_type='album' AND al.title='Views'
+              AND r.provenance='user_explicit'""").fetchone()
+    leftover = conn.execute(
+        "SELECT COUNT(*) FROM lib2_import_intent_snapshot").fetchone()[0]
+    conn.close()
+
+    assert stats["album_monitor_intent_restored"] == 1
+    assert row is not None and row["monitored"] == 0
+    assert leftover == 0
+
+
+# ---------------------------------------------------------------------------
+# L2-013: media-server mappings must exist in the first successful run
+# ---------------------------------------------------------------------------
+
+
+def test_media_server_mappings_are_written_by_the_import_itself(migrated_legacy_db):
+    """The backfill runs at startup and in ensure_library_v2_schema — both
+    BEFORE the import inserts. After a successful upgrade the mapping table was
+    therefore still empty, and mapping-only consumers (native
+    ``media_server_sources`` chips, the Navidrome lookup by lib2_track_id) had
+    nothing until the next restart."""
+    conn = sqlite3.connect(migrated_legacy_db.path)
+    conn.execute("UPDATE artists SET server_source='plex'")
+    conn.execute("UPDATE albums SET server_source='plex'")
+    conn.execute("UPDATE tracks SET server_source='plex'")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(migrated_legacy_db, reset=True)
+
+    conn = sqlite3.connect(migrated_legacy_db.path)
+    try:
+        by_type = dict(conn.execute(
+            "SELECT entity_type, COUNT(*) FROM lib2_media_server_mappings "
+            "WHERE server_source='plex' GROUP BY entity_type").fetchall())
+    finally:
+        conn.close()
+
+    assert by_type.get("artist"), "no artist mapping — needs a restart to appear"
+    assert by_type.get("album"), "no album mapping — needs a restart to appear"
+    assert by_type.get("track"), "no track mapping — needs a restart to appear"
+
+
+def test_the_mapping_backfill_is_idempotent_across_imports(migrated_legacy_db):
+    conn = sqlite3.connect(migrated_legacy_db.path)
+    conn.execute("UPDATE artists SET server_source='plex'")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(migrated_legacy_db, reset=True)
+    import_legacy_library(migrated_legacy_db)
+
+    conn = sqlite3.connect(migrated_legacy_db.path)
+    try:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM lib2_media_server_mappings "
+            "WHERE entity_type='artist' AND server_source='plex'").fetchone()[0] == 1
+    finally:
+        conn.close()

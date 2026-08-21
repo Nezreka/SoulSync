@@ -263,3 +263,43 @@ def test_playlist_status_does_not_count_provider_catalogue(tmp_path):
 
     assert db.get_mirrored_playlist_status_counts(playlist)['in_library'] == 0
     assert db.get_all_mirrored_playlist_status_counts()[playlist]['in_library'] == 0
+
+
+def test_public_api_reports_repair_state_from_the_findings_table(tmp_path):
+    """``repair_status``/``repair_last_checked`` were columns on the legacy
+    ``tracks`` table that nothing had written for a long time, so the public API
+    served two permanently NULL fields. The repair worker records its results as
+    ``repair_findings`` rows against the native subject ``lib2:<id>``; that is
+    what the projection answers from now.
+    """
+    db = _db(tmp_path)
+    with db._get_connection() as conn:
+        artist = seed_artist(conn, server_id='ar1', name='Rone')
+        album = seed_album(conn, server_id='al1', title='Tohu Bohu', artist_id=artist)
+        flagged = seed_track(conn, server_id='tr1', title='Bora', album_id=album,
+                             artist_id=artist, file_path='/m/bora.flac')
+        clean = seed_track(conn, server_id='tr2', title='Parade', album_id=album,
+                           artist_id=artist, file_path='/m/parade.flac')
+        conn.execute(
+            "INSERT INTO repair_findings(job_id, finding_type, severity, status, "
+            "entity_type, entity_id, title, updated_at) "
+            "VALUES('dead_file_cleaner','dead_file','warning','pending','track',?,"
+            "'gone','2026-08-21 10:00:00')", (f'lib2:{flagged}',))
+        # A resolved finding still dates the last check, but is not open state.
+        conn.execute(
+            "INSERT INTO repair_findings(job_id, finding_type, severity, status, "
+            "entity_type, entity_id, title, updated_at) "
+            "VALUES('corrupt_audio_scan','corrupt_audio','warning','resolved','track',?,"
+            "'fixed','2026-08-21 11:00:00')", (f'lib2:{clean}',))
+
+    open_row, closed_row = db.api_get_track(flagged), db.api_get_track(clean)
+    assert (open_row['repair_status'], open_row['repair_last_checked']) == (
+        'dead_file', '2026-08-21 10:00:00')
+    assert closed_row['repair_status'] is None
+    assert closed_row['repair_last_checked'] == '2026-08-21 11:00:00'
+
+    with db._get_connection() as conn:
+        untouched = seed_track(conn, server_id='tr3', title='Bye', album_id=album,
+                               artist_id=artist, file_path='/m/bye.flac')
+    never = db.api_get_track(untouched)
+    assert never['repair_status'] is None and never['repair_last_checked'] is None

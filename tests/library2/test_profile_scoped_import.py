@@ -120,3 +120,102 @@ def test_import_without_profile_uses_admin_only(legacy_db):
     }
     conn.close()
     assert monitored == {"Drake": 1, "Adele": 0}
+
+
+# ---------------------------------------------------------------------------
+# L2-006: the watchlist's own quality profile is part of the intent
+# ---------------------------------------------------------------------------
+
+
+def _seed_profiles(conn):
+    conn.execute("""CREATE TABLE IF NOT EXISTS quality_profiles(
+        id INTEGER PRIMARY KEY, name TEXT, is_default INTEGER DEFAULT 0)""")
+    conn.execute("INSERT OR IGNORE INTO quality_profiles(id,name,is_default) "
+                 "VALUES(1,'Standard',1)")
+    conn.execute("INSERT OR IGNORE INTO quality_profiles(id,name,is_default) "
+                 "VALUES(2,'Lossless',0)")
+    conn.commit()
+
+
+def _watchlist_with_profile(conn, profile_id):
+    conn.execute("""CREATE TABLE watchlist_artists(
+        id INTEGER PRIMARY KEY, artist_name TEXT, spotify_artist_id TEXT,
+        quality_profile_id INTEGER, profile_id INTEGER DEFAULT 1)""")
+    conn.execute(
+        "INSERT INTO watchlist_artists(artist_name, spotify_artist_id, "
+        "quality_profile_id, profile_id) VALUES('Drake','sp-drake',?,1)",
+        (profile_id,))
+    conn.commit()
+
+
+def _drake(conn):
+    cur = conn.cursor()
+    cur.execute("INSERT INTO lib2_artists(name, spotify_id, quality_profile_id, "
+                "quality_profile_explicit) VALUES('Drake','sp-drake',1,0)")
+    artist = cur.lastrowid
+    cur.execute("INSERT INTO lib2_albums(primary_artist_id, title, "
+                "quality_profile_id, quality_profile_explicit) VALUES(?,'A',1,0)",
+                (artist,))
+    conn.commit()
+    return artist
+
+
+def test_watchlist_quality_profile_survives_the_import(imported_conn):
+    """The user picked profile 2 for this watched artist before the upgrade;
+    importing only ``monitored=1`` dropped them back to the global default, so
+    every future release was fetched at the wrong quality."""
+    conn = imported_conn
+    _seed_profiles(conn)
+    _watchlist_with_profile(conn, 2)
+    artist = _drake(conn)
+
+    apply_monitoring_from_watchlist_wishlist(conn.cursor(), profile_id=1)
+    conn.commit()
+
+    row = conn.execute(
+        "SELECT monitored, quality_profile_id, quality_profile_explicit "
+        "FROM lib2_artists WHERE id=?", (artist,)).fetchone()
+    assert row["monitored"] == 1
+    assert row["quality_profile_id"] == 2
+    assert row["quality_profile_explicit"] == 1
+    # …and the inheritance projection reached the artist's albums, which is
+    # what a newly materialised discography release copies from.
+    assert conn.execute(
+        "SELECT quality_profile_id FROM lib2_albums WHERE primary_artist_id=?",
+        (artist,)).fetchone()[0] == 2
+
+
+def test_a_dangling_watchlist_profile_falls_back_to_the_default(imported_conn):
+    conn = imported_conn
+    _seed_profiles(conn)
+    _watchlist_with_profile(conn, 99)
+    artist = _drake(conn)
+
+    apply_monitoring_from_watchlist_wishlist(conn.cursor(), profile_id=1)
+    conn.commit()
+
+    row = conn.execute(
+        "SELECT monitored, quality_profile_id, quality_profile_explicit "
+        "FROM lib2_artists WHERE id=?", (artist,)).fetchone()
+    assert row["monitored"] == 1
+    assert row["quality_profile_explicit"] == 0
+
+
+def test_watchlist_rows_that_disagree_keep_the_default(imported_conn):
+    conn = imported_conn
+    _seed_profiles(conn)
+    _watchlist_with_profile(conn, 2)
+    conn.execute(
+        "INSERT INTO watchlist_artists(artist_name, spotify_artist_id, "
+        "quality_profile_id, profile_id) VALUES('Drake','sp-drake',1,1)")
+    conn.commit()
+    artist = _drake(conn)
+
+    apply_monitoring_from_watchlist_wishlist(conn.cursor(), profile_id=1)
+    conn.commit()
+
+    row = conn.execute(
+        "SELECT monitored, quality_profile_explicit FROM lib2_artists WHERE id=?",
+        (artist,)).fetchone()
+    assert row["monitored"] == 1
+    assert row["quality_profile_explicit"] == 0

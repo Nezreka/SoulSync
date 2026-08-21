@@ -293,7 +293,7 @@ class TestTheStoredIdFastPath:
         assert stored_provider_id(conn, "artist", artist, "discogs") is None
 
     def test_the_callback_runs_when_a_stored_id_fetches(self, conn, db):
-        from core.library2.worker_support import honor_stored_match
+        from core.library2.worker_support import MATCHED, honor_stored_match
 
         artist = _artist(conn, "Rone", external_ids={"discogs": "12345"})
         seen = []
@@ -302,42 +302,76 @@ class TestTheStoredIdFastPath:
             db, entity_type="artist", entity_id=artist, service="discogs",
             fetch=lambda stored: {"id": stored, "name": "Rone"},
             on_match=lambda eid, stored, data: seen.append((eid, stored, data)),
-        ) is True
+        ) == MATCHED
         assert seen == [(artist, "12345", {"id": "12345", "name": "Rone"})]
 
     def test_without_a_stored_id_the_caller_falls_through(self, conn, db):
-        from core.library2.worker_support import honor_stored_match
+        from core.library2.worker_support import NO_STORED_ID, honor_stored_match
 
         artist = _artist(conn, "Rone")
 
-        assert honor_stored_match(
+        result = honor_stored_match(
             db, entity_type="artist", entity_id=artist, service="discogs",
             fetch=lambda stored: {"id": stored},
             on_match=lambda *a: None,
-        ) is False
+        )
+        assert result == NO_STORED_ID
+        assert not result, "falsy, so the caller still searches by name"
 
-    def test_a_failed_fetch_falls_through_without_raising(self, conn, db):
-        from core.library2.worker_support import honor_stored_match
+    def test_a_failed_fetch_keeps_the_stored_id_instead_of_searching(self, conn, db):
+        """L2-005: a transient provider failure is not evidence that the id is
+        wrong. Falling through sent the worker into a fuzzy name search that
+        overwrote a deliberately chosen match with whatever came back."""
+        from core.library2.provider_attempts import ensure_provider_attempt_schema
+        from core.library2.worker_support import UNAVAILABLE, honor_stored_match
 
+        ensure_provider_attempt_schema(conn.cursor())
+        conn.commit()
         artist = _artist(conn, "Rone", external_ids={"discogs": "12345"})
+        searched = []
 
         def boom(_stored):
             raise RuntimeError("rate limited")
 
-        assert honor_stored_match(
+        result = honor_stored_match(
             db, entity_type="artist", entity_id=artist, service="discogs",
-            fetch=boom, on_match=lambda *a: None,
-        ) is False
+            fetch=boom, on_match=lambda *a: searched.append(1),
+        )
 
-    def test_an_empty_response_falls_through(self, conn, db):
-        from core.library2.worker_support import honor_stored_match
+        assert result == UNAVAILABLE
+        assert result, "truthy, so the caller skips search-by-name"
+        assert searched == []
+        # …and the failure is on record, so the queue backs off instead of
+        # handing the same entity straight back on the next tick.
+        row = conn.execute(
+            "SELECT status, attempts FROM lib2_provider_attempts "
+            "WHERE entity_type='artist' AND entity_id=? AND service='discogs'",
+            (artist,)).fetchone()
+        assert row["status"] == "error"
+
+    def test_an_empty_response_also_keeps_the_stored_id(self, conn, db):
+        """A provider answering "I have nothing for this id" is indistinguishable
+        from one having a bad day, and both used to release the id."""
+        from core.library2.worker_support import UNAVAILABLE, honor_stored_match
 
         artist = _artist(conn, "Rone", external_ids={"discogs": "12345"})
 
         assert honor_stored_match(
             db, entity_type="artist", entity_id=artist, service="discogs",
             fetch=lambda _stored: None, on_match=lambda *a: None,
-        ) is False
+        ) == UNAVAILABLE
+
+    def test_a_missing_ledger_does_not_break_the_refresh(self, conn, db):
+        from core.library2.worker_support import UNAVAILABLE, honor_stored_match
+
+        conn.execute("DROP TABLE IF EXISTS lib2_provider_attempts")
+        conn.commit()
+        artist = _artist(conn, "Rone", external_ids={"discogs": "12345"})
+
+        assert honor_stored_match(
+            db, entity_type="artist", entity_id=artist, service="discogs",
+            fetch=lambda _s: None, on_match=lambda *a: None,
+        ) == UNAVAILABLE
 
     def test_a_callback_error_is_not_swallowed(self, conn, db):
         """A failed DB write is the worker's problem to hear about — swallowing it

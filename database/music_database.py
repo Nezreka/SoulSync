@@ -8,7 +8,7 @@ import os
 import re
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,7 +45,6 @@ def _as_datetime(value):
 _database_initialized_paths = set()
 _database_sidecar_warnings = set()
 _database_initialization_lock = threading.Lock()
-
 
 
 def _row_value(row, column: str, default=None):
@@ -192,6 +191,26 @@ _EXPORT_TRACK_PROJECTION = (
     ('jiosaavn_id', _export_json_id('jiosaavn'), 'external_ids'),
     ('bandcamp_url', _export_json_id('bandcamp'), 'external_ids'),
 )
+
+# The instant a row's EXPORTED payload last changed — its own timestamp or a
+# parent's (L2-011). An album carries its artist's name and a track carries the
+# artist name plus the album title, so renaming an artist rewrites what the
+# export says about every one of its albums and tracks while touching none of
+# their timestamps: a consumer that had already walked them would never be told.
+#
+# julianday() on every side, never a text MAX — these columns hold a mix of
+# 'YYYY-MM-DD HH:MM:SS' and ISO-with-a-'T', and 'T' > ' ', so a lexicographic
+# MAX picks the OLDER value whenever two rows were written in different formats.
+# COALESCE to 0 so an absent or unparseable parent timestamp cannot NULL the
+# whole comparison and drop the row from every incremental export.
+_EXPORT_CHANGED_AT = {
+    'artist': "COALESCE(julianday(t.updated_at), 0)",
+    'album': ("MAX(COALESCE(julianday(t.updated_at), 0), "
+              "COALESCE(julianday(ar.updated_at), 0))"),
+    'track': ("MAX(COALESCE(julianday(t.updated_at), 0), "
+              "COALESCE(julianday(ar.updated_at), 0), "
+              "COALESCE(julianday(al.updated_at), 0))"),
+}
 
 _EXPORT_SPECS = {
     'artist': {
@@ -554,56 +573,14 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             
-            # Artists table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS artists (
-                    id INTEGER PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    thumb_url TEXT,
-                    genres TEXT,  -- JSON array
-                    summary TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Albums table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS albums (
-                    id INTEGER PRIMARY KEY,
-                    artist_id INTEGER NOT NULL,
-                    title TEXT NOT NULL,
-                    year INTEGER,
-                    thumb_url TEXT,
-                    genres TEXT,  -- JSON array
-                    track_count INTEGER,
-                    duration INTEGER,  -- milliseconds
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (artist_id) REFERENCES artists (id) ON DELETE CASCADE
-                )
-            """)
-            
-            # Tracks table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS tracks (
-                    id INTEGER PRIMARY KEY,
-                    album_id INTEGER NOT NULL,
-                    artist_id INTEGER NOT NULL,
-                    title TEXT NOT NULL,
-                    track_number INTEGER,
-                    duration INTEGER,  -- milliseconds
-                    file_path TEXT,
-                    bitrate INTEGER,
-                    file_size INTEGER,  -- bytes; populated by deep scan from media-server API
-                    year INTEGER,  -- per-track release year from file tags (albums.year is canonical)
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (album_id) REFERENCES albums (id) ON DELETE CASCADE,
-                    FOREIGN KEY (artist_id) REFERENCES artists (id) ON DELETE CASCADE
-                )
-            """)
-            
+            # The legacy `artists`/`albums`/`tracks` catalogue is no longer
+            # created. Library v2 owns the catalogue (`lib2_*`); an install
+            # that still has the old tables keeps them until
+            # `core.library2.importer` has migrated their rows, and a fresh
+            # install never grows them. Nothing reads or writes them at
+            # runtime — `tests/library2/test_legacy_usage_ratchet.py` pins
+            # that at reads: 0, writes: 0.
+
             # Metadata table for storing system information like last refresh dates
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS metadata (
@@ -845,18 +822,9 @@ class MusicDatabase:
                            "ON watchlist_labels (musicbrainz_label_id)")
 
             # Create indexes for performance
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_artist_id ON albums (artist_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks (album_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_artist_id ON tracks (artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_spotify_id ON wishlist_tracks (spotify_track_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_spotify_id ON watchlist_artists (spotify_artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_date_added ON wishlist_tracks (date_added)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_name ON artists (name)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_title ON albums (title)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks (title)")
-            
-            # Add server_source columns for multi-server support (migration)
-            self._add_server_source_columns(cursor)
 
             # Add discovery feature tables (migration)
             self._add_discovery_tables(cursor)
@@ -883,53 +851,10 @@ class MusicDatabase:
             # Make spotify_artist_id nullable for iTunes-only artists (migration)
             self._fix_watchlist_spotify_id_nullable(cursor)
 
-            # Add MusicBrainz columns to library tables (migration)
-            self._add_musicbrainz_columns(cursor)
-
-            # Add external ID columns (Spotify/iTunes) to library tables (migration)
-            self._add_external_id_columns(cursor)
-
-            # Add AudioDB columns to artists table (migration)
-            self._add_audiodb_columns(cursor)
-
-            # Add Deezer columns to library tables (migration)
-            self._add_deezer_columns(cursor)
-
-            # Add JioSaavn columns to library tables (migration)
-            self._add_jiosaavn_columns(cursor)
-
-            # Add Spotify/iTunes enrichment tracking columns (migration)
-            self._add_spotify_itunes_enrichment_columns(cursor)
-
-            # Add Last.fm and Genius enrichment columns (migration)
-            self._add_lastfm_genius_columns(cursor)
-
-            # Add Tidal and Qobuz enrichment columns (migration)
-            self._add_tidal_qobuz_enrichment_columns(cursor)
-
-            # Add Discogs enrichment columns (migration)
-            self._add_discogs_columns(cursor)
-
-            # Add Amazon artist ID column (migration)
-            self._add_amazon_columns(cursor)
-
-            # Add Similar-Artists worker tracking columns (migration)
-            self._add_similar_artists_worker_columns(cursor)
-
-            # Add Bandcamp enrichment tracking columns (migration)
-            self._add_bandcamp_columns(cursor)
-
-            # Backfill match_status for rows that already have an external ID but
-            # NULL status. Prevents enrichment workers from re-processing these
-            # rows forever. Must run AFTER all *_match_status columns have been
-            # created by the migrations above.
-            self._backfill_match_status_for_existing_ids(cursor)
+            # MusicBrainz API result cache (migration)
+            self._add_musicbrainz_cache(cursor)
 
             # §56.2: normalized provenance for provider identity matches.
-            # Triggers cover every enrichment worker without teaching a dozen
-            # legacy write paths a second, easy-to-drift convention. Existing
-            # matches are explicitly marked ``legacy`` because their original
-            # automatic/manual source cannot be reconstructed honestly.
             self._add_metadata_match_provenance(cursor)
 
             # Bubble snapshots table for persisting UI state across page refreshes
@@ -960,7 +885,6 @@ class MusicDatabase:
             self._add_profile_recovery_support(cursor)
             self._add_profile_service_credentials(cursor)
             self._add_service_credential_sets(cursor)
-            self._add_soul_id_columns(cursor)
             self._add_listening_history_table(cursor)
 
             # Per-artist auto_download ("follow only") column. MUST run after the
@@ -1447,7 +1371,6 @@ class MusicDatabase:
                 logger.error(f"Quality-profiles schema init failed: {qp_err}")
 
             self._ensure_wishlist_quality_columns(cursor)
-            self._ensure_library_quality_column(cursor)
 
             # One-time: materialize the current global quality/AcoustID/downsample
             # settings into the `quality_profiles` default row and backfill
@@ -1489,10 +1412,6 @@ class MusicDatabase:
                 self._record_migration(cursor, 'acquisition_phase4_schema')
             except Exception as grabs_err:
                 logger.error(f"Acquisition schema init failed: {grabs_err}")
-
-            self._ensure_core_media_schema_columns(cursor)
-            self._ensure_art_lock_columns(cursor)
-            self._normalize_genres_to_json(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
             self._sync_migration_ledger(cursor)
@@ -1630,125 +1549,6 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error syncing migration ledger: {e}")
 
-    def _normalize_genres_to_json(self, cursor):
-        """One-time: rewrite legacy comma-separated genres to canonical JSON arrays.
-
-        ``artists.genres`` / ``albums.genres`` historically stored EITHER a JSON
-        array (new writes) OR a comma-separated string (old writes), so every
-        reader has to try-JSON-then-split. This normalizes existing rows to JSON
-        in place. It mirrors the readers' exact parse (JSON list, else
-        comma-split/strip/drop-empties), so the genre VALUES are unchanged — only
-        the storage format. Marker-gated to run once, and per-row diffed so a
-        re-run (or a row already in JSON form) is a no-op. Non-fatal on error,
-        like the other migrations.
-        """
-        import json
-        try:
-            cursor.execute("SELECT value FROM metadata WHERE key = 'genres_json_normalized' LIMIT 1")
-            if cursor.fetchone():
-                return
-
-            def _to_list(raw):
-                # Identical semantics to the genres readers elsewhere in this file.
-                try:
-                    parsed = json.loads(raw)
-                    return parsed if isinstance(parsed, list) else [str(parsed)]
-                except (json.JSONDecodeError, ValueError, TypeError):
-                    return [g.strip() for g in raw.split(',') if g.strip()]
-
-            total = 0
-            for table in ('artists', 'albums'):
-                cursor.execute(
-                    f"SELECT id, genres FROM {table} "
-                    f"WHERE genres IS NOT NULL AND TRIM(genres) != ''"
-                )
-                pending = []
-                for row in cursor.fetchall():
-                    rid, raw = row[0], row[1]
-                    canonical = json.dumps(_to_list(raw))
-                    if canonical != raw:  # leave already-canonical rows untouched
-                        pending.append((canonical, rid))
-                for canonical, rid in pending:
-                    cursor.execute(f"UPDATE {table} SET genres = ? WHERE id = ?", (canonical, rid))
-                    total += 1
-
-            cursor.execute(
-                "INSERT OR REPLACE INTO metadata (key, value, updated_at) "
-                "VALUES ('genres_json_normalized', 'true', CURRENT_TIMESTAMP)"
-            )
-            self._record_migration(cursor, 'genres_json')
-            if total:
-                logger.info("Normalized %d legacy genres value(s) to JSON", total)
-        except Exception as e:
-            logger.error(f"Error normalizing genres to JSON: {e}")
-
-    def _ensure_core_media_schema_columns(self, cursor):
-        """Repair required media-library columns that older migrations may miss.
-
-        A few legacy migrations rebuild artists/albums/tracks in place. Newer
-        installs get these columns from CREATE TABLE, but upgraded databases can
-        occasionally miss one if a previous migration path failed or was marked
-        complete before the column existed.
-        """
-        try:
-            cursor.execute("PRAGMA table_info(tracks)")
-            track_cols = {c[1] for c in cursor.fetchall()}
-            if track_cols and 'file_size' not in track_cols:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN file_size INTEGER")
-                logger.info("Repaired missing file_size column on tracks table")
-            # #910 — Full Refresh writes a per-track `year` (from file tags), but the column
-            # was only ever in the live INSERT, never in CREATE TABLE or a migration. On any
-            # DB that predates this fix, every Full Refresh track insert hard-fails with
-            # "table tracks has no column named year". Additive + nullable; nothing reads it
-            # except the writer, so this is safe to backfill on every existing DB.
-            if track_cols and 'year' not in track_cols:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN year INTEGER")
-                logger.info("Repaired missing year column on tracks table (#910)")
-            # #927 — multi-disc fix: the scan now writes a real disc_number, but the column
-            # was only ever added by a separate migration that doesn't run on fresh installs,
-            # so the new INSERT/UPDATE would hard-fail with "no column named disc_number".
-            # Same shape as the year repair above: additive, defaults to 1, ensured on every DB.
-            if track_cols and 'disc_number' not in track_cols:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN disc_number INTEGER DEFAULT 1")
-                logger.info("Repaired missing disc_number column on tracks table (#927)")
-
-            cursor.execute("PRAGMA table_info(albums)")
-            album_cols = {c[1] for c in cursor.fetchall()}
-            if album_cols and 'api_track_count' not in album_cols:
-                cursor.execute("ALTER TABLE albums ADD COLUMN api_track_count INTEGER DEFAULT NULL")
-                logger.info("Repaired missing api_track_count column on albums table")
-
-            # Full release date (#824). Additive + nullable: NULL means "only the
-            # year is known", and every reader falls back to albums.year, so this
-            # is safe to ship dormant. Populated by enrichment + manual edit;
-            # consumed by the tag writer to write the full date (e.g. 2023-09-01)
-            # instead of truncating it to the year.
-            if album_cols and 'release_date' not in album_cols:
-                cursor.execute("ALTER TABLE albums ADD COLUMN release_date TEXT DEFAULT NULL")
-                logger.info("Added release_date column to albums table (#824)")
-
-            # Canonical album version (#765 / #767-Bug2). Additive + nullable:
-            # a NULL canonical means "unresolved" and every tool falls back to
-            # today's behavior, so this is safe to ship dormant. Columns are
-            # populated/consumed in later stages.
-            _canonical_cols = {
-                'canonical_source': 'TEXT DEFAULT NULL',
-                'canonical_album_id': 'TEXT DEFAULT NULL',
-                'canonical_score': 'REAL DEFAULT NULL',
-                'canonical_resolved_at': 'TIMESTAMP DEFAULT NULL',
-                # #758 — set when the user MANUALLY pins an album version. The
-                # auto resolve job (and any re-resolution) must never overwrite
-                # a locked pin, so a manual match stays put across cycles.
-                'canonical_locked': 'INTEGER DEFAULT 0',
-            }
-            for _col, _typedef in _canonical_cols.items():
-                if album_cols and _col not in album_cols:
-                    cursor.execute(f"ALTER TABLE albums ADD COLUMN {_col} {_typedef}")
-                    logger.info("Added %s column to albums table (canonical version)", _col)
-
-        except Exception as e:
-            logger.error("Error repairing core media schema columns: %s", e)
-
     def _art_lock_supported(self, cursor, table: str) -> bool:
         """Does this database have ``<table>.art_locked`` yet?
 
@@ -1776,36 +1576,6 @@ class MusicDatabase:
             except Exception:
                 cache[table] = False
         return cache[table]
-
-    def _ensure_art_lock_columns(self, cursor):
-        """Art chosen by hand (TheHomeGuy). Same shape as ``canonical_locked``:
-        a manual pick must survive every automatic writer.
-
-        The art picker used to be "pinned" only by accident — enrichment workers
-        fill art solely ``WHERE thumb_url IS NULL OR ''``, so a non-empty value
-        happened to survive them. A library sync is a different writer with
-        different rules, and it overwrote the pick with whatever the media server
-        returned. Nothing in the row said a human chose this, so nothing could
-        protect it. Additive, defaults to 0 = "follow the server", i.e. exactly
-        today's behaviour for every existing row.
-
-        Deliberately its OWN method with its OWN try, not part of
-        ``_ensure_core_media_schema_columns``: that one wraps every repair in a
-        single try, so one unrelated failure would skip everything after it. The
-        sync upserts now REFERENCE ``art_locked``, and a missing column there
-        raises "no such column" for every album and artist — swallowed by the
-        upsert's broad except, which would silently lose the whole scan. This
-        column has to be the one thing that cannot be skipped by someone else's
-        error."""
-        for table in ('albums', 'artists'):
-            try:
-                cursor.execute(f"PRAGMA table_info({table})")
-                cols = {c[1] for c in cursor.fetchall()}
-                if cols and 'art_locked' not in cols:
-                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN art_locked INTEGER DEFAULT 0")
-                    logger.info("Added art_locked column to %s table (custom artwork)", table)
-            except Exception as e:
-                logger.error("Could not ensure %s.art_locked: %s", table, e)
 
     def _ensure_wishlist_quality_columns(self, cursor):
         """Give every wishlist row a pointer to its own quality profile.
@@ -1848,27 +1618,6 @@ class MusicDatabase:
         except Exception as e:
             logger.error("Error adding wishlist quality-profile column: %s", e)
 
-    def _ensure_library_quality_column(self, cursor):
-        """Give every library track a pointer to its own quality profile.
-
-        Same pointer-only design as `_ensure_wishlist_quality_columns` above:
-        NULL means "use the app-wide default profile" (resolved live), a
-        concrete id pins the track to a specific profile. Existing rows are
-        backfilled to the migrated default profile by
-        `core/quality/migrate_to_profiles.py` so upgrading installs don't lose
-        the assignment their old global settings implied; new library tracks
-        are inserted with NULL and simply follow whichever profile is default
-        at read time — no insert call site needs to change.
-        """
-        try:
-            cursor.execute("PRAGMA table_info(tracks)")
-            cols = {c[1] for c in cursor.fetchall()}
-            if cols and 'quality_profile_id' not in cols:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN quality_profile_id INTEGER DEFAULT NULL")
-                logger.info("Added quality_profile_id column to tracks table (quality-profile pipeline)")
-        except Exception as e:
-            logger.error("Error adding library quality-profile column: %s", e)
-
     def set_album_canonical(self, album_id, source: str, canonical_album_id: str,
                             score: float, locked: bool = False) -> bool:
         """Persist the resolved canonical (source, album_id, score) for an album
@@ -1885,9 +1634,14 @@ class MusicDatabase:
             # Auto writes can't clobber a manual lock; manual writes always apply.
             guard = "" if locked else " AND (canonical_locked IS NULL OR canonical_locked = 0)"
             cursor.execute(
+                # updated_at moves with the canonical claim (L2-011): these
+                # columns are part of the MetaSync payload, so a claim that did
+                # not touch the timestamp changed what a full export says while
+                # every incremental export kept omitting the row.
                 "UPDATE lib2_albums SET canonical_source = ?, canonical_album_id = ?, "
                 "canonical_score = ?, canonical_locked = ?, "
-                "canonical_resolved_at = CURRENT_TIMESTAMP "
+                "canonical_resolved_at = CURRENT_TIMESTAMP, "
+                "updated_at = CURRENT_TIMESTAMP "
                 f"WHERE id = ?{guard}",
                 (source, str(canonical_album_id), float(score), 1 if locked else 0, album_id),
             )
@@ -2313,45 +2067,6 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding automation then_actions column: {e}")
 
-    def _add_server_source_columns(self, cursor):
-        """Add server_source columns to existing tables for multi-server support"""
-        try:
-            # Check if server_source column exists in artists table
-            cursor.execute("PRAGMA table_info(artists)")
-            artists_columns = [column[1] for column in cursor.fetchall()]
-            
-            if 'server_source' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN server_source TEXT DEFAULT 'plex'")
-                logger.info("Added server_source column to artists table")
-            
-            # Check if server_source column exists in albums table
-            cursor.execute("PRAGMA table_info(albums)")
-            albums_columns = [column[1] for column in cursor.fetchall()]
-            
-            if 'server_source' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN server_source TEXT DEFAULT 'plex'")
-                logger.info("Added server_source column to albums table")
-            
-            # Check if server_source column exists in tracks table
-            cursor.execute("PRAGMA table_info(tracks)")
-            tracks_columns = [column[1] for column in cursor.fetchall()]
-            
-            if 'server_source' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN server_source TEXT DEFAULT 'plex'")
-                logger.info("Added server_source column to tracks table")
-            if 'disc_number' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN disc_number INTEGER DEFAULT 1")
-                logger.info("Added disc_number column to tracks table")
-                
-            # Create indexes for server_source columns for performance
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_server_source ON artists (server_source)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_server_source ON albums (server_source)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_server_source ON tracks (server_source)")
-            
-        except Exception as e:
-            logger.error(f"Error adding server_source columns: {e}")
-            # Don't raise - this is a migration, database can still function without it
-    
     def _add_discovery_tables(self, cursor):
         """Add tables for discovery feature: similar artists, discovery pool, and recent releases"""
         try:
@@ -3351,78 +3066,16 @@ class MusicDatabase:
             logger.error(f"Error making spotify_artist_id nullable in watchlist_artists: {e}")
             # Don't raise - this is a migration, database can still function
 
-    def _add_musicbrainz_columns(self, cursor):
-        """Add MusicBrainz tracking columns to library tables for metadata enrichment"""
-        columns_added = False
+    def _add_musicbrainz_cache(self, cursor):
+        """The MusicBrainz API result cache (``core.metadata`` reads it).
+
+        This method used to add ``musicbrainz_*`` columns and indexes to the
+        legacy ``artists``/``albums``/``tracks`` tables as well. Those went with
+        the catalogue: the workers write ``lib2_*`` directly and a recording's
+        MBID lives in ``lib2_tracks.musicbrainz_id``. Only the cache is still
+        read, so only the cache is still created.
+        """
         try:
-            # --- Artists ---
-            cursor.execute("PRAGMA table_info(artists)")
-            artists_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'musicbrainz_id' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN musicbrainz_id TEXT")
-                columns_added = True
-            if 'musicbrainz_last_attempted' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN musicbrainz_last_attempted TIMESTAMP")
-                columns_added = True
-            if 'musicbrainz_match_status' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN musicbrainz_match_status TEXT")
-                columns_added = True
-            # MusicBrainz exposes alternate-spelling aliases on every artist
-            # record (Japanese kanji ↔ romanized, Cyrillic ↔ Latin, etc.).
-            # SoulSync's artist matching used to compare expected vs actual
-            # name with raw similarity — cross-script comparison scored 0%
-            # and the file got quarantined even when MusicBrainz knew both
-            # names belonged to the same artist (issue #442). Persist the
-            # alias list as JSON so the verifier + matcher can consult it
-            # without re-querying MB on every comparison.
-            if 'aliases' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN aliases TEXT")
-                columns_added = True
-            if columns_added:
-                logger.info("Added MusicBrainz columns to artists table")
-
-            # --- Albums ---
-            cursor.execute("PRAGMA table_info(albums)")
-            albums_columns = [column[1] for column in cursor.fetchall()]
-
-            added_albums = False
-            if 'musicbrainz_release_id' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN musicbrainz_release_id TEXT")
-                added_albums = True
-            if 'musicbrainz_last_attempted' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN musicbrainz_last_attempted TIMESTAMP")
-                added_albums = True
-            if 'musicbrainz_match_status' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN musicbrainz_match_status TEXT")
-                added_albums = True
-            if added_albums:
-                columns_added = True
-                logger.info("Added MusicBrainz columns to albums table")
-
-            # --- Tracks ---
-            cursor.execute("PRAGMA table_info(tracks)")
-            tracks_columns = [column[1] for column in cursor.fetchall()]
-
-            added_tracks = False
-            if 'musicbrainz_recording_id' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN musicbrainz_recording_id TEXT")
-                added_tracks = True
-            if 'musicbrainz_last_attempted' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN musicbrainz_last_attempted TIMESTAMP")
-                added_tracks = True
-            if 'musicbrainz_match_status' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN musicbrainz_match_status TEXT")
-                added_tracks = True
-            if 'verification_status' not in tracks_columns:
-                # 'verified' / 'unverified' / 'force_imported' — set at import,
-                # refreshed by the AcoustID scan (which reads the file tag).
-                cursor.execute("ALTER TABLE tracks ADD COLUMN verification_status TEXT")
-                added_tracks = True
-            if added_tracks:
-                columns_added = True
-                logger.info("Added MusicBrainz columns to tracks table")
-            
             # Create MusicBrainz cache table for storing API results
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS musicbrainz_cache (
@@ -3440,347 +3093,42 @@ class MusicDatabase:
                 )
             """)
             
-            # Create indexes (safe even if columns were already present)
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_mbid ON artists (musicbrainz_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_mb_status ON artists (musicbrainz_match_status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_mbid ON albums (musicbrainz_release_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_mb_status ON albums (musicbrainz_match_status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_mbid ON tracks (musicbrainz_recording_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_mb_status ON tracks (musicbrainz_match_status)")
-            
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_entity ON musicbrainz_cache (entity_type, entity_name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_mbid ON musicbrainz_cache (musicbrainz_id)")
             # Partial index for failed lookups — speeds up the management modal queries
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_failed ON musicbrainz_cache (entity_type, last_updated) WHERE musicbrainz_id IS NULL")
-            
-            if columns_added:
-                logger.info("MusicBrainz migration completed successfully")
-            
         except Exception as e:
-            logger.error(f"Error in MusicBrainz migration: {e}")
+            logger.error(f"Error creating the MusicBrainz cache table: {e}")
             # Don't raise - this is a migration, database can still function
 
-    def _add_external_id_columns(self, cursor):
-        """Add Spotify/iTunes external ID columns to library tables for enrichment"""
-        try:
-            # --- Artists ---
-            cursor.execute("PRAGMA table_info(artists)")
-            artists_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'spotify_artist_id' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN spotify_artist_id TEXT")
-            if 'itunes_artist_id' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN itunes_artist_id TEXT")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_spotify_id ON artists (spotify_artist_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_itunes_id ON artists (itunes_artist_id)")
-
-            # --- Albums ---
-            cursor.execute("PRAGMA table_info(albums)")
-            albums_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'spotify_album_id' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN spotify_album_id TEXT")
-            if 'itunes_album_id' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN itunes_album_id TEXT")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_spotify_id ON albums (spotify_album_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_itunes_id ON albums (itunes_album_id)")
-
-            # --- Tracks ---
-            cursor.execute("PRAGMA table_info(tracks)")
-            tracks_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'spotify_track_id' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN spotify_track_id TEXT")
-            if 'itunes_track_id' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN itunes_track_id TEXT")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_spotify_id ON tracks (spotify_track_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_itunes_id ON tracks (itunes_track_id)")
-
-        except Exception as e:
-            logger.error(f"Error adding external ID columns: {e}")
             # Don't raise - this is a migration, database can still function
 
-    def _add_audiodb_columns(self, cursor):
-        """Add AudioDB tracking + generic metadata columns for enrichment (artists, albums, tracks)"""
-        try:
-            # --- Artists ---
-            cursor.execute("PRAGMA table_info(artists)")
-            artists_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'audiodb_id' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN audiodb_id TEXT")
-            if 'audiodb_match_status' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN audiodb_match_status TEXT")
-            if 'audiodb_last_attempted' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN audiodb_last_attempted TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_audiodb_id ON artists (audiodb_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_audiodb_status ON artists (audiodb_match_status)")
-
-            if 'style' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN style TEXT")
-            if 'mood' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN mood TEXT")
-            if 'label' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN label TEXT")
-            if 'banner_url' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN banner_url TEXT")
-
-            # --- Albums ---
-            cursor.execute("PRAGMA table_info(albums)")
-            albums_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'audiodb_id' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN audiodb_id TEXT")
-            if 'audiodb_match_status' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN audiodb_match_status TEXT")
-            if 'audiodb_last_attempted' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN audiodb_last_attempted TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_audiodb_id ON albums (audiodb_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_audiodb_status ON albums (audiodb_match_status)")
-
-            if 'style' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN style TEXT")
-            if 'mood' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN mood TEXT")
-
-            # --- Tracks ---
-            cursor.execute("PRAGMA table_info(tracks)")
-            tracks_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'audiodb_id' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN audiodb_id TEXT")
-            if 'audiodb_match_status' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN audiodb_match_status TEXT")
-            if 'audiodb_last_attempted' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN audiodb_last_attempted TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_audiodb_id ON tracks (audiodb_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_audiodb_status ON tracks (audiodb_match_status)")
-
-            if 'style' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN style TEXT")
-            if 'mood' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN mood TEXT")
-
-        except Exception as e:
-            logger.error(f"Error adding AudioDB columns: {e}")
-            # Don't raise - this is a migration, database can still function
-
-    def _add_discogs_columns(self, cursor):
-        """Add Discogs enrichment columns to artists and albums tables."""
-        try:
-            # --- Artists ---
-            cursor.execute("PRAGMA table_info(artists)")
-            artists_columns = [column[1] for column in cursor.fetchall()]
-
-            for col in ['discogs_id', 'discogs_match_status', 'discogs_bio', 'discogs_members', 'discogs_urls']:
-                if col not in artists_columns:
-                    col_type = 'TIMESTAMP' if col.endswith('_attempted') else 'TEXT'
-                    cursor.execute(f"ALTER TABLE artists ADD COLUMN {col} {col_type}")
-            if 'discogs_last_attempted' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN discogs_last_attempted TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_discogs_id ON artists (discogs_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_discogs_status ON artists (discogs_match_status)")
-
-            # --- Albums ---
-            cursor.execute("PRAGMA table_info(albums)")
-            albums_columns = [column[1] for column in cursor.fetchall()]
-
-            for col in ['discogs_id', 'discogs_match_status', 'discogs_genres', 'discogs_styles',
-                         'discogs_label', 'discogs_catno', 'discogs_country']:
-                if col not in albums_columns:
-                    cursor.execute(f"ALTER TABLE albums ADD COLUMN {col} TEXT")
-            if 'discogs_last_attempted' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN discogs_last_attempted TIMESTAMP")
-            if 'discogs_rating' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN discogs_rating REAL")
-            if 'discogs_rating_count' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN discogs_rating_count INTEGER")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_discogs_id ON albums (discogs_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_discogs_status ON albums (discogs_match_status)")
-
-            logger.info("Discogs enrichment columns added/verified successfully")
-
-        except Exception as e:
-            logger.error(f"Error adding Discogs columns: {e}")
-
-    def _add_similar_artists_worker_columns(self, cursor):
-        """Add Similar-Artists worker tracking columns to the artists table.
-
-        Mirrors the per-source enrichment pattern: a match_status (NULL =
-        unattempted, then 'matched'/'not_found'/'error') + last_attempted
-        timestamp so the SimilarArtistsWorker can pick the next library artist to
-        fetch MusicMap similars for and retry transient failures after a window.
-        Idempotent — only adds columns that aren't already present.
-        """
-        try:
-            cursor.execute("PRAGMA table_info(artists)")
-            artists_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'similar_artists_match_status' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN similar_artists_match_status TEXT")
-            if 'similar_artists_last_attempted' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN similar_artists_last_attempted TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_similarartists_status ON artists (similar_artists_match_status)")
-        except Exception as e:
-            logger.error(f"Error adding similar-artists worker columns: {e}")
-
-    def _add_amazon_columns(self, cursor):
-        """Add Amazon enrichment tracking columns to artists, albums, and tracks."""
-        try:
-            # --- Artists ---
-            cursor.execute("PRAGMA table_info(artists)")
-            artists_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'amazon_id' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN amazon_id TEXT")
-            if 'amazon_match_status' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN amazon_match_status TEXT")
-            if 'amazon_last_attempted' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN amazon_last_attempted TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_amazon_id ON artists (amazon_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_amazon_status ON artists (amazon_match_status)")
-
-            # --- Albums ---
-            cursor.execute("PRAGMA table_info(albums)")
-            albums_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'amazon_id' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN amazon_id TEXT")
-            if 'amazon_match_status' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN amazon_match_status TEXT")
-            if 'amazon_last_attempted' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN amazon_last_attempted TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_amazon_id ON albums (amazon_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_amazon_status ON albums (amazon_match_status)")
-
-            # --- Tracks ---
-            cursor.execute("PRAGMA table_info(tracks)")
-            tracks_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'amazon_id' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN amazon_id TEXT")
-            if 'amazon_match_status' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN amazon_match_status TEXT")
-            if 'amazon_last_attempted' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN amazon_last_attempted TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_amazon_id ON tracks (amazon_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_amazon_status ON tracks (amazon_match_status)")
-
-            logger.info("Amazon columns added/verified successfully")
-        except Exception as e:
-            logger.error(f"Error adding Amazon columns: {e}")
-
-    def _add_bandcamp_columns(self, cursor):
-        """Add Bandcamp enrichment tracking columns to albums and tracks.
-
-        Album+track (unlike Last.fm/Genius, which also enrich artists) —
-        Bandcamp's band/label pages don't carry enough structured data to be
-        worth a separate artist enrichment pass, but releases (albums) are
-        Bandcamp's primary unit — a release's JSON-LD is the richer object
-        (full tracklist, tags, label, credits in one place), so albums get
-        the same enrichment columns tracks do, mirroring the existing
-        Last.fm/Tidal/Qobuz album-level columns."""
-        try:
-            for table in ("albums", "tracks"):
-                cursor.execute(f"PRAGMA table_info({table})")
-                table_columns = [column[1] for column in cursor.fetchall()]
-
-                if 'bandcamp_id' not in table_columns:
-                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_id TEXT")
-                if 'bandcamp_match_status' not in table_columns:
-                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_match_status TEXT")
-                if 'bandcamp_last_attempted' not in table_columns:
-                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_last_attempted TIMESTAMP")
-                if 'bandcamp_url' not in table_columns:
-                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_url TEXT")
-                if 'bandcamp_tags' not in table_columns:
-                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_tags TEXT")
-                if 'bandcamp_label' not in table_columns:
-                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_label TEXT")
-
-                cursor.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_bandcamp_id ON {table} (bandcamp_id)")
-                cursor.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_bandcamp_status ON {table} (bandcamp_match_status)")
-
-            logger.info("Bandcamp columns added/verified successfully")
-        except Exception as e:
-            logger.error(f"Error adding Bandcamp columns: {e}")
-
-    def _backfill_match_status_for_existing_ids(self, cursor):
-        """Set `<provider>_match_status = 'matched'` for rows that already have a
-        populated external ID but NULL match_status.
-
-        Prevents enrichment workers from re-selecting the same rows forever when
-        the ID was populated outside the worker (file tags, manual match,
-        pre-migration legacy data) without a corresponding status update.
-
-        Only runs columns that actually exist, so pre-migration databases are
-        handled safely. UPDATE statements are cheap no-ops when nothing matches.
-        """
-        # (table, id_column, status_column)
-        targets = [
-            ('artists', 'lastfm_url', 'lastfm_match_status'),
-            ('albums', 'lastfm_url', 'lastfm_match_status'),
-            ('tracks', 'lastfm_url', 'lastfm_match_status'),
-            ('artists', 'musicbrainz_id', 'musicbrainz_match_status'),
-            ('albums', 'musicbrainz_release_id', 'musicbrainz_match_status'),
-            ('tracks', 'musicbrainz_recording_id', 'musicbrainz_match_status'),
-            ('artists', 'tidal_id', 'tidal_match_status'),
-            ('albums', 'tidal_id', 'tidal_match_status'),
-            ('tracks', 'tidal_id', 'tidal_match_status'),
-            ('artists', 'qobuz_id', 'qobuz_match_status'),
-            ('albums', 'qobuz_id', 'qobuz_match_status'),
-            ('tracks', 'qobuz_id', 'qobuz_match_status'),
-            ('albums', 'bandcamp_url', 'bandcamp_match_status'),
-            ('tracks', 'bandcamp_url', 'bandcamp_match_status'),
-            ('artists', 'jiosaavn_id', 'jiosaavn_match_status'),
-            ('albums', 'jiosaavn_id', 'jiosaavn_match_status'),
-            ('tracks', 'jiosaavn_id', 'jiosaavn_match_status'),
-        ]
-
-        total_backfilled = 0
-        for table, id_col, status_col in targets:
-            try:
-                cursor.execute(f"PRAGMA table_info({table})")
-                cols = {row[1] for row in cursor.fetchall()}
-                if id_col not in cols or status_col not in cols:
-                    continue
-                cursor.execute(
-                    f"UPDATE {table} SET {status_col} = 'matched' "
-                    f"WHERE {status_col} IS NULL AND {id_col} IS NOT NULL AND {id_col} != ''"
-                )
-                if cursor.rowcount and cursor.rowcount > 0:
-                    total_backfilled += cursor.rowcount
-                    logger.info(
-                        f"Backfilled {cursor.rowcount} rows in {table}.{status_col} "
-                        f"where {id_col} was already set."
-                    )
-            except Exception as e:
-                logger.error(f"Error backfilling {table}.{status_col}: {e}")
-
-        if total_backfilled == 0:
-            logger.debug("Match-status backfill: no rows needed updating.")
+    PROVENANCE_ENTITY_TYPES = (
+        'lib2_artist', 'lib2_album', 'lib2_track',
+        # The pre-v2 spellings. Kept accepted so an upgraded database's existing
+        # rows survive the rebuild below; nothing writes them any more.
+        'artist', 'album', 'track',
+    )
 
     def _add_metadata_match_provenance(self, cursor):
-        """Persist automatic/manual provenance for every provider match.
+        """Persist who chose a provider identity for a catalogue row.
 
-        All enrichment workers already converge on the same legacy contract:
-        ``<provider>_id`` plus ``<provider>_match_status='matched'``. SQLite
-        triggers turn that existing contract into one normalized audit row,
-        avoiding provider-specific provenance code in every worker. The manual
-        match endpoint overwrites the trigger-created ``automatic`` row with
-        ``manual`` in the same transaction.
+        Written by ``core.enrichment.match_provenance.record_manual_match`` and
+        read back through ``core.library2.match_status``. Database triggers used
+        to fill it automatically off the legacy ``<provider>_match_status``
+        columns; they went with those columns, and they had been writing rows
+        nothing could read for a while before that — the trigger's entity_type
+        was ``artist`` while every lib2 reader asks for ``lib2_artist``.
+
+        That namespace split is also why the CHECK has to be widened rather than
+        left alone: it listed only the three legacy spellings, so every
+        Library-v2 write was rejected by the constraint and swallowed by its
+        caller's ``except`` — no manual match has ever been recorded. An
+        existing table is rebuilt once, carrying its rows over.
         """
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS metadata_match_provenance (
+        allowed = ", ".join(f"'{name}'" for name in self.PROVENANCE_ENTITY_TYPES)
+        create_sql = f"""
+            CREATE TABLE IF NOT EXISTS {{name}} (
                 entity_type TEXT NOT NULL,
                 entity_id INTEGER NOT NULL,
                 service TEXT NOT NULL,
@@ -3789,501 +3137,30 @@ class MusicDatabase:
                 matched_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 actor TEXT,
                 PRIMARY KEY (entity_type, entity_id, service),
-                CHECK (entity_type IN ('artist', 'album', 'track')),
+                CHECK (entity_type IN ({allowed})),
                 CHECK (origin IN ('automatic', 'manual', 'legacy'))
             )
-        """)
+        """
+        existing = cursor.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' "
+            "AND name='metadata_match_provenance'"
+        ).fetchone()
+        if existing and 'lib2_artist' not in (existing[0] or ''):
+            cursor.execute(create_sql.format(name='metadata_match_provenance_new'))
+            cursor.execute(
+                "INSERT OR IGNORE INTO metadata_match_provenance_new "
+                "SELECT entity_type, entity_id, service, origin, external_id, "
+                "       matched_at, actor FROM metadata_match_provenance")
+            cursor.execute("DROP TABLE metadata_match_provenance")
+            cursor.execute(
+                "ALTER TABLE metadata_match_provenance_new "
+                "RENAME TO metadata_match_provenance")
+        else:
+            cursor.execute(create_sql.format(name='metadata_match_provenance'))
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_metadata_match_provenance_origin "
             "ON metadata_match_provenance(origin, service)"
         )
-
-        # (legacy table, canonical entity type, provider, external-id column)
-        targets = [
-            ("artists", "artist", "spotify", "spotify_artist_id"),
-            ("artists", "artist", "musicbrainz", "musicbrainz_id"),
-            ("artists", "artist", "deezer", "deezer_id"),
-            ("artists", "artist", "itunes", "itunes_artist_id"),
-            ("artists", "artist", "audiodb", "audiodb_id"),
-            ("artists", "artist", "discogs", "discogs_id"),
-            ("artists", "artist", "lastfm", "lastfm_url"),
-            ("artists", "artist", "genius", "genius_id"),
-            ("artists", "artist", "tidal", "tidal_id"),
-            ("artists", "artist", "qobuz", "qobuz_id"),
-            ("artists", "artist", "amazon", "amazon_id"),
-            ("artists", "artist", "jiosaavn", "jiosaavn_id"),
-            ("albums", "album", "spotify", "spotify_album_id"),
-            ("albums", "album", "musicbrainz", "musicbrainz_release_id"),
-            ("albums", "album", "deezer", "deezer_id"),
-            ("albums", "album", "itunes", "itunes_album_id"),
-            ("albums", "album", "audiodb", "audiodb_id"),
-            ("albums", "album", "discogs", "discogs_id"),
-            ("albums", "album", "lastfm", "lastfm_url"),
-            ("albums", "album", "tidal", "tidal_id"),
-            ("albums", "album", "qobuz", "qobuz_id"),
-            ("albums", "album", "amazon", "amazon_id"),
-            ("albums", "album", "jiosaavn", "jiosaavn_id"),
-            ("albums", "album", "bandcamp", "bandcamp_url"),
-            ("tracks", "track", "spotify", "spotify_track_id"),
-            ("tracks", "track", "musicbrainz", "musicbrainz_recording_id"),
-            ("tracks", "track", "deezer", "deezer_id"),
-            ("tracks", "track", "itunes", "itunes_track_id"),
-            ("tracks", "track", "audiodb", "audiodb_id"),
-            ("tracks", "track", "lastfm", "lastfm_url"),
-            ("tracks", "track", "genius", "genius_id"),
-            ("tracks", "track", "tidal", "tidal_id"),
-            ("tracks", "track", "qobuz", "qobuz_id"),
-            ("tracks", "track", "amazon", "amazon_id"),
-            ("tracks", "track", "jiosaavn", "jiosaavn_id"),
-            ("tracks", "track", "bandcamp", "bandcamp_url"),
-        ]
-
-        for table, entity_type, service, id_col in targets:
-            cursor.execute(f"PRAGMA table_info({table})")
-            columns = {row[1] for row in cursor.fetchall()}
-            status_col = f"{service}_match_status"
-            attempted_col = f"{service}_last_attempted"
-            if not {id_col, status_col, attempted_col}.issubset(columns):
-                continue
-
-            # Preserve epistemic honesty for pre-feature rows: their origin is
-            # unknowable, even if an external id proves they are matched.
-            cursor.execute(
-                f"""INSERT OR IGNORE INTO metadata_match_provenance(
-                         entity_type, entity_id, service, origin, external_id,
-                         matched_at, actor)
-                    SELECT ?, id, ?, 'legacy', CAST({id_col} AS TEXT),
-                           COALESCE({attempted_col}, CURRENT_TIMESTAMP), 'migration'
-                      FROM {table}
-                     WHERE {status_col}='matched'
-                       AND COALESCE(CAST({id_col} AS TEXT), '') <> ''""",
-                (entity_type, service),
-            )
-
-            trigger_base = f"metadata_match_{table}_{service}"
-            upsert_sql = f"""
-                INSERT INTO metadata_match_provenance(
-                    entity_type, entity_id, service, origin, external_id,
-                    matched_at, actor)
-                VALUES(
-                    '{entity_type}', NEW.id, '{service}', 'automatic',
-                    CAST(NEW.{id_col} AS TEXT),
-                    COALESCE(NEW.{attempted_col}, CURRENT_TIMESTAMP), 'system')
-                ON CONFLICT(entity_type, entity_id, service) DO UPDATE SET
-                    external_id=excluded.external_id,
-                    matched_at=excluded.matched_at,
-                    origin=CASE
-                        WHEN metadata_match_provenance.origin='manual'
-                         AND metadata_match_provenance.external_id=excluded.external_id
-                        THEN 'manual' ELSE 'automatic' END,
-                    actor=CASE
-                        WHEN metadata_match_provenance.origin='manual'
-                         AND metadata_match_provenance.external_id=excluded.external_id
-                        THEN metadata_match_provenance.actor ELSE 'system' END;
-            """
-            match_when = (
-                f"NEW.{status_col}='matched' AND "
-                f"COALESCE(CAST(NEW.{id_col} AS TEXT), '') <> ''"
-            )
-            cursor.execute(f"""
-                CREATE TRIGGER IF NOT EXISTS {trigger_base}_insert
-                AFTER INSERT ON {table}
-                WHEN {match_when}
-                BEGIN
-                    {upsert_sql}
-                END
-            """)
-            cursor.execute(f"""
-                CREATE TRIGGER IF NOT EXISTS {trigger_base}_update
-                AFTER UPDATE OF {id_col}, {status_col} ON {table}
-                WHEN {match_when}
-                BEGIN
-                    {upsert_sql}
-                END
-            """)
-            cursor.execute(f"""
-                CREATE TRIGGER IF NOT EXISTS {trigger_base}_clear
-                AFTER UPDATE OF {id_col}, {status_col} ON {table}
-                WHEN COALESCE(NEW.{status_col}, '') <> 'matched'
-                  OR COALESCE(CAST(NEW.{id_col} AS TEXT), '') = ''
-                BEGIN
-                    DELETE FROM metadata_match_provenance
-                     WHERE entity_type='{entity_type}' AND entity_id=NEW.id
-                       AND service='{service}';
-                END
-            """)
-
-    def _add_deezer_columns(self, cursor):
-        """Add Deezer tracking + generic metadata columns for enrichment (artists, albums, tracks)"""
-        try:
-            # --- Artists ---
-            cursor.execute("PRAGMA table_info(artists)")
-            artists_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'deezer_id' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN deezer_id TEXT")
-            if 'deezer_match_status' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN deezer_match_status TEXT")
-            if 'deezer_last_attempted' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN deezer_last_attempted TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_deezer_id ON artists (deezer_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_deezer_status ON artists (deezer_match_status)")
-
-            # --- Albums ---
-            cursor.execute("PRAGMA table_info(albums)")
-            albums_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'deezer_id' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN deezer_id TEXT")
-            if 'deezer_match_status' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN deezer_match_status TEXT")
-            if 'deezer_last_attempted' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN deezer_last_attempted TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_deezer_id ON albums (deezer_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_deezer_status ON albums (deezer_match_status)")
-
-            if 'label' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN label TEXT")
-            if 'explicit' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN explicit INTEGER")
-            if 'record_type' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN record_type TEXT")
-
-            # --- Tracks ---
-            cursor.execute("PRAGMA table_info(tracks)")
-            tracks_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'deezer_id' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN deezer_id TEXT")
-            if 'deezer_match_status' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN deezer_match_status TEXT")
-            if 'deezer_last_attempted' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN deezer_last_attempted TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_deezer_id ON tracks (deezer_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_deezer_status ON tracks (deezer_match_status)")
-
-            if 'bpm' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN bpm REAL")
-            if 'explicit' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN explicit INTEGER")
-
-        except Exception as e:
-            logger.error(f"Error adding Deezer columns: {e}")
-            # Don't raise - this is a migration, database can still function
-
-        # --- Repair worker columns ---
-        # Kept in their OWN try block: a failure in the Deezer ALTERs above must not
-        # prevent these from being created, or the repair worker errors on every run
-        # querying a missing repair_status column. (#964 folded this into the Deezer
-        # block; restored here.) Re-read tracks_columns so a partial failure above
-        # doesn't leave us with a stale snapshot.
-        try:
-            cursor.execute("PRAGMA table_info(tracks)")
-            tracks_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'repair_status' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN repair_status TEXT")
-            if 'repair_last_checked' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN repair_last_checked TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_repair_status ON tracks (repair_status)")
-
-        except Exception as e:
-            logger.error(f"Error adding repair worker columns: {e}")
-            # Don't raise - this is a migration, database can still function
-
-    def _add_jiosaavn_columns(self, cursor):
-        """Add JioSaavn tracking columns for enrichment (artists, albums, tracks)"""
-        try:
-            cursor.execute("PRAGMA table_info(artists)")
-            artists_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'jiosaavn_id' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN jiosaavn_id TEXT")
-            if 'jiosaavn_match_status' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN jiosaavn_match_status TEXT")
-            if 'jiosaavn_last_attempted' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN jiosaavn_last_attempted TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_jiosaavn_id ON artists (jiosaavn_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_jiosaavn_status ON artists (jiosaavn_match_status)")
-
-            cursor.execute("PRAGMA table_info(albums)")
-            albums_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'jiosaavn_id' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN jiosaavn_id TEXT")
-            if 'jiosaavn_match_status' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN jiosaavn_match_status TEXT")
-            if 'jiosaavn_last_attempted' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN jiosaavn_last_attempted TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_jiosaavn_id ON albums (jiosaavn_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_jiosaavn_status ON albums (jiosaavn_match_status)")
-
-            cursor.execute("PRAGMA table_info(tracks)")
-            tracks_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'jiosaavn_id' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN jiosaavn_id TEXT")
-            if 'jiosaavn_match_status' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN jiosaavn_match_status TEXT")
-            if 'jiosaavn_last_attempted' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN jiosaavn_last_attempted TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_jiosaavn_id ON tracks (jiosaavn_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_jiosaavn_status ON tracks (jiosaavn_match_status)")
-
-            logger.info("JioSaavn columns added/verified successfully")
-        except Exception as e:
-            logger.error(f"Error adding JioSaavn columns: {e}")
-
-    def _add_spotify_itunes_enrichment_columns(self, cursor):
-        """Add Spotify/iTunes enrichment tracking columns (match_status + last_attempted) to artists, albums, tracks"""
-        try:
-            # --- Artists ---
-            cursor.execute("PRAGMA table_info(artists)")
-            artists_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'spotify_match_status' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN spotify_match_status TEXT")
-            if 'spotify_last_attempted' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN spotify_last_attempted TIMESTAMP")
-            if 'itunes_match_status' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN itunes_match_status TEXT")
-            if 'itunes_last_attempted' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN itunes_last_attempted TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_spotify_match_status ON artists (spotify_match_status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_itunes_match_status ON artists (itunes_match_status)")
-
-            # --- Albums ---
-            cursor.execute("PRAGMA table_info(albums)")
-            albums_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'spotify_match_status' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN spotify_match_status TEXT")
-            if 'spotify_last_attempted' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN spotify_last_attempted TIMESTAMP")
-            if 'itunes_match_status' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN itunes_match_status TEXT")
-            if 'itunes_last_attempted' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN itunes_last_attempted TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_spotify_match_status ON albums (spotify_match_status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_itunes_match_status ON albums (itunes_match_status)")
-
-            # --- Tracks ---
-            cursor.execute("PRAGMA table_info(tracks)")
-            tracks_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'spotify_match_status' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN spotify_match_status TEXT")
-            if 'spotify_last_attempted' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN spotify_last_attempted TIMESTAMP")
-            if 'itunes_match_status' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN itunes_match_status TEXT")
-            if 'itunes_last_attempted' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN itunes_last_attempted TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_spotify_match_status ON tracks (spotify_match_status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_itunes_match_status ON tracks (itunes_match_status)")
-
-        except Exception as e:
-            logger.error(f"Error adding Spotify/iTunes enrichment columns: {e}")
-            # Don't raise - this is a migration, database can still function
-
-    def _add_lastfm_genius_columns(self, cursor):
-        """Add Last.fm and Genius enrichment tracking + metadata columns to artists, albums, tracks"""
-        try:
-            # --- Artists ---
-            cursor.execute("PRAGMA table_info(artists)")
-            artists_columns = [column[1] for column in cursor.fetchall()]
-
-            # Last.fm columns
-            if 'lastfm_match_status' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN lastfm_match_status TEXT")
-            if 'lastfm_last_attempted' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN lastfm_last_attempted TIMESTAMP")
-            if 'lastfm_listeners' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN lastfm_listeners INTEGER")
-            if 'lastfm_playcount' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN lastfm_playcount INTEGER")
-            if 'lastfm_tags' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN lastfm_tags TEXT")
-            if 'lastfm_similar' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN lastfm_similar TEXT")
-            if 'lastfm_bio' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN lastfm_bio TEXT")
-            if 'lastfm_url' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN lastfm_url TEXT")
-
-            # Genius columns
-            if 'genius_id' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN genius_id TEXT")
-            if 'genius_match_status' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN genius_match_status TEXT")
-            if 'genius_last_attempted' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN genius_last_attempted TIMESTAMP")
-            if 'genius_description' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN genius_description TEXT")
-            if 'genius_alt_names' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN genius_alt_names TEXT")
-            if 'genius_url' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN genius_url TEXT")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_lastfm_status ON artists (lastfm_match_status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_genius_id ON artists (genius_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_genius_status ON artists (genius_match_status)")
-
-            # --- Albums ---
-            cursor.execute("PRAGMA table_info(albums)")
-            albums_columns = [column[1] for column in cursor.fetchall()]
-
-            # Last.fm columns
-            if 'lastfm_match_status' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN lastfm_match_status TEXT")
-            if 'lastfm_last_attempted' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN lastfm_last_attempted TIMESTAMP")
-            if 'lastfm_listeners' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN lastfm_listeners INTEGER")
-            if 'lastfm_playcount' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN lastfm_playcount INTEGER")
-            if 'lastfm_tags' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN lastfm_tags TEXT")
-            if 'lastfm_wiki' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN lastfm_wiki TEXT")
-            if 'lastfm_url' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN lastfm_url TEXT")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_lastfm_status ON albums (lastfm_match_status)")
-
-            # --- Tracks ---
-            cursor.execute("PRAGMA table_info(tracks)")
-            tracks_columns = [column[1] for column in cursor.fetchall()]
-
-            # Last.fm columns
-            if 'lastfm_match_status' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN lastfm_match_status TEXT")
-            if 'lastfm_last_attempted' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN lastfm_last_attempted TIMESTAMP")
-            if 'lastfm_listeners' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN lastfm_listeners INTEGER")
-            if 'lastfm_playcount' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN lastfm_playcount INTEGER")
-            if 'lastfm_tags' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN lastfm_tags TEXT")
-            if 'lastfm_url' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN lastfm_url TEXT")
-
-            # Genius columns
-            if 'genius_id' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN genius_id TEXT")
-            if 'genius_match_status' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN genius_match_status TEXT")
-            if 'genius_last_attempted' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN genius_last_attempted TIMESTAMP")
-            if 'genius_lyrics' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN genius_lyrics TEXT")
-            if 'genius_description' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN genius_description TEXT")
-            if 'genius_url' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN genius_url TEXT")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_lastfm_status ON tracks (lastfm_match_status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_genius_id ON tracks (genius_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_genius_status ON tracks (genius_match_status)")
-
-        except Exception as e:
-            logger.error(f"Error adding Last.fm/Genius enrichment columns: {e}")
-            # Don't raise - this is a migration, database can still function
-
-    def _add_tidal_qobuz_enrichment_columns(self, cursor):
-        """Add Tidal and Qobuz enrichment tracking columns to artists, albums, tracks"""
-        try:
-            # --- Artists ---
-            cursor.execute("PRAGMA table_info(artists)")
-            artists_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'tidal_id' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN tidal_id TEXT")
-            if 'tidal_match_status' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN tidal_match_status TEXT")
-            if 'tidal_last_attempted' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN tidal_last_attempted TIMESTAMP")
-            if 'qobuz_id' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN qobuz_id TEXT")
-            if 'qobuz_match_status' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN qobuz_match_status TEXT")
-            if 'qobuz_last_attempted' not in artists_columns:
-                cursor.execute("ALTER TABLE artists ADD COLUMN qobuz_last_attempted TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_tidal_id ON artists (tidal_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_tidal_status ON artists (tidal_match_status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_qobuz_id ON artists (qobuz_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_qobuz_status ON artists (qobuz_match_status)")
-
-            # --- Albums ---
-            cursor.execute("PRAGMA table_info(albums)")
-            albums_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'tidal_id' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN tidal_id TEXT")
-            if 'tidal_match_status' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN tidal_match_status TEXT")
-            if 'tidal_last_attempted' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN tidal_last_attempted TIMESTAMP")
-            if 'qobuz_id' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN qobuz_id TEXT")
-            if 'qobuz_match_status' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN qobuz_match_status TEXT")
-            if 'qobuz_last_attempted' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN qobuz_last_attempted TIMESTAMP")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_tidal_id ON albums (tidal_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_tidal_status ON albums (tidal_match_status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_qobuz_id ON albums (qobuz_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_qobuz_status ON albums (qobuz_match_status)")
-
-            # --- Albums (extra metadata columns) ---
-            if 'upc' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN upc TEXT")
-            if 'copyright' not in albums_columns:
-                cursor.execute("ALTER TABLE albums ADD COLUMN copyright TEXT")
-
-            # --- Tracks ---
-            cursor.execute("PRAGMA table_info(tracks)")
-            tracks_columns = [column[1] for column in cursor.fetchall()]
-
-            if 'tidal_id' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN tidal_id TEXT")
-            if 'tidal_match_status' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN tidal_match_status TEXT")
-            if 'tidal_last_attempted' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN tidal_last_attempted TIMESTAMP")
-            if 'qobuz_id' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN qobuz_id TEXT")
-            if 'qobuz_match_status' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN qobuz_match_status TEXT")
-            if 'qobuz_last_attempted' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN qobuz_last_attempted TIMESTAMP")
-            if 'isrc' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN isrc TEXT")
-            if 'copyright' not in tracks_columns:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN copyright TEXT")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_tidal_id ON tracks (tidal_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_tidal_status ON tracks (tidal_match_status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_qobuz_id ON tracks (qobuz_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_qobuz_status ON tracks (qobuz_match_status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_isrc ON tracks (isrc)")
-
-        except Exception as e:
-            logger.error(f"Error adding Tidal/Qobuz enrichment columns: {e}")
-            # Don't raise - this is a migration, database can still function
 
     def _add_retag_tables(self, cursor):
         """Add retag tool tables for tracking processed downloads"""
@@ -5337,68 +4214,12 @@ class MusicDatabase:
         cred = self.get_service_credential(cred_id)
         return cred['payload'] if cred else None
 
-    def _add_soul_id_columns(self, cursor):
-        """Add soul_id columns to artists, albums, and tracks tables."""
-        try:
-            # Artists: soul_id
-            cursor.execute("PRAGMA table_info(artists)")
-            artist_cols = [c[1] for c in cursor.fetchall()]
-            if 'soul_id' not in artist_cols:
-                cursor.execute("ALTER TABLE artists ADD COLUMN soul_id TEXT DEFAULT NULL")
-                logger.info("Added soul_id column to artists table")
-            # Which derivation produced the artist soul_id: 'canonical' (name +
-            # a provider's artist id), 'album' (name + the alphabetically-first
-            # album title IN THIS LIBRARY) or 'name' (name alone). Only
-            # 'canonical' is reproducible on another install — the album
-            # fallback depends on what that user happens to own, so two
-            # libraries holding the same artist derive different ids. Nothing
-            # recorded how much to trust a given artist soul_id before this.
-            # NULL means unknown (generated before this column existed).
-            if 'soul_id_path' not in artist_cols:
-                cursor.execute("ALTER TABLE artists ADD COLUMN soul_id_path TEXT DEFAULT NULL")
-                logger.info("Added soul_id_path column to artists table")
-
-            # Albums: soul_id
-            cursor.execute("PRAGMA table_info(albums)")
-            album_cols = [c[1] for c in cursor.fetchall()]
-            if 'soul_id' not in album_cols:
-                cursor.execute("ALTER TABLE albums ADD COLUMN soul_id TEXT DEFAULT NULL")
-                logger.info("Added soul_id column to albums table")
-
-            # Albums: api_track_count — cached expected track count from the
-            # metadata provider, separate from track_count which is the
-            # OBSERVED count written by server syncs (Plex leafCount,
-            # SoulSync standalone len(tracks)). Without a separate column,
-            # the Album Completeness job can't tell apart "you have all the
-            # tracks" from "Plex says this album has N tracks and you have
-            # N tracks" — the latter looks complete but might be missing
-            # material the metadata source knows about. NULL = not yet
-            # looked up; the repair job fills it as it runs.
-            if 'api_track_count' not in album_cols:
-                cursor.execute("ALTER TABLE albums ADD COLUMN api_track_count INTEGER DEFAULT NULL")
-                logger.info("Added api_track_count column to albums table")
-
-            # Tracks: soul_id (song-level) + album_soul_id (release-specific)
-            cursor.execute("PRAGMA table_info(tracks)")
-            track_cols = [c[1] for c in cursor.fetchall()]
-            if 'soul_id' not in track_cols:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN soul_id TEXT DEFAULT NULL")
-                logger.info("Added soul_id column to tracks table")
-            if 'album_soul_id' not in track_cols:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN album_soul_id TEXT DEFAULT NULL")
-                logger.info("Added album_soul_id column to tracks table")
-
-            # Indexes for lookups
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_soul_id ON artists (soul_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_soul_id ON albums (soul_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_soul_id ON tracks (soul_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album_soul_id ON tracks (album_soul_id)")
-
-        except Exception as e:
-            logger.error(f"Error adding soul_id columns: {e}")
-
     def _add_listening_history_table(self, cursor):
-        """Create listening_history table and add play_count/last_played to tracks."""
+        """Create the listening_history table.
+
+        Play counts live on ``lib2_tracks.play_count``/``last_played``; this
+        method used to add the same pair to the legacy ``tracks`` table too.
+        """
         try:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS listening_history (
@@ -5441,16 +4262,6 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_listening_played_at ON listening_history (played_at)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_listening_artist ON listening_history (artist)")
             cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_listening_dedup ON listening_history (track_id, played_at, server_source)")
-
-            # Add play_count and last_played to tracks table
-            cursor.execute("PRAGMA table_info(tracks)")
-            track_cols = [c[1] for c in cursor.fetchall()]
-            if 'play_count' not in track_cols:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN play_count INTEGER DEFAULT 0")
-                logger.info("Added play_count column to tracks table")
-            if 'last_played' not in track_cols:
-                cursor.execute("ALTER TABLE tracks ADD COLUMN last_played TIMESTAMP")
-                logger.info("Added last_played column to tracks table")
 
             # Add scrobble tracking columns to listening_history
             cursor.execute("PRAGMA table_info(listening_history)")
@@ -7800,20 +6611,23 @@ class MusicDatabase:
                     albums_deleted = detached['albums_removed']
                     artists_deleted = detached['artists_removed']
 
-                    # Stamp the rebuild. Wiping the library destroys every local
-                    # signal about a track — play_count above all — while
-                    # library_history keeps each download's original created_at,
-                    # so afterwards a much-loved track reads to the Expired
-                    # Download Cleaner as "old and never played". Recording WHEN
-                    # the library was rebuilt lets that job treat everything
-                    # downloaded before it as out of scope, permanently. Written
-                    # in the same transaction as the delete so a crash can never
-                    # leave the wipe applied without the stamp.
-                    cursor.execute(
-                        "INSERT OR REPLACE INTO metadata (key, value, updated_at) "
-                        "VALUES (?, ?, CURRENT_TIMESTAMP)",
-                        ('library_rebuilt_at', datetime.now().isoformat()),
-                    )
+                    # Deliberately NO 'library_rebuilt_at' stamp (L2-012).
+                    # The stamp exists for a DESTRUCTIVE rebuild: wiping the
+                    # catalogue used to destroy every local signal about a
+                    # track — play_count above all — while library_history kept
+                    # each download's original created_at, so afterwards a
+                    # much-loved track read to the Expired Download Cleaner as
+                    # "old and never played". A full refresh no longer deletes
+                    # anything: _detach_server_contribution drops this server's
+                    # mappings and server_source/server_id and leaves the lib2
+                    # artists, albums, tracks, files and play_count in place, so
+                    # the protective signal survives and no amnesty is needed.
+                    # Writing it anyway permanently grandfathered every download
+                    # older than the refresh, and each further refresh pushed
+                    # that boundary forward again until retention cleanup did
+                    # nothing at all for existing downloads. An existing stamp
+                    # from an older, genuinely destructive build is left alone —
+                    # it just stops moving.
 
                     conn.commit()
 
@@ -9303,7 +8117,6 @@ class MusicDatabase:
             logger.error(f"Error searching albums with title='{title}', artist='{artist}': {e}")
             return []
         
-
 
     def _get_artist_variations(self, artist_name: str) -> List[str]:
             """Returns a list of known variations for an artist's name."""
@@ -17125,6 +15938,31 @@ class MusicDatabase:
             [entity_type, *ids],
         ):
             attempts.setdefault(int(row['entity_id']), {})[row['service']] = row
+        # `repair_status` / `repair_last_checked` used to be columns on the legacy
+        # `tracks` table. Nothing in this codebase has written them for a long
+        # time — the repair worker records its results as `repair_findings` rows
+        # keyed by the native subject `lib2:<id>` — so the public API served two
+        # permanently NULL fields. They are answered from the real source here
+        # rather than dropped, because a client that reads them should get the
+        # repair state that actually exists: the newest open finding's type, and
+        # when repair last had something to say about the row.
+        repairs: Dict[int, Any] = {}
+        try:
+            for row in conn.execute(
+                f"SELECT entity_id, finding_type, status, updated_at "
+                f"FROM repair_findings "
+                f"WHERE entity_type=? AND entity_id IN "
+                f"({','.join('?' * len(ids))}) "
+                f"ORDER BY updated_at",
+                [entity_type, *(f'lib2:{value}' for value in ids)],
+            ):
+                key = int(str(row['entity_id']).split(':', 1)[1])
+                seen = repairs.setdefault(key, {'status': None, 'checked': None})
+                seen['checked'] = row['updated_at']
+                if row['status'] == 'pending':
+                    seen['status'] = row['finding_type']
+        except Exception as exc:  # the table is optional on older databases
+            logger.debug("API: could not read repair findings: %s", exc)
         artist_ids = {}
         if entity_type == 'track':
             album_ids = {row.get('album_id') for row in data if row.get('album_id') is not None}
@@ -17156,6 +15994,9 @@ class MusicDatabase:
                 if item.get(column):
                     source_ids[service] = item[column]
             item.update(thumb_url=item.get('image_url'), created_at=item.get('added_at'))
+            repair = repairs.get(int(item['id'])) or {}
+            item['repair_status'] = repair.get('status')
+            item['repair_last_checked'] = repair.get('checked')
             if entity_type == 'album':
                 item.update(artist_id=item.get('primary_artist_id'),
                             record_type=item.get('album_type'))
@@ -18396,6 +17237,27 @@ class MusicDatabase:
 
     # ── MetaSync export ──────────────────────────────────────────────────
 
+    @staticmethod
+    def _normalize_since(value: Any) -> str:
+        """One aware-UTC ``'YYYY-MM-DD HH:MM:SS'`` string for the export filter.
+
+        A naive input is read as UTC because that is what SQLite's
+        CURRENT_TIMESTAMP writes; anything with an offset is converted, so two
+        callers naming the same instant in different zones get the same slice.
+        """
+        text = str(value or "").strip()
+        if not text:
+            return text
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            raise ValueError(
+                "since must be an ISO-8601 timestamp "
+                f"(e.g. 2026-08-19T00:00:00), got {value!r}")
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
     def api_export_entities(self, entity: str, cursor: str = "",
                             since: str = "", limit: int = 500) -> List[Dict[str, Any]]:
         """Page through artists/albums/tracks for the MetaSync export.
@@ -18453,8 +17315,16 @@ class MusicDatabase:
                 raise ValueError("cursor is not a valid export cursor") from e
             where.append("t.id > ?")
         if since:
-            where.append("t.updated_at >= ?")
-            params.append(str(since))
+            # Compared as INSTANTS, not as text (L2-010). SQLite writes
+            # CURRENT_TIMESTAMP as 'YYYY-MM-DD HH:MM:SS' while the API accepts
+            # ISO-8601 with a 'T' and an offset, and 'T' > ' ' in ASCII — so a
+            # caller asking for everything since midnight got nothing at all
+            # from that same day, and an offset was ranked by its own text
+            # rather than by the moment it denotes. The input is normalised to
+            # UTC once, here; the left-hand side spans the row's parents too
+            # (L2-011).
+            where.append(f"{_EXPORT_CHANGED_AT[entity]} >= julianday(?)")
+            params.append(self._normalize_since(since))
 
         try:
             conn = self._get_connection()

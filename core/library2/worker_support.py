@@ -214,10 +214,42 @@ def stored_provider_id(conn, entity_type: str, entity_id: Any,
     return _ids(row, key) if row is not None else None
 
 
+MATCHED = "matched"
+UNAVAILABLE = "error"
+NO_STORED_ID = ""
+
+
+def _record_unavailable(db, entity_type: str, entity_id: Any, service: str,
+                        detail: str) -> None:
+    """Persist a failed stored-id refresh in the attempt ledger.
+
+    Without it the failure leaves no trace at all, and ``next_pending()`` hands
+    the same entity straight back on the following tick — a tight provider loop
+    with no backoff. ``record_attempt`` increments the consecutive-failure count
+    for a non-settled status, which is exactly the backoff this needs.
+    """
+    try:
+        from core.library2 import provider_attempts
+
+        conn = db._get_connection()
+        try:
+            if not provider_attempts._table_exists(conn, "lib2_provider_attempts"):
+                return
+            provider_attempts.record_attempt(
+                conn, entity_type=entity_type, entity_id=entity_id,
+                service=service, status="error", detail=detail[:500])
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 - bookkeeping must not break the run
+        logger.debug("could not record failed stored-id refresh for %s #%s: %s",
+                     entity_type, entity_id, exc)
+
+
 def honor_stored_match(db, *, entity_type: str, entity_id: Any, service: str,
                        fetch: Callable[[str], Any],
                        on_match: Callable[[Any, str, Any], None],
-                       log_prefix: str = "") -> bool:
+                       log_prefix: str = "") -> str:
     """Refresh from an id already stored, instead of searching by name.
 
     Issue #501: without this, every enrichment pass ran a fuzzy name search and
@@ -229,12 +261,22 @@ def honor_stored_match(db, *, entity_type: str, entity_id: Any, service: str,
     connection open across a provider call is how this project's worst production
     bug worked, and ``on_match`` opens its own connection to write.
 
-    Returns True when an id was stored, the fetch returned data, and ``on_match``
-    ran; the caller then skips its search and counts a match. Returns False when
-    there is no stored id or the fetch came back empty or failed, and the caller
-    falls through to search. A fetch error is caught (transient rate limits are
-    normal); an ``on_match`` error is not — a failed write is something the worker
-    has to hear about rather than report as a match that never landed.
+    Returns one of three states (L2-005):
+
+    ``MATCHED``     — an id was stored, the fetch returned data and ``on_match``
+        ran. The caller skips its search and counts a match.
+    ``UNAVAILABLE`` — an id IS stored but the provider could not confirm it. The
+        caller must NOT search by name: a transient provider failure is not
+        evidence that the id is wrong, and searching would overwrite a
+        deliberately chosen id with whatever a fuzzy name match returns. The
+        failure is written to the attempt ledger so the retry gets a backoff
+        instead of coming straight back round. An id is released only by an
+        explicit re-match, never by a timeout.
+    ``NO_STORED_ID`` (falsy) — nothing stored; the caller searches as before.
+
+    A fetch error is caught (transient rate limits are normal); an ``on_match``
+    error is not — a failed write is something the worker has to hear about
+    rather than report as a match that never landed.
     """
     conn = db._get_connection()
     try:
@@ -242,29 +284,36 @@ def honor_stored_match(db, *, entity_type: str, entity_id: Any, service: str,
     finally:
         conn.close()
     if not stored:
-        return False
+        return NO_STORED_ID
 
     entity = _entity(entity_type) or str(entity_type)
+
+    def _unavailable(reason: str) -> str:
+        _record_unavailable(db, entity_type, entity_id, service, reason)
+        logger.warning(
+            "[%s] Stored id %s for %s #%s could not be confirmed (%s) — keeping "
+            "it rather than searching by name",
+            log_prefix or service, stored, entity, entity_id, reason)
+        return UNAVAILABLE
+
     try:
         data = fetch(stored)
     except Exception as exc:
-        logger.warning("[%s] Stored-id fetch failed for %s #%s (id=%s): %s",
-                       log_prefix or service, entity, entity_id, stored, exc)
-        return False
+        return _unavailable(str(exc))
 
     if not data:
-        logger.debug("[%s] Stored id %s for %s #%s returned nothing — "
-                     "falling through to search",
-                     log_prefix or service, stored, entity, entity_id)
-        return False
+        return _unavailable("the provider returned nothing")
 
     on_match(entity_id, stored, data)
     logger.info("[%s] Honored stored match: %s #%s → %s=%s",
                 log_prefix or service, entity, entity_id, service, stored)
-    return True
+    return MATCHED
 
 
 __all__ = [
+    "MATCHED",
+    "NO_STORED_ID",
+    "UNAVAILABLE",
     "accept_artist_match",
     "honor_stored_match",
     "owned_album_titles",

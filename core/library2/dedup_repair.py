@@ -56,6 +56,7 @@ _ENTITY_TYPE_BY_TABLE = {
     "lib2_albums": "album",
     "lib2_artists": "artist",
     "lib2_release_editions": "release_edition",
+    "lib2_tracks": "track",
 }
 
 
@@ -96,9 +97,9 @@ def _sanitize_provider_namespaces(conn: Any, cursor: Any) -> int:
     the number of rows fixed."""
     fixed = 0
     for lib2_table in _ENTITY_TYPE_BY_TABLE:
-        if lib2_table not in ("lib2_albums", "lib2_artists",
-                              "lib2_release_editions"):
-            continue
+        # Tracks are in scope too (L2-007): a Deezer/iTunes wishlist row wrote
+        # its numeric track id into ``spotify_id``, which then failed to match
+        # the same recording's real library row and left a duplicate wanted item.
         if not _table_columns(conn, lib2_table):
             continue
         has_mb_column = "musicbrainz_id" in _table_columns(conn, lib2_table)

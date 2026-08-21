@@ -204,31 +204,33 @@ def _scan_ctx(db, cfg, findings):
 
 def _db_with_tracks(n=3):
     from database.music_database import MusicDatabase
+    from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
+
     d = MusicDatabase(_os.path.join(_tempfile.mkdtemp(), 't.db'))
     conn = d._get_connection()
-    cur = conn.cursor()
-    cur.execute("INSERT INTO artists (id, name) VALUES (1,'A')")
-    cur.execute("INSERT INTO albums (id, artist_id, title) VALUES (1,1,'Al')")
+    artist_id = seed_artist(conn, server_id='ar1', name='A')
+    album_id = seed_album(conn, server_id='al1', title='Al', artist_id=artist_id)
     for i in range(n):
-        cur.execute("INSERT INTO tracks (id, album_id, artist_id, title, file_path) "
-                    "VALUES (?, 1, 1, ?, ?)",
-                    (i + 1, f'Song {i}', f'/music/{i}.flac'))
+        seed_track(conn, server_id=f'tr{i}', title=f'Song {i}', album_id=album_id,
+                   artist_id=artist_id, file_path=f'/music/{i}.flac')
     conn.commit(); conn.close()
     return d
 
 
 def _subjects_from_db(db):
-    """The job now enumerates Library-v2 file subjects, not the legacy
-    ``tracks`` table directly — bridge ``_db_with_tracks``'s rows into that
-    shape so these tests stay isolated from whatever real files happen to
-    exist on the filesystem being scanned."""
+    """The job enumerates Library-v2 file subjects — build the same shape here
+    so these tests stay isolated from whatever real files happen to exist on
+    the filesystem being scanned."""
     conn = db._get_connection()
     rows = conn.execute(
-        "SELECT id, title, file_path FROM tracks ORDER BY id"
+        """SELECT t.id AS id, t.title AS title, f.path AS path
+             FROM lib2_tracks t
+             JOIN lib2_track_files f ON f.track_id = t.id AND f.is_primary = 1
+            ORDER BY t.id"""
     ).fetchall()
     conn.close()
     return [
-        {'track_id': r['id'], 'title': r['title'], 'artist_name': 'A', 'path': r['file_path']}
+        {'track_id': r['id'], 'title': r['title'], 'artist_name': 'A', 'path': r['path']}
         for r in rows
     ]
 

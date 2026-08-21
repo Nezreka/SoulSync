@@ -32,7 +32,7 @@ projection wrote, exactly like before this table existed.
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from utils.logging_config import get_logger
 
@@ -54,6 +54,91 @@ def _album_intent_key(row) -> str:
     if row["musicbrainz_id"]:
         return f"musicbrainz:{row['musicbrainz_id']}"
     return f"stable:{row['stable_id']}" if row["stable_id"] else ""
+
+
+# A destructive rebuild deletes the rules table and rebuilds every local id, so
+# the intent it must preserve has to live somewhere that is neither. Holding it
+# in the importer's local variable meant a crash between the delete and the
+# restore lost exactly the user decisions the reset promised to keep (L2-008):
+# the walk checkpoints commit, so the delete is durable long before the restore
+# runs, while the resumed process starts with an empty dict. Keyed by run id so
+# a resumed run picks up its own snapshot and an abandoned one is identifiable.
+IMPORT_INTENT_SNAPSHOT_DDL = """
+CREATE TABLE IF NOT EXISTS lib2_import_intent_snapshot (
+    run_id TEXT NOT NULL,
+    profile_id INTEGER NOT NULL,
+    intent_key TEXT NOT NULL,
+    monitored INTEGER NOT NULL,
+    provenance TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (run_id, profile_id, intent_key)
+)
+"""
+
+
+def ensure_import_intent_schema(conn) -> None:
+    """Create the reset-intent snapshot table. Idempotent."""
+    conn.execute(IMPORT_INTENT_SNAPSHOT_DDL)
+
+
+def persist_album_monitor_intent(
+    conn, run_id: str, intent: Dict[str, Tuple[bool, str]], *, profile_id: int = 1,
+) -> int:
+    """Commit the pre-delete snapshot so a crash cannot take it with it.
+
+    The caller must run this in the SAME transaction as the deletes it protects:
+    then the snapshot and the wipe are durable together, never one without the
+    other. Every earlier run's rows for this profile go at the same time — the
+    caller has already merged them into ``intent``, so this is the whole
+    outstanding picture and the table cannot grow one abandoned run at a time.
+    """
+    ensure_import_intent_schema(conn)
+    conn.execute(
+        "DELETE FROM lib2_import_intent_snapshot WHERE profile_id=?",
+        (int(profile_id),),
+    )
+    rows = [(str(run_id), int(profile_id), key, 1 if monitored else 0, provenance)
+            for key, (monitored, provenance) in intent.items() if key]
+    if rows:
+        conn.executemany(
+            "INSERT INTO lib2_import_intent_snapshot"
+            "(run_id, profile_id, intent_key, monitored, provenance) "
+            "VALUES(?,?,?,?,?)", rows)
+    return len(rows)
+
+
+def load_album_monitor_intent(
+    conn, run_id: Optional[str] = None, *, profile_id: int = 1,
+) -> Dict[str, Tuple[bool, str]]:
+    """Committed intent still waiting to be restored.
+
+    ``run_id=None`` returns every outstanding run's, which is what a fresh
+    destructive rebuild needs: a rebuild that crashed before restoring left the
+    rules table empty, so snapshotting the live state alone would record nothing
+    and quietly finish the job the crash started.
+    """
+    ensure_import_intent_schema(conn)
+    sql = ("SELECT intent_key, monitored, provenance "
+           "FROM lib2_import_intent_snapshot WHERE profile_id=?")
+    params: List = [int(profile_id)]
+    if run_id is not None:
+        sql += " AND run_id=?"
+        params.append(str(run_id))
+    else:
+        sql += " ORDER BY created_at"
+    return {
+        str(row["intent_key"]): (bool(row["monitored"]), str(row["provenance"]))
+        for row in conn.execute(sql, params)
+    }
+
+
+def clear_album_monitor_intent(conn, run_id: str, *, profile_id: int = 1) -> None:
+    """Drop the snapshot once its intent is back on real rows."""
+    ensure_import_intent_schema(conn)
+    conn.execute(
+        "DELETE FROM lib2_import_intent_snapshot WHERE run_id=? AND profile_id=?",
+        (str(run_id), int(profile_id)),
+    )
 
 
 def snapshot_album_monitor_intent(

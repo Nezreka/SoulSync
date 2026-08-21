@@ -174,6 +174,17 @@ def record_attempt(conn, *, entity_type: str, entity_id: int, service: str,
     if state not in STATUSES:
         raise ValueError(f"Unknown attempt status: {status!r}")
     when = attempted_at or None
+    # The MetaSync export projects a row's ledger statuses into its payload as
+    # <service>_match_status, so a status CHANGE here changes what the export
+    # says about the entity while touching nothing on the entity itself — and
+    # the incremental export filters on the entity's updated_at (L2-011). Read
+    # the previous value first so only a real change moves the timestamp: this
+    # runs on every provider cycle, and touching unconditionally would put the
+    # whole library into every incremental slice.
+    previous = conn.execute(
+        "SELECT status FROM lib2_provider_attempts "
+        "WHERE entity_type=? AND entity_id=? AND service=?",
+        (entity, int(entity_id), key)).fetchone()
     conn.execute(
         """
         INSERT INTO lib2_provider_attempts
@@ -189,6 +200,10 @@ def record_attempt(conn, *, entity_type: str, entity_id: int, service: str,
         """,
         (entity, int(entity_id), key, state, when, detail),
     )
+    if previous is None or str(previous[0]).strip().lower() != state:
+        conn.execute(
+            f"UPDATE {_TABLES[entity]} SET updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (int(entity_id),))
 
 
 def attempt_state(conn, *, entity_type: str, entity_id: int) -> Dict[str, Dict[str, Any]]:

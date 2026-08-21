@@ -9,10 +9,9 @@ exactly the property that makes it dangerous: it is the version whose breakage
 nobody notices, and it deletes rows.
 
 What can still arrive at a handler with a bare id is a *stale* finding — one
-persisted before the job moved to native subjects and never applied. Applying it
-would mutate the legacy twin of a track whose real row lives in ``lib2_tracks``.
-So it is refused, and the startup prune drops it so the next scan can raise it
-again against the right subject.
+persisted before the job moved to native subjects and never applied. It names a
+row in a catalogue that is gone, so it is refused, and the startup prune drops
+it so the next scan can raise it again against the right subject.
 
 A finding with **no** entity id at all is a different thing and must keep
 working: ``track_number_repair``'s folder scan raises findings about a file on
@@ -30,17 +29,7 @@ from database.music_database import MusicDatabase
 
 
 def _db(tmp_path: Path) -> MusicDatabase:
-    db = MusicDatabase(str(tmp_path / 'm.db'))
-    conn = db._get_connection()
-    conn.execute("INSERT INTO artists (id, name) VALUES (1, 'A-ha')")
-    conn.execute(
-        "INSERT INTO albums (id, artist_id, title) VALUES (1, 1, 'Hunting')")
-    conn.execute(
-        "INSERT INTO tracks (id, artist_id, album_id, title, track_number, file_path) "
-        "VALUES (1, 1, 1, 'Take On Me', 1, '/m/a.flac')")
-    conn.commit()
-    conn.close()
-    return db
+    return MusicDatabase(str(tmp_path / 'm.db'))
 
 
 def _worker(db: MusicDatabase, tmp_path: Path) -> RepairWorker:
@@ -89,31 +78,6 @@ def test_a_bare_id_subject_is_declined_as_stale(finding_type, tmp_path: Path):
 
     assert result['success'] is False, finding_type
     assert result.get('stale_subject') is True, finding_type
-
-
-@pytest.mark.parametrize('finding_type', sorted(STALE_SUBJECT_CASES))
-def test_declining_leaves_the_legacy_catalogue_untouched(finding_type, tmp_path: Path):
-    """The refusal is the point: these branches used to DELETE the row."""
-    db = _db(tmp_path)
-    audio = tmp_path / 'a.flac'
-    audio.write_bytes(b'fake audio bytes')
-
-    _worker(db, tmp_path)._execute_fix(
-        finding_type, STALE_SUBJECT_ENTITY_TYPES.get(finding_type, 'track'), '1',
-        str(audio), dict(STALE_SUBJECT_CASES[finding_type]))
-
-    conn = db._get_connection()
-    try:
-        track = conn.execute(
-            "SELECT title, track_number, isrc FROM tracks WHERE id=1").fetchone()
-        album_thumb = conn.execute(
-            "SELECT thumb_url FROM albums WHERE id=1").fetchone()[0]
-    finally:
-        conn.close()
-
-    assert track is not None, f"{finding_type} deleted the legacy row"
-    assert (track['title'], track['track_number'], track['isrc']) == ('Take On Me', 1, None)
-    assert album_thumb is None
 
 
 def test_the_declining_types_are_declared(tmp_path: Path):
@@ -193,9 +157,9 @@ def test_the_worker_no_longer_reads_the_legacy_catalogue():
 def test_the_legacy_writes_left_are_only_path_write_throughs():
     """What survives is the file's *location*, and only until the readers move.
 
-    ``tracks.file_path`` and ``tracks.track_number`` are not mirrored columns
-    (``core.library2.legacy_mirror`` watches enrichment), so a fix that moves or
-    renames a file has to write both sides itself or the legacy view goes stale.
+    ``tracks.file_path`` and ``tracks.track_number`` were the only columns a
+    repair fix ever had to write on both sides, so that moving or renaming a
+    file did not leave the legacy view stale.
     Nothing else may be written: a ``DELETE``, an ``INSERT``, or an update of any
     other column would be the legacy branch growing back.
     """

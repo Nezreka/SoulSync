@@ -7,8 +7,6 @@ their track API responses, so we read it during the deep scan and
 aggregate via SQL on demand. No filesystem walk involved.
 
 Tests pin:
-- Schema migration is idempotent and backward-compatible (existing
-  rows get NULL file_size; new column doesn't break old inserts).
 - Aggregator returns the empty-shape dict for fresh installs and
   walks/sums correctly when populated.
 - Per-format breakdown handles mixed extensions correctly.
@@ -18,7 +16,6 @@ Tests pin:
 from __future__ import annotations
 
 import os
-import sqlite3
 import tempfile
 import uuid
 from pathlib import Path
@@ -65,86 +62,6 @@ def _insert_track(db: MusicDatabase, *, track_id: str, file_path: str,
 # ---------------------------------------------------------------------------
 # Schema migration
 # ---------------------------------------------------------------------------
-
-
-def test_file_size_column_exists_after_init(db: MusicDatabase) -> None:
-    """Fresh install should have the column from the canonical
-    CREATE TABLE."""
-    conn = db._get_connection()
-    cur = conn.cursor()
-    cur.execute("PRAGMA table_info(tracks)")
-    cols = {row[1] for row in cur.fetchall()}
-    conn.close()
-    assert 'file_size' in cols
-
-
-def test_legacy_media_schema_repairs_required_refresh_columns(tmp_path: Path) -> None:
-    """Upgraded installs can have old library tables plus migration markers.
-    Startup must repair the columns full refresh writes later."""
-    db_path = tmp_path / 'legacy_missing_media_columns.db'
-    conn = sqlite3.connect(str(db_path))
-    cur = conn.cursor()
-    cur.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT)")
-    cur.execute("INSERT INTO metadata (key, value) VALUES ('id_columns_migrated', 'true')")
-    cur.execute("""
-        CREATE TABLE artists (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE albums (
-            id TEXT PRIMARY KEY,
-            artist_id TEXT NOT NULL,
-            title TEXT NOT NULL
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE tracks (
-            id TEXT PRIMARY KEY,
-            album_id TEXT NOT NULL,
-            artist_id TEXT NOT NULL,
-            title TEXT NOT NULL,
-            file_path TEXT,
-            bitrate INTEGER
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-    repaired = MusicDatabase(database_path=str(db_path))
-    conn = repaired._get_connection()
-    cur = conn.cursor()
-    cur.execute("PRAGMA table_info(tracks)")
-    track_cols = {row[1] for row in cur.fetchall()}
-    cur.execute("PRAGMA table_info(albums)")
-    album_cols = {row[1] for row in cur.fetchall()}
-    conn.close()
-
-    assert 'file_size' in track_cols
-    assert 'api_track_count' in album_cols
-
-
-def test_existing_tracks_have_null_file_size_after_migration(db: MusicDatabase) -> None:
-    """Backward-compat: rows inserted via the OLD schema (no file_size)
-    must still be readable, and querying file_size returns NULL — not
-    an error. Simulated by inserting a track without specifying
-    file_size (relies on column default = NULL)."""
-    conn = db._get_connection()
-    cur = conn.cursor()
-    cur.execute("INSERT OR IGNORE INTO artists (id, name) VALUES (1, 'A')")
-    cur.execute("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES (1, 1, 'Al')")
-    # Note: NOT specifying file_size — should default to NULL
-    cur.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, file_path) "
-        "VALUES (1, 1, 1, 'L', '/x/legacy.flac')"
-    )
-    conn.commit()
-    cur.execute("SELECT file_size FROM tracks WHERE id = 1")
-    row = cur.fetchone()
-    conn.close()
-    # Could be sqlite3.Row or tuple; both index by 0
-    assert row[0] is None
 
 
 # ---------------------------------------------------------------------------

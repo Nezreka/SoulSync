@@ -236,9 +236,15 @@ def status_counts(conn, service: str, entity_type: str, *,
 
     ``total`` counts the same population the queue picks from, so the two agree —
     a tally over a wider universe than the selection would show a percentage that
-    never reaches 100.
+    never reaches 100. That is why the ownership predicate is not optional here
+    (L2-016): v2 keeps discography, wishlist and provider-only rows in the same
+    tables, and counting those reported pending work ``next_pending`` can never
+    hand out, so the bar sat below 100% forever.
     """
-    universe = f"WHERE {_HAS_PROVIDER_ID}" if require_provider_id else ""
+    predicates = [owned_sql(entity_type, "e")]
+    if require_provider_id:
+        predicates.append(f"({_HAS_PROVIDER_ID})")
+    universe = "WHERE " + " AND ".join(predicates)
     row = conn.execute(
         f"""
         SELECT

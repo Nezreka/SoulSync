@@ -112,10 +112,11 @@ def test_top_similar_artists_keeps_existing_behavior_without_library_filter(tmp_
     with db._get_connection() as conn:
         conn.execute(
             """
-            INSERT INTO artists (name, server_source, spotify_artist_id)
-            VALUES (?, ?, ?)
+            INSERT INTO lib2_artists (name, name_key, spotify_id,
+                                      server_source, server_id)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            ("Owned Artist", "navidrome", "sp-owned"),
+            ("Owned Artist", "owned artist", "sp-owned", "navidrome", "na-1"),
         )
         conn.commit()
 

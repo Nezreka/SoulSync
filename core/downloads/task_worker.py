@@ -252,11 +252,104 @@ class TaskWorkerDeps:
     try_version_mismatch_fallback: Optional[Callable] = None  # (title, artist, task_id, batch_id) -> bool
 
 
-# A sibling may only be skipped against once it has actually OBTAINED the file.
-# 'searching'/'downloading' is a promise, not a file: if that peer later fails,
-# a task that already stood down is stranded with nothing and no retry.
-# 'post_processing' counts — the file is on disk, the import is what is pending.
-_SIBLING_OWNED_STATUSES = frozenset({'completed', 'post_processing', 'already_owned'})
+# A sibling may only be skipped against once it has actually OBTAINED the file
+# AND finished with it. 'searching'/'downloading' is a promise, not a file, and
+# 'post_processing' is only a file on disk — the integrity, quality and AcoustID
+# gates that run after it can still quarantine, requeue or fail that owner. A
+# task that stood down against either is stranded with nothing and no retry
+# (L2-003), so only genuinely terminal, successful owners count.
+_SIBLING_OWNED_STATUSES = frozenset({'completed', 'already_owned'})
+
+# Two runs of the same song rarely differ by more than tagging jitter; a gap
+# this large means the sibling is a different recording (radio edit, live
+# version, extended mix) and must not be deduped away.
+_DEDUP_DURATION_TOLERANCE_MS = 5000
+
+
+def _dedup_provider_identity(track_info: Any) -> Optional[tuple]:
+    """``(namespace, id)`` naming the exact recording, or ``None``.
+
+    Metadata alone cannot tell a remaster from its original — same title, same
+    artist, same album title, different recording. When both sides carry an id
+    in the SAME namespace it is authoritative in both directions: equal ids are
+    the same recording, different ids are not.
+    """
+    from core.downloads.origin import _parse_source_info
+
+    if not isinstance(track_info, dict):
+        return None
+    source_info = _parse_source_info(track_info.get('source_info'))
+    lib2_id = source_info.get('lib2_track_id') or track_info.get('lib2_track_id')
+    if lib2_id not in (None, ''):
+        return ('lib2', str(lib2_id))
+    source = str(source_info.get('source') or track_info.get('source') or '').strip().lower()
+    provider_id = (track_info.get('provider_track_id')
+                   or source_info.get('track_id')
+                   or track_info.get('id'))
+    if source and provider_id not in (None, ''):
+        return (source, str(provider_id))
+    return None
+
+
+def _dedup_profile_id(track_info: Any) -> Optional[int]:
+    """The quality profile this request was made under, if it declared one."""
+    from core.downloads.origin import _parse_source_info
+
+    if not isinstance(track_info, dict):
+        return None
+    raw = track_info.get('quality_profile_id')
+    if raw in (None, ''):
+        raw = _parse_source_info(track_info.get('source_info')).get('quality_profile_id')
+    if raw in (None, ''):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _dedup_int(track_info: Any, key: str) -> Optional[int]:
+    if not isinstance(track_info, dict):
+        return None
+    raw = track_info.get(key)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _same_recording(mine: Any, theirs: Any) -> bool:
+    """Do these two ``track_info`` payloads name the same recording?
+
+    Provider identity decides when both sides speak the same namespace. Only
+    when they don't do we fall back to metadata, and then the title/artist/album
+    triple has to be backed by duration and disc/track agreement — the triple on
+    its own conflates every alternate take of a song.
+    """
+    from core.downloads.status import track_info_identity
+
+    mine_id = _dedup_provider_identity(mine)
+    theirs_id = _dedup_provider_identity(theirs)
+    if mine_id and theirs_id and mine_id[0] == theirs_id[0]:
+        return mine_id[1] == theirs_id[1]
+
+    # Both sides go through track_info_identity, so the artist normalisation is
+    # identical. Building one side out of the SpotifyTrack's first artist only
+    # (as this used to) made every collaboration credit a false negative.
+    if track_info_identity(mine) != track_info_identity(theirs):
+        return False
+
+    mine_ms = _dedup_int(mine, 'duration_ms')
+    theirs_ms = _dedup_int(theirs, 'duration_ms')
+    if mine_ms and theirs_ms and abs(mine_ms - theirs_ms) > _DEDUP_DURATION_TOLERANCE_MS:
+        return False
+
+    for key in ('disc_number', 'track_number'):
+        a, b = _dedup_int(mine, key), _dedup_int(theirs, key)
+        if a and b and a != b:
+            return False
+    return True
 
 
 def _find_owning_sibling(task_id: str, track: SpotifyTrack):
@@ -276,32 +369,43 @@ def _find_owning_sibling(task_id: str, track: SpotifyTrack):
     explicitly took. Within one batch the queue is the caller's own list, so a
     repeat there is also their choice.
 
-    Identity is the same ``(title, artist, album)`` triple the downloads view
-    dedups on, so this and the UI can never disagree about whether two rows are
-    the same song.
+    Three things must hold before we stand a task down (L2-003): the sibling has
+    to name the SAME recording (``_same_recording``), it has to have finished
+    successfully with a file to show for it, and it has to have been fetched
+    under the same quality profile — otherwise a deliberate upgrade request
+    silently inherits the low-quality copy it was meant to replace.
     """
-    from core.downloads.status import download_identity, track_info_identity
-
-    artists = list(getattr(track, 'artists', None) or [])
-    first = artists[0] if artists else ''
-    wanted = download_identity(
-        getattr(track, 'name', ''),
-        first.get('name', '') if isinstance(first, dict) else first,
-        getattr(track, 'album', ''),
-    )
-    if not wanted[0]:
-        # No title is not an identity — it would match every other untitled row.
-        return None, None
     with tasks_lock:
-        own_batch = (download_tasks.get(task_id) or {}).get('batch_id')
+        own = download_tasks.get(task_id) or {}
+        own_batch = own.get('batch_id')
         if not own_batch:
             return None, None
+        mine = own.get('track_info')
+        if not isinstance(mine, dict):
+            mine = {
+                'name': getattr(track, 'name', ''),
+                'artists': list(getattr(track, 'artists', None) or []),
+                'album': getattr(track, 'album', ''),
+                'duration_ms': getattr(track, 'duration_ms', 0),
+            }
+        from core.downloads.status import track_info_identity
+        if not track_info_identity(mine)[0] and not _dedup_provider_identity(mine):
+            # No title and no id is not an identity — it would match every other
+            # untitled row.
+            return None, None
+        my_profile = _dedup_profile_id(mine)
         for other_id, other in download_tasks.items():
             if other_id == task_id or other.get('batch_id') == own_batch:
                 continue
             if other.get('status') not in _SIBLING_OWNED_STATUSES:
                 continue
-            if track_info_identity(other.get('track_info')) == wanted:
+            if not (other.get('file_path') or other.get('filename')):
+                # Terminal but with nothing on disk to point at — treating that
+                # as ownership hands this task a success it has no file for.
+                continue
+            if _dedup_profile_id(other.get('track_info')) != my_profile:
+                continue
+            if _same_recording(mine, other.get('track_info')):
                 return other_id, other
     return None, None
 

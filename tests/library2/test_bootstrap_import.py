@@ -247,6 +247,15 @@ def test_try_claim_concurrent_race_has_exactly_one_winner(legacy_db):
 
 
 def test_empty_fresh_install_is_immediately_converged(legacy_db):
+    """No source rows means no walk — and no second attempt on every start.
+
+    Since the compatibility tables stopped being created, a fresh install has
+    no ``artists``/``albums``/``tracks`` at all, so the watermark reports zero
+    either way. Calling the importer then would raise on a projection of
+    columns no table has, so the run settles into ``waiting_for_source``: the
+    next start skips it, and an upgrade whose rows DO exist moves the watermark
+    and runs normally.
+    """
     conn = legacy_db._get_connection()
     try:
         conn.execute("DELETE FROM tracks")
@@ -257,11 +266,39 @@ def test_empty_fresh_install_is_immediately_converged(legacy_db):
         conn.close()
 
     first = lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled)
-    assert first["success"] is True
-    assert lib2_bootstrap.get_state(legacy_db)["status"] == "done"
+    assert first == {"skipped": "empty_source"}
+    assert lib2_bootstrap.get_state(legacy_db)["status"] == "waiting_for_source"
     assert lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled) == {
-        "skipped": "already_done"
+        "skipped": "empty_source"
     }
+
+
+def test_a_source_that_appears_later_still_runs(legacy_db):
+    """``waiting_for_source`` must not become a permanent refusal: the state is
+    pinned to the watermark it was written for, so rows arriving afterwards
+    change the watermark and start a normal run."""
+    conn = legacy_db._get_connection()
+    try:
+        conn.execute("DELETE FROM tracks")
+        conn.execute("DELETE FROM albums")
+        conn.execute("DELETE FROM artists")
+        conn.commit()
+    finally:
+        conn.close()
+    assert lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled) == {
+        "skipped": "empty_source"
+    }
+
+    conn = legacy_db._get_connection()
+    try:
+        conn.execute("INSERT INTO artists (id, name) VALUES (1, 'A-ha')")
+        conn.commit()
+    finally:
+        conn.close()
+
+    second = lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled)
+    assert second.get("success") is True
+    assert lib2_bootstrap.get_state(legacy_db)["status"] == "done"
 
 
 # --- iss29-A08: a working migration must never look dead ------------------
