@@ -30,7 +30,6 @@ import type { MirroredPlaylistRow } from '../-sync.mirrored';
 import {
   libraryCardState,
   libraryCoveragePct,
-  libraryGap,
   libraryMissingCount,
   libraryTotal,
 } from '../-sync.library';
@@ -120,21 +119,17 @@ export function playlistCardMeta(row: MirroredPlaylistRow, when: string): string
   // "discovered", not "in library": the number is discovered_count, which
   // counts tracks the discovery step matched to a source — owning the file is a
   // different question the database answers with a separate `in_library`.
-  // THE SHORTFALL, NAMED AND COUNTED. This line is where a gap is reported now
-  // — the button went back to saying "Sync now", because it always ran the same
-  // pipeline and three names for one action bought nothing.
+  // THE SHORTFALL, NAMED AND COUNTED. This line is where a gap is reported —
+  // the button says "Sync now" whatever the state, because it always ran the
+  // same pipeline and three names for one action bought nothing.
   //
-  // Stated as what is MISSING rather than what is present: "96 in library" made
-  // you subtract to reach the number you would act on, and the meta line's job
-  // is to say what is wrong when something is. The two gaps get different words
-  // because they need different things done — one wants a match found, the
-  // other wants a file fetched.
-  if (state === 'short') {
-    const missing = libraryMissingCount(row);
-    return libraryGap(row) === 'ownership'
-      ? `${tracks} · ${missing} not downloaded`
-      : `${tracks} · ${missing} not found`;
-  }
+  // Stated as what is MISSING rather than what is present: this line's job is
+  // to say what is wrong when something is, and a count you have to subtract to
+  // reach is not that.
+  //
+  // Only DISCOVERY is reported. A "not downloaded" count needs
+  // in_library_count, which is not accurate enough to show — see libraryOwned.
+  if (state === 'short') return `${tracks} · ${libraryMissingCount(row)} not found`;
 
   return when ? `${tracks} · ${when}` : tracks;
 }

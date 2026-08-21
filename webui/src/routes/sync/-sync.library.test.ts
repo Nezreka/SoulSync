@@ -482,95 +482,62 @@ describe('ordering the library', () => {
 });
 
 describe('which gap a playlist has', () => {
-  const full = { total_count: 140, discovered_count: 140 };
-
-  it('none when discovery is complete and everything is owned', () => {
-    expect(libraryGap(row({ ...full, in_library_count: 140 }))).toBe('none');
-  });
-
   it('discovery when tracks were never found', () => {
-    expect(libraryGap(row({ total_count: 140, discovered_count: 62, in_library_count: 0 }))).toBe(
-      'discovery',
-    );
+    expect(libraryGap(row({ total_count: 140, discovered_count: 62 }))).toBe('discovery');
   });
 
-  it('discovery WINS over ownership — you cannot own what was never found', () => {
-    // Sequential, not alternative. Offering "download the rest" before
-    // discovery has finished would act on an incomplete list.
-    expect(libraryGap(row({ total_count: 140, discovered_count: 62, in_library_count: 10 }))).toBe(
-      'discovery',
-    );
+  it('none once discovery is complete', () => {
+    expect(libraryGap(row({ total_count: 140, discovered_count: 140 }))).toBe('none');
   });
 
-  it('ownership once discovery is complete but the files are not here', () => {
-    expect(libraryGap(row({ ...full, in_library_count: 96 }))).toBe('ownership');
-  });
-
-  it('owning NONE of a fully discovered playlist is a gap, not a blank', () => {
-    // The case the whole change exists for.
-    expect(libraryGap(row({ ...full, in_library_count: 0 }))).toBe('ownership');
-  });
-
-  it('distinguishes "reported zero" from "did not report"', () => {
-    // The whole reason the gap can trust a 0. Collapsing these would either
-    // hide a playlist you own none of, or flag every row on a payload that
-    // predates the field.
-    expect(libraryOwnedKnown(row({ in_library_count: 0 }))).toBe(true);
-    expect(libraryOwnedKnown(row({}))).toBe(false);
-  });
-
-  it('is none when the backend reported no ownership figure at all', () => {
-    // An absent field is an older payload, not a claim that you own nothing —
-    // treating it as zero would flag every row on such a payload.
-    expect(libraryGap(row(full))).toBe('none');
-  });
-
-  it('is none for a playlist nobody has run yet', () => {
+  it('none for a playlist nobody has run yet', () => {
     // A fresh import is not broken.
-    expect(libraryGap(row({ total_count: 140, discovered_count: 0, in_library_count: 0 }))).toBe(
-      'none',
-    );
+    expect(libraryGap(row({ total_count: 140, discovered_count: 0 }))).toBe('none');
+  });
+
+  it('none when there is nothing to be short OF', () => {
+    expect(libraryGap(row({ total_count: 0, discovered_count: 0 }))).toBe('none');
   });
 });
 
-describe('an ownership gap reads as one everywhere', () => {
-  const short = row({ total_count: 140, discovered_count: 140, in_library_count: 96 });
+describe('ownership is NOT a gap, because the count is not trustworthy', () => {
+  /**
+   * This was briefly wired in and taken straight back out. in_library_count
+   * comes from a SQL join whose ID path only fires when the source id happens
+   * to be a Spotify id — a ListenBrainz playlist carries an MBID and matches
+   * nothing — leaving an exact case-sensitive name join the query's own comment
+   * admits undercounts.
+   *
+   * Measured against reality: a 50-track ListenBrainz playlist reading 47/50 on
+   * the media server, and 47/50 in SoulSync's own Server Playlists tab, was
+   * reported as 18 here. The error is differential — near enough for Spotify,
+   * badly wrong elsewhere — which is worse than uniformly wrong, because it
+   * looks right wherever you happen to check it.
+   *
+   * These tests exist so re-wiring it is a deliberate act with a failing test
+   * to answer, not an easy-looking one-liner.
+   */
+  const owned96 = row({ total_count: 140, discovered_count: 140, in_library_count: 96 });
 
-  it('lands in Needs attention, which used to miss it entirely', () => {
-    expect(libraryNeedsAttention(short)).toBe(true);
-    expect(libraryCardState(short)).toBe('short');
+  it('a fully discovered playlist rests, however little of it is on disk', () => {
+    expect(libraryGap(owned96)).toBe('none');
+    expect(libraryNeedsAttention(owned96)).toBe(false);
+    expect(libraryCardState(owned96)).toBe('ok');
   });
 
-  it('leaves the Discovered tab, because it is no longer resting', () => {
-    // libraryIsComplete refuses anything needing attention, so the two tabs
-    // still partition rather than overlap.
-    expect(libraryIsComplete(short)).toBe(false);
+  it('owning NONE of it still does not flag the card', () => {
+    const owned0 = row({ total_count: 140, discovered_count: 140, in_library_count: 0 });
+    expect(libraryCardState(owned0)).toBe('ok');
   });
 
-  it('the ring measures OWNERSHIP, not discovery', () => {
-    // On the discovery ratio this would draw a full ring on a playlist missing
-    // 44 files.
-    expect(libraryCoveragePct(short)).toBe(69);
+  it('the ring and the missing count both stay on DISCOVERY', () => {
+    expect(libraryCoveragePct(owned96)).toBe(100);
+    expect(libraryMissingCount(owned96)).toBe(0);
   });
 
-  it('the missing count is the files, not the matches', () => {
-    // total - discovered is zero here; the button would read "Find 0 missing".
-    expect(libraryMissingCount(short)).toBe(44);
-  });
-
-  it('a discovery gap still counts discovery, unchanged', () => {
-    const disc = row({ total_count: 86, discovered_count: 62, in_library_count: 40 });
-    expect(libraryCoveragePct(disc)).toBe(72);
-    expect(libraryMissingCount(disc)).toBe(24);
-  });
-
-  it('a running playlist is still never flagged, whichever gap it has', () => {
-    const running = row({
-      total_count: 140,
-      discovered_count: 140,
-      in_library_count: 0,
-      pipeline_state: { status: 'running' },
-    });
-    expect(libraryNeedsAttention(running)).toBe(false);
+  it('the accessor still reads the field, so the fix is a rewiring not a rebuild', () => {
+    expect(libraryOwned(owned96)).toBe(96);
+    expect(libraryOwnedKnown(owned96)).toBe(true);
+    expect(libraryOwnedKnown(row({}))).toBe(false);
   });
 });

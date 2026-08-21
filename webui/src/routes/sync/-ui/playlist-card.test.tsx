@@ -362,41 +362,31 @@ describe('the hover veil, as the stylesheet actually declares it', () => {
   });
 });
 
-describe('the card tells you what you actually own', () => {
-  it('counts what is NOT DOWNLOADED when everything was discovered', () => {
-    // The state that had no way of being seen: discovery matched all 140, the
-    // files are not all here, and the card used to read a flat "140 tracks".
-    expect(
-      playlistCardMeta(
-        row({ total_count: 140, discovered_count: 140, in_library_count: 96 }),
-        'synced 3h ago',
-      ),
-      // The number you would act on, rather than one you have to subtract from.
-    ).toBe('140 tracks · 44 not downloaded');
+describe('the meta line reports the discovery shortfall', () => {
+  it('names what is MISSING, not what is present', () => {
+    // A count you have to subtract to reach is not "what is wrong".
+    expect(playlistCardMeta(row({ total_count: 86, discovered_count: 62 }), 'x')).toBe(
+      '86 tracks · 24 not found',
+    );
   });
 
-  it('stays quiet when everything IS owned — nothing to report is nothing to say', () => {
+  it('says nothing about ownership, however little is downloaded', () => {
+    // in_library_count is not accurate enough to show — see libraryOwned. A
+    // ListenBrainz playlist with 47 of 50 files reported 18 here.
     expect(
       playlistCardMeta(
-        row({ total_count: 140, discovered_count: 140, in_library_count: 140 }),
+        row({ total_count: 140, discovered_count: 140, in_library_count: 12 }),
         'synced 3h ago',
       ),
     ).toBe('140 tracks · synced 3h ago');
   });
 
-  it('says nothing about ownership when the backend sent no count', () => {
-    // 0 here means "not reported", not "you own none of it" — claiming the
-    // latter would be the same overclaim in the opposite direction.
-    expect(playlistCardMeta(row({ total_count: 140, discovered_count: 140 }), 'x')).toBe(
-      '140 tracks · x',
+  it('the button is Sync now whatever the shortfall', () => {
+    // It always called the same pipeline.run; three names for one action bought
+    // nothing, and spent the card's only button on a count.
+    expect(playlistCardPrimaryLabel(row({ total_count: 86, discovered_count: 62 }))).toBe(
+      'Sync now',
     );
-  });
-
-  it('the discovery shortfall still wins — it is the actionable one', () => {
-    // "Find 24 missing" is the button; the meta line has to match it.
-    expect(
-      playlistCardMeta(row({ total_count: 86, discovered_count: 62, in_library_count: 40 }), 'x'),
-    ).toBe('86 tracks · 24 not found');
   });
 });
 
