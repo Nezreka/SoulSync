@@ -17,16 +17,18 @@ import {
   libraryCardState,
   libraryCoveragePct,
   libraryDiscovered,
-  libraryMissingCount,
-  librarySortedRows,
-  libraryMatchesFilter,
-  libraryTotal,
   libraryFilterCounts,
   libraryIsComplete,
   libraryIsRunning,
+  libraryMatchesFilter,
+  libraryMatchesSearch,
+  libraryMissingCount,
   libraryNeedsAttention,
+  librarySearch,
+  librarySortedRows,
   librarySources,
   librarySummary,
+  libraryTotal,
   libraryVisibleFilters,
   libraryVisibleRows,
 } from './-sync.library';
@@ -135,11 +137,21 @@ describe('filtering', () => {
 
   it('counts are scoped by SOURCE but not by the active state tab', () => {
     // Each tab must say how many you would get by switching to it.
-    const all = libraryFilterCounts(rows, NONE);
-    expect(all).toEqual({ all: 3, attention: 1, running: 1, synced: 1 });
-
-    const spotifyOnly = libraryFilterCounts(rows, new Set(['spotify']));
-    expect(spotifyOnly).toEqual({ all: 2, attention: 0, running: 1, synced: 1 });
+    // The STATE counts only — schedule has its own test, and asserting the
+    // whole record here would rewrite this literal every time a filter is
+    // added.
+    expect(libraryFilterCounts(rows, NONE)).toMatchObject({
+      all: 3,
+      attention: 1,
+      running: 1,
+      synced: 1,
+    });
+    expect(libraryFilterCounts(rows, new Set(['spotify']))).toMatchObject({
+      all: 2,
+      attention: 0,
+      running: 1,
+      synced: 1,
+    });
   });
 
   it('lists the sources present, de-duplicated and stable', () => {
@@ -149,21 +161,29 @@ describe('filtering', () => {
 });
 
 describe('which tabs render', () => {
+  /** Counts with everything defaulted, so adding a filter never rewrites these. */
+  const counts = (over: Partial<Record<LibraryFilter, number>>): Record<LibraryFilter, number> => ({
+    all: 0,
+    attention: 0,
+    running: 0,
+    synced: 0,
+    scheduled: 0,
+    unscheduled: 0,
+    ...over,
+  });
+
   it('hides a state tab with nothing in it — a tab with no rows has no tab', () => {
-    const counts = { all: 3, attention: 0, running: 0, synced: 3 };
-    expect(libraryVisibleFilters(counts, 'all').map((f) => f.id)).toEqual(['all', 'synced']);
+    expect(libraryVisibleFilters(counts({ all: 3, synced: 3 }), 'all').map((f) => f.id)).toEqual(['all', 'synced']);
   });
 
   it('always keeps All, so the strip never empties', () => {
-    const counts = { all: 0, attention: 0, running: 0, synced: 0 };
-    expect(libraryVisibleFilters(counts, 'all').map((f) => f.id)).toEqual(['all']);
+    expect(libraryVisibleFilters(counts({}), 'all').map((f) => f.id)).toEqual(['all']);
   });
 
   it('keeps the ACTIVE tab even at zero', () => {
     // Removing the tab you are standing on would move the page out from
     // under you the moment its last row finished.
-    const counts = { all: 3, attention: 0, running: 0, synced: 3 };
-    expect(libraryVisibleFilters(counts, 'attention').map((f) => f.id)).toEqual([
+    expect(libraryVisibleFilters(counts({ all: 3, synced: 3 }), 'attention').map((f) => f.id)).toEqual([
       'all',
       'attention',
       'synced',
@@ -171,8 +191,7 @@ describe('which tabs render', () => {
   });
 
   it('renders them in the declared order, never the order they filled up', () => {
-    const counts = { all: 9, attention: 1, running: 1, synced: 1 };
-    expect(libraryVisibleFilters(counts, 'all').map((f) => f.id)).toEqual(
+    expect(libraryVisibleFilters(counts({ all: 9, attention: 1, running: 1, synced: 1, scheduled: 1, unscheduled: 1 }), 'all').map((f) => f.id)).toEqual(
       LIBRARY_FILTERS.map((f) => f.id),
     );
   });
@@ -288,5 +307,99 @@ describe('sorting', () => {
     const original = [...rows];
     librarySortedRows(rows);
     expect(rows).toEqual(original);
+  });
+});
+
+describe('filtering by schedule', () => {
+  const rows = [
+    row({ id: 1, name: 'Road Trip' }),
+    row({ id: 2, name: 'Deep Focus' }),
+    row({ id: 3, name: 'Hot Hits' }),
+  ];
+  const scheduled = new Set([1, 3]);
+
+  it('keeps only the playlists with a cadence', () => {
+    expect(libraryVisibleRows(rows, 'scheduled', new Set(), scheduled).map((r) => r.id)).toEqual([
+      1, 3,
+    ]);
+  });
+
+  it('and only those without, for the other half', () => {
+    expect(libraryVisibleRows(rows, 'unscheduled', new Set(), scheduled).map((r) => r.id)).toEqual([
+      2,
+    ]);
+  });
+
+  it('the two halves partition the library — every row lands in exactly one', () => {
+    const a = libraryVisibleRows(rows, 'scheduled', new Set(), scheduled).length;
+    const b = libraryVisibleRows(rows, 'unscheduled', new Set(), scheduled).length;
+    expect(a + b).toBe(rows.length);
+  });
+
+  it('counts both halves, and they agree with what the filters return', () => {
+    // A tab must never advertise a number its own filter would not produce.
+    const counts = libraryFilterCounts(rows, new Set(), scheduled);
+    expect(counts.scheduled).toBe(2);
+    expect(counts.unscheduled).toBe(1);
+  });
+
+  it('shows NOTHING rather than everything when the schedule map is missing', () => {
+    // An empty tab is a visible mistake; silently listing all 38 under
+    // "Scheduled" would look like an answer.
+    expect(libraryVisibleRows(rows, 'scheduled', new Set())).toEqual([]);
+  });
+
+  it('a row with no id cannot be either — it can never be scheduled', () => {
+    const anon = [row({ id: undefined, name: 'Orphan' })];
+    expect(libraryVisibleRows(anon, 'scheduled', new Set(), scheduled)).toEqual([]);
+    expect(libraryVisibleRows(anon, 'unscheduled', new Set(), scheduled)).toEqual([]);
+  });
+
+  it('still honours the source chips alongside it', () => {
+    const mixed = [
+      row({ id: 1, name: 'A', source: 'spotify' }),
+      row({ id: 3, name: 'B', source: 'tidal' }),
+    ];
+    expect(
+      libraryVisibleRows(mixed, 'scheduled', new Set(['tidal']), scheduled).map((r) => r.id),
+    ).toEqual([3]);
+  });
+});
+
+describe('searching by name', () => {
+  const rows = [
+    row({ id: 1, name: 'Time Machine — 2000s' }),
+    row({ id: 2, name: 'Discover Weekly' }),
+    row({ id: 3, name: 'Deep Focus', custom_name: 'Monday' }),
+  ];
+
+  it('matches on a fragment, ignoring case', () => {
+    expect(librarySearch(rows, 'machine').map((r) => r.id)).toEqual([1]);
+    expect(librarySearch(rows, 'MACHINE').map((r) => r.id)).toEqual([1]);
+  });
+
+  it('matches a renamed playlist on BOTH names', () => {
+    // The card shows the custom name, but someone who remembers importing
+    // "Deep Focus" should still find it after calling it "Monday".
+    expect(librarySearch(rows, 'Monday').map((r) => r.id)).toEqual([3]);
+    expect(librarySearch(rows, 'Deep Focus').map((r) => r.id)).toEqual([3]);
+  });
+
+  it('an empty or whitespace query returns everything, not nothing', () => {
+    expect(librarySearch(rows, '')).toHaveLength(3);
+    expect(librarySearch(rows, '   ')).toHaveLength(3);
+  });
+
+  it('trims, so a trailing space from a paste still matches', () => {
+    expect(librarySearch(rows, '  weekly  ').map((r) => r.id)).toEqual([2]);
+  });
+
+  it('returns nothing when nothing matches, rather than falling back to all', () => {
+    expect(librarySearch(rows, 'zzzz')).toEqual([]);
+  });
+
+  it('survives a row with no name at all', () => {
+    expect(librarySearch([row({ id: 9, name: undefined })], 'x')).toEqual([]);
+    expect(libraryMatchesSearch(row({ id: 9, name: undefined }), '')).toBe(true);
   });
 });

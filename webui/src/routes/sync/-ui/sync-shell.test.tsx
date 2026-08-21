@@ -3,6 +3,8 @@
  * tab handler at sync-services.js 3694-3811.
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { act, fireEvent, render } from '@testing-library/react';
 import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -417,5 +419,28 @@ describe('the sidebar slot', () => {
     expect(open.container.querySelector('.sync-content-area')?.className).toBe(
       'sync-content-area sync-content-area--with-sidebar',
     );
+  });
+});
+
+describe('the three tabs are named, not just drawn', () => {
+  const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
+
+  it('the label is rendered in the markup at all', () => {
+    const { container } = renderShell();
+    const labels = [...container.querySelectorAll('.sync-tab-label')].map((n) => n.textContent);
+    expect(labels.length).toBeGreaterThan(0);
+    expect(labels).toContain('Mirrored');
+  });
+
+  it('and the stylesheet lets it OPEN above the icon-only breakpoint', () => {
+    // The strip collapsed every label back when it held fifteen chips. It holds
+    // three, and three unlabelled icons whose meaning lives in a tooltip is the
+    // thing the card redesign removed. The chip also has to stop being a fixed
+    // 40x40 with overflow:hidden, or the label has nowhere to appear however
+    // wide you let the label itself be — measured, it stayed 10px.
+    const block = /@media\s*\(min-width:\s*721px\)\s*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+    expect(block, 'no min-width:721px block opens the tab labels').toContain('.sync-tab-label');
+    expect(block).toMatch(/width:\s*auto/);
+    expect(block).not.toMatch(/max-width:\s*0/);
   });
 });

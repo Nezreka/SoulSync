@@ -77,6 +77,7 @@ import {
   libraryCardState,
   librarySortedRows,
   libraryFilterCounts,
+  librarySearch,
   librarySources,
   librarySummary,
   libraryVisibleFilters,
@@ -258,6 +259,7 @@ export function MirroredTab({
   const [placeholder, setPlaceholder] = useState('Loading mirrored playlists...');
   /** The library view: filter by STATE, and optionally narrow by source. */
   const [filter, setFilter] = useState<LibraryFilter>('all');
+  const [query, setQuery] = useState('');
   const [sources, setSources] = useState<ReadonlySet<string>>(() => new Set());
   const toggleSource = useCallback((source: string) => {
     setSources((prev) => {
@@ -662,10 +664,29 @@ export function MirroredTab({
   const now = Date.now();
 
   const allRows = rows ?? [];
-  const counts = libraryFilterCounts(allRows, sources);
+  /**
+   * The ids that have a cadence, for the Scheduled / Unscheduled tabs. Derived
+   * from the same map the cards read for their pills, so a tab can never
+   * disagree with the pill on the card it is filtering to.
+   */
+  const scheduledIds = new Set(
+    Object.keys(cardSchedules.schedules)
+      .map(Number)
+      .filter((id) => !Number.isNaN(id)),
+  );
+
+  /**
+   * Search narrows BEFORE the tabs count, so "Complete 2" describes what the
+   * search left rather than the whole library — a count that ignored the
+   * search would send you to a tab that then showed nothing.
+   */
+  const searchedRows = librarySearch(allRows, query);
+  const counts = libraryFilterCounts(searchedRows, sources, scheduledIds);
   const visibleFilters = libraryVisibleFilters(counts, filter);
+  // Source chips list every source in the LIBRARY, not in the search result:
+  // chips that vanished as you typed would move under the cursor.
   const sourceList = librarySources(allRows);
-  const visibleRows = libraryVisibleRows(allRows, filter, sources);
+  const visibleRows = libraryVisibleRows(searchedRows, filter, sources, scheduledIds);
 
   return (
     <div>
@@ -674,8 +695,44 @@ export function MirroredTab({
           <h3>Your playlists</h3>
           {/* Says something TRUE, and omits what it has nothing to say about —
               a fresh install gets a sentence, not a row of zeroes. */}
-          <p className="library-summary">{librarySummary(rows ?? [])}</p>
+          {/* While searching, the count has to describe what you are LOOKING
+              at — "38 playlists" over three visible cards is just wrong. */}
+          <p className="library-summary">
+            {query.trim()
+              ? `${visibleRows.length} of ${allRows.length} playlists`
+              : librarySummary(rows ?? [])}
+          </p>
         </div>
+        {/* The gap between the heading and Update list was the widest empty
+            space on the page, and finding one playlist among thirty-eight had
+            no answer but scrolling. */}
+        {allRows.length > 0 && (
+          <div className="library-search">
+            <input
+              type="search"
+              className="library-search-input"
+              placeholder="Search playlists"
+              aria-label="Search playlists"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                // Escape clears rather than blurs: a search box you cannot empty
+                // without selecting the text is a box you have to fight.
+                if (e.key === 'Escape') setQuery('');
+              }}
+            />
+            {query && (
+              <button
+                type="button"
+                className="library-search-clear"
+                aria-label="Clear search"
+                onClick={() => setQuery('')}
+              >
+                &times;
+              </button>
+            )}
+          </div>
+        )}
         <button
           type="button"
           className="refresh-button mirrored"
@@ -732,7 +789,11 @@ export function MirroredTab({
               ? placeholder
               : rows.length === 0
                 ? 'Playlists you add from any service will appear here.'
-                : 'Nothing in this filter.'}
+                : query.trim()
+                  ? // Naming the query beats "Nothing in this filter", which
+                    // leaves you wondering whether it was the search or the tab.
+                    `No playlist matches “${query.trim()}”.`
+                  : 'Nothing in this filter.'}
           </div>
         ) : (
           <div className="pl-grid">

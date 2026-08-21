@@ -15,7 +15,21 @@
 
 import type { MirroredPlaylistRow } from './-sync.mirrored';
 
-export type LibraryFilter = 'all' | 'attention' | 'running' | 'synced';
+export type LibraryFilter =
+  | 'all'
+  | 'attention'
+  | 'running'
+  | 'synced'
+  /**
+   * Schedule is a SECOND dimension sharing one strip, which is a deliberate
+   * simplification rather than an oversight: the page only ever narrows to one
+   * group at a time, and two rows of tabs to express that would cost more than
+   * the combinations are worth. The page shows a cadence on every card now, so
+   * "which of these is actually scheduled" is the obvious next question and it
+   * had no answer.
+   */
+  | 'scheduled'
+  | 'unscheduled';
 
 /** Chip order, and the labels. `all` is first and always present. */
 export const LIBRARY_FILTERS: readonly { id: LibraryFilter; label: string }[] = [
@@ -23,6 +37,8 @@ export const LIBRARY_FILTERS: readonly { id: LibraryFilter; label: string }[] = 
   { id: 'attention', label: 'Needs attention' },
   { id: 'running', label: 'Working' },
   { id: 'synced', label: 'Complete' },
+  { id: 'scheduled', label: 'Scheduled' },
+  { id: 'unscheduled', label: 'Unscheduled' },
 ];
 
 /** How many of a row's tracks have been found. */
@@ -73,7 +89,20 @@ export function libraryIsComplete(row: MirroredPlaylistRow): boolean {
   return libraryDiscovered(row) >= total;
 }
 
-export function libraryMatchesFilter(row: MirroredPlaylistRow, filter: LibraryFilter): boolean {
+/**
+ * `scheduled` is the set of playlist ids that have a cadence.
+ *
+ * Passed in rather than read off the row: a schedule is an automation, stored
+ * nowhere on the playlist itself, and the card strip already holds this map.
+ * Omitting it makes both schedule filters match NOTHING rather than everything
+ * — an empty tab is a visible mistake, whereas silently showing all 38 under
+ * "Scheduled" would look like an answer.
+ */
+export function libraryMatchesFilter(
+  row: MirroredPlaylistRow,
+  filter: LibraryFilter,
+  scheduled?: ReadonlySet<number>,
+): boolean {
   switch (filter) {
     case 'attention':
       return libraryNeedsAttention(row);
@@ -81,9 +110,37 @@ export function libraryMatchesFilter(row: MirroredPlaylistRow, filter: LibraryFi
       return libraryIsRunning(row);
     case 'synced':
       return libraryIsComplete(row);
+    case 'scheduled':
+      return row.id !== undefined && Boolean(scheduled?.has(row.id));
+    case 'unscheduled':
+      return row.id !== undefined && !scheduled?.has(row.id);
     default:
       return true;
   }
+}
+
+/**
+ * Free-text match over the name a user actually SEES.
+ *
+ * A renamed playlist is matched on both its custom name and its original: the
+ * card shows the custom one, but someone who remembers importing "Discover
+ * Weekly" should still find it after calling it "Monday".
+ */
+export function libraryMatchesSearch(row: MirroredPlaylistRow, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return [row.custom_name, row.name].some((n) => (n ?? '').toLowerCase().includes(needle));
+}
+
+/**
+ * Narrow by text BEFORE the tabs count, so the counts describe what a search
+ * actually left behind rather than the whole library.
+ */
+export function librarySearch(
+  rows: readonly MirroredPlaylistRow[],
+  query: string,
+): MirroredPlaylistRow[] {
+  return rows.filter((row) => libraryMatchesSearch(row, query));
 }
 
 /**
@@ -96,10 +153,12 @@ export function libraryVisibleRows(
   rows: readonly MirroredPlaylistRow[],
   filter: LibraryFilter,
   sources: ReadonlySet<string>,
+  scheduled?: ReadonlySet<number>,
 ): MirroredPlaylistRow[] {
   return rows.filter(
     (row) =>
-      libraryMatchesFilter(row, filter) && (sources.size === 0 || sources.has(row.source ?? '')),
+      libraryMatchesFilter(row, filter, scheduled) &&
+      (sources.size === 0 || sources.has(row.source ?? '')),
   );
 }
 
@@ -113,6 +172,7 @@ export function libraryVisibleRows(
 export function libraryFilterCounts(
   rows: readonly MirroredPlaylistRow[],
   sources: ReadonlySet<string>,
+  scheduled?: ReadonlySet<number>,
 ): Record<LibraryFilter, number> {
   const scoped = rows.filter((row) => sources.size === 0 || sources.has(row.source ?? ''));
   return {
@@ -120,6 +180,8 @@ export function libraryFilterCounts(
     attention: scoped.filter(libraryNeedsAttention).length,
     running: scoped.filter(libraryIsRunning).length,
     synced: scoped.filter(libraryIsComplete).length,
+    scheduled: scoped.filter((r) => libraryMatchesFilter(r, 'scheduled', scheduled)).length,
+    unscheduled: scoped.filter((r) => libraryMatchesFilter(r, 'unscheduled', scheduled)).length,
   };
 }
 

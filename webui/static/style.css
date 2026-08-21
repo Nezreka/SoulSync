@@ -19628,7 +19628,19 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 }
 
 .pl-card-art-img .playlist-card-art-img { width: 100%; height: 100%; object-fit: cover; }
-.pl-card-art-img .tab-icon { width: 26px; height: 26px; opacity: 0.5; }
+/* A playlist with nothing discovered yet has no cover to derive, so it falls
+   back to its service mark. At 26px and half opacity on a dark tile that mark
+   did not register, and six cards in a library of thirty-eight read as failed
+   image loads rather than as "nothing found yet". Bigger and fully opaque, on
+   a tile that is visibly a placeholder rather than a hole. */
+.pl-card-art-img .tab-icon { width: 34px; height: 34px; opacity: 0.9; }
+
+.pl-card-art-img:has(.playlist-card-art-glyph) {
+    background:
+        radial-gradient(circle at 50% 45%, rgba(255, 255, 255, 0.07), transparent 68%),
+        rgba(255, 255, 255, 0.035);
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+}
 
 /* An incomplete cover desaturates, so the card reads differently even out of
    focus — the state is legible before any digits are. */
@@ -71464,8 +71476,29 @@ body.max-performance .dash-card::after {
                 opacity 0.22s ease;
 }
 
-/* Labels stay collapsed for every chip (icon-only strip); the active
-   source is named by the panel header, so the chip needn't swell (SY1). */
+/* SY1 collapsed every label because the strip held FIFTEEN chips and naming
+   them all would have been a wall. The strip holds three. There is room, and
+   three unlabelled icons whose meaning lives only in a tooltip is exactly the
+   thing the card redesign removed — so the labels come back.
+
+   The collapse machinery above stays: it is what the routed chips (Spotify
+   Link, iTunes Link) still use when they appear and drop out again. */
+@media (min-width: 721px) {
+    /* The chip has to stop being a fixed 40x40 circle with overflow:hidden, or
+       the label has nowhere to appear however wide you let the label itself be
+       — measured: max-width alone left it 10px wide. Below 721 they stay
+       icon-only, which is the breakpoint the strip already uses to shrink. */
+    .sync-tabs .sync-tab-button {
+        width: auto;
+        min-width: 40px;
+        padding: 0 15px 0 11px;
+        gap: 8px;
+    }
+    .sync-tabs .sync-tab-button > .sync-tab-label {
+        max-width: 16ch;
+        opacity: 1;
+    }
+}
 
 /* Chain-link badge for the ``Link`` variants (Spotify Link, Deezer
  * Link, iTunes Link). Bottom-right corner of the chip, accent-tinted
@@ -78282,6 +78315,69 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     min-height: 0;
     overflow-y: auto;
     padding: 16px 24px 22px;
+}
+
+/* Search over the playlist library.
+   It sits in what was the widest empty space on the page — between the heading
+   and Update list — because that gap was doing nothing and finding one playlist
+   among thirty-eight had no answer but scrolling. */
+.library-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+    margin-right: 12px;
+    flex: 0 1 320px;
+    min-width: 0;
+}
+
+.library-search-input {
+    width: 100%;
+    padding: 7px 30px 7px 13px;
+    border-radius: 100px;
+    font-size: 12.5px;
+    font-family: inherit;
+    color: rgba(255, 255, 255, 0.85);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: border-color 0.16s, background 0.16s;
+}
+.library-search-input::placeholder { color: rgba(255, 255, 255, 0.32); }
+.library-search-input:focus {
+    outline: none;
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(var(--accent-rgb), 0.5);
+}
+/* The UA's own clear affordance is a light-mode X that is invisible here, and
+   it sits where ours goes. */
+.library-search-input::-webkit-search-cancel-button { display: none; }
+
+.library-search-clear {
+    position: absolute;
+    right: 8px;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    padding: 2px 4px;
+    color: rgba(255, 255, 255, 0.4);
+    transition: color 0.15s;
+}
+.library-search-clear:hover { color: #fff; }
+
+@media (max-width: 768px) {
+    /* Its own line under the heading: at 320px it would squeeze the title
+       into two words. */
+    /* .playlist-header does not wrap by default, so `flex-basis: 100%` alone
+       could not put the box on its own line — measured at 186px, sharing the
+       row with the heading and Update list. */
+    .playlist-header { flex-wrap: wrap; }
+    .library-search {
+        flex: 1 1 100%;
+        order: 3;
+        margin: 8px 0 0;
+    }
 }
 
 /* ── The sync redesign on smaller screens ────────────────────────────

@@ -1015,3 +1015,73 @@ describe('MirroredTab — the schedule pill', () => {
     expect(document.querySelector('.pl-menu--schedule')).not.toBeNull();
   });
 });
+
+describe('MirroredTab — finding one playlist among many', () => {
+  const LIBRARY = [
+    ROW,
+    { ...ROW, id: 4, name: 'Discover Weekly', source_playlist_id: 'tp2' },
+    { ...ROW, id: 5, name: 'Deep Focus', custom_name: 'Monday', source_playlist_id: 'tp3' },
+  ];
+
+  async function renderLibrary() {
+    stubFetch();
+    responder = (url) => (url === '/api/mirrored-playlists' ? LIBRARY : { states: [] });
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    return screen.getByLabelText('Search playlists') as HTMLInputElement;
+  }
+
+  it('narrows the grid as you type', async () => {
+    const input = await renderLibrary();
+    fireEvent.change(input, { target: { value: 'discover' } });
+    expect(screen.getByText('Discover Weekly')).toBeInTheDocument();
+    expect(screen.queryByText('Road Trip')).toBeNull();
+  });
+
+  it('finds a renamed playlist by the name it was IMPORTED under', async () => {
+    // The card shows "Monday"; someone who remembers adding "Deep Focus"
+    // should still find it.
+    const input = await renderLibrary();
+    fireEvent.change(input, { target: { value: 'Deep Focus' } });
+    expect(screen.queryByText('Road Trip')).toBeNull();
+    expect(document.querySelectorAll('.pl-card')).toHaveLength(1);
+  });
+
+  it('says what is being shown, not what the library holds', async () => {
+    // "3 playlists" over one visible card is simply wrong.
+    const input = await renderLibrary();
+    fireEvent.change(input, { target: { value: 'discover' } });
+    expect(screen.getByText('1 of 3 playlists')).toBeInTheDocument();
+  });
+
+  it('names the query when nothing matches, so you know WHICH filter emptied it', async () => {
+    const input = await renderLibrary();
+    fireEvent.change(input, { target: { value: 'zzzz' } });
+    expect(screen.getByText(/No playlist matches/)).toBeInTheDocument();
+    expect(screen.getByText(/zzzz/)).toBeInTheDocument();
+  });
+
+  it('Escape clears it — a box you cannot empty is a box you fight', async () => {
+    const input = await renderLibrary();
+    fireEvent.change(input, { target: { value: 'discover' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(input.value).toBe('');
+    expect(screen.getByText('Road Trip')).toBeInTheDocument();
+  });
+
+  it('the clear button appears only when there is something to clear', async () => {
+    const input = await renderLibrary();
+    expect(document.querySelector('.library-search-clear')).toBeNull();
+    fireEvent.change(input, { target: { value: 'x' } });
+    fireEvent.click(document.querySelector('.library-search-clear') as HTMLElement);
+    expect(input.value).toBe('');
+  });
+
+  it('the source chips do NOT shrink to the search result', async () => {
+    // Chips that vanished as you typed would move under the cursor.
+    const input = await renderLibrary();
+    const before = document.querySelectorAll('.library-source').length;
+    fireEvent.change(input, { target: { value: 'zzzz' } });
+    expect(document.querySelectorAll('.library-source')).toHaveLength(before);
+  });
+});
