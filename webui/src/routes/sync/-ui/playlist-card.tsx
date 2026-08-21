@@ -103,8 +103,8 @@ export interface PlaylistCardProps {
  *
  * It says what is WRONG when something is, and what is true when nothing is.
  * The count only earns its place when it differs from the total — "140 tracks"
- * on a complete playlist is more useful than "140 tracks · 140 in library",
- * which states the same fact twice.
+ * on a fully discovered playlist is more useful than "140 tracks · 140
+ * discovered", which states the same fact twice.
  */
 export function playlistCardMeta(row: MirroredPlaylistRow, when: string): string {
   const total = libraryTotal(row);
@@ -116,7 +116,10 @@ export function playlistCardMeta(row: MirroredPlaylistRow, when: string): string
     const phase = row.pipeline_state?.phase || 'working';
     return `${tracks} · ${phase.toLowerCase()}`;
   }
-  if (state === 'short') return `${tracks} · ${total - libraryMissingCount(row)} in library`;
+  // "discovered", not "in library": the number is discovered_count, which
+  // counts tracks the discovery step matched to a source — owning the file is a
+  // different question the database answers with a separate `in_library`.
+  if (state === 'short') return `${tracks} · ${total - libraryMissingCount(row)} discovered`;
   return when ? `${tracks} · ${when}` : tracks;
 }
 
@@ -189,7 +192,7 @@ export function PlaylistCard({
             /* The number is IN the ring, so the arc never has to be read
                precisely — it is the glanceable half, the digits the exact one. */
             data-pct={`${pct}%`}
-            aria-label={`${pct}% of tracks in library`}
+            aria-label={`${pct}% of tracks discovered`}
           />
         )}
       </div>

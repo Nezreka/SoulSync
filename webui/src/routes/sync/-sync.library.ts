@@ -36,7 +36,15 @@ export const LIBRARY_FILTERS: readonly { id: LibraryFilter; label: string }[] = 
   { id: 'all', label: 'All' },
   { id: 'attention', label: 'Needs attention' },
   { id: 'running', label: 'Working' },
-  { id: 'synced', label: 'Complete' },
+  /**
+   * "Discovered", not "Complete". The count behind it is discovered_count —
+   * tracks the discovery step MATCHED to a source track — which is not the same
+   * as owning the file. A playlist can sit here with every track matched and
+   * nothing downloaded, and "Complete" claimed otherwise. The database keeps a
+   * separate `in_library` figure for the stronger question; nothing on this
+   * page reads it yet.
+   */
+  { id: 'synced', label: 'Discovered' },
   { id: 'scheduled', label: 'Scheduled' },
   { id: 'unscheduled', label: 'Unscheduled' },
 ];
@@ -81,7 +89,10 @@ export function libraryNeedsAttention(row: MirroredPlaylistRow): boolean {
   return discovered < libraryTotal(row);
 }
 
-/** Everything the playlist claims to have, found. */
+/**
+ * Every track the playlist claims to have, MATCHED — not necessarily owned.
+ * See the label note on LIBRARY_FILTERS.
+ */
 export function libraryIsComplete(row: MirroredPlaylistRow): boolean {
   const total = libraryTotal(row);
   if (total <= 0) return false;

@@ -73,14 +73,14 @@ describe('the ring — what a healthy card does NOT show', () => {
   it('describes itself to assistive tech, since the arc is visual only', () => {
     const { container } = renderCard({ total_count: 10, discovered_count: 5 });
     expect(container.querySelector('.pl-ring')?.getAttribute('aria-label')).toBe(
-      '50% of tracks in library',
+      '50% of tracks discovered',
     );
   });
 });
 
 describe('the meta line', () => {
   it('states the count alone when everything is fine', () => {
-    // "140 tracks · 140 in library" says the same thing twice.
+    // "140 tracks · 140 discovered" says the same thing twice.
     expect(playlistCardMeta(row({ total_count: 140, discovered_count: 140 }), 'synced 3h ago')).toBe(
       '140 tracks · synced 3h ago',
     );
@@ -88,7 +88,7 @@ describe('the meta line', () => {
 
   it('says what is in the library only when it differs', () => {
     expect(playlistCardMeta(row({ total_count: 86, discovered_count: 62 }), 'x')).toBe(
-      '86 tracks · 62 in library',
+      '86 tracks · 62 discovered',
     );
   });
 
