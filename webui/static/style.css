@@ -78410,6 +78410,32 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     .sync-header-row { display: block; }
     .sync-header-actions { margin-top: 12px; }
 
+    /* CONTAINERS, MEASURED.
+       At 390px the nesting ate 190 of 390 pixels before a card's own text
+       began — page-shell margin and padding, then the panel's, then the scroll
+       container's, then the grid's, each a value tuned for a desktop panel and
+       simply repeated on a phone. Halving them gives roughly a third of the
+       screen back to content.
+
+       The shell change is scoped to #sync-page rather than .page-shell because
+       that class is shared by every React page; the same trim would help all of
+       them, but that is a decision about the whole app, not this one screen. */
+    #sync-page {
+        margin-left: 8px;
+        margin-right: 8px;
+        padding: 16px 12px 18px;
+        border-radius: 16px;
+    }
+
+    .sync-main-panel,
+    .sync-sidebar { padding: 5px; }
+
+    .playlist-scroll-container { padding: 5px; }
+
+    .pl-grid { padding: 2px 2px 10px; }
+
+    .library-filters { margin-left: 2px; margin-right: 2px; }
+
     .sync-header { margin-bottom: 16px; }
     .sync-title { font-size: 22px; }
 
