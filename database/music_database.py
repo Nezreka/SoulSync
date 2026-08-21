@@ -18966,7 +18966,33 @@ class MusicDatabase:
                     WHERE playlist_id = ?
                 """.rstrip() + owner_sql + " ORDER BY position",
                     [playlist_id, *owner_params])
-                return [dict(row) for row in cursor.fetchall()]
+                tracks = [dict(row) for row in cursor.fetchall()]
+
+                # Give each DISCOVERED track the album art its match carries.
+                #
+                # The mirror-track projections never sent an image_url, so the
+                # column is empty for essentially every source and the detail
+                # modal showed rows of blank squares. Discovery does know the
+                # artwork — it is inside the match it wrote to extra_data — so
+                # it is read back out here.
+                #
+                # Read-time decoration, not a write: this is per track and per
+                # open, where the playlist COVER is one value that earns being
+                # stored.
+                for track in tracks:
+                    if track.get('image_url'):
+                        continue
+                    raw = track.get('extra_data')
+                    if not raw:
+                        continue
+                    try:
+                        extra = json.loads(raw) if isinstance(raw, str) else raw
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    cover = mirrored_cover_from_match(extra)
+                    if cover:
+                        track['image_url'] = cover
+                return tracks
         except Exception as e:
             logger.error(f"Error getting mirrored playlist tracks: {e}")
             return []

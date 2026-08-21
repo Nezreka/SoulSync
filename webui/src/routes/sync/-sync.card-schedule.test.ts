@@ -60,7 +60,7 @@ afterEach(() => {
 describe('reading schedules', () => {
   it('reads an interval off an owned automation', () => {
     expect(cardSchedulesFrom([hourly(7, 6)])).toEqual({
-      '7': { hours: 6, automationId: 107, weekly: false },
+      '7': { hours: 6, automationId: 107, weekly: false, nextRun: null },
     });
   });
 
@@ -75,6 +75,27 @@ describe('reading schedules', () => {
     expect(cardScheduleLabel({ hours: null, automationId: 1, weekly: true })).toBe('Weekly');
   });
 
+  it('carries the next run when a clock is given', () => {
+    // The board showed both. The cadence alone answers a weaker question: how
+    // often, but not whether anything is about to happen.
+    const now = Date.UTC(2026, 0, 15, 12, 0, 0);
+    const soon = new Date(now + 3 * 3600_000).toISOString();
+    expect(
+      cardScheduleLabel({ hours: 6, automationId: 1, weekly: false, nextRun: soon }, now),
+    ).toBe('Every 6 hours · next in 3h');
+  });
+
+  it('says only the cadence when there is no next run to report', () => {
+    const now = Date.UTC(2026, 0, 15, 12, 0, 0);
+    expect(cardScheduleLabel({ hours: 6, automationId: 1, weekly: false }, now)).toBe(
+      'Every 6 hours',
+    );
+  });
+
+  it('never appends a next run to "Not scheduled"', () => {
+    expect(cardScheduleLabel(undefined, Date.now())).toBe('Not scheduled');
+  });
+
   it('offers "Not scheduled" first, so turning it off is one click', () => {
     expect(CARD_SCHEDULE_OPTIONS[0]).toEqual({ value: '', label: 'Not scheduled' });
     expect(CARD_SCHEDULE_OPTIONS.length).toBeGreaterThan(1);
@@ -82,13 +103,33 @@ describe('reading schedules', () => {
 });
 
 describe('the controller', () => {
-  it('loads ONE endpoint, not the five the modal loads', async () => {
-    // Cards need intervals on every visit; paying the modal's five requests
-    // per page load to render a dropdown would undo the page's own speed.
+  it('loads TWO endpoints in parallel, not the modal\u2019s five', async () => {
+    // Cards need this on every visit, so the budget matters: the schedules and
+    // the run history the failure signal reads, fetched together so the second
+    // costs no added latency. The modal loads five.
     const { result } = renderHook(() => useCardSchedules());
     await waitFor(() => expect(result.current.loaded).toBe(true));
-    expect(calls.map((c) => c.url)).toEqual(['/api/automations']);
+    expect(calls.map((c) => c.url).sort()).toEqual([
+      '/api/automations',
+      '/api/playlist-pipeline/history?limit=100',
+    ]);
     expect(result.current.schedules['7']?.hours).toBe(6);
+  });
+
+  it('still renders when the history is unavailable', async () => {
+    // Best-effort decoration: no history means no failure glyph, which is
+    // exactly how it looked to anyone who never opened the Auto-Sync modal.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (String(url).startsWith('/api/playlist-pipeline')) throw new Error('offline');
+        return new Response(JSON.stringify({ automations: [hourly(7, 6)] }));
+      }),
+    );
+    const { result } = renderHook(() => useCardSchedules());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(result.current.schedules['7']?.hours).toBe(6);
+    expect(result.current.history).toEqual([]);
   });
 
   it('marks itself loaded even when the read fails, so cards still render', async () => {

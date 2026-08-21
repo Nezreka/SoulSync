@@ -84,7 +84,14 @@ import {
 } from '../-sync.library';
 import { autoSyncCanSchedulePlaylist } from '../-sync.autosync';
 import { cardScheduleLabel, useCardSchedules } from '../-sync.card-schedule';
+import { autoSyncPlaylistHealth, detectBrowserTimezone } from '../-sync.autosync';
+import { patchMirroredPreferences } from '../-sync.api';
+import type { AutoSyncWeeklyDraft } from './autosync-weekly';
+
+import { AutoSyncWeeklyEditor } from './autosync-weekly';
 import { PlaylistCard, playlistCardPrimaryLabel } from './playlist-card';
+import { ScheduleMenu } from './schedule-menu';
+import { usePopoverPosition } from './use-popover-position';
 import { SourceIcon } from './source-icon';
 import { ExportModal, ExportStatusSpan } from './export-modal';
 import { MirroredDetailModal } from './mirrored-detail-modal';
@@ -144,6 +151,7 @@ function MirroredCardMenu({
   onExport,
   onClear,
   onDelete,
+  onToggleOrganize,
 }: {
   row: MirroredPlaylistRow;
   top: number;
@@ -154,8 +162,22 @@ function MirroredCardMenu({
   onExport: () => void;
   onClear: () => void;
   onDelete: () => void;
+  onToggleOrganize: (enabled: boolean) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const pos = usePopoverPosition({ top, left }, ref);
+
+  const profileHtml =
+    typeof window.playlistQualityProfileSelectHtml === 'function'
+      ? window.playlistQualityProfileSelectHtml(row.source_playlist_id, row.source, true)
+      : '';
+  const { source_playlist_id: sourcePlaylistId, source, quality_profile_id: profileId } = row;
+  useEffect(() => {
+    if (!profileHtml) return;
+    if (typeof window.hydratePlaylistQualityProfileSelects !== 'function') return;
+    void window.hydratePlaylistQualityProfileSelects(sourcePlaylistId, source, profileId);
+  }, [profileHtml, sourcePlaylistId, source, profileId]);
+
   useEffect(() => {
     // Deferred by a tick, or the click that OPENED the menu closes it again.
     const onDocClick = (e: MouseEvent) => {
@@ -187,7 +209,44 @@ function MirroredCardMenu({
   );
 
   return (
-    <div className="pl-menu" ref={ref} style={{ top: `${top}px`, left: `${left}px` }} role="menu">
+    <div
+      className="pl-menu"
+      ref={ref}
+      style={{ top: `${pos.top}px`, left: `${pos.left}px` }}
+      role="menu"
+    >
+      {/* A per-playlist SETTING, not an action: it lived only on the Auto-Sync
+          board's scheduled cards, which made it unreachable for any playlist
+          that was not scheduled. It belongs with the playlist. */}
+      <button
+        type="button"
+        className={`pl-menu-item${row.organize_by_playlist ? ' pl-menu-item--on' : ''}`}
+        title="Download missing tracks into a playlist-named folder (artist - track)"
+        onClick={() => {
+          onToggleOrganize(!row.organize_by_playlist);
+          onClose();
+        }}
+      >
+        Organize by playlist
+        {row.organize_by_playlist ? <span className="pl-menu-tick">✓</span> : null}
+      </button>
+      {/* The per-playlist Quality Profile, also stranded on the board's
+          scheduled cards. It is markup from a legacy global, hydrated after
+          mount — the same contract autosync-shared used, moved rather than
+          reimplemented, because the select's options come from a store React
+          does not own. Absent global, absent control: exactly as before. */}
+      {profileHtml ? (
+        <div
+          className="pl-menu-profile"
+          onClick={(e) => {
+            e.stopPropagation();
+          }}
+        >
+          <span className="pl-menu-heading">Quality profile</span>
+          <span dangerouslySetInnerHTML={{ __html: profileHtml }} />
+        </div>
+      ) : null}
+      <div className="pl-menu-sep" />
       {item('Rename', onRename)}
       {item('Edit source link', onEditSource)}
       {item('Export', onExport)}
@@ -229,6 +288,14 @@ export function MirroredTab({
   const [menu, setMenu] = useState<{ row: MirroredPlaylistRow; top: number; left: number } | null>(
     null,
   );
+  /** The schedule picker, and the weekly editor it can open. */
+  const [schedMenu, setSchedMenu] = useState<{
+    row: MirroredPlaylistRow;
+    top: number;
+    left: number;
+  } | null>(null);
+  const [weeklyDraft, setWeeklyDraft] = useState<AutoSyncWeeklyDraft | null>(null);
+
 
   const [renaming, setRenaming] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -451,6 +518,34 @@ export function MirroredTab({
     }
   }, []);
 
+  /**
+   * Organize-by-playlist, moved off the Auto-Sync board.
+   *
+   * Optimistic, then reconciled by the reload: the checkbox on the board was
+   * instant and a round-trip before the tick moves would feel broken.
+   */
+  const setOrganize = useCallback(
+    async (row: MirroredPlaylistRow, enabled: boolean) => {
+      try {
+        const res = await patchMirroredPreferences(row.id, { organize_by_playlist: enabled });
+        const data = (await res.json()) as { error?: string };
+        if (!res.ok || data.error) throw new Error(data.error || 'Failed to update preference');
+        window.showToast?.(
+          enabled
+            ? `"${row.name ?? 'Playlist'}" downloads into its own folder`
+            : `"${row.name ?? 'Playlist'}" downloads into the library root`,
+          'success',
+        );
+        await load();
+      } catch (err) {
+        window.showToast?.(
+          `Error: ${err instanceof Error ? err.message : String(err)}`,
+          'error',
+        );
+      }
+    },
+    [load],
+  );
   /** Same ref-not-dependency reasoning as registerReload above. */
   const registerOpenDetailRef = useRef(registerOpenDetail);
   registerOpenDetailRef.current = registerOpenDetail;
@@ -702,7 +797,8 @@ export function MirroredTab({
                 // the timestamp actually is (the last mirror refresh), where a
                 // bare "30m ago" leaves you guessing.
                 when={`Mirrored ${timeAgo(row.updated_at || row.mirrored_at, Date.now())}`}
-                schedule={cardScheduleLabel(cardSchedules.schedules[String(row.id)])}
+                schedule={cardScheduleLabel(cardSchedules.schedules[String(row.id)], Date.now())}
+                health={autoSyncPlaylistHealth(cardSchedules.history, row.id)}
                 status={
                   exportStatus ? (
                     <ExportStatusSpan status={exportStatus} />
@@ -732,6 +828,14 @@ export function MirroredTab({
                   },
                       }
                 }
+                onSchedule={
+                  autoSyncCanSchedulePlaylist(row)
+                    ? (anchor) => {
+                        const box = anchor.getBoundingClientRect();
+                        setSchedMenu({ row, top: box.bottom + 6, left: box.left });
+                      }
+                    : undefined
+                }
                 onMore={(anchor) => {
                   const box = anchor.getBoundingClientRect();
                   setMenu({ row, top: box.bottom + 6, left: box.right - 188 });
@@ -742,6 +846,60 @@ export function MirroredTab({
           </div>
         )}
       </div>
+      {schedMenu && (
+        <ScheduleMenu
+          row={schedMenu.row}
+          hours={cardSchedules.schedules[String(schedMenu.row.id)]?.hours ?? null}
+          weekly={Boolean(cardSchedules.schedules[String(schedMenu.row.id)]?.weekly)}
+          anchor={{ top: schedMenu.top, left: schedMenu.left }}
+          onClose={() => setSchedMenu(null)}
+          onPickHours={(hours) => void cardSchedules.set(schedMenu.row, hours)}
+          onPickWeekly={(days) => void cardSchedules.setWeekly(schedMenu.row, { days })}
+          onCustomWeekly={() => {
+            const current = cardSchedules.schedules[String(schedMenu.row.id)]?.weeklyConfig;
+            setWeeklyDraft({
+              playlistId: Number(schedMenu.row.id),
+              days: current?.days ?? ['mon'],
+              time: current?.time ?? '09:00',
+              tz: current?.tz ?? detectBrowserTimezone(),
+            });
+          }}
+        />
+      )}
+      {weeklyDraft && (
+        /* All that survives of the weekly BOARD. The board rendered the same
+           card once per selected day because a calendar has to; a draft in an
+           editor does not. */
+        <AutoSyncWeeklyEditor
+          draft={weeklyDraft}
+          playlistName={
+            rows?.find((r) => r.id === weeklyDraft.playlistId)?.display_name ??
+            rows?.find((r) => r.id === weeklyDraft.playlistId)?.name ??
+            ''
+          }
+          hasExisting={Boolean(
+            cardSchedules.schedules[String(weeklyDraft.playlistId)]?.weekly,
+          )}
+          onChange={setWeeklyDraft}
+          onSave={() => {
+            const target = rows?.find((r) => r.id === weeklyDraft.playlistId);
+            if (target) {
+              void cardSchedules.setWeekly(target, {
+                days: weeklyDraft.days,
+                time: weeklyDraft.time,
+                tz: weeklyDraft.tz,
+              });
+            }
+            setWeeklyDraft(null);
+          }}
+          onUnschedule={() => {
+            const target = rows?.find((r) => r.id === weeklyDraft.playlistId);
+            if (target) void cardSchedules.set(target, null);
+            setWeeklyDraft(null);
+          }}
+          onClose={() => setWeeklyDraft(null)}
+        />
+      )}
       {menu && (
         <MirroredCardMenu
           row={menu.row}
@@ -759,6 +917,7 @@ export function MirroredTab({
           onExport={() => setExporting(menu.row)}
           onClear={() => void onClear(menu.row)}
           onDelete={() => void onDelete(menu.row)}
+          onToggleOrganize={(enabled) => void setOrganize(menu.row, enabled)}
         />
       )}
       {exporting && (

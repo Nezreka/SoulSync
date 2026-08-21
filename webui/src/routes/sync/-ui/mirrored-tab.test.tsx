@@ -997,3 +997,21 @@ describe('MirroredTab — the reopen origin cannot leak between entry points', (
     expect(listAt).toBeLessThan(detailAt);
   });
 });
+
+describe('MirroredTab — the schedule pill', () => {
+  it('is a BUTTON that opens the schedule menu, not the detail modal', async () => {
+    stubFetch();
+    responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+
+    const pill = document.querySelector('.pl-card-pill') as HTMLElement;
+    expect(pill).not.toBeNull();
+    // A span here means onSchedule never reached the card, and the click would
+    // fall through to the card and open the detail modal instead.
+    expect(pill.tagName).toBe('BUTTON');
+
+    fireEvent.click(pill);
+    expect(document.querySelector('.pl-menu--schedule')).not.toBeNull();
+  });
+});

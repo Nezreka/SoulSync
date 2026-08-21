@@ -55,8 +55,14 @@ export interface PlaylistCardProps {
   nameTitle?: string;
   /** "synced 3h ago" — the tail of the meta line. */
   when: string;
-  /** Current schedule, e.g. "Every 6 hours". */
+  /** Current schedule, e.g. "Every 6 hours · next in 3h". */
   schedule: string;
+  /**
+   * Repeated-failure signal from the run history — the board's `!` / `⚠` glyph.
+   * Distinct from the ring, which reports the CURRENT run: a playlist can be
+   * sitting green right now and still have failed its last three scheduled runs.
+   */
+  health?: { level: 'ok' | 'warning' | 'failing'; tooltip: string };
   /**
    * Live narration, which REPLACES the meta line while it exists: the pipeline
    * phase with its percentage, or an export in flight. The resting meta line is
@@ -73,6 +79,12 @@ export interface PlaylistCardProps {
   primary?: PlaylistCardAction | null;
   /** The overflow menu's trigger; the menu itself is the caller's. */
   onMore: (anchor: HTMLElement) => void;
+  /**
+   * Open the schedule picker. Omitted for sources the pipeline cannot refresh,
+   * where the pill stays a plain label — offering a schedule that can never run
+   * is the same lie as offering a Sync now that 400s.
+   */
+  onSchedule?: (anchor: HTMLElement) => void;
 }
 
 /**
@@ -119,10 +131,12 @@ export function PlaylistCard({
   nameTitle,
   when,
   schedule,
+  health,
   status,
   onOpen,
   primary,
   onMore,
+  onSchedule,
 }: PlaylistCardProps) {
   const state = libraryCardState(row);
   const pct = libraryCoveragePct(row);
@@ -170,13 +184,48 @@ export function PlaylistCard({
 
       <div className="pl-card-body">
         <div className="pl-card-name">
+          {health && health.level !== 'ok' ? (
+            <span
+              className={`pl-card-health pl-card-health--${health.level}`}
+              title={health.tooltip}
+              aria-label={health.tooltip}
+            >
+              {health.level === 'failing' ? '!' : '⚠'}
+            </span>
+          ) : null}
           <SourceIcon source={row.source} />
           <b title={nameTitle ?? name}>{name}</b>
         </div>
         <div className="pl-card-meta card-meta">
           {status ?? playlistCardMeta(row, when)}
         </div>
-        <span className="pl-card-pill">{schedule}</span>
+        {/* The schedule is a CONTROL, not a label: with Auto-Sync's board
+            gone this is the only place a cadence gets set. It still reads as a
+            quiet pill at rest — a dropdown sitting open on every card was the
+            chrome the redesign removed. */}
+        {onSchedule ? (
+          <button
+            type="button"
+            className="pl-card-pill pl-card-pill--action"
+            title="Change how often this playlist syncs"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSchedule(e.currentTarget);
+            }}
+          >
+            {schedule}
+          </button>
+        ) : (
+          /* No onSchedule means this source cannot be refreshed by the
+             pipeline at all. Saying "Not scheduled" would imply you could,
+             and clicking it does nothing — so it says what is actually true. */
+          <span
+            className="pl-card-pill pl-card-pill--inert"
+            title="Auto-Sync cannot refresh this source, so it cannot be scheduled"
+          >
+            Can’t be scheduled
+          </span>
+        )}
       </div>
 
       {/* Under a veil, so the resting card is only art and words. */}

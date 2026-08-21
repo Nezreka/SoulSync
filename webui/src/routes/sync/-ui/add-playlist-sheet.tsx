@@ -29,6 +29,7 @@ import {
   detectPlaylistUrl,
   isDetected,
 } from '../-sync.url-detect';
+import { usePopoverPosition } from './use-popover-position';
 
 /** The account tabs this sheet can send you to, in the order they read best. */
 export const ADD_PLAYLIST_ACCOUNTS: readonly { tab: string; label: string; glyph: string }[] = [
@@ -61,6 +62,7 @@ export function AddPlaylistSheet({ anchor, onRoute, onClose }: AddPlaylistSheetP
   const [input, setInput] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const pos = usePopoverPosition(anchor, ref);
 
   useEffect(() => {
     // Deferred a tick, or the click that OPENED it closes it again.
@@ -108,7 +110,7 @@ export function AddPlaylistSheet({ anchor, onRoute, onClose }: AddPlaylistSheetP
       ref={ref}
       role="dialog"
       aria-label="Add a playlist"
-      style={{ top: `${anchor.top}px`, left: `${anchor.left}px` }}
+      style={{ top: `${pos.top}px`, left: `${pos.left}px` }}
     >
       <div className="add-playlist-head">
         <h3>Add a playlist</h3>

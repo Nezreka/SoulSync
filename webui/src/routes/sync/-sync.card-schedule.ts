@@ -21,17 +21,27 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import type { MirroredRow } from './-sync.autosync';
+import type { AutoSyncHistoryEntry, MirroredRow } from './-sync.autosync';
 
 import {
   AUTO_SYNC_BUCKETS,
   autoSyncCanSchedulePlaylist,
   autoSyncIntervalLabel,
+  autoSyncNextRunLabel,
   autoSyncSchedulePayload,
   autoSyncTriggerForHours,
+  autoSyncWeeklyLabel,
+  autoSyncWeeklyTrigger,
   buildAutoSyncScheduleState,
+  detectBrowserTimezone,
 } from './-sync.autosync';
-import { createAutomation, deleteAutomation, fetchAutomations, updateAutomation } from './-sync.api';
+import {
+  createAutomation,
+  deleteAutomation,
+  fetchAutomations,
+  fetchPipelineHistory,
+  updateAutomation,
+} from './-sync.api';
 
 /** What a card knows about its own schedule. */
 export interface CardSchedule {
@@ -41,6 +51,10 @@ export interface CardSchedule {
   automationId: number | string;
   /** True when the schedule is a weekly day rather than an interval. */
   weekly: boolean;
+  /** The weekly trigger itself, so the editor can open on what is set. */
+  weeklyConfig?: { days: string[]; time: string; tz: string };
+  /** When it next runs, as the automation reports it. */
+  nextRun?: string | null;
 }
 
 export type CardScheduleMap = Readonly<Record<string, CardSchedule>>;
@@ -62,30 +76,70 @@ export function cardSchedulesFrom(automations: unknown[]): CardScheduleMap {
   const state = buildAutoSyncScheduleState([], (automations || []) as never[]);
   const out: Record<string, CardSchedule> = {};
   for (const [playlistId, entry] of Object.entries(state.playlistSchedules)) {
-    out[playlistId] = { hours: entry.hours, automationId: entry.automation_id, weekly: false };
+    out[playlistId] = {
+      hours: entry.hours,
+      automationId: entry.automation_id,
+      weekly: false,
+      nextRun: entry.next_run ?? null,
+    };
   }
   for (const [playlistId, entry] of Object.entries(state.weeklySchedules)) {
     // A weekly schedule has no interval to show. The card says so rather than
     // pretending it is unscheduled, which would invite someone to overwrite a
     // weekly plan by picking an hourly one without realising.
-    out[playlistId] = { hours: null, automationId: entry.automation_id, weekly: true };
+    out[playlistId] = {
+      hours: null,
+      automationId: entry.automation_id,
+      weekly: true,
+      nextRun: entry.next_run ?? null,
+      weeklyConfig: {
+        days: Array.isArray(entry.days) ? [...entry.days] : [],
+        // autoSyncWeeklyTrigger's own fallback, kept in step with it.
+        time: entry.time || '09:00',
+        tz: entry.tz || detectBrowserTimezone(),
+      },
+    };
   }
   return out;
 }
 
-/** The label a card shows for its current schedule. */
-export function cardScheduleLabel(schedule: CardSchedule | undefined): string {
+/**
+ * The label a card shows for its current schedule.
+ *
+ * `now` is optional so the cadence alone is still available; when it is given,
+ * the NEXT RUN rides along. The board showed both ("Every 6 hours · next in
+ * 3h") and the cadence on its own answers a different, weaker question — how
+ * often, but not whether anything is about to happen.
+ */
+export function cardScheduleLabel(schedule: CardSchedule | undefined, now?: number): string {
   if (!schedule) return 'Not scheduled';
-  if (schedule.weekly) return 'Weekly';
-  return schedule.hours ? autoSyncIntervalLabel(schedule.hours) : 'Not scheduled';
+  const base = schedule.weekly
+    ? 'Weekly'
+    : schedule.hours
+      ? autoSyncIntervalLabel(schedule.hours)
+      : 'Not scheduled';
+  if (now === undefined || base === 'Not scheduled') return base;
+  const next = autoSyncNextRunLabel(schedule.nextRun, now);
+  return next ? `${base} · ${next}` : base;
 }
 
 export interface CardScheduleController {
   schedules: CardScheduleMap;
+  /**
+   * Recent pipeline runs, for the repeated-failure signal the board's `!` / `⚠`
+   * glyph carried. The card's ring reports the CURRENT run; this reports the
+   * pattern — "the last three all failed" — which nothing else on the page says.
+   */
+  history: AutoSyncHistoryEntry[];
   /** Null until the first load lands — cards render no control before then. */
   loaded: boolean;
   /** Set an interval, or pass null to unschedule. */
   set: (row: MirroredRow, hours: number | null) => Promise<void>;
+  /** Set a weekly cadence. Replaces an hourly one rather than sitting beside it. */
+  setWeekly: (
+    row: MirroredRow,
+    weekly: { days: string[]; time?: string; tz?: string },
+  ) => Promise<void>;
   /** Playlist ids currently being written, so a card can disable its select. */
   busy: ReadonlySet<string>;
 }
@@ -96,15 +150,28 @@ export interface UseCardSchedulesOptions {
 
 export function useCardSchedules(options: UseCardSchedulesOptions = {}): CardScheduleController {
   const [schedules, setSchedules] = useState<CardScheduleMap>({});
+  const [history, setHistory] = useState<AutoSyncHistoryEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set());
 
   const load = useCallback(async () => {
     try {
-      const res = await fetchAutomations();
+      // In PARALLEL, so the health signal costs no added latency. The history
+      // window is bounded (the endpoint caps at 100), which means a playlist
+      // whose runs fall outside it simply shows no signal — the same as it
+      // looked to anyone who never opened the Auto-Sync modal.
+      const [res, historyRes] = await Promise.all([
+        fetchAutomations(),
+        fetchPipelineHistory(100).catch(() => null),
+      ]);
       const data = (await res.json()) as { automations?: unknown[] } | unknown[];
       const rows = Array.isArray(data) ? data : (data.automations ?? []);
       setSchedules(cardSchedulesFrom(rows));
+
+      if (historyRes) {
+        const payload = (await historyRes.json()) as { history?: AutoSyncHistoryEntry[] };
+        setHistory(Array.isArray(payload.history) ? payload.history : []);
+      }
     } catch {
       // Best-effort: a card without its interval still works, and a failed
       // read must not stop the library rendering.
@@ -169,5 +236,55 @@ export function useCardSchedules(options: UseCardSchedulesOptions = {}): CardSch
     [schedules, load, options.toast],
   );
 
-  return { schedules, loaded, set, busy };
+  const setWeekly = useCallback(
+    async (row: MirroredRow, weekly: { days: string[]; time?: string; tz?: string }) => {
+      if (row.id === undefined) return;
+      const playlistId = String(row.id);
+      const toast = options.toast ?? ((m: string, k: string) => window.showToast?.(m, k));
+
+      if (!autoSyncCanSchedulePlaylist(row)) {
+        toast('That playlist source cannot be refreshed by Auto-Sync.', 'info');
+        return;
+      }
+      const config = autoSyncWeeklyTrigger(weekly);
+      // Refused here as well as in the editor, because a preset reaches this
+      // without passing through the editor at all.
+      if (!config.days.length) {
+        toast('Pick at least one day for the weekly schedule.', 'error');
+        return;
+      }
+
+      setBusy((prev) => new Set(prev).add(playlistId));
+      try {
+        const existing = schedules[playlistId];
+        const payload = autoSyncSchedulePayload(row, row.id, {
+          trigger_type: 'weekly_time',
+          trigger_config: config,
+        });
+        // An HOURLY row is a different trigger shape, so it is replaced rather
+        // than updated into a weekly one — updating across shapes is how you
+        // end up with a row that claims both.
+        const res =
+          existing?.weekly
+            ? await updateAutomation(existing.automationId, payload)
+            : await createAutomation(payload);
+        const data = (await res.json()) as { error?: string };
+        if (!res.ok || data.error) throw new Error(data.error || 'Failed to save schedule');
+        if (existing && !existing.weekly) await deleteAutomation(existing.automationId);
+        toast(`${row.name || 'Playlist'} syncs ${autoSyncWeeklyLabel(config)}`, 'success');
+        await load();
+      } catch (err) {
+        toast(`Error: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      } finally {
+        setBusy((prev) => {
+          const next = new Set(prev);
+          next.delete(playlistId);
+          return next;
+        });
+      }
+    },
+    [schedules, load, options.toast],
+  );
+
+  return { schedules, history, loaded, set, setWeekly, busy };
 }

@@ -40,6 +40,14 @@ export interface MirroredPlaylistRow {
   total_count?: number;
   discovered_count?: number;
   quality_profile_id?: number | null;
+  /**
+   * Download missing tracks into a playlist-named folder.
+   *
+   * A per-playlist setting whose ONLY UI was a scheduled card on the Auto-Sync
+   * board, so it became unreachable for any playlist that was not scheduled.
+   * It belongs with the playlist, not with its cadence.
+   */
+  organize_by_playlist?: boolean;
   updated_at?: string;
   mirrored_at?: string;
   pipeline_state?: {

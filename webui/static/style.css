@@ -19527,9 +19527,30 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
    front instead, so nothing has to shout to be found. */
 .pl-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(322px, 1fr));
+    /* Explicit counts rather than auto-fill: auto-fill kept packing six and
+       more onto a wide screen, which turns a library into a contact sheet.
+       Five is the cap; the cards stay big enough for the cover to lead. */
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
     padding: 2px 6px 10px;
+}
+
+@media (max-width: 760px) {
+    .pl-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (min-width: 1180px) {
+    .pl-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1560px) {
+    .pl-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* Four is the cap. Five still read as a contact sheet on a wide monitor;
+   the cover has to stay big enough to be the thing you recognise. */
+@media (min-width: 1960px) {
+    .pl-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
 .pl-card {
@@ -19618,7 +19639,16 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     50% { opacity: 0.55; }
 }
 
-.pl-card-body { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.pl-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+    /* Above the hover veil, so the pill stays readable AND reachable while the
+       buttons are showing. */
+    position: relative;
+    z-index: 1;
+}
 
 .pl-card-name { display: flex; align-items: center; gap: 7px; min-width: 0; }
 
@@ -19665,9 +19695,17 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     pointer-events: none;
 }
 
+/* The veil is PAINT ONLY. It spans the whole card so the gradient can fade
+   the artwork behind the buttons, but it must never swallow clicks: the
+   schedule pill sits underneath it, and an inset:0 layer with pointer-events
+   made the pill unclickable exactly when hovering revealed the controls. Only
+   the buttons themselves take pointer events. */
 .pl-card:hover .pl-card-hover,
 .pl-card:focus-within .pl-card-hover {
     opacity: 1;
+}
+
+.pl-card-hover > * {
     pointer-events: auto;
 }
 
@@ -19740,6 +19778,110 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 }
 
 .pl-menu-item:hover { background: rgba(255, 255, 255, 0.07); color: #fff; }
+
+/* The schedule picker: a longer menu, so it scrolls rather than running off. */
+.pl-menu--schedule { max-height: 60vh; overflow-y: auto; min-width: 210px; }
+
+.pl-menu-heading {
+    padding: 8px 12px 4px;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.pl-menu-item--on { color: rgb(var(--accent-light-rgb)); }
+
+.pl-menu-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
+
+.pl-menu-tick { font-size: 11px; }
+
+/* The pill is a control now — it is the only place a cadence gets set. */
+.pl-card-pill--inert { opacity: 0.55; cursor: default; }
+
+.pl-card-pill--action { cursor: pointer; transition: border-color 0.16s, color 0.16s; }
+
+.pl-card-pill--action:hover {
+    border-color: rgba(var(--accent-rgb), 0.45);
+    color: rgb(var(--accent-light-rgb));
+}
+
+/* Separates a per-playlist SETTING from the actions below it. */
+/* The repeated-failure glyph. Distinct from the ring, which reports the run
+   happening now: a card can be green and still have failed its last three. */
+.pl-card-health {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.pl-card-health--failing { background: rgba(224, 85, 78, 0.2); color: #f0928c; }
+.pl-card-health--warning { background: rgba(227, 166, 60, 0.2); color: #efc375; }
+
+/* The quality profile select, moved off the board's scheduled card. */
+.pl-menu-profile {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 4px 4px 8px;
+}
+
+.pl-menu-profile select {
+    width: 100%;
+    padding: 6px 8px;
+    border-radius: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(0, 0, 0, 0.32);
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 12px;
+}
+
+.pl-menu-sep {
+    height: 1px;
+    margin: 4px 8px;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* The custom-interval field, from the board's bulk popover. */
+.pl-menu-custom {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 12px 8px;
+    align-items: center;
+}
+
+.pl-menu-custom input {
+    width: 88px;
+    padding: 5px 8px;
+    border-radius: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(0, 0, 0, 0.32);
+    color: #fff;
+    font-size: 12px;
+}
+
+.pl-menu-custom button {
+    padding: 5px 12px;
+    border-radius: 7px;
+    border: 1px solid rgba(var(--accent-rgb), 0.4);
+    background: rgba(var(--accent-rgb), 0.16);
+    color: rgb(var(--accent-light-rgb));
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.pl-menu-error {
+    flex: 1 0 100%;
+    color: #e3a63c;
+    font-size: 11px;
+}
 
 .pl-menu-item--danger { color: #f0928c; }
 .pl-menu-item--danger:hover { background: rgba(224, 85, 78, 0.14); color: #ff9e97; }

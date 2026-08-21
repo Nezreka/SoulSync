@@ -151,7 +151,54 @@ describe('the card body', () => {
   it('shows the source brand mark beside the name, and the schedule', () => {
     const { container } = renderCard();
     expect(container.querySelector('.pl-card-name .spotify-icon')).not.toBeNull();
-    expect(screen.getByText('Every 6 hours')).toBeInTheDocument();
+    // With no onSchedule the pill is inert, and says so rather than claiming
+    // "Not scheduled" — which would imply you could schedule it.
+    expect(container.querySelector('.pl-card-pill--inert')?.textContent).toBe(
+      'Can\u2019t be scheduled',
+    );
+  });
+
+  it('a schedulable card shows its cadence on a CLICKABLE pill', () => {
+    const onSchedule = vi.fn();
+    const r = row();
+    const { container } = render(
+      <PlaylistCard
+        row={r}
+        name="Road Trip"
+        when="synced 3h ago"
+        schedule="Every 6 hours"
+        onOpen={vi.fn()}
+        primary={{ label: 'Sync now', onClick: vi.fn() }}
+        onMore={vi.fn()}
+        onSchedule={onSchedule}
+      />,
+    );
+    const pill = container.querySelector('.pl-card-pill') as HTMLElement;
+    expect(pill.tagName).toBe('BUTTON');
+    expect(pill.textContent).toBe('Every 6 hours');
+  });
+
+  it('the pill opens the picker without also opening the card', () => {
+    // The hover veil used to cover the whole card, so the pill was unreachable
+    // exactly when hovering revealed the controls.
+    const onSchedule = vi.fn();
+    const onOpen = vi.fn();
+    const r = row();
+    const { container } = render(
+      <PlaylistCard
+        row={r}
+        name="Road Trip"
+        when="x"
+        schedule="Every 6 hours"
+        onOpen={onOpen}
+        primary={{ label: 'Sync now', onClick: vi.fn() }}
+        onMore={vi.fn()}
+        onSchedule={onSchedule}
+      />,
+    );
+    fireEvent.click(container.querySelector('.pl-card-pill') as HTMLElement);
+    expect(onSchedule).toHaveBeenCalledTimes(1);
+    expect(onOpen).not.toHaveBeenCalled();
   });
 
   it('renders the display name, which may be a rename', () => {

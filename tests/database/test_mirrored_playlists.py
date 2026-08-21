@@ -543,3 +543,85 @@ class TestServerLink:
         for field in ("name", "source", "source_playlist_id", "track_count", "image_url"):
             assert after[field] == before[field]
         assert len(db.get_mirrored_playlist_tracks(pid)) == 1
+
+
+class TestTrackArtFromDiscovery:
+    """Boulder: "if the tracks of a playlist are discovered, when opening the
+    playlist details modal, it should show the pictures for the tracks".
+
+    They never could. The mirror-track projections send no image_url at all, so
+    the column is empty for essentially every source and the modal rendered rows
+    of blank squares. Discovery DOES know the artwork — it is inside the match
+    it wrote to extra_data — so the read hands it back.
+    """
+
+    def _playlist_with_tracks(self, db):
+        return db.mirror_playlist(
+            source="youtube",
+            source_playlist_id="arty",
+            name="Mirror",
+            tracks=[
+                {"track_name": "One", "artist_name": "A", "source_track_id": "t1"},
+                {"track_name": "Two", "artist_name": "B", "source_track_id": "t2"},
+            ],
+            profile_id=1,
+        )
+
+    def test_a_discovered_track_gets_its_album_art(self, tmp_path):
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        pid = self._playlist_with_tracks(db)
+        first = db.get_mirrored_playlist_tracks(pid)[0]
+        assert not first.get("image_url")
+
+        db.update_mirrored_track_extra_data(
+            first["id"],
+            {"discovered": True, "matched_data": {"image_url": "http://art/cover.jpg"}},
+        )
+        assert db.get_mirrored_playlist_tracks(pid)[0]["image_url"] == "http://art/cover.jpg"
+
+    def test_an_undiscovered_track_stays_bare(self, tmp_path):
+        # Same rule as the playlist cover: art appears only once discovery has
+        # found something.
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        pid = self._playlist_with_tracks(db)
+        track = db.get_mirrored_playlist_tracks(pid)[1]
+        db.update_mirrored_track_extra_data(track["id"], {"discovered": False})
+        assert not db.get_mirrored_playlist_tracks(pid)[1].get("image_url")
+
+    def test_a_source_supplied_track_image_is_never_replaced(self, tmp_path):
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        pid = db.mirror_playlist(
+            source="deezer",
+            source_playlist_id="dz",
+            name="Mirror",
+            tracks=[
+                {
+                    "track_name": "One",
+                    "artist_name": "A",
+                    "image_url": "http://original/track.jpg",
+                }
+            ],
+            profile_id=1,
+        )
+        track = db.get_mirrored_playlist_tracks(pid)[0]
+        db.update_mirrored_track_extra_data(
+            track["id"],
+            {"discovered": True, "matched_data": {"image_url": "http://match/cover.jpg"}},
+        )
+        assert (
+            db.get_mirrored_playlist_tracks(pid)[0]["image_url"] == "http://original/track.jpg"
+        )
+
+    def test_malformed_extra_data_does_not_break_the_read(self, tmp_path):
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        pid = self._playlist_with_tracks(db)
+        track = db.get_mirrored_playlist_tracks(pid)[0]
+        with db._get_connection() as conn:
+            conn.execute(
+                "UPDATE mirrored_playlist_tracks SET extra_data = ? WHERE id = ?",
+                ("{not json", track["id"]),
+            )
+            conn.commit()
+        rows = db.get_mirrored_playlist_tracks(pid)
+        assert len(rows) == 2
+        assert not rows[0].get("image_url")
