@@ -259,6 +259,47 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
         return None, 0.0
 
 
+
+def _record_library_membership(tracks_json, match_details) -> None:
+    """Persist the sync matcher's per-track verdict onto mirrored playlist rows.
+
+    Only mirrored playlists carry ``db_track_id`` (added by the sync_playlist
+    handler), so every other caller of run_sync_task falls straight through.
+
+    ``match_details[i]['index']`` indexes ``tracks_json`` directly: the
+    conversion to SpotifyTrack objects is a plain 1:1 enumerate with an
+    unconditional append, so nothing is dropped between the two. The index is
+    still bounds-checked, because a silent off-by-one here would mark the WRONG
+    tracks as owned and look entirely plausible.
+    """
+    if not match_details:
+        return
+    try:
+        from database.music_database import get_database
+        db = get_database()
+        checked_at = int(time.time())
+        written = 0
+        for detail in match_details:
+            idx = detail.get('index')
+            if not isinstance(idx, int) or idx < 0 or idx >= len(tracks_json):
+                continue
+            db_track_id = (tracks_json[idx] or {}).get('db_track_id')
+            if not db_track_id:
+                continue
+            db.update_mirrored_track_extra_data(db_track_id, {
+                'in_library': detail.get('status') == 'found',
+                # Stamped so the count can say WHEN it was true. The flag is a
+                # cache: deleting files outside SoulSync will not update it
+                # until the next sync, and a number that cannot say how old it
+                # is invites more trust than it has earned.
+                'library_checked_at': checked_at,
+            })
+            written += 1
+        if written:
+            logger.info(f"[Sync] Recorded library membership for {written} mirrored tracks")
+    except Exception as e:  # noqa: BLE001 - never fail a completed sync over bookkeeping
+        logger.warning(f"Failed to record library membership: {e}")
+
 def run_sync_task(
     playlist_id,
     playlist_name,
@@ -618,6 +659,22 @@ def run_sync_task(
                 logger.warning(f"[Sync History] No match_details on SyncResult for batch {target_batch_id}")
         except Exception as e:
             logger.warning(f"Failed to record sync history completion: {e}")
+
+        # Record which tracks are actually IN THE LIBRARY, per track.
+        #
+        # The matcher has just answered this for every track, correctly — it
+        # handles the collaboration and casing differences that defeat a SQL
+        # join ("Taylor Swift feat. HAIM" against a library holding "Taylor
+        # Swift", "Empire of the Sun" against "Empire Of The Sun"). That answer
+        # used to be summarised into counts and thrown away, so the library page
+        # was left re-deriving it from string equality and undercounting badly.
+        #
+        # Written here rather than recomputed on read because recomputing is not
+        # affordable: normalising names at query time turns the lookup into a
+        # full scan of the tracks table PER track (measured — it does not
+        # finish). Counting a stored flag costs nothing extra, since the batch
+        # status query already scans these rows for `discovered`.
+        _record_library_membership(tracks_json, getattr(result, 'match_details', None))
 
         if automation_id:
             matched = getattr(result, 'matched_tracks', 0)

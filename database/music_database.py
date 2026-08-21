@@ -19178,13 +19178,26 @@ class MusicDatabase:
                     WHERE mp.profile_id = ?
                 """, (profile_id,))
                 for row in cursor.fetchall():
-                    result[row['playlist_id']] = {'total': 0, 'discovered': 0, 'wishlisted': 0, 'in_library': 0}
+                    result[row['playlist_id']] = {
+                        'total': 0, 'discovered': 0, 'wishlisted': 0,
+                        'in_library': 0, 'library_checked': 0,
+                    }
 
                 # Core counts: total + discovered, grouped per playlist
                 cursor.execute("""
                     SELECT mpt.playlist_id,
                            COUNT(*) as total,
-                           SUM(CASE WHEN mpt.extra_data LIKE '%"discovered": true%' THEN 1 ELSE 0 END) as discovered
+                           SUM(CASE WHEN mpt.extra_data LIKE '%"discovered": true%' THEN 1 ELSE 0 END) as discovered,
+                           -- Written by the SYNC MATCHER, not derived here. A join
+                           -- cannot answer this: it fails on collaborations and
+                           -- casing, and normalising at query time is a full scan
+                           -- of `tracks` per row. Free to read — same scan, one
+                           -- more CASE.
+                           SUM(CASE WHEN mpt.extra_data LIKE '%"in_library": true%' THEN 1 ELSE 0 END) as in_library,
+                           -- How many rows have EVER been checked. Without this a
+                           -- never-synced playlist reads as "you own none of it"
+                           -- rather than "nobody has looked".
+                           SUM(CASE WHEN mpt.extra_data LIKE '%"library_checked_at"%' THEN 1 ELSE 0 END) as library_checked
                     FROM mirrored_playlist_tracks mpt
                     JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
                     WHERE mp.profile_id = ?
@@ -19193,9 +19206,14 @@ class MusicDatabase:
                 for row in cursor.fetchall():
                     pid = row['playlist_id']
                     if pid not in result:
-                        result[pid] = {'total': 0, 'discovered': 0, 'wishlisted': 0, 'in_library': 0}
+                        result[pid] = {
+                            'total': 0, 'discovered': 0, 'wishlisted': 0,
+                            'in_library': 0, 'library_checked': 0,
+                        }
                     result[pid]['total'] = row['total'] or 0
                     result[pid]['discovered'] = row['discovered'] or 0
+                    result[pid]['in_library'] = row['in_library'] or 0
+                    result[pid]['library_checked'] = row['library_checked'] or 0
 
                 # Wishlist counts in one shot
                 try:
@@ -19216,35 +19234,28 @@ class MusicDatabase:
                 except Exception as e:
                     logger.debug(f"Batch wishlist counts failed: {e}")
 
-                # In-library counts in one shot. ID-FIRST: a mirrored track's
-                # source id against enriched tracks' spotify_track_id
-                # (idx_tracks_spotify_id), OR the case-sensitive name
-                # join (idx_artists_name + idx_tracks_title). The name join
-                # alone undercounted — the sync matcher lands tracks under
-                # normalized names the exact join never credits.
-                try:
-                    cursor.execute("""
-                        SELECT mpt.playlist_id, COUNT(DISTINCT mpt.id) as in_library
-                        FROM mirrored_playlist_tracks mpt
-                        JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
-                        WHERE mp.profile_id = ?
-                          AND (
-                            (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                             AND EXISTS (SELECT 1 FROM tracks ti
-                                         WHERE ti.spotify_track_id = mpt.source_track_id))
-                            OR EXISTS (SELECT 1 FROM artists a
-                                       JOIN tracks t ON t.artist_id = a.id
-                                       WHERE a.name = mpt.artist_name
-                                         AND t.title = mpt.track_name)
-                          )
-                        GROUP BY mpt.playlist_id
-                    """, (profile_id,))
-                    for row in cursor.fetchall():
-                        pid = row['playlist_id']
-                        if pid in result:
-                            result[pid]['in_library'] = row['in_library'] or 0
-                except Exception as e:
-                    logger.debug(f"Batch library counts failed: {e}")
+                # NOTE: in_library is no longer derived here. It used to be a
+                # join with two paths and both were wrong. The ID path compared
+                # `tracks.spotify_track_id` to the mirrored row's source id,
+                # which is only a Spotify id by coincidence — a ListenBrainz
+                # playlist stores 'file:...' references, so it matched NOTHING.
+                # That left an exact case-sensitive artist+title join, which
+                # fails on ordinary things: "Taylor Swift feat. HAIM" against a
+                # library holding "Taylor Swift", "Empire of the Sun" against
+                # "Empire Of The Sun".
+                #
+                # Measured on a real 50-track ListenBrainz playlist: 47 owned by
+                # the media server's own reckoning, 18 reported here. The error
+                # was also differential — near enough for Spotify, badly wrong
+                # elsewhere — which is worse than uniform error, because it looks
+                # right wherever you happen to check it.
+                #
+                # It comes from the SYNC MATCHER now, which already resolves all
+                # of the above, and is read as a stored flag in the query above.
+                # Normalising names at query time was measured and is not
+                # affordable: LOWER() on either side drops the index and scans
+                # the whole `tracks` table per row.
+
         except Exception as e:
             logger.error(f"Error getting batch mirrored playlist status counts: {e}")
         return result

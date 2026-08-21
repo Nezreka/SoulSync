@@ -704,3 +704,79 @@ def test_finally_drops_original_tracks_map(patched_db):
     ds.run_sync_task('pTM', 'PTM', [_track()], deps=deps)
 
     assert not hasattr(svc, '_original_tracks_map')
+
+
+class TestRecordLibraryMembership:
+    """The sync matcher's per-track verdict, persisted for the library page.
+
+    This exists because the page cannot re-derive it. A SQL join fails on
+    ordinary collaborations and casing — "Taylor Swift feat. HAIM" against a
+    library holding "Taylor Swift" — and normalising at query time drops the
+    index and scans the whole tracks table per row. The matcher has already
+    solved all of that by the time these details exist.
+    """
+
+    def _db(self, monkeypatch):
+        writes = {}
+
+        class FakeDB:
+            def update_mirrored_track_extra_data(self, track_id, data):
+                writes[track_id] = data
+                return True
+
+        import database.music_database as mdb
+        monkeypatch.setattr(mdb, 'get_database', lambda: FakeDB(), raising=False)
+        return writes
+
+    def test_writes_found_and_not_found_per_track(self, monkeypatch):
+        from core.discovery.sync import _record_library_membership
+        writes = self._db(monkeypatch)
+        tracks_json = [{'db_track_id': 11}, {'db_track_id': 22}]
+        _record_library_membership(tracks_json, [
+            {'index': 0, 'status': 'found'},
+            {'index': 1, 'status': 'not_found'},
+        ])
+        assert writes[11]['in_library'] is True
+        assert writes[22]['in_library'] is False
+        # Both stamped, so "checked and absent" is distinguishable from
+        # "never looked at" — the page must not report the second as the first.
+        assert writes[11]['library_checked_at'] == writes[22]['library_checked_at']
+
+    def test_ignores_tracks_that_are_not_mirrored_rows(self, monkeypatch):
+        # Only the mirrored sync handler attaches db_track_id; every other
+        # caller of run_sync_task must fall straight through.
+        from core.discovery.sync import _record_library_membership
+        writes = self._db(monkeypatch)
+        _record_library_membership([{'id': 'spotify:1'}], [{'index': 0, 'status': 'found'}])
+        assert writes == {}
+
+    def test_an_out_of_range_index_writes_nothing(self, monkeypatch):
+        # A silent off-by-one would mark the WRONG tracks as owned and look
+        # entirely plausible, so the index is bounds-checked rather than trusted.
+        from core.discovery.sync import _record_library_membership
+        writes = self._db(monkeypatch)
+        _record_library_membership([{'db_track_id': 11}], [
+            {'index': 5, 'status': 'found'},
+            {'index': -1, 'status': 'found'},
+            {'index': None, 'status': 'found'},
+        ])
+        assert writes == {}
+
+    def test_no_match_details_is_a_no_op(self, monkeypatch):
+        from core.discovery.sync import _record_library_membership
+        writes = self._db(monkeypatch)
+        _record_library_membership([{'db_track_id': 11}], None)
+        _record_library_membership([{'db_track_id': 11}], [])
+        assert writes == {}
+
+    def test_never_raises_into_a_completed_sync(self, monkeypatch):
+        """Bookkeeping must not fail a sync that already succeeded."""
+        from core.discovery.sync import _record_library_membership
+
+        class Exploding:
+            def update_mirrored_track_extra_data(self, *a, **k):
+                raise RuntimeError('db gone')
+
+        import database.music_database as mdb
+        monkeypatch.setattr(mdb, 'get_database', lambda: Exploding(), raising=False)
+        _record_library_membership([{'db_track_id': 11}], [{'index': 0, 'status': 'found'}])

@@ -38311,11 +38311,19 @@ def get_mirrored_playlists_endpoint():
         # playlists that's 1.5s of modal load time just for status counts.
         batch_counts = database.get_all_mirrored_playlist_status_counts(profile_id=profile_id)
         for pl in playlists:
-            counts = batch_counts.get(pl['id'], {'total': 0, 'discovered': 0, 'wishlisted': 0, 'in_library': 0})
+            counts = batch_counts.get(pl['id'], {
+                'total': 0, 'discovered': 0, 'wishlisted': 0,
+                'in_library': 0, 'library_checked': 0,
+            })
             pl['discovered_count'] = counts['discovered']
             pl['total_count'] = counts['total']
             pl['wishlisted_count'] = counts['wishlisted']
             pl['in_library_count'] = counts['in_library']
+            # How many of this playlist's tracks the sync matcher has ever
+            # checked. 0 means nobody has looked, which is NOT the same as
+            # owning none of it, and the card must not report the second when it
+            # only knows the first.
+            pl['library_checked_count'] = counts.get('library_checked', 0)
             source_ref = describe_mirrored_source_ref(pl)
             pl['source_ref'] = source_ref.source_ref
             pl['source_ref_kind'] = source_ref.source_ref_kind
