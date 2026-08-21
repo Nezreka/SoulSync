@@ -2043,14 +2043,23 @@ def validate_and_heal_batch_states():
                 _total_active = sum(
                     b.get('active_count', 0) for b in download_batches.values()
                 )
-                if _total_active < _global_max:
-                    for batch_id, batch_data in download_batches.items():
-                        if batch_id in batches_needing_workers:
+                # AT MOST ONE BATCH PER FREE SLOT. Queueing every held batch
+                # would have each acquire two locks only to find the limit full
+                # and log about it — with a cap of one that is thirty-seven
+                # pointless wakes every thirty seconds. The wake-on-completion
+                # path stops early for the same reason.
+                _free_slots = _global_max - _total_active
+                if _free_slots > 0:
+                    for _bid, _bdata in download_batches.items():
+                        if _free_slots <= 0:
+                            break
+                        if _bid in batches_needing_workers:
                             continue
-                        if batch_data.get('phase') in ('complete', 'error', 'cancelled', 'failed'):
+                        if _bdata.get('phase') in ('complete', 'error', 'cancelled', 'failed'):
                             continue
-                        if batch_data.get('queue_index', 0) < len(batch_data.get('queue', [])):
-                            batches_needing_workers.append(batch_id)
+                        if _bdata.get('queue_index', 0) < len(_bdata.get('queue', [])):
+                            batches_needing_workers.append(_bid)
+                            _free_slots -= 1
 
         # ---- All work below runs WITHOUT tasks_lock held ----
 

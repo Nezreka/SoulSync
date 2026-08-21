@@ -199,7 +199,13 @@ def _resolve_downloading_requests(soulseek, run_async):
             elif verdict in ('failed', 'cancelled'):
                 req['status'] = 'failed'
                 req['error'] = f"Download {verdict}: {state or 'unknown'}"
-            elif now >= req.get('watch_until', 0):
+            # `watch_until` must EXIST to expire. Defaulting a missing one to 0
+            # made `now >= 0` always true, so any request marked `downloading`
+            # without a deadline timed out on its first sweep — and the symptom,
+            # a request that never reaches a terminal state, looks exactly like
+            # the bug this endpoint was reported for. Only the handoff sets both
+            # today; this makes a second writer fail visibly instead.
+            elif req.get('watch_until') and now >= req['watch_until']:
                 # The transfer may well still be running. Calling it failed
                 # because WE stopped watching is a worse lie than saying so.
                 req['timed_out'] = True

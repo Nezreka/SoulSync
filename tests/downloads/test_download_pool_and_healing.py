@@ -231,3 +231,82 @@ def test_orphans_are_still_never_dropped_from_the_queue():
     assert "_reported_orphans" in fn
     for bad in ("queue.remove(", "queue'].remove(", "orphaned_tasks.remove("):
         assert bad not in fn, f"{bad} would corrupt queue_index"
+
+
+# ── the healer's global-gate safety net (#1166) ─────────────────────────────
+
+class TestHealerNudgesGloballyHeldBatches:
+    """A batch held at the global cap is normally woken by whoever frees the
+    slot. If that completion never fires — a worker dying in a way nothing
+    reports — the held batches would wait forever, and the cap would have
+    traded a concurrency bug for a permanent stall. The 30s healer is the
+    backstop, but it must not stampede: one batch per FREE SLOT, not all of
+    them, or a cap of one means thirty-seven pointless wakes every half minute.
+    """
+
+    def _setup(self, monkeypatch, global_max, held=6, active=0):
+        import web_server
+        from core.runtime_state import download_batches, download_tasks
+
+        started = []
+        monkeypatch.setattr(web_server, '_check_batch_completion_v2', lambda _b: None)
+        monkeypatch.setattr(web_server, '_start_next_batch_of_downloads', started.append)
+        monkeypatch.setattr(web_server, '_get_global_max_concurrent', lambda: global_max)
+
+        download_batches.clear()
+        download_tasks.clear()
+        for i in range(held):
+            # b0 optionally holds the slot. Its task must be genuinely ACTIVE or
+            # the healer rightly spots active_count as wrong, heals it, and
+            # restarts the batch — which is its job, and would make this test
+            # measure that instead of the gate.
+            busy = active and i == 0
+            tid = f"h{i}"
+            download_tasks[tid] = {
+                'status': 'downloading' if busy else 'pending',
+                'track_index': 0, 'batch_id': f'b{i}',
+                'status_change_time': time.time(),
+            }
+            download_batches[f'b{i}'] = {
+                'queue': [tid],
+                'queue_index': 1 if busy else 0,
+                'active_count': 1 if busy else 0,
+                'max_concurrent': 1, 'phase': 'downloading',
+            }
+        return web_server, started, download_batches, download_tasks
+
+    def test_it_wakes_at_most_one_batch_per_free_slot(self, monkeypatch):
+        web_server, started, batches, tasks = self._setup(monkeypatch, global_max=1)
+        try:
+            web_server.validate_and_heal_batch_states()
+            assert len(started) == 1, f'1 free slot, woke {len(started)} batches'
+        finally:
+            batches.clear()
+            tasks.clear()
+
+    def test_more_slots_wake_more_batches(self, monkeypatch):
+        web_server, started, batches, tasks = self._setup(monkeypatch, global_max=3)
+        try:
+            web_server.validate_and_heal_batch_states()
+            assert len(started) == 3
+        finally:
+            batches.clear()
+            tasks.clear()
+
+    def test_nothing_is_woken_when_the_limit_is_already_full(self, monkeypatch):
+        web_server, started, batches, tasks = self._setup(monkeypatch, global_max=1, active=1)
+        try:
+            web_server.validate_and_heal_batch_states()
+            assert started == [], 'the cap is full; nothing should be nudged'
+        finally:
+            batches.clear()
+            tasks.clear()
+
+    def test_no_gate_means_the_healer_behaves_exactly_as_before(self, monkeypatch):
+        web_server, started, batches, tasks = self._setup(monkeypatch, global_max=None)
+        try:
+            web_server.validate_and_heal_batch_states()
+            assert started == []
+        finally:
+            batches.clear()
+            tasks.clear()

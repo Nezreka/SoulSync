@@ -421,3 +421,52 @@ class TestWatcherLifecycleIsIndependent:
             assert not request_mod._watcher_stop_event.is_set()
         finally:
             request_mod._cleanup_stop_event.clear()
+
+
+class TestTheWatchDeadlineMustExist:
+    """A missing deadline is not an expired one.
+
+    `req.get('watch_until', 0)` made `now >= 0` always true, so a request marked
+    `downloading` without a deadline timed out on its first sweep. Nothing does
+    that today — the handoff sets both — but the symptom of getting it wrong is
+    a request that never reaches a terminal state, which is indistinguishable
+    from the bug this endpoint was reported for.
+    """
+
+    def test_a_downloading_request_with_no_deadline_is_not_timed_out(self):
+        with request_mod._requests_lock:
+            request_mod._pending_requests["nd"] = {
+                "request_id": "nd", "query": "q", "status": "downloading",
+                "created_at": datetime.now(), "completed_at": None,
+                "download_id": "dl-nd", "error": None, "notify_url": None,
+                # watch_until deliberately absent
+            }
+
+        class _Soulseek:
+            def get_all_downloads(self):
+                return []
+
+        request_mod._resolve_downloading_requests(_Soulseek(), run_async=lambda c: c)
+
+        with request_mod._requests_lock:
+            req = request_mod._pending_requests["nd"]
+        assert req["status"] == "downloading"
+        assert "timed_out" not in req, "a missing deadline was treated as an expired one"
+
+    def test_a_real_deadline_still_expires(self):
+        with request_mod._requests_lock:
+            request_mod._pending_requests["ex"] = {
+                "request_id": "ex", "query": "q", "status": "downloading",
+                "created_at": datetime.now(), "completed_at": None,
+                "download_id": "dl-ex", "error": None, "notify_url": None,
+                "watch_until": time.monotonic() - 1,
+            }
+
+        class _Soulseek:
+            def get_all_downloads(self):
+                return []
+
+        request_mod._resolve_downloading_requests(_Soulseek(), run_async=lambda c: c)
+
+        with request_mod._requests_lock:
+            assert request_mod._pending_requests["ex"].get("timed_out") is True
