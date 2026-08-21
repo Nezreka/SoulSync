@@ -1615,6 +1615,41 @@ def _get_batch_max_concurrent(is_album=False, source=None):
                 return 1
     return _get_max_concurrent()
 
+def _soulseek_is_active_download_source():
+    """Whether Soulseek is doing the downloading right now.
+
+    Soulseek is the source that punishes parallel searching — too many at once
+    and the server rate-limits or bans you. Other sources do not need the same
+    gate, so the global cap is scoped to when Soulseek is actually in play:
+    directly, or first in the hybrid order.
+    """
+    mode = config_manager.get('download_source.mode', 'soulseek')
+    if mode == 'soulseek':
+        return True
+    if mode == 'hybrid':
+        hybrid_order = config_manager.get('download_source.hybrid_order', []) or []
+        if isinstance(hybrid_order, str):
+            hybrid_order = [hybrid_order]
+        first_source = next((str(x).strip().lower() for x in hybrid_order if str(x).strip()), '')
+        return first_source == 'soulseek'
+    return False
+
+
+def _get_global_max_concurrent():
+    """The cap on TOTAL active workers across every batch (#1166).
+
+    max_concurrent has always been per batch, so a wishlist split into ten album
+    batches ran ten Soulseek searches against a configured limit of one — each
+    batch correctly reporting Active: 1/1 while the real total was ten.
+
+    Returns None when no global gate applies, which leaves the per-batch limit
+    as the only one, exactly as before.
+    """
+    if not _soulseek_is_active_download_source():
+        return None
+    return max(1, int(_get_max_concurrent() or 1))
+
+
 # --- Session Download Statistics ---
 # Track individual download completions (matches dashboard.py behavior)
 
@@ -1989,6 +2024,33 @@ def validate_and_heal_batch_states():
 
             if healed_batches:
                 logger.info(f"[Batch Healing] Healed {len(healed_batches)} batches: {healed_batches}")
+
+            # SAFETY NET FOR THE GLOBAL GATE (#1166).
+            #
+            # A batch held at the global limit is normally woken by whoever
+            # frees the slot. If that completion never fires — a worker dies in
+            # a way nothing reports — the held batches would wait forever, and
+            # the cap would have turned a concurrency bug into a permanent
+            # stall. This runs every 30s and only when a slot is genuinely
+            # free, so it costs nothing in the normal case and cannot itself
+            # exceed the limit: each woken batch re-checks the cap under its own
+            # lock before starting anything.
+            try:
+                _global_max = _get_global_max_concurrent()
+            except Exception:  # noqa: BLE001
+                _global_max = None
+            if _global_max is not None:
+                _total_active = sum(
+                    b.get('active_count', 0) for b in download_batches.values()
+                )
+                if _total_active < _global_max:
+                    for batch_id, batch_data in download_batches.items():
+                        if batch_id in batches_needing_workers:
+                            continue
+                        if batch_data.get('phase') in ('complete', 'error', 'cancelled', 'failed'):
+                            continue
+                        if batch_data.get('queue_index', 0) < len(batch_data.get('queue', [])):
+                            batches_needing_workers.append(batch_id)
 
         # ---- All work below runs WITHOUT tasks_lock held ----
 
@@ -20396,6 +20458,7 @@ def _build_lifecycle_deps():
         tidal_discovery_states=tidal_discovery_states,
         deezer_discovery_states=deezer_discovery_states,
         spotify_public_discovery_states=spotify_public_discovery_states,
+        get_global_max_concurrent=_get_global_max_concurrent,
     )
 
 

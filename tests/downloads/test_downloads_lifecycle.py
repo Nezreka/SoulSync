@@ -85,6 +85,7 @@ def _build_deps(
     tidal_states=None,
     deezer_states=None,
     spotify_states=None,
+    global_max=None,
 ):
     rec = _Recorder()
     return lc.LifecycleDeps(
@@ -108,6 +109,7 @@ def _build_deps(
         tidal_discovery_states=tidal_states or {},
         deezer_discovery_states=deezer_states or {},
         spotify_public_discovery_states=spotify_states or {},
+        get_global_max_concurrent=(lambda: global_max) if global_max is not None else None,
     ), rec
 
 
@@ -600,3 +602,253 @@ def test_check_v2_exception_returns_false():
     deps, _ = _build_deps()
     result = lc.check_batch_completion_v2('b1', deps)
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# The GLOBAL concurrency gate (#1166)
+# ---------------------------------------------------------------------------
+
+class TestGlobalConcurrencyGate:
+    """max_concurrent was per BATCH, and so was the lock guarding it.
+
+    Reported against 3.2.2: a wishlist that groups tracks into album batches ran
+    several Soulseek searches at once against a configured limit of one. The log
+    told the truth from each batch's own point of view and was wrong about the
+    machine:
+
+        [Batch Lock] Started download 1/10 - Active: 1/1
+        [Batch Lock] Started download 1/12 - Active: 1/1
+        [Batch Lock] Started download 1/18 - Active: 1/1
+
+    Three batches, six seconds apart, one configured slot. That is what floods
+    Soulseek and earns a rate-limit or a ban.
+    """
+
+    @staticmethod
+    def _batch(queue, active=0, max_concurrent=1):
+        return {
+            'queue': list(queue),
+            'queue_index': 0,
+            'active_count': active,
+            'max_concurrent': max_concurrent,
+            'phase': 'downloading',
+        }
+
+    def _tasks(self, *ids):
+        for t in ids:
+            download_tasks[t] = {'status': 'pending', 'status_change_time': 0}
+
+    def test_a_second_batch_cannot_start_while_the_first_holds_the_only_slot(self):
+        # The reported bug, at its smallest.
+        self._tasks('a1', 'b1')
+        download_batches['A'] = self._batch(['a1'], active=1)   # already running
+        download_batches['B'] = self._batch(['b1'])
+        deps, rec = _build_deps(global_max=1)
+
+        lc.start_next_batch_of_downloads('B', deps)
+
+        assert [c for c in rec.calls if c[0] == 'submit_dl'] == []
+        assert download_batches['B']['active_count'] == 0
+        # HELD, not dropped: the work is still queued for when a slot frees.
+        assert download_batches['B']['queue_index'] == 0
+
+    def test_the_cap_counts_every_batch_not_just_this_one(self):
+        # Three batches each at 1/1 is exactly the reported log.
+        self._tasks('a1', 'b1', 'c1')
+        download_batches['A'] = self._batch(['a1'], active=1)
+        download_batches['B'] = self._batch(['b1'], active=1)
+        download_batches['C'] = self._batch(['c1'])
+        deps, rec = _build_deps(global_max=2)
+
+        lc.start_next_batch_of_downloads('C', deps)
+        assert [c for c in rec.calls if c[0] == 'submit_dl'] == []
+
+    def test_it_starts_when_the_global_limit_has_room(self):
+        self._tasks('a1', 'b1')
+        download_batches['A'] = self._batch(['a1'], active=1)
+        download_batches['B'] = self._batch(['b1'])
+        deps, rec = _build_deps(global_max=3)
+
+        lc.start_next_batch_of_downloads('B', deps)
+        assert len([c for c in rec.calls if c[0] == 'submit_dl']) == 1
+        assert download_batches['B']['active_count'] == 1
+
+    def test_one_batch_still_fills_up_to_the_global_limit(self):
+        # The gate caps the total; it must not throttle a single batch below
+        # what it is allowed to run.
+        self._tasks('a1', 'a2', 'a3', 'a4')
+        download_batches['A'] = self._batch(['a1', 'a2', 'a3', 'a4'], max_concurrent=5)
+        deps, rec = _build_deps(global_max=3)
+
+        lc.start_next_batch_of_downloads('A', deps)
+        assert len([c for c in rec.calls if c[0] == 'submit_dl']) == 3
+
+    def test_the_per_batch_limit_still_applies_under_a_looser_global_one(self):
+        # An album batch is capped at 1 for source reuse; a roomy global cap
+        # must not override that.
+        self._tasks('a1', 'a2')
+        download_batches['A'] = self._batch(['a1', 'a2'], max_concurrent=1)
+        deps, rec = _build_deps(global_max=10)
+
+        lc.start_next_batch_of_downloads('A', deps)
+        assert len([c for c in rec.calls if c[0] == 'submit_dl']) == 1
+
+    def test_no_gate_configured_leaves_the_old_behaviour_untouched(self):
+        # A source that is not rate-limited the way Soulseek is, and any caller
+        # that has not been updated, must keep its per-batch limit rather than
+        # lose all limiting.
+        self._tasks('a1', 'b1')
+        download_batches['A'] = self._batch(['a1'], active=1)
+        download_batches['B'] = self._batch(['b1'])
+        deps, rec = _build_deps()  # get_global_max_concurrent is None
+
+        lc.start_next_batch_of_downloads('B', deps)
+        assert len([c for c in rec.calls if c[0] == 'submit_dl']) == 1
+
+    def test_a_failing_gate_falls_back_rather_than_halting_downloads(self):
+        # A broken limit lookup must not become a total stop.
+        self._tasks('a1')
+        download_batches['A'] = self._batch(['a1'])
+
+        def _boom():
+            raise RuntimeError('config exploded')
+
+        deps, rec = _build_deps()
+        deps.get_global_max_concurrent = _boom
+
+        lc.start_next_batch_of_downloads('A', deps)
+        assert len([c for c in rec.calls if c[0] == 'submit_dl']) == 1
+
+
+class TestGlobalGateWakesWaitingBatches:
+    """The cap alone would turn a concurrency bug into a stall.
+
+    A freed slot used to be offered back only to the batch that freed it, which
+    was fine when every batch had its own limit. Under a global cap the batches
+    being held have to be woken by whoever frees the slot, or they wait forever
+    — and a wishlist that never finishes is worse than one that searches too
+    hard.
+    """
+
+    def test_a_held_batch_starts_when_another_batch_frees_the_slot(self):
+        download_tasks['a1'] = {'status': 'completed', 'track_info': {'name': 'X'}}
+        download_tasks['b1'] = {'status': 'pending', 'status_change_time': 0}
+        # A is finishing its only task; B is held at the global limit.
+        download_batches['A'] = {
+            'queue': ['a1'], 'queue_index': 1, 'active_count': 1, 'max_concurrent': 1,
+            'permanently_failed_tracks': [], 'cancelled_tracks': set(), 'phase': 'downloading',
+        }
+        download_batches['B'] = {
+            'queue': ['b1'], 'queue_index': 0, 'active_count': 0, 'max_concurrent': 1,
+            'permanently_failed_tracks': [], 'cancelled_tracks': set(), 'phase': 'downloading',
+        }
+        deps, rec = _build_deps(global_max=1)
+
+        lc.on_download_completed('A', 'a1', True, deps)
+
+        started = [c for c in rec.calls if c[0] == 'submit_dl']
+        assert started, 'the held batch was never woken — it would wait forever'
+        assert download_batches['B']['active_count'] == 1
+
+    def test_a_finished_batch_is_not_woken(self):
+        download_tasks['a1'] = {'status': 'completed', 'track_info': {'name': 'X'}}
+        download_tasks['b1'] = {'status': 'pending', 'status_change_time': 0}
+        download_batches['A'] = {
+            'queue': ['a1'], 'queue_index': 1, 'active_count': 1, 'max_concurrent': 1,
+            'permanently_failed_tracks': [], 'cancelled_tracks': set(), 'phase': 'downloading',
+        }
+        download_batches['B'] = {
+            'queue': ['b1'], 'queue_index': 0, 'active_count': 0, 'max_concurrent': 1,
+            'permanently_failed_tracks': [], 'cancelled_tracks': set(), 'phase': 'cancelled',
+        }
+        deps, rec = _build_deps(global_max=1)
+
+        lc.on_download_completed('A', 'a1', True, deps)
+        assert [c for c in rec.calls if c[0] == 'submit_dl'] == []
+
+    def test_a_batch_with_nothing_queued_is_not_woken(self):
+        download_tasks['a1'] = {'status': 'completed', 'track_info': {'name': 'X'}}
+        download_batches['A'] = {
+            'queue': ['a1'], 'queue_index': 1, 'active_count': 1, 'max_concurrent': 1,
+            'permanently_failed_tracks': [], 'cancelled_tracks': set(), 'phase': 'downloading',
+        }
+        download_batches['B'] = {
+            'queue': ['b1'], 'queue_index': 1, 'active_count': 0, 'max_concurrent': 1,
+            'permanently_failed_tracks': [], 'cancelled_tracks': set(), 'phase': 'downloading',
+        }
+        deps, rec = _build_deps(global_max=1)
+
+        lc.on_download_completed('A', 'a1', True, deps)
+        assert [c for c in rec.calls if c[0] == 'submit_dl'] == []
+
+    def test_no_gate_means_no_waking_at_all(self):
+        # Unchanged behaviour where no global cap applies: nothing new happens.
+        download_tasks['a1'] = {'status': 'completed', 'track_info': {'name': 'X'}}
+        download_tasks['b1'] = {'status': 'pending', 'status_change_time': 0}
+        download_batches['A'] = {
+            'queue': ['a1'], 'queue_index': 1, 'active_count': 1, 'max_concurrent': 1,
+            'permanently_failed_tracks': [], 'cancelled_tracks': set(), 'phase': 'downloading',
+        }
+        download_batches['B'] = {
+            'queue': ['b1'], 'queue_index': 0, 'active_count': 0, 'max_concurrent': 1,
+            'permanently_failed_tracks': [], 'cancelled_tracks': set(), 'phase': 'downloading',
+        }
+        deps, rec = _build_deps()
+        lc.on_download_completed('A', 'a1', True, deps)
+        assert [c for c in rec.calls if c[0] == 'submit_dl'] == []
+
+
+class TestGlobalGateDoesNotStampede:
+    """One freed slot should ASK about one batch, not all of them.
+
+    start_next_batch_of_downloads re-checks the cap itself, so the outcome is
+    correct either way — only one batch ever starts. What differs is the work
+    done to get there: without an early stop, every held batch acquires its own
+    lock plus tasks_lock only to discover the limit is full, which is
+    O(all batches) of lock traffic per completion on exactly the large wishlist
+    this bug is about.
+
+    Counted via get_batch_lock, which is asked exactly once per batch consulted.
+    """
+
+    def _setup(self, held=('B', 'C', 'D', 'E')):
+        download_tasks['a1'] = {'status': 'completed', 'track_info': {'name': 'X'}}
+        download_batches['A'] = {
+            'queue': ['a1'], 'queue_index': 1, 'active_count': 1, 'max_concurrent': 1,
+            'permanently_failed_tracks': [], 'cancelled_tracks': set(), 'phase': 'downloading',
+        }
+        for name in held:
+            download_tasks[f'{name.lower()}1'] = {'status': 'pending', 'status_change_time': 0}
+            download_batches[name] = {
+                'queue': [f'{name.lower()}1'], 'queue_index': 0, 'active_count': 0,
+                'max_concurrent': 1, 'permanently_failed_tracks': [],
+                'cancelled_tracks': set(), 'phase': 'downloading',
+            }
+
+    def test_stops_consulting_batches_once_the_limit_refills(self):
+        self._setup()
+        consulted = []
+        deps, rec = _build_deps(global_max=1)
+        deps.get_batch_lock = lambda bid: (consulted.append(bid), threading.Lock())[1]
+
+        lc.on_download_completed('A', 'a1', True, deps)
+
+        # A's own restart, then ONE held batch takes the freed slot. The other
+        # three are never consulted at all.
+        held_consulted = [b for b in consulted if b in ('B', 'C', 'D', 'E')]
+        assert len(held_consulted) == 1, f'consulted {held_consulted}, expected to stop after one'
+
+        started = [c for c in rec.calls if c[0] == 'submit_dl']
+        assert len(started) == 1
+
+    def test_two_free_slots_wake_two_batches(self):
+        # The stop is on the LIMIT, not a hardcoded one-per-completion.
+        self._setup()
+        consulted = []
+        deps, rec = _build_deps(global_max=3)
+        deps.get_batch_lock = lambda bid: (consulted.append(bid), threading.Lock())[1]
+
+        lc.on_download_completed('A', 'a1', True, deps)
+
+        started = [c for c in rec.calls if c[0] == 'submit_dl']
+        assert len(started) == 3, f'3 slots free, expected 3 starts, got {len(started)}'

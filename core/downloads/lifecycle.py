@@ -278,6 +278,11 @@ class LifecycleDeps:
     spotify_public_discovery_states: dict
     ensure_wishlist_track_format: Callable | None = None
     ensure_spotify_track_format: Callable | None = None
+    # Returns the cap on TOTAL active workers across every batch, or None when
+    # no global gate applies (a source that is not rate-limited the way
+    # Soulseek is). Optional so a caller that has not been updated keeps the
+    # old per-batch behaviour rather than losing its limit entirely.
+    get_global_max_concurrent: Callable[[], int | None] | None = None
 
     def __post_init__(self) -> None:
         if self.ensure_wishlist_track_format is None:
@@ -315,10 +320,43 @@ def start_next_batch_of_downloads(batch_id: str, deps: LifecycleDeps) -> None:
             queue_index = batch['queue_index']
             active_count = batch['active_count']
 
-            logger.info(f"[Batch Lock] Starting workers for {batch_id}: active={active_count}, max={max_concurrent}, queue_pos={queue_index}/{len(queue)}")
+            # THE GLOBAL GATE (#1166).
+            #
+            # max_concurrent is PER BATCH, and so is the lock above, so nothing
+            # stopped two batches each starting "1 of 1" at the same moment. A
+            # wishlist that groups tracks into ten album batches therefore ran
+            # ten Soulseek searches against a configured limit of one — each
+            # batch honestly logging Active: 1/1 while the real total was ten.
+            # That is what floods Soulseek and earns a rate-limit.
+            #
+            # The cap is on the SUM across every batch. Batches are not turned
+            # away, only held: a blocked one starts nothing now and is woken by
+            # on_download_completed when any batch anywhere frees a slot.
+            global_max = None
+            if deps.get_global_max_concurrent is not None:
+                try:
+                    global_max = deps.get_global_max_concurrent()
+                except Exception as gate_error:  # noqa: BLE001
+                    # A broken gate must not stop downloads entirely; fall back
+                    # to the per-batch limit, which is the old behaviour.
+                    logger.error(f"[Batch Lock] Global concurrency gate failed, using per-batch limit: {gate_error}")
+                    global_max = None
+
+            logger.info(f"[Batch Lock] Starting workers for {batch_id}: active={active_count}, max={max_concurrent}, queue_pos={queue_index}/{len(queue)}, global_max={global_max}")
 
             # Start downloads up to the concurrent limit
             while active_count < max_concurrent and queue_index < len(queue):
+                if global_max is not None:
+                    total_active = sum(
+                        b.get('active_count', 0) for b in download_batches.values()
+                    )
+                    if total_active >= global_max:
+                        logger.info(
+                            f"[Batch Lock] {batch_id} holding at the GLOBAL limit "
+                            f"({total_active}/{global_max} active across all batches) — "
+                            f"{len(queue) - queue_index} still queued"
+                        )
+                        break
                 task_id = queue[queue_index]
 
                 # CRITICAL V2 FIX: Skip cancelled tasks instead of trying to restart them
@@ -376,7 +414,86 @@ def start_next_batch_of_downloads(batch_id: str, deps: LifecycleDeps) -> None:
 # on_download_completed
 # ---------------------------------------------------------------------------
 
+
+def _wake_waiting_batches(finished_batch_id: str, deps: LifecycleDeps) -> None:
+    """Offer a just-freed worker slot to the batches the global gate is holding.
+
+    Without this the cap would turn a concurrency bug into a stall, which is
+    worse: a freed slot was only ever offered back to the batch that freed it,
+    which is fine when every batch has its own limit and useless when they share
+    one.
+
+    Called on BOTH completion paths. The batch finishing its LAST task returns
+    early — and that is exactly when a slot frees and somebody else should get
+    it, so waking only on the "more work to do" path misses the common case
+    entirely. (It did; a test caught it.)
+
+    Each woken batch re-checks the cap itself under its own lock, so this is a
+    nudge rather than a decision. The list is built under tasks_lock and the
+    calls made outside it: start_next_batch_of_downloads takes the batch lock
+    and THEN tasks_lock, so calling it while holding tasks_lock inverts that
+    order — the deadlock this codebase has already been bitten by.
+    """
+    if deps.get_global_max_concurrent is None:
+        return
+
+    waiting = []
+    try:
+        with tasks_lock:
+            for other_id, other in download_batches.items():
+                if other_id == finished_batch_id:
+                    continue
+                if other.get('phase') in ('complete', 'error', 'cancelled', 'failed'):
+                    continue
+                if other.get('queue_index', 0) < len(other.get('queue', [])):
+                    waiting.append(other_id)
+    except Exception as scan_error:  # noqa: BLE001
+        logger.error(f"[Batch Manager] Could not scan for waiting batches: {scan_error}")
+        return
+
+    # STOP AS SOON AS THE LIMIT REFILLS. One slot freed, so usually one batch
+    # can take it — waking the other thirty-seven would have each of them
+    # acquire two locks only to find the limit full and log about it. Re-reading
+    # the total between wakes keeps a completion O(batches that can actually
+    # start) instead of O(all batches).
+    try:
+        global_max = deps.get_global_max_concurrent()
+    except Exception:  # noqa: BLE001
+        global_max = None
+
+    for other_id in waiting:
+        if global_max is not None:
+            with tasks_lock:
+                total_active = sum(b.get('active_count', 0) for b in download_batches.values())
+            if total_active >= global_max:
+                break
+        try:
+            start_next_batch_of_downloads(other_id, deps)
+        except Exception as wake_error:  # noqa: BLE001
+            logger.error(f"[Batch Manager] Error waking batch {other_id}: {wake_error}")
+
+
 def on_download_completed(batch_id: str, task_id: str, success: bool, deps: LifecycleDeps) -> None:
+    """Handle a finished task, then offer the freed slot to whoever is waiting.
+
+    A wrapper, because the slot has to be offered on EVERY exit path and always
+    with tasks_lock released. The inner function returns early when its batch
+    finishes its last task — which is exactly when a slot frees and somebody
+    else should get it — and it does so from deep inside the lock. Waking from
+    in there deadlocks the engine outright: threading.Lock is not reentrant and
+    the wake needs the same lock. Both mistakes were made on the way here; the
+    first was caught by a test that failed, the second by one that hung.
+
+    `finally`, not a trailing call: the lock is released by the time the inner
+    function has returned, and a slot may have freed even if it raised.
+    """
+    try:
+        _on_download_completed(batch_id, task_id, success, deps)
+    finally:
+        _wake_waiting_batches(batch_id, deps)
+
+
+def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: LifecycleDeps) -> None:
     """Called when a download completes to start the next one in queue."""
     with tasks_lock:
         if batch_id not in download_batches:
