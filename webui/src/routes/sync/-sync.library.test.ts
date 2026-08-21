@@ -500,44 +500,68 @@ describe('which gap a playlist has', () => {
   });
 });
 
-describe('ownership is NOT a gap, because the count is not trustworthy', () => {
+describe('when the ownership figure may be stated', () => {
   /**
-   * This was briefly wired in and taken straight back out. in_library_count
-   * comes from a SQL join whose ID path only fires when the source id happens
-   * to be a Spotify id — a ListenBrainz playlist carries an MBID and matches
-   * nothing — leaving an exact case-sensitive name join the query's own comment
-   * admits undercounts.
-   *
-   * Measured against reality: a 50-track ListenBrainz playlist reading 47/50 on
-   * the media server, and 47/50 in SoulSync's own Server Playlists tab, was
-   * reported as 18 here. The error is differential — near enough for Spotify,
-   * badly wrong elsewhere — which is worse than uniformly wrong, because it
-   * looks right wherever you happen to check it.
-   *
-   * These tests exist so re-wiring it is a deliberate act with a failing test
-   * to answer, not an easy-looking one-liner.
+   * The count comes from the sync matcher now, not a SQL join. Verified against
+   * the real library: ListenBrainz Weekly Exploration reads 47 of 50, which is
+   * what the media server itself reports. The old join said 18.
    */
-  const owned96 = row({ total_count: 140, discovered_count: 140, in_library_count: 96 });
+  const full = { total_count: 50, discovered_count: 50 };
 
-  it('a fully discovered playlist rests, however little of it is on disk', () => {
-    expect(libraryGap(owned96)).toBe('none');
-    expect(libraryNeedsAttention(owned96)).toBe(false);
-    expect(libraryCardState(owned96)).toBe('ok');
+  it('is known once every track has been checked', () => {
+    expect(libraryOwnedKnown(row({ ...full, in_library_count: 47, library_checked_count: 50 }))).toBe(
+      true,
+    );
+    expect(libraryOwned(row({ ...full, in_library_count: 47, library_checked_count: 50 }))).toBe(47);
   });
 
-  it('owning NONE of it still does not flag the card', () => {
-    const owned0 = row({ total_count: 140, discovered_count: 140, in_library_count: 0 });
-    expect(libraryCardState(owned0)).toBe('ok');
+  it('is UNKNOWN for a playlist the matcher has never checked', () => {
+    // Not synced since the flag existed. 0 owned here means "nobody looked",
+    // and reporting it as "you own none of it" is exactly how the previous
+    // attempt at this went wrong.
+    expect(libraryOwnedKnown(row({ ...full, in_library_count: 0 }))).toBe(false);
+    expect(libraryOwnedKnown(row({ ...full, in_library_count: 0, library_checked_count: 0 }))).toBe(
+      false,
+    );
   });
 
-  it('the ring and the missing count both stay on DISCOVERY', () => {
-    expect(libraryCoveragePct(owned96)).toBe(100);
-    expect(libraryMissingCount(owned96)).toBe(0);
+  it('is UNKNOWN when only some tracks were checked', () => {
+    // The sync skips rows with no usable id or name, so a partial check would
+    // let a small "not downloaded" number stand for a playlist where many more
+    // were never examined.
+    expect(libraryOwnedKnown(row({ ...full, in_library_count: 12, library_checked_count: 20 }))).toBe(
+      false,
+    );
   });
 
-  it('the accessor still reads the field, so the fix is a rewiring not a rebuild', () => {
-    expect(libraryOwned(owned96)).toBe(96);
-    expect(libraryOwnedKnown(owned96)).toBe(true);
-    expect(libraryOwnedKnown(row({}))).toBe(false);
+  it('is UNKNOWN for an empty playlist, which cannot be short of anything', () => {
+    expect(libraryOwnedKnown(row({ total_count: 0, library_checked_count: 0 }))).toBe(false);
+  });
+});
+
+describe('ownership still does not flag the card', () => {
+  /**
+   * The number is trustworthy now; whether a partly-owned playlist is a PROBLEM
+   * is a separate question and not yet settled. Only one playlist in the
+   * library has been checked so far, so there is no evidence about how common
+   * partial ownership is — and marking most of a library as needing attention
+   * is the same mistake the rings avoid.
+   */
+  const owned = row({
+    total_count: 50,
+    discovered_count: 50,
+    in_library_count: 47,
+    library_checked_count: 50,
+  });
+
+  it('stays resting, with no ring and no attention', () => {
+    expect(libraryCardState(owned)).toBe('ok');
+    expect(libraryNeedsAttention(owned)).toBe(false);
+    expect(libraryGap(owned)).toBe('none');
+  });
+
+  it('the ring and missing count stay on discovery', () => {
+    expect(libraryCoveragePct(owned)).toBe(100);
+    expect(libraryMissingCount(owned)).toBe(0);
   });
 });

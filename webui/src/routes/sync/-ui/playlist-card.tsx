@@ -31,6 +31,8 @@ import {
   libraryCardState,
   libraryCoveragePct,
   libraryMissingCount,
+  libraryOwned,
+  libraryOwnedKnown,
   libraryTotal,
 } from '../-sync.library';
 import { PlaylistArt, PlaylistCollage, playlistCoverTiles } from './playlist-art';
@@ -130,6 +132,19 @@ export function playlistCardMeta(row: MirroredPlaylistRow, when: string): string
   // Only DISCOVERY is reported. A "not downloaded" count needs
   // in_library_count, which is not accurate enough to show — see libraryOwned.
   if (state === 'short') return `${tracks} · ${libraryMissingCount(row)} not found`;
+
+  // Fully discovered, but the files are not all here. Reported only when the
+  // sync matcher has checked EVERY track of this playlist — see
+  // libraryOwnedKnown. Playlists not synced since the flag existed say nothing
+  // rather than claiming you own none of them.
+  //
+  // DISPLAY ONLY: this does not make the card "short", put a ring on it, or
+  // move it into Needs attention. Whether an unowned track is a problem to fix
+  // or a normal resting state depends on how the library is used, and that is
+  // not settled — so the card states the fact and leaves the verdict alone.
+  if (libraryOwnedKnown(row) && libraryOwned(row) < total) {
+    return `${tracks} · ${total - libraryOwned(row)} not downloaded`;
+  }
 
   return when ? `${tracks} · ${when}` : tracks;
 }

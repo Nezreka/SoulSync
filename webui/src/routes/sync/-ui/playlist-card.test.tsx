@@ -370,15 +370,60 @@ describe('the meta line reports the discovery shortfall', () => {
     );
   });
 
-  it('says nothing about ownership, however little is downloaded', () => {
-    // in_library_count is not accurate enough to show — see libraryOwned. A
-    // ListenBrainz playlist with 47 of 50 files reported 18 here.
+  it('counts what is NOT DOWNLOADED once the matcher has checked every track', () => {
+    // Verified against the real library: this playlist reads 47 of 50, which is
+    // what the media server itself reports. The old SQL join said 18.
     expect(
       playlistCardMeta(
-        row({ total_count: 140, discovered_count: 140, in_library_count: 12 }),
+        row({
+          total_count: 50,
+          discovered_count: 50,
+          in_library_count: 47,
+          library_checked_count: 50,
+        }),
+        'synced 3h ago',
+      ),
+    ).toBe('50 tracks · 3 not downloaded');
+  });
+
+  it('says NOTHING about ownership for a playlist never checked', () => {
+    // 0 owned with 0 checked means nobody looked. Reporting that as "you own
+    // none of it" is exactly how the previous attempt went wrong.
+    expect(
+      playlistCardMeta(
+        row({ total_count: 140, discovered_count: 140, in_library_count: 0 }),
         'synced 3h ago',
       ),
     ).toBe('140 tracks · synced 3h ago');
+  });
+
+  it('says nothing when only SOME tracks were checked', () => {
+    expect(
+      playlistCardMeta(
+        row({
+          total_count: 140,
+          discovered_count: 140,
+          in_library_count: 12,
+          library_checked_count: 20,
+        }),
+        'synced 3h ago',
+      ),
+    ).toBe('140 tracks · synced 3h ago');
+  });
+
+  it('the discovery shortfall still wins the line', () => {
+    // Sequential, not alternative — and "not found" is the earlier problem.
+    expect(
+      playlistCardMeta(
+        row({
+          total_count: 86,
+          discovered_count: 62,
+          in_library_count: 40,
+          library_checked_count: 86,
+        }),
+        'x',
+      ),
+    ).toBe('86 tracks · 24 not found');
   });
 
   it('the button is Sync now whatever the shortfall', () => {

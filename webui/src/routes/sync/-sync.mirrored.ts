@@ -47,6 +47,15 @@ export interface MirroredPlaylistRow {
    * discovered and own none of it.
    */
   in_library_count?: number;
+  /**
+   * How many of this playlist's tracks the sync matcher has ever checked.
+   *
+   * 0 means nobody has looked, which is NOT "you own none of it" — a playlist
+   * that has never synced since the flag existed has no answer either way, and
+   * reporting the second when we only know the first is how the previous
+   * attempt at this went wrong.
+   */
+  library_checked_count?: number;
   quality_profile_id?: number | null;
   /**
    * Download missing tracks into a playlist-named folder.

@@ -90,16 +90,19 @@ export function libraryOwned(row: MirroredPlaylistRow): number {
 }
 
 /**
- * Whether the backend REPORTED an ownership figure, as distinct from reporting
- * zero.
+ * Whether the ownership figure is COMPLETE and therefore safe to state.
  *
- * The endpoint always sets in_library_count, so an absent field means a payload
- * that predates it — and a genuine 0 is exactly the case worth surfacing ("I
- * discovered all 140 and own none of them"). Collapsing the two would either
- * hide that case or flag every row on an older payload.
+ * Two things have to hold. The sync matcher must have checked this playlist at
+ * all — one not synced since the flag existed reports 0 owned, which is
+ * indistinguishable from owning none of it unless you look here, and reporting
+ * the second when you only know the first is how the previous attempt at this
+ * went wrong. And it must have checked EVERY track: the sync skips rows with no
+ * usable id or name, so a partial check would let a small "not downloaded"
+ * number stand for a playlist where many more were never examined.
  */
 export function libraryOwnedKnown(row: MirroredPlaylistRow): boolean {
-  return typeof row.in_library_count === 'number';
+  const total = libraryTotal(row);
+  return total > 0 && (row.library_checked_count || 0) >= total;
 }
 
 /**
