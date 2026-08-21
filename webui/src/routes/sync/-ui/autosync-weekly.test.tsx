@@ -189,6 +189,9 @@ describe('AutoSyncWeeklyEditor (1026-1077)', () => {
       target: { value: '23:45' },
     });
     expect(props.onChange).toHaveBeenCalledWith(expect.objectContaining({ time: '23:45' }));
+    // The timezone is folded away behind a summary line — it already defaults
+    // to the browser's own, so almost nobody needs to change it.
+    fireEvent.click(container.querySelector('.auto-sync-tz-summary') as HTMLElement);
     fireEvent.change(container.querySelector('#auto-sync-weekly-tz') as HTMLInputElement, {
       target: { value: 'Asia/Tokyo' },
     });
@@ -201,6 +204,9 @@ describe('AutoSyncWeeklyEditor (1026-1077)', () => {
       target: { value: '' },
     });
     expect(props.onChange).toHaveBeenCalledWith(expect.objectContaining({ time: '09:00' }));
+    // The timezone is folded away behind a summary line — it already defaults
+    // to the browser's own, so almost nobody needs to change it.
+    fireEvent.click(container.querySelector('.auto-sync-tz-summary') as HTMLElement);
     fireEvent.change(container.querySelector('#auto-sync-weekly-tz') as HTMLInputElement, {
       target: { value: '' },
     });
@@ -228,6 +234,42 @@ describe('AutoSyncWeeklyEditor (1026-1077)', () => {
     const { container } = renderEditor({ playlistName: 'Deep Focus' });
     expect(container.querySelector('.auto-sync-weekly-editor-playlist')?.textContent).toBe(
       'Deep Focus',
+    );
+  });
+
+  /* ── the timezone fold ── */
+  it('shows the zone as a sentence, not a text field', () => {
+    // It defaults to the browser's own, so it is right without being touched.
+    const { container } = renderEditor();
+    expect(container.querySelector('#auto-sync-weekly-tz')).toBeNull();
+    expect(container.querySelector('.auto-sync-tz-summary')?.textContent).toContain('UTC');
+  });
+
+  it('opens to a field when you ask to change it', () => {
+    const { container } = renderEditor();
+    fireEvent.click(container.querySelector('.auto-sync-tz-summary') as HTMLElement);
+    expect(container.querySelector('#auto-sync-weekly-tz')).not.toBeNull();
+  });
+
+  it('says so when the zone is one the system does not know', () => {
+    // Silently accepting it would schedule a run for an hour that never comes.
+    const { container } = renderEditor({
+      draft: { playlistId: 1, time: '09:00', days: ['mon'], tz: 'America/Los_Angles' },
+    });
+    fireEvent.click(container.querySelector('.auto-sync-tz-summary') as HTMLElement);
+    const field = container.querySelector('#auto-sync-weekly-tz') as HTMLElement;
+    expect(field.getAttribute('aria-invalid')).toBe('true');
+    expect(container.querySelector('.auto-sync-tz-bad')?.textContent).toContain(
+      'not a timezone this system knows',
+    );
+  });
+
+  it('shows the ordinary hint while the zone is valid', () => {
+    const { container } = renderEditor();
+    fireEvent.click(container.querySelector('.auto-sync-tz-summary') as HTMLElement);
+    expect(container.querySelector('.auto-sync-tz-bad')).toBeNull();
+    expect(container.querySelector('#auto-sync-weekly-tz')?.getAttribute('aria-invalid')).toBe(
+      'false',
     );
   });
 });

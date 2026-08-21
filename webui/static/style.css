@@ -12551,9 +12551,11 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     color: #ef4444;
 }
 
+/* Auto-fit rather than a fixed four: the strip is three tiles now, and the
+   failure one only exists when there ARE failures. */
 .auto-sync-summary {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 10px;
     padding: 14px 20px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
@@ -13252,6 +13254,34 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 .auto-sync-playlist.scheduled {
     border-color: rgba(var(--accent-rgb), 0.22);
 }
+
+/* The one number in this strip you would act on. */
+.auto-sync-summary-bad {
+    border-color: rgba(224, 85, 78, 0.35) !important;
+    background: rgba(224, 85, 78, 0.09) !important;
+}
+
+.auto-sync-summary-bad span,
+.auto-sync-summary-bad small {
+    color: #f0928c !important;
+}
+
+/* The timezone, folded away: it already defaults to the browser's own. */
+.auto-sync-tz-summary {
+    align-self: flex-start;
+    padding: 6px 0;
+    border: none;
+    background: none;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12.5px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.auto-sync-tz-summary:hover { color: rgba(255, 255, 255, 0.85); }
+.auto-sync-tz-summary b { color: rgba(255, 255, 255, 0.8); font-weight: 600; }
+
+.auto-sync-weekly-editor-hint.auto-sync-tz-bad { color: #e3a63c; }
 
 .auto-sync-playlist.unavailable {
     cursor: default;

@@ -125,7 +125,7 @@ describe('closing (594, 585)', () => {
 });
 
 describe('the summary counters (658-664)', () => {
-  it('counts both schedule kinds, active schedules, pipelines and tracks', () => {
+  it('shows one fact per slot, with paused riding along on the schedule count', () => {
     const { container } = renderModal({
       state: emptyState({
         playlists: [{ id: 1, track_count: 10 }, { id: 2, track_count: '5' }, { id: 3 }],
@@ -140,8 +140,40 @@ describe('the summary counters (658-664)', () => {
     const nums = Array.from(container.querySelectorAll('.auto-sync-summary span')).map(
       (s) => s.textContent,
     );
-    // 3 scheduled (2 hourly + 1 weekly), 2 active, 2 pipelines, 15 tracks.
-    expect(nums).toEqual(['3', '2', '2', '15']);
+    // 3 scheduled (2 hourly + 1 weekly) and 2 pipelines. "active schedules"
+    // was the same number as "scheduled" until something was paused, so the
+    // paused one rides on the first tile instead of taking a second; and
+    // "mirrored tracks" was never about scheduling at all.
+    expect(nums).toEqual(['3', '2']);
+    expect(container.querySelector('.auto-sync-summary small')?.textContent).toBe(
+      'scheduled playlists · 1 paused',
+    );
+  });
+
+  it('says nothing about paused when nothing is', () => {
+    const { container } = renderModal({
+      state: emptyState({
+        playlists: [{ id: 1, track_count: 10 }],
+        playlistSchedules: { '1': { hours: 24, enabled: true } as never },
+      }),
+    });
+    expect(container.querySelector('.auto-sync-summary small')?.textContent).toBe(
+      'scheduled playlist',
+    );
+  });
+
+  it('surfaces failed runs, which is the one number here you would act on', () => {
+    const { container } = renderModal({
+      state: emptyState({ runHistory: [{ status: 'error' }, { status: 'error' }] as never }),
+    });
+    const bad = container.querySelector('.auto-sync-summary-bad');
+    expect(bad?.querySelector('span')?.textContent).toBe('2');
+    expect(bad?.querySelector('small')?.textContent).toBe('failed runs');
+  });
+
+  it('hides the failure tile when there are none', () => {
+    const { container } = renderModal();
+    expect(container.querySelector('.auto-sync-summary-bad')).toBeNull();
   });
 
   it('reads enabled as plain truthiness here, unlike everywhere else (660)', () => {

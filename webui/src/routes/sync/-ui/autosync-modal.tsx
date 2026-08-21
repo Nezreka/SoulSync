@@ -287,23 +287,30 @@ export function AutoSyncModal({
   return overlay(
     <div className="auto-sync-modal">
       {header(BLURB)}
+      {/* One fact per slot, and the better fact.
+          - "scheduled playlists" and "active schedules" were the same number
+            until something was paused. Paused is the interesting half, so it
+            rides along and only appears when it is not zero.
+          - "mirrored tracks" was never about scheduling at all. Failed runs
+            are, and they are the one number here you would act on. */}
       <div className="auto-sync-summary">
         <div>
           <span>{summary.scheduledCount}</span>
-          <small>scheduled playlists</small>
-        </div>
-        <div>
-          <span>{summary.enabledCount}</span>
-          <small>active schedules</small>
+          <small>
+            scheduled {summary.scheduledCount === 1 ? 'playlist' : 'playlists'}
+            {summary.pausedCount > 0 ? ` · ${summary.pausedCount} paused` : ''}
+          </small>
         </div>
         <div>
           <span>{summary.pipelineCount}</span>
           <small>automation pipelines</small>
         </div>
-        <div>
-          <span>{summary.totalTracks}</span>
-          <small>mirrored tracks</small>
-        </div>
+        {summary.historyErrorCount > 0 && (
+          <div className="auto-sync-summary-bad">
+            <span>{summary.historyErrorCount}</span>
+            <small>failed {summary.historyErrorCount === 1 ? 'run' : 'runs'}</small>
+          </div>
+        )}
       </div>
 
       <AutoSyncMonitorPanel

@@ -26,6 +26,7 @@ import {
   autoSyncSavedToast,
   autoSyncSchedulePayload,
   autoSyncSummary,
+  isValidTimezone,
   autoSyncAutomationCardFields,
   autoSyncFormatTrigger,
   autoSyncHumanizeType,
@@ -1475,7 +1476,7 @@ describe('the modal shell pure core (571-740, 1303-1313)', () => {
     expect(autoSyncNormalizeTab(undefined)).toBe('schedule');
   });
 
-  it('summarises an empty board as four zeroes', () => {
+  it('summarises an empty board as zeroes', () => {
     expect(
       autoSyncSummary({
         playlists: [],
@@ -1486,6 +1487,7 @@ describe('the modal shell pure core (571-740, 1303-1313)', () => {
       }),
     ).toEqual({
       scheduledCount: 0,
+      pausedCount: 0,
       enabledCount: 0,
       pipelineCount: 0,
       totalTracks: 0,
@@ -1503,6 +1505,8 @@ describe('the modal shell pure core (571-740, 1303-1313)', () => {
     });
     expect(s).toEqual({
       scheduledCount: 2,
+      // scheduled minus enabled: the exception the strip actually shows.
+      pausedCount: 1,
       enabledCount: 1,
       pipelineCount: 1,
       totalTracks: 15,
@@ -1591,5 +1595,21 @@ describe('autoSyncSavedToast (2098, 2283)', () => {
     expect(autoSyncSavedToast('Late Night', 'weekly', 'Mon, Fri @ 09:00')).toBe(
       'Late Night scheduled mon, fri @ 09:00',
     );
+  });
+});
+
+describe('isValidTimezone', () => {
+  // The field is free text and a typo does not fail loudly: it produces a
+  // schedule that quietly never runs at the hour you meant.
+  it('accepts real IANA zones', () => {
+    for (const tz of ['UTC', 'America/Los_Angeles', 'Europe/London', 'Asia/Tokyo']) {
+      expect(isValidTimezone(tz)).toBe(true);
+    }
+  });
+
+  it('rejects a typo, an empty value and obvious nonsense', () => {
+    for (const tz of ['', 'America/Los_Angles', 'Europe/Lundon', 'nonsense', 'GMT+25']) {
+      expect(isValidTimezone(tz)).toBe(false);
+    }
   });
 });

@@ -43,6 +43,7 @@ import {
   autoSyncNextRunLabel,
   autoSyncWeeklyLabel,
   detectBrowserTimezone,
+  isValidTimezone,
   type AutoSyncHistoryEntry,
   type AutoSyncHourlyEntry,
   type AutoSyncWeeklyEntry,
@@ -166,6 +167,9 @@ export function AutoSyncWeeklyEditor({
     return () => document.removeEventListener('keydown', onKey, true);
   }, [onClose]);
 
+  const [tzOpen, setTzOpen] = useState(false);
+  const tzValid = isValidTimezone(draft.tz);
+
   const toggleDay = (day: string) => {
     // 2192-2202. Guarded against a day outside the seven, same as the vanilla.
     if (!AUTO_SYNC_WEEKDAYS.includes(day)) return;
@@ -218,19 +222,41 @@ export function AutoSyncWeeklyEditor({
             }}
           />
         </div>
+        {/* The timezone is already correct: it defaults to the browser's own.
+            It was a prominent free-text IANA field, which is a lot of surface
+            for something almost nobody needs to change, and a typo there does
+            not fail loudly — it produces a schedule that quietly never fires at
+            the hour you meant. Folded away, and validated when opened. */}
         <div className="auto-sync-weekly-editor-section">
-          <label htmlFor="auto-sync-weekly-tz">Timezone (IANA)</label>
-          <input
-            type="text"
-            id="auto-sync-weekly-tz"
-            value={draft.tz}
-            onChange={(e) => {
-              onChange({ ...draft, tz: e.target.value || 'UTC' });
-            }}
-          />
-          <small className="auto-sync-weekly-editor-hint">
-            e.g. America/Los_Angeles, Europe/London, Asia/Tokyo
-          </small>
+          {tzOpen ? (
+            <>
+              <label htmlFor="auto-sync-weekly-tz">Timezone</label>
+              <input
+                type="text"
+                id="auto-sync-weekly-tz"
+                value={draft.tz}
+                aria-invalid={!tzValid}
+                onChange={(e) => {
+                  onChange({ ...draft, tz: e.target.value || 'UTC' });
+                }}
+              />
+              <small
+                className={`auto-sync-weekly-editor-hint${tzValid ? '' : ' auto-sync-tz-bad'}`}
+              >
+                {tzValid
+                  ? 'e.g. America/Los_Angeles, Europe/London, Asia/Tokyo'
+                  : `"${draft.tz}" is not a timezone this system knows. The schedule would never run at the hour you meant.`}
+              </small>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="auto-sync-tz-summary"
+              onClick={() => setTzOpen(true)}
+            >
+              Runs in <b>{draft.tz}</b> · change
+            </button>
+          )}
         </div>
         <div className="auto-sync-weekly-editor-actions">
           {hasExisting ? (
