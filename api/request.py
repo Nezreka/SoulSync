@@ -4,6 +4,7 @@ Inbound music request endpoint — accept a search query from external sources
 """
 
 import threading
+import time
 import uuid
 from datetime import datetime, timedelta
 
@@ -95,6 +96,67 @@ def stop_cleanup_thread(timeout: float = 2.0) -> None:
         _cleanup_stop_event.clear()
 
 
+# How long to watch a transfer before giving up on seeing it finish, and how
+# often to look. A single track is normally seconds; the ceiling is well inside
+# the 1-hour record TTL, so a watch can never outlive the record it updates.
+_COMPLETION_TIMEOUT_SECONDS = 15 * 60
+_COMPLETION_POLL_SECONDS = 5
+
+
+def _await_download_completion(request_id, soulseek, download_id, run_async):
+    """Watch a transfer until it reaches a terminal state, then record it.
+
+    Sets ``completed`` or ``failed``. On timeout the status is deliberately LEFT
+    as ``downloading`` — the transfer may well still be going, and calling it
+    failed because we stopped watching would be a worse lie than admitting the
+    endpoint stopped looking. ``timed_out`` records that we did.
+
+    States come from the shared classifier rather than a local list of strings.
+    slskd reports compound states like "Completed, Errored", so a check for
+    "Completed" reads a failed transfer as a successful one.
+    """
+    from core.downloads.status import classify_engine_state
+
+    deadline = time.monotonic() + _COMPLETION_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if _cleanup_stop_event.wait(timeout=_COMPLETION_POLL_SECONDS):
+            return  # server shutting down — stop watching, leave the last state
+        with _requests_lock:
+            if request_id not in _pending_requests:
+                return  # expired or cleaned up under us
+
+        try:
+            status = run_async(soulseek.get_download_status(download_id))
+        except Exception as e:  # noqa: BLE001 - a poll failure must not fail the download
+            logger.debug("Request %s: could not read transfer state: %s", request_id, e)
+            continue
+
+        verdict = classify_engine_state(getattr(status, 'state', None) if status else None)
+        if verdict == 'pending':
+            continue
+
+        with _requests_lock:
+            req = _pending_requests.get(request_id)
+            if req is None:
+                return
+            if verdict == 'success':
+                req['status'] = 'completed'
+            else:
+                req['status'] = 'failed'
+                req['error'] = f"Download {verdict}: {getattr(status, 'state', '') or 'unknown'}"
+            req['completed_at'] = datetime.now().isoformat()
+        return
+
+    with _requests_lock:
+        req = _pending_requests.get(request_id)
+        if req is not None and req.get('status') == 'downloading':
+            req['timed_out'] = True
+            logger.info(
+                "Request %s still downloading after %ss — no longer watching",
+                request_id, _COMPLETION_TIMEOUT_SECONDS,
+            )
+
+
 def _run_search_and_download(request_id, query, notify_url):
     """Background worker: search, download, update status, notify."""
     try:
@@ -122,9 +184,23 @@ def _run_search_and_download(request_id, query, notify_url):
                 else:
                     _pending_requests[request_id]['status'] = 'not_found'
                     _pending_requests[request_id]['error'] = 'No match found'
-                _pending_requests[request_id]['completed_at'] = datetime.now().isoformat()
+                    # A terminal state, so it is stamped. `downloading` is NOT
+                    # terminal and no longer claims to be — see below.
+                    _pending_requests[request_id]['completed_at'] = datetime.now().isoformat()
 
-        # Send notification to callback URL if provided
+        # WATCH THE TRANSFER TO A TERMINAL STATE (#1168).
+        #
+        # `downloading` used to be written once and never revisited, so the
+        # `completed` the docstring promised was unreachable and a caller had no
+        # way to tell success from a transfer that died. Nothing else was going
+        # to update it: this endpoint's requests do not go through the batch
+        # engine that tracks everything else.
+        if result:
+            _await_download_completion(request_id, soulseek, result, run_async)
+
+        # Send notification to callback URL if provided. Sent AFTER the wait, so
+        # the payload carries a terminal status — a callback that always says
+        # "downloading" and never follows up is the same defect in webhook form.
         if notify_url:
             try:
                 with _requests_lock:
@@ -202,18 +278,30 @@ def register_routes(bp):
 
         logger.info(f"Music request queued: '{query}' (id={request_id})")
 
+        # `api_success(..., status=202)`, NOT `api_success(...), 202`. The helper
+        # already returns (response, status), so appending another status built
+        # ((response, 200), 202) — a nested tuple Flask refuses, which it
+        # reported as a 500. The request itself queued and downloaded fine, so
+        # the endpoint looked healthy in the logs while every caller saw the
+        # failure. (#1168)
         return api_success({
             "request_id": request_id,
             "status": "queued",
             "query": query,
-        }), 202
+        }, status=202)
 
     @bp.route("/request/<request_id>", methods=["GET"])
     @require_api_key
     def get_request_status(request_id):
         """Check the status of a music request.
 
-        Returns current status: queued → searching → downloading → completed/not_found/failed
+        queued → searching → downloading → completed / not_found / failed
+
+        `downloading` is transitional: the worker watches the transfer and
+        settles on `completed` or `failed`. It can still be the LAST state you
+        see if the transfer outlives the watch window, in which case
+        `timed_out` is true and the download may yet be running — the endpoint
+        stopped looking, which is not the same as the download stopping.
         """
         with _requests_lock:
             req = _pending_requests.get(request_id)
