@@ -470,3 +470,84 @@ class TestTheWatchDeadlineMustExist:
 
         with request_mod._requests_lock:
             assert request_mod._pending_requests["ex"].get("timed_out") is True
+
+
+class TestFoundByReadingLineByLine:
+    """Three defects a targeted review missed and a full read caught."""
+
+    def test_a_vanished_record_does_not_crash_the_no_source_path(self, monkeypatch):
+        # `terminal` was bound only INSIDE `if request_id in _pending_requests`,
+        # so a record cleaned up between queueing and the source check raised
+        # UnboundLocalError — swallowed by the outer handler and reported as
+        # "Request failed: cannot access local variable 'terminal'", which is
+        # about this function rather than the download.
+        class _App:
+            soulsync = {}  # no download_orchestrator
+
+            def _get_current_object(self):
+                return self
+
+        monkeypatch.setattr(request_mod, "current_app", _App())
+        monkeypatch.setitem(
+            sys.modules, "utils.async_helpers",
+            types.SimpleNamespace(run_async=lambda coro: coro),
+        )
+        logged = []
+        monkeypatch.setattr(request_mod.logger, "error", lambda *a, **k: logged.append(a))
+
+        # deliberately NOT registered in _pending_requests
+        request_mod._run_search_and_download("ghost", "q", notify_url=None)
+
+        assert not any("terminal" in str(a) for a in logged), \
+            f"the no-source path crashed on its own local: {logged}"
+
+    def test_the_no_source_path_still_reports_failure_normally(self, monkeypatch):
+        class _App:
+            soulsync = {}
+
+            def _get_current_object(self):
+                return self
+
+        monkeypatch.setattr(request_mod, "current_app", _App())
+        monkeypatch.setitem(
+            sys.modules, "utils.async_helpers",
+            types.SimpleNamespace(run_async=lambda coro: coro),
+        )
+        with request_mod._requests_lock:
+            request_mod._pending_requests["ns"] = {
+                "request_id": "ns", "query": "q", "status": "queued",
+                "created_at": datetime.now(), "completed_at": None,
+                "download_id": None, "error": None, "notify_url": None,
+            }
+
+        request_mod._run_search_and_download("ns", "q", notify_url=None)
+
+        with request_mod._requests_lock:
+            req = request_mod._pending_requests["ns"]
+        assert req["status"] == "failed"
+        assert "not configured" in req["error"]
+        assert req["completed_at"] is not None
+
+    def test_the_status_endpoint_returns_the_field_it_documents(self):
+        # timed_out was described in the docstring and absent from the payload —
+        # the same defect as documenting a status the code never sets, which is
+        # what this endpoint was reported for.
+        import inspect
+        fn = request_mod.register_routes
+        src = inspect.getsource(fn)
+        # Split at the end of the status handler's docstring: everything after
+        # is the code that builds the response.
+        doc_start = src.index("Check the status of a music request")
+        doc_end = src.index('"""', doc_start)
+        docstring, payload = src[doc_start:doc_end], src[doc_end:]
+
+        assert "timed_out" in docstring, "the docstring stopped mentioning timed_out"
+        assert '"timed_out"' in payload, "documented but not returned"
+
+    def test_the_status_endpoint_does_not_leak_the_callback_url(self):
+        # notify_url now lives on the record so the shared watcher can use it.
+        # It is the caller's own endpoint and has no business coming back out.
+        import inspect
+        src = inspect.getsource(request_mod.register_routes)
+        payload = src[src.index("Check the status of a music request"):]
+        assert '"notify_url"' not in payload

@@ -264,13 +264,21 @@ def _run_search_and_download(request_id, query, notify_url):
 
         soulseek = current_app._get_current_object().soulsync.get('download_orchestrator')
         if not soulseek:
+            # Initialised BEFORE the guard: the record can be cleaned up between
+            # queueing and this check, and `terminal` was only bound inside the
+            # `if`, so notifying raised UnboundLocalError. The outer handler
+            # swallowed it, reporting the request as failed for a reason that
+            # was about this function rather than the download.
+            terminal = None
             with _requests_lock:
                 if request_id in _pending_requests:
-                    _pending_requests[request_id]['status'] = 'failed'
-                    _pending_requests[request_id]['error'] = 'Download source not configured'
-                    _pending_requests[request_id]['completed_at'] = datetime.now().isoformat()
-                    terminal = dict(_pending_requests[request_id])
-            _notify(terminal)
+                    req = _pending_requests[request_id]
+                    req['status'] = 'failed'
+                    req['error'] = 'Download source not configured'
+                    req['completed_at'] = datetime.now().isoformat()
+                    terminal = dict(req)
+            if terminal:
+                _notify(terminal)
             return
 
         result = run_async(soulseek.search_and_download_best(query))
@@ -394,8 +402,8 @@ def register_routes(bp):
 
         queued → searching → downloading → completed / not_found / failed
 
-        `downloading` is transitional: the worker watches the transfer and
-        settles on `completed` or `failed`. It can still be the LAST state you
+        `downloading` is transitional: a shared background watcher settles it
+        on `completed` or `failed`. It can still be the LAST state you
         see if the transfer outlives the watch window, in which case
         `timed_out` is true and the download may yet be running — the endpoint
         stopped looking, which is not the same as the download stopping.
@@ -413,6 +421,10 @@ def register_routes(bp):
             "download_id": req.get('download_id'),
             "error": req.get('error'),
             "completed_at": req.get('completed_at'),
+            # Documented above, so it has to be HERE. Promising a field the
+            # caller cannot read is the same defect as promising a status the
+            # code never sets, which is what this endpoint was reported for.
+            "timed_out": bool(req.get('timed_out')),
         })
 
 
