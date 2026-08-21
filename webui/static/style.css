@@ -14984,9 +14984,15 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     margin-top: 5px;
 }
 
+/* minmax(0, ...) everywhere below, never a bare `1fr`.
+   A bare `1fr` is `minmax(auto, 1fr)`, and that `auto` minimum is the item's
+   MIN-CONTENT size — so the track refuses to go narrower than the widest
+   unbreakable thing inside it. On a phone that was the nine-chip source filter
+   strip, which held .sync-main-panel at 748px inside a 390px viewport and made
+   the whole document scroll sideways. Measured, not guessed. */
 .sync-content-area {
     display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     /* Sidebar hidden by default, shown when sync starts */
     gap: 25px;
     /* min-height: calc(90vh - 200px);  Minimum height, but allow expansion */
@@ -14996,7 +15002,7 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 /* Hide sidebar on laptop and smaller screens */
 @media (max-width: 1300px) {
     .sync-content-area {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
         /* Single column - main panel takes full width */
         gap: 0;
     }
@@ -15040,7 +15046,7 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 }
 
 .sync-content-area--with-sidebar {
-    grid-template-columns: 2.5fr 0.75fr;
+    grid-template-columns: minmax(0, 2.5fr) minmax(0, 0.75fr);
 }
 
 /*
@@ -15052,7 +15058,7 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
  */
 @media (max-width: 1300px) {
     .sync-content-area--with-sidebar {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
         gap: 0;
     }
 }
@@ -78357,8 +78363,36 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 
        The trailing padding is what keeps the fade off the last chip's text
        once you reach the end. */
+    /* THE ROW STOPS BEING A FLEX CONTAINER, which is what actually makes the
+       strip scroll.
+
+       overflow-x:auto alone did nothing, and measuring it in a real browser at
+       390px said why: the strip was 736px wide inside a 246px parent. It never
+       shrank, so it had no overflow of its OWN to scroll — it simply overflowed
+       upward until .sync-main-panel (overflow-x: hidden) clipped it, which is
+       why the chips were unreachable rather than merely off-screen.
+
+       It refused to shrink because a flex item's automatic minimum size is its
+       min-content width, and `flex-basis: 100%` could not save it either: the
+       percentage resolves against a parent whose main size is indefinite here,
+       so it falls back to content size. min-width:0 on the chain did not fix it
+       (measured, not assumed).
+
+       As a BLOCK-level child the strip is simply as wide as its parent, full
+       stop — no intrinsic floor to fight — and its own overflow-x can finally
+       do the scrolling. Verified in Chromium at 390px: .sync-main-panel stops
+       overflowing entirely and the strip reports scrollWidth 736 in a 246px
+       box. */
+    .library-filters { display: block; }
+    .library-tabs {
+        display: flex;
+        /* The row's flex `gap` does nothing once it is a block. */
+        margin-bottom: 10px;
+    }
+
     .library-sources {
-        flex-basis: 100%;
+        display: flex;
+        flex-basis: auto;
         padding-right: 30px;
         scroll-snap-type: x proximity;
         -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 30px), transparent);
@@ -78366,9 +78400,15 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     }
     .library-source { scroll-snap-align: start; }
 
-    /* space-between pushed the two strips apart when they shared a line; on
-       one-per-line they should both simply start at the left. */
-    .library-filters { justify-content: flex-start; }
+    /* Same disease as the filter row, same cure. `.sync-header-row` is a flex
+       container and `.sync-header-actions` is an item that will not shrink
+       below its min-content width — seven buttons — so instead of scrolling it
+       widened the header, the shell and then the DOCUMENT, and every page in
+       the app scrolled sideways. Measured at 390px: the page came out 793px
+       wide. As a block-level child the strip is parent-width and scrolls
+       itself. */
+    .sync-header-row { display: block; }
+    .sync-header-actions { margin-top: 12px; }
 
     .sync-header { margin-bottom: 16px; }
     .sync-title { font-size: 22px; }
