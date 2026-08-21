@@ -104,10 +104,25 @@ _COMPLETION_POLL_SECONDS = 10
 
 _watcher_thread = None
 _watcher_lock = threading.Lock()
+# The watcher's OWN stop event, not the cleanup thread's. Sharing one coupled
+# two threads with different lifecycles: stopping cleanup killed the watcher,
+# and because _ensure_watcher only restarts a dead thread — onto an event that
+# is still set — it would exit again immediately and never sweep again.
+_watcher_stop_event = threading.Event()
+
+# Callbacks go out on a small pool, never on the sweep. Each is an HTTP POST
+# with a ten second timeout, so notifying fifty settled requests in line could
+# hold the sweep for eight minutes and one unreachable notify_url would stall
+# every other caller's status. Bounded, so it cannot become the thread-per-
+# request problem this design exists to avoid.
+_notify_pool = None
 
 
 def _notify(req):
-    """POST a terminal request record to its callback, if it asked for one."""
+    """POST a terminal request record to its callback, if it asked for one.
+
+    Blocking; callers on the sweep must go through _notify_async.
+    """
     url = req.get('notify_url')
     if not url:
         return
@@ -116,6 +131,22 @@ def _notify(req):
         http_requests.post(url, json=payload, timeout=10)
     except Exception as e:  # noqa: BLE001
         logger.warning(f"Failed to POST to notify_url {url}: {e}")
+
+
+def _notify_async(req):
+    """Hand a callback to the pool so a slow endpoint cannot stall the sweep."""
+    if not req.get('notify_url'):
+        return
+    global _notify_pool
+    with _watcher_lock:
+        if _notify_pool is None:
+            from concurrent.futures import ThreadPoolExecutor
+            _notify_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="api-request-notify")
+        pool = _notify_pool
+    try:
+        pool.submit(_notify, req)
+    except Exception as e:  # noqa: BLE001 - a full pool must not break the sweep
+        logger.warning(f"Could not dispatch notify_url callback: {e}")
 
 
 def _resolve_downloading_requests(soulseek, run_async):
@@ -184,7 +215,7 @@ def _resolve_downloading_requests(soulseek, run_async):
 
 def _watcher_loop(app):
     """Single background sweep for every in-flight request."""
-    while not _cleanup_stop_event.wait(timeout=_COMPLETION_POLL_SECONDS):
+    while not _watcher_stop_event.wait(timeout=_COMPLETION_POLL_SECONDS):
         try:
             with app.app_context():
                 from utils.async_helpers import run_async
@@ -192,7 +223,7 @@ def _watcher_loop(app):
                 if not soulseek:
                     continue
                 for req in _resolve_downloading_requests(soulseek, run_async):
-                    _notify(req)
+                    _notify_async(req)
         except Exception as e:  # noqa: BLE001 - the sweep must never die
             logger.error(f"Request watcher sweep failed: {e}")
 

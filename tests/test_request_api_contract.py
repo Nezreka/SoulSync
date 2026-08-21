@@ -344,3 +344,80 @@ class TestCallbacksFireOnTerminalOnly:
         finally:
             mod.http_requests.post = original
         assert posted == []
+
+
+class TestASlowCallbackCannotStallTheSweep:
+    """A callback is an HTTP POST to somebody else's server.
+
+    Notifying settled requests in line would let one unreachable notify_url
+    hold the sweep — at a ten second timeout each, fifty of them is eight
+    minutes during which nobody else's status advances. The pool is bounded, so
+    this cannot become the thread-per-request problem the shared sweep exists
+    to avoid.
+    """
+
+    def test_notifications_do_not_run_on_the_calling_thread(self):
+        import threading as _t
+        seen = []
+        caller = _t.current_thread().name
+
+        import api.request as mod
+        original = mod.http_requests.post
+
+        def _slow(url, json=None, timeout=None):
+            seen.append(_t.current_thread().name)
+
+        mod.http_requests.post = _slow
+        try:
+            mod._notify_async({"request_id": "x", "status": "completed",
+                               "notify_url": "http://example.invalid/hook"})
+            # give the pool a moment to pick it up
+            for _ in range(200):
+                if seen:
+                    break
+                time.sleep(0.01)
+        finally:
+            mod.http_requests.post = original
+
+        assert seen, "the callback never ran"
+        assert seen[0] != caller, "the callback ran on the sweep thread"
+
+    def test_the_pool_is_bounded(self):
+        import api.request as mod
+        mod._notify_async({"request_id": "x", "status": "completed",
+                           "notify_url": "http://example.invalid/hook"})
+        assert mod._notify_pool is not None
+        assert mod._notify_pool._max_workers <= 8, "an unbounded pool is the bug again"
+
+    def test_the_SWEEP_dispatches_asynchronously(self):
+        # The one that matters. Every test above calls _notify_async directly,
+        # so all of them pass with the sweep swapped back to the blocking
+        # _notify — the helper being right is not the same as the sweep using
+        # it. (Third time this shape of gap has appeared today.)
+        import inspect
+        import re
+        src = inspect.getsource(request_mod._watcher_loop)
+        assert re.search(r"_notify_async\(", src), 'the sweep is not dispatching async'
+        assert not re.search(r"(?<!_async)\b_notify\(", src), 'the sweep calls the blocking _notify'
+
+    def test_no_pool_work_when_no_callback_was_asked_for(self):
+        import api.request as mod
+        before = mod._notify_pool
+        mod._notify_async({"request_id": "x", "status": "completed"})
+        assert mod._notify_pool is before, "a request with no notify_url built a pool"
+
+
+class TestWatcherLifecycleIsIndependent:
+    def test_the_watcher_has_its_own_stop_event(self):
+        # Sharing the cleanup thread's event meant stopping cleanup killed the
+        # watcher — and since _ensure_watcher only restarts a DEAD thread onto
+        # an event that is still set, it would exit again at once and never
+        # sweep. Two threads, two lifecycles, two events.
+        assert request_mod._watcher_stop_event is not request_mod._cleanup_stop_event
+
+    def test_stopping_cleanup_does_not_stop_the_watcher(self):
+        request_mod._cleanup_stop_event.set()
+        try:
+            assert not request_mod._watcher_stop_event.is_set()
+        finally:
+            request_mod._cleanup_stop_event.clear()
