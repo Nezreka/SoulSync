@@ -1085,3 +1085,101 @@ describe('MirroredTab — finding one playlist among many', () => {
     expect(document.querySelectorAll('.library-source')).toHaveLength(before);
   });
 });
+
+describe('MirroredTab — the Scheduled tab keeps up with the menu', () => {
+  /** One automation, pointing at ROW (id 3), in the shape the card map reads. */
+  const AUTOMATION = {
+    id: 91,
+    // The name carries ownership: an automation someone else made for this
+    // playlist must not be touched.
+    name: 'Auto-Sync: playlist 3',
+    enabled: true,
+    trigger_type: 'schedule',
+    trigger_config: { interval: 24, unit: 'hours' },
+    action_type: 'playlist_pipeline',
+    action_config: { playlist_id: 3 },
+  };
+
+  it('drops a playlist off Scheduled the moment you unschedule it', async () => {
+    // Reported: scheduling moved a card out of Unscheduled at once, but
+    // unscheduling left it sitting on Scheduled until Update list was pressed.
+    let automations: unknown[] = [AUTOMATION];
+    stubFetch();
+    responder = (url, method) => {
+      if (url === '/api/mirrored-playlists') return [ROW];
+      if (url.startsWith('/api/automations')) {
+        // The DELETE is what the unschedule path issues.
+        if (method === 'DELETE') {
+          automations = [];
+          return { success: true };
+        }
+        return { automations };
+      }
+      if (url.startsWith('/api/playlist-pipeline/history')) return { history: [] };
+      return { states: [] };
+    };
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+
+    // Stand on the Scheduled tab; the card is there because it has a cadence.
+    const scheduledTab = [...document.querySelectorAll('.library-tab')].find((t) =>
+      t.textContent?.startsWith('Scheduled'),
+    ) as HTMLElement;
+    expect(scheduledTab, 'no Scheduled tab rendered').toBeTruthy();
+    fireEvent.click(scheduledTab);
+    await waitFor(() => expect(document.querySelectorAll('.pl-card')).toHaveLength(1));
+
+    // Unschedule through the card's own menu.
+    fireEvent.click(document.querySelector('.pl-card-pill') as HTMLElement);
+    const notScheduled = [...document.querySelectorAll('.pl-menu-item')].find((b) =>
+      b.textContent?.startsWith('Not scheduled'),
+    ) as HTMLElement;
+    fireEvent.click(notScheduled);
+
+    // It no longer has a cadence, so it no longer belongs on this tab.
+    await waitFor(() => expect(document.querySelectorAll('.pl-card')).toHaveLength(0));
+  });
+
+  it('picks up a cadence removed SOMEWHERE ELSE when the page reloads it', () => {
+    // The reported bug. Scheduling from the card updated the tabs at once,
+    // because that write refreshes its own map. Unscheduling from the Bulk
+    // schedule modal did not: that modal holds a second copy of the same
+    // automations, and nothing told this tab its copy had gone stale. The tab
+    // only caught up when Update list was pressed — and even that refetched
+    // rows only, never the schedules.
+    let automations: unknown[] = [AUTOMATION];
+    let reloadFromPage: (() => void) | undefined;
+    stubFetch();
+    responder = (url) => {
+      if (url === '/api/mirrored-playlists') return [ROW];
+      if (url.startsWith('/api/automations')) return { automations };
+      if (url.startsWith('/api/playlist-pipeline/history')) return { history: [] };
+      return { states: [] };
+    };
+    render(
+      <Harness
+        registerReload={(fn: () => void) => {
+          reloadFromPage = fn;
+        }}
+      />,
+    );
+
+    return waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument())
+      .then(async () => {
+        const scheduledTab = () =>
+          [...document.querySelectorAll('.library-tab')].find((t) =>
+            t.textContent?.startsWith('Scheduled'),
+          );
+        await waitFor(() => expect(scheduledTab()).toBeTruthy());
+
+        // Something outside this tab removes the schedule.
+        automations = [];
+
+        // The page reconciles — which is what closing the modal now does.
+        reloadFromPage?.();
+
+        // The tab is gone because nothing is scheduled any more.
+        await waitFor(() => expect(scheduledTab()).toBeFalsy());
+      });
+  });
+});

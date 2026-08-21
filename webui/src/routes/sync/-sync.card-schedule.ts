@@ -142,6 +142,14 @@ export interface CardScheduleController {
   ) => Promise<void>;
   /** Playlist ids currently being written, so a card can disable its select. */
   busy: ReadonlySet<string>;
+  /**
+   * Re-read the automations.
+   *
+   * Every write here already refreshes itself, so this exists for cadences
+   * changed ELSEWHERE — the Bulk schedule modal holds its own copy of the same
+   * automations, and nothing told this map when that copy changed.
+   */
+  reload: () => Promise<void>;
 }
 
 export interface UseCardSchedulesOptions {
@@ -286,5 +294,5 @@ export function useCardSchedules(options: UseCardSchedulesOptions = {}): CardSch
     [schedules, load, options.toast],
   );
 
-  return { schedules, history, loaded, set, setWeekly, busy };
+  return { schedules, history, loaded, set, setWeekly, busy, reload: load };
 }

@@ -382,7 +382,13 @@ export function SyncPage() {
           onHistoryFilterChange={autoSync.setHistoryFilter}
           onLoadMoreHistory={autoSync.loadMoreHistory}
           onRefresh={autoSync.refresh}
-          onClose={() => setAutoSyncOpen(false)}
+          onClose={() => {
+            setAutoSyncOpen(false);
+            // That modal writes the same automations the library's Scheduled /
+            // Unscheduled tabs are built from, through its own copy of the
+            // state. Without this the tab keeps the cadence it last read.
+            page.reloadMirrored();
+          }}
           boardActions={boardActions}
           weeklyActions={weeklyActions}
           onBulkSchedule={autoSync.bulkSchedule}

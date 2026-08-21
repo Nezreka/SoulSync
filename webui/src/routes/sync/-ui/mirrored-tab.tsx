@@ -369,10 +369,19 @@ export function MirroredTab({
     void load();
   }, [load]);
 
-  // Memoised so the registration below does not re-fire on every render.
+  /**
+   * Memoised so the registration below does not re-fire on every render.
+   *
+   * Reloads the SCHEDULES as well as the rows. A cadence can be changed from
+   * outside this tab entirely — the Bulk schedule modal owns its own copy of
+   * the same automations — and this tab's Scheduled / Unscheduled tabs are
+   * built from the map held here. Refetching rows alone left a playlist sitting
+   * under "Scheduled" after it had been unscheduled somewhere else.
+   */
   const reload = useCallback(() => {
     void load();
-  }, [load]);
+    void cardSchedules.reload();
+  }, [load, cardSchedules.reload]);
 
   /**
    * The controller is the page's; this is the half of it only this tab can
