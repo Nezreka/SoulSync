@@ -30,6 +30,7 @@ import type { MirroredPlaylistRow } from '../-sync.mirrored';
 import {
   libraryCardState,
   libraryCoveragePct,
+  libraryGap,
   libraryMissingCount,
   libraryOwned,
   libraryTotal,
@@ -120,13 +121,13 @@ export function playlistCardMeta(row: MirroredPlaylistRow, when: string): string
   // "discovered", not "in library": the number is discovered_count, which
   // counts tracks the discovery step matched to a source — owning the file is a
   // different question the database answers with a separate `in_library`.
-  if (state === 'short') return `${tracks} · ${total - libraryMissingCount(row)} discovered`;
-
-  // Fully discovered but not fully OWNED — the state that had no way of being
-  // seen. Discovery matched everything and the files are not all here, which
-  // used to read as an unqualified "140 tracks" and looked finished.
-  const owned = libraryOwned(row);
-  if (total > 0 && owned > 0 && owned < total) return `${tracks} · ${owned} in library`;
+  // Keyed off the SAME gap the ring and the button read, so the line can never
+  // report one shortfall while the button offers to fix the other.
+  if (state === 'short') {
+    return libraryGap(row) === 'ownership'
+      ? `${tracks} · ${libraryOwned(row)} in library`
+      : `${tracks} · ${total - libraryMissingCount(row)} discovered`;
+  }
 
   return when ? `${tracks} · ${when}` : tracks;
 }

@@ -65,6 +65,42 @@ export function libraryOwned(row: MirroredPlaylistRow): number {
   return row.in_library_count || 0;
 }
 
+/**
+ * Whether the backend REPORTED an ownership figure, as distinct from reporting
+ * zero.
+ *
+ * The endpoint always sets in_library_count, so an absent field means a payload
+ * that predates it — and a genuine 0 is exactly the case worth surfacing ("I
+ * discovered all 140 and own none of them"). Collapsing the two would either
+ * hide that case or flag every row on an older payload.
+ */
+export function libraryOwnedKnown(row: MirroredPlaylistRow): boolean {
+  return typeof row.in_library_count === 'number';
+}
+
+/**
+ * WHICH gap a playlist has, which everything else reads rather than re-deriving.
+ *
+ * Discovery and ownership are sequential, not alternative: you cannot own what
+ * was never found. So a discovery shortfall wins — it is the earlier and more
+ * actionable of the two — and ownership is only asked about once discovery is
+ * complete. The ring, the meta line, the missing count and the button all key
+ * off this, so they cannot disagree about which number they are showing.
+ */
+export type LibraryGap = 'none' | 'discovery' | 'ownership';
+
+export function libraryGap(row: MirroredPlaylistRow): LibraryGap {
+  const total = libraryTotal(row);
+  if (total <= 0) return 'none';
+  const discovered = libraryDiscovered(row);
+  // Never attempted is not a gap — it is a playlist nobody has run yet, and
+  // flagging those would mark a fresh import as broken.
+  if (discovered <= 0) return 'none';
+  if (discovered < total) return 'discovery';
+  if (libraryOwnedKnown(row) && libraryOwned(row) < total) return 'ownership';
+  return 'none';
+}
+
 /** How many there are in total — `total_count` first, the row's own count after. */
 export function libraryTotal(row: MirroredPlaylistRow): number {
   return row.total_count || row.track_count || 0;
@@ -95,9 +131,10 @@ export function libraryNeedsAttention(row: MirroredPlaylistRow): boolean {
   // error above still wins, because a failed run needs a human whether or not
   // the poller has caught up.
   if (libraryIsRunning(row)) return false;
-  const discovered = libraryDiscovered(row);
-  if (discovered <= 0) return false; // never attempted, not failed
-  return discovered < libraryTotal(row);
+  // Both gaps count. A playlist that discovered all 140 tracks and owns 96 of
+  // them still needs something doing to it, and it used to sit under
+  // "Discovered" looking finished with nothing to say otherwise.
+  return libraryGap(row) !== 'none';
 }
 
 /**
@@ -272,16 +309,29 @@ export function libraryCardState(row: MirroredPlaylistRow): LibraryCardState {
   return 'ok';
 }
 
-/** How full the ring is: discovered over total, clamped, 0 when unknowable. */
+/**
+ * How full the ring is, over the gap the card is actually reporting.
+ *
+ * An ownership gap measured on the DISCOVERY ratio would draw a full ring on a
+ * playlist owning none of its tracks.
+ */
 export function libraryCoveragePct(row: MirroredPlaylistRow): number {
   const total = libraryTotal(row);
   if (total <= 0) return 0;
-  return Math.max(0, Math.min(100, Math.round((libraryDiscovered(row) / total) * 100)));
+  const have = libraryGap(row) === 'ownership' ? libraryOwned(row) : libraryDiscovered(row);
+  return Math.max(0, Math.min(100, Math.round((have / total) * 100)));
 }
 
-/** How many tracks the playlist claims to have that we have not found. */
+/**
+ * How many tracks are missing, in whichever sense this playlist is short.
+ *
+ * Keyed off libraryGap for the same reason as the ring: total - discovered on
+ * an ownership gap is zero, and the button would read "Find 0 missing".
+ */
 export function libraryMissingCount(row: MirroredPlaylistRow): number {
-  return Math.max(0, libraryTotal(row) - libraryDiscovered(row));
+  const total = libraryTotal(row);
+  const have = libraryGap(row) === 'ownership' ? libraryOwned(row) : libraryDiscovered(row);
+  return Math.max(0, total - have);
 }
 
 /**
