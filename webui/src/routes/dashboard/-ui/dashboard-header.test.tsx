@@ -10,6 +10,8 @@
  * fixture at P9, when the vanilla markup was deleted.
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -292,5 +294,40 @@ describe('click seams', () => {
     });
     const urls = fetchMock.mock.calls.map((call) => String(call[0]));
     expect(urls[0]).toBe('/api/enrichment/deezer/resume');
+  });
+});
+
+/**
+ * Asserted as stylesheet text because jsdom has no layout engine: it cannot
+ * measure a flex item, so it cannot notice one holding a row wider than the
+ * viewport. This particular overflow is worth pinning because it does not stay
+ * on the dashboard — an unclipped row wider than the screen makes the whole
+ * PAGE scroll sideways, on every page that shares the shell.
+ */
+describe('the hello strip does not push the page sideways on a phone', () => {
+  const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8').replace(
+    /\/\*[\s\S]*?\*\//g,
+    '',
+  );
+  const phoneBlocks = [...css.matchAll(/@media[^{]*max-width:\s*768px[^{]*\{([\s\S]*?)\n\}/g)].map(
+    (m) => m[1],
+  );
+
+  it('lets the greeting text shrink instead of holding the row open', () => {
+    // A flex item holding text keeps min-width:auto, which refuses to go below
+    // its longest unbreakable word — so a long profile name sets the floor.
+    const block = phoneBlocks.find((b) => b.includes('.hello-greeting > span'));
+    expect(block, 'no phone rule shrinks .hello-greeting > span').toBeTruthy();
+    expect(block).toMatch(/min-width:\s*0/);
+  });
+
+  it('breaks a long username that has no space to wrap at', () => {
+    const block = phoneBlocks.find((b) => b.includes('.hello-greeting > span'));
+    expect(block).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
+  it('shrinks the 176px hero illustration', () => {
+    const block = phoneBlocks.find((b) => b.includes('.page-header-icon'));
+    expect(block, 'no phone rule shrinks the dashboard hero').toBeTruthy();
   });
 });

@@ -9481,6 +9481,37 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     display: inline-block;
 }
 
+/* The hello strip on a phone.
+
+   `.hello-greeting` is a flex row of [176px hero illustration][greeting text].
+   A flex item holding text keeps min-width:auto, which refuses to shrink below
+   its longest unbreakable WORD — so a profile named "boulderbaddad" set at 27px
+   held the row wider than the viewport, and because nothing clips it the whole
+   PAGE scrolled sideways. Every other page inherited the sideways scroll.
+
+   min-width:0 lets the text wrap instead of pushing; overflow-wrap handles a
+   single long username with no space to break at. */
+@media (max-width: 768px) {
+    #dashboard-page .page-header-icon { width: 96px; height: 96px; }
+
+    .hello-greeting {
+        font-size: 20px;
+        gap: 10px;
+        letter-spacing: -0.2px;
+    }
+    .hello-greeting > span {
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+    .header-hello { max-width: 100%; }
+
+    /* The interpunct is a ::before on each chip after the first, so when the
+       row wraps it lands at the START of the new line as a dangling dot. A gap
+       separates them without needing a character. */
+    .hello-stats { gap: 5px 14px; }
+    .hello-stat + .hello-stat::before { display: none; }
+}
+
 /* Artist line on rail cards — its own hit-target straight to the artist
    page. A <button> now, so undo the UA chrome and keep the sub's look;
    the underline on hover is the only tell. */
@@ -78316,6 +78347,28 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     .sync-header-actions > *,
     .library-sources > *,
     .library-tabs > * { flex-shrink: 0; }
+
+    /* A SCROLLER HAS TO LOOK LIKE ONE.
+       The strip already scrolled, but it ended in the container's own tidy
+       padding, so eleven sources looked like three sources and a hard edge —
+       there was nothing to suggest the rest were a swipe away. The fade says
+       the row continues, and the snap makes the swipe land on a chip instead
+       of halfway through one.
+
+       The trailing padding is what keeps the fade off the last chip's text
+       once you reach the end. */
+    .library-sources {
+        flex-basis: 100%;
+        padding-right: 30px;
+        scroll-snap-type: x proximity;
+        -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 30px), transparent);
+        mask-image: linear-gradient(90deg, #000 calc(100% - 30px), transparent);
+    }
+    .library-source { scroll-snap-align: start; }
+
+    /* space-between pushed the two strips apart when they shared a line; on
+       one-per-line they should both simply start at the left. */
+    .library-filters { justify-content: flex-start; }
 
     .sync-header { margin-bottom: 16px; }
     .sync-title { font-size: 22px; }
