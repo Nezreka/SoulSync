@@ -340,18 +340,17 @@ describe('the hello strip does not push the page sideways on a phone', () => {
  */
 describe('a hovered orb outranks the orbs it overlaps', () => {
   const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
+  const hoverRule =
+    /#dashboard-page \.header-actions > \[class([$*])="-button-container"\]:hover[\s\S]{0,240}?\}/.exec(
+      css,
+    );
 
   it('lifts the hovered CONTAINER, not just the tooltip inside it', () => {
     // The tooltip already carries z-index 5000 and that is not enough: it is
     // absolutely positioned inside its own orb's container, so it competes from
-    // in there rather than against the sibling containers. `.header-actions`
-    // wraps, so a row-1 tooltip drops across row 2 and the later orbs — later
-    // siblings — paint straight over it.
-    const rule = /#dashboard-page \.header-actions > \[class\$="-button-container"\]:hover[\s\S]{0,220}?\}/.exec(
-      css,
-    );
-    expect(rule, 'no rule lifts the hovered orb container').toBeTruthy();
-    const z = /z-index:\s*(\d+)/.exec(rule![0]);
+    // in there rather than against the sibling containers.
+    expect(hoverRule, 'no rule lifts the hovered orb container').toBeTruthy();
+    const z = /z-index:\s*(\d+)/.exec(hoverRule![0]);
     expect(z, 'the hover rule sets no z-index').toBeTruthy();
     // Must clear the tooltip's own 5000, and stay under the modal layer so a
     // modal still covers a tooltip.
@@ -359,10 +358,27 @@ describe('a hovered orb outranks the orbs it overlaps', () => {
     expect(Number(z![1])).toBeLessThan(99999);
   });
 
-  it('does not hold a stacking context when NOT hovered', () => {
-    // A permanent z-index on every orb would trap each tooltip in its own
-    // container for good, which is the shape of the bug rather than the fix.
-    const base = /\.lastfm-enrich-button-container \{([^}]*)\}/.exec(css)?.[1] ?? '';
-    expect(base).not.toMatch(/z-index/);
+  it('uses class*=, because the live element carries a SECOND class', () => {
+    // worker-orbs.js appends its own, so the attribute reads
+    // "lastfm-enrich-button-container worker-orb-reveal". [class$=] tests the
+    // whole attribute, so it ends with worker-orb-reveal and matches NOTHING —
+    // the first attempt at this fix shipped that way and did exactly nothing.
+    expect(hoverRule![1], '[class$=] matches no orb once worker-orbs adds its class').toBe('*');
+  });
+
+  it('the selector actually matches a real orb element', () => {
+    // Asserted against the DOM rather than the stylesheet, so a selector that
+    // compiles but matches nothing cannot pass.
+    const el = document.createElement('div');
+    el.className = 'lastfm-enrich-button-container worker-orb-reveal';
+    expect(el.matches('[class*="-button-container"]')).toBe(true);
+    expect(el.matches('[class$="-button-container"]')).toBe(false);
+  });
+
+  it('gives every orb a baseline z-index, so the strip stacks by rule not DOM order', () => {
+    const base =
+      /#dashboard-page \.header-actions > \[class\*="-button-container"\]\s*\{([^}]*)\}/.exec(css);
+    expect(base, 'no baseline rule for the orb containers').toBeTruthy();
+    expect(base![1]).toMatch(/z-index:\s*\d+/);
   });
 });
