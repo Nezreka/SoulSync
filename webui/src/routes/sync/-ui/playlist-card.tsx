@@ -32,7 +32,6 @@ import {
   libraryCoveragePct,
   libraryGap,
   libraryMissingCount,
-  libraryOwned,
   libraryTotal,
 } from '../-sync.library';
 import { PlaylistArt, PlaylistCollage, playlistCoverTiles } from './playlist-art';
@@ -121,12 +120,20 @@ export function playlistCardMeta(row: MirroredPlaylistRow, when: string): string
   // "discovered", not "in library": the number is discovered_count, which
   // counts tracks the discovery step matched to a source — owning the file is a
   // different question the database answers with a separate `in_library`.
-  // Keyed off the SAME gap the ring and the button read, so the line can never
-  // report one shortfall while the button offers to fix the other.
+  // THE SHORTFALL, NAMED AND COUNTED. This line is where a gap is reported now
+  // — the button went back to saying "Sync now", because it always ran the same
+  // pipeline and three names for one action bought nothing.
+  //
+  // Stated as what is MISSING rather than what is present: "96 in library" made
+  // you subtract to reach the number you would act on, and the meta line's job
+  // is to say what is wrong when something is. The two gaps get different words
+  // because they need different things done — one wants a match found, the
+  // other wants a file fetched.
   if (state === 'short') {
+    const missing = libraryMissingCount(row);
     return libraryGap(row) === 'ownership'
-      ? `${tracks} · ${libraryOwned(row)} in library`
-      : `${tracks} · ${total - libraryMissingCount(row)} discovered`;
+      ? `${tracks} · ${missing} not downloaded`
+      : `${tracks} · ${missing} not found`;
   }
 
   return when ? `${tracks} · ${when}` : tracks;
@@ -141,8 +148,10 @@ export function playlistCardPrimaryLabel(row: MirroredPlaylistRow): string {
       // NOT "Cancel": the pipeline controller has no cancel, and a button that
       // cannot do what it says is worse than one that offers less.
       return 'View progress';
-    case 'short':
-      return `Find ${libraryMissingCount(row)} missing`;
+    // NOT "Find N missing". It called the very same pipeline.run as Sync now,
+    // so the label promised a narrower action than it performed, and the count
+    // it carried now lives on the meta line where it does not have to compete
+    // with a verb.
     default:
       return 'Sync now';
   }

@@ -88,7 +88,7 @@ describe('the meta line', () => {
 
   it('says what is in the library only when it differs', () => {
     expect(playlistCardMeta(row({ total_count: 86, discovered_count: 62 }), 'x')).toBe(
-      '86 tracks · 62 discovered',
+      '86 tracks · 24 not found',
     );
   });
 
@@ -111,9 +111,11 @@ describe('the meta line', () => {
 describe('the primary action', () => {
   it('offers the fix that matches the state', () => {
     expect(playlistCardPrimaryLabel(row({ total_count: 86, discovered_count: 62 }))).toBe(
-      'Find 24 missing',
+      'Sync now',
     );
     expect(playlistCardPrimaryLabel(row({ pipeline_state: { status: 'error' } }))).toBe('Retry');
+    // NOT "Find 24 missing": that label promised a narrower action than the
+    // identical pipeline.run it actually performed.
     expect(playlistCardPrimaryLabel(row({ total_count: 10, discovered_count: 10 }))).toBe(
       'Sync now',
     );
@@ -361,7 +363,7 @@ describe('the hover veil, as the stylesheet actually declares it', () => {
 });
 
 describe('the card tells you what you actually own', () => {
-  it('names the in-library count when everything is discovered but not all owned', () => {
+  it('counts what is NOT DOWNLOADED when everything was discovered', () => {
     // The state that had no way of being seen: discovery matched all 140, the
     // files are not all here, and the card used to read a flat "140 tracks".
     expect(
@@ -369,7 +371,8 @@ describe('the card tells you what you actually own', () => {
         row({ total_count: 140, discovered_count: 140, in_library_count: 96 }),
         'synced 3h ago',
       ),
-    ).toBe('140 tracks · 96 in library');
+      // The number you would act on, rather than one you have to subtract from.
+    ).toBe('140 tracks · 44 not downloaded');
   });
 
   it('stays quiet when everything IS owned — nothing to report is nothing to say', () => {
@@ -393,7 +396,7 @@ describe('the card tells you what you actually own', () => {
     // "Find 24 missing" is the button; the meta line has to match it.
     expect(
       playlistCardMeta(row({ total_count: 86, discovered_count: 62, in_library_count: 40 }), 'x'),
-    ).toBe('86 tracks · 62 discovered');
+    ).toBe('86 tracks · 24 not found');
   });
 });
 
