@@ -494,6 +494,29 @@ async function readPipelineResponse(
   return text ? (JSON.parse(text) as Record<string, unknown>) : {};
 }
 
+/**
+ * POST .../server-link — record which server playlist this mirror is.
+ *
+ * The relationship is a NAME match made fresh on every visit today, which is
+ * why the disambiguation modal exists. This stores the answer once the server
+ * tab has resolved it.
+ *
+ * WRITE ONLY for now: nothing reads the columns yet. Fire-and-forget, and
+ * deliberately swallowing its own failure — a link that does not land must
+ * never disturb the tab that called it.
+ */
+export function recordServerLink(
+  playlistId: number,
+  serverPlaylistId: string,
+  serverType: string,
+): void {
+  void fetch(`/api/mirrored-playlists/${playlistId}/server-link`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ server_playlist_id: serverPlaylistId, server_type: serverType }),
+  }).catch(() => undefined);
+}
+
 /** POST .../pipeline/run — an empty JSON body, as the vanilla sends (2468-2472). */
 export async function runMirroredPipeline(
   playlistId: number | string,

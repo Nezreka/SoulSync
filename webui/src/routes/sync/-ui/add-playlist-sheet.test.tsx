@@ -8,8 +8,8 @@
  * silent no-op.
  */
 
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SYNC_TABS } from '../-sync.shell';
 import { ADD_PLAYLIST_ACCOUNTS, AddPlaylistSheet } from './add-playlist-sheet';
@@ -17,11 +17,13 @@ import { ADD_PLAYLIST_ACCOUNTS, AddPlaylistSheet } from './add-playlist-sheet';
 function renderSheet() {
   const onRoute = vi.fn();
   const onClose = vi.fn();
-  render(<AddPlaylistSheet onRoute={onRoute} onClose={onClose} />);
+  const { unmount } = render(
+    <AddPlaylistSheet anchor={{ top: 80, left: 400 }} onRoute={onRoute} onClose={onClose} />,
+  );
   const input = screen.getByLabelText('Paste a link') as HTMLInputElement;
   const type = (value: string) => fireEvent.change(input, { target: { value } });
   const add = () => fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-  return { onRoute, onClose, input, type, add };
+  return { onRoute, onClose, input, type, add, unmount };
 }
 
 const TAB_IDS = new Set(SYNC_TABS.map((t) => t.id));
@@ -35,12 +37,16 @@ describe('routing a pasted link', () => {
       ['https://www.youtube.com/playlist?list=PLabc', 'youtube'],
     ];
     for (const [url, tab] of cases) {
-      const { onRoute, onClose, type, add } = renderSheet();
+      const { onRoute, onClose, type, add, unmount } = renderSheet();
       type(url);
       add();
       expect(onRoute).toHaveBeenCalledWith(tab, url);
       expect(onClose).toHaveBeenCalled();
-      screen.getByRole('dialog').remove();
+      // UNMOUNT, not .remove(): detaching the node leaves the popover's
+      // outside-click and Escape listeners on `document`, and a stale listener
+      // whose ref points at a detached node treats every later click as an
+      // outside one.
+      unmount();
     }
   });
 
@@ -134,18 +140,33 @@ describe('the other two ways in', () => {
 });
 
 describe('dismissal', () => {
-  it('closes from the × and from the backdrop, but not from the sheet itself', () => {
+  beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
+  afterEach(() => vi.useRealTimers());
+
+  it('closes from the ×, from an outside click and from Escape — not from itself', () => {
     const onRoute = vi.fn();
     const onClose = vi.fn();
-    const { container } = render(<AddPlaylistSheet onRoute={onRoute} onClose={onClose} />);
+    const { container } = render(
+      <AddPlaylistSheet anchor={{ top: 80, left: 400 }} onRoute={onRoute} onClose={onClose} />,
+    );
 
+    // A click inside must not dismiss it.
     fireEvent.click(screen.getByRole('dialog'));
     expect(onClose).not.toHaveBeenCalled();
 
-    fireEvent.click(container.querySelector('.add-playlist-overlay') as HTMLElement);
+    // The outside-click listener is attached on a timer, so the click that
+    // opened the popover cannot immediately close it.
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    fireEvent.click(document.body);
     expect(onClose).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.keyDown(document, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onClose).toHaveBeenCalledTimes(3);
+    expect(container).toBeTruthy();
   });
 });

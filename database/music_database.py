@@ -930,6 +930,7 @@ class MusicDatabase:
             # Add explored_at to mirrored_playlists (migration)
             self._add_mirrored_playlist_explored_column(cursor)
             self._add_mirrored_playlist_cover_tiles_column(cursor)
+            self._add_mirrored_playlist_server_link_columns(cursor)
             self._add_mirrored_playlist_organize_column(cursor)
             self._add_mirrored_playlist_custom_name_column(cursor)
             self._add_mirrored_playlist_quality_profile_column(cursor)
@@ -2000,6 +2001,37 @@ class MusicDatabase:
                 logger.info("Added custom_name column to mirrored_playlists table")
         except Exception as e:
             logger.error(f"Error adding custom_name column to mirrored_playlists: {e}")
+
+    def _add_mirrored_playlist_server_link_columns(self, cursor):
+        """Which server playlist a mirror corresponds to, once we know.
+
+        Today the relationship is matched BY NAME at read time: the server tab
+        fetches the mirrored list and marks a server playlist synced when the
+        names line up, and the disambiguation modal exists because that guess
+        can hit more than one. Nothing is stored, so the guess is made again on
+        every visit.
+
+        These columns record the answer when it has actually been resolved.
+        NOTHING READS THEM YET, deliberately: the write lands first and gets
+        checked against real data before any behaviour depends on it. Nullable
+        throughout, so every existing row means "not linked" and behaves exactly
+        as it does today.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = [c[1] for c in cursor.fetchall()]
+            for name, decl in (
+                ('server_playlist_id', 'TEXT DEFAULT NULL'),
+                ('server_type', 'TEXT DEFAULT NULL'),
+                ('server_linked_at', 'TIMESTAMP DEFAULT NULL'),
+            ):
+                if name not in cols:
+                    cursor.execute(
+                        f"ALTER TABLE mirrored_playlists ADD COLUMN {name} {decl}"
+                    )
+                    logger.info(f"Added {name} column to mirrored_playlists table")
+        except Exception as e:
+            logger.error(f"Error adding server link columns to mirrored_playlists: {e}")
 
     def _add_mirrored_playlist_cover_tiles_column(self, cursor):
         """Up to four distinct album covers, for the 2x2 collage.
@@ -18394,6 +18426,43 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error mirroring playlist: {e}")
             return None
+
+    def link_mirrored_playlist_to_server(
+        self,
+        playlist_id: int,
+        server_playlist_id: str,
+        server_type: str,
+        *,
+        profile_id: Optional[int] = None,
+    ) -> bool:
+        """Record which server playlist a mirror corresponds to.
+
+        Called when the relationship has actually been RESOLVED — the server tab
+        matched exactly one mirror by name, or the user picked one in the
+        disambiguation modal. Owner-scoped like every other request-facing
+        mirror write, so a foreign mirror is indistinguishable from a missing
+        one.
+
+        Nothing reads these columns yet. This is the write half landing on its
+        own so it can be checked against real data before anything depends on
+        it.
+        """
+        if not server_playlist_id or not server_type:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
+                cursor.execute(
+                    "UPDATE mirrored_playlists SET server_playlist_id = ?, server_type = ?, "
+                    "server_linked_at = CURRENT_TIMESTAMP WHERE id = ?" + owner_sql,
+                    [str(server_playlist_id), str(server_type), int(playlist_id), *owner_params],
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error linking mirrored playlist {playlist_id} to server: {e}")
+            return False
 
     def backfill_missing_mirrored_covers(self, profile_id: int = 1) -> int:
         """Give already-discovered playlists the covers they never got.

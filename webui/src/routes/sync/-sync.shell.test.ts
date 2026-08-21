@@ -106,23 +106,24 @@ describe('the tab table matches the markup it was transcribed from', () => {
 });
 
 describe('the header actions', () => {
-  it('lists them in order, pools first, with their tooltips', () => {
-    // Discovery Pool and Wing It Pool moved up from the Mirrored tab's own
-    // header: both are app-level overlays over everything, not one tab's
-    // controls, and the Tools page opens the Discovery Pool through the same
-    // seam.
+  it('leads with the actions that CHANGE something', () => {
+    // Auto-Sync sits first so it lands beside Add playlist: those two decide
+    // what the page will do, and the four after them only report what already
+    // happened. The pools moved up from the Mirrored tab's own header, since
+    // both are app-level overlays over everything rather than one tab's
+    // controls.
     expect(SYNC_HEADER_ACTIONS.map((a) => a.label)).toEqual([
+      'Auto-Sync',
       'Discovery Pool',
       'Wing It Pool',
-      'Auto-Sync',
       'Library Match',
       'Sync History',
       'Download Origins',
     ]);
     expect(SYNC_HEADER_ACTIONS.map((a) => a.key)).toEqual([
+      'auto-sync',
       'discovery-pool',
       'wing-it-pool',
-      'auto-sync',
       'library-match',
       'sync-history',
       'download-origins',

@@ -59,7 +59,7 @@ export interface SyncShellProps {
    * one entry point that replaces choosing a source tab before you have even
    * pasted anything.
    */
-  onAddPlaylist?: () => void;
+  onAddPlaylist?: (anchor: { top: number; left: number }) => void;
   onTabChange?: () => void;
   /**
    * Hand the host a function that opens a tab programmatically.
@@ -169,14 +169,21 @@ export function SyncShell({
                 type="button"
                 className="btn btn--sm sync-add-playlist-btn"
                 title="Paste a link, pick a connected account, or import a file"
-                onClick={onAddPlaylist}
+                onClick={(e) => {
+                  // Pops in AT the button, like the card's overflow menu.
+                  const box = e.currentTarget.getBoundingClientRect();
+                  onAddPlaylist({ top: box.bottom + 8, left: box.left });
+                }}
               >
                 + Add playlist
               </button>
             )}
-            {SYNC_HEADER_ACTIONS.map((action) => (
+            {SYNC_HEADER_ACTIONS.map((action, index) => (
+              <Fragment key={action.key}>
+                {/* Divides the two actions that CHANGE something from the four
+                    that only report what already happened. */}
+                {index === 1 && <span className="sync-header-divider" />}
               <button
-                key={action.key}
                 type="button"
                 className={`btn btn--sm btn--secondary sync-history-btn${
                   action.key === 'auto-sync' ? ' auto-sync-manager-btn' : ''
@@ -188,6 +195,7 @@ export function SyncShell({
               >
                 {action.label}
               </button>
+              </Fragment>
             ))}
           </div>
         </div>

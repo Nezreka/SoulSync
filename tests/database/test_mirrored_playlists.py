@@ -460,3 +460,86 @@ class TestCoverBackfillForExistingPlaylists:
         db = MusicDatabase(str(tmp_path / "music.db"))
         self._mirror_with_discovered_track(db)
         assert db.backfill_missing_mirrored_covers(2) == 0
+
+
+class TestServerLink:
+    """Recording which server playlist a mirror corresponds to.
+
+    Today that relationship is a NAME match made fresh on every visit to the
+    server tab, which is why a disambiguation modal exists. These columns store
+    the answer once it has actually been resolved.
+
+    Nothing reads them yet, on purpose: the write lands first and gets checked
+    against real data before any behaviour depends on it.
+    """
+
+    def _mirror(self, db, profile_id=1):
+        return db.mirror_playlist(
+            source="spotify",
+            source_playlist_id=f"sp{profile_id}",
+            name="Road Trip",
+            tracks=[{"track_name": "One", "artist_name": "A"}],
+            profile_id=profile_id,
+        )
+
+    def test_a_new_mirror_starts_unlinked(self, tmp_path):
+        # Nullable throughout, so every existing row means "not linked" and
+        # behaves exactly as it does today.
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        row = db.get_mirrored_playlist(self._mirror(db))
+        assert row["server_playlist_id"] is None
+        assert row["server_type"] is None
+        assert row["server_linked_at"] is None
+
+    def test_it_records_the_resolved_link(self, tmp_path):
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        pid = self._mirror(db)
+        assert db.link_mirrored_playlist_to_server(pid, "12345", "plex") is True
+
+        row = db.get_mirrored_playlist(pid)
+        assert row["server_playlist_id"] == "12345"
+        assert row["server_type"] == "plex"
+        assert row["server_linked_at"] is not None
+
+    def test_relinking_replaces_the_previous_answer(self, tmp_path):
+        # A playlist can be re-pointed at a different server playlist, and the
+        # newest resolution is the true one.
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        pid = self._mirror(db)
+        db.link_mirrored_playlist_to_server(pid, "111", "plex")
+        db.link_mirrored_playlist_to_server(pid, "222", "jellyfin")
+
+        row = db.get_mirrored_playlist(pid)
+        assert row["server_playlist_id"] == "222"
+        assert row["server_type"] == "jellyfin"
+
+    def test_it_refuses_an_incomplete_link(self, tmp_path):
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        pid = self._mirror(db)
+        assert db.link_mirrored_playlist_to_server(pid, "", "plex") is False
+        assert db.link_mirrored_playlist_to_server(pid, "123", "") is False
+        assert db.get_mirrored_playlist(pid)["server_playlist_id"] is None
+
+    def test_an_unknown_playlist_is_a_no_op(self, tmp_path):
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        assert db.link_mirrored_playlist_to_server(9999, "123", "plex") is False
+
+    def test_another_profile_cannot_link_your_mirror(self, tmp_path):
+        # Owner-scoped like every other request-facing mirror write: a foreign
+        # mirror must be indistinguishable from a missing one.
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        pid = self._mirror(db, profile_id=1)
+        assert db.link_mirrored_playlist_to_server(pid, "123", "plex", profile_id=2) is False
+        assert db.get_mirrored_playlist(pid)["server_playlist_id"] is None
+        assert db.link_mirrored_playlist_to_server(pid, "123", "plex", profile_id=1) is True
+
+    def test_the_link_does_not_disturb_anything_else_on_the_row(self, tmp_path):
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        pid = self._mirror(db)
+        before = db.get_mirrored_playlist(pid)
+        db.link_mirrored_playlist_to_server(pid, "123", "plex")
+        after = db.get_mirrored_playlist(pid)
+
+        for field in ("name", "source", "source_playlist_id", "track_count", "image_url"):
+            assert after[field] == before[field]
+        assert len(db.get_mirrored_playlist_tracks(pid)) == 1

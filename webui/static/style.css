@@ -19842,6 +19842,15 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
    One entry point in place of choosing between twelve source tabs before you
    have even pasted anything. Paste a link (service detected, not chosen), pick
    a connected account, or import a file. */
+/* Separates the two actions that CHANGE something from the four that only
+   report what already happened. */
+.sync-header-divider {
+    width: 1px;
+    align-self: stretch;
+    margin: 2px 4px;
+    background: rgba(255, 255, 255, 0.14);
+}
+
 .sync-add-playlist-btn {
     background: rgba(var(--accent-rgb), 0.16);
     border: 1px solid rgba(var(--accent-rgb), 0.45);
@@ -19854,62 +19863,48 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     border-color: rgba(var(--accent-rgb), 0.7);
 }
 
-.add-playlist-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 1200;
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    padding: 10vh 20px 20px;
-    background: rgba(0, 0, 0, 0.62);
-    backdrop-filter: blur(4px);
-}
-
+/* Pops in AT the button, like the card's overflow menu. Adding a playlist is a
+   small act; dimming the whole page and taking over the middle of it overstated
+   what was happening. */
 .add-playlist-sheet {
-    width: 100%;
-    max-width: 560px;
-    max-height: 80vh;
+    position: fixed;
+    z-index: 1300;
+    width: 420px;
+    max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 120px);
     overflow-y: auto;
     background: rgba(20, 20, 24, 0.98);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 18px;
-    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 14px;
+    box-shadow: 0 20px 52px rgba(0, 0, 0, 0.6);
     display: flex;
     flex-direction: column;
-    gap: 26px;
-    padding: 26px 28px 30px;
+    gap: 18px;
+    padding: 16px 18px 20px;
 }
 
 .add-playlist-head {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 16px;
 }
 
 .add-playlist-head h3 {
-    font-size: 20px;
+    font-size: 15px;
     font-weight: 700;
-    margin: 2px 0 0;
-}
-
-.add-playlist-eyebrow {
-    font-size: 10.5px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.38);
+    margin: 0;
 }
 
 .add-playlist-close {
-    width: 32px;
-    height: 32px;
+    width: 26px;
+    height: 26px;
     flex: 0 0 auto;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 50%;
     background: rgba(255, 255, 255, 0.06);
     color: rgba(255, 255, 255, 0.7);
-    font-size: 22px;
+    font-size: 17px;
     line-height: 1;
     cursor: pointer;
 }

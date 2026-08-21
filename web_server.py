@@ -38816,6 +38816,42 @@ def delete_mirrored_playlist_endpoint(playlist_id):
         logger.error(f"Error deleting mirrored playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/mirrored-playlists/<int:playlist_id>/server-link', methods=['POST'])
+def link_mirrored_playlist_server_endpoint(playlist_id):
+    """Record which server playlist this mirror corresponds to.
+
+    The relationship is matched BY NAME today, fresh on every visit to the
+    server tab, which is why a disambiguation modal exists at all. This stores
+    the answer once the server tab has actually resolved it.
+
+    WRITE ONLY, for now. Nothing reads these columns: the write is landing on
+    its own so it can be checked against real installs before any behaviour
+    depends on it. Best-effort by design — a failure here must never disturb the
+    tab that called it.
+    """
+    try:
+        database = get_database()
+        profile_id = get_current_profile_id()
+        if not _owned_mirrored_playlist(database, playlist_id):
+            return jsonify({"error": "Playlist not found"}), 404
+
+        data = request.get_json(silent=True) or {}
+        server_playlist_id = str(data.get('server_playlist_id') or '')
+        server_type = str(data.get('server_type') or '')
+        if not server_playlist_id or not server_type:
+            return jsonify({"error": "server_playlist_id and server_type are required"}), 400
+
+        linked = database.link_mirrored_playlist_to_server(
+            playlist_id,
+            server_playlist_id,
+            server_type,
+            profile_id=profile_id,
+        )
+        return jsonify({"success": bool(linked)})
+    except Exception as e:
+        logger.error(f"Error linking mirrored playlist {playlist_id} to server: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/mirrored-playlists/<int:playlist_id>/clear-discovery', methods=['POST'])
 def clear_mirrored_discovery_endpoint(playlist_id):
     """Clear discovery data for all tracks in a mirrored playlist, including discovery cache."""

@@ -150,6 +150,15 @@ export interface SyncHeaderAction {
  * made them look like that tab's controls.
  */
 export const SYNC_HEADER_ACTIONS: readonly SyncHeaderAction[] = [
+  // Auto-Sync sits FIRST so it lands beside Add playlist. The two of them are
+  // the only header buttons that change what the page will do; everything after
+  // is a "what happened" surface, and grouping them by that split is more
+  // useful than the order the vanilla happened to declare them in.
+  {
+    key: 'auto-sync',
+    label: 'Auto-Sync',
+    title: 'Schedule mirrored playlists to refresh, discover, sync, and queue missing tracks',
+  },
   {
     key: 'discovery-pool',
     label: 'Discovery Pool',
@@ -160,11 +169,6 @@ export const SYNC_HEADER_ACTIONS: readonly SyncHeaderAction[] = [
     label: 'Wing It Pool',
     title:
       'Review tracks Wing It auto-matched on a best-effort guess — verify or re-match them',
-  },
-  {
-    key: 'auto-sync',
-    label: 'Auto-Sync',
-    title: 'Schedule mirrored playlists to refresh, discover, sync, and queue missing tracks',
   },
   {
     key: 'library-match',

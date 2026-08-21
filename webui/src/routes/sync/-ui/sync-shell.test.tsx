@@ -45,14 +45,14 @@ describe('the header (2229-2243)', () => {
       (b) => b.textContent !== '+ Add playlist',
     );
     expect(btns.map((b) => b.textContent)).toEqual([
+      'Auto-Sync',
       'Discovery Pool',
       'Wing It Pool',
-      'Auto-Sync',
       'Library Match',
       'Sync History',
       'Download Origins',
     ]);
-    expect(btns[2].getAttribute('title')).toBe(
+    expect(btns[0].getAttribute('title')).toBe(
       'Schedule mirrored playlists to refresh, discover, sync, and queue missing tracks',
     );
     expect(btns[5].getAttribute('title')).toBe('See every track your playlist syncs downloaded');

@@ -21,7 +21,7 @@
  * of the part of this page that actually works.
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   DETECTED_SOURCE_SERVICE_LABELS,
@@ -43,6 +43,13 @@ export const ADD_PLAYLIST_ACCOUNTS: readonly { tab: string; label: string; glyph
 
 export interface AddPlaylistSheetProps {
   /**
+   * Where the button that opened it sits, so it pops in AT the control rather
+   * than dimming the page and taking over the middle of it. Same idiom as the
+   * card's overflow menu — adding a playlist is a small act and a full-screen
+   * dialog overstates it.
+   */
+  anchor: { top: number; left: number };
+  /**
    * Open a tab and hand it a URL to load. `url` is omitted for the account and
    * file routes, which have nothing to parse.
    */
@@ -50,9 +57,27 @@ export interface AddPlaylistSheetProps {
   onClose: () => void;
 }
 
-export function AddPlaylistSheet({ onRoute, onClose }: AddPlaylistSheetProps) {
+export function AddPlaylistSheet({ anchor, onRoute, onClose }: AddPlaylistSheetProps) {
   const [input, setInput] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Deferred a tick, or the click that OPENED it closes it again.
+    const onDocClick = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    const id = setTimeout(() => document.addEventListener('click', onDocClick), 0);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener('click', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
 
   const trimmed = input.trim();
   const detection = detectPlaylistUrl(trimmed);
@@ -79,26 +104,18 @@ export function AddPlaylistSheet({ onRoute, onClose }: AddPlaylistSheetProps) {
 
   return (
     <div
-      className="add-playlist-overlay"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+      className="add-playlist-sheet"
+      ref={ref}
+      role="dialog"
+      aria-label="Add a playlist"
+      style={{ top: `${anchor.top}px`, left: `${anchor.left}px` }}
     >
-      <div className="add-playlist-sheet" role="dialog" aria-label="Add a playlist">
-        <div className="add-playlist-head">
-          <div>
-            <span className="add-playlist-eyebrow">Add to your library</span>
-            <h3>Add a playlist</h3>
-          </div>
-          <button
-            type="button"
-            className="add-playlist-close"
-            aria-label="Close"
-            onClick={onClose}
-          >
-            &times;
-          </button>
-        </div>
+      <div className="add-playlist-head">
+        <h3>Add a playlist</h3>
+        <button type="button" className="add-playlist-close" aria-label="Close" onClick={onClose}>
+          &times;
+        </button>
+      </div>
 
         <div className="add-playlist-section">
           <label className="add-playlist-label" htmlFor="add-playlist-url">
@@ -169,7 +186,6 @@ export function AddPlaylistSheet({ onRoute, onClose }: AddPlaylistSheetProps) {
             📄 Import CSV, TSV, TXT or M3U
           </button>
         </div>
-      </div>
     </div>
   );
 }
