@@ -331,3 +331,38 @@ describe('the hello strip does not push the page sideways on a phone', () => {
     expect(block, 'no phone rule shrinks the dashboard hero').toBeTruthy();
   });
 });
+
+/**
+ * Asserted as stylesheet text: jsdom has no layout and no paint order, so it
+ * cannot tell you which of two overlapping elements is on top. This one was
+ * found by rendering the real CSS in Chromium at a width where the orb strip
+ * wraps, and screenshotting it.
+ */
+describe('a hovered orb outranks the orbs it overlaps', () => {
+  const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
+
+  it('lifts the hovered CONTAINER, not just the tooltip inside it', () => {
+    // The tooltip already carries z-index 5000 and that is not enough: it is
+    // absolutely positioned inside its own orb's container, so it competes from
+    // in there rather than against the sibling containers. `.header-actions`
+    // wraps, so a row-1 tooltip drops across row 2 and the later orbs — later
+    // siblings — paint straight over it.
+    const rule = /#dashboard-page \.header-actions > \[class\$="-button-container"\]:hover[\s\S]{0,220}?\}/.exec(
+      css,
+    );
+    expect(rule, 'no rule lifts the hovered orb container').toBeTruthy();
+    const z = /z-index:\s*(\d+)/.exec(rule![0]);
+    expect(z, 'the hover rule sets no z-index').toBeTruthy();
+    // Must clear the tooltip's own 5000, and stay under the modal layer so a
+    // modal still covers a tooltip.
+    expect(Number(z![1])).toBeGreaterThan(5000);
+    expect(Number(z![1])).toBeLessThan(99999);
+  });
+
+  it('does not hold a stacking context when NOT hovered', () => {
+    // A permanent z-index on every orb would trap each tooltip in its own
+    // container for good, which is the shape of the bug rather than the fix.
+    const base = /\.lastfm-enrich-button-container \{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(base).not.toMatch(/z-index/);
+  });
+});

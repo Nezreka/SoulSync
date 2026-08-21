@@ -9535,6 +9535,24 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     width: 100%;
 }
 
+/* THE HOVERED ORB RISES ABOVE ITS SIBLINGS.
+   Each orb is <container><button><tooltip></container>, and the tooltip is
+   absolutely positioned INSIDE its own container. `.header-actions` wraps, so
+   at some widths the strip becomes two rows and a row-1 tooltip drops across
+   row 2 — where the later orbs, being later siblings, paint over it. The
+   tooltip already carries z-index 5000, which does not help: it is competing
+   from inside its container, not against the containers.
+
+   Lifting the container itself takes the whole orb, tooltip included, above
+   every sibling regardless of which one was winning. Only while hovered, so no
+   orb holds a stacking context it does not need. 6000 clears the tooltip's own
+   5000 and stays far below the modal layer, which should still cover a
+   tooltip. */
+#dashboard-page .header-actions > [class$="-button-container"]:hover,
+#dashboard-page .header-actions > [class$="-button-container"]:focus-within {
+    z-index: 6000;
+}
+
 /* Watchlist / Wishlist quick-nav — top-right of header */
 .header-quick-nav {
     display: flex;
