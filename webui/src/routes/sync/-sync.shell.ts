@@ -154,10 +154,14 @@ export const SYNC_HEADER_ACTIONS: readonly SyncHeaderAction[] = [
   // the only header buttons that change what the page will do; everything after
   // is a "what happened" surface, and grouping them by that split is more
   // useful than the order the vanilla happened to declare them in.
+  // "Bulk schedule", not "Auto-Sync". A cadence is set from the playlist's own
+  // card now, so this is no longer the way to schedule ONE playlist — it is the
+  // way to schedule many at once, and a name promising the whole feature sends
+  // people to a drag-and-drop board when a two-click menu was on the card.
   {
     key: 'auto-sync',
-    label: 'Auto-Sync',
-    title: 'Schedule mirrored playlists to refresh, discover, sync, and queue missing tracks',
+    label: 'Bulk schedule',
+    title: 'Schedule many mirrored playlists at once, and review the pipeline',
   },
   {
     key: 'discovery-pool',
@@ -175,7 +179,14 @@ export const SYNC_HEADER_ACTIONS: readonly SyncHeaderAction[] = [
     label: 'Library Match',
     title: 'Manually link source tracks to library tracks',
   },
-  { key: 'sync-history', label: 'Sync History', title: 'View sync history' },
+  // One "what happened" surface. Syncs you ran and runs the schedule ran were
+  // two buttons answering the same question, and you had to know which had run
+  // your playlist before you knew where to look.
+  {
+    key: 'activity',
+    label: 'Activity',
+    title: 'Syncs you ran and scheduled pipeline runs',
+  },
   {
     key: 'download-origins',
     label: 'Download Origins',

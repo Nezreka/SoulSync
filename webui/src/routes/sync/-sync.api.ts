@@ -9,6 +9,7 @@
  */
 
 import type { ExportJob, ExportMode, ExportStartResponse } from './-sync.export';
+import type { SyncHistoryEntry, SyncHistoryResyncTrack } from './-sync.history';
 import type { MirrorPayload } from './-sync.import';
 import type { MirroredPipelineState } from './-sync.pipeline';
 import type { SourceVerticalConfig } from './-sync.sources';
@@ -731,4 +732,63 @@ export async function fetchSyncLogs(): Promise<{ logs?: unknown } | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Sync history — the endpoints behind the Activity modal's first tab.
+ *
+ * `/api/sync/start` and `/api/sync/cancel` are the SAME engine
+ * fetchAccountSyncStatus polls, which is why a re-sync reuses that status call
+ * rather than adding a third one.
+ */
+export async function fetchSyncHistory(
+  page: number,
+  limit: number,
+  source: string | null,
+): Promise<{
+  entries?: SyncHistoryEntry[];
+  stats?: Record<string, number>;
+  total?: number;
+  error?: string;
+}> {
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (source) params.set('source', source);
+  return readJson(await fetch(`/api/sync/history?${params}`));
+}
+
+/** GET one entry — the only call that returns its stored `tracks`. */
+export async function fetchSyncHistoryEntry(
+  entryId: number,
+): Promise<{ success?: boolean; entry?: SyncHistoryEntry; error?: string }> {
+  return readJson(await fetch(`/api/sync/history/${entryId}`));
+}
+
+export async function deleteSyncHistoryEntry(
+  entryId: number,
+): Promise<{ success?: boolean; error?: string }> {
+  return readJson(await fetch(`/api/sync/history/${entryId}`, { method: 'DELETE' }));
+}
+
+export async function startSync(body: {
+  playlist_id: string;
+  playlist_name: string;
+  tracks: SyncHistoryResyncTrack[];
+}): Promise<{ success?: boolean; error?: string }> {
+  return readJson(
+    await fetch('/api/sync/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+export async function cancelSync(playlistId: string): Promise<{ success?: boolean }> {
+  return readJson(
+    await fetch('/api/sync/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playlist_id: playlistId }),
+    }),
+  );
 }

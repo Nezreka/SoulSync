@@ -38,6 +38,7 @@ export interface SyncShellProps {
   /** One node per tab id. A tab with no entry renders an empty panel. */
   panels: Partial<Record<SyncTabId, ReactNode>>;
   onAutoSync: () => void;
+  onActivity: () => void;
   /** The right-hand sidebar (S2). Rendered as the second grid column. */
   sidebar?: ReactNode;
   /**
@@ -79,8 +80,8 @@ export interface SyncShellProps {
   registerOpenTab?: (open: (tab: SyncTabId) => void) => void;
 }
 
-/** 2237-2241. Three of the four are vanilla seams; see -sync.shell.ts. */
-function runHeaderAction(key: string, onAutoSync: () => void) {
+/** 2237-2241. The rest are vanilla seams; see -sync.shell.ts. */
+function runHeaderAction(key: string, onAutoSync: () => void, onActivity: () => void) {
   if (key === 'discovery-pool') {
     window.openDiscoveryPoolModal?.();
     return;
@@ -97,8 +98,11 @@ function runHeaderAction(key: string, onAutoSync: () => void) {
     window.openManualLibraryMatchTool?.();
     return;
   }
-  if (key === 'sync-history') {
-    window.openSyncHistoryModal?.();
+  if (key === 'activity') {
+    // React now, not window.openSyncHistoryModal: Activity holds the sync
+    // history AND the scheduled-run history, and the vanilla modal knows about
+    // only the first of those.
+    onActivity();
     return;
   }
   // 2241 passes the literal 'playlist' — the modal is shared with other pages
@@ -110,6 +114,7 @@ export function SyncShell({
   panels,
   onAddPlaylist,
   onAutoSync,
+  onActivity,
   sidebar,
   sidebarVisible,
   onTabChange,
@@ -190,7 +195,7 @@ export function SyncShell({
                 }`}
                 title={action.title}
                 onClick={() => {
-                  runHeaderAction(action.key, onAutoSync);
+                  runHeaderAction(action.key, onAutoSync, onActivity);
                 }}
               >
                 {action.label}

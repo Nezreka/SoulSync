@@ -107,7 +107,7 @@ afterEach(() => {
 });
 
 function openAutoSync() {
-  fireEvent.click(screen.getByText('Auto-Sync'));
+  fireEvent.click(screen.getByText('Bulk schedule'));
 }
 
 describe('the Auto-Sync action groups', () => {

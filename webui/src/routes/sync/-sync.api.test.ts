@@ -9,6 +9,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   cancelSourceSync,
+  deleteSyncHistoryEntry,
+  fetchSyncHistory,
+  fetchSyncHistoryEntry,
   deleteBeatportChart,
   deleteYouTubePlaylist,
   detectLbSeries,
@@ -718,5 +721,32 @@ describe('recordServerLink', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
     expect(() => recordServerLink(7, 'x', 'plex')).not.toThrow();
     await Promise.resolve();
+  });
+});
+
+describe('sync history endpoints (wishlist-tools.js 3934-4310)', () => {
+  it('fetchSyncHistory carries page and limit, and OMITS source for All', () => {
+    // A `source=` param with an empty value is not the same request as no
+    // param: the endpoint would filter on the empty string and return nothing.
+    stubFetch({ entries: [] });
+    return fetchSyncHistory(2, 20, null).then(() => {
+      expect(calls[0].url).toBe('/api/sync/history?page=2&limit=20');
+    });
+  });
+
+  it('fetchSyncHistory adds source when a tab is picked', async () => {
+    stubFetch({ entries: [] });
+    await fetchSyncHistory(1, 20, 'spotify');
+    expect(calls[0].url).toBe('/api/sync/history?page=1&limit=20&source=spotify');
+  });
+
+  it('fetchSyncHistoryEntry and the delete hit the same per-entry path', async () => {
+    stubFetch({ success: true });
+    await fetchSyncHistoryEntry(7);
+    await deleteSyncHistoryEntry(7);
+    expect(calls.map((c) => `${c.method ?? 'GET'} ${c.url}`)).toEqual([
+      'GET /api/sync/history/7',
+      'DELETE /api/sync/history/7',
+    ]);
   });
 });

@@ -14,6 +14,7 @@ function renderShell(over: Partial<React.ComponentProps<typeof SyncShell>> = {})
   const props: React.ComponentProps<typeof SyncShell> = {
     panels: {},
     onAutoSync: vi.fn(),
+    onActivity: vi.fn(),
     ...over,
   };
   return { props, ...render(<SyncShell {...props} />) };
@@ -45,32 +46,33 @@ describe('the header (2229-2243)', () => {
       (b) => b.textContent !== '+ Add playlist',
     );
     expect(btns.map((b) => b.textContent)).toEqual([
-      'Auto-Sync',
+      'Bulk schedule',
       'Discovery Pool',
       'Wing It Pool',
       'Library Match',
-      'Sync History',
+      'Activity',
       'Download Origins',
     ]);
     expect(btns[0].getAttribute('title')).toBe(
-      'Schedule mirrored playlists to refresh, discover, sync, and queue missing tracks',
+      'Schedule many mirrored playlists at once, and review the pipeline',
     );
     expect(btns[5].getAttribute('title')).toBe('See every track your playlist syncs downloaded');
-    // Only Auto-Sync carries the extra hook class the vanilla gives it.
+    // Only the bulk-schedule button carries the extra hook class the vanilla
+    // gives it; the CLASS keeps its auto-sync name because vanilla CSS and the
+    // dashboard tile both still select on it. Only the LABEL changed.
     const byLabel = (label: string) =>
       [...container.querySelectorAll('.sync-header-actions button')].find(
         (b) => b.textContent === label,
       ) as HTMLElement;
-    expect(byLabel('Auto-Sync').className).toContain('auto-sync-manager-btn');
+    expect(byLabel('Bulk schedule').className).toContain('auto-sync-manager-btn');
     expect(byLabel('Library Match').className).not.toContain('auto-sync-manager-btn');
   });
 
-  it('routes each button to its own seam, Auto-Sync to React', () => {
+  it('routes each button to its own seam, Bulk schedule and Activity to React', () => {
     // Selected by LABEL, not index: the row gained two buttons when the pool
     // modals moved up from the Mirrored tab, and index-based assertions all
     // silently pointed at the wrong control.
     window.openManualLibraryMatchTool = vi.fn();
-    window.openSyncHistoryModal = vi.fn();
     window.openDownloadOriginsModal = vi.fn();
     window.openDiscoveryPoolModal = vi.fn();
     window.openWingItPoolModal = vi.fn();
@@ -82,12 +84,14 @@ describe('the header (2229-2243)', () => {
       fireEvent.click(btn);
     };
 
-    click('Auto-Sync');
+    click('Bulk schedule');
     expect(props.onAutoSync).toHaveBeenCalledTimes(1);
     click('Library Match');
     expect(window.openManualLibraryMatchTool).toHaveBeenCalledTimes(1);
-    click('Sync History');
-    expect(window.openSyncHistoryModal).toHaveBeenCalledTimes(1);
+    // Activity is React, not a window seam: it holds the sync history AND the
+    // scheduled-run history, and the vanilla modal knows only the first.
+    click('Activity');
+    expect(props.onActivity).toHaveBeenCalledTimes(1);
     click('Discovery Pool');
     expect(window.openDiscoveryPoolModal).toHaveBeenCalledTimes(1);
     click('Wing It Pool');

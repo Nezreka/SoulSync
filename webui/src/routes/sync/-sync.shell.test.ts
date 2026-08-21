@@ -107,17 +107,17 @@ describe('the tab table matches the markup it was transcribed from', () => {
 
 describe('the header actions', () => {
   it('leads with the actions that CHANGE something', () => {
-    // Auto-Sync sits first so it lands beside Add playlist: those two decide
-    // what the page will do, and the four after them only report what already
-    // happened. The pools moved up from the Mirrored tab's own header, since
-    // both are app-level overlays over everything rather than one tab's
+    // Bulk schedule sits first so it lands beside Add playlist: those two
+    // decide what the page will do, and the four after them only report what
+    // already happened. The pools moved up from the Mirrored tab's own header,
+    // since both are app-level overlays over everything rather than one tab's
     // controls.
     expect(SYNC_HEADER_ACTIONS.map((a) => a.label)).toEqual([
-      'Auto-Sync',
+      'Bulk schedule',
       'Discovery Pool',
       'Wing It Pool',
       'Library Match',
-      'Sync History',
+      'Activity',
       'Download Origins',
     ]);
     expect(SYNC_HEADER_ACTIONS.map((a) => a.key)).toEqual([
@@ -125,7 +125,7 @@ describe('the header actions', () => {
       'discovery-pool',
       'wing-it-pool',
       'library-match',
-      'sync-history',
+      'activity',
       'download-origins',
     ]);
     expect(SYNC_HEADER_ACTIONS.every((a) => a.title.length > 0)).toBe(true);

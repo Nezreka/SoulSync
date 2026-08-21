@@ -207,6 +207,66 @@ describe('the card body', () => {
   });
 });
 
+describe('the pill only speaks up when it has something to say', () => {
+  function pillOf(scheduled: boolean, schedule: string) {
+    const { container } = render(
+      <PlaylistCard
+        row={row()}
+        name="Road Trip"
+        when="x"
+        schedule={schedule}
+        scheduled={scheduled}
+        onOpen={vi.fn()}
+        primary={{ label: 'Sync now', onClick: vi.fn() }}
+        onMore={vi.fn()}
+        onSchedule={vi.fn()}
+      />,
+    );
+    return container.querySelector('.pl-card-pill') as HTMLElement;
+  }
+
+  it('a scheduled playlist wears its cadence at rest', () => {
+    expect(pillOf(true, 'Every 1 day').className).not.toContain('pl-card-pill--quiet');
+  });
+
+  it('an unscheduled one goes quiet, so the scheduled few stand out', () => {
+    // 24 of 37 cards reading "Not scheduled" made the most-repeated element on
+    // the page the one carrying no information.
+    expect(pillOf(false, 'Not scheduled').className).toContain('pl-card-pill--quiet');
+  });
+
+  it('quiet is a STYLE, not a removal — it still opens the picker', () => {
+    // Reserving the box is what stops the grid jogging under the cursor on
+    // hover, and the control has to stay reachable either way.
+    const onSchedule = vi.fn();
+    const { container } = render(
+      <PlaylistCard
+        row={row()}
+        name="Road Trip"
+        when="x"
+        schedule="Not scheduled"
+        scheduled={false}
+        onOpen={vi.fn()}
+        primary={{ label: 'Sync now', onClick: vi.fn() }}
+        onMore={vi.fn()}
+        onSchedule={onSchedule}
+      />,
+    );
+    const pill = container.querySelector('.pl-card-pill') as HTMLElement;
+    expect(pill.tagName).toBe('BUTTON');
+    expect(pill.textContent).toBe('Not scheduled');
+    fireEvent.click(pill);
+    expect(onSchedule).toHaveBeenCalledTimes(1);
+  });
+
+  it('"Can’t be scheduled" is quiet too — it is rare, and it is not news', () => {
+    const { container } = renderCard();
+    expect((container.querySelector('.pl-card-pill--inert') as HTMLElement).className).toContain(
+      'pl-card-pill--quiet',
+    );
+  });
+});
+
 describe('when there is nothing honest to offer', () => {
   it('renders no primary button at all', () => {
     // A Beatport or file-backed mirror cannot be refreshed by the pipeline —

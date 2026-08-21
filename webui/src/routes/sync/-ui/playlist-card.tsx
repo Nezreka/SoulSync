@@ -85,6 +85,17 @@ export interface PlaylistCardProps {
    * is the same lie as offering a Sync now that 400s.
    */
   onSchedule?: (anchor: HTMLElement) => void;
+  /**
+   * Whether a cadence is actually set, which decides if the pill is a LABEL or
+   * just a control. Most playlists are unscheduled, so painting "Not scheduled"
+   * on every one of them made the loudest repeated element on the page the one
+   * carrying no information — and buried the handful that do have a cadence.
+   * Unscheduled cards keep the pill for its hit box and reveal it on hover.
+   *
+   * Passed rather than read off the label: "Not scheduled" is display copy, and
+   * matching against it would break the moment the wording changes.
+   */
+  scheduled?: boolean;
 }
 
 /**
@@ -137,6 +148,7 @@ export function PlaylistCard({
   primary,
   onMore,
   onSchedule,
+  scheduled,
 }: PlaylistCardProps) {
   const state = libraryCardState(row);
   const pct = libraryCoveragePct(row);
@@ -206,7 +218,7 @@ export function PlaylistCard({
         {onSchedule ? (
           <button
             type="button"
-            className="pl-card-pill pl-card-pill--action"
+            className={`pl-card-pill pl-card-pill--action${scheduled ? '' : ' pl-card-pill--quiet'}`}
             title="Change how often this playlist syncs"
             onClick={(e) => {
               e.stopPropagation();
@@ -220,7 +232,7 @@ export function PlaylistCard({
              pipeline at all. Saying "Not scheduled" would imply you could,
              and clicking it does nothing — so it says what is actually true. */
           <span
-            className="pl-card-pill pl-card-pill--inert"
+            className="pl-card-pill pl-card-pill--inert pl-card-pill--quiet"
             title="Auto-Sync cannot refresh this source, so it cannot be scheduled"
           >
             Can’t be scheduled

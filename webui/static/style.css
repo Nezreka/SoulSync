@@ -19799,6 +19799,26 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 /* The pill is a control now — it is the only place a cadence gets set. */
 .pl-card-pill--inert { opacity: 0.55; cursor: default; }
 
+/* An unscheduled playlist says nothing at rest.
+   Most playlists have no cadence, so a chip reading "Not scheduled" on each of
+   them made the most-repeated thing on the page the one carrying no
+   information, and the few that ARE scheduled stopped standing out. The pill
+   keeps its box so nothing reflows on hover; it just stops shouting.
+   VISIBILITY, NOT DISPLAY: the space stays reserved, so revealing it cannot
+   push the card taller and jog the grid under the cursor. */
+.pl-card-pill--quiet {
+    opacity: 0;
+    transition: opacity 0.16s ease;
+}
+
+/* focus-within, not just hover, or the pill is unreachable by keyboard. */
+.pl-card:hover .pl-card-pill--quiet,
+.pl-card:focus-within .pl-card-pill--quiet { opacity: 0.75; }
+
+.pl-card-pill--inert.pl-card-pill--quiet { opacity: 0; }
+.pl-card:hover .pl-card-pill--inert.pl-card-pill--quiet,
+.pl-card:focus-within .pl-card-pill--inert.pl-card-pill--quiet { opacity: 0.55; }
+
 .pl-card-pill--action { cursor: pointer; transition: border-color 0.16s, color 0.16s; }
 
 .pl-card-pill--action:hover {
@@ -78119,4 +78139,107 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     .reassign-steps {
         padding: 12px 16px 0;
     }
+}
+
+/* ── Activity ────────────────────────────────────────────────────────
+   Syncs you ran and runs the schedule ran, under one roof. They were two
+   header buttons answering the same question, and you had to know which one
+   had touched your playlist before you knew where to look.
+
+   The BODY is what scrolls, not the modal: the tab strip has to stay put, or
+   switching tabs from halfway down a long history leaves you halfway down a
+   different one. Namespaced `sync-activity-` because an unrelated
+   `.activity-*` family already exists for the live activity feed. */
+.sync-activity-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+}
+.sync-activity-overlay.hidden { display: none; }
+
+.sync-activity-modal {
+    width: 860px;
+    max-width: 95vw;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: linear-gradient(135deg, rgba(26, 26, 26, 0.98) 0%, rgba(16, 16, 16, 0.99) 100%);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+}
+
+.sync-activity-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 24px 14px;
+}
+.sync-activity-head h3 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 650;
+    color: #fff;
+}
+.sync-activity-close {
+    border: 0;
+    background: none;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+    color: rgba(255, 255, 255, 0.5);
+    transition: color 0.15s;
+}
+.sync-activity-close:hover { color: #fff; }
+
+.sync-activity-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 0 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.sync-activity-tab {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 14px;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.55);
+    /* The underline is drawn on the element itself so an inactive tab reserves
+       the same 2px and nothing shifts by a pixel as you switch. */
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: color 0.15s, border-color 0.15s;
+}
+.sync-activity-tab:hover { color: rgba(255, 255, 255, 0.85); }
+.sync-activity-tab.active {
+    color: #fff;
+    border-bottom-color: rgb(var(--accent-light-rgb));
+}
+.sync-activity-tab-badge {
+    min-width: 17px;
+    padding: 1px 5px;
+    border-radius: 100px;
+    font-size: 10px;
+    font-weight: 700;
+    text-align: center;
+    color: #ff9e97;
+    background: rgba(224, 85, 78, 0.18);
+}
+
+.sync-activity-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 16px 24px 22px;
 }

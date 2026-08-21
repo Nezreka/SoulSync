@@ -27,9 +27,11 @@ import type { SyncTabId } from '../-sync.shell';
 
 import { metadataSourceLabel } from '../-sync.modal-core';
 import { useAutoSync } from '../-sync.use-autosync';
+import { useSyncHistory } from '../-sync.use-history';
 import { useSyncPage } from '../-sync.use-page';
 import { QobuzTab, TidalTab } from './account-tab';
 import { DeezerArlTab, SpotifyTab } from './account-tabs';
+import { ActivityModal, type ActivityTab } from './activity-modal';
 import { AutoSyncModal } from './autosync-modal';
 import { BeatportTab } from './beatport-tab';
 import { ImportFileTab } from './import-file-tab';
@@ -65,6 +67,8 @@ declare global {
 export function SyncPage() {
   const page = useSyncPage();
   const [autoSyncOpen, setAutoSyncOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [activityTab, setActivityTab] = useState<ActivityTab>('syncs');
   const [compare, setCompare] = useState<CompareView | null>(null);
 
   /**
@@ -125,7 +129,38 @@ export function SyncPage() {
    * for on `window` — `runMirroredPlaylistPipeline` lives in auto-sync.js,
    * which the flip deletes.
    */
-  const autoSync = useAutoSync({ open: autoSyncOpen, runPipeline: page.pipeline.run });
+  /**
+   * Open for the Auto-Sync modal OR for Activity's scheduled-runs tab, which
+   * reads the same run history. Leaving it closed there would show an empty
+   * list on a tab whose whole job is that list.
+   */
+  const autoSync = useAutoSync({
+    open: autoSyncOpen || (activityOpen && activityTab === 'runs'),
+    runPipeline: page.pipeline.run,
+  });
+  const syncHistory = useSyncHistory({
+    active: activityOpen && activityTab === 'syncs',
+    // The download-type re-sync path is the vanilla download modal, which this
+    // port does not own and does not replace.
+    openDownloadModal: async (entry) => {
+      setActivityOpen(false);
+      await window.openDownloadMissingModalForArtistAlbum?.(
+        String(entry.playlist_id ?? `resync_${entry.id}`),
+        entry.playlist_name ?? '',
+        entry.tracks ?? [],
+        entry.album_context ?? {
+          id: `resync_album_${entry.id}`,
+          name: entry.playlist_name,
+          album_type: entry.sync_type === 'album' ? 'album' : 'compilation',
+          images: entry.thumb_url ? [{ url: entry.thumb_url }] : [],
+          total_tracks: entry.total_tracks,
+        },
+        entry.artist_context ?? { id: 'resync_artist', name: 'Various Artists' },
+        false,
+        entry.sync_type === 'album' ? 'artist_album' : 'playlist',
+      );
+    },
+  });
 
   /**
    * The live metadata-source name. The vanilla interpolates
@@ -278,6 +313,7 @@ export function SyncPage() {
         panels={panels}
         onAddPlaylist={setAddAnchor}
         onAutoSync={() => setAutoSyncOpen(true)}
+        onActivity={() => setActivityOpen(true)}
         sidebar={
           <SyncSidebar
             state={page.actions}
@@ -295,6 +331,39 @@ export function SyncPage() {
         modals={page.modals}
         standalone={page.standalone}
         mirroredSource={sourceName}
+      />
+
+      <ActivityModal
+        open={activityOpen}
+        tab={activityTab}
+        onTab={setActivityTab}
+        onClose={() => setActivityOpen(false)}
+        now={autoSync.now}
+        failedRuns={autoSync.state.runHistory.filter((r) => r.status === 'error').length}
+        syncs={{
+          entries: syncHistory.entries,
+          stats: syncHistory.stats,
+          total: syncHistory.total,
+          page: syncHistory.page,
+          pageSize: syncHistory.pageSize,
+          source: syncHistory.source,
+          loading: syncHistory.loading,
+          error: syncHistory.error,
+          resyncs: syncHistory.resyncs,
+          onSelectSource: syncHistory.selectSource,
+          onPage: syncHistory.goToPage,
+          onResync: syncHistory.resync,
+          onCancel: syncHistory.cancel,
+          onDelete: syncHistory.remove,
+        }}
+        runs={{
+          history: autoSync.state.runHistory,
+          total: autoSync.state.runHistoryTotal,
+          filter: autoSync.historyFilter,
+          onFilterChange: autoSync.setHistoryFilter,
+          onLoadMore: autoSync.loadMoreHistory,
+          onRunAgain: (playlistId) => autoSync.runNow(playlistId),
+        }}
       />
 
       {autoSyncOpen ? (

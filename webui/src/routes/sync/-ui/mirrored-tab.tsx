@@ -798,6 +798,7 @@ export function MirroredTab({
                 // bare "30m ago" leaves you guessing.
                 when={`Mirrored ${timeAgo(row.updated_at || row.mirrored_at, Date.now())}`}
                 schedule={cardScheduleLabel(cardSchedules.schedules[String(row.id)], Date.now())}
+                scheduled={Boolean(cardSchedules.schedules[String(row.id)])}
                 health={autoSyncPlaylistHealth(cardSchedules.history, row.id)}
                 status={
                   exportStatus ? (
