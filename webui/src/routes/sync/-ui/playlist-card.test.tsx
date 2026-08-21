@@ -359,3 +359,77 @@ describe('the hover veil, as the stylesheet actually declares it', () => {
     expect(block('.pl-card-body')).not.toMatch(/z-index/);
   });
 });
+
+describe('the card tells you what you actually own', () => {
+  it('names the in-library count when everything is discovered but not all owned', () => {
+    // The state that had no way of being seen: discovery matched all 140, the
+    // files are not all here, and the card used to read a flat "140 tracks".
+    expect(
+      playlistCardMeta(
+        row({ total_count: 140, discovered_count: 140, in_library_count: 96 }),
+        'synced 3h ago',
+      ),
+    ).toBe('140 tracks · 96 in library');
+  });
+
+  it('stays quiet when everything IS owned — nothing to report is nothing to say', () => {
+    expect(
+      playlistCardMeta(
+        row({ total_count: 140, discovered_count: 140, in_library_count: 140 }),
+        'synced 3h ago',
+      ),
+    ).toBe('140 tracks · synced 3h ago');
+  });
+
+  it('says nothing about ownership when the backend sent no count', () => {
+    // 0 here means "not reported", not "you own none of it" — claiming the
+    // latter would be the same overclaim in the opposite direction.
+    expect(playlistCardMeta(row({ total_count: 140, discovered_count: 140 }), 'x')).toBe(
+      '140 tracks · x',
+    );
+  });
+
+  it('the discovery shortfall still wins — it is the actionable one', () => {
+    // "Find 24 missing" is the button; the meta line has to match it.
+    expect(
+      playlistCardMeta(row({ total_count: 86, discovered_count: 62, in_library_count: 40 }), 'x'),
+    ).toBe('86 tracks · 62 discovered');
+  });
+});
+
+describe('the organize-by-playlist marker', () => {
+  it('shows on a playlist in organize mode', () => {
+    const { container } = render(
+      <PlaylistCard
+        row={row({ organize_by_playlist: true })}
+        name="Road Trip"
+        when="x"
+        schedule="Not scheduled"
+        onOpen={vi.fn()}
+        onMore={vi.fn()}
+      />,
+    );
+    expect(container.querySelector('.pl-card-organize')).not.toBeNull();
+  });
+
+  it('is absent otherwise, so it marks a mode rather than decorating every card', () => {
+    const { container } = renderCard();
+    expect(container.querySelector('.pl-card-organize')).toBeNull();
+  });
+
+  it('its tooltip names the WISHLIST effect, which the setting’s name does not imply', () => {
+    // organize_by_playlist also sets skip_wishlist_add, so misses are
+    // downloaded directly instead of landing on the wishlist.
+    const { container } = render(
+      <PlaylistCard
+        row={row({ organize_by_playlist: true })}
+        name="Road Trip"
+        when="x"
+        schedule="Not scheduled"
+        onOpen={vi.fn()}
+        onMore={vi.fn()}
+      />,
+    );
+    expect(container.querySelector('.pl-card-organize')?.getAttribute('title')).toMatch(/wishlist/);
+  });
+});

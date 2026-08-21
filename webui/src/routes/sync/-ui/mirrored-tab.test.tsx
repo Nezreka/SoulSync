@@ -1183,3 +1183,42 @@ describe('MirroredTab — the Scheduled tab keeps up with the menu', () => {
       });
   });
 });
+
+describe('MirroredTab — the sort control', () => {
+  const MANY = [
+    { ...ROW, id: 11, name: 'Zebra', track_count: 5, source_playlist_id: 'a' },
+    { ...ROW, id: 12, name: 'apple', track_count: 90, source_playlist_id: 'b' },
+    { ...ROW, id: 13, name: 'Mango', track_count: 50, source_playlist_id: 'c' },
+    { ...ROW, id: 14, name: 'Kiwi', track_count: 20, source_playlist_id: 'd' },
+  ];
+
+  async function renderMany() {
+    stubFetch();
+    responder = (url) => (url === '/api/mirrored-playlists' ? MANY : { states: [] });
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Zebra')).toBeInTheDocument());
+  }
+
+  const names = () =>
+    [...document.querySelectorAll('.pl-card-name b')].map((n) => n.textContent);
+
+  it('reorders the grid by the name a user sees', async () => {
+    await renderMany();
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'name' } });
+    expect(names()).toEqual(['apple', 'Kiwi', 'Mango', 'Zebra']);
+  });
+
+  it('reorders by track count, biggest first', async () => {
+    await renderMany();
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'tracks' } });
+    expect(names()).toEqual(['apple', 'Mango', 'Kiwi', 'Zebra']);
+  });
+
+  it('is not offered for a library too small to need reordering', async () => {
+    stubFetch();
+    responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    expect(screen.queryByRole('combobox')).toBeNull();
+  });
+});

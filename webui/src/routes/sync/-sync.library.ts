@@ -54,6 +54,17 @@ export function libraryDiscovered(row: MirroredPlaylistRow): number {
   return row.discovered_count || 0;
 }
 
+/**
+ * How many tracks SoulSync owns a FILE for.
+ *
+ * The honest answer to "do I actually have this music", as opposed to
+ * libraryDiscovered, which only says a match was found. The two diverge exactly
+ * when discovery has run and the downloads have not.
+ */
+export function libraryOwned(row: MirroredPlaylistRow): number {
+  return row.in_library_count || 0;
+}
+
 /** How many there are in total — `total_count` first, the row's own count after. */
 export function libraryTotal(row: MirroredPlaylistRow): number {
   return row.total_count || row.track_count || 0;
@@ -289,10 +300,49 @@ const STATE_RANK: Readonly<Record<LibraryCardState, number>> = {
   ok: 3,
 };
 
+export type LibrarySort = 'state' | 'name' | 'tracks' | 'recent';
+
+export const LIBRARY_SORTS: readonly { id: LibrarySort; label: string }[] = [
+  { id: 'state', label: 'Needs attention' },
+  { id: 'name', label: 'Name' },
+  { id: 'tracks', label: 'Track count' },
+  { id: 'recent', label: 'Recently synced' },
+];
+
+/** The name a user sees, which is what sorting by "name" has to mean. */
+function sortName(row: MirroredPlaylistRow): string {
+  return (row.display_name || row.custom_name || row.name || '').toLowerCase();
+}
+
+function syncedAt(row: MirroredPlaylistRow): number {
+  const raw = row.updated_at || row.mirrored_at;
+  const t = raw ? Date.parse(raw) : NaN;
+  return Number.isNaN(t) ? 0 : t;
+}
+
+/**
+ * `state` stays the DEFAULT, and is the only order that is about the library
+ * rather than about the rows: problems first, so nothing needs a warning colour
+ * to be findable. The others exist because thirty-eight playlists is enough
+ * that "where is the big one" and "what did I sync last" are real questions.
+ *
+ * Every order falls back to STATE_RANK on a tie rather than to the incoming
+ * order, so two playlists with the same track count still surface the broken
+ * one first.
+ */
 export function librarySortedRows(
   rows: readonly MirroredPlaylistRow[],
+  sort: LibrarySort = 'state',
 ): MirroredPlaylistRow[] {
+  const byState = (a: MirroredPlaylistRow, b: MirroredPlaylistRow) =>
+    STATE_RANK[libraryCardState(a)] - STATE_RANK[libraryCardState(b)];
+
   // A COPY: sorting the caller's array in place would reorder the row list the
   // rest of the tab still holds.
-  return [...rows].sort((a, b) => STATE_RANK[libraryCardState(a)] - STATE_RANK[libraryCardState(b)]);
+  return [...rows].sort((a, b) => {
+    if (sort === 'name') return sortName(a).localeCompare(sortName(b)) || byState(a, b);
+    if (sort === 'tracks') return libraryTotal(b) - libraryTotal(a) || byState(a, b);
+    if (sort === 'recent') return syncedAt(b) - syncedAt(a) || byState(a, b);
+    return byState(a, b);
+  });
 }

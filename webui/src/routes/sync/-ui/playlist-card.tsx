@@ -31,6 +31,7 @@ import {
   libraryCardState,
   libraryCoveragePct,
   libraryMissingCount,
+  libraryOwned,
   libraryTotal,
 } from '../-sync.library';
 import { PlaylistArt, PlaylistCollage, playlistCoverTiles } from './playlist-art';
@@ -120,6 +121,13 @@ export function playlistCardMeta(row: MirroredPlaylistRow, when: string): string
   // counts tracks the discovery step matched to a source — owning the file is a
   // different question the database answers with a separate `in_library`.
   if (state === 'short') return `${tracks} · ${total - libraryMissingCount(row)} discovered`;
+
+  // Fully discovered but not fully OWNED — the state that had no way of being
+  // seen. Discovery matched everything and the files are not all here, which
+  // used to read as an unqualified "140 tracks" and looked finished.
+  const owned = libraryOwned(row);
+  if (total > 0 && owned > 0 && owned < total) return `${tracks} · ${owned} in library`;
+
   return when ? `${tracks} · ${when}` : tracks;
 }
 
@@ -210,6 +218,20 @@ export function PlaylistCard({
           ) : null}
           <SourceIcon source={row.source} />
           <b title={nameTitle ?? name}>{name}</b>
+          {/* Organize-by-playlist was set-and-forget: nothing on the card said
+              which playlists were in that mode, so finding out meant opening
+              the overflow menu on each of thirty-eight. The tooltip names BOTH
+              effects, because the second one is not implied by the setting's
+              name and changes where failures go. */}
+          {row.organize_by_playlist ? (
+            <span
+              className="pl-card-organize"
+              title="Downloads into a folder named after this playlist. Missed tracks are downloaded directly instead of going to the wishlist."
+              aria-label="Organized by playlist"
+            >
+              📁
+            </span>
+          ) : null}
         </div>
         <div className="pl-card-meta card-meta">
           {status ?? playlistCardMeta(row, when)}

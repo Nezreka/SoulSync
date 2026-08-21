@@ -14,6 +14,7 @@ import type { LibraryFilter } from './-sync.library';
 
 import {
   LIBRARY_FILTERS,
+  LIBRARY_SORTS,
   libraryCardState,
   libraryCoveragePct,
   libraryDiscovered,
@@ -24,6 +25,7 @@ import {
   libraryMatchesSearch,
   libraryMissingCount,
   libraryNeedsAttention,
+  libraryOwned,
   librarySearch,
   librarySortedRows,
   librarySources,
@@ -401,5 +403,78 @@ describe('searching by name', () => {
   it('survives a row with no name at all', () => {
     expect(librarySearch([row({ id: 9, name: undefined })], 'x')).toEqual([]);
     expect(libraryMatchesSearch(row({ id: 9, name: undefined }), '')).toBe(true);
+  });
+});
+
+describe('what the library actually OWNS', () => {
+  it('reads the in-library count, which is not the discovered one', () => {
+    // Discovery matched a track to a source; owning the file is a separate
+    // question the backend answers by joining the real tracks table.
+    expect(libraryOwned(row({ discovered_count: 140, in_library_count: 96 }))).toBe(96);
+  });
+
+  it('is 0 when the field is absent, never the discovered count', () => {
+    // Falling back to discovered would reintroduce the exact overclaim this
+    // number exists to correct.
+    expect(libraryOwned(row({ discovered_count: 140 }))).toBe(0);
+  });
+});
+
+describe('ordering the library', () => {
+  const rows = [
+    row({ id: 1, name: 'Zebra', total_count: 10, discovered_count: 10, updated_at: '2026-01-01' }),
+    row({ id: 2, name: 'apple', total_count: 90, discovered_count: 90, updated_at: '2026-03-01' }),
+    row({ id: 3, name: 'Mango', total_count: 50, discovered_count: 50, updated_at: '2026-02-01' }),
+  ];
+
+  it('defaults to state, which is the only order about the LIBRARY', () => {
+    const broken = row({ id: 9, name: 'aaa', pipeline_state: { status: 'error' } });
+    expect(librarySortedRows([...rows, broken])[0].id).toBe(9);
+  });
+
+  it('sorts by the name a user SEES, case-insensitively', () => {
+    // Not the raw name: a renamed playlist shows its alias, so sorting on the
+    // original would order the list by something invisible.
+    expect(librarySortedRows(rows, 'name').map((r) => r.name)).toEqual(['apple', 'Mango', 'Zebra']);
+    const renamed = [row({ id: 1, name: 'Zebra', display_name: 'aardvark' }), row({ id: 2, name: 'apple' })];
+    expect(librarySortedRows(renamed, 'name')[0].id).toBe(1);
+  });
+
+  it('sorts by track count, biggest first', () => {
+    expect(librarySortedRows(rows, 'tracks').map((r) => r.total_count)).toEqual([90, 50, 10]);
+  });
+
+  it('sorts by most recently synced', () => {
+    expect(librarySortedRows(rows, 'recent').map((r) => r.id)).toEqual([2, 3, 1]);
+  });
+
+  it('a row with no timestamp sorts last rather than first', () => {
+    // An unparseable date must not become 1970-beats-everything or, worse, NaN.
+    const withNone = [...rows, row({ id: 4, name: 'No date', updated_at: undefined })];
+    expect(librarySortedRows(withNone, 'recent').at(-1)?.id).toBe(4);
+  });
+
+  it('breaks every tie on state, so a broken row still surfaces', () => {
+    const tied = [
+      row({ id: 1, name: 'A', total_count: 10, discovered_count: 10 }),
+      row({ id: 2, name: 'B', total_count: 10, pipeline_state: { status: 'error' } }),
+    ];
+    expect(librarySortedRows(tied, 'tracks')[0].id).toBe(2);
+  });
+
+  it('never sorts the caller’s array in place', () => {
+    const original = [...rows];
+    librarySortedRows(rows, 'name');
+    expect(rows).toEqual(original);
+  });
+
+  it('every declared sort id is handled, none falls through to state silently', () => {
+    const byId = Object.fromEntries(
+      LIBRARY_SORTS.map((s) => [s.id, librarySortedRows(rows, s.id).map((r) => r.id).join()]),
+    );
+    // name/tracks/recent must each differ from the default ordering.
+    for (const id of ['name', 'tracks', 'recent']) {
+      expect(byId[id], `${id} produced the default order`).not.toBe(byId.state);
+    }
   });
 });

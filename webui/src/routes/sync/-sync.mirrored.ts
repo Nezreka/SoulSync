@@ -39,6 +39,14 @@ export interface MirroredPlaylistRow {
   track_count?: number;
   total_count?: number;
   discovered_count?: number;
+  /**
+   * Tracks SoulSync actually owns a file for, which is a different and stronger
+   * question than `discovered_count`. Discovery only matched a track to a
+   * source; this joins against the real `tracks` table by source id or by
+   * artist+title (web_server.py's batch status counts). A playlist can be fully
+   * discovered and own none of it.
+   */
+  in_library_count?: number;
   quality_profile_id?: number | null;
   /**
    * Download missing tracks into a playlist-named folder.

@@ -71,12 +71,13 @@ import { SOURCE_REF_FAILED, sourceRefUpdatedToast } from '../-sync.pipeline';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { asString } from '../-sync.url-tabs';
 import { useExportJobs } from '../-sync.use-export';
-import type { LibraryFilter } from '../-sync.library';
+import type { LibraryFilter, LibrarySort } from '../-sync.library';
 
 import {
   libraryCardState,
   librarySortedRows,
   libraryFilterCounts,
+  LIBRARY_SORTS,
   librarySearch,
   librarySources,
   librarySummary,
@@ -260,6 +261,7 @@ export function MirroredTab({
   /** The library view: filter by STATE, and optionally narrow by source. */
   const [filter, setFilter] = useState<LibraryFilter>('all');
   const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<LibrarySort>('state');
   const [sources, setSources] = useState<ReadonlySet<string>>(() => new Set());
   const toggleSource = useCallback((source: string) => {
     setSources((prev) => {
@@ -769,6 +771,21 @@ export function MirroredTab({
               </button>
             ))}
           </div>
+          {/* A plain <select>: four orders is a menu's worth of nothing, and a
+              popover here would be the third one on this page. Only offered
+              once there is enough to reorder. */}
+          {allRows.length > 3 && (
+            <label className="library-sort">
+              <span>Sort</span>
+              <select value={sort} onChange={(e) => setSort(e.target.value as LibrarySort)}>
+                {LIBRARY_SORTS.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {/* Source demoted to a filter, which is what it always actually was. */}
           {sourceList.length > 1 && (
             <div className="library-sources">
@@ -806,7 +823,7 @@ export function MirroredTab({
           </div>
         ) : (
           <div className="pl-grid">
-            {librarySortedRows(visibleRows).map((row) => {
+            {librarySortedRows(visibleRows, sort).map((row) => {
             const displayName = row.display_name || row.name || '';
             // The live phase line, unchanged — its percentages and its
             // Discovered N/M are information the resting meta line cannot
