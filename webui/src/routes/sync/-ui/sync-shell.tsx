@@ -60,7 +60,7 @@ export interface SyncShellProps {
    * one entry point that replaces choosing a source tab before you have even
    * pasted anything.
    */
-  onAddPlaylist?: (anchor: { top: number; left: number }) => void;
+  onAddPlaylist?: (anchor: { top: number; left: number; el: HTMLElement }) => void;
   onTabChange?: () => void;
   /**
    * Hand the host a function that opens a tab programmatically.
@@ -175,9 +175,11 @@ export function SyncShell({
                 className="btn btn--sm sync-add-playlist-btn"
                 title="Paste a link, pick a connected account, or import a file"
                 onClick={(e) => {
-                  // Pops in AT the button, like the card's overflow menu.
+                  // Pops in AT the button, like the card's overflow menu. The
+                  // element rides along so clicking the button again closes the
+                  // sheet instead of racing the outside-click handler.
                   const box = e.currentTarget.getBoundingClientRect();
-                  onAddPlaylist({ top: box.bottom + 8, left: box.left });
+                  onAddPlaylist({ top: box.bottom + 8, left: box.left, el: e.currentTarget });
                 }}
               >
                 + Add playlist

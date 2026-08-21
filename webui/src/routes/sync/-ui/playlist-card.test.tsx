@@ -6,6 +6,8 @@
  * design, and it is the first thing a future change would erode.
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -287,5 +289,62 @@ describe('when there is nothing honest to offer', () => {
     expect(container.querySelector('.pl-card-fix')).toBeNull();
     // The overflow still works, so rename/export/delete stay reachable.
     expect(container.querySelector('.pl-card-more')).not.toBeNull();
+  });
+});
+
+/**
+ * These live in the vanilla stylesheet, so jsdom cannot hit-test them — it has
+ * no layout engine, and every button here "works" in a rendered test whether or
+ * not something is sitting on top of it in a real browser. The stacking rules
+ * get asserted as TEXT instead, because both of these have now broken once.
+ */
+describe('the hover veil, as the stylesheet actually declares it', () => {
+  // Comments stripped first: they discuss the very properties being asserted,
+  // and a prose mention of z-index is not a declaration of one.
+  const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8').replace(
+    /\/\*[\s\S]*?\*\//g,
+    '',
+  );
+  const block = (selector: string) => {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const found = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css);
+    expect(found, `${selector} is not in static/style.css`).not.toBeNull();
+    return found?.[1] ?? '';
+  };
+
+  it('the veil takes NO pointer events, so the pill under it stays clickable', () => {
+    // The original bug: an inset:0 layer that swallowed every click meant for
+    // the schedule pill, exactly when hovering revealed the controls.
+    expect(block('.pl-card-hover')).toMatch(/pointer-events:\s*none/);
+  });
+
+  it('its children DO, or Sync now and the overflow menu are inert', () => {
+    expect(block('.pl-card-hover > *')).toMatch(/pointer-events:\s*auto/);
+  });
+
+  it('reveals the veil on TOUCH, where :hover never fires', () => {
+    // Without this, Sync now and the overflow menu sit at opacity 0 on every
+    // phone and tablet while staying perfectly clickable — controls you can
+    // only hit by guessing where they are.
+    const touch = /@media\s*\(hover:\s*none\)\s*\{([\s\S]*?)\n\}/g;
+    const blocks = [...css.matchAll(touch)].map((m) => m[1]);
+    const veil = blocks.find((b) => b.includes('.pl-card-hover'));
+    expect(veil, 'no (hover: none) rule reveals .pl-card-hover').toBeTruthy();
+    expect(veil).toMatch(/opacity:\s*1/);
+  });
+
+  it('reveals the quiet schedule pill on touch too', () => {
+    const touch = /@media\s*\(hover:\s*none\)\s*\{([\s\S]*?)\n\}/g;
+    const blocks = [...css.matchAll(touch)].map((m) => m[1]);
+    expect(blocks.some((b) => b.includes('.pl-card-pill--quiet'))).toBe(true);
+  });
+
+  it('the card body is NOT lifted above the veil', () => {
+    // The second bug, caused by fixing the first: z-index on the body puts its
+    // box over Sync now and the overflow menu, which stretch to the same right
+    // edge, so their clicks landed on the card and opened the detail modal.
+    // pointer-events is what protects the pill; a z-index here only breaks the
+    // buttons.
+    expect(block('.pl-card-body')).not.toMatch(/z-index/);
   });
 });

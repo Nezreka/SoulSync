@@ -88,7 +88,11 @@ export function SyncPage() {
    * because the tab that must parse it may not be mounted at the moment the
    * sheet closes — opening it is what mounts it.
    */
-  const [addAnchor, setAddAnchor] = useState<{ top: number; left: number } | null>(null);
+  const [addAnchor, setAddAnchor] = useState<{
+    top: number;
+    left: number;
+    el: HTMLElement;
+  } | null>(null);
   const [pending, setPending] = useState<{ tab: string; url: string } | null>(null);
   const routeAdd = useCallback((tab: string, url?: string) => {
     if (url) setPending({ tab, url });
@@ -304,14 +308,16 @@ export function SyncPage() {
     <>
       {addAnchor && (
         <AddPlaylistSheet
-          anchor={addAnchor}
+          anchor={{ top: addAnchor.top, left: addAnchor.left }}
+          anchorEl={addAnchor.el}
           onRoute={routeAdd}
           onClose={() => setAddAnchor(null)}
         />
       )}
       <SyncShell
         panels={panels}
-        onAddPlaylist={setAddAnchor}
+        // Toggles: pressing the button again closes the sheet.
+        onAddPlaylist={(next) => setAddAnchor((prev) => (prev ? null : next))}
         onAutoSync={() => setAutoSyncOpen(true)}
         onActivity={() => setActivityOpen(true)}
         sidebar={

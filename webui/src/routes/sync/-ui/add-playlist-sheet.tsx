@@ -21,7 +21,7 @@
  * of the part of this page that actually works.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 
 import {
   DETECTED_SOURCE_SERVICE_LABELS,
@@ -29,6 +29,7 @@ import {
   detectPlaylistUrl,
   isDetected,
 } from '../-sync.url-detect';
+import { usePopoverDismiss } from './use-popover-dismiss';
 import { usePopoverPosition } from './use-popover-position';
 
 /** The account tabs this sheet can send you to, in the order they read best. */
@@ -50,6 +51,8 @@ export interface AddPlaylistSheetProps {
    * dialog overstates it.
    */
   anchor: { top: number; left: number };
+  /** The trigger, so clicking "+ Add playlist" again closes rather than rebuilds. */
+  anchorEl?: HTMLElement | null;
   /**
    * Open a tab and hand it a URL to load. `url` is omitted for the account and
    * file routes, which have nothing to parse.
@@ -58,28 +61,13 @@ export interface AddPlaylistSheetProps {
   onClose: () => void;
 }
 
-export function AddPlaylistSheet({ anchor, onRoute, onClose }: AddPlaylistSheetProps) {
+export function AddPlaylistSheet({ anchor, anchorEl, onRoute, onClose }: AddPlaylistSheetProps) {
   const [input, setInput] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const pos = usePopoverPosition(anchor, ref);
 
-  useEffect(() => {
-    // Deferred a tick, or the click that OPENED it closes it again.
-    const onDocClick = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    const id = setTimeout(() => document.addEventListener('click', onDocClick), 0);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      clearTimeout(id);
-      document.removeEventListener('click', onDocClick);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [onClose]);
+  usePopoverDismiss({ ref, anchor: anchorEl, onClose });
 
   const trimmed = input.trim();
   const detection = detectPlaylistUrl(trimmed);

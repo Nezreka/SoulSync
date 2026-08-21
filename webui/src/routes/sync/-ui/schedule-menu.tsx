@@ -15,10 +15,11 @@
  * dies with the board that forced it.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 
 import type { MirroredRow } from '../-sync.autosync';
 
+import { usePopoverDismiss } from './use-popover-dismiss';
 import { usePopoverPosition } from './use-popover-position';
 
 import {
@@ -40,6 +41,8 @@ export interface ScheduleMenuProps {
   hours: number | null;
   weekly: boolean;
   anchor: { top: number; left: number };
+  /** The trigger, so clicking the pill again closes rather than rebuilds. */
+  anchorEl?: HTMLElement | null;
   onClose: () => void;
   /** Pass null to unschedule. */
   onPickHours: (hours: number | null) => void;
@@ -53,6 +56,7 @@ export function ScheduleMenu({
   hours,
   weekly,
   anchor,
+  anchorEl,
   onClose,
   onPickHours,
   onPickWeekly,
@@ -65,22 +69,7 @@ export function ScheduleMenu({
   const [custom, setCustom] = useState<string | null>(null);
   const [customError, setCustomError] = useState('');
 
-  useEffect(() => {
-    // Deferred a tick, or the click that OPENED it closes it again.
-    const onDocClick = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    const id = setTimeout(() => document.addEventListener('click', onDocClick), 0);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      clearTimeout(id);
-      document.removeEventListener('click', onDocClick);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [onClose]);
+  usePopoverDismiss({ ref, anchor: anchorEl, onClose });
 
   const item = (label: string, active: boolean, run: () => void) => (
     <button

@@ -91,6 +91,7 @@ import type { AutoSyncWeeklyDraft } from './autosync-weekly';
 import { AutoSyncWeeklyEditor } from './autosync-weekly';
 import { PlaylistCard, playlistCardPrimaryLabel } from './playlist-card';
 import { ScheduleMenu } from './schedule-menu';
+import { usePopoverDismiss } from './use-popover-dismiss';
 import { usePopoverPosition } from './use-popover-position';
 import { SourceIcon } from './source-icon';
 import { ExportModal, ExportStatusSpan } from './export-modal';
@@ -145,6 +146,7 @@ function MirroredCardMenu({
   row,
   top,
   left,
+  anchor,
   onClose,
   onRename,
   onEditSource,
@@ -156,6 +158,8 @@ function MirroredCardMenu({
   row: MirroredPlaylistRow;
   top: number;
   left: number;
+  /** The trigger, so an outside click on IT does not fight the toggle. */
+  anchor?: HTMLElement | null;
   onClose: () => void;
   onRename: () => void;
   onEditSource: () => void;
@@ -178,22 +182,7 @@ function MirroredCardMenu({
     void window.hydratePlaylistQualityProfileSelects(sourcePlaylistId, source, profileId);
   }, [profileHtml, sourcePlaylistId, source, profileId]);
 
-  useEffect(() => {
-    // Deferred by a tick, or the click that OPENED the menu closes it again.
-    const onDocClick = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    const id = setTimeout(() => document.addEventListener('click', onDocClick), 0);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      clearTimeout(id);
-      document.removeEventListener('click', onDocClick);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [onClose]);
+  usePopoverDismiss({ ref, anchor, onClose });
 
   const item = (label: string, run: () => void, danger = false) => (
     <button
@@ -285,7 +274,12 @@ export function MirroredTab({
   const cardSchedules = useCardSchedules();
 
   /** The overflow menu: which row, and where its trigger sits. */
-  const [menu, setMenu] = useState<{ row: MirroredPlaylistRow; top: number; left: number } | null>(
+  const [menu, setMenu] = useState<{
+    row: MirroredPlaylistRow;
+    top: number;
+    left: number;
+    anchor: HTMLElement;
+  } | null>(
     null,
   );
   /** The schedule picker, and the weekly editor it can open. */
@@ -293,6 +287,7 @@ export function MirroredTab({
     row: MirroredPlaylistRow;
     top: number;
     left: number;
+    anchor: HTMLElement;
   } | null>(null);
   const [weeklyDraft, setWeeklyDraft] = useState<AutoSyncWeeklyDraft | null>(null);
 
@@ -832,14 +827,25 @@ export function MirroredTab({
                 onSchedule={
                   autoSyncCanSchedulePlaylist(row)
                     ? (anchor) => {
+                        // Toggles, like the overflow trigger.
                         const box = anchor.getBoundingClientRect();
-                        setSchedMenu({ row, top: box.bottom + 6, left: box.left });
+                        setSchedMenu((prev) =>
+                          prev?.row.id === row.id
+                            ? null
+                            : { row, top: box.bottom + 6, left: box.left, anchor },
+                        );
                       }
                     : undefined
                 }
                 onMore={(anchor) => {
+                  // A TOGGLE, not a set: clicking the trigger of an open menu
+                  // closes it, which is what the control looks like it does.
                   const box = anchor.getBoundingClientRect();
-                  setMenu({ row, top: box.bottom + 6, left: box.right - 188 });
+                  setMenu((prev) =>
+                    prev?.row.id === row.id
+                      ? null
+                      : { row, top: box.bottom + 6, left: box.right - 188, anchor },
+                  );
                 }}
               />
             );
@@ -853,6 +859,7 @@ export function MirroredTab({
           hours={cardSchedules.schedules[String(schedMenu.row.id)]?.hours ?? null}
           weekly={Boolean(cardSchedules.schedules[String(schedMenu.row.id)]?.weekly)}
           anchor={{ top: schedMenu.top, left: schedMenu.left }}
+          anchorEl={schedMenu.anchor}
           onClose={() => setSchedMenu(null)}
           onPickHours={(hours) => void cardSchedules.set(schedMenu.row, hours)}
           onPickWeekly={(days) => void cardSchedules.setWeekly(schedMenu.row, { days })}
@@ -906,6 +913,7 @@ export function MirroredTab({
           row={menu.row}
           top={menu.top}
           left={menu.left}
+          anchor={menu.anchor}
           onClose={() => setMenu(null)}
           onRename={() => {
             setRenameValue(menu.row.custom_name ?? '');
