@@ -9,6 +9,7 @@ Only the caller ever sees the failure.
 """
 
 import sys
+import time
 import types
 from datetime import datetime, timedelta
 
@@ -85,10 +86,11 @@ class TestTerminalStatus:
     """Root cause 2: `completed` was documented and never assigned."""
 
     class _Status:
-        def __init__(self, state):
+        def __init__(self, state, id="dl-1"):
             self.state = state
+            self.id = id
 
-    def _req(self, request_id="r1", status="downloading"):
+    def _req(self, request_id="r1", status="downloading", download_id="dl-1"):
         with request_mod._requests_lock:
             request_mod._pending_requests[request_id] = {
                 "request_id": request_id,
@@ -96,110 +98,152 @@ class TestTerminalStatus:
                 "status": status,
                 "created_at": datetime.now(),
                 "completed_at": None,
-                "download_id": "dl-1",
+                "download_id": download_id,
                 "error": None,
+                "notify_url": None,
+                "watch_until": time.monotonic() + 600,
             }
 
-    def _watch(self, states, request_id="r1"):
-        """Run the watcher against a scripted sequence of transfer states."""
-        seq = list(states)
-
+    def _sweep(self, transfers, request_id="r1"):
+        """Run one sweep of the shared watcher against a set of transfers."""
         class _Soulseek:
-            def get_download_status(self, download_id):
-                return seq.pop(0) if seq else None
+            def get_all_downloads(self):
+                return transfers
 
-        # The watcher waits on the shutdown event between polls; make that
-        # instant rather than sleeping 5s per poll.
-        request_mod._COMPLETION_POLL_SECONDS = 0.001
-        request_mod._await_download_completion(
-            request_id, _Soulseek(), "dl-1", run_async=lambda coro: coro,
+        settled = request_mod._resolve_downloading_requests(
+            _Soulseek(), run_async=lambda coro: coro,
         )
         with request_mod._requests_lock:
-            return dict(request_mod._pending_requests.get(request_id, {}))
+            return dict(request_mod._pending_requests.get(request_id, {})), settled
 
     def test_a_finished_transfer_reaches_completed(self):
         self._req()
-        req = self._watch([self._Status("InProgress"), self._Status("Completed, Succeeded")])
+        req, settled = self._sweep([self._Status("Completed, Succeeded")])
         assert req["status"] == "completed"
         assert req["completed_at"] is not None
+        assert len(settled) == 1
 
     def test_a_compound_failure_is_NOT_read_as_completed(self):
-        # "Completed, Errored" contains "Completed". A check for that substring
+        # "Completed, Errored" contains "Completed". A substring check for that
         # would call a dead transfer a success, which is worse than the bug.
         self._req()
-        req = self._watch([self._Status("Completed, Errored")])
+        req, _ = self._sweep([self._Status("Completed, Errored")])
         assert req["status"] == "failed"
         assert "Errored" in req["error"]
 
     def test_a_cancelled_transfer_fails_rather_than_completing(self):
         self._req()
-        req = self._watch([self._Status("Completed, Cancelled")])
+        req, _ = self._sweep([self._Status("Completed, Cancelled")])
         assert req["status"] == "failed"
 
-    def test_it_keeps_waiting_through_pending_states(self):
+    def test_an_in_progress_transfer_is_left_alone(self):
         self._req()
-        req = self._watch([
-            self._Status("Queued"),
-            self._Status("InProgress"),
-            self._Status("Completed, Succeeded"),
-        ])
-        assert req["status"] == "completed"
+        req, settled = self._sweep([self._Status("InProgress")])
+        assert req["status"] == "downloading"
+        assert settled == []
 
-    def test_a_timeout_leaves_downloading_rather_than_claiming_failure(self):
+    def test_a_transfer_missing_from_the_sweep_is_left_alone(self):
+        # slskd not listing it yet is not evidence of anything.
+        self._req()
+        req, _ = self._sweep([self._Status("Completed, Succeeded", id="someone-else")])
+        assert req["status"] == "downloading"
+
+    def test_it_settles_only_the_matching_request(self):
+        self._req("r1", download_id="dl-1")
+        self._req("r2", download_id="dl-2")
+        self._sweep([self._Status("Completed, Succeeded", id="dl-1")])
+        with request_mod._requests_lock:
+            assert request_mod._pending_requests["r1"]["status"] == "completed"
+            assert request_mod._pending_requests["r2"]["status"] == "downloading"
+
+    def test_past_the_watch_window_it_stops_looking_without_claiming_failure(self):
         # The transfer may well still be running. Calling it failed because we
         # stopped watching would be a worse lie than saying we stopped.
         self._req()
-        request_mod._COMPLETION_TIMEOUT_SECONDS = 0.01
-        try:
-            req = self._watch([self._Status("InProgress")] * 50)
-        finally:
-            request_mod._COMPLETION_TIMEOUT_SECONDS = 15 * 60
+        with request_mod._requests_lock:
+            request_mod._pending_requests["r1"]["watch_until"] = time.monotonic() - 1
+        req, settled = self._sweep([self._Status("InProgress")])
         assert req["status"] == "downloading"
         assert req.get("timed_out") is True
+        assert settled == [], 'a timeout is not a result to call back about'
 
-    def test_it_stops_if_the_record_is_cleaned_up_under_it(self):
-        # The 1-hour TTL can evict a record mid-watch; the watcher must not
-        # resurrect it as a stray dict.
+    def test_a_failed_sweep_settles_nothing(self):
         self._req()
-        with request_mod._requests_lock:
-            request_mod._pending_requests.clear()
-        req = self._watch([self._Status("Completed, Succeeded")])
-        assert req == {}
-
-    def test_a_poll_error_does_not_kill_the_watch(self):
-        self._req()
-        seq = [RuntimeError("slskd down"), self._Status("Completed, Succeeded")]
 
         class _Soulseek:
-            def get_download_status(self, download_id):
-                nxt = seq.pop(0)
-                if isinstance(nxt, Exception):
-                    raise nxt
-                return nxt
+            def get_all_downloads(self):
+                raise RuntimeError("slskd down")
 
-        request_mod._COMPLETION_POLL_SECONDS = 0.001
-        request_mod._await_download_completion(
-            "r1", _Soulseek(), "dl-1", run_async=lambda coro: coro,
+        settled = request_mod._resolve_downloading_requests(
+            _Soulseek(), run_async=lambda coro: coro,
         )
+        assert settled == []
         with request_mod._requests_lock:
-            assert request_mod._pending_requests["r1"]["status"] == "completed"
+            assert request_mod._pending_requests["r1"]["status"] == "downloading"
 
 
-class TestTheWatcherIsActuallyWired:
-    """The watcher working is not the same as the worker calling it.
+class TestTheSweepDoesNotFloodSoulseek:
+    """A fix for #1168 is not allowed to cause #1166.
 
-    Every test above drives `_await_download_completion` directly, so they all
-    pass even with the call removed from the worker — which is exactly how a fix
-    ships and does nothing. (A selector that matched no elements got through
-    this way earlier in the same codebase.)
+    The endpoint allows 60 requests a minute and each is watched for up to
+    fifteen minutes. Polling per request would mean hundreds of live threads
+    issuing hundreds of slskd calls a second — the exact search flooding the
+    concurrency cap exists to prevent. One bulk read settles all of them.
     """
 
-    def test_the_worker_waits_for_a_terminal_state(self, monkeypatch):
-        watched = []
+    def test_one_api_call_settles_every_watched_request(self):
+        calls = []
+        for i in range(50):
+            with request_mod._requests_lock:
+                request_mod._pending_requests[f"r{i}"] = {
+                    "request_id": f"r{i}", "query": "q", "status": "downloading",
+                    "created_at": datetime.now(), "completed_at": None,
+                    "download_id": f"dl-{i}", "error": None, "notify_url": None,
+                    "watch_until": time.monotonic() + 600,
+                }
+
+        class _Transfer:
+            def __init__(self, i):
+                self.id = f"dl-{i}"
+                self.state = "Completed, Succeeded"
 
         class _Soulseek:
+            def get_all_downloads(self):
+                calls.append(1)
+                return [_Transfer(i) for i in range(50)]
+
+        settled = request_mod._resolve_downloading_requests(
+            _Soulseek(), run_async=lambda coro: coro,
+        )
+
+        assert len(calls) == 1, f'50 requests cost {len(calls)} slskd calls, expected 1'
+        assert len(settled) == 50
+
+    def test_an_idle_sweep_costs_no_api_call_at_all(self):
+        calls = []
+
+        class _Soulseek:
+            def get_all_downloads(self):
+                calls.append(1)
+                return []
+
+        assert request_mod._resolve_downloading_requests(
+            _Soulseek(), run_async=lambda coro: coro,
+        ) == []
+        assert calls == [], 'nothing is downloading; slskd should not be asked'
+
+class TestTheWatcherIsActuallyWired:
+    """The sweep working is not the same as anything calling it.
+
+    Worth its own class: an earlier version of these tests drove the watcher
+    directly, so every one of them passed with the call removed from the worker
+    — a fix that ships and does nothing.
+    """
+
+    def _app(self, result):
+        class _Soulseek:
             def search_and_download_best(self, query):
-                return "dl-77"
+                return result
 
         class _App:
             soulsync = {"download_orchestrator": _Soulseek()}
@@ -207,60 +251,96 @@ class TestTheWatcherIsActuallyWired:
             def _get_current_object(self):
                 return self
 
-        monkeypatch.setattr(request_mod, "current_app", _App())
-        monkeypatch.setattr(
-            request_mod, "_await_download_completion",
-            lambda rid, sk, dl, ra: watched.append((rid, dl)),
-        )
+        return _App()
+
+    def _run(self, monkeypatch, result, request_id="r9"):
+        monkeypatch.setattr(request_mod, "current_app", self._app(result))
         monkeypatch.setitem(
             sys.modules, "utils.async_helpers",
             types.SimpleNamespace(run_async=lambda coro: coro),
         )
-
         with request_mod._requests_lock:
-            request_mod._pending_requests["r9"] = {
-                "request_id": "r9", "query": "q", "status": "queued",
+            request_mod._pending_requests[request_id] = {
+                "request_id": request_id, "query": "q", "status": "queued",
                 "created_at": datetime.now(), "completed_at": None,
-                "download_id": None, "error": None,
+                "download_id": None, "error": None, "notify_url": None,
             }
-
-        request_mod._run_search_and_download("r9", "q", notify_url=None)
-
-        assert watched == [("r9", "dl-77")], 'the worker never waited for the transfer'
-
-    def test_nothing_is_watched_when_no_match_was_found(self, monkeypatch):
-        # not_found is already terminal; there is no transfer to watch.
-        watched = []
-
-        class _Soulseek:
-            def search_and_download_best(self, query):
-                return None
-
-        class _App:
-            soulsync = {"download_orchestrator": _Soulseek()}
-
-            def _get_current_object(self):
-                return self
-
-        monkeypatch.setattr(request_mod, "current_app", _App())
-        monkeypatch.setattr(
-            request_mod, "_await_download_completion",
-            lambda rid, sk, dl, ra: watched.append(rid),
-        )
-        monkeypatch.setitem(
-            sys.modules, "utils.async_helpers",
-            types.SimpleNamespace(run_async=lambda coro: coro),
-        )
-
+        request_mod._run_search_and_download(request_id, "q", notify_url=None)
         with request_mod._requests_lock:
-            request_mod._pending_requests["r8"] = {
-                "request_id": "r8", "query": "q", "status": "queued",
-                "created_at": datetime.now(), "completed_at": None,
-                "download_id": None, "error": None,
+            return dict(request_mod._pending_requests[request_id])
+
+    def test_the_worker_hands_the_transfer_to_the_watcher(self, monkeypatch):
+        # download_id AND watch_until: without the deadline the sweep would
+        # never time it out, and without the id it cannot be matched at all.
+        req = self._run(monkeypatch, result="dl-77")
+        assert req["status"] == "downloading"
+        assert req["download_id"] == "dl-77"
+        assert req.get("watch_until"), 'nothing tells the sweep when to give up'
+
+    def test_the_worker_does_NOT_sit_on_the_transfer(self, monkeypatch):
+        # It used to poll here, holding a thread for up to fifteen minutes per
+        # request against a 60/minute endpoint. It must return immediately.
+        import inspect
+        src = inspect.getsource(request_mod._run_search_and_download)
+        assert "_resolve_downloading_requests" not in src
+        assert "while" not in src, 'the worker is polling again'
+
+    def test_create_request_starts_the_shared_watcher(self):
+        # Nothing else does; without this the sweep never runs and `completed`
+        # is unreachable all over again.
+        #
+        # Matched as a CALL, not a substring: `_ensure_watcher(app)` also occurs
+        # in `def _ensure_watcher(app):`, so a plain `in src` passes with the
+        # call deleted — which is how the first version of this test behaved.
+        import inspect
+        import re
+        src = inspect.getsource(request_mod)
+        calls = re.findall(r"^\s+_ensure_watcher\(app\)\s*$", src, re.MULTILINE)
+        assert calls, "nothing calls _ensure_watcher — the sweep would never run"
+
+    def test_a_no_match_is_terminal_immediately(self, monkeypatch):
+        req = self._run(monkeypatch, result=None, request_id="r8")
+        assert req["status"] == "not_found"
+        assert req["completed_at"] is not None
+        assert "watch_until" not in req, 'nothing to watch — there is no transfer'
+
+
+class TestCallbacksFireOnTerminalOnly:
+    def test_a_settled_request_notifies_with_its_terminal_status(self):
+        posted = []
+        with request_mod._requests_lock:
+            request_mod._pending_requests["rn"] = {
+                "request_id": "rn", "query": "q", "status": "completed",
+                "created_at": datetime.now(), "completed_at": "now",
+                "download_id": "dl-1", "error": None,
+                "notify_url": "http://example.invalid/hook",
             }
+            req = dict(request_mod._pending_requests["rn"])
 
-        request_mod._run_search_and_download("r8", "q", notify_url=None)
+        import api.request as mod
+        original = mod.http_requests.post
+        mod.http_requests.post = lambda url, json=None, timeout=None: posted.append((url, json))
+        try:
+            mod._notify(req)
+        finally:
+            mod.http_requests.post = original
 
-        assert watched == []
-        with request_mod._requests_lock:
-            assert request_mod._pending_requests["r8"]["status"] == "not_found"
+        assert len(posted) == 1
+        url, payload = posted[0]
+        assert url == "http://example.invalid/hook"
+        assert payload["status"] == "completed"
+        # created_at is a datetime and would not serialise; notify_url is the
+        # caller's own secret coming back at them.
+        assert "created_at" not in payload
+        assert "notify_url" not in payload
+
+    def test_no_callback_when_none_was_asked_for(self):
+        posted = []
+        import api.request as mod
+        original = mod.http_requests.post
+        mod.http_requests.post = lambda *a, **k: posted.append(1)
+        try:
+            mod._notify({"request_id": "x", "status": "completed"})
+        finally:
+            mod.http_requests.post = original
+        assert posted == []
