@@ -322,21 +322,32 @@ describe('the hover veil, as the stylesheet actually declares it', () => {
     expect(block('.pl-card-hover > *')).toMatch(/pointer-events:\s*auto/);
   });
 
-  it('reveals the veil on TOUCH, where :hover never fires', () => {
-    // Without this, Sync now and the overflow menu sit at opacity 0 on every
-    // phone and tablet while staying perfectly clickable — controls you can
-    // only hit by guessing where they are.
-    const touch = /@media\s*\(hover:\s*none\)\s*\{([\s\S]*?)\n\}/g;
-    const blocks = [...css.matchAll(touch)].map((m) => m[1]);
-    const veil = blocks.find((b) => b.includes('.pl-card-hover'));
-    expect(veil, 'no (hover: none) rule reveals .pl-card-hover').toBeTruthy();
+  /** Any @media whose condition list mentions `hover: none`. */
+  const touchBlocks = () =>
+    [...css.matchAll(/@media[^{]*\(hover:\s*none\)[^{]*\{([\s\S]*?)\n\}/g)].map((m) => m[1]);
+
+  it('takes the action layer OUT of the overlay on touch', () => {
+    // The layer is inset:0 and holds Sync now and the overflow menu. That works
+    // on a wide card because the buttons sit in empty space right of the text.
+    // Simply revealing it on touch — which the page must do, since :hover never
+    // fires there — drops those buttons straight onto the playlist name and the
+    // schedule pill. Visible and overlapping is worse than invisible; it has to
+    // stop being an overlay, not just become opaque.
+    const veil = touchBlocks().find((b) => b.includes('.pl-card-hover'));
+    expect(veil, 'no (hover: none) rule handles .pl-card-hover').toBeTruthy();
+    expect(veil).toMatch(/position:\s*static/);
     expect(veil).toMatch(/opacity:\s*1/);
   });
 
+  it('spans the layer across the card once it is in flow', () => {
+    // Without an explicit span it auto-places into one grid cell beside the
+    // artwork, which is narrower than the buttons.
+    const veil = touchBlocks().find((b) => b.includes('.pl-card-hover'));
+    expect(veil).toMatch(/grid-column:\s*1\s*\/\s*-1/);
+  });
+
   it('reveals the quiet schedule pill on touch too', () => {
-    const touch = /@media\s*\(hover:\s*none\)\s*\{([\s\S]*?)\n\}/g;
-    const blocks = [...css.matchAll(touch)].map((m) => m[1]);
-    expect(blocks.some((b) => b.includes('.pl-card-pill--quiet'))).toBe(true);
+    expect(touchBlocks().some((b) => b.includes('.pl-card-pill--quiet'))).toBe(true);
   });
 
   it('the card body is NOT lifted above the veil', () => {

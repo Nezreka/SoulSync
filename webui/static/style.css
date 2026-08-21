@@ -78248,20 +78248,80 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 }
 
 /* ── The sync redesign on smaller screens ────────────────────────────
-   Laptop is already handled by the grid's own steps: one column to 760,
-   two to 1179, three to 1559, four above. What follows is the rest. */
+   Laptop is handled by the grid's own steps: one column to 760, two to 1179,
+   three to 1559, four above. Phone and tablet need more than a narrower grid,
+   because the design leans on two things neither of them has — hover, and
+   horizontal room. */
 
-/* TOUCH HAS NO HOVER, and the redesign leans on hover hard.
-   Sync now, the overflow menu and an unscheduled schedule pill all rest at
-   opacity 0 and are revealed by :hover. On a phone or tablet the pointer never
-   enters anything, so all three stay invisible while remaining perfectly
-   clickable — a control you can only hit by guessing where it is. The veil's
-   gradient becomes permanent here, which is the same trade the downloads list
-   and the watchlist rows already make. */
-@media (hover: none) {
-    .pl-card-hover { opacity: 1; }
+/* THE ACTION ROW STOPS BEING AN OVERLAY.
+   `.pl-card-hover` is an inset:0 layer holding Sync now and the overflow menu,
+   which works on a wide card because the buttons sit in empty space to the
+   right of the text. Revealing that same layer on touch — which the page must
+   do, since :hover never fires there — drops the buttons directly ON TOP of
+   the playlist name, the meta line and the schedule pill. Visible and
+   overlapping is worse than invisible.
+
+   So on touch, and in any window too narrow for the buttons to have their own
+   space, the layer leaves the overlay entirely and becomes a third grid row:
+   artwork and text on top, actions underneath, nothing covering anything. */
+@media (hover: none), (max-width: 760px) {
+    .pl-card {
+        /* Column stays 72px: the coverage ring is positioned against the art
+           box, so shrinking it moves the ring off the artwork. */
+        row-gap: 11px;
+    }
+
+    .pl-card-hover {
+        position: static;
+        inset: auto;
+        grid-column: 1 / -1;
+        opacity: 1;
+        padding: 0;
+        border-radius: 0;
+        /* The gradient existed to keep artwork legible BEHIND the buttons.
+           Nothing is behind them now. */
+        background: none;
+        justify-content: flex-start;
+        pointer-events: auto;
+    }
+
+    /* Nothing is hidden any more, so nothing needs revealing. */
     .pl-card-pill--quiet { opacity: 0.75; }
     .pl-card-pill--inert.pl-card-pill--quiet { opacity: 0.55; }
+}
+
+/* STRIPS SCROLL, THEY DO NOT STACK.
+   Seven header actions and eleven source chips wrapped into six rows of
+   controls above the content — on a phone that is the entire first screen
+   before a single playlist is visible. One swipeable line each costs nothing
+   and gives the page back. */
+@media (max-width: 768px) {
+    .sync-header-actions,
+    .library-sources,
+    .library-tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        /* Momentum, and a little end padding so the last chip is not flush
+           against the edge mid-scroll. */
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 2px;
+    }
+    .sync-header-actions::-webkit-scrollbar,
+    .library-sources::-webkit-scrollbar,
+    .library-tabs::-webkit-scrollbar { display: none; }
+
+    /* Without this they compress to fit instead of scrolling. */
+    .sync-header-actions > *,
+    .library-sources > *,
+    .library-tabs > * { flex-shrink: 0; }
+
+    .sync-header { margin-bottom: 16px; }
+    .sync-title { font-size: 22px; }
+
+    /* The divider marked a grouping that a scrolling strip cannot express. */
+    .sync-header-divider { display: none; }
 }
 
 /* usePopoverPosition clamps a menu into the viewport, but no clamp can help a
@@ -78277,8 +78337,7 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 }
 
 /* Activity goes full-screen on a phone. A centred 860px dialog with a long
-   scrolling history inside it wastes the only screen dimension there is, and
-   the tab strip ends up scrolling with the content instead of staying put. */
+   scrolling history inside it wastes the only screen dimension there is. */
 @media (max-width: 768px) {
     .sync-activity-modal {
         width: 100%;
@@ -78292,9 +78351,6 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     .sync-activity-tabs { padding: 0 16px; }
     .sync-activity-body { padding: 12px 16px 18px; }
 
-    /* Both tab strips scroll sideways rather than wrapping into a block that
-       pushes the list off the bottom — sync history builds one tab per source
-       and there can be eleven. */
     .sync-activity-tabs,
     .sync-history-tabs {
         flex-wrap: nowrap;
@@ -78306,8 +78362,7 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     .sync-history-tab { flex-shrink: 0; }
 
     /* A history row is seven things in a line — thumb, name, source, stats,
-       time, delete, re-sync. It wraps instead of crushing every one of them:
-       artwork and name take the first line, the rest fall to a second. */
+       time, delete, re-sync. It wraps rather than crushing every one of them. */
     .sync-history-entry {
         flex-wrap: wrap;
         row-gap: 8px;
