@@ -31,7 +31,7 @@
  * distinction disappears.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import {
   AUTO_SYNC_WEEKDAYS,
@@ -148,6 +148,24 @@ export function AutoSyncWeeklyEditor({
   onUnschedule,
   onClose,
 }: AutoSyncWeeklyEditorProps) {
+  /**
+   * Escape dismisses THIS popover, not the modal behind it.
+   *
+   * The Auto-Sync modal closes on Escape, and its handler is on `document` —
+   * so without this, hitting Escape while editing a weekly schedule closed the
+   * whole modal and took the half-made edit with it. Capture phase, because
+   * the modal's listener is on document and would otherwise run first.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      onClose();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+
   const toggleDay = (day: string) => {
     // 2192-2202. Guarded against a day outside the seven, same as the vanilla.
     if (!AUTO_SYNC_WEEKDAYS.includes(day)) return;
@@ -307,7 +325,6 @@ export function AutoSyncWeeklyBoard({
       <AutoSyncBoardIntro
         heading="Drag playlists onto a day"
         blurb="Each placement creates a weekly-time schedule. Click a card to edit time, additional days, or timezone."
-        onRefresh={actions.onRefresh}
       />
       <div className="auto-sync-body">
         <AutoSyncSidebar

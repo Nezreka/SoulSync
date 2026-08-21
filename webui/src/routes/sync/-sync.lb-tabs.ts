@@ -150,7 +150,7 @@ export async function fetchLbPlaylistTracks(mbid: string): Promise<LbTrack[]> {
   }));
 }
 
-/* ── The LB card progress line (_refreshOneLbSyncCard 253-283) ────────────── */
+/* ── The LB card's coverage numbers (_refreshOneLbSyncCard 253-283) ──────── */
 
 export interface LbProgressInput {
   phase: string;
@@ -166,27 +166,45 @@ export interface LbProgressInput {
   discoveryProgress: number;
 }
 
+export interface LbCoverageCounts {
+  total: number;
+  matched: number;
+  failed: number;
+  percentage: number;
+}
+
 /**
- * "♪ T / ✓ M / ✗ F / P%": syncing/sync_complete read lastSyncProgress (failed
- * falls back to total-matched, percent is matched/total); other non-fresh
- * phases read the discovery counters (percent falls back to the discovery
- * progress when total is 0). Fresh → null (the line hides).
+ * ListenBrainz/Last.fm's own four numbers.
+ *
+ * syncing/sync_complete read lastSyncProgress (failed falls back to
+ * total-matched); other non-fresh phases read the discovery counters, whose
+ * percent falls back to the discovery progress when total is 0. Fresh → null,
+ * and the card hides the element.
+ *
+ * The vanilla rendered these as "♪ T / ✓ M / ✗ F / P%"; the cards render the
+ * shared coverage bar now, so only the numbers survive. Note the percentage is
+ * matched/total in BOTH branches —
+ * including the sync branch, where every other source on the page uses
+ * (matched+failed)/total. That is deliberate parity with sync-listenbrainz.js
+ * 271, not drift, so it is computed here and never re-derived downstream.
  */
-export function lbCardProgressLine(input: LbProgressInput): string | null {
+export function lbCoverageCounts(input: LbProgressInput): LbCoverageCounts | null {
   if (input.phase === 'fresh') return null;
   if ((input.phase === 'syncing' || input.phase === 'sync_complete') && input.lastSyncProgress) {
     const sp = input.lastSyncProgress;
     const matched = sp.matched_tracks || sp.spotify_matches || 0;
     const total = sp.total_tracks || sp.spotify_total || 0;
     const failed = sp.failed_tracks !== undefined ? sp.failed_tracks : Math.max(0, total - matched);
-    const pct = total > 0 ? Math.round((matched / total) * 100) : 0;
-    return `♪ ${total} / ✓ ${matched} / ✗ ${failed} / ${pct}%`;
+    return { total, matched, failed, percentage: total > 0 ? Math.round((matched / total) * 100) : 0 };
   }
   const total = input.spotifyTotal || 0;
   const matched = input.spotifyMatches || 0;
-  const failed = Math.max(0, total - matched);
-  const pct = total > 0 ? Math.round((matched / total) * 100) : input.discoveryProgress || 0;
-  return `♪ ${total} / ✓ ${matched} / ✗ ${failed} / ${pct}%`;
+  return {
+    total,
+    matched,
+    failed: Math.max(0, total - matched),
+    percentage: total > 0 ? Math.round((matched / total) * 100) : input.discoveryProgress || 0,
+  };
 }
 
 /* ── SoulSync Discovery (sync-soulsync-discovery.js) ──────────────────────── */

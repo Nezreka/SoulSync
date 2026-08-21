@@ -328,7 +328,6 @@ export interface AutoSyncHistoryPanelProps {
   filter: AutoSyncHistoryFilter;
   onFilterChange: (filter: AutoSyncHistoryFilter) => void;
   onLoadMore: () => void;
-  onRefresh: () => void;
   onRunAgain: (playlistId: number, playlistName: string) => void;
   now: number;
 }
@@ -340,7 +339,6 @@ export function AutoSyncHistoryPanel({
   filter,
   onFilterChange,
   onLoadMore,
-  onRefresh,
   onRunAgain,
   now,
 }: AutoSyncHistoryPanelProps) {
@@ -385,9 +383,6 @@ export function AutoSyncHistoryPanel({
               </button>
             ))}
           </div>
-          <button type="button" onClick={onRefresh}>
-            Refresh
-          </button>
         </div>
       </div>
       <div className="auto-sync-history-list">

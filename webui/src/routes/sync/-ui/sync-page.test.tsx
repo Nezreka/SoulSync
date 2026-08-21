@@ -150,13 +150,18 @@ describe('the Auto-Sync action groups', () => {
     expect(autoSyncStub.runNow).toHaveBeenCalledWith(12);
   });
 
-  it('opens the shared vanilla mirrored modal for Details', () => {
-    const open = vi.fn();
-    window.openMirroredPlaylistModal = open;
+  it('opens the page\u2019s OWN mirrored modal for Details, not the legacy one', () => {
+    // The React modal and the legacy openMirroredPlaylistModal are two
+    // implementations over the same endpoint with different visuals, so the
+    // same playlist looked different depending on which button you pressed.
+    // The vanilla function stays alive for other PAGES; this page stops
+    // calling it.
+    const legacy = vi.fn();
+    window.openMirroredPlaylistModal = legacy;
     render(<SyncPage />);
     openAutoSync();
     modalProps?.onOpenDetails(31);
-    expect(open).toHaveBeenCalledWith(31);
+    expect(legacy).not.toHaveBeenCalled();
   });
 });
 
@@ -172,6 +177,16 @@ describe('the modal mount', () => {
     expect(screen.queryByTestId('auto-sync-modal')).toBeNull();
   });
 });
+
+/**
+ * Open Add playlist, paste a link, submit — the page's new way to reach a
+ * paste-a-link tab now that the strip carries three chips instead of fifteen.
+ */
+function routeViaAddPlaylist(url: string): void {
+  fireEvent.click(screen.getByText('+ Add playlist'));
+  fireEvent.change(screen.getByLabelText('Paste a link'), { target: { value: url } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+}
 
 describe('the panel map', () => {
   it('mounts under #sync-page with the server tab open', () => {
@@ -189,8 +204,10 @@ describe('the panel map', () => {
     // tests: the Deezer link tab would render, fetch and look fine while
     // driving YouTube's state. Identity is the only thing that catches it.
     render(<SyncPage />);
-    fireEvent.click(screen.getByText('Deezer Link'));
-    fireEvent.click(screen.getByText('YouTube'));
+    // These tabs are no longer chips in the strip — they are reached by
+    // routing a link through Add playlist, which is the real path now.
+    routeViaAddPlaylist('https://www.deezer.com/playlist/1');
+    routeViaAddPlaylist('https://www.youtube.com/playlist?list=P1');
     expect(verticalsSeen.deezerLink).toBeTruthy();
     expect(verticalsSeen.youtube).toBeTruthy();
     expect(verticalsSeen.deezerLink).not.toBe(verticalsSeen.youtube);
@@ -200,7 +217,8 @@ describe('the panel map', () => {
     // The card carries both, and only the mbid is the source id the vertical
     // prefixes downstream. The stub deliberately gives them different values.
     render(<SyncPage />);
-    fireEvent.click(screen.getByText('ListenBrainz'));
+    fireEvent.click(screen.getByText('+ Add playlist'));
+    fireEvent.click(screen.getByRole('button', { name: /ListenBrainz/ }));
     fireEvent.click(screen.getByText('lb-card'));
     expect(syncModalsProps?.modals.openIdFor('listenbrainz')).toBe('mb-1');
   });

@@ -474,9 +474,37 @@ describe('AutoSyncWeeklyBoard (861-977)', () => {
     expect(container.querySelector('.auto-sync-weekly-editor-playlist')?.textContent).toBe('B');
   });
 
-  it('wires Refresh', () => {
-    const { actions } = renderBoard([]);
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
-    expect(actions.onRefresh).toHaveBeenCalledTimes(1);
+  it('has no Refresh of its own — the modal header owns the only one', () => {
+    renderBoard([]);
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+  });
+});
+
+describe('Escape inside the weekly editor', () => {
+  it('dismisses the EDITOR without closing the modal behind it', () => {
+    // The Auto-Sync modal closes on Escape via a document listener. Without
+    // the editor swallowing the key first, editing a weekly schedule and
+    // pressing Escape closed the whole modal and lost the in-progress edit.
+    const onClose = vi.fn();
+    const modalClose = vi.fn();
+    document.addEventListener('keydown', modalClose);
+    try {
+      render(
+        <AutoSyncWeeklyEditor
+          draft={{ playlistId: 1, days: ['mon'], time: '03:00', tz: 'UTC' }}
+          playlistName="Mix"
+          hasExisting={false}
+          onChange={vi.fn()}
+          onSave={vi.fn()}
+          onUnschedule={vi.fn()}
+          onClose={onClose}
+        />,
+      );
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(modalClose).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener('keydown', modalClose);
+    }
   });
 });

@@ -10,12 +10,15 @@
  * enough to hide it.
  */
 
+import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { UrlTabPlaylist } from './-sync.url-tabs';
 
 import {
   forgetAccountPlaylists,
+  urlTabCacheKey,
+  useRememberedPlaylists,
   recallAccountPlaylists,
   rememberAccountPlaylists,
 } from './-sync.account-cache';
@@ -72,5 +75,59 @@ describe('account playlist cache', () => {
     rememberAccountPlaylists('tidal', null as unknown as UrlTabPlaylist[]);
     expect(recallAccountPlaylists('')).toBeNull();
     expect(recallAccountPlaylists('tidal')).toBeNull();
+  });
+});
+
+describe('urlTabCacheKey + useRememberedPlaylists (the paste-a-link tabs)', () => {
+  afterEach(() => {
+    forgetAccountPlaylists();
+  });
+
+  it('namespaces url-tab rows away from the account tab of the same name', () => {
+    // The Deezer LINK tab and the Deezer-ARL ACCOUNT tab are different lists.
+    expect(urlTabCacheKey('deezer')).toBe('url:deezer');
+    expect(urlTabCacheKey('deezer')).not.toBe('deezer');
+  });
+
+  it('restores the rows a tab had loaded before the page was left', () => {
+    // Boulder, live: went to Deezer Link, loaded a playlist, clicked sync, went
+    // to Explorer, came back — the card was gone and only the history pill was
+    // left, because /sync is a route and leaving it unmounts the tab.
+    const first = renderHook(() => useRememberedPlaylists(urlTabCacheKey('deezer')));
+    act(() => {
+      first.result.current[1]([{ id: '1', name: 'Dz Mix' }]);
+    });
+    first.unmount();
+
+    const second = renderHook(() => useRememberedPlaylists(urlTabCacheKey('deezer')));
+    expect(second.result.current[0]).toEqual([{ id: '1', name: 'Dz Mix' }]);
+  });
+
+  it('supports functional updates — every call site uses setPlaylists(prev => …)', () => {
+    const { result } = renderHook(() => useRememberedPlaylists(urlTabCacheKey('youtube')));
+    act(() => {
+      result.current[1]([{ id: 'a' }]);
+    });
+    act(() => {
+      result.current[1]((prev) => [...prev, { id: 'b' }]);
+    });
+    expect(result.current[0]).toEqual([{ id: 'a' }, { id: 'b' }]);
+
+    const remount = renderHook(() => useRememberedPlaylists(urlTabCacheKey('youtube')));
+    expect(remount.result.current[0]).toHaveLength(2);
+  });
+
+  it('keeps separate tabs separate', () => {
+    const dz = renderHook(() => useRememberedPlaylists(urlTabCacheKey('deezer')));
+    act(() => {
+      dz.result.current[1]([{ id: 'dz' }]);
+    });
+    const yt = renderHook(() => useRememberedPlaylists(urlTabCacheKey('youtube')));
+    expect(yt.result.current[0]).toEqual([]);
+  });
+
+  it('starts empty for a tab that has never loaded anything', () => {
+    const { result } = renderHook(() => useRememberedPlaylists(urlTabCacheKey('itunes-link')));
+    expect(result.current[0]).toEqual([]);
   });
 });

@@ -70,11 +70,9 @@ export function AutoSyncMonitorCard({
 export function AutoSyncMonitorPanel({
   playlists,
   onDetails,
-  onRefresh,
 }: {
   playlists: MirroredRow[];
   onDetails: (playlistId: number) => void;
-  onRefresh: () => void;
 }) {
   const { visible, title, detail } = autoSyncMonitorSummary(playlists);
   return (
@@ -85,9 +83,6 @@ export function AutoSyncMonitorPanel({
           <strong>{title}</strong>
           <small>{detail}</small>
         </div>
-        <button type="button" onClick={onRefresh}>
-          Refresh
-        </button>
       </div>
       {visible.length ? (
         <div className="auto-sync-monitor-list">

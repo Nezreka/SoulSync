@@ -88,7 +88,6 @@ export function AutoSyncBoard({
       <AutoSyncBoardIntro
         heading="Drag playlists into an interval"
         blurb="Each placement creates or updates an Auto-Sync-owned playlist-pipeline automation."
-        onRefresh={actions.onRefresh}
       />
       <div className="auto-sync-body">
         <AutoSyncSidebar

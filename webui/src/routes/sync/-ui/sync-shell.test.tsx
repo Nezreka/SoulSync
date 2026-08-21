@@ -7,7 +7,7 @@ import { act, fireEvent, render } from '@testing-library/react';
 import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { SYNC_TABS } from '../-sync.shell';
+import { SYNC_PRIMARY_TAB_IDS, SYNC_TABS } from '../-sync.shell';
 import { SyncShell } from './sync-shell';
 
 function renderShell(over: Partial<React.ComponentProps<typeof SyncShell>> = {}) {
@@ -39,49 +39,69 @@ describe('the header (2229-2243)', () => {
     );
   });
 
-  it('renders the four action buttons in order, with their tooltips', () => {
+  it('renders the action buttons in order, with their tooltips', () => {
     const { container } = renderShell();
-    const btns = Array.from(container.querySelectorAll('.sync-header-actions button'));
+    const btns = Array.from(container.querySelectorAll('.sync-header-actions button')).filter(
+      (b) => b.textContent !== '+ Add playlist',
+    );
     expect(btns.map((b) => b.textContent)).toEqual([
+      'Discovery Pool',
+      'Wing It Pool',
       'Auto-Sync',
       'Library Match',
       'Sync History',
       'Download Origins',
     ]);
-    expect(btns[0].getAttribute('title')).toBe(
+    expect(btns[2].getAttribute('title')).toBe(
       'Schedule mirrored playlists to refresh, discover, sync, and queue missing tracks',
     );
-    expect(btns[3].getAttribute('title')).toBe('See every track your playlist syncs downloaded');
+    expect(btns[5].getAttribute('title')).toBe('See every track your playlist syncs downloaded');
     // Only Auto-Sync carries the extra hook class the vanilla gives it.
-    expect(btns[0].className).toContain('auto-sync-manager-btn');
-    expect(btns[1].className).not.toContain('auto-sync-manager-btn');
+    const byLabel = (label: string) =>
+      [...container.querySelectorAll('.sync-header-actions button')].find(
+        (b) => b.textContent === label,
+      ) as HTMLElement;
+    expect(byLabel('Auto-Sync').className).toContain('auto-sync-manager-btn');
+    expect(byLabel('Library Match').className).not.toContain('auto-sync-manager-btn');
   });
 
-  it('routes Auto-Sync to React and the other three to their vanilla seams', () => {
+  it('routes each button to its own seam, Auto-Sync to React', () => {
+    // Selected by LABEL, not index: the row gained two buttons when the pool
+    // modals moved up from the Mirrored tab, and index-based assertions all
+    // silently pointed at the wrong control.
     window.openManualLibraryMatchTool = vi.fn();
     window.openSyncHistoryModal = vi.fn();
     window.openDownloadOriginsModal = vi.fn();
+    window.openDiscoveryPoolModal = vi.fn();
+    window.openWingItPoolModal = vi.fn();
     const { container, props } = renderShell();
-    const btns = container.querySelectorAll('.sync-header-actions button');
+    const click = (label: string) => {
+      const btn = [...container.querySelectorAll('.sync-header-actions button')].find(
+        (b) => b.textContent === label,
+      ) as HTMLElement;
+      fireEvent.click(btn);
+    };
 
-    fireEvent.click(btns[0]);
+    click('Auto-Sync');
     expect(props.onAutoSync).toHaveBeenCalledTimes(1);
-    fireEvent.click(btns[1]);
+    click('Library Match');
     expect(window.openManualLibraryMatchTool).toHaveBeenCalledTimes(1);
-    fireEvent.click(btns[2]);
+    click('Sync History');
     expect(window.openSyncHistoryModal).toHaveBeenCalledTimes(1);
-    fireEvent.click(btns[3]);
+    click('Discovery Pool');
+    expect(window.openDiscoveryPoolModal).toHaveBeenCalledTimes(1);
+    click('Wing It Pool');
+    expect(window.openWingItPoolModal).toHaveBeenCalledTimes(1);
+    click('Download Origins');
     // 2241: the shared modal is scoped by this literal.
     expect(window.openDownloadOriginsModal).toHaveBeenCalledWith('playlist');
   });
 
   it('does not throw when a vanilla seam is missing', () => {
     const { container } = renderShell();
-    const btns = container.querySelectorAll('.sync-header-actions button');
+    const btns = [...container.querySelectorAll('.sync-header-actions button')];
     expect(() => {
-      fireEvent.click(btns[1]);
-      fireEvent.click(btns[2]);
-      fireEvent.click(btns[3]);
+      for (const btn of btns) fireEvent.click(btn as HTMLElement);
     }).not.toThrow();
   });
 });
@@ -97,95 +117,124 @@ describe('the page root', () => {
   });
 });
 
-describe('the tab strip (2249-2295)', () => {
-  it('renders all fifteen tabs, in order, with their labels', () => {
+describe('the tab strip', () => {
+  it('renders THREE permanent chips, not fifteen', () => {
+    // Six of the fifteen were duplicates of one another and the four
+    // paste-a-URL tabs differed at the input step not at all. They are reached
+    // through Add playlist now, which detects the service from the link.
     const { container } = renderShell();
     const btns = Array.from(container.querySelectorAll('.sync-tab-button'));
-    expect(btns).toHaveLength(15);
     expect(btns.map((b) => b.getAttribute('data-tab'))).toEqual([
-      'server',
-      'spotify',
-      'spotify-public',
-      'itunes-link',
-      'tidal',
-      'qobuz',
-      'deezer',
-      'deezer-link',
-      'youtube',
-      'beatport',
-      'listenbrainz-sync',
-      'lastfm-sync',
-      'soulsync-discovery-sync',
-      'import-file',
       'mirrored',
+      'server',
+      'beatport',
     ]);
-    expect(btns[0].querySelector('.sync-tab-label')?.textContent).toBe('Server Playlists');
-    expect(btns[12].querySelector('.sync-tab-label')?.textContent).toBe('SoulSync Discovery');
   });
 
-  it('gives each tab its sprite class, sharing one across link variants', () => {
+  it('opens on Mirrored — the library, not a source directory', () => {
+    const { container } = renderShell();
+    expect(container.querySelector('[data-tab="mirrored"]')?.className).toContain('active');
+    expect(container.querySelector('#mirrored-tab-content')?.className).toContain('active');
+  });
+
+  it('shows a routed tab while it is active, and drops it again after', () => {
+    // A panel with no chip is a room with no door.
+    let open!: (tab: string) => void;
+    const { container } = renderShell({
+      registerOpenTab: (fn) => {
+        open = fn as (tab: string) => void;
+      },
+    });
+    act(() => {
+      open('spotify-public');
+    });
+    const withRouted = Array.from(container.querySelectorAll('.sync-tab-button')).map((b) =>
+      b.getAttribute('data-tab'),
+    );
+    expect(withRouted).toEqual(['mirrored', 'server', 'beatport', 'spotify-public']);
+    expect(container.querySelector('[data-tab="spotify-public"]')?.className).toContain('active');
+
+    act(() => {
+      open('server');
+    });
+    expect(container.querySelectorAll('.sync-tab-button')).toHaveLength(3);
+  });
+
+  it('keeps a routed panel MOUNTED after its chip disappears', () => {
+    // The chip is navigation; the panel is state. Losing the panel when the
+    // chip goes would throw away a playlist the user just loaded.
+    let open!: (tab: string) => void;
+    const { container } = renderShell({
+      panels: { 'spotify-public': <div id="probe" /> },
+      registerOpenTab: (fn) => {
+        open = fn as (tab: string) => void;
+      },
+    });
+    act(() => {
+      open('spotify-public');
+    });
+    expect(container.querySelector('#probe')).not.toBeNull();
+    act(() => {
+      open('server');
+    });
+    expect(container.querySelector('#probe')).not.toBeNull();
+  });
+
+  it('gives each rendered chip its sprite class and its own title', () => {
     const { container } = renderShell();
     const icon = (tab: string) =>
       container.querySelector(`[data-tab="${tab}"] .tab-icon`)?.className;
-    expect(icon('spotify')).toBe('tab-icon spotify-icon');
-    // The link variants are the same service, so they reuse the sprite.
-    expect(icon('spotify-public')).toBe('tab-icon spotify-icon');
-    expect(icon('deezer-link')).toBe('tab-icon deezer-icon');
-    expect(icon('listenbrainz-sync')).toBe('tab-icon listenbrainz-icon');
-  });
-
-  it('marks ONLY the three URL-import tabs with data-link', () => {
-    const { container } = renderShell();
-    const linked = Array.from(container.querySelectorAll('.sync-tab-button[data-link="true"]')).map(
-      (b) => b.getAttribute('data-tab'),
-    );
-    expect(linked).toEqual(['spotify-public', 'itunes-link', 'deezer-link']);
-  });
-
-  it('puts the divider after Server Playlists, and only there', () => {
-    const { container } = renderShell();
-    const dividers = container.querySelectorAll('.sync-tab-divider');
-    expect(dividers).toHaveLength(1);
-    // It follows the server button in document order.
-    expect(dividers[0].previousElementSibling?.getAttribute('data-tab')).toBe('server');
+    expect(icon('mirrored')).toBe('tab-icon mirrored-icon');
+    expect(icon('server')).toBe('tab-icon server-icon');
+    expect(icon('beatport')).toBe('tab-icon beatport-icon');
+    for (const t of SYNC_TABS.filter((x) => SYNC_PRIMARY_TAB_IDS.includes(x.id))) {
+      expect(container.querySelector(`[data-tab="${t.id}"]`)?.getAttribute('title')).toBe(t.label);
+    }
   });
 
   it('gives the server tab its own extra class', () => {
     const { container } = renderShell();
     expect(container.querySelector('[data-tab="server"]')?.className).toContain('sync-tab-server');
-    expect(container.querySelector('[data-tab="spotify"]')?.className).not.toContain(
+    expect(container.querySelector('[data-tab="mirrored"]')?.className).not.toContain(
       'sync-tab-server',
     );
   });
 
-  it('titles every tab with its own label', () => {
+  it('renders a panel for EVERY tab, strip or not — routing depends on it', () => {
     const { container } = renderShell();
     for (const t of SYNC_TABS) {
-      expect(container.querySelector(`[data-tab="${t.id}"]`)?.getAttribute('title')).toBe(t.label);
+      expect(container.querySelector(`#${t.id}-tab-content`)).not.toBeNull();
     }
+  });
+
+  it('no longer renders the fifteen-tab divider', () => {
+    // It marked the boundary after Server Playlists in a crowded strip; with
+    // three chips it separates nothing.
+    const { container } = renderShell();
+    expect(container.querySelectorAll('.sync-tab-divider')).toHaveLength(0);
   });
 });
 
 describe('switching tabs (3702-3715)', () => {
-  it('opens on Server Playlists', () => {
+  it('opens on Mirrored', () => {
     const { container } = renderShell();
-    expect(container.querySelector('[data-tab="server"]')?.className).toContain('active');
-    expect(container.querySelector('#server-tab-content')?.className).toContain('active');
+    expect(container.querySelector('[data-tab="mirrored"]')?.className).toContain('active');
+    expect(container.querySelector('#mirrored-tab-content')?.className).toContain('active');
   });
 
   it('moves the active class on both the button and the panel', () => {
     const { container } = renderShell();
-    fireEvent.click(container.querySelector('[data-tab="tidal"]') as HTMLElement);
+    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
 
-    expect(container.querySelector('[data-tab="tidal"]')?.className).toContain('active');
+    expect(container.querySelector('[data-tab="beatport"]')?.className).toContain('active');
     expect(container.querySelector('[data-tab="server"]')?.className).not.toContain('active');
-    expect(container.querySelector('#tidal-tab-content')?.className).toContain('active');
+    expect(container.querySelector('#beatport-tab-content')?.className).toContain('active');
     expect(container.querySelector('#server-tab-content')?.className).not.toContain('active');
   });
 
   it('marks exactly ONE tab active at a time', () => {
     const { container } = renderShell();
-    fireEvent.click(container.querySelector('[data-tab="mirrored"]') as HTMLElement);
+    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
     expect(container.querySelectorAll('.sync-tab-button.active')).toHaveLength(1);
     expect(container.querySelectorAll('.sync-tab-content.active')).toHaveLength(1);
   });
@@ -201,16 +250,14 @@ describe('switching tabs (3702-3715)', () => {
 
   it('exposes the selection to assistive tech', () => {
     const { container } = renderShell();
-    expect(container.querySelector('[data-tab="server"]')?.getAttribute('aria-selected')).toBe(
-      'true',
-    );
-    fireEvent.click(container.querySelector('[data-tab="qobuz"]') as HTMLElement);
-    expect(container.querySelector('[data-tab="server"]')?.getAttribute('aria-selected')).toBe(
-      'false',
-    );
-    expect(container.querySelector('[data-tab="qobuz"]')?.getAttribute('aria-selected')).toBe(
-      'true',
-    );
+    const aria = (tab: string) =>
+      container.querySelector(`[data-tab="${tab}"]`)?.getAttribute('aria-selected');
+    expect(aria('mirrored')).toBe('true');
+    expect(aria('beatport')).toBe('false');
+
+    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
+    expect(aria('mirrored')).toBe('false');
+    expect(aria('beatport')).toBe('true');
   });
 });
 
@@ -218,9 +265,9 @@ describe('the tab-change signal', () => {
   it('fires on every switch, with the tab already updated', () => {
     const onTabChange = vi.fn();
     const { container } = renderShell({ onTabChange });
-    fireEvent.click(container.querySelector('[data-tab="tidal"]') as HTMLElement);
+    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
     expect(onTabChange).toHaveBeenCalledTimes(1);
-    fireEvent.click(container.querySelector('[data-tab="qobuz"]') as HTMLElement);
+    fireEvent.click(container.querySelector('[data-tab="server"]') as HTMLElement);
     expect(onTabChange).toHaveBeenCalledTimes(2);
   });
 
@@ -230,38 +277,38 @@ describe('the tab-change signal', () => {
     // off. Filtering same-tab clicks would change that behaviour.
     const onTabChange = vi.fn();
     const { container } = renderShell({ onTabChange });
-    const server = container.querySelector('[data-tab="server"]') as HTMLElement;
-    fireEvent.click(server);
-    fireEvent.click(server);
+    const active = container.querySelector('[data-tab="mirrored"]') as HTMLElement;
+    fireEvent.click(active);
+    fireEvent.click(active);
     expect(onTabChange).toHaveBeenCalledTimes(2);
   });
 
   it('is optional — the shell works without it', () => {
     const { container } = renderShell();
     expect(() => {
-      fireEvent.click(container.querySelector('[data-tab="tidal"]') as HTMLElement);
+      fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
     }).not.toThrow();
-    expect(container.querySelector('#tidal-tab-content')?.className).toContain('active');
+    expect(container.querySelector('#beatport-tab-content')?.className).toContain('active');
   });
 });
 
 describe('panel mounting — the one-shot load flags (3724-3803)', () => {
   const panels = {
+    mirrored: <div data-testid="p-mirrored">mirrored</div>,
     server: <div data-testid="p-server">server</div>,
-    tidal: <div data-testid="p-tidal">tidal</div>,
-    qobuz: <div data-testid="p-qobuz">qobuz</div>,
+    beatport: <div data-testid="p-beatport">beatport</div>,
   };
 
   it('mounts only the default panel to begin with', () => {
     const { container } = renderShell({ panels });
-    expect(container.querySelector('[data-testid="p-server"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="p-tidal"]')).toBeNull();
+    expect(container.querySelector('[data-testid="p-mirrored"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="p-beatport"]')).toBeNull();
   });
 
   it('mounts a panel the first time its tab is opened', () => {
     const { container } = renderShell({ panels });
-    fireEvent.click(container.querySelector('[data-tab="tidal"]') as HTMLElement);
-    expect(container.querySelector('[data-testid="p-tidal"]')).not.toBeNull();
+    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
+    expect(container.querySelector('[data-testid="p-beatport"]')).not.toBeNull();
   });
 
   it('KEEPS a panel mounted after leaving it — the one-shot flags never reset', () => {
@@ -269,13 +316,13 @@ describe('panel mounting — the one-shot load flags (3724-3803)', () => {
     // clears it, so returning to a tab shows what it already loaded rather
     // than re-fetching. Unmounting on leave would re-fetch every visit.
     const { container } = renderShell({ panels });
-    fireEvent.click(container.querySelector('[data-tab="tidal"]') as HTMLElement);
-    fireEvent.click(container.querySelector('[data-tab="qobuz"]') as HTMLElement);
-    expect(container.querySelector('[data-testid="p-tidal"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="p-qobuz"]')).not.toBeNull();
+    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
+    fireEvent.click(container.querySelector('[data-tab="server"]') as HTMLElement);
+    expect(container.querySelector('[data-testid="p-beatport"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="p-server"]')).not.toBeNull();
     // ...and only the current one is visible.
-    expect(container.querySelector('#tidal-tab-content')?.className).not.toContain('active');
-    expect(container.querySelector('#qobuz-tab-content')?.className).toContain('active');
+    expect(container.querySelector('#beatport-tab-content')?.className).not.toContain('active');
+    expect(container.querySelector('#server-tab-content')?.className).toContain('active');
   });
 
   it('mounts each panel only ONCE across repeated visits', () => {
@@ -290,8 +337,8 @@ describe('panel mounting — the one-shot load flags (3724-3803)', () => {
       }, []);
       return <div data-testid="counted" />;
     }
-    const { container } = renderShell({ panels: { tidal: <Counted /> } });
-    const tidal = container.querySelector('[data-tab="tidal"]') as HTMLElement;
+    const { container } = renderShell({ panels: { beatport: <Counted /> } });
+    const tidal = container.querySelector('[data-tab="beatport"]') as HTMLElement;
     const server = container.querySelector('[data-tab="server"]') as HTMLElement;
 
     expect(mounts).toBe(0);
@@ -305,7 +352,7 @@ describe('panel mounting — the one-shot load flags (3724-3803)', () => {
   });
 
   it('renders an empty panel for a tab with no content supplied', () => {
-    const { container } = renderShell({ panels });
+    const { container } = renderShell({ panels: { mirrored: panels.mirrored } });
     fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
     expect(container.querySelector('#beatport-tab-content')?.textContent).toBe('');
   });
@@ -331,20 +378,23 @@ describe('the sidebar slot', () => {
     // the opener upward. Opening this way must be indistinguishable from a
     // click: the panel mounts AND the sidebar re-hide fires, because the
     // vanilla got there BY clicking the button.
-    let open: ((tab: 'mirrored') => void) | undefined;
+    // Targets a tab that is NOT the default and NOT in the strip — which is
+    // now this opener's main user: Add playlist routes a detected link to the
+    // tab that loads it.
+    let open: ((tab: 'spotify-public') => void) | undefined;
     const onTabChange = vi.fn();
     renderShell({
-      panels: { mirrored: <div data-testid="mirrored-panel" /> },
+      panels: { 'spotify-public': <div data-testid="routed-panel" /> },
       onTabChange,
       registerOpenTab: (fn) => {
-        open = fn as (tab: 'mirrored') => void;
+        open = fn as (tab: 'spotify-public') => void;
       },
     });
-    expect(document.querySelector('[data-testid="mirrored-panel"]')).toBeNull();
+    expect(document.querySelector('[data-testid="routed-panel"]')).toBeNull();
     expect(onTabChange).not.toHaveBeenCalled();
 
-    act(() => open?.('mirrored'));
-    expect(document.querySelector('[data-testid="mirrored-panel"]')).not.toBeNull();
+    act(() => open?.('spotify-public'));
+    expect(document.querySelector('[data-testid="routed-panel"]')).not.toBeNull();
     expect(onTabChange).toHaveBeenCalledTimes(1);
   });
 

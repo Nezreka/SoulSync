@@ -8,6 +8,8 @@
 
 import type { UrlHistoryEntry } from './-sync.urls';
 
+import { wrongTabError } from './-sync.url-detect';
+
 import {
   extractDeezerPlaylistId,
   isDeezerShareUrl,
@@ -32,7 +34,8 @@ export function asString(value: unknown, fallback = ''): string {
 export function youtubeUrlError(url: string): string | null {
   if (!url) return 'Please enter a YouTube playlist URL';
   if (!url.includes('youtube.com/playlist') && !url.includes('music.youtube.com/playlist')) {
-    return 'Please enter a valid YouTube playlist URL';
+    // A good link for a DIFFERENT tab gets named, not rejected as invalid.
+    return wrongTabError(url, 'youtube') ?? 'Please enter a valid YouTube playlist URL';
   }
   return null;
 }
@@ -57,7 +60,9 @@ export function deezerInputResult(
     }
     return {
       ok: false,
-      error: 'Invalid Deezer playlist URL. Expected format: deezer.com/playlist/{id}',
+      error:
+        wrongTabError(rawUrl, 'deezer') ??
+        'Invalid Deezer playlist URL. Expected format: deezer.com/playlist/{id}',
     };
   }
   return { ok: true, id };
@@ -72,7 +77,7 @@ export function spotifyPublicUrlError(url: string): string | null {
     !url.startsWith('spotify:playlist:') &&
     !url.startsWith('spotify:album:')
   ) {
-    return 'Please enter a valid Spotify playlist or album URL';
+    return wrongTabError(url, 'spotify_public') ?? 'Please enter a valid Spotify playlist or album URL';
   }
   return null;
 }
@@ -91,7 +96,7 @@ export function itunesLinkUrlError(url: string): string | null {
     !lowerUrl.startsWith('applemusic:track:') &&
     !lowerUrl.startsWith('applemusic:playlist:')
   ) {
-    return 'Please enter a valid iTunes or Apple Music URL';
+    return wrongTabError(url, 'itunes_link') ?? 'Please enter a valid iTunes or Apple Music URL';
   }
   return null;
 }
@@ -255,15 +260,36 @@ export interface CardProgressCounts {
   matches: number;
 }
 
+/**
+ * The slash-text writers' four numbers (updateYouTubeCardProgress 9120-9125).
+ *
+ * Split out from the string so the card renderer and the string share ONE
+ * arithmetic — the card no longer prints this text, but the formula is the same
+ * formula and two copies of it would be exactly the drift this page already has
+ * too much of.
+ */
+export function slashTextCounts(progress: { spotify_total?: number; spotify_matches?: number }): {
+  total: number;
+  matches: number;
+  failed: number;
+  percentage: number;
+} {
+  const total = progress.spotify_total || 0;
+  const matches = progress.spotify_matches || 0;
+  return {
+    total,
+    matches,
+    failed: total - matches,
+    percentage: total > 0 ? Math.round((matches / total) * 100) : 0,
+  };
+}
+
 /** updateYouTubeCardProgress 9120-9125 — the slash-text format. */
 export function slashTextProgressLine(progress: {
   spotify_total?: number;
   spotify_matches?: number;
 }): string {
-  const total = progress.spotify_total || 0;
-  const matches = progress.spotify_matches || 0;
-  const failed = total - matches;
-  const percentage = total > 0 ? Math.round((matches / total) * 100) : 0;
+  const { total, matches, failed, percentage } = slashTextCounts(progress);
   return `♪ ${total} / ✓ ${matches} / ✗ ${failed} / ${percentage}%`;
 }
 

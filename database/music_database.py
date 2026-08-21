@@ -231,6 +231,47 @@ class RecentRelease:
     track_count: int
     added_date: datetime
 
+def mirrored_cover_from_match(extra_data: dict) -> str:
+    """The cover art hiding inside a discovery match, or '' if there is none.
+
+    Most playlist sources hand us no poster at all when a playlist is mirrored —
+    Spotify links, YouTube, ListenBrainz, Last.fm and SoulSync Discovery all
+    arrive art-less, and Tidal's only started supplying one recently, so older
+    mirrors have nothing stored either. What they DO get, once discovery runs,
+    is a matched track with real metadata behind it, and that carries album art.
+
+    So a playlist's cover is derived from the first track discovery matches.
+    `_build_fix_modal_spotify_data` deliberately carries the image in two places
+    ("image_url is carried both at top level and inside album.images for parity
+    with Spotify API responses"), and older rows only have the nested one, so
+    both are read here.
+    """
+    if not isinstance(extra_data, dict):
+        return ''
+    if not extra_data.get('discovered'):
+        return ''
+    match = extra_data.get('matched_data') or extra_data.get('spotify_data')
+    if not isinstance(match, dict):
+        return ''
+
+    direct = match.get('image_url')
+    if isinstance(direct, str) and direct:
+        return direct
+
+    album = match.get('album')
+    if isinstance(album, dict):
+        images = album.get('images')
+        if isinstance(images, list):
+            for image in images:
+                if isinstance(image, dict):
+                    url = image.get('url')
+                    if isinstance(url, str) and url:
+                        return url
+                elif isinstance(image, str) and image:
+                    return image
+    return ''
+
+
 class MusicDatabase:
     """SQLite database manager for SoulSync music library data"""
     
@@ -888,6 +929,7 @@ class MusicDatabase:
 
             # Add explored_at to mirrored_playlists (migration)
             self._add_mirrored_playlist_explored_column(cursor)
+            self._add_mirrored_playlist_cover_tiles_column(cursor)
             self._add_mirrored_playlist_organize_column(cursor)
             self._add_mirrored_playlist_custom_name_column(cursor)
             self._add_mirrored_playlist_quality_profile_column(cursor)
@@ -1958,6 +2000,23 @@ class MusicDatabase:
                 logger.info("Added custom_name column to mirrored_playlists table")
         except Exception as e:
             logger.error(f"Error adding custom_name column to mirrored_playlists: {e}")
+
+    def _add_mirrored_playlist_cover_tiles_column(self, cursor):
+        """Up to four distinct album covers, for the 2x2 collage.
+
+        `image_url` stays what it always was: the ONE poster a source supplied,
+        which still wins when it exists — a real playlist cover beats a mosaic
+        of its albums. This column is the fallback for the many sources that
+        send no poster at all, filled from what discovery matched.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'cover_tiles' not in cols:
+                cursor.execute("ALTER TABLE mirrored_playlists ADD COLUMN cover_tiles TEXT DEFAULT NULL")
+                logger.info("Added cover_tiles column to mirrored_playlists table")
+        except Exception as e:
+            logger.error(f"Error adding cover_tiles column to mirrored_playlists: {e}")
 
     def _add_mirrored_playlist_quality_profile_column(self, cursor):
         """Add the native per-playlist Quality Profile assignment.
@@ -18336,8 +18395,82 @@ class MusicDatabase:
             logger.error(f"Error mirroring playlist: {e}")
             return None
 
+    def backfill_missing_mirrored_covers(self, profile_id: int = 1) -> int:
+        """Give already-discovered playlists the covers they never got.
+
+        Collects up to four DISTINCT album covers from what discovery matched,
+        for the 2x2 collage. `image_url` is left alone throughout: it means the
+        poster the SOURCE supplied, which still wins when there is one.
+
+        The derivation above only fires when a track GAINS matched data, so
+        every playlist discovered before it existed stays bare — which is most
+        of them. This fills those in from the discovery results already sitting
+        in their tracks' extra_data.
+
+        Cheap by construction and self-limiting: it starts with a count of
+        playlists still missing a cover and returns immediately when that is
+        zero, which is the case on every run after the first. Only art-less
+        playlists are read, and each one is written at most once.
+        """
+        filled = 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id FROM mirrored_playlists "
+                    "WHERE profile_id = ? AND cover_tiles IS NULL",
+                    (int(profile_id),)
+                )
+                bare = [row['id'] for row in cursor.fetchall()]
+                if not bare:
+                    return 0
+
+                for playlist_id in bare:
+                    cursor.execute(
+                        "SELECT extra_data FROM mirrored_playlist_tracks "
+                        "WHERE playlist_id = ? AND extra_data IS NOT NULL "
+                        "ORDER BY position",
+                        (playlist_id,)
+                    )
+                    # DISTINCT covers: a playlist of one album would otherwise
+                    # make a collage of the same tile four times, which reads as
+                    # a rendering bug rather than a design.
+                    tiles = []
+                    for row in cursor.fetchall():
+                        try:
+                            extra = json.loads(row['extra_data'])
+                        except (json.JSONDecodeError, TypeError):
+                            continue
+                        cover = mirrored_cover_from_match(extra)
+                        if cover and cover not in tiles:
+                            tiles.append(cover)
+                            if len(tiles) == 4:
+                                break
+                    # Always written, even empty: an undiscovered playlist has
+                    # no covers to find and must not be re-scanned on every
+                    # visit. `image_url` is NEVER touched — it means one thing,
+                    # the poster the source supplied, and a mosaic of album art
+                    # is not that.
+                    cursor.execute(
+                        "UPDATE mirrored_playlists SET cover_tiles = ? WHERE id = ?",
+                        (json.dumps(tiles), playlist_id)
+                    )
+                    if tiles:
+                        filled += 1
+                conn.commit()
+        except Exception as e:
+            # Best-effort decoration: a playlist without a cover still works,
+            # and this must never stop the library rendering.
+            logger.error(f"Error backfilling mirrored covers: {e}")
+        return filled
+
     def get_mirrored_playlists(self, profile_id: int = 1) -> List[Dict]:
         """Return all mirrored playlists for a profile, newest first."""
+        # Most sources supply no poster of their own, so a playlist borrows one
+        # from the first track discovery matched. Doing it here means the first
+        # visit after an upgrade fixes the whole library; every later visit
+        # short-circuits on the count and costs nothing.
+        self.backfill_missing_mirrored_covers(profile_id)
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -18856,6 +18989,16 @@ class MusicDatabase:
                     "UPDATE mirrored_playlist_tracks SET extra_data = ? WHERE id = ?",
                     (json.dumps(existing), track_id)
                 )
+                # A newly discovered track can change what the collage should
+                # be, so drop the cached tiles and let the next library read
+                # rebuild them. Cheaper than recomputing four distinct covers on
+                # every single track write, and it is the read that needs them.
+                if mirrored_cover_from_match(existing):
+                    cursor.execute(
+                        "UPDATE mirrored_playlists SET cover_tiles = NULL "
+                        "WHERE id = (SELECT playlist_id FROM mirrored_playlist_tracks WHERE id = ?)",
+                        (track_id,)
+                    )
                 conn.commit()
                 return cursor.rowcount > 0
         except Exception as e:

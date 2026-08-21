@@ -12505,6 +12505,34 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     line-height: 1.45;
 }
 
+/* One Refresh for the whole modal, in the header. The monitor, both boards and
+   the history each grew their own, all calling the same handler. */
+.auto-sync-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.auto-sync-refresh {
+    padding: 7px 14px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.auto-sync-refresh:hover {
+    background: rgba(var(--accent-rgb), 0.14);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: rgb(var(--accent-light-rgb));
+}
+
 .auto-sync-close {
     width: 32px;
     height: 32px;
@@ -13603,6 +13631,26 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 }
 
 .auto-sync-loading,
+/* A failed load used to offer only a close button, so the sole recovery was to
+   close and reopen — a dead end the user had to guess their way out of. */
+.auto-sync-error-retry {
+    margin-top: 14px;
+    padding: 8px 18px;
+    border-radius: 8px;
+    border: 1px solid rgba(var(--accent-rgb), 0.35);
+    background: rgba(var(--accent-rgb), 0.12);
+    color: rgb(var(--accent-light-rgb));
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.auto-sync-error-retry:hover {
+    background: rgba(var(--accent-rgb), 0.2);
+    border-color: rgba(var(--accent-rgb), 0.55);
+}
+
 .auto-sync-error {
     padding: 48px;
 }
@@ -19348,6 +19396,679 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     align-items: center;
     justify-content: space-between;
     width: 100%;
+}
+
+/* ── Playlist cover art ───────────────────────────────────────────────────
+   image_url was already being fetched and carried on every one of these rows
+   and then dropped; these rules are what render it. Two hosts:
+
+     .playlist-card-art   a NEW tile on the account cards (Spotify, Deezer-ARL),
+                          which had no icon element at all.
+     .playlist-card-icon  the EXISTING 40px brand-tinted tile on every source
+                          card — the art fills it, so nothing moves and the
+                          tint becomes the empty state rather than the normal
+                          one.
+
+   The tile keeps its size when empty, so a mixed list of arted and art-less
+   cards still lines up. */
+.playlist-card-art {
+    width: 40px;
+    height: 40px;
+    flex: 0 0 auto;
+    margin-right: 16px;
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Both existing tiles need clipping now that an image can fill them; without
+   this the cover renders as a hard-edged square over the rounded tint. */
+.playlist-card-icon,
+.mirrored-playlist-card .source-icon {
+    overflow: hidden;
+}
+
+.playlist-card-art-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.playlist-card-art-glyph {
+    line-height: 1;
+}
+
+/* The 2x2 collage — a playlist's artwork when its source supplied no poster,
+   built from four DISTINCT album covers off its discovered tracks. Only ever
+   rendered at four; one to three shows a single cover instead, because a grid
+   with holes in it reads as a broken image. */
+.playlist-card-collage {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    width: 100%;
+    height: 100%;
+    gap: 0;
+}
+
+.playlist-card-collage img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* One dropdown in place of ten drag lanes, a filterable sidebar and a bulk
+   popover — all of which existed to express a single integer per playlist. */
+.mirrored-card-schedule {
+    flex: 0 0 auto;
+    max-width: 132px;
+    padding: 5px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(0, 0, 0, 0.3);
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 11.5px;
+    cursor: pointer;
+}
+
+.mirrored-card-schedule:hover:not(:disabled) {
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: #fff;
+}
+
+.mirrored-card-schedule:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+/* ── The playlist card ────────────────────────────────────────────────────
+   Artwork first; state carried BY the artwork rather than beside it.
+
+   The resting card is a cover, a name, one line and a schedule. No buttons, no
+   chips, no colour. A healthy card shows no ring at all — a ring on every card
+   would be forty of them announcing that nothing is wrong. Problems sort to the
+   front instead, so nothing has to shout to be found. */
+.pl-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(322px, 1fr));
+    gap: 12px;
+    padding: 2px 6px 10px;
+}
+
+.pl-card {
+    position: relative;
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+    gap: 15px;
+    align-items: center;
+    padding: 13px;
+    border-radius: 15px;
+    background: rgba(18, 18, 22, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.18s, transform 0.18s, background 0.18s;
+}
+
+.pl-card:hover,
+.pl-card:focus-visible {
+    border-color: rgba(255, 255, 255, 0.13);
+    transform: translateY(-2px);
+    background: rgba(22, 22, 27, 0.95);
+}
+
+.pl-card-art { position: relative; width: 72px; height: 72px; flex: 0 0 auto; }
+
+.pl-card-art-img {
+    width: 100%;
+    height: 100%;
+    border-radius: 10px;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.05);
+    font-size: 22px;
+    transition: filter 0.2s;
+}
+
+.pl-card-art-img .playlist-card-art-img { width: 100%; height: 100%; object-fit: cover; }
+.pl-card-art-img .tab-icon { width: 26px; height: 26px; opacity: 0.5; }
+
+/* An incomplete cover desaturates, so the card reads differently even out of
+   focus — the state is legible before any digits are. */
+.pl-card[data-state="short"] .pl-card-art-img,
+.pl-card[data-state="error"] .pl-card-art-img {
+    filter: saturate(0.55) brightness(0.72);
+}
+
+/* The ring: a conic arc on the cover's corner, the coverage as its sweep and
+   its number in the middle. Only ever rendered when it has something to say. */
+.pl-ring {
+    position: absolute;
+    right: -6px;
+    bottom: -6px;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    --ring-color: #e3a63c;
+    background: conic-gradient(var(--ring-color) calc(var(--pct, 0) * 1%), rgba(255, 255, 255, 0.1) 0);
+    box-shadow: 0 0 0 3px #0d0d10;
+}
+
+.pl-ring::after {
+    content: attr(data-pct);
+    position: absolute;
+    inset: 3px;
+    border-radius: 50%;
+    background: #111114;
+    display: grid;
+    place-items: center;
+    font-size: 8.5px;
+    font-weight: 700;
+    color: var(--ring-color);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+}
+
+.pl-ring--error { --ring-color: #e0554e; }
+.pl-ring--working { --ring-color: rgb(var(--accent-rgb)); animation: pl-ring-pulse 1.6s ease-in-out infinite; }
+
+@keyframes pl-ring-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}
+
+.pl-card-body { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+
+.pl-card-name { display: flex; align-items: center; gap: 7px; min-width: 0; }
+
+.pl-card-name b {
+    font-size: 14.5px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pl-card-meta {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.34);
+    font-variant-numeric: tabular-nums;
+}
+
+.pl-card-pill {
+    align-self: flex-start;
+    margin-top: 2px;
+    padding: 3px 9px;
+    border-radius: 100px;
+    font-size: 10.5px;
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    background: rgba(255, 255, 255, 0.045);
+    color: rgba(255, 255, 255, 0.55);
+}
+
+/* Actions live under a veil, so a wall of cards carries one thing each rather
+   than six. The gradient keeps the artwork visible behind the buttons. */
+.pl-card-hover {
+    position: absolute;
+    inset: 0;
+    border-radius: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 0 13px;
+    background: linear-gradient(90deg, rgba(13, 13, 16, 0) 30%, rgba(13, 13, 16, 0.93) 68%);
+    opacity: 0;
+    transition: opacity 0.16s;
+    pointer-events: none;
+}
+
+.pl-card:hover .pl-card-hover,
+.pl-card:focus-within .pl-card-hover {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.pl-card-fix {
+    padding: 7px 13px;
+    border-radius: 9px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid rgba(var(--accent-rgb), 0.45);
+    background: rgba(var(--accent-rgb), 0.2);
+    color: rgb(var(--accent-light-rgb));
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.pl-card-fix:hover { background: rgba(var(--accent-rgb), 0.3); }
+
+.pl-card-fix--danger {
+    border-color: rgba(224, 85, 78, 0.45);
+    background: rgba(224, 85, 78, 0.18);
+    color: #f0928c;
+}
+
+.pl-card-more {
+    width: 30px;
+    height: 30px;
+    flex: 0 0 auto;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    background: rgba(255, 255, 255, 0.045);
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+}
+
+.pl-card-more:hover { color: #fff; }
+
+@media (prefers-reduced-motion: reduce) {
+    .pl-card { transition: none; }
+    .pl-card:hover { transform: none; }
+    .pl-ring--working { animation: none; }
+}
+
+/* The overflow menu — five actions that used to be five icon-only buttons on
+   every card at once, each with tooltip-only meaning. */
+.pl-menu {
+    position: fixed;
+    z-index: 1400;
+    min-width: 188px;
+    padding: 6px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(20, 20, 24, 0.98);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.pl-menu-item {
+    padding: 8px 12px;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.pl-menu-item:hover { background: rgba(255, 255, 255, 0.07); color: #fff; }
+
+.pl-menu-item--danger { color: #f0928c; }
+.pl-menu-item--danger:hover { background: rgba(224, 85, 78, 0.14); color: #ff9e97; }
+
+/* A card mid-rename keeps the card's footprint so the grid does not reflow. */
+.pl-card--renaming { align-items: center; padding: 20px 16px; }
+.pl-card--renaming .mirrored-rename-input { width: 100%; }
+
+/* ── The playlist library ─────────────────────────────────────────────────
+   The sync page organised by STATE rather than by source. Quiet text tabs
+   (the dashboard's band-tab idiom) carry the states; source drops to a chip
+   row, which is what source always actually was. */
+.library-heading {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-right: auto;
+}
+
+.library-summary {
+    margin: 0;
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.45);
+    font-variant-numeric: tabular-nums;
+}
+
+.library-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 20px;
+    margin: 4px 6px 14px;
+}
+
+.library-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    align-items: baseline;
+}
+
+/* Background-less text tabs: one strip of chrome, not a second box. */
+.library-tab {
+    background: none;
+    border: none;
+    padding: 0 0 6px;
+    border-bottom: 2px solid transparent;
+    font-size: 15px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.38);
+    cursor: pointer;
+    transition: color 0.18s, border-color 0.18s;
+}
+
+.library-tab:hover {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.library-tab.active {
+    color: #fff;
+    border-bottom-color: rgb(var(--accent-rgb));
+}
+
+.library-tab-count {
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.35);
+    font-variant-numeric: tabular-nums;
+}
+
+.library-sources {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.library-source {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 11px;
+    border-radius: 100px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 11.5px;
+    text-transform: capitalize;
+    cursor: pointer;
+    transition: background 0.18s, border-color 0.18s, color 0.18s;
+}
+
+.library-source:hover {
+    color: rgba(255, 255, 255, 0.85);
+    border-color: rgba(255, 255, 255, 0.22);
+}
+
+.library-source.active {
+    background: rgba(var(--accent-rgb), 0.16);
+    border-color: rgba(var(--accent-rgb), 0.45);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.library-source-clear {
+    background: none;
+    border: none;
+    padding: 4px 6px;
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.library-source-clear:hover {
+    color: rgba(255, 255, 255, 0.75);
+}
+
+@media (max-width: 699px) {
+    .library-filters {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .library-tabs {
+        gap: 14px;
+    }
+}
+
+/* ── Add playlist sheet ───────────────────────────────────────────────────
+   One entry point in place of choosing between twelve source tabs before you
+   have even pasted anything. Paste a link (service detected, not chosen), pick
+   a connected account, or import a file. */
+.sync-add-playlist-btn {
+    background: rgba(var(--accent-rgb), 0.16);
+    border: 1px solid rgba(var(--accent-rgb), 0.45);
+    color: rgb(var(--accent-light-rgb));
+    font-weight: 600;
+}
+
+.sync-add-playlist-btn:hover {
+    background: rgba(var(--accent-rgb), 0.26);
+    border-color: rgba(var(--accent-rgb), 0.7);
+}
+
+.add-playlist-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 10vh 20px 20px;
+    background: rgba(0, 0, 0, 0.62);
+    backdrop-filter: blur(4px);
+}
+
+.add-playlist-sheet {
+    width: 100%;
+    max-width: 560px;
+    max-height: 80vh;
+    overflow-y: auto;
+    background: rgba(20, 20, 24, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 18px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+    display: flex;
+    flex-direction: column;
+    gap: 26px;
+    padding: 26px 28px 30px;
+}
+
+.add-playlist-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.add-playlist-head h3 {
+    font-size: 20px;
+    font-weight: 700;
+    margin: 2px 0 0;
+}
+
+.add-playlist-eyebrow {
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.38);
+}
+
+.add-playlist-close {
+    width: 32px;
+    height: 32px;
+    flex: 0 0 auto;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.add-playlist-close:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+.add-playlist-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.add-playlist-label {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.add-playlist-row {
+    display: flex;
+    gap: 10px;
+}
+
+.add-playlist-row input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 11px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(0, 0, 0, 0.35);
+    color: #fff;
+    font-size: 13.5px;
+}
+
+.add-playlist-row input:focus {
+    outline: none;
+    border-color: rgba(var(--accent-rgb), 0.55);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.14);
+}
+
+.add-playlist-submit {
+    flex: 0 0 auto;
+    padding: 11px 22px;
+    border-radius: 10px;
+    border: 1px solid rgba(var(--accent-rgb), 0.5);
+    background: rgba(var(--accent-rgb), 0.2);
+    color: rgb(var(--accent-light-rgb));
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.add-playlist-submit:hover {
+    background: rgba(var(--accent-rgb), 0.3);
+}
+
+.add-playlist-hint {
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: #e0a33e;
+}
+
+.add-playlist-hint--ok {
+    color: rgb(var(--accent-light-rgb));
+}
+
+.add-playlist-accounts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.add-playlist-account,
+.add-playlist-file {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.18s, border-color 0.18s;
+}
+
+.add-playlist-account:hover,
+.add-playlist-file:hover {
+    background: rgba(var(--accent-rgb), 0.14);
+    border-color: rgba(var(--accent-rgb), 0.4);
+}
+
+.add-playlist-file {
+    align-self: flex-start;
+}
+
+/* ── Card coverage bar ────────────────────────────────────────────────────
+   Replaces four different ways of saying the same thing (the sync writer's
+   ♪/✓/✗/%, the check-note pair, the slash-text line and ListenBrainz's own).
+   The bar is the better fact: it carries the total as well as the win, which
+   is why the dashboard's sync row dropped its redundant download chip.
+
+   The numbers still differ per source on purpose — see card-coverage.tsx. */
+.playlist-card-coverage {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 116px;
+}
+
+.pcc-bar {
+    height: 4px;
+    border-radius: 100px;
+    background: rgba(255, 255, 255, 0.09);
+    overflow: hidden;
+}
+
+.pcc-bar > i {
+    display: block;
+    height: 100%;
+    border-radius: 100px;
+    background: rgb(var(--accent-rgb));
+    transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Failures are the one number here you would act on, so they tint the bar
+   as well as adding the chip — legible before you read any digits. */
+.pcc-bar--has-failures > i {
+    background: #e0a33e;
+}
+
+.pcc-legend {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.55);
+    white-space: nowrap;
+}
+
+.pcc-count {
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.82);
+}
+
+.pcc-failed {
+    color: #e0a33e;
+    font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pcc-bar > i { transition: none; }
 }
 
 .playlist-card-content {

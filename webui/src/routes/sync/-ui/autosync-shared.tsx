@@ -485,11 +485,9 @@ export function AutoSyncLane({
 export function AutoSyncBoardIntro({
   heading,
   blurb,
-  onRefresh,
 }: {
   heading: string;
   blurb: string;
-  onRefresh: () => void;
 }) {
   return (
     <div className="auto-sync-board-intro">
@@ -497,9 +495,6 @@ export function AutoSyncBoardIntro({
         <strong>{heading}</strong>
         <span>{blurb}</span>
       </div>
-      <button type="button" onClick={onRefresh}>
-        Refresh
-      </button>
     </div>
   );
 }

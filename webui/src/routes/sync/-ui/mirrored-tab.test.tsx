@@ -89,8 +89,25 @@ function Harness(props: Partial<Parameters<typeof MirroredTab>[0]> = {}) {
   );
 }
 
+
+/**
+ * Run one of a card's overflow actions.
+ *
+ * They used to be five icon-only buttons on every card at once; they live
+ * behind the ⋯ menu now, so a test has to open it the way a user does.
+ */
+function runCardAction(label: string, cardIndex = 0): void {
+  const more = document.querySelectorAll('.pl-card-more')[cardIndex] as HTMLElement;
+  fireEvent.click(more);
+  const item = [...document.querySelectorAll('.pl-menu-item')].find(
+    (b) => b.textContent === label,
+  ) as HTMLElement;
+  fireEvent.click(item);
+}
+
+
 describe('MirroredTab — load and card', () => {
-  it('renders the vanilla card DOM: icon, name, badge, count, timeAgo', async () => {
+  it('renders the card: cover, brand mark, name, one meta line, schedule', async () => {
     stubFetch();
     responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
     vi.spyOn(Date, 'now').mockReturnValue(Date.UTC(2026, 0, 15, 12, 0, 0));
@@ -98,18 +115,23 @@ describe('MirroredTab — load and card', () => {
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
 
     const card = document.querySelector('#mirrored-card-3')!;
-    expect(card.className).toBe('mirrored-playlist-card');
-    expect(card.querySelector('.source-icon')!.textContent).toBe('🌊');
-    expect(card.querySelector('.source-icon')!.className).toContain('tidal');
-    expect(card.querySelector('.source-badge')!.textContent).toBe('tidal');
-    expect(screen.getByText('25 tracks')).toBeInTheDocument();
-    expect(screen.getByText('Mirrored 30m ago')).toBeInTheDocument();
-    // no discovered_count -> no ratio and no ↺ clear button (578, 603)
-    expect(card.querySelector('.discovery-ratio')).toBeNull();
-    expect(card.querySelector('.mirrored-card-clear')).toBeNull();
+    expect(card.className).toBe('pl-card');
+    // The brand mark replaces the emoji, and appears twice on purpose: once on
+    // the cover (as its fallback) and once beside the name.
+    expect(card.querySelector('.pl-card-art .tidal-icon')).not.toBeNull();
+    expect(card.querySelector('.pl-card-name .tidal-icon')).not.toBeNull();
+    // ONE meta line in place of the old chip row (source badge, count,
+    // mirrored-ago, ratio, phase, export status).
+    expect(card.querySelector('.pl-card-meta')!.textContent).toBe('25 tracks · Mirrored 30m ago');
+    // Untouched playlist: no ring, and Clear discovery is not offered.
+    expect(card.querySelector('.pl-ring')).toBeNull();
+    fireEvent.click(card.querySelector('.pl-card-more') as HTMLElement);
+    expect([...document.querySelectorAll('.pl-menu-item')].map((b) => b.textContent)).not.toContain(
+      'Clear discovery',
+    );
   });
 
-  it('the custom_name subline and the ratio appear only when earned', async () => {
+  it('a renamed playlist keeps its original name, and a partial one rings', async () => {
     stubFetch();
     responder = (url) =>
       url === '/api/mirrored-playlists'
@@ -117,13 +139,20 @@ describe('MirroredTab — load and card', () => {
         : { states: [] };
     render(<Harness sourceName="Plex" />);
     await waitFor(() => expect(screen.getByText('My Alias')).toBeInTheDocument());
-    expect(screen.getByTitle('Original (upstream) playlist name — still tracked').textContent).toBe(
-      '↳ Road Trip',
+    // The "↳ original name" line is gone — a whole extra line on every renamed
+    // card for something you read once. It moved to the name's hover text.
+    expect(document.querySelector('.pl-card-name b')!.getAttribute('title')).toBe(
+      'My Alias — originally "Road Trip"',
     );
-    const ratio = document.querySelector('.discovery-ratio')!;
-    expect(ratio.textContent).toBe('9/25 discovered on Plex');
-    expect(ratio.className).not.toContain('complete');
-    expect(document.querySelector('.mirrored-card-clear')).not.toBeNull();
+    // The ratio chip became the ring on the cover: 9 of 25 is 36%.
+    const ring = document.querySelector('.pl-ring')!;
+    expect(ring.getAttribute('data-pct')).toBe('36%');
+    expect(ring.className).toContain('pl-ring--short');
+    // Clear discovery is offered now that there IS a discovery to clear.
+    fireEvent.click(document.querySelector('.pl-card-more') as HTMLElement);
+    expect([...document.querySelectorAll('.pl-menu-item')].map((b) => b.textContent)).toContain(
+      'Clear discovery',
+    );
   });
 
   it('a pipeline_state with no live state paints the pipeline phase (534-542)', async () => {
@@ -171,15 +200,16 @@ describe('MirroredTab — load and card', () => {
     expect(screen.getByText('Loading mirrored playlists...')).toBeInTheDocument();
   });
 
-  it('the empty and error placeholders are the vanilla strings (511, 522)', async () => {
+  it('the empty and error placeholders read in the user\u2019s words', async () => {
+    // Deliberate copy change: the vanilla said "playlists you PARSE ... as
+    // persistent BACKUPS", which describes the implementation. A user adds a
+    // playlist; they do not parse one.
     stubFetch();
     responder = () => [];
     const { unmount } = render(<Harness />);
     await waitFor(() =>
       expect(
-        screen.getByText(
-          'Playlists you parse from any service will appear here as persistent backups.',
-        ),
+        screen.getByText('Playlists you add from any service will appear here.'),
       ).toBeInTheDocument(),
     );
     unmount();
@@ -212,7 +242,7 @@ describe('MirroredTab — the three actions', () => {
     window.showToast = toast as typeof window.showToast;
     await loaded({ ...ROW, discovered_count: 4 });
 
-    fireEvent.click(screen.getByTitle('Clear discovery data'));
+    runCardAction('Clear discovery');
     await waitFor(() => expect(toast).toHaveBeenCalled());
     expect(confirm).toHaveBeenCalledWith({
       title: 'Clear Discovery Data',
@@ -242,7 +272,7 @@ describe('MirroredTab — the three actions', () => {
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
     const before = calls.filter((c) => c.url === '/api/mirrored-playlists').length;
-    fireEvent.click(screen.getByTitle('Clear discovery data'));
+    runCardAction('Clear discovery');
     await waitFor(() => expect(toast).toHaveBeenCalledWith('busy', 'error'));
     expect(calls.filter((c) => c.url === '/api/mirrored-playlists').length).toBe(before);
   });
@@ -271,7 +301,7 @@ describe('MirroredTab — the three actions', () => {
     fireEvent.click(screen.getByText('Discover'));
     await waitFor(() => expect(screen.getByTestId('seeded')).toHaveTextContent('Road Trip'));
 
-    fireEvent.click(screen.getByTitle('Clear discovery data'));
+    runCardAction('Clear discovery');
     await waitFor(() => expect(toast).toHaveBeenCalled());
     // The vanilla deletes the entry; leaving it at 'cancelled' would make the
     // next card click take the non-fresh branch and open an empty modal.
@@ -284,7 +314,7 @@ describe('MirroredTab — the three actions', () => {
     window.showToast = vi.fn() as typeof window.showToast;
     await loaded({ ...ROW, discovered_count: 4 });
     const before = calls.length;
-    fireEvent.click(screen.getByTitle('Clear discovery data'));
+    runCardAction('Clear discovery');
     await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());
     expect(calls.length).toBe(before);
   });
@@ -296,7 +326,7 @@ describe('MirroredTab — the three actions', () => {
     window.showToast = toast as typeof window.showToast;
     await loaded();
 
-    fireEvent.click(screen.getByTitle('Delete mirror'));
+    runCardAction('Delete');
     await waitFor(() => expect(toast).toHaveBeenCalled());
     expect(confirm).toHaveBeenCalledWith({
       title: 'Delete Playlist',
@@ -316,7 +346,7 @@ describe('MirroredTab — the three actions', () => {
     window.showToast = vi.fn() as typeof window.showToast;
     await loaded();
     const before = calls.length;
-    fireEvent.click(screen.getByTitle('Delete mirror'));
+    runCardAction('Delete');
     await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());
     expect(calls.length).toBe(before);
   });
@@ -328,7 +358,7 @@ describe('MirroredTab — the three actions', () => {
     window.prompt = prompt as typeof window.prompt;
     await loaded();
 
-    fireEvent.click(screen.getByTitle(/^Rename/));
+    runCardAction('Rename');
     const input = document.querySelector('.mirrored-rename-input') as HTMLInputElement;
     expect(input).not.toBeNull();
     expect(prompt).not.toHaveBeenCalled();
@@ -363,7 +393,7 @@ describe('MirroredTab — the three actions', () => {
     );
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    fireEvent.click(screen.getByTitle(/^Rename/));
+    runCardAction('Rename');
     const input = document.querySelector('.mirrored-rename-input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'X' } });
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -375,7 +405,7 @@ describe('MirroredTab — the three actions', () => {
     const toast = vi.fn();
     window.showToast = toast as typeof window.showToast;
     await loaded();
-    fireEvent.click(screen.getByTitle(/^Rename/));
+    runCardAction('Rename');
     const input = document.querySelector('.mirrored-rename-input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '   ' } });
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -387,7 +417,7 @@ describe('MirroredTab — the three actions', () => {
   it('rename: Escape cancels without a request (the vanilla null return, 2386)', async () => {
     window.showToast = vi.fn() as typeof window.showToast;
     await loaded();
-    fireEvent.click(screen.getByTitle(/^Rename/));
+    runCardAction('Rename');
     const input = document.querySelector('.mirrored-rename-input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'Nope' } });
     const before = calls.length;
@@ -400,7 +430,7 @@ describe('MirroredTab — the three actions', () => {
     window.showConfirmDialog = vi.fn(async () => false) as typeof window.showConfirmDialog;
     window.showToast = vi.fn() as typeof window.showToast;
     await loaded({ ...ROW, discovered_count: 4 });
-    fireEvent.click(screen.getByTitle('Clear discovery data'));
+    runCardAction('Clear discovery');
     await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());
     expect(screen.getByTestId('open-id')).toHaveTextContent('none');
   });
@@ -412,13 +442,12 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    // None is conditional: the three card actions own their controllers, and
-    // the two pool buttons OPEN the adopted vanilla overlays.
-    expect(screen.getByText('Discovery Pool')).toBeInTheDocument();
-    expect(screen.getByText('Wing It Pool')).toBeInTheDocument();
-    expect(screen.getByTitle('Export to ListenBrainz / JSPF')).toBeInTheDocument();
-    expect(screen.getByText('Auto-Sync')).toBeInTheDocument();
-    expect(screen.getByTitle('Edit original playlist link')).toBeInTheDocument();
+    // None is conditional: the card actions own their controllers.
+    fireEvent.click(document.querySelector('.pl-card-more') as HTMLElement);
+    const labels = [...document.querySelectorAll('.pl-menu-item')].map((b) => b.textContent);
+    expect(labels).toContain('Export');
+    expect(screen.getByText('Sync now')).toBeInTheDocument();
+    expect(labels).toContain('Edit source link');
   });
 
   it('a FRESH card click opens the tracks detail modal (641), not the discovery one', async () => {
@@ -516,7 +545,7 @@ describe('MirroredTab — export (#903)', () => {
     responder = withExport();
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    fireEvent.click(screen.getByTitle('Export to ListenBrainz / JSPF'));
+    runCardAction('Export');
     await waitFor(() => expect(screen.getByText('Export playlist')).toBeInTheDocument());
     // The picker names the card's shown name (607).
     expect(screen.getByText('Road Trip → ListenBrainz')).toBeInTheDocument();
@@ -540,7 +569,7 @@ describe('MirroredTab — export (#903)', () => {
     responder = withExport();
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    fireEvent.click(screen.getByTitle('Export to ListenBrainz / JSPF'));
+    runCardAction('Export');
     await waitFor(() =>
       expect(document.querySelector('[data-mode="deezer"]')).toHaveAttribute('data-disconnected'),
     );
@@ -558,14 +587,14 @@ describe('MirroredTab — export (#903)', () => {
     responder = withExport();
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    fireEvent.click(screen.getByTitle('Export to ListenBrainz / JSPF'));
+    runCardAction('Export');
     await waitFor(() => expect(screen.getByText('Export playlist')).toBeInTheDocument());
     expect(screen.getByTestId('open-id')).toHaveTextContent('none');
   });
 });
 
 describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
-  it('Auto-Sync runs the pipeline and paints its phase onto the card', async () => {
+  it('Sync now runs the pipeline and paints its phase onto the card', async () => {
     stubFetch();
     window.showToast = vi.fn() as typeof window.showToast;
     responder = (url) => {
@@ -579,7 +608,7 @@ describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
     };
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Auto-Sync'));
+    fireEvent.click(screen.getByText('Sync now'));
     await waitFor(() =>
       expect(calls.some((c) => c.url === '/api/mirrored-playlists/3/pipeline/run')).toBe(true),
     );
@@ -590,13 +619,13 @@ describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
     await waitFor(() => expect(screen.getByText('Syncing 45%')).toBeInTheDocument());
   });
 
-  it('the Auto-Sync click never opens the card behind it', async () => {
+  it('the Sync now click never opens the card behind it', async () => {
     stubFetch();
     window.showToast = vi.fn() as typeof window.showToast;
     responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Auto-Sync'));
+    fireEvent.click(screen.getByText('Sync now'));
     expect(screen.getByTestId('open-id')).toHaveTextContent('none');
   });
 
@@ -636,7 +665,7 @@ describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
     responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    fireEvent.click(screen.getByTitle('Edit original playlist link'));
+    runCardAction('Edit source link');
     // ROW has no source_ref and no URL description, so the id is the default.
     const input = document.querySelector('.mirrored-source-ref-input') as HTMLInputElement;
     expect(input.value).toBe('tp1');
@@ -663,7 +692,7 @@ describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
     };
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    fireEvent.click(screen.getByTitle('Edit original playlist link'));
+    runCardAction('Edit source link');
     const input = document.querySelector('.mirrored-source-ref-input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'nope' } });
     fireEvent.click(screen.getByText('Save'));
@@ -678,7 +707,7 @@ describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
     responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    fireEvent.click(screen.getByTitle('Edit original playlist link'));
+    runCardAction('Edit source link');
     const input = document.querySelector('.mirrored-source-ref-input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '   ' } });
     fireEvent.click(screen.getByText('Save'));
@@ -761,40 +790,21 @@ describe('MirroredTab — it hands its reload to the controller owner', () => {
   });
 });
 
-describe('MirroredTab — the pools are ADOPTED, not reimplemented', () => {
-  // globals.d.ts records these as modals that stay vanilla and are opened.
-  // The Tools page opens the Discovery Pool through the same seam
-  // (routes/tools/-ui/launcher-cards.tsx), so a React reimplementation here
-  // would strand that caller the moment the flip deleted the global.
-  it('the header buttons call the vanilla globals and render no React overlay', async () => {
-    stubFetch();
-    responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
-    const openDiscovery = vi.fn();
-    const openWingIt = vi.fn();
-    (window as { openDiscoveryPoolModal?: unknown }).openDiscoveryPoolModal = openDiscovery;
-    (window as { openWingItPoolModal?: unknown }).openWingItPoolModal = openWingIt;
-    render(<Harness />);
-    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-
-    fireEvent.click(screen.getByText('Discovery Pool'));
-    expect(openDiscovery).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByText('Wing It Pool'));
-    expect(openWingIt).toHaveBeenCalledTimes(1);
-
-    // No React pool overlay is mounted — the vanilla owns that DOM.
-    expect(document.querySelector('#discovery-pool-overlay')).toBeNull();
-    expect(document.querySelector('#wing-it-pool-overlay')).toBeNull();
-    delete (window as { openDiscoveryPoolModal?: unknown }).openDiscoveryPoolModal;
-    delete (window as { openWingItPoolModal?: unknown }).openWingItPoolModal;
-  });
-
-  it('a missing global is survivable — the optional call just no-ops', async () => {
+/*
+ * The pool buttons moved OUT of this tab and into the page header — both are
+ * app-level overlays reviewing tracks across everything, not one tab's
+ * controls, and the Tools page opens the Discovery Pool through the same seam.
+ * Their wiring is covered by sync-shell.test.tsx now; what this tab must prove
+ * is that it no longer renders them itself.
+ */
+describe('MirroredTab — the pools live in the page header now', () => {
+  it('renders neither pool button of its own', async () => {
     stubFetch();
     responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    expect(() => fireEvent.click(screen.getByText('Discovery Pool'))).not.toThrow();
-    expect(() => fireEvent.click(screen.getByText('Wing It Pool'))).not.toThrow();
+    expect(screen.queryByText('Discovery Pool')).toBeNull();
+    expect(screen.queryByText('Wing It Pool')).toBeNull();
   });
 });
 
@@ -851,7 +861,7 @@ describe('MirroredTab — the source-ref reopen tail (2434-2438)', () => {
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByTitle('Edit original playlist link'));
+    runCardAction('Edit source link');
     await waitFor(() =>
       expect(document.querySelector('#mirrored-source-ref-modal')).not.toBeNull(),
     );
@@ -918,7 +928,7 @@ describe('MirroredTab — the reopen origin cannot leak between entry points', (
     await waitFor(() => expect(document.querySelector('#mirrored-source-ref-modal')).toBeNull());
 
     // Now edit from the CARD and commit.
-    fireEvent.click(screen.getByTitle('Edit original playlist link'));
+    runCardAction('Edit source link');
     await waitFor(() =>
       expect(document.querySelector('#mirrored-source-ref-modal')).not.toBeNull(),
     );

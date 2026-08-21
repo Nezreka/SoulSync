@@ -29,6 +29,7 @@ import {
   SYNC_DEFAULT_TAB,
   SYNC_HEADER_ACTIONS,
   SYNC_TABS,
+  syncStripTabs,
   normalizeSyncTab,
   type SyncTabId,
 } from '../-sync.shell';
@@ -53,6 +54,12 @@ export interface SyncShellProps {
    * 3732), and its unconditional sidebar re-hide is what the page keys off.
    * Filtering out same-tab clicks here would change that.
    */
+  /**
+   * Opens the Add-playlist sheet. The PRIMARY action on this page: it is the
+   * one entry point that replaces choosing a source tab before you have even
+   * pasted anything.
+   */
+  onAddPlaylist?: () => void;
   onTabChange?: () => void;
   /**
    * Hand the host a function that opens a tab programmatically.
@@ -74,6 +81,14 @@ export interface SyncShellProps {
 
 /** 2237-2241. Three of the four are vanilla seams; see -sync.shell.ts. */
 function runHeaderAction(key: string, onAutoSync: () => void) {
+  if (key === 'discovery-pool') {
+    window.openDiscoveryPoolModal?.();
+    return;
+  }
+  if (key === 'wing-it-pool') {
+    window.openWingItPoolModal?.();
+    return;
+  }
   if (key === 'auto-sync') {
     onAutoSync();
     return;
@@ -93,6 +108,7 @@ function runHeaderAction(key: string, onAutoSync: () => void) {
 
 export function SyncShell({
   panels,
+  onAddPlaylist,
   onAutoSync,
   sidebar,
   sidebarVisible,
@@ -146,6 +162,18 @@ export function SyncShell({
               because the port does not emit inline styles; the rule is a 1:1
               transcription of those three declarations. */}
           <div className="sync-header-actions">
+            {/* Primary, and first: adding a playlist is what this page is FOR.
+                The four buttons beside it are all "what happened" surfaces. */}
+            {onAddPlaylist && (
+              <button
+                type="button"
+                className="btn btn--sm sync-add-playlist-btn"
+                title="Paste a link, pick a connected account, or import a file"
+                onClick={onAddPlaylist}
+              >
+                + Add playlist
+              </button>
+            )}
             {SYNC_HEADER_ACTIONS.map((action) => (
               <button
                 key={action.key}
@@ -170,7 +198,7 @@ export function SyncShell({
       >
         <div className="sync-main-panel">
           <div className="sync-tabs" role="tablist">
-            {SYNC_TABS.map((t) => (
+            {syncStripTabs(tab).map((t) => (
               <Fragment key={t.id}>
                 <button
                   type="button"
@@ -190,7 +218,6 @@ export function SyncShell({
                   <span className="sync-tab-label">{t.label}</span>
                 </button>
                 {/* 2253: the divider sits after Server Playlists only. */}
-                {t.id === 'server' ? <div className="sync-tab-divider" /> : null}
               </Fragment>
             ))}
           </div>

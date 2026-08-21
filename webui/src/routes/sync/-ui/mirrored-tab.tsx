@@ -63,8 +63,6 @@ import { exportNotConnectedStatus } from '../-sync.export';
 import {
   mirroredHash,
   mirroredPhaseLine,
-  mirroredRatio,
-  mirroredSourceIcon,
   mirroredDiscoveryTracks,
   pipelinePhaseFor,
   timeAgo,
@@ -73,6 +71,21 @@ import { SOURCE_REF_FAILED, sourceRefUpdatedToast } from '../-sync.pipeline';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { asString } from '../-sync.url-tabs';
 import { useExportJobs } from '../-sync.use-export';
+import type { LibraryFilter } from '../-sync.library';
+
+import {
+  libraryCardState,
+  librarySortedRows,
+  libraryFilterCounts,
+  librarySources,
+  librarySummary,
+  libraryVisibleFilters,
+  libraryVisibleRows,
+} from '../-sync.library';
+import { autoSyncCanSchedulePlaylist } from '../-sync.autosync';
+import { cardScheduleLabel, useCardSchedules } from '../-sync.card-schedule';
+import { PlaylistCard, playlistCardPrimaryLabel } from './playlist-card';
+import { SourceIcon } from './source-icon';
 import { ExportModal, ExportStatusSpan } from './export-modal';
 import { MirroredDetailModal } from './mirrored-detail-modal';
 import { SourceRefModal } from './source-ref-modal';
@@ -101,18 +114,122 @@ export interface MirroredTabProps {
    * the returned controller is STABLE").
    */
   registerReload: (reload: () => void) => void;
+  /**
+   * Hand the page this tab's detail-modal opener.
+   *
+   * The React modal and the legacy `openMirroredPlaylistModal` are two
+   * implementations of the same thing over the same endpoint, and the page had
+   * surfaces opening each — so the same playlist looked different depending on
+   * which button you pressed. Registering upward lets everything on this page
+   * use the React one. (The vanilla function stays alive: other pages still
+   * call it, so it is the sync page's duplicate that goes, not the function.)
+   */
+  registerOpenDetail?: (open: (playlistId: number) => void) => void;
+}
+
+/**
+ * A mirrored card's overflow menu.
+ *
+ * Five actions that used to be five icon-only buttons on every card — ↺ ✏️ 🔗
+ * 📤 ✕ — each with tooltip-only meaning, on every row of the library at once.
+ * They are all real, and none of them is what you came to the page to do.
+ */
+function MirroredCardMenu({
+  row,
+  top,
+  left,
+  onClose,
+  onRename,
+  onEditSource,
+  onExport,
+  onClear,
+  onDelete,
+}: {
+  row: MirroredPlaylistRow;
+  top: number;
+  left: number;
+  onClose: () => void;
+  onRename: () => void;
+  onEditSource: () => void;
+  onExport: () => void;
+  onClear: () => void;
+  onDelete: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Deferred by a tick, or the click that OPENED the menu closes it again.
+    const onDocClick = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    const id = setTimeout(() => document.addEventListener('click', onDocClick), 0);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener('click', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  const item = (label: string, run: () => void, danger = false) => (
+    <button
+      type="button"
+      className={`pl-menu-item${danger ? ' pl-menu-item--danger' : ''}`}
+      onClick={() => {
+        run();
+        onClose();
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="pl-menu" ref={ref} style={{ top: `${top}px`, left: `${left}px` }} role="menu">
+      {item('Rename', onRename)}
+      {item('Edit source link', onEditSource)}
+      {item('Export', onExport)}
+      {/* Only offered when there IS a discovery to clear (575-582). */}
+      {(row.discovered_count || 0) > 0 && item('Clear discovery', onClear)}
+      {item('Delete', onDelete, true)}
+    </div>
+  );
 }
 
 export function MirroredTab({
   vertical,
   onOpen,
-  sourceName = 'Spotify',
   pipeline,
   registerReload,
+  registerOpenDetail,
 }: MirroredTabProps) {
   const config = SYNC_SOURCES.mirrored;
   const [rows, setRows] = useState<MirroredPlaylistRow[] | null>(null);
   const [placeholder, setPlaceholder] = useState('Loading mirrored playlists...');
+  /** The library view: filter by STATE, and optionally narrow by source. */
+  const [filter, setFilter] = useState<LibraryFilter>('all');
+  const [sources, setSources] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleSource = useCallback((source: string) => {
+    setSources((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(source)) next.add(source);
+      return next;
+    });
+  }, []);
+  const clearSources = useCallback(() => {
+    setSources(new Set());
+  }, []);
+
+  /** Each card's own sync interval — see -sync.card-schedule. */
+  const cardSchedules = useCardSchedules();
+
+  /** The overflow menu: which row, and where its trigger sits. */
+  const [menu, setMenu] = useState<{ row: MirroredPlaylistRow; top: number; left: number } | null>(
+    null,
+  );
+
   const [renaming, setRenaming] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState('');
   /** The row whose export picker is open (exportMirroredPlaylist, 663). */
@@ -334,6 +451,13 @@ export function MirroredTab({
     }
   }, []);
 
+  /** Same ref-not-dependency reasoning as registerReload above. */
+  const registerOpenDetailRef = useRef(registerOpenDetail);
+  registerOpenDetailRef.current = registerOpenDetail;
+  useEffect(() => {
+    registerOpenDetailRef.current?.((playlistId) => void openDetail(playlistId));
+  }, [openDetail]);
+
   const commitSourceRef = useCallback(
     async (row: MirroredPlaylistRow, sourceRef: string, fromDetail: boolean) => {
       const name = row.name ?? '';
@@ -447,26 +571,21 @@ export function MirroredTab({
   // One clock read per render — the vanilla calls timeAgo per card at 527.
   const now = Date.now();
 
+  const allRows = rows ?? [];
+  const counts = libraryFilterCounts(allRows, sources);
+  const visibleFilters = libraryVisibleFilters(counts, filter);
+  const sourceList = librarySources(allRows);
+  const visibleRows = libraryVisibleRows(allRows, filter, sources);
+
   return (
     <div>
       <div className="playlist-header">
-        <h3>Mirrored Playlists</h3>
-        <button
-          type="button"
-          className="pool-trigger-btn"
-          title="View matched and failed discovery tracks"
-          onClick={() => window.openDiscoveryPoolModal?.()}
-        >
-          Discovery Pool
-        </button>
-        <button
-          type="button"
-          className="pool-trigger-btn"
-          title="Review tracks Wing It auto-matched on a best-effort guess — verify or re-match them"
-          onClick={() => window.openWingItPoolModal?.()}
-        >
-          Wing It Pool
-        </button>
+        <div className="library-heading">
+          <h3>Your playlists</h3>
+          {/* Says something TRUE, and omits what it has nothing to say about —
+              a fresh install gets a sentence, not a row of zeroes. */}
+          <p className="library-summary">{librarySummary(rows ?? [])}</p>
+        </div>
         <button
           type="button"
           className="refresh-button mirrored"
@@ -476,32 +595,73 @@ export function MirroredTab({
           Update list
         </button>
       </div>
-      <div className="playlist-scroll-container" id="mirrored-playlist-container">
-        {rows === null || rows.length === 0 ? (
+      {rows !== null && rows.length > 0 && (
+        <div className="library-filters">
+          {/* State first: what a user came to find out is which playlists still
+              need something doing to them, not where they came from. */}
+          <div className="library-tabs" role="tablist">
+            {visibleFilters.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                role="tab"
+                aria-selected={filter === f.id}
+                className={`library-tab${filter === f.id ? ' active' : ''}`}
+                onClick={() => setFilter(f.id)}
+              >
+                {f.label} <span className="library-tab-count">{counts[f.id]}</span>
+              </button>
+            ))}
+          </div>
+          {/* Source demoted to a filter, which is what it always actually was. */}
+          {sourceList.length > 1 && (
+            <div className="library-sources">
+              {sourceList.map((source) => (
+                <button
+                  key={source}
+                  type="button"
+                  className={`library-source${sources.has(source) ? ' active' : ''}`}
+                  onClick={() => toggleSource(source)}
+                >
+                  <SourceIcon source={source} /> {source}
+                </button>
+              ))}
+              {sources.size > 0 && (
+                <button type="button" className="library-source-clear" onClick={clearSources}>
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      <div className="playlist-scroll-container pl-grid-scroll" id="mirrored-playlist-container">
+        {rows === null || visibleRows.length === 0 ? (
           <div className="playlist-placeholder">
             {rows === null
               ? placeholder
-              : 'Playlists you parse from any service will appear here as persistent backups.'}
+              : rows.length === 0
+                ? 'Playlists you add from any service will appear here.'
+                : 'Nothing in this filter.'}
           </div>
         ) : (
-          rows.map((row) => {
+          <div className="pl-grid">
+            {librarySortedRows(visibleRows).map((row) => {
+            const displayName = row.display_name || row.name || '';
+            // The live phase line, unchanged — its percentages and its
+            // Discovered N/M are information the resting meta line cannot
+            // carry, so the existing (tested) writer still produces them.
             const hash = mirroredHash(row.id);
-            const state = vertical.states[hash];
-            // The live state wins; the pipeline phase is synthesised only in
-            // its absence (534-542).
-            const phase = state?.phase ?? pipelinePhaseFor(row);
-            const line = mirroredPhaseLine(
-              phase,
-              state
+            const live = vertical.states[hash];
+            const phaseLine = mirroredPhaseLine(
+              live?.phase ?? pipelinePhaseFor(row),
+              live
                 ? {
-                    discoveryProgress: state.discoveryProgress,
-                    spotifyMatches: state.spotifyMatches,
-                    spotifyTotal: state.spotifyTotal,
-                    // A live Auto-Sync run writes these onto the same state
-                    // (applyPipelineState), so the pipeline arms read them
-                    // from there rather than the stale row.
-                    pipeline_progress: state.pipeline_progress,
-                    pipeline_phase: state.pipeline_phase,
+                    discoveryProgress: live.discoveryProgress,
+                    spotifyMatches: live.spotifyMatches,
+                    spotifyTotal: live.spotifyTotal,
+                    pipeline_progress: live.pipeline_progress,
+                    pipeline_phase: live.pipeline_phase,
                   }
                 : {
                     pipeline_progress: row.pipeline_state?.progress,
@@ -509,136 +669,98 @@ export function MirroredTab({
                   },
               row,
             );
-            const ratio = mirroredRatio(row, sourceName);
-            const discovered = row.discovered_count || 0;
-            return (
-              <div
-                key={row.id}
-                className="mirrored-playlist-card"
-                id={`mirrored-card-${row.id}`}
-                onClick={() => onCardClick(row)}
-              >
-                <div className={`source-icon ${row.source ?? ''}`}>
-                  {mirroredSourceIcon(row.source)}
-                </div>
-                <div className="mirrored-card-info">
-                  {renaming === row.id ? (
-                    <input
-                      className="card-name mirrored-rename-input"
-                      autoFocus
-                      value={renameValue}
-                      placeholder="Leave blank to use the original name"
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      onKeyDown={(e) => {
-                        e.stopPropagation();
-                        if (e.key === 'Enter') void commitRename(row);
-                        // Escape is the vanilla's null-return cancel (2386).
-                        if (e.key === 'Escape') setRenaming(null);
-                      }}
-                      onBlur={() => setRenaming(null)}
-                    />
-                  ) : (
-                    <div className="card-name">{row.display_name || row.name}</div>
-                  )}
-                  {row.custom_name && (
-                    <div
-                      className="card-original-name"
-                      title="Original (upstream) playlist name — still tracked"
-                    >
-                      ↳ {row.name}
-                    </div>
-                  )}
-                  <div className="card-meta">
-                    <span className={`source-badge ${row.source ?? ''}`}>{row.source}</span>
-                    <span>{row.track_count} tracks</span>
-                    <span>Mirrored {timeAgo(row.updated_at || row.mirrored_at, now)}</span>
-                    {ratio && (
-                      <span className={`discovery-ratio${ratio.complete ? ' complete' : ''}`}>
-                        {ratio.text}
-                      </span>
-                    )}
-                    {line && <span style={{ color: line.color }}>{line.text}</span>}
-                    {exportJobs.statuses[row.id] && (
-                      <ExportStatusSpan status={exportJobs.statuses[row.id]} />
-                    )}
-                  </div>
-                </div>
-                {discovered > 0 && (
-                  <button
-                    type="button"
-                    className="mirrored-card-clear"
-                    title="Clear discovery data"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void onClear(row);
-                    }}
-                  >
-                    ↺
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="mirrored-card-pipeline"
-                  title="Refresh, discover, sync, and queue missing tracks"
-                  onClick={(e) => {
+            const exportStatus = exportJobs.statuses[row.id];
+            const state = libraryCardState(row);
+            return renaming === row.id ? (
+              // Rename stays INLINE on the card: a modal for one text field is
+              // heavier than the edit itself.
+              <div className="pl-card pl-card--renaming" key={row.id}>
+                <input
+                  className="card-name mirrored-rename-input"
+                  autoFocus
+                  value={renameValue}
+                  placeholder="Leave blank to use the original name"
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
                     e.stopPropagation();
-                    void pipeline.run(row.id, row.name ?? '');
+                    if (e.key === 'Enter') void commitRename(row);
+                    if (e.key === 'Escape') setRenaming(null);
                   }}
-                >
-                  Auto-Sync
-                </button>
-                <button
-                  type="button"
-                  className="mirrored-card-rename"
-                  title="Rename (changes the name shown here and used when syncing)"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setRenameValue(row.custom_name ?? '');
-                    setRenaming(row.id);
-                  }}
-                >
-                  ✏️
-                </button>
-                <button
-                  type="button"
-                  className="mirrored-card-link"
-                  title="Edit original playlist link"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setRefEditFromDetail(false);
-                    setEditingRef(row);
-                  }}
-                >
-                  🔗
-                </button>
-                <button
-                  type="button"
-                  className="mirrored-card-export"
-                  title="Export to ListenBrainz / JSPF"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setExporting(row);
-                  }}
-                >
-                  📤
-                </button>
-                <button
-                  type="button"
-                  className="mirrored-card-delete"
-                  title="Delete mirror"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void onDelete(row);
-                  }}
-                >
-                  ✕
-                </button>
+                  onBlur={() => setRenaming(null)}
+                />
               </div>
+            ) : (
+              <PlaylistCard
+                key={row.id}
+                row={row}
+                name={displayName}
+                nameTitle={
+                  row.custom_name ? `${displayName} — originally "${row.name ?? ''}"` : displayName
+                }
+                // "Mirrored 30m ago", the vanilla's own wording — it names what
+                // the timestamp actually is (the last mirror refresh), where a
+                // bare "30m ago" leaves you guessing.
+                when={`Mirrored ${timeAgo(row.updated_at || row.mirrored_at, Date.now())}`}
+                schedule={cardScheduleLabel(cardSchedules.schedules[String(row.id)])}
+                status={
+                  exportStatus ? (
+                    <ExportStatusSpan status={exportStatus} />
+                  ) : phaseLine ? (
+                    <span className="card-phase" style={{ color: phaseLine.color }}>
+                      {phaseLine.text}
+                    </span>
+                  ) : null
+                }
+                onOpen={() => onCardClick(row)}
+                primary={
+                  // The pipeline endpoint rejects file/beatport outright, and
+                  // lastfm cannot be scheduled either — same guard the board
+                  // uses, so the card never offers a run that 400s.
+                  !autoSyncCanSchedulePlaylist(row)
+                    ? null
+                    : {
+                  label: playlistCardPrimaryLabel(row),
+                  danger: state === 'error',
+                  onClick: () => {
+                    // "View progress" opens the card; everything else runs the
+                    // pipeline, which IS refresh + discover + sync + queue the
+                    // missing tracks — so "Find N missing" is literal, not a
+                    // friendlier name for something else.
+                    if (state === 'working') onCardClick(row);
+                    else void pipeline.run(row.id, row.name ?? '');
+                  },
+                      }
+                }
+                onMore={(anchor) => {
+                  const box = anchor.getBoundingClientRect();
+                  setMenu({ row, top: box.bottom + 6, left: box.right - 188 });
+                }}
+              />
             );
-          })
+            })}
+          </div>
         )}
       </div>
+      {menu && (
+        <MirroredCardMenu
+          row={menu.row}
+          top={menu.top}
+          left={menu.left}
+          onClose={() => setMenu(null)}
+          onRename={() => {
+            setRenameValue(menu.row.custom_name ?? '');
+            setRenaming(menu.row.id);
+          }}
+          onEditSource={() => {
+            setRefEditFromDetail(false);
+            setEditingRef(menu.row);
+          }}
+          onExport={() => setExporting(menu.row)}
+          onClear={() => void onClear(menu.row)}
+          onDelete={() => void onDelete(menu.row)}
+        />
+      )}
       {exporting && (
         <ExportModal
           // The picker's subtitle uses the card's shown name (607).

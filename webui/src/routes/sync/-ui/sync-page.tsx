@@ -22,6 +22,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 
 import type { LbCardData } from '../-sync.lb-tabs';
 import type { MirroredMatch, ServerPlaylist } from '../-sync.server';
+import { normalizeSyncTab } from '../-sync.shell';
 import type { SyncTabId } from '../-sync.shell';
 
 import { metadataSourceLabel } from '../-sync.modal-core';
@@ -41,12 +42,24 @@ import { SoulsyncDiscoveryTab } from './soulsync-discovery-tab';
 import { SyncModals } from './sync-modals';
 import { SyncShell } from './sync-shell';
 import { SyncSidebar } from './sync-sidebar';
+import { AddPlaylistSheet } from './add-playlist-sheet';
 import { DeezerLinkTab, ITunesLinkTab, SpotifyPublicTab, YouTubeTab } from './url-import-tab';
 
 /** The server tab's two views (2226-2236 vs the compare editor). */
 interface CompareView {
   playlist: ServerPlaylist;
   mirrored: MirroredMatch | null;
+}
+
+/**
+ * The legacy mirrored detail modal. This page no longer opens it — the React
+ * modal is used everywhere here — but the declaration stays for the one
+ * fallback below, and because other pages still call the vanilla function.
+ */
+declare global {
+  interface Window {
+    openMirroredPlaylistModal?: (playlistId: number) => Promise<void> | void;
+  }
 }
 
 export function SyncPage() {
@@ -62,6 +75,50 @@ export function SyncPage() {
   const registerOpenTab = useCallback((open: (tab: SyncTabId) => void) => {
     openTab.current = open;
   }, []);
+
+  /**
+   * The Add-playlist sheet, and the link it routed.
+   *
+   * The sheet only DECIDES which tab a link belongs to; the tab still loads it,
+   * so the four bespoke loaders are untouched. The pending link is held here
+   * because the tab that must parse it may not be mounted at the moment the
+   * sheet closes — opening it is what mounts it.
+   */
+  const [addOpen, setAddOpen] = useState(false);
+  const [pending, setPending] = useState<{ tab: string; url: string } | null>(null);
+  const routeAdd = useCallback((tab: string, url?: string) => {
+    if (url) setPending({ tab, url });
+    openTab.current?.(normalizeSyncTab(tab));
+  }, []);
+  const clearPending = useCallback(() => {
+    setPending(null);
+  }, []);
+
+  /**
+   * The mirrored tab's detail-modal opener.
+   *
+   * Everything on this page opens the SAME modal now. The legacy
+   * `openMirroredPlaylistModal` is a second implementation over the same
+   * endpoint with different visuals, and the Auto-Sync monitor and the
+   * SoulSync Discovery tab were reaching for it — so the same playlist looked
+   * different depending on which button you pressed. The vanilla function is
+   * left alive because other PAGES still call it.
+   */
+  const openMirroredDetail = useRef<((playlistId: number) => void) | undefined>(undefined);
+  const registerOpenDetail = useCallback((open: (playlistId: number) => void) => {
+    openMirroredDetail.current = open;
+  }, []);
+  const showMirroredDetail = useCallback((playlistId: number) => {
+    // Mirrored is the default tab, so the opener is registered before anything
+    // can ask for it. The fallback covers a future where it is not.
+    if (openMirroredDetail.current) openMirroredDetail.current(playlistId);
+    else void window.openMirroredPlaylistModal?.(playlistId);
+  }, []);
+  /** The pending url, but only for the tab it was meant for. */
+  const pendingFor = useCallback(
+    (tab: string) => (pending && pending.tab === tab ? pending.url : undefined),
+    [pending],
+  );
 
   /**
    * `runPipeline` is the page's ONE controller, injected rather than reached
@@ -146,12 +203,16 @@ export function SyncPage() {
       <SpotifyPublicTab
         vertical={page.verticals.spotify_public}
         onOpen={(sourceId) => openSourceModal('spotify_public', sourceId)}
+        pendingUrl={pendingFor('spotify-public')}
+        onPendingConsumed={clearPending}
       />
     ),
     'itunes-link': (
       <ITunesLinkTab
         vertical={page.verticals.itunes_link}
         onOpen={(sourceId) => openSourceModal('itunes_link', sourceId)}
+        pendingUrl={pendingFor('itunes-link')}
+        onPendingConsumed={clearPending}
       />
     ),
     tidal: (
@@ -174,19 +235,23 @@ export function SyncPage() {
       <DeezerLinkTab
         vertical={page.verticals.deezer}
         onOpen={(sourceId) => openSourceModal('deezer', sourceId)}
+        pendingUrl={pendingFor('deezer-link')}
+        onPendingConsumed={clearPending}
       />
     ),
     youtube: (
       <YouTubeTab
         vertical={page.verticals.youtube}
         onOpen={(sourceId) => openSourceModal('youtube', sourceId)}
+        pendingUrl={pendingFor('youtube')}
+        onPendingConsumed={clearPending}
       />
     ),
     'listenbrainz-sync': (
       <ListenBrainzSyncTab vertical={page.verticals.listenbrainz} onOpen={openLbCard} />
     ),
     'lastfm-sync': <LastfmSyncTab vertical={page.verticals.listenbrainz} onOpen={openLbCard} />,
-    'soulsync-discovery-sync': <SoulsyncDiscoveryTab />,
+    'soulsync-discovery-sync': <SoulsyncDiscoveryTab onOpenMirrored={showMirroredDetail} />,
     'import-file': <ImportFileTab onImported={onImported} />,
     mirrored: (
       <MirroredTab
@@ -195,14 +260,19 @@ export function SyncPage() {
         sourceName={sourceName}
         pipeline={page.pipeline}
         registerReload={page.registerMirroredReload}
+        registerOpenDetail={registerOpenDetail}
       />
     ),
   };
 
   return (
     <>
+      {addOpen && (
+        <AddPlaylistSheet onRoute={routeAdd} onClose={() => setAddOpen(false)} />
+      )}
       <SyncShell
         panels={panels}
+        onAddPlaylist={() => setAddOpen(true)}
         onAutoSync={() => setAutoSyncOpen(true)}
         sidebar={
           <SyncSidebar
@@ -242,7 +312,7 @@ export function SyncPage() {
           // vanilla mirrored modal, which five vanilla files call and the flip
           // does not delete. MirroredTab's own React detail modal is internal
           // to that tab, so this is the vanilla's own target, not a second one.
-          onOpenDetails={(playlistId) => window.openMirroredPlaylistModal?.(playlistId)}
+          onOpenDetails={showMirroredDetail}
           // runNow takes only the id; the modal offers the name too. Dropping
           // it here is the adapter, not a lost argument.
           onRunAgain={(playlistId) => autoSync.runNow(playlistId)}

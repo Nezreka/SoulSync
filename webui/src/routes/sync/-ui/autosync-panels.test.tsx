@@ -36,7 +36,7 @@ describe('AutoSyncMonitorPanel (1131-1160)', () => {
       onDetails,
       onRefresh,
       ...render(
-        <AutoSyncMonitorPanel playlists={playlists} onDetails={onDetails} onRefresh={onRefresh} />,
+        <AutoSyncMonitorPanel playlists={playlists} onDetails={onDetails} />,
       ),
     };
   };
@@ -149,10 +149,9 @@ describe('AutoSyncMonitorPanel (1131-1160)', () => {
     expect(names).toEqual(['R2', 'R3', 'R4', 'R5']);
   });
 
-  it('wires Refresh', () => {
-    const { container, onRefresh } = renderPanel([]);
-    fireEvent.click(container.querySelector('.auto-sync-monitor-head button') as HTMLElement);
-    expect(onRefresh).toHaveBeenCalledTimes(1);
+  it('the monitor head has no Refresh — the modal header owns the only one', () => {
+    const { container } = renderPanel([]);
+    expect(container.querySelector('.auto-sync-monitor-head button')).toBeNull();
   });
 });
 

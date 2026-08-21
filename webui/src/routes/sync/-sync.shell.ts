@@ -68,8 +68,53 @@ export const SYNC_TABS: readonly SyncTab[] = [
   { id: 'mirrored', label: 'Mirrored', icon: 'mirrored-icon' },
 ];
 
-/** The tab the page opens on — `active` in the markup at 2250. */
-export const SYNC_DEFAULT_TAB: SyncTabId = 'server';
+/**
+ * The tab the page opens on.
+ *
+ * Mirrored, not Server Playlists. Mirrored is the persistent local record of
+ * every playlist regardless of where it came from — the only surface that
+ * holds sync state for all of them — and it sat at position fifteen, a peer of
+ * the fourteen inputs that feed it. Landing there makes the page a library of
+ * playlists rather than a directory of services.
+ */
+export const SYNC_DEFAULT_TAB: SyncTabId = 'mirrored';
+
+/**
+ * The tabs that earn a permanent place in the strip.
+ *
+ * The other twelve are now reached through Add playlist, which detects the
+ * service from the link rather than making you pick first. They are NOT gone —
+ * every one still exists as a panel and is opened by routing — they simply do
+ * not each need a chip in a strip that had fifteen of them, six of which were
+ * duplicates of one another.
+ *
+ * What is left is genuinely three different things:
+ *   mirrored  the library — the page's subject
+ *   server    the other direction: reading FROM Plex/Jellyfin/Navidrome
+ *   beatport  a chart browser, a different page grafted into the strip
+ */
+export const SYNC_PRIMARY_TAB_IDS: readonly SyncTabId[] = ['mirrored', 'server', 'beatport'];
+
+/**
+ * Which chips to render, given what is open.
+ *
+ * A routed tab appears in the strip WHILE IT IS ACTIVE and drops out when you
+ * leave it. Without that, opening Spotify Link from the sheet would leave the
+ * strip highlighting nothing and no way back — a panel with no chip is a room
+ * with no door. It is appended rather than inserted in place so the three
+ * permanent chips never move under the cursor.
+ */
+export function syncStripTabs(active: string): readonly SyncTab[] {
+  // Ordered by SYNC_PRIMARY_TAB_IDS, not by SYNC_TABS: a filter would hand
+  // them back in the old fifteen-tab order (server, beatport, mirrored) and
+  // quietly put the library last again, which is the whole thing being fixed.
+  const primary = SYNC_PRIMARY_TAB_IDS.map(
+    (id) => SYNC_TABS.find((t) => t.id === id) as SyncTab,
+  ).filter(Boolean);
+  if (SYNC_PRIMARY_TAB_IDS.includes(active as SyncTabId)) return primary;
+  const routed = SYNC_TABS.find((t) => t.id === active);
+  return routed ? [...primary, routed] : primary;
+}
 
 const IDS = new Set<string>(SYNC_TABS.map((t) => t.id));
 
@@ -92,12 +137,30 @@ export interface SyncHeaderAction {
 }
 
 /**
- * The four header buttons (index.html 2237-2241), in order. Three of them stay
- * VANILLA behind a `window.x?.()` seam — their targets live in
- * manual-library-match.js, wishlist-tools.js and origin-history.js, none of
- * which the flip touches. The fourth, Auto-Sync, is React now.
+ * The header buttons, in order.
+ *
+ * Most stay VANILLA behind a `window.x?.()` seam — their targets live in
+ * manual-library-match.js, wishlist-tools.js, origin-history.js and the pool
+ * modals, none of which the flip touches. Auto-Sync is React.
+ *
+ * Discovery Pool and Wing It Pool moved UP from the Mirrored tab's own header.
+ * They were never about one tab: both are app-level overlays reviewing matched
+ * and best-effort-guessed tracks across everything, and the Tools page opens
+ * the Discovery Pool through the same seam. Sitting inside one tab's header
+ * made them look like that tab's controls.
  */
 export const SYNC_HEADER_ACTIONS: readonly SyncHeaderAction[] = [
+  {
+    key: 'discovery-pool',
+    label: 'Discovery Pool',
+    title: 'View matched and failed discovery tracks',
+  },
+  {
+    key: 'wing-it-pool',
+    label: 'Wing It Pool',
+    title:
+      'Review tracks Wing It auto-matched on a best-effort guess — verify or re-match them',
+  },
   {
     key: 'auto-sync',
     label: 'Auto-Sync',

@@ -28,6 +28,14 @@ export interface MirroredPlaylistRow {
   source_playlist_id?: string;
   source_ref?: string;
   description?: string;
+  /** The poster the SOURCE supplied, when it supplied one. */
+  image_url?: string;
+  /**
+   * Up to four distinct album covers borrowed from the playlist's discovered
+   * tracks, as a JSON array string. The fallback for the many sources that send
+   * no poster at all — see backfill_missing_mirrored_covers.
+   */
+  cover_tiles?: string | null;
   track_count?: number;
   total_count?: number;
   discovered_count?: number;

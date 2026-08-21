@@ -25,10 +25,20 @@
 
 import type { AccountPlaylistRow } from '../-sync.accounts';
 
+import { PlaylistArt } from './playlist-art';
+import { SourceIcon } from './source-icon';
+
 export interface AccountPlaylistCardProps {
   /** The id the ENGINE uses — raw for Spotify, `deezer_arl_<n>` for ARL. */
   cardId: string;
   row: AccountPlaylistRow;
+  /**
+   * The SOURCE this card belongs to ('spotify' | 'deezer'), used for the brand
+   * mark drawn when the row carries no `image_url`. The art tile is a NEW
+   * sibling — it deliberately adds no id and no class the engine selects on, so
+   * the adopted contract above is untouched.
+   */
+  glyph: string;
   statusClass: string;
   statusLabel: string;
   /** Spotify only (1646); ARL cards do not toggle (2503). */
@@ -44,6 +54,7 @@ export interface AccountPlaylistCardProps {
 export function AccountPlaylistCard({
   cardId,
   row,
+  glyph,
   statusClass,
   statusLabel,
   selectable,
@@ -75,6 +86,9 @@ export function AccountPlaylistCard({
       }
     >
       <div className="playlist-card-main">
+        <div className="playlist-card-art">
+          <PlaylistArt url={row.image_url} fallback={<SourceIcon source={glyph} />} />
+        </div>
         <div className="playlist-card-content">
           <div className="playlist-card-name">{row.name}</div>
           <div className="playlist-card-info">

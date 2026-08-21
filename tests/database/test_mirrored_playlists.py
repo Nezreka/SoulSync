@@ -210,3 +210,253 @@ def test_provider_agnostic_assignment_resolver_handles_non_spotify_source(tmp_pa
 
     assert db.resolve_mirrored_playlist_assignment("12345", "Deezer Mix", 1)["id"] == pid
     assert db.resolve_mirrored_playlist_assignment(f"auto_mirror_{pid}", None, 1)["id"] == pid
+
+
+# ── Deriving a playlist cover from what discovery matched ──────────────────
+#
+# Boulder, looking at the new library grid: "images dont appear in most cards.
+# none for last.fm, none for listenbrainz, none for soulsync discovery, none
+# for spotify public, none for tidal, none for youtube."
+#
+# They never could. Most sources hand us no poster when a playlist is mirrored,
+# and there is no per-track art either. What there IS, once discovery runs, is a
+# matched track carrying real album art — so the playlist borrows its cover from
+# the first track discovery finds, and has one from the next visit onwards.
+
+from database.music_database import mirrored_cover_from_match
+
+
+class TestMirroredCoverFromMatch:
+    def test_reads_the_top_level_image(self):
+        assert mirrored_cover_from_match(
+            {"discovered": True, "matched_data": {"image_url": "http://a/cover.jpg"}}
+        ) == "http://a/cover.jpg"
+
+    def test_reads_the_nested_album_image(self):
+        # _build_fix_modal_spotify_data carries the image in BOTH places for
+        # parity with Spotify's own shape; older rows only have this one.
+        assert mirrored_cover_from_match(
+            {
+                "discovered": True,
+                "matched_data": {"album": {"images": [{"url": "http://b/cover.jpg"}]}},
+            }
+        ) == "http://b/cover.jpg"
+
+    def test_prefers_the_top_level_image_when_both_exist(self):
+        assert mirrored_cover_from_match(
+            {
+                "discovered": True,
+                "matched_data": {
+                    "image_url": "http://top/cover.jpg",
+                    "album": {"images": [{"url": "http://nested/cover.jpg"}]},
+                },
+            }
+        ) == "http://top/cover.jpg"
+
+    def test_falls_back_to_spotify_data_for_older_rows(self):
+        assert mirrored_cover_from_match(
+            {"discovered": True, "spotify_data": {"image_url": "http://c/cover.jpg"}}
+        ) == "http://c/cover.jpg"
+
+    def test_an_undiscovered_track_yields_nothing(self):
+        # The whole rule: art appears only once discovery has found something.
+        assert mirrored_cover_from_match(
+            {"discovered": False, "matched_data": {"image_url": "http://a/cover.jpg"}}
+        ) == ""
+
+    def test_survives_every_malformed_shape(self):
+        for junk in [
+            None,
+            "nope",
+            {},
+            {"discovered": True},
+            {"discovered": True, "matched_data": "nope"},
+            {"discovered": True, "matched_data": {}},
+            {"discovered": True, "matched_data": {"album": "Just A Name"}},
+            {"discovered": True, "matched_data": {"album": {"images": []}}},
+            {"discovered": True, "matched_data": {"album": {"images": [{}]}}},
+            {"discovered": True, "matched_data": {"image_url": ""}},
+        ]:
+            assert mirrored_cover_from_match(junk) == ""
+
+
+class TestPlaylistCoverBackfill:
+    def _mirror(self, db, **over):
+        return db.mirror_playlist(
+            source=over.get("source", "youtube"),
+            source_playlist_id="h1",
+            name="Mirror",
+            tracks=[
+                {"track_name": "One", "artist_name": "A", "source_track_id": "t1"},
+                {"track_name": "Two", "artist_name": "B", "source_track_id": "t2"},
+            ],
+            profile_id=1,
+            image_url=over.get("image_url"),
+        )
+
+    def test_a_discovered_track_invalidates_the_cached_collage(self, tmp_path):
+        # A new match can change what the four tiles should be, so the write
+        # drops them and the next library read rebuilds them. Recomputing four
+        # distinct covers on every track write would be far more expensive.
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        pid = self._mirror(db)
+        db.backfill_missing_mirrored_covers(1)
+        assert db.get_mirrored_playlist(pid)["cover_tiles"] is not None
+
+        track = db.get_mirrored_playlist_tracks(pid)[0]
+        db.update_mirrored_track_extra_data(
+            track["id"],
+            {"discovered": True, "matched_data": {"image_url": "http://a/cover.jpg"}},
+        )
+        assert db.get_mirrored_playlist(pid)["cover_tiles"] is None
+
+    def test_it_never_touches_a_poster_the_source_supplied(self, tmp_path):
+        # Deezer and the Spotify account tab DO send a real poster. image_url
+        # means exactly that, and a mosaic of album art is not that.
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        pid = self._mirror(db, image_url="http://original/poster.jpg")
+
+        track = db.get_mirrored_playlist_tracks(pid)[0]
+        db.update_mirrored_track_extra_data(
+            track["id"],
+            {"discovered": True, "matched_data": {"image_url": "http://a/cover.jpg"}},
+        )
+        db.backfill_missing_mirrored_covers(1)
+        assert db.get_mirrored_playlist(pid)["image_url"] == "http://original/poster.jpg"
+
+    def test_the_collage_collects_tiles_in_track_order(self, tmp_path):
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        pid = self._mirror(db)
+        first, second = db.get_mirrored_playlist_tracks(pid)[:2]
+        db.update_mirrored_track_extra_data(
+            first["id"], {"discovered": True, "matched_data": {"image_url": "http://first.jpg"}}
+        )
+        db.update_mirrored_track_extra_data(
+            second["id"], {"discovered": True, "matched_data": {"image_url": "http://second.jpg"}}
+        )
+        db.backfill_missing_mirrored_covers(1)
+        assert db.get_mirrored_playlist(pid)["cover_tiles"] == (
+            '["http://first.jpg", "http://second.jpg"]'
+        )
+
+    def test_the_collage_never_repeats_the_same_cover(self, tmp_path):
+        # A playlist from one album would otherwise render the same tile four
+        # times, which reads as a rendering bug rather than a design.
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        pid = self._mirror(db)
+        for track in db.get_mirrored_playlist_tracks(pid):
+            db.update_mirrored_track_extra_data(
+                track["id"],
+                {"discovered": True, "matched_data": {"image_url": "http://same.jpg"}},
+            )
+        db.backfill_missing_mirrored_covers(1)
+        assert db.get_mirrored_playlist(pid)["cover_tiles"] == '["http://same.jpg"]'
+
+    def test_an_undiscovered_write_leaves_the_collage_alone(self, tmp_path):
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        pid = self._mirror(db)
+        track = db.get_mirrored_playlist_tracks(pid)[0]
+        db.backfill_missing_mirrored_covers(1)
+        db.update_mirrored_track_extra_data(
+            track["id"], {"discovery_attempted": True, "discovered": False}
+        )
+        # No match, nothing to rebuild — the cached (empty) tiles stand.
+        assert db.get_mirrored_playlist(pid)["cover_tiles"] == "[]"
+
+    def test_the_track_write_itself_still_succeeds(self, tmp_path):
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        pid = self._mirror(db)
+        track = db.get_mirrored_playlist_tracks(pid)[0]
+        assert db.update_mirrored_track_extra_data(
+            track["id"],
+            {"discovered": True, "matched_data": {"image_url": "http://a/cover.jpg"}},
+        ) is True
+        assert db.get_mirrored_playlist_tracks(pid)[0]["extra_data"] is not None
+
+
+class TestCoverBackfillForExistingPlaylists:
+    """The rows that were discovered BEFORE the derivation existed.
+
+    That is most of Boulder's library: their extra_data already holds the
+    match, so nothing will ever write it again. The list read fills them in.
+    """
+
+    def _mirror_with_discovered_track(self, db, image=None, cover="http://found.jpg"):
+        pid = db.mirror_playlist(
+            source="youtube",
+            source_playlist_id=f"h{id(db)}{image}",
+            name="Mirror",
+            tracks=[
+                {"track_name": "One", "artist_name": "A", "source_track_id": "t1"},
+                {"track_name": "Two", "artist_name": "B", "source_track_id": "t2"},
+            ],
+            profile_id=1,
+            image_url=image,
+        )
+        # Write the match straight to the column, simulating a row discovered
+        # before the derivation existed.
+        import json as _json
+
+        with db._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id FROM mirrored_playlist_tracks WHERE playlist_id = ? ORDER BY position",
+                (pid,),
+            )
+            first = cur.fetchall()[0]["id"]
+            cur.execute(
+                "UPDATE mirrored_playlist_tracks SET extra_data = ? WHERE id = ?",
+                (_json.dumps({"discovered": True, "matched_data": {"image_url": cover}}), first),
+            )
+            cur.execute(
+                "UPDATE mirrored_playlists SET image_url = ? WHERE id = ?", (image, pid)
+            )
+            conn.commit()
+        return pid
+
+    def test_an_already_discovered_playlist_gains_its_cover(self, tmp_path):
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        pid = self._mirror_with_discovered_track(db)
+        assert not db.get_mirrored_playlist(pid).get("image_url")
+
+        assert db.backfill_missing_mirrored_covers(1) == 1
+        assert db.get_mirrored_playlist(pid)["cover_tiles"] == '["http://found.jpg"]'
+
+    def test_simply_listing_the_library_fixes_it(self, tmp_path):
+        # The whole point: the first visit after an upgrade repairs the page.
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        self._mirror_with_discovered_track(db)
+        rows = db.get_mirrored_playlists(profile_id=1)
+        assert rows[0]["cover_tiles"] == '["http://found.jpg"]'
+
+    def test_a_second_pass_does_nothing_at_all(self, tmp_path):
+        # Self-limiting: it short-circuits on the count once every playlist has
+        # a cover, so it is free on every visit after the first.
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        self._mirror_with_discovered_track(db)
+        assert db.backfill_missing_mirrored_covers(1) == 1
+        assert db.backfill_missing_mirrored_covers(1) == 0
+
+    def test_a_source_supplied_poster_is_never_replaced(self, tmp_path):
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        pid = self._mirror_with_discovered_track(db, image="http://original.jpg")
+        db.backfill_missing_mirrored_covers(1)
+        assert db.get_mirrored_playlist(pid)["image_url"] == "http://original.jpg"
+
+    def test_an_undiscovered_playlist_stays_bare(self, tmp_path):
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        pid = db.mirror_playlist(
+            source="youtube",
+            source_playlist_id="bare",
+            name="Bare",
+            tracks=[{"track_name": "One", "artist_name": "A"}],
+            profile_id=1,
+        )
+        assert db.backfill_missing_mirrored_covers(1) == 0
+        # Written empty rather than left NULL, so it is not re-scanned forever.
+        assert db.get_mirrored_playlist(pid)["cover_tiles"] == "[]"
+
+    def test_another_profile_is_left_alone(self, tmp_path):
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        self._mirror_with_discovered_track(db)
+        assert db.backfill_missing_mirrored_covers(2) == 0

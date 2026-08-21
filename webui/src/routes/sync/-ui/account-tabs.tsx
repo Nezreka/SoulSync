@@ -190,6 +190,7 @@ export function SpotifyTab({ selectedIds, onToggleSelect, registerRows }: Accoun
                 key={cardId}
                 cardId={cardId}
                 row={row}
+                glyph="spotify"
                 statusClass={spotifyStatusClass(row.sync_status)}
                 statusLabel={row.sync_status ?? ''}
                 selectable
@@ -336,6 +337,7 @@ export function DeezerArlTab() {
                 key={cardId}
                 cardId={cardId}
                 row={row}
+                glyph="deezer"
                 statusClass={deezerArlStatusClass(row.sync_status)}
                 statusLabel={deezerArlStatusLabel(row.sync_status)}
                 extraClassName="deezer-arl-playlist-card"
