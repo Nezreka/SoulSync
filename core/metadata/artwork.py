@@ -29,6 +29,54 @@ __all__ = [
 
 logger = _create_logger("metadata.artwork")
 
+# A FLAC METADATA_BLOCK header carries its length in 24 bits, so no single block
+# can exceed 2**24 - 1 bytes. The picture block also holds the mime string, a
+# description and five 32-bit fields, so leave a little room rather than sitting
+# exactly on the ceiling.
+FLAC_MAX_PICTURE_BYTES = (1 << 24) - 1 - 4096
+
+
+def _shrink_for_flac(image_data: bytes, mime_type: str):
+    """Re-encode cover art down to something a FLAC picture block can hold.
+
+    Returns JPEG bytes, or None when Pillow is unavailable or the image cannot
+    be read. None means "write the tags without art", which is strictly better
+    than the whole save failing.
+
+    Quality first, then dimensions: a 4000px cover re-encoded at quality 85 is
+    usually well under the limit already, and halving the pixels is a bigger
+    loss than dropping a little JPEG quality.
+    """
+    try:
+        import io as _io
+
+        from PIL import Image
+    except Exception:  # noqa: BLE001 - Pillow missing is not an error here
+        return None
+    try:
+        with Image.open(_io.BytesIO(image_data)) as img:
+            img = img.convert("RGB")
+            for quality in (85, 70, 55):
+                buf = _io.BytesIO()
+                img.save(buf, format="JPEG", quality=quality, optimize=True)
+                if buf.tell() <= FLAC_MAX_PICTURE_BYTES:
+                    return buf.getvalue()
+            # Still too big at low quality, so it is the pixel count. Step the
+            # long edge down until it fits.
+            side = max(img.size)
+            while side > 500:
+                side //= 2
+                copy = img.copy()
+                copy.thumbnail((side, side))
+                buf = _io.BytesIO()
+                copy.save(buf, format="JPEG", quality=85, optimize=True)
+                if buf.tell() <= FLAC_MAX_PICTURE_BYTES:
+                    return buf.getvalue()
+    except Exception as exc:  # noqa: BLE001 - a cover we cannot re-encode is not fatal
+        logger.debug("Could not resize album art for FLAC: %s", exc)
+    return None
+
+
 
 # Query-string keys whose values must be masked when a media-server
 # URL ends up in a log line. Plex uses X-Plex-Token, Jellyfin uses
@@ -455,6 +503,29 @@ def embed_album_art_metadata(audio_file, metadata: dict):
         if not image_data:
             logger.error("Failed to download album art data.")
             return False
+
+        # A FLAC metadata block carries a 24-bit length, so nothing over
+        # 16,777,215 bytes can ever be written. mutagen only finds out at SAVE
+        # time and raises "block is too long to write", which fails the whole
+        # tag write — the track ends up with no art AND no tags, and the log
+        # says "Album art successfully embedded" right before it (Boulder,
+        # Aug 2026, a 1-09 capaz.flac from LA CIUDAD).
+        #
+        # Some CDNs serve genuinely huge originals (#806 deliberately prefers
+        # the original over the 1200px thumbnail), so this is reachable on
+        # ordinary downloads.
+        if isinstance(audio_file, symbols.FLAC) and len(image_data) > FLAC_MAX_PICTURE_BYTES:
+            shrunk = _shrink_for_flac(image_data, mime_type)
+            if shrunk is None:
+                logger.warning(
+                    "Album art is %.1f MB, over the %.1f MB a FLAC picture block can hold, "
+                    "and it could not be resized — writing tags without art rather than "
+                    "failing the whole save.",
+                    len(image_data) / 1048576, FLAC_MAX_PICTURE_BYTES / 1048576)
+                return False
+            logger.info("Album art resized to fit a FLAC picture block (%.1f MB -> %.1f MB).",
+                        len(image_data) / 1048576, len(shrunk) / 1048576)
+            image_data, mime_type = shrunk, "image/jpeg"
 
         if isinstance(audio_file.tags, symbols.ID3):
             audio_file.tags.add(symbols.APIC(encoding=3, mime=mime_type, type=3, desc="Cover", data=image_data))

@@ -250,6 +250,29 @@ def _audio_intact(before: Any, after: Any) -> bool:
     return True
 
 
+def _is_tag_write_error(exc: Exception) -> bool:
+    """Whether the tagging library refused to encode these tags.
+
+    Distinct from "the atomic path could not run". mutagen raises its own error
+    type for a tag set it cannot write at all — an over-long FLAC block being
+    the one seen in the wild. Retrying that in place cannot help, so it must not
+    be treated as a fallback-worthy failure.
+
+    OSError is deliberately NOT included: a disk or permission problem is
+    exactly the case the in-place fallback exists for.
+    """
+    try:
+        import mutagen
+
+        if isinstance(exc, mutagen.MutagenError):
+            return True
+    except Exception as probe_err:  # noqa: BLE001 - mutagen missing cannot make this fatal
+        logger.debug("mutagen error-type probe failed: %s", probe_err)
+    # mutagen.flac.error subclasses IOError on some versions rather than
+    # MutagenError, so match the message it actually raises too.
+    return "too long to write" in str(exc).lower()
+
+
 def save_audio_file(audio_file: Any, symbols: Any) -> bool:
     """Persist mutagen tag changes ATOMICALLY and only if the audio survives it
     (#819 + #1000). Returns True if the file was written, False if the write was
@@ -323,14 +346,30 @@ def save_audio_file(audio_file: Any, symbols: Any) -> bool:
                      "untouched, tags NOT written", os.path.basename(path), bad)
         return False
     except Exception as atomic_err:
-        # Atomic path couldn't run (copy/format/replace error). Fall back to the
-        # plain in-place save so any edge the atomic path can't handle behaves
-        # exactly as before #819.
         try:
             if os.path.exists(tmp):
                 os.remove(tmp)
         except OSError:
             pass
+
+        # Split by WHY it failed, because the two need opposite handling.
+        #
+        # A tagging-library error means the write itself is invalid — the tags
+        # cannot be encoded at all, most often a FLAC picture block over the
+        # 16MB a 24-bit length can express. Retrying that in place runs the same
+        # doomed write against the user's real file: it fails identically, logs
+        # a second traceback, and on a writer that fails part-way it would be
+        # writing to the original instead of a copy. That is the same reasoning
+        # the integrity-check branch above already applies.
+        if _is_tag_write_error(atomic_err):
+            logger.error("[Atomic Save] tags could not be encoded for %s (%s) — original "
+                         "left untouched, tags NOT written",
+                         os.path.basename(path), atomic_err)
+            return False
+
+        # Anything else (copy, permission, replace, unsupported edge) means the
+        # atomic path couldn't RUN. Fall back to the plain in-place save so
+        # those behave exactly as before #819.
         logger.warning("[Atomic Save] atomic path failed (%s) — in-place fallback for %s",
                        atomic_err, os.path.basename(path))
         _raw_audio_save(audio_file, symbols)
