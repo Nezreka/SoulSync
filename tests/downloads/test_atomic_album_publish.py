@@ -358,6 +358,40 @@ def test_publish_order_does_not_depend_on_the_filesystem(tmp_path):
 
     found = ap.iter_staged_files(staging)
 
-    assert found == sorted(found)
     assert [os.path.basename(p) for p in found] == \
         ["01.flac", "02.flac", "10.flac", "cover.png"]
+
+
+def test_publish_order_reads_track_numbers_as_numbers(tmp_path):
+    """Ordering is by track NUMBER, not by the spelling of the number.
+
+    post_processing zero-pads track numbers to a minimum of two digits, so an
+    album that runs past 99 gets "100 - Title.flac" alongside "09 - …", and a
+    plain string sort files 100 in among the ones. Rollback survives that (it
+    replays the files it really moved), but the publish log of a partial failure
+    is a human-readable record of what went live before what, and it has to
+    match the order the tracks are actually in.
+    """
+    staging = str(tmp_path / "stage")
+    for name in ("100 - c.flac", "09 - a.flac", "10 - b.flac", "99 - z.flac"):
+        _mk(Path(staging) / "A" / "Boxset" / name)
+
+    found = [os.path.basename(p) for p in ap.iter_staged_files(staging)]
+
+    assert found == ["09 - a.flac", "10 - b.flac", "99 - z.flac", "100 - c.flac"]
+    # ... which is exactly where a plain string sort disagrees.
+    assert found != sorted(found)
+
+
+def test_publish_order_is_total_even_for_names_that_only_differ_in_case(tmp_path):
+    """No pair of files may be left to os.walk to order. Folding case for the
+    numeric comparison introduces ties, so the raw path breaks them."""
+    staging = str(tmp_path / "stage")
+    for name in ("Track.flac", "track.flac"):
+        _mk(Path(staging) / "A" / "Al" / name)
+
+    first = ap.iter_staged_files(staging)
+    second = ap.iter_staged_files(staging)
+
+    assert first == second
+    assert len(first) == 2

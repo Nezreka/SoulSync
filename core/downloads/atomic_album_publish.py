@@ -26,6 +26,7 @@ Scope guardrails baked in here (defensive; the call sites also gate):
 from __future__ import annotations
 
 import os
+import re
 from typing import Callable, Dict, List, Optional, Tuple
 
 from utils.logging_config import get_logger
@@ -132,6 +133,31 @@ def album_folder_is_fresh(album_folder: str) -> bool:
         return False
 
 
+_DIGIT_RUN = re.compile(r"(\d+)")
+
+
+def _publish_order_key(path: str) -> tuple:
+    """Sort key that reads digit runs as NUMBERS, so 9 comes before 10 and 10
+    before 100.
+
+    Plain string order gets that wrong as soon as an album passes 99 tracks:
+    post-processing zero-pads track numbers to two digits, so a boxset's
+    "100 - Title.flac" sorts in among the ones, ahead of tracks 11-99. Rollback
+    stays correct either way -- it walks the files it actually moved, not this
+    list -- but the publish log of a partial failure is read by a human, and
+    "45 published, 100 failed" has to mean what it appears to say.
+
+    The raw path rides along as the final tiebreaker so two names differing only
+    in case or in leading zeros still get a stable order instead of falling back
+    on os.walk's.
+    """
+    chunks = tuple(
+        (1, int(chunk), "") if chunk.isdigit() else (0, 0, chunk.lower())
+        for chunk in _DIGIT_RUN.split(path)
+    )
+    return (chunks, path)
+
+
 def iter_staged_files(staging_root: str) -> List[str]:
     """Every real file under the staging root (audio + sidecars: art, .lrc, …),
     so publish moves the whole prepared album folder, not just the audio."""
@@ -152,7 +178,7 @@ def iter_staged_files(staging_root: str) -> List[str]:
     # 02 first, the failing track is the FIRST one, nothing has published yet,
     # and the rollback never runs. The guard for the db-pointer rollback passed
     # with the rollback deleted.
-    out.sort()
+    out.sort(key=_publish_order_key)
     return out
 
 

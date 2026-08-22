@@ -28,6 +28,7 @@ from unittest.mock import patch
 
 import pytest
 
+from core import tidal_client as tidal_client_mod
 from core.tidal_client import Track, Playlist, TidalClient
 
 
@@ -47,6 +48,20 @@ class _FakeResp:
 
     def json(self):
         return self._body
+
+
+class _RequestsShim:
+    """Stands in for `core.tidal_client`'s module-global ``requests`` for the
+    length of one call: ``.get`` is recorded, everything else (``.exceptions``,
+    ``.Session``, ...) falls through to the real module so any other tidal_client
+    code running in a background thread meanwhile is unaffected."""
+
+    def __init__(self, real, on_get):
+        self._real = real
+        self.get = on_get
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
 
 
 def _make_authed_client():
@@ -474,7 +489,25 @@ class TestGetPlaylistVirtualId:
 
         client.session = SimpleNamespace(get=_record, headers={})
 
-        with patch.object(client, 'get_collection_tracks', return_value=fake_collection), \
+        # Session traffic is not the only way out: six other HTTP call sites in
+        # core/tidal_client.py reach for the module-global `requests` directly,
+        # so a copy-paste of one of them into the virtual branch would leave
+        # `session_urls` empty and slip past. Rebind the NAME inside
+        # core.tidal_client rather than patching `requests.get` itself -- the
+        # shared requests module every background enrichment thread also calls
+        # through stays untouched, which is the whole reason this guard stopped
+        # being flaky, and the URL filter below keeps a concurrent Tidal worker
+        # from writing into the assertion.
+        module_urls: list[str] = []
+
+        def _record_module_get(url, *args, **kwargs):
+            module_urls.append(str(url))
+            return _FakeResp(404, text="not found")
+
+        shim = _RequestsShim(tidal_client_mod.requests, _record_module_get)
+
+        with patch.object(tidal_client_mod, 'requests', shim), \
+             patch.object(client, 'get_collection_tracks', return_value=fake_collection), \
              patch.object(client, '_ensure_valid_token') as mock_token:
             playlist = client.get_playlist("tidal-favorites")
 
@@ -488,6 +521,7 @@ class TestGetPlaylistVirtualId:
         # endpoint OR the auth precheck (get_collection_tracks
         # handles its own auth gate downstream).
         assert session_urls == []
+        assert [u for u in module_urls if "tidal-favorites" in u] == []
         assert not mock_token.called
 
     def test_real_playlist_id_falls_through_to_normal_path(self):
