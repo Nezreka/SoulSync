@@ -8,7 +8,7 @@ from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.bandcamp_client import BandcampClient
 from core.worker_utils import interruptible_sleep, set_album_api_track_count
-from core.enrichment.manual_match_honoring import honor_stored_match
+from core.enrichment.manual_match_honoring import MATCHED, honor_stored_match
 
 logger = get_logger("bandcamp_worker")
 
@@ -345,14 +345,22 @@ class BandcampWorker:
         # never overwriting a manual match. Bandcamp's canonical id IS the
         # release URL (no id->page lookup exists), so it stands in for the
         # numeric id other workers pass here.
-        if honor_stored_match(
+        _stored = honor_stored_match(
             db=self.db, entity_table='albums', entity_id=album_id,
             id_column='bandcamp_url',
             client_fetch_fn=self.client.get_release_metadata,
             on_match_fn=self._refresh_album_via_stored_url,
+            mark_status_fn=self._mark_status,
+            status_column='bandcamp_match_status',
             log_prefix='Bandcamp',
-        ):
-            self.stats['matched'] += 1
+        )
+        if _stored:
+            # L2-005: a stored ID the source could not confirm right now is
+            # NOT released to a fuzzy name search below — a transient provider
+            # failure is not evidence that the ID is wrong, and searching
+            # overwrote deliberately chosen matches with whatever came back.
+            if _stored == MATCHED:
+                self.stats['matched'] += 1
             return
         # honor_stored_match also returns False when the stored URL failed to
         # re-fetch (transient error / rate limit). In that case DON'T fall
@@ -374,14 +382,22 @@ class BandcampWorker:
 
     def _process_track(self, track_id: int, track_name: str, artist_name: str):
         """Process a track: honor a stored match by id-refresh, else search."""
-        if honor_stored_match(
+        _stored = honor_stored_match(
             db=self.db, entity_table='tracks', entity_id=track_id,
             id_column='bandcamp_url',
             client_fetch_fn=self.client.get_release_metadata,
             on_match_fn=self._refresh_track_via_stored_url,
+            mark_status_fn=self._mark_status,
+            status_column='bandcamp_match_status',
             log_prefix='Bandcamp',
-        ):
-            self.stats['matched'] += 1
+        )
+        if _stored:
+            # L2-005: a stored ID the source could not confirm right now is
+            # NOT released to a fuzzy name search below — a transient provider
+            # failure is not evidence that the ID is wrong, and searching
+            # overwrote deliberately chosen matches with whatever came back.
+            if _stored == MATCHED:
+                self.stats['matched'] += 1
             return
         if self._get_existing_url('track', track_id):
             logger.debug(f"Preserving Bandcamp match for track '{track_name}' despite a refresh miss")

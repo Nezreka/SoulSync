@@ -148,16 +148,61 @@ def test_a_signal_matches_across_a_docker_style_path_difference(db):
 
 # ── the stale guard ───────────────────────────────────────────────────────
 
-def test_never_synced_falls_back_to_the_old_behaviour(db):
-    """Curation was never set up on this install, so the job works exactly as
-    it did before the feature existed — retention plus play count.
+def test_never_synced_keeps_everything(db):
+    """L2-001: curation is ON (the default) and no sweep has ever completed, so
+    we do not know what anyone favourited. That is not the same as "nobody
+    favourited anything", and this job deletes files.
 
-    This is deliberately NOT treated as "unknown, keep everything": that would
-    silently make the job do nothing for every user who never turns curation
-    on, which is a functional regression dressed up as safety."""
+    The sweep is scheduled by the same settings that enable this job, so the
+    state resolves itself on the next media-server poll. An install with no
+    media server turns ``use_curation_signals`` off — see the test below — and
+    gets the pre-feature behaviour back immediately."""
     _download(db)
     _track(db)
+    assert _scan(db) == []
+
+
+def test_a_sweep_that_found_no_capable_server_is_not_a_blocker(db):
+    """The other half of L2-001's "pending" rule. Once the sweep has actually
+    run and reported that no configured server can produce curation signals,
+    there is nothing for the feature to protect and the job must work normally
+    — otherwise it would be permanently disabled on those installs."""
+    _download(db)
+    _track(db)
+    db.mark_curation_sync({'complete': True, 'expected_servers': [],
+                           'servers': [], 'failed': []})
     assert len(_scan(db)) == 1
+
+
+def test_an_incomplete_sweep_keeps_everything(db):
+    """A sweep where one server or one user failed produced a snapshot that
+    says those people like nothing. Stamping it fresh anyway is what deleted
+    favourited files."""
+    _download(db)
+    _track(db)
+    db.mark_curation_sync({'complete': False, 'expected_servers': ['plex'],
+                           'servers': [], 'failed': ['plex/bob']})
+    assert _scan(db) == []
+
+
+def test_a_corrupt_status_record_keeps_everything(db):
+    _download(db)
+    _track(db)
+    db.set_preference(db.CURATION_STATUS_KEY, 'not json')
+    assert _scan(db) == []
+
+
+def test_unreadable_signals_keep_everything(db, monkeypatch):
+    """The read used to swallow its error and return {}, which the cleaner read
+    as "nobody curated anything"."""
+    _download(db)
+    _track(db)
+    db.mark_curation_sync({'complete': True, 'expected_servers': ['plex'],
+                           'servers': ['plex'], 'failed': []})
+    monkeypatch.setattr(
+        type(db), 'get_curation_signals_by_track_key',
+        lambda self: (_ for _ in ()).throw(RuntimeError("no such table")))
+    assert _scan(db) == []
 
 
 def test_a_stale_sweep_keeps_everything(db):
@@ -172,7 +217,17 @@ def test_a_stale_sweep_keeps_everything(db):
     assert _scan(db, curation_max_age_hours=48) == []
 
 
-def test_a_fresh_sweep_allows_deletion(db):
+def test_a_fresh_complete_sweep_allows_deletion(db):
+    _download(db)
+    _track(db)
+    db.mark_curation_sync({'complete': True, 'expected_servers': ['plex'],
+                           'servers': ['plex'], 'failed': []})
+    assert len(_scan(db)) == 1
+
+
+def test_a_bare_legacy_stamp_still_allows_deletion(db):
+    """An adapter/caller that only writes the timestamp keeps working: a stamp
+    with no structured record is still a completed sweep."""
     _download(db)
     _track(db)
     db.mark_curation_sync()

@@ -163,16 +163,22 @@ class ExpiredDownloadCleanerJob(RepairJob):
     def _curation_lookup(self, context: JobContext, settings: dict):
         """``(curated_track_keys, stale)`` from the stored media-server signals.
 
-        Returns ``(None, False)`` when curation is switched off — the job then
-        behaves exactly as it did before the feature existed.
+        Three outcomes, and the difference between them is the whole safety
+        contract (L2-001):
 
-        ``stale`` is the safety valve. If the signal sweep has never run, or
-        last succeeded longer ago than ``curation_max_age_hours``, we have no
-        current picture of what anyone favourited, and a sweep that quietly
-        broke (server down, credentials rotated, worker crashed) would
-        otherwise look identical to "nobody likes any of these". Deleting on
-        that basis is the failure this whole job has to avoid, so a stale
-        sweep keeps everything.
+        * ``(None, False)`` — curation cannot apply here: the user switched it
+          off, the database predates it, or no configured server can report it.
+          The job behaves exactly as it did before the feature existed.
+        * ``(set(), True)`` — curation applies but we do not have a trustworthy
+          picture: never swept, swept incompletely, swept too long ago, or the
+          signals could not be read. Nothing is deleted.
+        * ``(keys, False)`` — a complete, fresh snapshot. These keys are
+          protected; everything else is judged on retention and play count.
+
+        The middle case is the one that matters. A sweep that quietly broke —
+        server down, credentials rotated, a failed write for one user — used to
+        be indistinguishable from "nobody likes any of these", and deleting on
+        that basis is the exact failure this job exists to avoid.
         """
         if not bool(settings.get('use_curation_signals', True)):
             return None, False
@@ -181,28 +187,50 @@ class ExpiredDownloadCleanerJob(RepairJob):
         except (TypeError, ValueError):
             max_age = 48.0
 
-        synced_at = None
         reader = getattr(context.db, 'get_curation_sync_at', None)
         if not callable(reader):
             # Database predates the feature — no signals to consult, and no
             # claim to make about staleness.
             return None, False
+
+        status, synced_at = None, None
         try:
+            status_reader = getattr(context.db, 'get_curation_status', None)
+            if callable(status_reader):
+                status = status_reader()
             synced_at = parse_ts(reader())
         except Exception as e:
-            logger.warning("expired cleanup: curation sync stamp unreadable (%s) "
+            logger.warning("expired cleanup: curation sync state unreadable (%s) "
                            "— keeping everything this run", e)
             return set(), True
 
+        if status is not None:
+            if not status.get('expected_servers') and status.get('complete'):
+                # The sweep ran and found no server that can report curation.
+                # Nothing to protect, so the job runs on retention + play count
+                # exactly as it did before the feature existed.
+                return None, False
+            if not status.get('complete'):
+                logger.warning(
+                    "[Expired Cleaner] the last curation sweep was incomplete (%s) "
+                    "— keeping everything this run",
+                    ", ".join(status.get('failed') or []) or "reason unrecorded")
+                return set(), True
+            synced_at = parse_ts(status.get('at')) or synced_at
+
         if synced_at is None:
-            # NEVER synced is different from "went stale". A sweep that has
-            # never run means curation simply isn't in use on this install, so
-            # the job behaves as it always did (retention + play count). Only a
-            # sweep that WAS working and then stopped is evidence that
-            # something broke, and that is what must block deletion — treating
-            # "not set up" as "broken" would silently make the job useless for
-            # everyone who never turns curation on.
-            return None, False
+            # Curation is switched on and no sweep has ever completed, so we
+            # have no idea what anyone favourited. That is not the same as
+            # "nobody favourited anything", and this job deletes files. The
+            # sweep is scheduled by the same settings that enabled this job, so
+            # this state resolves itself on the next media-server poll; an
+            # install with no media server should switch use_curation_signals
+            # off, which restores the pre-feature behaviour immediately.
+            logger.warning(
+                "[Expired Cleaner] curation signals are enabled but no sweep has "
+                "completed yet — keeping everything this run. Switch off "
+                "'use_curation_signals' if this install has no media server.")
+            return set(), True
         age_hours = (datetime.now(timezone.utc) - synced_at).total_seconds() / 3600.0
         if age_hours > max_age:
             logger.warning("[Expired Cleaner] curation signals are %.1fh old (max %.1fh) "

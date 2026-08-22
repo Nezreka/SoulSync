@@ -40,6 +40,18 @@ def _accepts_users(reader) -> bool:
         return False
 
 
+def _accepts_status(marker) -> bool:
+    """Whether the database adapter takes the structured sweep record."""
+    if not callable(marker):
+        return False
+    try:
+        import inspect
+
+        return bool(inspect.signature(marker).parameters)
+    except (TypeError, ValueError):
+        return False
+
+
 def normalize_signals(raw: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
     """Turn a client's raw ``{user: [{path, ...}]}`` into storage rows keyed by
     ``track_key``. Rows with no usable path are dropped; a user whose rows all
@@ -173,21 +185,34 @@ def sync_curation_signals(db, clients: Dict[str, Any],
     """Read every configured server's curation signals and store them.
 
     ``clients`` maps server name → client (or None). Returns a summary dict:
-    ``{servers, users, rows, stamped}``.
+    ``{servers, users, rows, stamped, complete, failed}``.
 
-    The stamp is what unblocks deletion in the cleaner, so it is only written
-    when at least one user was genuinely read. Everything else — a server that
-    is down, a client without the method, an exception mid-sweep — leaves the
-    previous stamp in place, which ages out and blocks deletion by itself.
+    The stamp is what unblocks deletion in the cleaner, so it records whether
+    the sweep was COMPLETE — every server that supports curation read, and every
+    one of its users stored. A partial sweep used to stamp itself fresh anyway
+    (L2-001): Bob's write failing while Alice's succeeded produced a snapshot
+    that said "Bob likes nothing", and the cleaner deleted on it. Everything that
+    goes wrong now lands in ``failed`` and marks the record incomplete, which
+    makes the cleaner keep everything until a clean sweep replaces it.
     """
-    summary = {'servers': [], 'users': 0, 'rows': 0, 'stamped': False}
+    summary = {'servers': [], 'users': 0, 'rows': 0, 'stamped': False,
+               'complete': True, 'failed': []}
+    expected_servers = []
 
     for server, client in (clients or {}).items():
         if client is None:
+            # The caller named this server as active, so it IS expected to
+            # contribute; we simply could not reach it. Skipping silently would
+            # record a "complete" sweep that quietly omits everyone on it.
+            expected_servers.append(server)
+            summary['failed'].append(server)
+            summary['complete'] = False
             continue
         reader = getattr(client, 'get_curation_signals', None)
         if not callable(reader):
-            continue  # server doesn't support it — contributes nothing
+            # This server genuinely cannot report curation signals. Nothing is
+            # missing from the snapshot because of it.
+            continue
         # Servers whose per-user data needs per-user credentials (Subsonic)
         # take them here. Passed per CALL, never assigned onto the client:
         # mutating a shared singleton's identity is how one user's view leaks
@@ -198,16 +223,24 @@ def sync_curation_signals(db, clients: Dict[str, Any],
         # take credentials" and silently retried without them, hiding a real
         # bug and reading the wrong user's data.
         wants_users = accounts and _accepts_users(reader)
+        expected_servers.append(server)
         try:
             raw = (reader(users=accounts) if wants_users else reader()) or {}
         except Exception as e:
             logger.warning("curation sync: %s failed, leaving its stored signals "
                            "untouched: %s", server, e)
+            summary['failed'].append(server)
+            summary['complete'] = False
             continue
 
         normalized = normalize_signals(raw)
         if not normalized:
-            logger.info("curation sync: %s returned no readable users", server)
+            # A server that supports curation and returned no readable user is
+            # not a server that told us nobody curates anything — it is a server
+            # we failed to read.
+            logger.warning("curation sync: %s returned no readable users", server)
+            summary['failed'].append(server)
+            summary['complete'] = False
             continue
 
         wrote_any = False
@@ -216,6 +249,8 @@ def sync_curation_signals(db, clients: Dict[str, Any],
                 stored = db.replace_curation_signals(server, user, rows)
             except Exception as e:
                 logger.warning("curation sync: storing %s/%s failed: %s", server, user, e)
+                summary['failed'].append(f"{server}/{user}")
+                summary['complete'] = False
                 continue
             summary['rows'] += stored
             summary['users'] += 1
@@ -223,16 +258,43 @@ def sync_curation_signals(db, clients: Dict[str, Any],
         if wrote_any:
             summary['servers'].append(server)
 
-    if summary['servers']:
-        try:
+    if not expected_servers:
+        # No configured server can report curation signals, so there is nothing
+        # for this feature to protect here and nothing to be incomplete about.
+        # Recording that explicitly is what lets the cleaner tell "curation
+        # cannot work on this install" from "curation has never run yet".
+        logger.info("curation sync: no configured server supports curation signals")
+
+    status = {
+        'complete': bool(summary['complete']),
+        'expected_servers': sorted(expected_servers),
+        'servers': sorted(summary['servers']),
+        'failed': sorted(summary['failed']),
+        'users': summary['users'],
+        'rows': summary['rows'],
+    }
+    # Ask by SIGNATURE, same reasoning as _accepts_users above: a TypeError
+    # from inside the adapter must not be mistaken for "this adapter is the old
+    # one", which would silently stamp an incomplete sweep as a good one.
+    structured = _accepts_status(getattr(db, 'mark_curation_sync', None))
+    try:
+        if structured:
+            # The record is written even for a failed sweep: "we tried and it
+            # did not work" is exactly what the cleaner has to know, and only
+            # a complete sweep counts as stamped.
+            db.mark_curation_sync(status)
+            summary['stamped'] = bool(status['complete'])
+        elif status['complete'] and summary['servers']:
+            # An adapter predating the structured record cannot carry the
+            # caveat, so only a clean sweep may stamp at all.
             db.mark_curation_sync()
             summary['stamped'] = True
-        except Exception as e:
-            logger.warning("curation sync: could not stamp completion: %s", e)
-    else:
-        logger.warning("curation sync: nothing was read from any server — the "
-                       "previous stamp stands and will age out, which keeps "
-                       "everything rather than deleting it")
+    except Exception as e:
+        logger.warning("curation sync: could not stamp completion: %s", e)
+    if not summary['complete']:
+        logger.warning("curation sync: incomplete (%s) — the cleaner keeps "
+                       "everything until a clean sweep replaces this",
+                       ", ".join(status['failed']) or "unknown")
 
     logger.info("curation sync: %d server(s), %d user(s), %d signal rows",
                 len(summary['servers']), summary['users'], summary['rows'])

@@ -143,7 +143,11 @@ def test_publish_moves_all_files_updates_db_and_prunes(tmp_path):
         assert s.startswith(staging) and f.startswith(transfer)
 
 
-def test_publish_keeps_file_staged_on_move_failure(tmp_path):
+def test_a_failed_move_rolls_the_whole_album_back(tmp_path):
+    """L2-002: "the album appears at once" is the point of atomic publishing.
+    Leaving the files that did move live produced an album half in the library
+    and half in staging, which the batch then reported as Complete with no
+    retryable task for the missing half."""
     transfer = str(tmp_path / "music")
     staging = ap.staging_root_for_batch(transfer, "b2")
     good = _mk(Path(staging) / "A" / "Al" / "01.flac")
@@ -156,13 +160,76 @@ def test_publish_keeps_file_staged_on_move_failure(tmp_path):
 
     res = ap.publish_album_batch(staging, transfer, _move_one_fails)
 
-    assert len(res["published"]) == 1
+    assert res["success"] is False
+    assert res["published"] == []
     assert len(res["failed"]) == 1 and res["failed"][0][0].endswith("02.flac")
-    # The good one published; the failed one is STILL in staging (never lost,
-    # never a partial-library orphan), and the tree is NOT pruned.
-    assert os.path.isfile(os.path.join(transfer, "A", "Al", "01.flac"))
+    assert res["rollback_failed"] == []
+    # Nothing is live, both files are back in staging, the tree is NOT pruned.
+    assert not os.path.isfile(os.path.join(transfer, "A", "Al", "01.flac"))
+    assert os.path.isfile(good)
     assert os.path.isfile(bad)
     assert os.path.isdir(staging)
+
+
+def test_a_db_repoint_exception_fails_the_publish(tmp_path):
+    transfer = str(tmp_path / "music")
+    staging = ap.staging_root_for_batch(transfer, "b3")
+    track = _mk(Path(staging) / "A" / "Al" / "01.flac")
+
+    def _boom(_staged, _final):
+        raise RuntimeError("database is locked")
+
+    res = ap.publish_album_batch(staging, transfer, _move, _boom)
+
+    assert res["success"] is False
+    assert os.path.isfile(track), "the file must go back where a retry can find it"
+    assert not os.path.isfile(os.path.join(transfer, "A", "Al", "01.flac"))
+
+
+def test_a_db_repoint_that_matches_no_row_fails_the_publish(tmp_path):
+    """The move worked, but the library still points at a staging path this
+    publish is about to remove — the track would read as missing."""
+    transfer = str(tmp_path / "music")
+    staging = ap.staging_root_for_batch(transfer, "b4")
+    track = _mk(Path(staging) / "A" / "Al" / "01.flac")
+
+    res = ap.publish_album_batch(staging, transfer, _move,
+                                 lambda _s, _f: 0)
+
+    assert res["success"] is False
+    assert os.path.isfile(track)
+
+
+def test_a_sidecar_that_matches_no_row_is_fine(tmp_path):
+    """Cover art and lyrics have no track row by design, so a zero rowcount for
+    them says nothing about the publish."""
+    transfer = str(tmp_path / "music")
+    staging = ap.staging_root_for_batch(transfer, "b5")
+    _mk(Path(staging) / "A" / "Al" / "01.flac")
+    _mk(Path(staging) / "A" / "Al" / "folder.jpg")
+
+    seen = []
+
+    def _update(staged, _final):
+        seen.append(staged)
+        return 0 if staged.endswith(".jpg") else 1
+
+    res = ap.publish_album_batch(staging, transfer, _move, _update)
+
+    assert res["success"] is True
+    assert len(seen) == 2
+    assert os.path.isfile(os.path.join(transfer, "A", "Al", "folder.jpg"))
+
+
+def test_an_unknown_rowcount_does_not_fail_the_publish(tmp_path):
+    """A driver that cannot report a rowcount gives "unknown", not "zero"."""
+    transfer = str(tmp_path / "music")
+    staging = ap.staging_root_for_batch(transfer, "b6")
+    _mk(Path(staging) / "A" / "Al" / "01.flac")
+
+    res = ap.publish_album_batch(staging, transfer, _move, lambda _s, _f: None)
+
+    assert res["success"] is True
 
 
 def test_discard_removes_genuine_staging_root(tmp_path):

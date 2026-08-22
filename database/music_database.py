@@ -8,7 +8,7 @@ import os
 import re
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 from pathlib import Path
@@ -1753,9 +1753,14 @@ class MusicDatabase:
             # Auto writes can't clobber a manual lock; manual writes always apply.
             guard = "" if locked else " AND (canonical_locked IS NULL OR canonical_locked = 0)"
             cursor.execute(
+                # updated_at moves with the canonical claim (L2-011): these
+                # columns are part of the MetaSync payload, so a claim that did
+                # not touch the timestamp changed what a full export says while
+                # every incremental export kept omitting the row.
                 "UPDATE albums SET canonical_source = ?, canonical_album_id = ?, "
                 "canonical_score = ?, canonical_locked = ?, "
-                "canonical_resolved_at = CURRENT_TIMESTAMP "
+                "canonical_resolved_at = CURRENT_TIMESTAMP, "
+                "updated_at = CURRENT_TIMESTAMP "
                 f"WHERE id = ?{guard}",
                 (source, str(canonical_album_id), float(score), 1 if locked else 0, album_id),
             )
@@ -17325,6 +17330,11 @@ class MusicDatabase:
     # ── Curation signals (media-server favourites / ratings / playlists) ──
 
     CURATION_SYNC_KEY = 'curation_signals_synced_at'
+    # The structured outcome of the last sweep. The bare timestamp above cannot
+    # express "half of it failed", and a fresh stamp over a half-written
+    # snapshot is indistinguishable from "nobody curated anything" — which is
+    # the state that deletes a library (L2-001).
+    CURATION_STATUS_KEY = 'curation_signals_sync_status'
 
     def replace_curation_signals(self, server: str, user_key: str, signals) -> int:
         """Replace one user's curation signals for one server, atomically.
@@ -17336,66 +17346,98 @@ class MusicDatabase:
 
         ``signals`` items need ``track_key``; ``favorite``, ``rating``,
         ``in_playlist`` and ``source_path`` are optional.
+
+        Raises on any storage failure. This is a safety API: swallowing the
+        error and returning 0 made a failed write indistinguishable from "this
+        user curated nothing", and the caller then stamped the sweep as a
+        success (L2-001). The caller decides what a failure means; it must never
+        have to guess whether one happened.
         """
         rows = [s for s in (signals or []) if isinstance(s, dict) and s.get('track_key')]
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "DELETE FROM curation_signals WHERE server = ? AND user_key = ?",
-                    (str(server), str(user_key)))
-                cursor.executemany(
-                    "INSERT OR REPLACE INTO curation_signals "
-                    "(server, user_key, track_key, favorite, rating, in_playlist, "
-                    " source_path, updated_at) "
-                    "VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP)",
-                    [(str(server), str(user_key), s['track_key'],
-                      1 if s.get('favorite') else 0,
-                      s.get('rating'),
-                      1 if s.get('in_playlist') else 0,
-                      s.get('source_path'))
-                     for s in rows])
-                conn.commit()
-            return len(rows)
-        except Exception as e:
-            logger.error(f"Error storing curation signals for {server}/{user_key}: {e}")
-            return 0
-
-    def get_curation_signals_by_track_key(self) -> Dict[str, List[Dict[str, Any]]]:
-        """Every stored signal, grouped by track_key, for the cleanup decision."""
-        grouped: Dict[str, List[Dict[str, Any]]] = {}
-        try:
-            conn = self._get_connection()
+        with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT track_key, server, user_key, favorite, rating, in_playlist "
-                "FROM curation_signals")
-            for track_key, server, user_key, favorite, rating, in_playlist in cursor.fetchall():
-                grouped.setdefault(track_key, []).append({
-                    'server': server,
-                    'user': user_key,
-                    'favorite': bool(favorite),
-                    'rating': rating,
-                    'in_playlist': bool(in_playlist),
-                })
-        except Exception as e:
-            logger.debug(f"Error reading curation signals: {e}")
+                "DELETE FROM curation_signals WHERE server = ? AND user_key = ?",
+                (str(server), str(user_key)))
+            cursor.executemany(
+                "INSERT OR REPLACE INTO curation_signals "
+                "(server, user_key, track_key, favorite, rating, in_playlist, "
+                " source_path, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP)",
+                [(str(server), str(user_key), s['track_key'],
+                  1 if s.get('favorite') else 0,
+                  s.get('rating'),
+                  1 if s.get('in_playlist') else 0,
+                  s.get('source_path'))
+                 for s in rows])
+            conn.commit()
+        return len(rows)
+
+    def get_curation_signals_by_track_key(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Every stored signal, grouped by track_key, for the cleanup decision.
+
+        Raises on a read failure (L2-001). An empty dict has to mean "nobody
+        curated anything"; returning it for a schema or I/O error handed the
+        cleaner that exact conclusion and let it delete favourited files.
+        """
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT track_key, server, user_key, favorite, rating, in_playlist "
+            "FROM curation_signals")
+        for track_key, server, user_key, favorite, rating, in_playlist in cursor.fetchall():
+            grouped.setdefault(track_key, []).append({
+                'server': server,
+                'user': user_key,
+                'favorite': bool(favorite),
+                'rating': rating,
+                'in_playlist': bool(in_playlist),
+            })
         return grouped
 
-    def mark_curation_sync(self) -> None:
-        """Record that a curation sweep completed successfully."""
-        try:
-            self.set_preference(self.CURATION_SYNC_KEY, datetime.now().isoformat())
-        except Exception as e:
-            logger.debug(f"Error stamping curation sync: {e}")
+    def mark_curation_sync(self, status: Optional[Dict[str, Any]] = None) -> None:
+        """Record the outcome of a curation sweep.
+
+        ``status`` is the structured record the cleaner reads; it must carry a
+        ``complete`` flag saying whether EVERY expected server and user was
+        stored. The plain timestamp is kept alongside it for older readers.
+        Raises on failure — a stamp that silently did not land is a stamp the
+        cleaner will read as older than it is, and eventually as absent.
+        """
+        now = datetime.now().isoformat()
+        if status is None:
+            # A caller that has nothing structured to say is asserting a plain
+            # successful sweep. Clear any older record rather than leaving one
+            # behind that would keep describing a sweep this one replaced.
+            self.set_preference(self.CURATION_STATUS_KEY, '')
+        else:
+            payload = dict(status)
+            payload.setdefault('complete', True)
+            payload['at'] = now
+            self.set_preference(self.CURATION_STATUS_KEY,
+                                json.dumps(payload, ensure_ascii=False))
+        self.set_preference(self.CURATION_SYNC_KEY, now)
 
     def get_curation_sync_at(self):
-        """When the last successful curation sweep finished, or None."""
-        try:
-            return self.get_preference(self.CURATION_SYNC_KEY)
-        except Exception as e:
-            logger.debug(f"Error reading curation sync stamp: {e}")
+        """When the last curation sweep finished, or None. Raises on failure."""
+        return self.get_preference(self.CURATION_SYNC_KEY)
+
+    def get_curation_status(self) -> Optional[Dict[str, Any]]:
+        """The last sweep's structured outcome, or None if none was recorded.
+
+        Raises on a read failure, for the same reason as the signals above: the
+        caller must be able to tell "never swept" from "cannot tell".
+        """
+        raw = self.get_preference(self.CURATION_STATUS_KEY)
+        if not raw:
             return None
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            # A corrupted record is not evidence of a good sweep.
+            return {'complete': False, 'at': None, 'corrupt': True}
+        return parsed if isinstance(parsed, dict) else {'complete': False, 'at': None}
 
     def get_origin_cleanup_candidates(self):
         """Origin-tracked downloads (watchlist/playlist) annotated with the
@@ -18205,6 +18247,27 @@ class MusicDatabase:
 
     # ── MetaSync export ──────────────────────────────────────────────────
 
+    @staticmethod
+    def _normalize_since(value: Any) -> str:
+        """One aware-UTC ``'YYYY-MM-DD HH:MM:SS'`` string for the export filter.
+
+        A naive input is read as UTC because that is what SQLite's
+        CURRENT_TIMESTAMP writes; anything with an offset is converted, so two
+        callers naming the same instant in different zones get the same slice.
+        """
+        text = str(value or "").strip()
+        if not text:
+            return text
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            raise ValueError(
+                "since must be an ISO-8601 timestamp "
+                f"(e.g. 2026-08-19T00:00:00), got {value!r}")
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
     def api_export_entities(self, entity: str, cursor: str = "",
                             since: str = "", limit: int = 500) -> List[Dict[str, Any]]:
         """Page through artists/albums/tracks for the MetaSync export.
@@ -18228,6 +18291,26 @@ class MusicDatabase:
 
         Read-only.
         """
+        # The instant a row's EXPORTED payload last changed — its own timestamp
+        # or a parent's (L2-011). An album carries its artist's name and a track
+        # carries the artist name plus the album title and year, so renaming an
+        # artist rewrites what the export says about every one of its albums and
+        # tracks while touching none of their timestamps. A consumer that had
+        # already walked them would never be told.
+        # julianday() on every side, never a text MAX: the timestamps in these
+        # columns are a mix of 'YYYY-MM-DD HH:MM:SS' and ISO-with-a-'T', and
+        # 'T' > ' ' — a lexicographic MAX would pick the older one whenever the
+        # two rows were written in different formats. COALESCE to 0 so an
+        # unparseable or absent parent timestamp cannot NULL out the whole
+        # comparison and drop the row from every incremental export.
+        _day = "COALESCE(julianday({0}), 0)"
+        effective = {
+            'artist': _day.format("t.updated_at"),
+            'album': f"MAX({_day.format('t.updated_at')}, {_day.format('ar.updated_at')})",
+            'track': (f"MAX({_day.format('t.updated_at')}, "
+                      f"{_day.format('ar.updated_at')}, "
+                      f"{_day.format('al.updated_at')})"),
+        }
         specs = {
             'artist': (_EXPORT_ARTIST_COLUMNS, "FROM artists t", ""),
             'album': (
@@ -18278,8 +18361,15 @@ class MusicDatabase:
             where.append("t.id > ?")
             params.append(str(cursor))
         if since:
-            where.append("t.updated_at >= ?")
-            params.append(str(since))
+            # Compared as INSTANTS, not as text (L2-010). SQLite writes
+            # CURRENT_TIMESTAMP as 'YYYY-MM-DD HH:MM:SS' while the API accepts
+            # ISO-8601 with a 'T' and an offset, and 'T' > ' ' in ASCII — so a
+            # caller asking for everything since midnight got nothing at all
+            # from that same day, and an offset was ranked by its own text
+            # rather than by the moment it denotes. julianday() parses both
+            # sides, and the input is normalised to UTC once, here.
+            where.append(f"{effective[entity]} >= julianday(?)")
+            params.append(self._normalize_since(since))
 
         try:
             conn = self._get_connection()

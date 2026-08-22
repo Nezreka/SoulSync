@@ -137,8 +137,12 @@ class _Ctx:
 def _scan(db, settings=None):
     job = ExpiredDownloadCleanerJob()
     ctx = _Ctx(db)
+    # These tests are about the rebuild stamp and play_count, not curation.
+    # Curation defaults ON and blocks every deletion until a sweep has
+    # completed (L2-001), which would make every case here trivially pass.
     merged = {"watchlist_retention": "1w", "playlist_retention": "1w",
-              "keep_if_played_at_least": 2, "dry_run": True}
+              "keep_if_played_at_least": 2, "dry_run": True,
+              "use_curation_signals": False}
     merged.update(settings or {})
     job._get_settings = lambda _c: merged
     job.scan(ctx)

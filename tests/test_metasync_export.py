@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import sqlite3
+from urllib.parse import urlencode
 
 import pytest
 from flask import Flask
@@ -116,7 +117,10 @@ def client(db, monkeypatch):
 
 
 def _get(client, **params):
-    qs = "&".join(f"{k}={v}" for k, v in params.items() if v not in (None, ""))
+    # urlencode, not string concatenation: a '+' in a raw query string is a
+    # SPACE, which silently mangles both an offset like +02:00 and a base64
+    # cursor before the route ever sees them.
+    qs = urlencode({k: v for k, v in params.items() if v not in (None, "")})
     return client.get(f"/api/v1/metasync/export?{qs}",
                       headers={"Authorization": f"Bearer {RAW_KEY}"})
 
@@ -174,6 +178,133 @@ def test_since_filters_to_changed_rows(db, client):
 
     everything = _get(client, entity="artist").get_json()["data"]["items"]
     assert len(everything) == 2
+
+
+def test_a_same_day_change_is_not_lost_to_a_text_comparison(db, client):
+    """L2-010: SQLite writes CURRENT_TIMESTAMP as 'YYYY-MM-DD HH:MM:SS' while
+    the API takes ISO-8601 with a 'T'. Compared as text, 'T' > ' ', so asking
+    for everything since midnight silently returned nothing from that same
+    day — a permanent hole in every consumer's incremental feed."""
+    _seed(db, artists=1, albums_per_artist=0, tracks_per_album=0)
+    conn = db._get_connection()
+    conn.execute("UPDATE artists SET updated_at = ? WHERE id = ?",
+                 ("2026-08-21 12:00:00", "ar000"))
+    conn.commit()
+
+    for since in ("2026-08-21T00:00:00", "2026-08-21 00:00:00",
+                  "2026-08-21T00:00:00Z"):
+        items = _get(client, entity="artist", since=since).get_json()["data"]["items"]
+        assert [i["soul_id"] for i in items] == ["soul_artist_0"], since
+
+
+def test_offsets_are_compared_as_instants_not_as_text(db, client):
+    """13:00+02:00 is 11:00 UTC, so a row stamped 11:30 UTC is after it — but
+    ranked as text the offset string decided the answer instead."""
+    _seed(db, artists=1, albums_per_artist=0, tracks_per_album=0)
+    conn = db._get_connection()
+    conn.execute("UPDATE artists SET updated_at = ? WHERE id = ?",
+                 ("2026-08-21 11:30:00", "ar000"))
+    conn.commit()
+
+    included = _get(client, entity="artist",
+                    since="2026-08-21T13:00:00+02:00").get_json()["data"]["items"]
+    assert [i["soul_id"] for i in included] == ["soul_artist_0"]
+
+    excluded = _get(client, entity="artist",
+                    since="2026-08-21T14:00:00+02:00").get_json()["data"]["items"]
+    assert excluded == []
+
+
+def test_the_boundary_itself_is_included(db, client):
+    _seed(db, artists=1, albums_per_artist=0, tracks_per_album=0)
+    conn = db._get_connection()
+    conn.execute("UPDATE artists SET updated_at = ? WHERE id = ?",
+                 ("2026-08-21 12:00:00", "ar000"))
+    conn.commit()
+
+    items = _get(client, entity="artist",
+                 since="2026-08-21T12:00:00").get_json()["data"]["items"]
+    assert [i["soul_id"] for i in items] == ["soul_artist_0"]
+
+
+# ── L2-011: the change feed has to cover the whole payload ────────────────
+
+def _touch(db, table, row_id, when):
+    conn = db._get_connection()
+    conn.execute(f"UPDATE {table} SET updated_at = ? WHERE id = ?", (when, row_id))
+    conn.commit()
+
+
+def _incremental(client, entity, since):
+    return [i["soul_id"] for i in
+            _get(client, entity=entity, since=since).get_json()["data"]["items"]]
+
+
+def test_an_artist_rename_invalidates_its_albums_and_tracks(db, client):
+    """The album payload carries the artist's NAME and the track payload carries
+    the artist name plus the album title. Renaming an artist rewrites what the
+    export says about every one of its children while touching none of their
+    timestamps, so a consumer that had already walked them was never told."""
+    _seed(db, artists=1, albums_per_artist=1, tracks_per_album=1)
+    conn = db._get_connection()
+    conn.execute("UPDATE artists SET name = 'Renamed', updated_at = ? WHERE id = 'ar000'",
+                 ("2026-08-21 12:00:00",))
+    conn.commit()
+
+    since = "2026-08-21T00:00:00"
+    assert _incremental(client, "album", since) == ["soul_album_0_0"]
+    assert _incremental(client, "track", since) == ["soul_track_0_0_0"]
+
+
+def test_an_album_retitle_invalidates_its_tracks(db, client):
+    """A track's payload carries its album's title and year."""
+    _seed(db, artists=1, albums_per_artist=1, tracks_per_album=1)
+    _touch(db, "albums", "al000000", "2026-08-21 12:00:00")
+
+    assert _incremental(client, "track", "2026-08-21T00:00:00") == ["soul_track_0_0_0"]
+
+
+def test_an_untouched_child_is_still_left_out(db, client):
+    """The widened predicate must not turn the incremental export into a full
+    one: nothing changed anywhere, so nothing comes back."""
+    _seed(db, artists=1, albums_per_artist=1, tracks_per_album=1)
+
+    assert _incremental(client, "album", "2026-08-21T00:00:00") == []
+    assert _incremental(client, "track", "2026-08-21T00:00:00") == []
+
+
+def test_minting_a_soul_id_makes_the_row_appear_in_the_incremental(db, client):
+    """A row with no soul_id is filtered OUT of the export entirely, so minting
+    one is the moment it starts existing for consumers. The SoulID worker used
+    to write it without touching updated_at, so a full walk that ran before the
+    worker meant the row never appeared in any later incremental either."""
+    from core.soulid_worker import SoulIDWorker  # noqa: F401  (import guard only)
+
+    _seed(db, artists=1, albums_per_artist=0, tracks_per_album=0)
+    conn = db._get_connection()
+    conn.execute("UPDATE artists SET soul_id = NULL WHERE id = 'ar000'")
+    conn.commit()
+    assert _incremental(client, "artist", "2026-08-01T00:00:00") == []
+
+    # What the worker's write now does, verbatim.
+    conn = db._get_connection()
+    conn.execute("UPDATE artists SET soul_id = ?, soul_id_path = ?, "
+                 "updated_at = CURRENT_TIMESTAMP "
+                 "WHERE id = ? AND (soul_id IS NULL OR soul_id = '')",
+                 ("soul_artist_0", "canonical", "ar000"))
+    conn.commit()
+
+    assert _incremental(client, "artist", "2026-08-01T00:00:00") == ["soul_artist_0"]
+
+
+def test_a_canonical_claim_shows_up_in_the_incremental(db, client):
+    """canonical_source/canonical_album_id are exported fields."""
+    _seed(db, artists=1, albums_per_artist=1, tracks_per_album=0)
+    assert _incremental(client, "album", "2026-08-21T00:00:00") == []
+
+    assert db.set_album_canonical("al000000", "musicbrainz", "mb-1", 0.9) is True
+
+    assert _incremental(client, "album", "2026-08-21T00:00:00") == ["soul_album_0_0"]
 
 
 # ── unpublishable rows are never served ───────────────────────────────────

@@ -13,7 +13,7 @@ from core.worker_utils import (
     interruptible_sleep,
     set_album_api_track_count,
 )
-from core.enrichment.manual_match_honoring import honor_stored_match
+from core.enrichment.manual_match_honoring import MATCHED, honor_stored_match
 
 logger = get_logger("jiosaavn_worker")
 
@@ -381,14 +381,22 @@ class JioSaavnWorker:
         self._update_track(track_id, full_track_dict)
 
     def _process_album(self, album_id: int, album_name: str, artist_name: str):
-        if honor_stored_match(
+        _stored = honor_stored_match(
             db=self.db, entity_table='albums', entity_id=album_id,
             id_column='jiosaavn_id',
             client_fetch_fn=self.client.get_album,
             on_match_fn=self._refresh_album_via_stored_id,
+            mark_status_fn=self._mark_status,
+            status_column='jiosaavn_match_status',
             log_prefix='JioSaavn',
-        ):
-            self.stats['matched'] += 1
+        )
+        if _stored:
+            # L2-005: a stored ID the source could not confirm right now is
+            # NOT released to a fuzzy name search below — a transient provider
+            # failure is not evidence that the ID is wrong, and searching
+            # overwrote deliberately chosen matches with whatever came back.
+            if _stored == MATCHED:
+                self.stats['matched'] += 1
             return
         # honor_stored_match also returns False when the stored id failed to
         # re-fetch (transient error / rate limit). Don't fall through to a
@@ -433,14 +441,22 @@ class JioSaavnWorker:
             logger.debug("No match for album '%s'", album_name)
 
     def _process_track(self, track_id: int, track_name: str, artist_name: str):
-        if honor_stored_match(
+        _stored = honor_stored_match(
             db=self.db, entity_table='tracks', entity_id=track_id,
             id_column='jiosaavn_id',
             client_fetch_fn=self.client.get_track_details,
             on_match_fn=self._refresh_track_via_stored_id,
+            mark_status_fn=self._mark_status,
+            status_column='jiosaavn_match_status',
             log_prefix='JioSaavn',
-        ):
-            self.stats['matched'] += 1
+        )
+        if _stored:
+            # L2-005: a stored ID the source could not confirm right now is
+            # NOT released to a fuzzy name search below — a transient provider
+            # failure is not evidence that the ID is wrong, and searching
+            # overwrote deliberately chosen matches with whatever came back.
+            if _stored == MATCHED:
+                self.stats['matched'] += 1
             return
         # honor_stored_match also returns False when the stored id failed to
         # re-fetch (transient error / rate limit). Don't fall through to a

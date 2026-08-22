@@ -207,3 +207,71 @@ def test_publish_reregisters_final_folder_with_repair(monkeypatch, tmp_path):
     # The PUBLISHED album folder (not the emptied staging one) is registered so
     # the post-batch track-number repair scans real files.
     assert registered == [("B", os.path.join(transfer, "Artist", "Album"))]
+
+
+# --- L2-002: a failed publish must not produce a Complete batch -------------
+
+
+def _staged_batch(monkeypatch, tmp_path, name="F"):
+    """A batch with one staged track, ready to publish."""
+    from pathlib import Path
+
+    batch = {"is_album_download": True}
+    transfer = _wire(monkeypatch, tmp_path, flag=True, batch=batch)
+    final = os.path.join(transfer, "Artist", "Album", "01 - Song.flac")
+    staged = pl._maybe_stage_album_track({"batch_id": "B"}, final)
+    Path(staged).parent.mkdir(parents=True, exist_ok=True)
+    Path(staged).write_bytes(b"AUDIO")
+    return batch, staged, final
+
+
+def test_publish_hook_reports_success(monkeypatch, tmp_path):
+    batch, staged, final = _staged_batch(monkeypatch, tmp_path)
+
+    class _FakeConn:
+        rowcount = 1
+
+        def cursor(self): return self
+        def execute(self, q, params): pass
+        def commit(self): pass
+        def close(self): pass
+
+    class _FakeDB:
+        def _get_connection(self): return _FakeConn()
+
+    monkeypatch.setattr("database.music_database.MusicDatabase", _FakeDB)
+
+    assert lc._publish_atomic_album("B", batch) is True
+    assert os.path.isfile(final)
+
+
+def test_publish_hook_reports_failure_and_leaves_the_album_staged(monkeypatch, tmp_path):
+    """The result used to be logged and discarded, so the caller marked the
+    batch complete and emitted history/scan/completion events for an album that
+    never reached the library."""
+    batch, staged, final = _staged_batch(monkeypatch, tmp_path)
+
+    def _no_move(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("core.imports.file_ops.safe_move_file", _no_move)
+
+    class _FakeDB:
+        def _get_connection(self):  # never reached
+            raise AssertionError("no move, no repoint")
+
+    monkeypatch.setattr("database.music_database.MusicDatabase", _FakeDB)
+
+    assert lc._publish_atomic_album("B", batch) is False
+    assert os.path.isfile(staged)
+    assert not os.path.isfile(final)
+
+
+def test_a_noop_publish_still_reports_success(monkeypatch, tmp_path):
+    """A batch that never staged anything is not a failed publish."""
+    assert lc._publish_atomic_album("B", {"is_album_download": True}) is True
+    assert lc._publish_atomic_album("B", {
+        "_atomic_active": True,
+        "_atomic_staging_root": str(tmp_path / "gone"),
+        "_atomic_transfer_dir": str(tmp_path / "music"),
+    }) is True
