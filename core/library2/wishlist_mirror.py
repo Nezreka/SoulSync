@@ -27,6 +27,7 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
                   t.external_ids, t.isrc, t.title, t.track_number,
                   t.disc_number, t.duration,
                   al.id AS album_id, al.title album_title,
+                  al.image_url album_image_url,
                   al.spotify_id album_spotify,
                   al.musicbrainz_id album_musicbrainz,
                   al.external_ids album_external_ids,
@@ -81,6 +82,7 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     # library reset + reimport reproduces the same stable_id, so existing
     # wishlist rows keep matching instead of orphaning or double-queueing
     # against fresh rowids (audit P1-12).
+    from core.library2.wishlist_art import album_images
     from core.library2.stable_ids import ensure_album_stable_id, ensure_track_stable_id
     source_track_id = provider_track_id or (
         f"lib2-track:{ensure_track_stable_id(conn, t['track_id'])}"
@@ -135,6 +137,17 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
             "provider_ids": album_provider_ids,
             "total_tracks": t["expected_track_count"] or t["track_count"] or 1,
             "album_type": t["album_type"],
+            # The wishlist UI reads `album.images[0].url`, and the import
+            # pipeline reads the same slot for cover.jpg / embedded art. This
+            # payload carried no `images` at all, so every Library-v2 row
+            # rendered as a blank tile (373 of 611 rows in the production
+            # report) and reached the importer with no cover to work from.
+            # `album_images` puts a real provider CDN url first when the
+            # catalogue has one and always appends Library v2's own artwork
+            # endpoint, so a row is never image-less again.
+            "images": album_images(
+                conn, t["album_id"], stored_image_url=t["album_image_url"],
+            ),
         },
         "track_number": t["track_number"],
         "disc_number": t["disc_number"],

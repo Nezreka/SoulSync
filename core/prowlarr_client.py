@@ -254,6 +254,7 @@ class ProwlarrClient:
         search_type: str = "search",
         extra_params: Optional[Sequence[tuple]] = None,
         timeout: Optional[int] = None,
+        throttle: bool = True,
     ) -> List[ProwlarrSearchResult]:
         """Run a Newznab search across the selected indexers.
 
@@ -273,7 +274,7 @@ class ProwlarrClient:
         return await run_blocking(
             self._search_sync, query, list(categories), list(indexer_ids or []),
             limit, search_type, list(extra_params or []),
-            self.resolve_search_timeout(timeout),
+            self.resolve_search_timeout(timeout), None, throttle,
         )
 
     async def resolve_search_indexers(
@@ -350,12 +351,20 @@ class ProwlarrClient:
         # slot in seconds, so the realistic cost of the cap is nil.
         gate = asyncio.Semaphore(MAX_CONCURRENT_INDEXER_SEARCHES)
 
+        # ONE slot for the whole wave, not one per request. Each indexer gets
+        # exactly one query out of this, which is what the budget is protecting;
+        # billing per HTTP request would charge a single album search a slot per
+        # indexer and leave somebody staring at a spinner for twenty seconds.
+        # Reserved off-loop because the reservation sleeps.
+        from core.prowlarr_throttle import wait_for_slot
+        await run_blocking(wait_for_slot, None)
+
         async def _one(indexer_id: int):
             async with gate:
                 return await self.search(
                     query, categories=categories, indexer_ids=[indexer_id],
                     limit=limit, search_type=search_type, extra_params=extra_params,
-                    timeout=timeout,
+                    timeout=timeout, throttle=False,
                 )
 
         budget = self.resolve_search_timeout(timeout)
@@ -406,7 +415,31 @@ class ProwlarrClient:
         search_type: str = "search",
         extra_params: Optional[Sequence[tuple]] = None,
         timeout: Optional[int] = None,
+        max_wait_seconds: Optional[float] = None,
+        throttle: bool = True,
     ) -> List[ProwlarrSearchResult]:
+        # Every Prowlarr search in the app funnels through here: the async
+        # `search`, the per-indexer fan-out that calls it, and the video side
+        # calling this directly. So this is where the pacing goes.
+        #
+        # Prowlarr hands each search straight to your indexers and shields them
+        # from nothing. Nothing else in this app talks to a third party
+        # unthrottled; this was the exception, on both sides.
+        # `throttle=False` when the CALLER already reserved for this wave; see
+        # search_each_indexer. The budget counts hits on an indexer, and a
+        # fan-out gives each one exactly one, so charging it per HTTP request
+        # would bill a single album search ten slots and add twenty seconds to
+        # somebody waiting on a page.
+        if throttle:
+            from core.prowlarr_throttle import wait_for_slot
+            if not wait_for_slot(max_wait_seconds=max_wait_seconds):
+                # Only an interactive caller passes a bound, and only it can be
+                # refused. Saying so beats holding a request worker for a minute
+                # while a wishlist drain empties the window.
+                raise ProwlarrSearchError(
+                    "Prowlarr searches are rate limited right now — try again shortly"
+                )
+
         # Prowlarr's search endpoint accepts repeated params: ``categories=3000&categories=3010``.
         # ``requests`` serializes lists in that exact form when passed as tuples of pairs.
         params: List[tuple] = [('query', query), ('type', search_type or 'search'), ('limit', limit)]
@@ -494,6 +527,20 @@ class ProwlarrClient:
                 params=params,
                 timeout=timeout or self.DEFAULT_TIMEOUT,
             )
+            # getattr, not resp.status_code: this runs before the `resp.ok`
+            # check below, so it is the FIRST thing to touch the response, and a
+            # stub or an adapter that only implements `.ok` used to get this far
+            # untouched. Reading an attribute nothing promised broke a test that
+            # had every right to pass.
+            if getattr(resp, 'status_code', None) == 429:
+                # Prowlarr passes an indexer's rate limit back as a 429. Tell the
+                # shared budget so BOTH sides back off, instead of the other half
+                # of the app walking into the same wall a second later.
+                try:
+                    from core.prowlarr_throttle import note_rate_limited
+                    note_rate_limited(resp.headers.get('Retry-After'))
+                except Exception:  # noqa: BLE001 - never let bookkeeping sink a request
+                    logger.debug("Prowlarr 429 cooldown could not be recorded", exc_info=True)
             if not resp.ok:
                 logger.warning("Prowlarr %s returned HTTP %s", path, resp.status_code)
                 if raise_on_error:

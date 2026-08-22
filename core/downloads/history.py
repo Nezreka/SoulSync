@@ -13,6 +13,8 @@ a failure here must never break a real download.
 from __future__ import annotations
 
 import json
+import time
+
 from utils.logging_config import get_logger
 from typing import Optional
 
@@ -172,6 +174,65 @@ def record_sync_history_start(
         )
     except Exception as e:
         logger.warning(f"Failed to record sync history start: {e}")
+
+
+def record_sync_history_noop(
+    database,
+    playlist_id: str,
+    playlist_name: str,
+    tracks: list,
+    *,
+    profile_id=None,
+    quality_profile_id=None,
+    thumb_url: str = '',
+) -> None:
+    """Record a sync run that had nothing to do, as a FINISHED run.
+
+    The sync step skips when the track list is unchanged and everything already
+    matched, which is correct as work: there is nothing to download. But it used
+    to skip the bookkeeping with it, so a person who clicked Run got no run
+    recorded at all. The dashboard card then had nothing to show, said "no runs
+    yet", and would not open, while the pipeline had in fact completed
+    (Boulder, Aug 2026: Discover Weekly, 58 completed pipeline runs, zero recent
+    sync history).
+
+    "Ran, everything was already here" is a real outcome and the UI should be
+    able to say so. Written already-complete because it IS complete: every track
+    is present, none were downloaded, none failed.
+    """
+    try:
+        n = len(tracks or [])
+        record_sync_history_start(
+            database,
+            batch_id=f"noop_{playlist_id}_{int(time.time())}",
+            playlist_id=playlist_id,
+            playlist_name=playlist_name,
+            tracks=tracks or [],
+            is_album_download=False,
+            album_context=None,
+            artist_context=None,
+            playlist_folder_mode=False,
+            profile_id=profile_id,
+            quality_profile_id=quality_profile_id,
+        )
+        row = database.get_latest_sync_history_by_playlist(playlist_id, profile_id=profile_id)
+        if not row:
+            return
+        conn = database._get_connection()
+        try:
+            conn.execute(
+                "UPDATE sync_history SET completed_at = CURRENT_TIMESTAMP, "
+                "tracks_found = ?, tracks_downloaded = 0, tracks_failed = 0 "
+                "WHERE id = ?",
+                (n, row['id']),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        logger.info("Recorded no-op sync for '%s' (%d track(s) already present)",
+                    playlist_name, n)
+    except Exception as e:  # noqa: BLE001 - bookkeeping must never fail a sync
+        logger.warning("Could not record no-op sync history for '%s': %s", playlist_name, e)
 
 
 def record_sync_history_completion(database, batch_id: str, batch: dict) -> None:

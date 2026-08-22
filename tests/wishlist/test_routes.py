@@ -272,7 +272,7 @@ def test_get_wishlist_stats_uses_cycle_and_next_run():
     }
 
 
-def test_get_wishlist_tracks_filters_category_and_cleans_duplicates():
+def test_get_wishlist_tracks_filters_category():
     tracks = [
         {
             "id": "track-1",
@@ -305,9 +305,56 @@ def test_get_wishlist_tracks_filters_category_and_cleans_duplicates():
     assert payload["total"] == 2
     assert len(payload["tracks"]) == 1
     assert payload["tracks"][0]["id"] == "track-1"
-    assert db.duplicate_cleanup_profiles == [1]
-    assert any("duplicate tracks from wishlist" in msg for msg in logger.warning_messages)
     assert service.get_wishlist_tracks_for_download(profile_id=1)[0]["id"] == "track-1"
+
+
+def test_get_wishlist_tracks_never_mutates_the_wishlist():
+    """A GET that deleted rows was both wrong on its own terms and the only
+    difference between this endpoint and /api/wishlist/stats — which is why the
+    two counts could disagree (614 vs 611 in the 2026-08-22 report) with no way
+    to attribute the gap. Cleanup lives in the maintenance automation and the
+    processing cycle."""
+    runtime, _service, db, _logger, _activity = _build_runtime(
+        tracks=[{"id": "t1", "name": "A", "artists": [], "spotify_data": {}}],
+        duplicate_removals=2,
+    )
+
+    get_wishlist_tracks(runtime)
+
+    assert db.duplicate_cleanup_profiles == []
+
+
+def test_get_wishlist_tracks_reports_rows_it_hides():
+    """Whatever the endpoint drops has to be visible in the response, so a
+    count/list disagreement explains itself instead of needing a DB dump."""
+    duplicated = {"id": "same", "track_id": "same", "name": "A",
+                  "artists": [], "spotify_data": {}}
+    runtime, _service, _db, logger, _activity = _build_runtime(
+        tracks=[duplicated, dict(duplicated), {"id": "other", "track_id": "other",
+                                               "name": "B", "artists": [],
+                                               "spotify_data": {}}],
+    )
+
+    payload, status = get_wishlist_tracks(runtime)
+
+    assert status == 200
+    assert payload["stored_rows"] == 3
+    assert len(payload["tracks"]) == 2
+    assert payload["hidden_rows"] == 1
+    assert payload["duplicates_found"] == 1
+    assert any("duplicate track id" in msg for msg in logger.warning_messages)
+
+
+def test_get_wishlist_tracks_reports_no_hidden_rows_when_nothing_is_dropped():
+    runtime, _service, _db, _logger, _activity = _build_runtime(
+        tracks=[{"id": f"t{i}", "track_id": f"t{i}", "name": "A", "artists": [],
+                 "spotify_data": {}} for i in range(3)],
+    )
+
+    payload, _status = get_wishlist_tracks(runtime)
+
+    assert payload["stored_rows"] == 3
+    assert payload["hidden_rows"] == 0
 
 
 def test_clear_wishlist_cancels_active_batches_and_resets_state():

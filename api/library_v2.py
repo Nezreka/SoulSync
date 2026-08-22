@@ -2022,10 +2022,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         conn = _conn()
         try:
             from core.library2.match_status import set_library_v2_match
+            # steal=True: this is a deliberate user match. If another entity
+            # holds the id (the automated matcher's mistakes are exactly what
+            # someone comes here to correct), MOVE it rather than refusing —
+            # the invariant stays "one provider release, one local entity".
             set_library_v2_match(
                 conn, entity_type, entity_id, service,
                 service_id if request.method == "PUT" else None,
                 actor=f"profile:{_profile()}",
+                steal=True,
             )
 
             # Artist settings deliberately reuse the legacy Watchlist.  Keep a

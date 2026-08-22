@@ -1,18 +1,11 @@
-"""Editing a profile-captured toggle while previewing somebody else's profile
-must say so.
+"""The profile shown in Settings -> Quality is the save target.
 
-The Settings -> Quality page owns two kinds of control. The ranked-target
-ladder saves through `debouncedSaveQualityProfile`, which already refuses to
-write while a non-default profile is previewed and shows the editing banner
-instead. The other eight (AcoustID strictness, downsample, deep verify,
-replace-lower-quality and the lossy-copy group) are ordinary config keys saved
-by the whole-page `saveSettings`, and that one substitutes the real default's
-stored values back in for exactly those keys before sending — so the edit is
-correctly NOT written anywhere.
-
-Correct, but silent: the user toggled something, no banner appeared, and the
-value read Off again after switching profiles and back. These assertions pin
-the nudge that closes the gap.
+Historically a non-default row was only a preview: autosave and the prominent
+"Save Settings" button both reported success without writing it, while the
+small per-row pencil button was the only real save. These source-level seams
+pin the intuitive contract: every profile-owned control uses profile autosave,
+the target and payload survive a quick profile switch, and the full bundle is
+written through the id-qualified endpoint.
 """
 
 from __future__ import annotations
@@ -48,9 +41,17 @@ BUNDLE_CONTROL_IDS = (
     "lossy-copy-delete-original",
 )
 
+LADDER_CONTROL_IDS = (
+    "quality-fallback-enabled",
+    "quality-search-mode",
+    "quality-rank-candidates",
+    "quality-upgrade-policy",
+    "quality-upgrade-cutoff",
+)
+
 
 @pytest.mark.parametrize("control_id", BUNDLE_CONTROL_IDS)
-def test_every_profile_captured_control_is_in_the_nudge_set(settings_js, control_id):
+def test_every_profile_captured_control_is_in_the_bundle_set(settings_js, control_id):
     """A control missing here edits silently again — the exact bug."""
     start = settings_js.index("_QP_BUNDLE_CONTROL_IDS = new Set([")
     end = settings_js.index("]);", start)
@@ -58,8 +59,8 @@ def test_every_profile_captured_control_is_in_the_nudge_set(settings_js, control
 
 
 @pytest.mark.parametrize("control_id", BUNDLE_CONTROL_IDS)
-def test_the_nudge_set_matches_what_the_profile_actually_captures(settings_js,
-                                                                  control_id):
+def test_the_bundle_set_matches_what_the_profile_actually_captures(settings_js,
+                                                                   control_id):
     """Guard against the two lists drifting: every id in the nudge set must
     really be read by collectFullQualityBundleFromUI."""
     start = settings_js.index("function collectFullQualityBundleFromUI()")
@@ -67,40 +68,75 @@ def test_the_nudge_set_matches_what_the_profile_actually_captures(settings_js,
     assert f"'{control_id}'" in settings_js[start:end]
 
 
-def test_the_settings_autosave_runs_the_nudge(settings_js):
-    """It has to hang off the whole-page autosave, not the quality one — those
-    eight controls never reach debouncedSaveQualityProfile."""
+@pytest.mark.parametrize("control_id", LADDER_CONTROL_IDS)
+def test_every_ladder_control_routes_to_profile_autosave(settings_js, control_id):
+    start = settings_js.index("_QP_PROFILE_CONTROL_IDS = new Set([")
+    end = settings_js.index("]);", start)
+    assert f"'{control_id}'" in settings_js[start:end]
+
+
+def test_the_full_bundle_is_included_in_profile_autosave(settings_js):
+    start = settings_js.index("_QP_PROFILE_CONTROL_IDS = new Set([")
+    end = settings_js.index("]);", start)
+    assert "..._QP_BUNDLE_CONTROL_IDS" in settings_js[start:end]
+
+
+def test_the_settings_autosave_routes_quality_changes_and_stops(settings_js):
     start = settings_js.index("function debouncedAutoSaveSettings(event)")
     end = settings_js.index("\n}", start)
     body = settings_js[start:end]
-    assert "_qpNudgeIfEditingForeignProfile(event)" in body
-    # The event is what identifies the control; a no-arg signature cannot tell
-    # a lossy-copy toggle from a Plex URL.
+    assert "if (_qpHandleProfileControlChange(event)) return" in body
     assert "debouncedAutoSaveSettings(event)" in settings_js
 
 
-def test_the_nudge_only_fires_for_a_foreign_profile(settings_js):
-    """Editing the live default is the normal case and must stay quiet."""
-    start = settings_js.index("function _qpNudgeIfEditingForeignProfile(event)")
+def test_the_quality_change_handler_schedules_profile_autosave(settings_js):
+    start = settings_js.index("function _qpHandleProfileControlChange(event)")
     end = settings_js.index("\n}", start)
     body = settings_js[start:end]
-    assert "_qpEditingProfileId === null" in body
-    assert "_qpEditingProfileId === _qpDefaultProfileId()" in body
-    assert "qpShowEditingBanner()" in body
+    assert "_QP_PROFILE_CONTROL_IDS.has(id)" in body
+    assert "debouncedSaveQualityProfile()" in body
+    assert "return true" in body
 
 
-def test_the_nudge_does_not_block_the_save(settings_js):
-    """saveSettings already substitutes the default's values back in for these
-    keys, so the save is a no-op for them — skipping it outright would drop
-    whatever unrelated edit was debounced alongside."""
-    start = settings_js.index("function _qpNudgeIfEditingForeignProfile(event)")
+def test_debounce_captures_profile_id_and_full_payload_before_switch(settings_js):
+    start = settings_js.index("function debouncedSaveQualityProfile()")
     end = settings_js.index("\n}", start)
     body = settings_js[start:end]
-    # It may return early (nothing to say), but it must never report back.
-    assert "return true" not in body and "return false" not in body
+    assert "const targetProfileId = _qpEditingProfileId ?? _qpDefaultProfileId()" in body
+    assert "const profile = collectFullQualityBundleFromUI()" in body
+    assert "saveQualityProfile({ targetProfileId, profile })" in body
 
 
-def test_the_substitution_block_that_makes_the_nudge_honest_is_still_there(
+def test_save_targets_the_displayed_profile_and_refreshes_rows(settings_js):
+    start = settings_js.index("async function saveQualityProfile(")
+    end = settings_js.index("\n}\n\n//", start)
+    body = settings_js[start:end]
+    assert "`/api/quality-profile/custom/${resolvedTargetId}/update`" in body
+    assert "body: JSON.stringify(payload)" in body
+    assert "_qpSetProfileRows(data.profiles)" in body
+    assert "renderCustomQualityProfiles(_qpProfileRows)" in body
+
+
+def test_loading_settings_resets_view_to_full_default_bundle(settings_js):
+    start = settings_js.index("async function loadQualityProfile()")
+    end = settings_js.index("\n}\n\n//", start)
+    body = settings_js[start:end]
+    assert "_qpEditingProfileId = null" in body
+    assert "populateQualityProfileUI(currentQualityProfile)" in body
+    assert "applyFullQualityBundleToDom(currentQualityProfile)" in body
+    assert "qpHideEditingBanner()" in body
+
+
+def test_quick_preset_on_named_profile_uses_the_same_autosave(settings_js):
+    start = settings_js.index("async function applyQualityPreset(presetName)")
+    end = settings_js.index("\n}\n\n// Discard", start)
+    body = settings_js[start:end]
+    assert "currentQualityProfile = merged" in body
+    assert "debouncedSaveQualityProfile()" in body
+    assert "click ✎" not in body
+
+
+def test_full_settings_save_still_protects_the_default_while_editing_another(
         settings_js):
     """If this ever goes away the nudge becomes a lie: the edit WOULD then be
     written, straight into the wrong profile."""
@@ -113,12 +149,9 @@ def test_the_substitution_block_that_makes_the_nudge_honest_is_still_there(
         assert line in settings_js
 
 
-def test_the_banner_tells_the_user_what_to_do(index_html):
-    """It used to say 'changes on the left', which is the ladder tiles — but
-    six of the eight controls this now fires for live in completely different
-    sections of the page."""
+def test_the_banner_explains_intuitive_save_behaviour(index_html):
     start = index_html.index('id="qp-editing-banner"')
     end = index_html.index("</div>", start)
     banner = index_html[start:end]
-    assert "on this page" in banner
-    assert "✎" in banner
+    assert "Changes autosave to this profile" in banner
+    assert "Save Settings saves it too" in banner

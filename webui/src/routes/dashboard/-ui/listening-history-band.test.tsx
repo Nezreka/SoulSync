@@ -3,8 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ListeningHistoryBand } from './listening-history-band';
 
+// Typed with the real arity. `vi.fn(async () => {})` infers `calls: []` — an
+// empty tuple — so every `mock.calls[0][n]` below is a TS2493 type error, and
+// oxlint --type-check gates CI on those. Four red errors on dev, and they turn
+// every unrelated branch's `npm run check` red too.
 const playTrackByMetadata = vi.hoisted(() =>
-  vi.fn(async (_bridge: unknown, _title: string, _artist: string, _album: string) => {}),
+  vi.fn(async (_bridge: unknown, _title: string, _artist: string, _album?: string) => {}),
 );
 vi.mock('../../../features/playback/play-track', () => ({ playTrackByMetadata }));
 

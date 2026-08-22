@@ -23,6 +23,16 @@ logger = get_logger("image_cache")
 
 DEFAULT_TTL_SECONDS = 30 * 24 * 60 * 60
 DEFAULT_FAILED_TTL_SECONDS = 6 * 60 * 60
+# A `pending` row is a REGISTRATION, not an image: `cache_url_for` writes one
+# every time a URL is handed to a browser, and it only becomes `ok`/`failed` if
+# something actually requests it. Those rows used to be written with
+# `expires_at = 0`, and `prune()` only ever deleted rows with `expires_at > 0`,
+# so a registration nobody ever loaded was immortal — with the size cap
+# disabled (`max_cache_mb = 0`) nothing else could reclaim it either. A
+# production cache was measured at 857 rows of which 602 were pending, i.e. the
+# majority of the index was garbage. A registration is trivially recreated by
+# the next render, so it gets a short life of its own.
+DEFAULT_PENDING_TTL_SECONDS = 24 * 60 * 60
 DEFAULT_MAX_DOWNLOAD_BYTES = 15 * 1024 * 1024
 
 # Ceiling for the cache as a whole. Until this existed the cache had a TTL it
@@ -97,6 +107,7 @@ class ImageCache:
         *,
         ttl_seconds: int = DEFAULT_TTL_SECONDS,
         failed_ttl_seconds: int = DEFAULT_FAILED_TTL_SECONDS,
+        pending_ttl_seconds: int = DEFAULT_PENDING_TTL_SECONDS,
         max_download_bytes: int = DEFAULT_MAX_DOWNLOAD_BYTES,
         max_cache_bytes: int = DEFAULT_MAX_CACHE_BYTES,
         fetch_timeout: float = DEFAULT_FETCH_TIMEOUT,
@@ -105,6 +116,7 @@ class ImageCache:
         self.cache_dir = Path(cache_dir)
         self.ttl_seconds = int(ttl_seconds)
         self.failed_ttl_seconds = int(failed_ttl_seconds)
+        self.pending_ttl_seconds = int(pending_ttl_seconds)
         self.max_download_bytes = int(max_download_bytes)
         self.max_cache_bytes = int(max_cache_bytes)
         # A slow CDN must never hold a page open. Short by default, and
@@ -133,19 +145,27 @@ class ImageCache:
             variant = ""
         key = self.key_for_url(str(url), variant)
         now = time.time()
+        pending_expiry = now + self.pending_ttl_seconds
         with self._db_lock:
             with self._connect() as conn:
+                # The conflict branch must not touch a row that already holds a
+                # real image: an `ok` row carries the full TTL and a `failed`
+                # row its own shorter one. Only a still-`pending` registration
+                # gets its (short) lease renewed by being re-offered.
                 conn.execute(
                     """
                     INSERT INTO image_cache
                         (key, original_url, status, created_at, updated_at, last_accessed,
                          expires_at, size, mime_type, file_path, last_error, variant)
-                    VALUES (?, ?, 'pending', ?, ?, ?, 0, 0, '', '', '', ?)
+                    VALUES (?, ?, 'pending', ?, ?, ?, ?, 0, '', '', '', ?)
                     ON CONFLICT(key) DO UPDATE SET
                         original_url=excluded.original_url,
-                        last_accessed=excluded.last_accessed
+                        last_accessed=excluded.last_accessed,
+                        expires_at=CASE WHEN image_cache.status='pending'
+                                        THEN excluded.expires_at
+                                        ELSE image_cache.expires_at END
                     """,
-                    (key, str(url), now, now, now, variant),
+                    (key, str(url), now, now, now, pending_expiry, variant),
                 )
         return f"/api/image-cache/{key}"
 
@@ -212,7 +232,8 @@ class ImageCache:
                     "SELECT COUNT(*) AS entries, "
                     "       COALESCE(SUM(CASE WHEN status='ok' THEN size ELSE 0 END), 0) AS bytes, "
                     "       COALESCE(SUM(status='ok'), 0) AS ok, "
-                    "       COALESCE(SUM(status='failed'), 0) AS failed "
+                    "       COALESCE(SUM(status='failed'), 0) AS failed, "
+                    "       COALESCE(SUM(status='pending'), 0) AS pending "
                     "FROM image_cache"
                 ).fetchone()
         return {
@@ -220,8 +241,14 @@ class ImageCache:
             "bytes": int(row["bytes"] or 0),
             "ok": int(row["ok"] or 0),
             "failed": int(row["failed"] or 0),
+            # Reported explicitly rather than left to be inferred by
+            # subtraction: a runaway pending count is the visible symptom of
+            # URLs whose cache key keeps changing, and it should be readable
+            # straight off the status endpoint.
+            "pending": int(row["pending"] or 0),
             "max_bytes": self.max_cache_bytes,
             "ttl_seconds": self.ttl_seconds,
+            "pending_ttl_seconds": self.pending_ttl_seconds,
         }
 
     def _delete_rows(self, conn, keys: list[str]) -> int:
@@ -256,6 +283,17 @@ class ImageCache:
                     r["key"] for r in conn.execute(
                         "SELECT key FROM image_cache WHERE expires_at > 0 AND expires_at < ?",
                         (now,)).fetchall()
+                ])
+                # Registrations written before pending rows had an expiry of
+                # their own are stuck at `expires_at = 0` and the query above
+                # cannot see them. Age them out on `last_accessed` instead, so
+                # an existing cache drains its backlog on the next prune rather
+                # than carrying it forever.
+                expired += self._delete_rows(conn, [
+                    r["key"] for r in conn.execute(
+                        "SELECT key FROM image_cache "
+                        "WHERE status='pending' AND expires_at <= 0 AND last_accessed < ?",
+                        (now - self.pending_ttl_seconds,)).fetchall()
                 ])
 
                 if self.max_cache_bytes > 0:
@@ -638,6 +676,8 @@ def get_image_cache() -> ImageCache:
                 cache_dir,
                 ttl_seconds=int(config_manager.get("image_cache.ttl_seconds", DEFAULT_TTL_SECONDS)),
                 failed_ttl_seconds=int(config_manager.get("image_cache.failed_ttl_seconds", DEFAULT_FAILED_TTL_SECONDS)),
+                pending_ttl_seconds=int(config_manager.get(
+                    "image_cache.pending_ttl_seconds", DEFAULT_PENDING_TTL_SECONDS)),
                 max_download_bytes=int(config_manager.get("image_cache.max_download_mb", 15)) * 1024 * 1024,
                 max_cache_bytes=int(config_manager.get(
                     "image_cache.max_cache_mb", DEFAULT_MAX_CACHE_BYTES // (1024 * 1024))) * 1024 * 1024,

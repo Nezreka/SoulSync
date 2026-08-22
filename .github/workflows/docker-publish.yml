@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       version_tag:
-        description: 'Version tag (e.g. 3.2.3)'
+        description: 'Version tag (e.g. 3.2.4)'
         required: true
-        default: '3.2.3'
+        default: '3.2.4'
 
 jobs:
   build-and-push:

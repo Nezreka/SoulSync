@@ -81,6 +81,69 @@ def _artist_context_matches(wanted: str, candidate: str) -> bool:
     return any(artist_name_matches(wanted, component) for component in components)
 
 
+# Words that mark a genuinely DIFFERENT recording, not another edition of the
+# same one. `normalize_artist_name` deletes parentheticals and " - ..." tails
+# before comparing, which is what lets a fuzzy title match work at all — but it
+# also erases exactly these words, so "Memory Reboot (Slowed)" normalized to
+# "memory reboot" and scored 1.00 against the ORIGINAL "Memory Reboot". A
+# production report found 20 album provider-id groups shared between originals
+# and their slowed/sped-up editions for precisely this reason.
+#
+# Edition words (remastered, deluxe, expanded, anniversary, mono …) are
+# deliberately NOT here: those describe the same recordings, folding them is
+# what makes provider matching useful, and treating them as variants would cost
+# real coverage.
+_RECORDING_VARIANT_WORDS = frozenset({
+    "slowed", "sped", "speed", "spedup", "reverb", "nightcore", "daycore",
+    "remix", "remixed", "rmx", "bootleg", "mashup", "flip", "vip", "edit",
+    "instrumental", "instrumentals", "acapella", "acappella", "acoustic",
+    "unplugged", "live", "demo", "karaoke", "cover", "rerecorded",
+    "reimagined", "orchestral", "piano", "8d", "reverbed",
+})
+
+_SEQUENCE_SUFFIX_RE = re.compile(r"(\d+)\s*$")
+
+
+def _plain_title_tokens(title: Any) -> list:
+    """Every word in a title, with punctuation and case removed and NOTHING
+    dropped — the counterpart to ``normalize_artist_name``'s lossy fold."""
+    text = re.sub(r"[^\w\s]", " ", str(title or "").lower())
+    return [token for token in text.split() if token]
+
+
+def _title_variant_signature(title: Any) -> tuple:
+    """What distinguishes this title from its fuzzy-matched base form.
+
+    Returns ``(variant words, trailing sequence number)``. Two titles may only
+    be treated as the same release when their signatures agree:
+
+    * ``"Memory Reboot (Slowed)"`` -> ``({"slowed"}, None)`` vs
+      ``"Memory Reboot"`` -> ``(frozenset(), None)``  → different.
+    * ``"NEON BLADE 2"`` -> ``(frozenset(), "2")`` vs
+      ``"NEON BLADE"`` -> ``(frozenset(), None)``     → different.
+    * ``"Abbey Road (Remastered)"`` and ``"Abbey Road"`` both ->
+      ``(frozenset(), None)``                          → same (edition, not variant).
+    """
+    full = _plain_title_tokens(title)
+    # Scanned over the FULL token list, not only over what the fuzzy fold
+    # discards: `normalize_artist_name` strips `(...)` but not `[...]`, so
+    # "GigaChad Theme (Phonk House Version) [Slowed]" keeps its "slowed" and
+    # would otherwise look identical to the non-slowed release.
+    variants = frozenset(token for token in full if token in _RECORDING_VARIANT_WORDS)
+    match = _SEQUENCE_SUFFIX_RE.search(" ".join(full))
+    return variants, (match.group(1) if match else None)
+
+
+def titles_are_same_release(wanted: Any, candidate: Any) -> bool:
+    """False when two titles differ by a recording variant or a sequence number.
+
+    Applied on top of the existing fuzzy score, never instead of it: the score
+    still decides whether the titles are *close*, this decides whether the
+    thing that makes them differ is allowed to be folded away.
+    """
+    return _title_variant_signature(wanted) == _title_variant_signature(candidate)
+
+
 def _title_context_matches(wanted: str, candidate: str) -> bool:
     from difflib import SequenceMatcher
     from core.worker_utils import normalize_artist_name
@@ -610,6 +673,11 @@ def enrich_native_entity_for_service(
             if not wanted or not candidate_name:
                 continue
             if canonical != "artist":
+                # The fuzzy fold above erased whatever separates a slowed /
+                # sped-up / sequel release from its original, so the score alone
+                # cannot tell them apart. Reject before scoring.
+                if not titles_are_same_release(row["name"], candidate.get("name")):
+                    continue
                 candidate_artist, candidate_album = _candidate_context(
                     candidate, canonical,
                 )
@@ -645,11 +713,30 @@ def enrich_native_entity_for_service(
         provider_id = str(hit["id"]).strip()
         actual_source = str(hit.get("provider") or service).strip().lower()
 
-    from core.library2.match_status import set_library_v2_match
-    set_library_v2_match(
-        conn, canonical, int(entity_id), actual_source, provider_id,
-        actor="native_enrichment",
+    from core.library2.match_status import (
+        ProviderIdentityConflict, set_library_v2_match,
     )
+    try:
+        set_library_v2_match(
+            conn, canonical, int(entity_id), actual_source, provider_id,
+            actor="native_enrichment",
+        )
+    except ProviderIdentityConflict as conflict:
+        # Another entity already IS this provider release. Leaving this one
+        # unmatched is recoverable (the chip stays pending, a user can match it
+        # by hand); writing the id anyway is not — it silently makes two local
+        # releases the same release everywhere downstream.
+        logger.info(
+            "Refusing %s id %s for %s %s: already held by %s %s",
+            actual_source, provider_id, canonical, entity_id,
+            canonical, conflict.owner_id,
+        )
+        return {
+            "success": False, "attempted": True,
+            "entity_type": canonical, "entity_id": int(entity_id),
+            "reason": "identity_conflict", "source": actual_source,
+            "provider_id": provider_id, "conflicting_entity_id": conflict.owner_id,
+        }
 
     # Release the writer before the provider walk (same rule as
     # completeness.resolve_tracklist). Holding it here deadlocked this thread

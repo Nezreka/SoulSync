@@ -304,7 +304,8 @@ function RowArt({ row }: { row: SyncBandRow }) {
   );
 }
 
-function Row({
+/** Exported for tests: the row is where the click behaviour lives. */
+export function Row({
   row,
   busy,
   fading,
@@ -328,13 +329,27 @@ function Row({
   if (sched && !sched.enabled) classes.push('syncband-row--off');
 
   const lastId = row.last?.id;
-  const clickable = lastId !== undefined;
+  // A scheduled row can always open ITS PLAYLIST, run or no run. It used to
+  // open only the sync-detail modal, keyed on a history entry, so a playlist
+  // with no run in the fetched window was simply inert: clicking Discover
+  // Weekly did nothing while Release Radar opened (Boulder, Aug 2026). The
+  // schedule's board key IS the mirrored playlist id.
+  const playlistId = sched ? Number(sched.key) : NaN;
+  const openPlaylist = Number.isFinite(playlistId) && playlistId > 0;
+  const clickable = lastId !== undefined || openPlaylist;
+
+  const onOpen = () => {
+    // The run detail is the better answer when there is one: it shows what that
+    // sync actually did. The playlist is the fallback, not the preference.
+    if (lastId !== undefined) void window.openSyncDetailModal?.(Number(lastId));
+    else if (openPlaylist) void window.openMirroredPlaylistModal?.(playlistId);
+  };
 
   return (
     <div
       className={classes.join(' ')}
       style={fading ? { opacity: 0, transform: 'scale(0.97)' } : undefined}
-      onClick={clickable ? () => window.openSyncDetailModal?.(lastId as number) : undefined}
+      onClick={clickable ? onOpen : undefined}
       role={clickable ? 'button' : undefined}
     >
       <RowArt row={row} />

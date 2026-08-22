@@ -78,28 +78,31 @@ function syncRetryConditionalRows() {
 }
 window.syncRetryConditionalRows = syncRetryConditionalRows;
 
-// The Settings -> Quality controls that a PROFILE captures but the whole-page
-// save sends as ordinary config keys. Editing one of these while previewing a
-// non-default profile is deliberately not persisted by the page save (see the
-// substitution block in saveSettings), so the edit only reaches the profile
-// once the user clicks that row's Update (v) button. Without a nudge that
-// looked like a silent failure: toggle it, switch profiles, come back, and it
-// reads Off again with nothing having told you why.
+// Every Settings -> Quality control belongs to the profile currently shown in
+// the editor. Keep this list separate from ordinary app settings so a quality
+// edit uses the profile endpoint (and does not re-initialize every service
+// client through the full settings endpoint). The eight bundle controls live
+// outside the main ladder tile, but are profile-owned just the same.
 const _QP_BUNDLE_CONTROL_IDS = new Set([
     'acoustid-require-verified', 'downsample-hires', 'audio-completeness-check',
     'import-replace-lower-quality', 'lossy-copy-enabled', 'lossy-copy-codec',
     'lossy-copy-bitrate', 'lossy-copy-delete-original',
 ]);
+const _QP_PROFILE_CONTROL_IDS = new Set([
+    ..._QP_BUNDLE_CONTROL_IDS,
+    'quality-fallback-enabled', 'quality-search-mode', 'quality-rank-candidates',
+    'quality-upgrade-policy', 'quality-upgrade-cutoff',
+]);
 
-// Show the "you are editing <profile>" banner when a profile-captured control
-// is edited while previewing somebody else's profile. Only a notice — the save
-// itself is left alone, because saveSettings already substitutes the real
-// default's values back in for exactly these keys.
-function _qpNudgeIfEditingForeignProfile(event) {
+// Route a Quality-page change to the profile editor's lightweight autosave.
+// Returning true lets the full-page autosave stop here: the profile endpoint
+// persists the complete bundle and, for the default row, mirrors its global
+// config keys server-side as well.
+function _qpHandleProfileControlChange(event) {
     const id = event && event.target && event.target.id;
-    if (!id || !_QP_BUNDLE_CONTROL_IDS.has(id)) return;
-    if (_qpEditingProfileId === null || _qpEditingProfileId === _qpDefaultProfileId()) return;
-    qpShowEditingBanner();
+    if (!id || !_QP_PROFILE_CONTROL_IDS.has(id)) return false;
+    debouncedSaveQualityProfile();
+    return true;
 }
 
 function debouncedAutoSaveSettings(event) {
@@ -107,7 +110,7 @@ function debouncedAutoSaveSettings(event) {
     // fields on load — those aren't user edits and must not trigger a full
     // save (which re-initializes every backend service client).
     if (window._suppressSettingsAutoSave) return;
-    _qpNudgeIfEditingForeignProfile(event);
+    if (_qpHandleProfileControlChange(event)) return;
     // ISOLATION: the video side reuses this shared settings page, so editing a
     // VIDEO field (TMDB key, region, autoplay…) would otherwise fire this MUSIC
     // auto-save — which reads the server toggle from the DOM and would persist
@@ -128,6 +131,7 @@ function debouncedAutoSaveSettings(event) {
 
 function handleManualSaveClick() {
     if (settingsAutoSaveTimer) clearTimeout(settingsAutoSaveTimer);
+    if (qualityProfileAutoSaveTimer) clearTimeout(qualityProfileAutoSaveTimer);
     saveSettings(false);
 }
 
@@ -2462,12 +2466,9 @@ function updateHybridSecondaryOptions() {
 let currentQualityProfile = null;
 let qualityProfileAutoSaveTimer = null;
 
-// Which profile the tiles currently show. null = "the live default", the
-// only state that existed before profiles were previewable — autosave keeps
-// writing straight into the active default/global config exactly as always.
-// Set to a specific id by previewQualityProfile() when the user clicks a
-// DIFFERENT (non-default) profile's row to look at/edit it; in that state
-// autosave must NOT touch the live default — see debouncedSaveQualityProfile.
+// Which non-default profile the editor currently shows. null means the active
+// default. This is an edit target, not an activation flag: selecting a profile
+// to edit never makes it the default, but every save goes back to this row.
 let _qpEditingProfileId = null;
 
 function _qpDefaultProfileId() {
@@ -2480,18 +2481,15 @@ function _qpDefaultProfileId() {
 function debouncedSaveQualityProfile() {
     if (window._suppressSettingsAutoSave) return;
     if (window._settingsLoadFailed) return;
-    // Previewing a specific NON-default profile: the legacy save endpoint
-    // below always writes the LIVE default row + pushes into global config —
-    // autosaving here would silently overwrite the active profile (and
-    // anything downloading right now under it) while the user is just
-    // looking at/tweaking a different one. Edits only persist once the user
-    // explicitly clicks that profile row's Update (✎) button.
-    if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
-        qpShowEditingBanner();
-        return;
-    }
     if (qualityProfileAutoSaveTimer) clearTimeout(qualityProfileAutoSaveTimer);
-    qualityProfileAutoSaveTimer = setTimeout(() => saveQualityProfile(), 800);
+    // Capture both target and values now. If the user switches profiles before
+    // the debounce expires, the pending write still belongs to the profile
+    // that was on screen when the edit happened instead of overwriting the
+    // newly selected profile.
+    const targetProfileId = _qpEditingProfileId ?? _qpDefaultProfileId();
+    const profile = collectFullQualityBundleFromUI();
+    qualityProfileAutoSaveTimer = setTimeout(
+        () => saveQualityProfile({ targetProfileId, profile }), 800);
 }
 
 async function loadQualityProfile() {
@@ -2501,7 +2499,10 @@ async function loadQualityProfile() {
 
         if (data.success) {
             currentQualityProfile = data.profile;
+            _qpEditingProfileId = null;
             populateQualityProfileUI(currentQualityProfile);
+            applyFullQualityBundleToDom(currentQualityProfile);
+            qpHideEditingBanner();
         }
     } catch (error) {
         console.error('Error loading quality profile:', error);
@@ -2763,9 +2764,8 @@ async function applyQualityPreset(presetName) {
     // clicking a Quick-Set button while just looking at a different profile
     // would silently destroy the real default's settings and then swap the
     // tiles to show it instead (looks like the preview "jumps" to a random
-    // profile). Load the preset's values locally instead — read-only, never
-    // touches the server — same as previewQualityProfile; it only persists
-    // once the user explicitly clicks that profile row's Update (✎).
+    // profile). Load the preset's values locally, then save the resulting full
+    // bundle through this profile's id-qualified endpoint.
     if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
         try {
             const response = await fetch('/api/quality-profile/presets');
@@ -2783,13 +2783,15 @@ async function applyQualityPreset(presetName) {
                 search_mode: uiState.search_mode,
                 rank_candidates_by_quality: uiState.rank_candidates_by_quality,
             };
+            currentQualityProfile = merged;
             window._suppressSettingsAutoSave = true;
             try {
                 populateQualityProfileUI(merged);
             } finally {
                 window._suppressSettingsAutoSave = false;
             }
-            showToast(`Previewing '${PRESET_LABELS[presetName] || presetName}' — click ✎ on the profile row to save it here`, 'success');
+            debouncedSaveQualityProfile();
+            showToast(`Applied '${PRESET_LABELS[presetName] || presetName}' to this profile`, 'success');
         } catch (error) {
             console.error('Error loading quality preset:', error);
             showToast('Failed to load preset', 'error');
@@ -2811,7 +2813,7 @@ async function applyQualityPreset(presetName) {
             } finally {
                 window._suppressSettingsAutoSave = false;
             }
-            renderCustomQualityProfiles(_qpProfileRows);
+            await loadCustomQualityProfiles();
             showToast(`Switched to '${PRESET_LABELS[presetName] || presetName}'`, 'success');
         } else {
             showToast(`Failed to apply preset: ${data.error}`, 'error');
@@ -2853,6 +2855,7 @@ async function resetActiveQualityPreset() {
             } finally {
                 window._suppressSettingsAutoSave = false;
             }
+            await loadCustomQualityProfiles();
             showToast(`Reset '${PRESET_LABELS[presetName] || presetName}' to defaults`, 'success');
         } else {
             showToast(`Failed to reset preset: ${data.error}`, 'error');
@@ -2887,34 +2890,40 @@ function collectQualityProfileFromUI() {
     };
 }
 
-async function saveQualityProfile() {
-    // Same guard as debouncedSaveQualityProfile, enforced here too — this is
-    // also called directly by the page-wide "Save Settings" button
-    // (saveSettings), which bypasses the debounce path entirely. Without
-    // this, clicking Save Settings for some unrelated setting while merely
-    // PREVIEWING a different profile would still silently push what's on
-    // screen into the live default. Returns true (not false/"failed") —
-    // the banner already explains the skip; saveSettings() would otherwise
-    // report it as an error toast, which it isn't.
-    if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
-        qpShowEditingBanner();
-        return true;
-    }
+async function saveQualityProfile({ targetProfileId, profile } = {}) {
     try {
-        const profile = collectQualityProfileFromUI();
+        const resolvedTargetId = targetProfileId ?? _qpEditingProfileId ?? _qpDefaultProfileId();
+        const payload = profile || collectFullQualityBundleFromUI();
 
-        const response = await fetch('/api/quality-profile', {
+        // Named-profile CRUD is the one endpoint that can save the complete
+        // Quality-page bundle to a specific row. The old singleton endpoint
+        // can only safely target the default and is retained as a defensive
+        // fallback while the profile list is unavailable.
+        const url = resolvedTargetId == null
+            ? '/api/quality-profile'
+            : `/api/quality-profile/custom/${resolvedTargetId}/update`;
+
+        const response = await fetch(url, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(profile)
+            body: JSON.stringify(payload)
         });
 
         const data = await response.json();
 
         if (data.success) {
-            currentQualityProfile = profile;
+            if (resolvedTargetId === (_qpEditingProfileId ?? _qpDefaultProfileId())) {
+                currentQualityProfile = payload;
+            }
+            if (Array.isArray(data.profiles)) {
+                _qpSetProfileRows(data.profiles);
+                renderCustomQualityProfiles(_qpProfileRows);
+                if (document.getElementById('qp-manager-overlay')) {
+                    renderQualityProfileManager();
+                }
+            }
             console.log('Quality profile saved successfully');
             return true;
         } else {
@@ -3114,15 +3123,13 @@ function renderCustomQualityProfiles(profiles) {
         };
         actions.appendChild(ren);
 
-        // Update: overwrite this profile's stored settings with whatever is
-        // currently on the page (edit-in-place, keeps the name). Allowed on
-        // every profile, including the starter ones — it's an overwrite,
-        // not a delete.
+        // Optional explicit save-now action. Normal edits already autosave to
+        // the selected row, and the page-wide Save Settings button does too.
         const upd = document.createElement('button');
         upd.type = 'button';
         upd.className = 'qp-profile-action qp-action-update';
         upd.textContent = '✎';
-        upd.title = `Update '${profile.name}' with the current page settings`;
+        upd.title = `Save the current Quality-page settings to '${profile.name}' now`;
         upd.onclick = (e) => {
             e.stopPropagation();
             updateCustomQualityProfile(profile.id, profile.name);
@@ -3289,6 +3296,7 @@ function applyFullQualityBundleToDom(profile) {
     set('import-replace-lower-quality', profile.replace_lower_quality);
     set('lossy-copy-enabled', profile.lossy_copy_enabled);
     set('lossy-copy-codec', profile.lossy_copy_codec);
+    updateLossyBitrateOptions();
     set('lossy-copy-bitrate', profile.lossy_copy_bitrate);
     set('lossy-copy-delete-original', profile.lossy_copy_delete_original);
     const lossyOptions = document.getElementById('lossy-copy-options');
@@ -3425,10 +3433,8 @@ function confirmSetDefaultQualityProfileById(profileId) {
 
 // Load a profile's settings into the tile editor for viewing/editing —
 // purely read-only against the DB (a dedicated GET, not the mutating
-// /apply endpoint) so it can never make the previewed profile the live
-// default or touch anything mid-download. Edits made while previewing are
-// local until the row's Update (✎) button explicitly saves them into THIS
-// profile — see debouncedSaveQualityProfile.
+// /apply endpoint) so selecting it can never make it the live default.
+// Subsequent edits autosave back to this id — see debouncedSaveQualityProfile.
 async function previewQualityProfile(profileId) {
     try {
         const response = await fetch(`/api/quality-profile/custom/${profileId}`);
@@ -3443,7 +3449,7 @@ async function previewQualityProfile(profileId) {
         // before previewing this profile was exactly the kind of drift that made
         // preset actions apply to the wrong thing.
         currentQualityProfile = data.profile;
-        _qpEditingProfileId = profileId;
+        _qpEditingProfileId = data.profile.is_default ? null : profileId;
         window._suppressSettingsAutoSave = true;
         try {
             populateQualityProfileUI(data.profile);
@@ -3452,7 +3458,8 @@ async function previewQualityProfile(profileId) {
             window._suppressSettingsAutoSave = false;
         }
         renderCustomQualityProfiles(_qpProfileRows);
-        qpShowEditingBanner();
+        if (_qpEditingProfileId === null) qpHideEditingBanner();
+        else qpShowEditingBanner();
     } catch (error) {
         console.error('Error previewing quality profile:', error);
         showToast('Failed to load profile', 'error');
@@ -3471,7 +3478,7 @@ function qpShowEditingBanner() {
     // The id not resolving means the cache is stale or the profile is gone —
     // showing a nameless "viewing this profile" is just confusing; hide
     // instead of guessing.
-    if (!profile) {
+    if (!profile || profile.is_default) {
         banner.style.display = 'none';
         return;
     }
@@ -3553,8 +3560,8 @@ async function toggleAutoImportQualityProfile(profileId) {
 // (Settings → Import, falls back to Default when unset). Both assignments
 // are also reachable
 // inline from the row list (the dot / the ⇩ button); this is the overview +
-// explanation surface, not a second way to edit a profile's own settings —
-// that only ever happens via previewQualityProfile + a row's Update (✎).
+// explanation surface, not a second profile editor — selecting a row on the
+// Quality page and changing its controls is the editing path.
 function qpManagerOverlay() {
     let overlay = document.getElementById('qp-manager-overlay');
     if (overlay) return overlay;
@@ -6785,7 +6792,16 @@ async function loadImageCacheStatus() {
         if (!data.success) return;
         const entries = document.getElementById('imgcache-entries');
         const size = document.getElementById('imgcache-size');
-        if (entries) entries.textContent = (data.entries || 0).toLocaleString();
+        if (entries) {
+            // A "pending" row is a registered URL nothing ever loaded. When it
+            // dominates the count, the URLs being handed out are changing
+            // between renders (a media-server auth salt used to rotate on every
+            // call), and the entry count alone hides that completely.
+            const pending = data.pending || 0;
+            entries.textContent = pending
+                ? `${(data.entries || 0).toLocaleString()} (${pending.toLocaleString()} pending)`
+                : (data.entries || 0).toLocaleString();
+        }
         if (size) {
             size.textContent = data.max_bytes
                 ? `${_imgCacheBytes(data.bytes)} of ${_imgCacheBytes(data.max_bytes)}`

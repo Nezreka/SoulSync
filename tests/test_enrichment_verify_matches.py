@@ -77,7 +77,18 @@ def _build_db(tmp_path):
         a3 = seed_artist(conn, server_id='a3', name='Radiohead')
         for artist_id, provider_id in ((a1, 'T-SMEAR'), (a2, 'T-SMEAR'),
                                        (a3, 'T-OK')):
-            set_library_v2_match(conn, 'artist', artist_id, 'tidal', provider_id)
+            if artist_id == a2:
+                # Seeded with raw SQL on purpose. `set_library_v2_match` now
+                # REFUSES to give one provider id to a second entity, which is
+                # the corruption this whole repair job exists to clean up — the
+                # writer can no longer create it, but databases that predate the
+                # guard still contain it.
+                conn.execute(
+                    "UPDATE lib2_artists SET external_ids=? WHERE id=?",
+                    ('{"tidal":"T-SMEAR"}', artist_id),
+                )
+            else:
+                set_library_v2_match(conn, 'artist', artist_id, 'tidal', provider_id)
             record_attempt(conn, entity_type='artist', entity_id=artist_id,
                            service='tidal', status='matched')
         album = seed_album(conn, server_id='al1', title='OK Computer', artist_id=a3)
@@ -132,10 +143,13 @@ def test_verify_resets_the_smear_cluster_and_degenerate_match_only(tmp_path):
 
 def test_verify_is_idempotent_and_service_scoped(tmp_path):
     db = _build_db(tmp_path)
-    # Another service's columns are untouched by a tidal repair.
+    # Another service's columns are untouched by a tidal repair. Seeded raw for
+    # the same reason as the tidal smear: the writer refuses to create it now.
     with db._get_connection() as conn:
         set_library_v2_match(conn, 'artist', 1, 'deezer', 'D-SMEAR')
-        set_library_v2_match(conn, 'artist', 2, 'deezer', 'D-SMEAR')
+        conn.execute(
+            "UPDATE lib2_artists SET external_ids=json_set("
+            "COALESCE(external_ids,'{}'), '$.deezer', 'D-SMEAR') WHERE id=2")
         conn.commit()
     db.verify_enrichment_matches('tidal')
     second = db.verify_enrichment_matches('tidal')

@@ -146,3 +146,113 @@ def test_the_rebuild_runs_only_once(tmp_path):
         "SELECT 1 FROM sqlite_master WHERE name='metadata_match_provenance_new'"
     ).fetchone()
     conn.close()
+
+
+# The triggers that used to fill this table are gone from the source, but an
+# install that ever ran a build which created them still carries them in
+# ``sqlite_master`` — nothing ever dropped them. They are not merely dead: the
+# rebuild above drops the table they write into, and SQLite reparses every
+# trigger in the schema on ``ALTER TABLE ... RENAME TO``. A stale trigger then
+# fails that reparse, the whole init raises, and the container cannot boot.
+_LEGACY_TRIGGER_TABLE = """
+    CREATE TABLE artists (
+        id INTEGER PRIMARY KEY, name TEXT, spotify_id TEXT,
+        spotify_match_status TEXT, spotify_last_attempted TIMESTAMP)
+"""
+_LEGACY_TRIGGERS = [
+    """CREATE TRIGGER metadata_match_artists_spotify_insert
+       AFTER INSERT ON artists
+       WHEN NEW.spotify_match_status='matched'
+        AND COALESCE(CAST(NEW.spotify_id AS TEXT), '') <> ''
+       BEGIN
+           INSERT INTO metadata_match_provenance(
+               entity_type, entity_id, service, origin, external_id,
+               matched_at, actor)
+           VALUES('artist', NEW.id, 'spotify', 'automatic',
+                  CAST(NEW.spotify_id AS TEXT),
+                  COALESCE(NEW.spotify_last_attempted, CURRENT_TIMESTAMP),
+                  'system');
+       END""",
+    """CREATE TRIGGER metadata_match_artists_spotify_clear
+       AFTER UPDATE OF spotify_id, spotify_match_status ON artists
+       WHEN COALESCE(NEW.spotify_match_status, '') <> 'matched'
+       BEGIN
+           DELETE FROM metadata_match_provenance
+            WHERE entity_type='artist' AND entity_id=NEW.id
+              AND service='spotify';
+       END""",
+]
+_OLD_PROVENANCE_TABLE = """
+    CREATE TABLE metadata_match_provenance (
+        entity_type TEXT NOT NULL, entity_id INTEGER NOT NULL,
+        service TEXT NOT NULL, origin TEXT NOT NULL, external_id TEXT,
+        matched_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        actor TEXT,
+        PRIMARY KEY (entity_type, entity_id, service),
+        CHECK (entity_type IN ('artist', 'album', 'track')),
+        CHECK (origin IN ('automatic', 'manual', 'legacy')))
+"""
+
+
+def _stale_trigger_database(path: str) -> None:
+    raw = sqlite3.connect(path)
+    raw.execute(_LEGACY_TRIGGER_TABLE)
+    raw.execute(_OLD_PROVENANCE_TABLE)
+    for statement in _LEGACY_TRIGGERS:
+        raw.execute(statement)
+    raw.execute(
+        "INSERT INTO metadata_match_provenance(entity_type, entity_id, service, "
+        "origin, external_id, actor) VALUES('artist', 7, 'spotify', 'automatic', "
+        "'sp-old', 'system')")
+    raw.commit()
+    raw.close()
+
+
+def _trigger_names(conn) -> set:
+    return {
+        row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger'").fetchall()
+    }
+
+
+def test_a_stale_trigger_does_not_break_the_rebuild(tmp_path):
+    """The boot failure: ``error in trigger metadata_match_artists_spotify_insert:
+    no such table: main.metadata_match_provenance``, raised by the RENAME, from
+    a trigger no running code creates any more."""
+    path = str(tmp_path / "stale.db")
+    _stale_trigger_database(path)
+
+    conn = MusicDatabase(path)._get_connection()
+    try:
+        assert not [n for n in _trigger_names(conn)
+                    if n.startswith("metadata_match_")]
+        assert dict(_row(conn, "artist", 7)) == {
+            "origin": "automatic", "external_id": "sp-old", "actor": "system"}
+    finally:
+        conn.close()
+
+
+def test_a_stale_trigger_is_dropped_even_without_a_rebuild(tmp_path):
+    """The trigger is a landmine independent of this table: it breaks the next
+    schema reparse from any migration, and it writes the legacy ``artist``
+    namespace that no Library-v2 reader asks for. A database whose CHECK is
+    already current must still lose it."""
+    path = str(tmp_path / "current.db")
+    MusicDatabase(path)          # builds the current schema
+    raw = sqlite3.connect(path)
+    raw.execute(_LEGACY_TRIGGER_TABLE.replace("CREATE TABLE artists",
+                                              "CREATE TABLE IF NOT EXISTS artists"))
+    for statement in _LEGACY_TRIGGERS:
+        raw.execute(statement)
+    raw.commit()
+    raw.close()
+
+    db = MusicDatabase(path)
+    conn = db._get_connection()
+    try:
+        db._add_metadata_match_provenance(conn.cursor())
+        conn.commit()
+        assert not [n for n in _trigger_names(conn)
+                    if n.startswith("metadata_match_")]
+    finally:
+        conn.close()

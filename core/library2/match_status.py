@@ -219,6 +219,117 @@ def _sync_attempt_ledger(
         logger.debug("no attempt ledger for provider %s", service)
 
 
+# Track ids that several catalogue rows may legitimately share, because the
+# provider keys them by RECORDING or by content rather than by release: one
+# MusicBrainz recording MBID covers the album version and the greatest-hits
+# version, and Last.fm/AudioDB/Genius key on artist+title. Enforcing uniqueness
+# there would refuse correct matches. Every other provider issues a per-release
+# track id, so two rows holding one is always a mistake.
+_SHARED_TRACK_ID_SERVICES = frozenset({"musicbrainz", "lastfm", "audiodb", "genius"})
+
+
+def _identity_must_be_unique(canonical: str, service: str) -> bool:
+    """Whether one entity of this kind may be the only holder of this id.
+
+    Artist and album ids name exactly one thing at every provider. Track ids
+    do not — see ``_SHARED_TRACK_ID_SERVICES``.
+    """
+    if canonical == "track":
+        return service not in _SHARED_TRACK_ID_SERVICES
+    return True
+
+
+class ProviderIdentityConflict(Exception):
+    """Another Library-v2 entity of the same kind already claims this id.
+
+    One provider release is one local entity. When two rows carry the same
+    provider id everything keyed on it collapses: the wishlist writes one row
+    for what the user sees as two releases, artwork and tracklists are fetched
+    for the wrong edition, and the dedupe/twin scans see a false duplicate. A
+    production report found 20 album provider-id groups shared across distinct
+    Library-v2 albums — original vs. slowed/sped-up editions of the same track,
+    and in one case two unrelated albums by two different artists.
+    """
+
+    def __init__(self, service: str, external_id: str, owner_id: int, entity_type: str):
+        self.service = service
+        self.external_id = external_id
+        self.owner_id = owner_id
+        self.entity_type = entity_type
+        super().__init__(
+            f"{service} id {external_id!r} already belongs to {entity_type} {owner_id}"
+        )
+
+
+def provider_id_owner(
+    conn: Any, entity_type: str, service: str, external_id: str,
+) -> Optional[int]:
+    """The Library-v2 entity that already claims ``external_id``, if any."""
+    canonical = _canonical(entity_type)
+    table = _TABLES[canonical]
+    service = str(service or "").strip().lower()
+    value = str(external_id or "").strip()
+    if not value:
+        return None
+    if service == "spotify":
+        predicate, params = "spotify_id = ?", (value,)
+    elif service == "musicbrainz":
+        predicate, params = "musicbrainz_id = ?", (value,)
+    else:
+        predicate = "json_extract(external_ids, '$.' || ?) = ?"
+        params = (service, value)
+    row = conn.execute(
+        f"SELECT id FROM {table} WHERE {predicate} LIMIT 1", params,
+    ).fetchone()
+    return int(row["id"]) if row else None
+
+
+def provider_id_conflicts(conn: Any, entity_type: str) -> List[Dict[str, Any]]:
+    """Every provider id currently held by MORE than one entity of this kind.
+
+    Read-only. The write-time guard above stops NEW conflicts; databases that
+    predate it still carry the old ones, and cleaning those means merging or
+    re-matching real catalogue rows — a decision for the user, not for a
+    startup migration. This reports them so that decision can be made with the
+    actual list in hand.
+    """
+    canonical = _canonical(entity_type)
+    table = _TABLES[canonical]
+    conflicts: List[Dict[str, Any]] = []
+    services = [
+        name for name, _label, entity_types in SERVICES
+        if canonical in entity_types and _identity_must_be_unique(canonical, name)
+    ]
+    for service in services:
+        if service == "spotify":
+            expression = "spotify_id"
+        elif service == "musicbrainz":
+            expression = "musicbrainz_id"
+        else:
+            expression = f"json_extract(external_ids, '$.{service}')"
+        try:
+            rows = conn.execute(
+                f"""SELECT {expression} AS external_id,
+                           GROUP_CONCAT(id) AS entity_ids, COUNT(*) AS holders
+                      FROM {table}
+                     WHERE {expression} IS NOT NULL AND {expression} <> ''
+                     GROUP BY {expression}
+                    HAVING COUNT(*) > 1""",
+            ).fetchall()
+        except Exception as exc:  # noqa: BLE001 — reporting must not raise
+            logger.debug("conflict scan failed for %s/%s: %s", canonical, service, exc)
+            continue
+        for row in rows:
+            conflicts.append({
+                "entity_type": canonical,
+                "service": service,
+                "external_id": row["external_id"],
+                "entity_ids": [int(x) for x in str(row["entity_ids"]).split(",") if x],
+                "holders": int(row["holders"]),
+            })
+    return conflicts
+
+
 def set_library_v2_match(
     conn: Any,
     entity_type: str,
@@ -227,8 +338,17 @@ def set_library_v2_match(
     external_id: Optional[str],
     *,
     actor: str = "admin",
+    steal: bool = False,
 ) -> None:
-    """Set or clear one explicitly qualified provider identity."""
+    """Set or clear one explicitly qualified provider identity.
+
+    ``steal`` decides what happens when another entity already holds the id.
+    Automated callers leave it False and get a :class:`ProviderIdentityConflict`
+    — a missing id is recoverable, a wrong one silently corrupts everything
+    downstream. A deliberate user match passes True, which MOVES the id: the
+    previous owner's claim is cleared in the same transaction, so the "one
+    provider release, one local entity" invariant holds either way.
+    """
 
     canonical = _canonical(entity_type)
     service = str(service or "").strip().lower()
@@ -247,7 +367,21 @@ def set_library_v2_match(
 
     ids = parse_external_ids(row["external_ids"])
     value = str(external_id).strip() if external_id not in (None, "") else None
-    if value:
+    if value and _identity_must_be_unique(canonical, service):
+        owner = provider_id_owner(conn, canonical, service, value)
+        if owner is not None and owner != int(entity_id):
+            if not steal:
+                raise ProviderIdentityConflict(service, value, owner, canonical)
+            # Clear the previous claim first, in this same transaction — an
+            # id that exists on two rows for even one statement is a state no
+            # reader should ever be able to observe.
+            set_library_v2_match(
+                conn, canonical, owner, service, None, actor=actor,
+            )
+            logger.info(
+                "Moved %s id %s from %s %s to %s %s",
+                service, value, canonical, owner, canonical, entity_id,
+            )
         ids[service] = value
     else:
         ids.pop(service, None)
@@ -302,5 +436,8 @@ def set_library_v2_match(
 
 __all__ = [
     "SERVICES", "album_match_bundle", "entity_match_status",
+    "ProviderIdentityConflict",
+    "provider_id_conflicts",
+    "provider_id_owner",
     "set_library_v2_match",
 ]

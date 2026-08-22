@@ -641,6 +641,15 @@ class ConfigManager:
                 # Comma-separated list of indexer IDs to limit searches to.
                 # Empty = search all enabled indexers.
                 "indexer_ids": "",
+                # Pacing, shared by music AND video (core.prowlarr_throttle).
+                # Prowlarr forwards every search straight to your indexers and
+                # shields them from nothing, so this is the only thing standing
+                # between a long wishlist drain and an indexer that stops
+                # answering. The arr stack paces its indexer queries; we have to
+                # be at least as well behaved.
+                # 0 on either knob disables that half of the budget.
+                "search_min_gap_seconds": 2.0,
+                "max_searches_per_minute": 20,
             },
             # Torrent client — receives .torrent / magnet URIs from the
             # torrent download plugin. ``type`` picks which adapter to

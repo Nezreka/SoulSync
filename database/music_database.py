@@ -3230,6 +3230,36 @@ class MusicDatabase:
         'artist', 'album', 'track',
     )
 
+    def _drop_retired_match_provenance_triggers(self, cursor):
+        """Remove the trigger set that used to fill this table.
+
+        Deleting the code that creates a trigger does not remove the trigger
+        from a database that already ran that code. Every install which booted
+        a build from before the legacy catalogue was retired still carries
+        ``metadata_match_<table>_<service>_{insert,update,clear}`` in its
+        schema, and they outlive their purpose twice over: they write
+        ``entity_type='artist'`` where every Library-v2 reader asks for
+        ``'lib2_artist'``, and they name ``metadata_match_provenance`` — the
+        table the rebuild below drops before renaming its replacement into
+        place. SQLite reparses every trigger in the schema on
+        ``ALTER TABLE ... RENAME TO``, so one stale trigger turns that rename
+        into ``error in trigger ...: no such table:
+        main.metadata_match_provenance`` and takes the whole startup migration
+        down with it — on every boot, because the failed migration rolls back
+        into exactly the state that caused it.
+        """
+        retired = [
+            row[0] for row in cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger'").fetchall()
+            if str(row[0] or "").startswith("metadata_match_")
+        ]
+        for name in retired:
+            cursor.execute(f'DROP TRIGGER IF EXISTS "{name}"')
+        if retired:
+            logger.info(
+                "Dropped %d retired metadata-match trigger(s): %s",
+                len(retired), ", ".join(sorted(retired)))
+
     def _add_metadata_match_provenance(self, cursor):
         """Persist who chose a provider identity for a catalogue row.
 
@@ -3246,6 +3276,7 @@ class MusicDatabase:
         caller's ``except`` — no manual match has ever been recorded. An
         existing table is rebuilt once, carrying its rows over.
         """
+        self._drop_retired_match_provenance_triggers(cursor)
         allowed = ", ".join(f"'{name}'" for name in self.PROVENANCE_ENTITY_TYPES)
         create_sql = f"""
             CREATE TABLE IF NOT EXISTS {{name}} (
@@ -11658,13 +11689,14 @@ class MusicDatabase:
 
                 cursor.execute(query, params)
                 rows = cursor.fetchall()
-                
+
                 wishlist_tracks = []
+                unreadable: List[int] = []
                 for row in rows:
                     try:
                         spotify_data = json.loads(row['spotify_data'])
                         source_info = json.loads(row['source_info']) if row['source_info'] else {}
-                        
+
                         wishlist_tracks.append({
                             'id': row['id'],
                             'spotify_track_id': row['spotify_track_id'],
@@ -11678,11 +11710,27 @@ class MusicDatabase:
                             'quality_profile_id': row['quality_profile_id'],
                         })
                     except json.JSONDecodeError as e:
-                        logger.error(f"Error parsing wishlist track data: {e}")
+                        # Naming the row matters: a skipped row still counts in
+                        # `get_wishlist_count` (a plain SQL COUNT), so an
+                        # unparsable payload makes the badge and the list
+                        # disagree permanently — and the old message said
+                        # neither which row nor how many.
+                        unreadable.append(row['id'])
+                        logger.error(
+                            "Wishlist row %s has unreadable JSON and is being skipped: %s",
+                            row['id'], e,
+                        )
                         continue
-                
+
+                if unreadable:
+                    logger.warning(
+                        "Wishlist: %s of %s stored row(s) could not be parsed and are "
+                        "hidden from the track list (ids: %s)",
+                        len(unreadable), len(rows),
+                        ", ".join(str(i) for i in unreadable[:20]),
+                    )
                 return wishlist_tracks
-                
+
         except Exception as e:
             logger.error(f"Error getting wishlist tracks: {e}")
             return []
@@ -14980,17 +15028,20 @@ class MusicDatabase:
         n = ' '.join(n.split())  # collapse whitespace
         return n
 
-    # Known placeholder/default images that should be treated as "no image"
-    _PLACEHOLDER_IMAGES = {
-        '2a96cbd8b46e442fc41c2b86b821562f',  # Last.fm default star
-    }
-
     @classmethod
     def _is_placeholder_image(cls, url: str) -> bool:
-        """Check if an image URL is a known service placeholder."""
+        """Check if an image URL is a known service placeholder.
+
+        Empty counts as placeholder HERE (callers use it to decide whether to
+        store an image at all), which is why this wraps the shared predicate
+        rather than being it — see ``core.metadata.artwork``, the one list of
+        known placeholder images.
+        """
+        from core.metadata.artwork import is_placeholder_image_url
+
         if not url:
             return True
-        return any(ph in url for ph in cls._PLACEHOLDER_IMAGES)
+        return is_placeholder_image_url(url)
 
     def upsert_liked_artist(self, artist_name: str, source_service: str,
                             source_id: str = None, source_id_type: str = None,
@@ -17305,7 +17356,8 @@ class MusicDatabase:
             return ["(profile_id = ? OR profile_id IS NULL)"], [1]
         return ["profile_id = ?"], [int(profile_id)]
 
-    def get_sync_history(self, source=None, page=1, limit=20, profile_id=None):
+    def get_sync_history(self, source=None, page=1, limit=20, profile_id=None,
+                         sync_type=None):
         """Return (entries, total) for sync_history, newest first. Full tracks_json excluded from list."""
         try:
             conn = self._get_connection()
@@ -17315,6 +17367,22 @@ class MusicDatabase:
             if source:
                 conditions.append("source = ?")
                 params.append(source)
+            if sync_type:
+                # Filtered HERE, not by the caller after the fact. The dashboard
+                # band used to ask for 10 rows and then drop the album ones in
+                # javascript, so five album downloads left it five playlist runs
+                # to match eight schedules against, and three playlists reported
+                # "no runs yet" while their pipelines were completing fine
+                # (Boulder, Aug 2026). A filter after LIMIT is not a filter.
+                #
+                # NULL sync_type is legacy playlist history, so it rides along
+                # with 'playlist' exactly as the client-side filter did.
+                if sync_type == 'playlist':
+                    conditions.append("(sync_type = ? OR sync_type IS NULL OR sync_type = '')")
+                    params.append(sync_type)
+                else:
+                    conditions.append("sync_type = ?")
+                    params.append(sync_type)
             owner_conditions, owner_params = self._sync_history_owner_conditions(profile_id)
             conditions += owner_conditions
             params += owner_params

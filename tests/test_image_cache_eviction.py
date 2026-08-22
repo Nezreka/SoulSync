@@ -181,3 +181,67 @@ def test_a_prune_failure_never_breaks_the_image_being_served(tmp_path, monkeypat
         assert served.path.exists()
     finally:
         mod._PRUNE_EVERY_N_STORES = original
+
+
+# --- pending registrations -------------------------------------------------
+# A `pending` row is written by `cache_url_for` every time a URL is handed to a
+# browser; it only ever becomes ok/failed if something actually requests it.
+# Those rows were created with `expires_at = 0` and `prune()` only ever deleted
+# rows with `expires_at > 0`, so a registration nobody loaded was immortal —
+# and with the size cap disabled (`max_cache_mb = 0`) nothing else could reclaim
+# it either. A production cache held 857 rows of which 602 were pending.
+
+def test_a_registration_nobody_loads_expires(tmp_path):
+    cache = _cache(tmp_path, pending_ttl_seconds=100)
+    cache.cache_url_for("https://img.example.test/never-loaded.jpg")
+    assert cache.stats()["pending"] == 1
+
+    assert cache.prune(now=_now(cache) + 1000)["expired"] == 1
+    assert cache.stats()["entries"] == 0
+
+
+def test_a_fresh_registration_survives(tmp_path):
+    cache = _cache(tmp_path, pending_ttl_seconds=100_000)
+    cache.cache_url_for("https://img.example.test/soon.jpg")
+    cache.prune()
+    assert cache.stats()["pending"] == 1
+
+
+def test_pending_rows_are_reclaimed_even_with_the_size_cap_disabled(tmp_path):
+    """`max_cache_mb = 0` is a supported setting ("no size limit"), and it was
+    the production configuration. It must not also mean "never reclaim"."""
+    cache = _cache(tmp_path, max_cache_bytes=0, pending_ttl_seconds=1)
+    for i in range(5):
+        cache.cache_url_for(f"https://img.example.test/p{i}.jpg")
+    assert cache.prune(now=_now(cache) + 100)["expired"] == 5
+
+
+def test_legacy_pending_rows_without_an_expiry_still_drain(tmp_path):
+    """Rows written before pending registrations had an expiry sit at
+    `expires_at = 0`, where the TTL query cannot see them at all."""
+    cache = _cache(tmp_path, pending_ttl_seconds=10)
+    cache.cache_url_for("https://img.example.test/legacy.jpg")
+    with cache._connect() as conn:            # simulate the pre-fix row shape
+        conn.execute("UPDATE image_cache SET expires_at = 0")
+        conn.commit()
+
+    assert cache.prune(now=_now(cache) + 100)["expired"] == 1
+    assert cache.stats()["entries"] == 0
+
+
+def test_registering_a_url_again_never_shortens_a_real_cached_image(tmp_path):
+    """`cache_url_for` runs on every render, long after the image was fetched.
+    Renewing a pending lease must not overwrite an `ok` row's full TTL with the
+    much shorter pending one."""
+    cache = _cache(tmp_path, pending_ttl_seconds=1)
+    url = "https://img.example.test/real.jpg"
+    cache.get_url(url)                          # -> status ok, full TTL
+    cache.cache_url_for(url)                    # re-offered to the browser
+
+    assert cache.prune(now=_now(cache) + 100)["expired"] == 0
+    assert cache.stats()["ok"] == 1
+
+
+def _now(cache):
+    import time
+    return time.time()

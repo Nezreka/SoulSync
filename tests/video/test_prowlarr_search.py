@@ -58,7 +58,8 @@ def _patch(monkeypatch, per_type, configured=True):
         def is_configured(self):
             return configured
 
-        def _search_sync(self, q, cats, ids, limit, search_type="search", extra_params=None):
+        def _search_sync(self, q, cats, ids, limit, search_type="search", extra_params=None,
+                         max_wait_seconds=None):
             calls.append({"q": q, "type": search_type, "cats": cats, "extra": list(extra_params or [])})
             return list(per_type.get(search_type, []))
 
@@ -103,7 +104,8 @@ def test_one_strategy_failing_still_returns_the_other(monkeypatch):
         def is_configured(self):
             return True
 
-        def _search_sync(self, q, cats, ids, limit, search_type="search", extra_params=None):
+        def _search_sync(self, q, cats, ids, limit, search_type="search", extra_params=None,
+                         max_wait_seconds=None):
             if search_type == "tvsearch":
                 raise RuntimeError("indexer timeout")
             return list(good)

@@ -67134,6 +67134,12 @@ body.max-performance #page-particles-canvas {
     overflow: hidden; text-overflow: ellipsis; }
 .wl-list-track-album { color: rgba(255,255,255,0.42); font-size: 11.5px; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
+/* A wishlist row that is a QUALITY UPGRADE of a file already on disk, not a
+   missing track. Without it, a profile change that queues hundreds of owned
+   tracks reads as the wishlist duplicating the library. */
+.wl-list-upgrade { display: inline-block; margin-right: 6px; padding: 0 5px;
+    border-radius: 4px; background: rgba(96,165,250,0.14); color: #93c5fd;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.02em; vertical-align: 1px; }
 .wl-list-tries { font-size: 11.5px; color: rgba(255,255,255,0.4); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .wl-list-tries--failing { color: #fbbf24; font-weight: 600; }
 .wl-list-last { font-size: 11.5px; color: rgba(255,255,255,0.35); white-space: nowrap;

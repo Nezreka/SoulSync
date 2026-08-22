@@ -184,10 +184,16 @@ def _project(r: Any, url: str, want_proto: str) -> dict:
 def prowlarr_search(scope: str, title: Any, *, year: Any = None, season: Any = None,
                     episode: Any = None, source: str = "torrent", imdb_id: Any = None,
                     tmdb_id: Any = None, tvdb_id: Any = None, air_date: Any = None,
-                    absolute: Any = None, series_type: Any = None) -> dict:
+                    absolute: Any = None, series_type: Any = None,
+                    max_wait_seconds: Any = None) -> dict:
     """Search Prowlarr for a video release with the multi-strategy (structured + text)
     approach. ``source`` picks the protocol to keep (``torrent`` | ``usenet``). Returns
-    ``{configured, error?, hits:[...]}`` — the hit shape ``_evaluate_hits`` consumes."""
+    ``{configured, error?, hits:[...]}`` — the hit shape ``_evaluate_hits`` consumes.
+
+    ``max_wait_seconds`` bounds how long this will sit in the shared Prowlarr
+    budget (core.prowlarr_throttle) before giving up. Pass it from anything a
+    person is waiting on: the background drain is happy to queue, a manual
+    search should say "busy" rather than hold a request worker for a minute."""
     client = _client()
     if not client.is_configured():
         return {"configured": False, "hits": []}
@@ -203,7 +209,9 @@ def prowlarr_search(scope: str, title: Any, *, year: Any = None, season: Any = N
     def _run(strat):
         st_type, q, extra = strat
         try:
-            return client._search_sync(q, cats, ids, 100, search_type=st_type, extra_params=extra)
+            return client._search_sync(q, cats, ids, 100, search_type=st_type,
+                                       extra_params=extra,
+                                       max_wait_seconds=max_wait_seconds)
         except Exception as e:   # noqa: BLE001 - one strategy failing shouldn't sink the rest
             logger.warning("prowlarr %s search failed for %r: %s", st_type, q, e)
             return e

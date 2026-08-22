@@ -4670,7 +4670,7 @@
 
                             <!-- Right: detached, sticky Quality Profiles panel — everything on
                                  the 4 tiles to the left is saved under whichever profile is
-                                 active here. Always visible (no collapse), protruding to the
+                                 selected here for editing. Always visible (no collapse), protruding to the
                                  right of the settings column on wide screens so it never takes
                                  width away from the tiles. -->
                             <div class="qp-side-panel" id="qp-side-panel" data-stg="quality">
@@ -4678,9 +4678,9 @@
                                     <h3 class="qp-side-panel-title">Quality Profiles</h3>
                                     <button type="button" class="qp-manage-btn" onclick="openQualityProfileManager()">Manage</button>
                                 </div>
-                                <p class="qp-side-panel-hint">Click a profile's name to view/edit its settings on the left (this alone never activates it). Per row: ● set as the active default, ✏ rename, ✎ save the settings shown on the left into this profile, ⇩ use for Auto-Import instead of the default, × delete. "Manage" above shows what's active for what.</p>
+                                <p class="qp-side-panel-hint">Click a profile's name to view/edit its settings on the left. Changes autosave to that profile, and Save Settings saves it too; viewing never activates it. Per row: ● set as active default, ✏ rename, ✎ save now, ⇩ use for Auto-Import, × delete.</p>
                                 <div class="qp-editing-banner" id="qp-editing-banner" style="display:none">
-                                    Viewing <strong class="qp-editing-banner-name">this profile</strong> — not the active default. Any quality setting you change on this page only saves into it once you click its ✎.
+                                    Editing <strong class="qp-editing-banner-name">this profile</strong> — not the active default. Changes autosave to this profile; Save Settings saves it too.
                                 </div>
                                 <div class="qp-profile-list" id="qp-profile-list">
                                     <!-- rows injected by renderCustomQualityProfiles() -->

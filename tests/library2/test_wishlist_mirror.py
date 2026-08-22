@@ -197,3 +197,57 @@ def test_upgrade_payload_never_sets_the_legacy_enhance_flag(imported_conn):
     assert source_info["upgrade_check"] is True
     assert source_info.get("original_file_path")
     assert "enhance" not in source_info
+
+
+def test_payload_album_carries_images(imported_conn):
+    """Library-v2 wishlist rows used to carry no `album.images` at all, so the
+    UI (which reads `images[0].url`) drew a blank tile for every one of them —
+    373 of 611 rows in the 2026-08-22 production report — and the import
+    pipeline, which reads the same slot for cover.jpg, had nothing to work
+    from either."""
+    conn = imported_conn
+    track_id = _seed(conn, policy="acceptable", with_file=False)
+    album_id = conn.execute(
+        "SELECT album_id FROM lib2_tracks WHERE id=?", (track_id,)).fetchone()[0]
+
+    payload = track_wishlist_payload(conn, track_id)
+    images = payload["album"]["images"]
+    assert images, "a Library-v2 wishlist payload must never be image-less"
+    assert images[0]["url"] == f"/api/library/v2/artwork/album/{album_id}"
+
+
+def test_payload_album_images_lead_with_the_local_endpoint(imported_conn):
+    """Same precedence as the Library v2 pages: the locally cached copy is the
+    primary url, the provider CDN cover only stands in while a cold build runs.
+    The import pipeline reads the same list and must take the CDN entry, which
+    is why it asks for the first FETCHABLE url rather than images[0]."""
+    conn = imported_conn
+    track_id = _seed(conn, policy="acceptable", with_file=False)
+    album_id = conn.execute(
+        "SELECT album_id FROM lib2_tracks WHERE id=?", (track_id,)).fetchone()[0]
+    conn.execute("UPDATE lib2_albums SET image_url=? WHERE id=?",
+                 ("https://i.scdn.co/image/cover", album_id))
+    conn.commit()
+
+    images = track_wishlist_payload(conn, track_id)["album"]["images"]
+    assert [i["url"] for i in images] == [
+        f"/api/library/v2/artwork/album/{album_id}", "https://i.scdn.co/image/cover",
+    ]
+
+    from core.library2.wishlist_art import first_fetchable_image_url
+    assert first_fetchable_image_url(images) == "https://i.scdn.co/image/cover"
+
+
+def test_payload_album_images_reject_a_media_server_cover(imported_conn):
+    """A `/rest/..` cover only loads if the browser can reach Navidrome itself;
+    it must never be the primary image."""
+    conn = imported_conn
+    track_id = _seed(conn, policy="acceptable", with_file=False)
+    album_id = conn.execute(
+        "SELECT album_id FROM lib2_tracks WHERE id=?", (track_id,)).fetchone()[0]
+    conn.execute("UPDATE lib2_albums SET image_url=? WHERE id=?",
+                 ("/rest/getCoverArt.view?id=al-1", album_id))
+    conn.commit()
+
+    images = track_wishlist_payload(conn, track_id)["album"]["images"]
+    assert images[0]["url"] == f"/api/library/v2/artwork/album/{album_id}"

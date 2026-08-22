@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.2.3"
+_SOULSYNC_BASE_VERSION = "3.2.4"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -20830,11 +20830,16 @@ def get_sync_history():
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 20))
         source = request.args.get('source') or None
+        # 'playlist' also returns legacy rows with no sync_type. Filtering here
+        # rather than in the caller is the point: a client that fetches N rows
+        # and then discards the album ones has fewer than N of what it asked for.
+        sync_type = request.args.get('sync_type') or None
 
         db = MusicDatabase()
         profile_id = get_current_profile_id()
         entries, total = db.get_sync_history(
-            source=source, page=page, limit=limit, profile_id=profile_id
+            source=source, page=page, limit=limit, profile_id=profile_id,
+            sync_type=sync_type,
         )
         stats = db.get_sync_history_stats(profile_id=profile_id)
 
@@ -34241,8 +34246,20 @@ def serve_cached_image(cache_key):
         response.headers['X-SoulSync-Image-Cache'] = cached.status
         return response
     except Exception as exc:
-        logger.debug("cached image serve failed for %s: %s", cache_key, exc)
-        return '', 404
+        # An empty 404 made every distinct failure look identical from the
+        # browser — "key not found", "upstream refused", "host unreachable" and
+        # "not an image" were indistinguishable, so a production report could
+        # only say "218 images 404" without saying why. The reason travels in a
+        # header (secrets redacted) rather than a body so nothing about the
+        # response contract changes for the <img> that requested it.
+        from core.metadata.artwork import _redact_url_secrets
+        reason = ' '.join(_redact_url_secrets(str(exc)).split())[:200] \
+            or exc.__class__.__name__
+        logger.debug("cached image serve failed for %s: %s", cache_key, reason)
+        response = Response('', status=404)
+        response.headers['X-SoulSync-Image-Error'] = reason
+        response.headers['Cache-Control'] = 'no-store'
+        return response
 
 
 from core.artists.map import (
