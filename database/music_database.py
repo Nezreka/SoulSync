@@ -19193,7 +19193,33 @@ class MusicDatabase:
                            -- casing, and normalising at query time is a full scan
                            -- of `tracks` per row. Free to read — same scan, one
                            -- more CASE.
-                           SUM(CASE WHEN mpt.extra_data LIKE '%"in_library": true%' THEN 1 ELSE 0 END) as in_library,
+                           -- THE FLAG FIRST, THE JOIN ONLY AS FALLBACK.
+                           --
+                           -- The flag is what the sync matcher decided, and it is
+                           -- right about the cases a join cannot reach:
+                           -- collaborations and casing. But it only exists for
+                           -- playlists synced since it was added, so dropping the
+                           -- join outright regressed the id-first fix that landed
+                           -- for the 45/50 Hot Hits undercount.
+                           --
+                           -- So: trust the flag where there is one, including when
+                           -- it says NOT owned, and fall back to the old join only
+                           -- for tracks nobody has checked. The expensive branch
+                           -- therefore stops running for a playlist the moment it
+                           -- syncs once.
+                           SUM(CASE
+                               WHEN mpt.extra_data LIKE '%"in_library": true%' THEN 1
+                               WHEN mpt.extra_data LIKE '%"library_checked_at"%' THEN 0
+                               WHEN (
+                                   (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
+                                    AND EXISTS (SELECT 1 FROM tracks ti
+                                                WHERE ti.spotify_track_id = mpt.source_track_id))
+                                   OR EXISTS (SELECT 1 FROM artists a
+                                              JOIN tracks t ON t.artist_id = a.id
+                                              WHERE a.name = mpt.artist_name
+                                                AND t.title = mpt.track_name)
+                               ) THEN 1
+                               ELSE 0 END) as in_library,
                            -- How many rows have EVER been checked. Without this a
                            -- never-synced playlist reads as "you own none of it"
                            -- rather than "nobody has looked".
