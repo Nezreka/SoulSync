@@ -298,7 +298,14 @@ export function autoSyncCardRows(state: AutoSyncSeamState, nowMs: number): AutoS
     push(key, s.automation_id, s.automation_name, intervalLabel(s.hours), s.enabled, s.next_run);
   }
   for (const [key, s] of Object.entries(state.weeklySchedules || {})) {
-    push(key, s.automation_id, s.automation_name, weeklyLabel(s.time, s.days), s.enabled, s.next_run);
+    push(
+      key,
+      s.automation_id,
+      s.automation_name,
+      weeklyLabel(s.time, s.days),
+      s.enabled,
+      s.next_run,
+    );
   }
 
   const sortStamp = (r: AutoSyncCardRow) => {

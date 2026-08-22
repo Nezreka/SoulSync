@@ -128,7 +128,12 @@ describe('liveDetailLines', () => {
           source: 'Soulseek',
           username: 'slow_peer',
           filename: 'a.flac',
-          picked: { quality: 'flac', queue_length: 40, free_upload_slots: 0, upload_speed: 2097152 },
+          picked: {
+            quality: 'flac',
+            queue_length: 40,
+            free_upload_slots: 0,
+            upload_speed: 2097152,
+          },
           slskd_state: 'Queued, Remotely',
           queued_seconds: 45,
           tried_sources: 3,

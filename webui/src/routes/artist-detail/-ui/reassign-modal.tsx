@@ -1,12 +1,7 @@
 import { useEffect, useState } from 'react';
 
-import type {
-  ReassignAlbum,
-  ReassignArtist,
-  ReassignPreview,
-} from '../-artist-detail.reassign';
+import type { ReassignAlbum, ReassignArtist, ReassignPreview } from '../-artist-detail.reassign';
 
-import { fetchReidentifySources } from '../-artist-detail.reidentify';
 import {
   albumBits,
   applyReassign,
@@ -16,6 +11,7 @@ import {
   previewReassign,
   searchReassignArtists,
 } from '../-artist-detail.reassign';
+import { fetchReidentifySources } from '../-artist-detail.reidentify';
 
 /**
  * Reassign an album to a different artist.

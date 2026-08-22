@@ -41,9 +41,7 @@ function settle() {
 
 function mount(anchor?: HTMLElement | null) {
   const onClose = vi.fn();
-  const hook = renderHook(() =>
-    usePopoverDismiss({ ref: { current: popover }, anchor, onClose }),
-  );
+  const hook = renderHook(() => usePopoverDismiss({ ref: { current: popover }, anchor, onClose }));
   settle();
   return { onClose, ...hook };
 }

@@ -195,7 +195,12 @@ export function lbCoverageCounts(input: LbProgressInput): LbCoverageCounts | nul
     const matched = sp.matched_tracks || sp.spotify_matches || 0;
     const total = sp.total_tracks || sp.spotify_total || 0;
     const failed = sp.failed_tracks !== undefined ? sp.failed_tracks : Math.max(0, total - matched);
-    return { total, matched, failed, percentage: total > 0 ? Math.round((matched / total) * 100) : 0 };
+    return {
+      total,
+      matched,
+      failed,
+      percentage: total > 0 ? Math.round((matched / total) * 100) : 0,
+    };
   }
   const total = input.spotifyTotal || 0;
   const matched = input.spotifyMatches || 0;

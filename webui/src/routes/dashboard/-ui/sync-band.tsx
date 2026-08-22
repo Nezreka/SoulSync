@@ -107,10 +107,7 @@ function useSyncBand() {
   }, [loadAll, loadHistory]);
 
   const scheduleRows = useMemo(() => (seam ? autoSyncCardRows(seam, nowMs) : []), [seam, nowMs]);
-  const rows = useMemo(
-    () => syncBandRows(scheduleRows, entries ?? []),
-    [scheduleRows, entries],
-  );
+  const rows = useMemo(() => syncBandRows(scheduleRows, entries ?? []), [scheduleRows, entries]);
 
   // While a pipeline runs its phase/progress must move — a short loop that
   // exists ONLY while a running row is present.
@@ -236,31 +233,28 @@ function useSyncBand() {
   }, []);
 
   /** Delete a manual run's history entry — the 200ms fade, state-driven. */
-  const removeEntry = useCallback(
-    async (id: number | string) => {
-      setFadingIds((prev) => new Set(prev).add(id));
-      const unfade = () =>
-        setFadingIds((prev) => {
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
-      try {
-        const resp = await fetch(`/api/sync/history/${id}`, { method: 'DELETE' });
-        if (resp.ok) {
-          setTimeout(() => {
-            setEntries((prev) => (prev ? prev.filter((v) => v.id !== id) : prev));
-            unfade();
-          }, 200);
-        } else {
+  const removeEntry = useCallback(async (id: number | string) => {
+    setFadingIds((prev) => new Set(prev).add(id));
+    const unfade = () =>
+      setFadingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    try {
+      const resp = await fetch(`/api/sync/history/${id}`, { method: 'DELETE' });
+      if (resp.ok) {
+        setTimeout(() => {
+          setEntries((prev) => (prev ? prev.filter((v) => v.id !== id) : prev));
           unfade();
-        }
-      } catch {
+        }, 200);
+      } else {
         unfade();
       }
-    },
-    [],
-  );
+    } catch {
+      unfade();
+    }
+  }, []);
 
   return {
     seamPhase,
@@ -504,12 +498,16 @@ export function SyncBand() {
       <header className="dash-card__head">
         <h3 className="dash-card__title">
           Sync
-          {scheduled > 0 ? <span className="autosync-count-pill">{scheduled} scheduled</span> : null}
+          {scheduled > 0 ? (
+            <span className="autosync-count-pill">{scheduled} scheduled</span>
+          ) : null}
           {activeSyncs > 0 ? (
             <span className="dash-syncs-live">{activeSyncs} syncing now</span>
           ) : null}
         </h3>
-        <p className="dash-card__sub">Your playlists — what&apos;s scheduled, what ran, what you own.</p>
+        <p className="dash-card__sub">
+          Your playlists — what&apos;s scheduled, what ran, what you own.
+        </p>
         <button type="button" className="autosync-manage-btn" onClick={() => openBoard(loadAll)}>
           Manage
         </button>
@@ -523,7 +521,11 @@ export function SyncBand() {
                 Auto-Sync refreshes a playlist, hunts its missing tracks, and pushes it to your
                 server — on a schedule you set.
               </span>
-              <button type="button" className="autosync-empty-cta" onClick={() => openBoard(loadAll)}>
+              <button
+                type="button"
+                className="autosync-empty-cta"
+                onClick={() => openBoard(loadAll)}
+              >
                 Set one up
               </button>
             </div>

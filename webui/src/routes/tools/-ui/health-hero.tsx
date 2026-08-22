@@ -11,9 +11,9 @@
  * this file is the rendering of it.
  */
 
+import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
 import type { RepairJobRun } from '../-tools.types';
 
-import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
 import {
   contributionSegments,
   findingsTrend,

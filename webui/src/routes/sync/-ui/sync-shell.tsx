@@ -190,18 +190,18 @@ export function SyncShell({
                 {/* Divides the two actions that CHANGE something from the four
                     that only report what already happened. */}
                 {index === 1 && <span className="sync-header-divider" />}
-              <button
-                type="button"
-                className={`btn btn--sm btn--secondary sync-history-btn${
-                  action.key === 'auto-sync' ? ' auto-sync-manager-btn' : ''
-                }`}
-                title={action.title}
-                onClick={() => {
-                  runHeaderAction(action.key, onAutoSync, onActivity);
-                }}
-              >
-                {action.label}
-              </button>
+                <button
+                  type="button"
+                  className={`btn btn--sm btn--secondary sync-history-btn${
+                    action.key === 'auto-sync' ? ' auto-sync-manager-btn' : ''
+                  }`}
+                  title={action.title}
+                  onClick={() => {
+                    runHeaderAction(action.key, onAutoSync, onActivity);
+                  }}
+                >
+                  {action.label}
+                </button>
               </Fragment>
             ))}
           </div>

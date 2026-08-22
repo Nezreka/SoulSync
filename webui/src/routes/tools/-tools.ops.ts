@@ -131,7 +131,11 @@ export function jobSchedule(job: RepairJob, now: number = Date.now()): JobSchedu
     // Under an interval's grace, "due" is the honest word; a job that has
     // been waiting days is a different story and should look like one.
     if (overdue >= Math.max(2, (job.interval_hours || 24) * 0.5)) {
-      return { state: 'overdue', label: `overdue by ${roughDuration(overdue)}`, overdueHours: overdue };
+      return {
+        state: 'overdue',
+        label: `overdue by ${roughDuration(overdue)}`,
+        overdueHours: overdue,
+      };
     }
     return { state: 'due', label: 'due now' };
   }
@@ -187,7 +191,9 @@ export function jobFamilies(jobs: readonly RepairJob[], now: number = Date.now()
       running: sorted.filter((job) => job.is_running).length,
       waiting: sorted.filter((job) => {
         const schedule = jobSchedule(job, now);
-        return schedule.state === 'due' || schedule.state === 'overdue' || schedule.state === 'never';
+        return (
+          schedule.state === 'due' || schedule.state === 'overdue' || schedule.state === 'never'
+        );
       }).length,
       pending: sorted.reduce((sum, job) => sum + (job.pending_findings_count || 0), 0),
     });
@@ -218,11 +224,7 @@ export function familySummary(family: JobFamily): string {
 // ── Sparkline source ─────────────────────────────────────────────────────────
 
 /** Findings-per-run for one job, oldest → newest, from the shared history. */
-export function jobTrend(
-  runs: readonly RepairJobRun[],
-  jobId: string,
-  limit = 12,
-): number[] {
+export function jobTrend(runs: readonly RepairJobRun[], jobId: string, limit = 12): number[] {
   return runs
     .filter((run) => run.job_id === jobId)
     .slice(0, limit)
@@ -232,7 +234,10 @@ export function jobTrend(
 
 /** The job the page would point at first: enabled, most overdue, and with
  *  something to show for it. Null when nothing is waiting. */
-export function mostOverdueJob(jobs: readonly RepairJob[], now: number = Date.now()): RepairJob | null {
+export function mostOverdueJob(
+  jobs: readonly RepairJob[],
+  now: number = Date.now(),
+): RepairJob | null {
   let best: RepairJob | null = null;
   let worst = 0;
   for (const job of jobs) {

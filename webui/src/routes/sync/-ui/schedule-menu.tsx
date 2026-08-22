@@ -19,14 +19,13 @@ import { useRef, useState } from 'react';
 
 import type { MirroredRow } from '../-sync.autosync';
 
-import { usePopoverDismiss } from './use-popover-dismiss';
-import { usePopoverPosition } from './use-popover-position';
-
 import {
   AUTO_SYNC_BUCKETS,
   autoSyncIntervalLabel,
   autoSyncParseCustomInterval,
 } from '../-sync.autosync';
+import { usePopoverDismiss } from './use-popover-dismiss';
+import { usePopoverPosition } from './use-popover-position';
 
 /** The day-sets worth a one-click preset; everything else is Custom. */
 export const SCHEDULE_WEEKLY_PRESETS: readonly { label: string; days: string[] }[] = [
@@ -107,8 +106,8 @@ export function ScheduleMenu({
 
       {custom === null ? (
         // Ticked only when the current interval is NOT one of the presets,
-          // which is exactly when 'custom' is the true answer.
-          item('Custom interval…', hours !== null && !AUTO_SYNC_BUCKETS.includes(hours), () => {
+        // which is exactly when 'custom' is the true answer.
+        item('Custom interval…', hours !== null && !AUTO_SYNC_BUCKETS.includes(hours), () => {
           setCustom(String(hours ?? 6));
         })
       ) : (

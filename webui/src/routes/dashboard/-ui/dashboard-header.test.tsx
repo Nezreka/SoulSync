@@ -10,9 +10,9 @@
  * fixture at P9, when the vanilla markup was deleted.
  */
 
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { vanillaDashboardHtml } from './dash-artefact';
@@ -128,7 +128,9 @@ describe('the hello strip', () => {
     window._currentProfileName = 'BoulderBadgeDad';
     const view = await mountHeader();
     const greeting = view.container.querySelector('.hello-greeting span')!;
-    expect(greeting.textContent).toMatch(/^(good (morning|afternoon|evening)|up late\?), BoulderBadgeDad$/);
+    expect(greeting.textContent).toMatch(
+      /^(good (morning|afternoon|evening)|up late\?), BoulderBadgeDad$/,
+    );
     view.unmount();
 
     delete window._currentProfileName;

@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { RepairJobRun } from './-tools.types';
+
 import { formatCacheAge, parseDbTimestamp } from './-tools.core';
 import {
   filterRuns,
@@ -49,9 +50,7 @@ describe('parseDbTimestamp', () => {
   });
 
   it('handles fractional seconds', () => {
-    expect(parseDbTimestamp('2026-08-12 09:00:00.500')).toBe(
-      Date.UTC(2026, 7, 12, 9, 0, 0) + 500,
-    );
+    expect(parseDbTimestamp('2026-08-12 09:00:00.500')).toBe(Date.UTC(2026, 7, 12, 9, 0, 0) + 500);
   });
 });
 
@@ -213,8 +212,9 @@ describe('filterRuns', () => {
 describe('runCounters', () => {
   it('always shows checked and took, and drops the zeroes between them', () => {
     expect(runCounters(run()).map((c) => c.label)).toEqual(['Checked', 'Took']);
-    expect(runCounters(run({ findings_created: 3, auto_fixed: 1, errors: 2 })).map((c) => c.label))
-      .toEqual(['Checked', 'Findings raised', 'Auto-fixed', 'Errors', 'Took']);
+    expect(
+      runCounters(run({ findings_created: 3, auto_fixed: 1, errors: 2 })).map((c) => c.label),
+    ).toEqual(['Checked', 'Findings raised', 'Auto-fixed', 'Errors', 'Took']);
   });
 });
 

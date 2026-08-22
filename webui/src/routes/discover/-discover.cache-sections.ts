@@ -104,7 +104,7 @@ export const CACHE_SECTIONS: CacheSectionDef[] = [
 export const GENRE_EXPLORER_SECTION = {
   id: 'cache-genre-explorer',
   title: 'Browse Your Sound',
-  subtitle: "Every genre in your collection, one tap deep",
+  subtitle: 'Every genre in your collection, one tap deep',
   endpoint: '/api/discover/genre-explorer',
   /** `_insertCacheSection(..., 'top', false)` — no `.discover-grid` wrapper. */
   position: 'top' as const,

@@ -301,10 +301,7 @@ function useReviewCount(): number | null {
 
 function SettingsLink() {
   return (
-    <span
-      className="link"
-      onClick={() => void window.navigateToPage?.('settings')}
-    >
+    <span className="link" onClick={() => void window.navigateToPage?.('settings')}>
       Settings
     </span>
   );
@@ -420,7 +417,14 @@ export function LibraryCard() {
                 id="library-status-browse-btn"
                 onClick={() => void window.navigateToPage?.('library')}
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <path d="M3 6h18M3 12h18M3 18h18" />
                 </svg>
                 Browse
@@ -431,7 +435,14 @@ export function LibraryCard() {
                 title="Open the enrichment manager's Verify Matches repair flow"
                 onClick={() => window.openEnrichmentManager?.()}
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
                   <polyline points="22 4 12 14.01 9 11.01" />
                 </svg>
@@ -443,7 +454,14 @@ export function LibraryCard() {
                 title="Open the Tools maintenance center"
                 onClick={() => void window.navigateToPage?.('tools')}
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
                 </svg>
                 Repair
@@ -454,7 +472,14 @@ export function LibraryCard() {
                 title="Back up the SoulSync database now"
                 onClick={() => void backupNow()}
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <ellipse cx="12" cy="5" rx="9" ry="3" />
                   <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
                   <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
@@ -479,11 +504,20 @@ export function LibraryCard() {
                 }
                 onClick={() => void window.navigateToPage?.('active-downloads')}
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                 </svg>
                 Review
-                {reviewCount ? <span className="library-status-btn-badge">{reviewCount}</span> : null}
+                {reviewCount ? (
+                  <span className="library-status-btn-badge">{reviewCount}</span>
+                ) : null}
               </button>
               <button
                 className="library-status-btn library-status-btn-secondary"
@@ -491,7 +525,14 @@ export function LibraryCard() {
                 title="Tracks SoulSync is still trying to find"
                 onClick={() => void window.navigateToPage?.('wishlist')}
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21.2l7.8-7.7 1-1.1a5.5 5.5 0 0 0 0-7.8z" />
                 </svg>
                 Wishlist
@@ -502,7 +543,14 @@ export function LibraryCard() {
                 title="Active and queued downloads"
                 onClick={() => void window.navigateToPage?.('active-downloads')}
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                   <polyline points="7 10 12 15 17 10" />
                   <line x1="12" y1="15" x2="12" y2="3" />
@@ -515,7 +563,14 @@ export function LibraryCard() {
                 title="Find music you don't have yet"
                 onClick={() => void window.navigateToPage?.('discover')}
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <circle cx="12" cy="12" r="10" />
                   <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
                 </svg>
@@ -527,7 +582,14 @@ export function LibraryCard() {
                 title="Playlists and their sync schedules"
                 onClick={() => void window.navigateToPage?.('sync')}
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <polyline points="23 4 23 10 17 10" />
                   <polyline points="1 20 1 14 7 14" />
                   <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />

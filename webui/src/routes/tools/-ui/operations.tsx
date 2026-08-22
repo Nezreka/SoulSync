@@ -27,6 +27,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import type { Cadence, IntervalUnit } from '../-tools.ops';
 import type { RepairJob, RepairJobProgress, RepairJobRun } from '../-tools.types';
 
 import {
@@ -45,7 +46,7 @@ import {
   repairJobMeta,
   repairSettingInput,
 } from '../-tools.core';
-import type { Cadence, IntervalUnit } from '../-tools.ops';
+import { sparklinePoints } from '../-tools.groups';
 import {
   cadenceFromHours,
   cadenceLabel,
@@ -55,7 +56,6 @@ import {
   jobSchedule,
   jobTrend,
 } from '../-tools.ops';
-import { sparklinePoints } from '../-tools.groups';
 
 function toast(message: string, type = 'info') {
   window.showToast?.(message, type);
@@ -154,10 +154,19 @@ function CadenceEditor({ job, onSaved }: { job: RepairJob; onSaved: () => void }
           </option>
         ))}
       </select>
-      <button type="button" className="repair-tile-cadence-save" disabled={saving} onClick={() => void save()}>
+      <button
+        type="button"
+        className="repair-tile-cadence-save"
+        disabled={saving}
+        onClick={() => void save()}
+      >
         {saving ? '…' : 'Save'}
       </button>
-      <button type="button" className="repair-tile-cadence-cancel" onClick={() => setEditing(false)}>
+      <button
+        type="button"
+        className="repair-tile-cadence-cancel"
+        onClick={() => setEditing(false)}
+      >
         Cancel
       </button>
     </span>
@@ -202,83 +211,83 @@ function JobSettings({
       id={`repair-settings-${job.job_id}`}
       style={{ display: open ? '' : 'none' }}
     >
-        {Object.entries(job.settings || {}).map(([key, value]) => {
-          const field = repairSettingInput(key, value, job.setting_options?.[key]);
-          if (field.kind === 'section') {
-            return (
-              <div className="repair-setting-section" key={key}>
-                {field.title}
-              </div>
-            );
-          }
-          const current = values[key];
+      {Object.entries(job.settings || {}).map(([key, value]) => {
+        const field = repairSettingInput(key, value, job.setting_options?.[key]);
+        if (field.kind === 'section') {
           return (
-            <div className="repair-setting-row" key={key}>
-              <label>{prettifyRepairSettingKey(key)}</label>
-              {field.kind === 'select' ? (
-                <select
-                  className="repair-setting-input"
-                  data-job={job.job_id}
-                  data-key={key}
-                  value={settingText(current)}
-                  onChange={(event) =>
-                    setValues((previous) => ({ ...previous, [key]: event.target.value }))
-                  }
-                >
-                  {field.options.map((option) => (
-                    <option value={option} key={option}>
-                      {prettifyRepairSettingKey(option)}
-                    </option>
-                  ))}
-                </select>
-              ) : field.kind === 'checkbox' ? (
-                <input
-                  type="checkbox"
-                  className="repair-setting-input"
-                  data-job={job.job_id}
-                  data-key={key}
-                  checked={Boolean(current)}
-                  onChange={(event) =>
-                    setValues((previous) => ({ ...previous, [key]: event.target.checked }))
-                  }
-                />
-              ) : field.kind === 'number' ? (
-                <input
-                  type="number"
-                  className="repair-setting-input"
-                  data-job={job.job_id}
-                  data-key={key}
-                  value={settingText(current)}
-                  step="0.01"
-                  // A setting that is CURRENTLY negative gets no floor — some
-                  // thresholds are legitimately below zero and a min of 0 would
-                  // make them un-editable.
-                  {...(field.allowNegative ? {} : { min: '0' })}
-                  onChange={(event) =>
-                    setValues((previous) => ({
-                      ...previous,
-                      [key]: Number.parseFloat(event.target.value),
-                    }))
-                  }
-                />
-              ) : (
-                <input
-                  type="text"
-                  className="repair-setting-input"
-                  data-job={job.job_id}
-                  data-key={key}
-                  value={settingText(current)}
-                  onChange={(event) =>
-                    setValues((previous) => ({ ...previous, [key]: event.target.value }))
-                  }
-                />
-              )}
+            <div className="repair-setting-section" key={key}>
+              {field.title}
             </div>
           );
-        })}
-        <button className="repair-save-settings-btn" type="button" onClick={() => void save()}>
-          Save Settings
-        </button>
+        }
+        const current = values[key];
+        return (
+          <div className="repair-setting-row" key={key}>
+            <label>{prettifyRepairSettingKey(key)}</label>
+            {field.kind === 'select' ? (
+              <select
+                className="repair-setting-input"
+                data-job={job.job_id}
+                data-key={key}
+                value={settingText(current)}
+                onChange={(event) =>
+                  setValues((previous) => ({ ...previous, [key]: event.target.value }))
+                }
+              >
+                {field.options.map((option) => (
+                  <option value={option} key={option}>
+                    {prettifyRepairSettingKey(option)}
+                  </option>
+                ))}
+              </select>
+            ) : field.kind === 'checkbox' ? (
+              <input
+                type="checkbox"
+                className="repair-setting-input"
+                data-job={job.job_id}
+                data-key={key}
+                checked={Boolean(current)}
+                onChange={(event) =>
+                  setValues((previous) => ({ ...previous, [key]: event.target.checked }))
+                }
+              />
+            ) : field.kind === 'number' ? (
+              <input
+                type="number"
+                className="repair-setting-input"
+                data-job={job.job_id}
+                data-key={key}
+                value={settingText(current)}
+                step="0.01"
+                // A setting that is CURRENTLY negative gets no floor — some
+                // thresholds are legitimately below zero and a min of 0 would
+                // make them un-editable.
+                {...(field.allowNegative ? {} : { min: '0' })}
+                onChange={(event) =>
+                  setValues((previous) => ({
+                    ...previous,
+                    [key]: Number.parseFloat(event.target.value),
+                  }))
+                }
+              />
+            ) : (
+              <input
+                type="text"
+                className="repair-setting-input"
+                data-job={job.job_id}
+                data-key={key}
+                value={settingText(current)}
+                onChange={(event) =>
+                  setValues((previous) => ({ ...previous, [key]: event.target.value }))
+                }
+              />
+            )}
+          </div>
+        );
+      })}
+      <button className="repair-save-settings-btn" type="button" onClick={() => void save()}>
+        Save Settings
+      </button>
     </div>
   );
 }
@@ -432,7 +441,10 @@ export function OperationTile({
         )}
 
         <div className="repair-job-actions">
-          <label className="repair-job-toggle" title={enabled ? 'Disable this job' : 'Enable this job'}>
+          <label
+            className="repair-job-toggle"
+            title={enabled ? 'Disable this job' : 'Enable this job'}
+          >
             <input
               type="checkbox"
               checked={enabled}
@@ -496,7 +508,10 @@ export function OperationTile({
           <div className="repair-progress-phase">{progress.phase || ''}</div>
           <div className="repair-progress-log">
             {(progress.log || []).map((line, index) => (
-              <div className={`repair-log-line ${line.type || 'info'}`} key={`${index}-${line.text}`}>
+              <div
+                className={`repair-log-line ${line.type || 'info'}`}
+                key={`${index}-${line.text}`}
+              >
                 {line.text}
               </div>
             ))}

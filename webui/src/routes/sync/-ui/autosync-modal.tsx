@@ -313,10 +313,7 @@ export function AutoSyncModal({
         )}
       </div>
 
-      <AutoSyncMonitorPanel
-        playlists={state.playlists}
-        onDetails={onOpenDetails}
-      />
+      <AutoSyncMonitorPanel playlists={state.playlists} onDetails={onOpenDetails} />
 
       <div className="auto-sync-tabs">
         {(Object.keys(TAB_LABELS) as AutoSyncTab[]).map((key) => (

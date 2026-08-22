@@ -188,7 +188,7 @@ export function SearchResults({
   // The spotlight: the best match gets the big card. Artists outrank albums
   // outrank tracks — the same priority the section order implies.
   const topArtist = dbArtists[0] ?? artists[0];
-  const topAlbum = topArtist ? undefined : fullAlbums[0] ?? singlesAndEps[0];
+  const topAlbum = topArtist ? undefined : (fullAlbums[0] ?? singlesAndEps[0]);
   const topTrack = topArtist || topAlbum ? undefined : tracks[0];
   const spotlight = topArtist
     ? {
@@ -201,7 +201,10 @@ export function SearchResults({
       }
     : topAlbum
       ? {
-          kind: topAlbum.album_type === 'single' || topAlbum.album_type === 'ep' ? 'Single / EP' : 'Album',
+          kind:
+            topAlbum.album_type === 'single' || topAlbum.album_type === 'ep'
+              ? 'Single / EP'
+              : 'Album',
           name: topAlbum.name ?? '',
           image: albumImage(topAlbum),
           round: false,

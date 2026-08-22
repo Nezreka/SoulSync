@@ -9,8 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { UrlTabPlaylist } from '../-sync.url-tabs';
 
-import { fetchYouTubePlaylists } from '../-sync.api';
 import { forgetAccountPlaylists } from '../-sync.account-cache';
+import { fetchYouTubePlaylists } from '../-sync.api';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { useSourceVertical } from '../-sync.use-vertical';
 import { UrlHistoryBar, useUrlHistory } from './url-history-bar';

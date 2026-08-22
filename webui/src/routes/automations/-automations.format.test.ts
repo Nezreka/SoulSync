@@ -223,9 +223,9 @@ describe('automationMeta while the side is paused', () => {
   });
 
   it('says paused for both trigger kinds', () => {
-    expect(automationMeta({ ...base, trigger_type: 'schedule', enabled: 1 }, NOW, true).paused).toBe(
-      true,
-    );
+    expect(
+      automationMeta({ ...base, trigger_type: 'schedule', enabled: 1 }, NOW, true).paused,
+    ).toBe(true);
     expect(
       automationMeta({ ...base, trigger_type: 'app_started', enabled: 1 }, NOW, true).paused,
     ).toBe(true);
@@ -250,12 +250,11 @@ describe('automationMeta while the side is paused', () => {
   });
 
   it('defaults to not paused, so every existing caller keeps its behaviour', () => {
-    expect(automationMeta({ ...base, trigger_type: 'app_started', enabled: 1 }, NOW).listening).toBe(
-      true,
-    );
+    expect(
+      automationMeta({ ...base, trigger_type: 'app_started', enabled: 1 }, NOW).listening,
+    ).toBe(true);
   });
 });
-
 
 describe('automationOutcome — the handler stops speaking its own dialect', () => {
   it('says what a watchlist scan accomplished', () => {
@@ -337,9 +336,9 @@ describe('automationOutcome — the handler stops speaking its own dialect', () 
 
   it('does not claim a result for a run that handed off to a worker', () => {
     // discover_playlist returns status:'started' — the real outcome lands later.
-    expect(automationOutcome('discover_playlist', { status: 'started', playlist_count: '4' })).toEqual(
-      { text: 'Handed off — still working', kind: 'skipped' },
-    );
+    expect(
+      automationOutcome('discover_playlist', { status: 'started', playlist_count: '4' }),
+    ).toEqual({ text: 'Handed off — still working', kind: 'skipped' });
   });
 
   it('falls back to the generic facts for an action with no sentence', () => {

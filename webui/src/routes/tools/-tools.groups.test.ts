@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { FindingGroup, FindingTypeInfo } from './-tools.groups';
+
 import {
   contributionSegments,
   FINDING_TYPE_BLURBS,

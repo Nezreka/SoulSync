@@ -305,7 +305,6 @@ describe('grouping alternative candidates', () => {
   });
 });
 
-
 /**
  * TheHomeGuy: "the number at the top didnt update till i happened to click into
  * the area to check for songs."

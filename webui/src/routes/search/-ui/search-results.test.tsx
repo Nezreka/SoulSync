@@ -1,6 +1,6 @@
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { SearchAlbum, SearchTrack } from '../-search.types';
@@ -488,4 +488,4 @@ describe('an album result shows its title', () => {
     expect(bare, 'the colliding rule vanished — re-check the opt-out').toBeTruthy();
     expect(bare![1]).toMatch(/aspect-ratio:\s*1/);
   });
-})
+});

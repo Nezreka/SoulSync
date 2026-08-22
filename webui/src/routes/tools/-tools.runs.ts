@@ -182,9 +182,7 @@ export function runJobFilters(runs: readonly RepairJobRun[]): RunJobFilter[] {
     if (runOutcome(run) === 'failed') entry.hasFailure = true;
     byJob.set(jobId, entry);
   }
-  return [...byJob.values()].sort(
-    (a, b) => b.count - a.count || a.label.localeCompare(b.label),
-  );
+  return [...byJob.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 }
 
 export function filterRuns(

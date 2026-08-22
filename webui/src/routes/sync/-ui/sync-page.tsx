@@ -22,16 +22,17 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 
 import type { LbCardData } from '../-sync.lb-tabs';
 import type { MirroredMatch, ServerPlaylist } from '../-sync.server';
-import { normalizeSyncTab } from '../-sync.shell';
 import type { SyncTabId } from '../-sync.shell';
 
 import { metadataSourceLabel } from '../-sync.modal-core';
+import { normalizeSyncTab } from '../-sync.shell';
 import { useAutoSync } from '../-sync.use-autosync';
 import { useSyncHistory } from '../-sync.use-history';
 import { useSyncPage } from '../-sync.use-page';
 import { QobuzTab, TidalTab } from './account-tab';
 import { DeezerArlTab, SpotifyTab } from './account-tabs';
 import { ActivityModal, type ActivityTab } from './activity-modal';
+import { AddPlaylistSheet } from './add-playlist-sheet';
 import { AutoSyncModal } from './autosync-modal';
 import { BeatportTab } from './beatport-tab';
 import { ImportFileTab } from './import-file-tab';
@@ -44,7 +45,6 @@ import { SoulsyncDiscoveryTab } from './soulsync-discovery-tab';
 import { SyncModals } from './sync-modals';
 import { SyncShell } from './sync-shell';
 import { SyncSidebar } from './sync-sidebar';
-import { AddPlaylistSheet } from './add-playlist-sheet';
 import { DeezerLinkTab, ITunesLinkTab, SpotifyPublicTab, YouTubeTab } from './url-import-tab';
 
 /** The server tab's two views (2226-2236 vs the compare editor). */

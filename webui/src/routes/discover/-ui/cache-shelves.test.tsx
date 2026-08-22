@@ -129,6 +129,8 @@ describe('genre explorer', () => {
   it('titles itself Browse Your Sound with the tap hint', () => {
     render(<GenreExplorerSection genres={genres} onOpenGenre={vi.fn()} />);
     expect(screen.getByText('Browse Your Sound').tagName).toBe('H3');
-    expect(screen.getByText("Every genre in your collection, one tap deep")).toHaveClass('discover-section-subtitle');
+    expect(screen.getByText('Every genre in your collection, one tap deep')).toHaveClass(
+      'discover-section-subtitle',
+    );
   });
 });

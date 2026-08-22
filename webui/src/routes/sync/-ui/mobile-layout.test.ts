@@ -26,7 +26,6 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-
 import { describe, expect, it } from 'vitest';
 
 /** Comments stripped: they discuss the very properties being asserted. */
@@ -35,9 +34,9 @@ const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8').rep
   '',
 );
 
-const phoneBlocks = [
-  ...css.matchAll(/@media[^{]*max-width:\s*768px[^{]*\{([\s\S]*?)\n\}/g),
-].map((m) => m[1]);
+const phoneBlocks = [...css.matchAll(/@media[^{]*max-width:\s*768px[^{]*\{([\s\S]*?)\n\}/g)].map(
+  (m) => m[1],
+);
 
 function phoneRule(selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

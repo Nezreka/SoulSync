@@ -8,9 +8,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { MirroredPlaylistRow } from './-sync.mirrored';
-
 import type { LibraryFilter } from './-sync.library';
+import type { MirroredPlaylistRow } from './-sync.mirrored';
 
 import {
   LIBRARY_FILTERS,
@@ -177,7 +176,10 @@ describe('which tabs render', () => {
   });
 
   it('hides a state tab with nothing in it — a tab with no rows has no tab', () => {
-    expect(libraryVisibleFilters(counts({ all: 3, synced: 3 }), 'all').map((f) => f.id)).toEqual(['all', 'synced']);
+    expect(libraryVisibleFilters(counts({ all: 3, synced: 3 }), 'all').map((f) => f.id)).toEqual([
+      'all',
+      'synced',
+    ]);
   });
 
   it('always keeps All, so the strip never empties', () => {
@@ -187,17 +189,18 @@ describe('which tabs render', () => {
   it('keeps the ACTIVE tab even at zero', () => {
     // Removing the tab you are standing on would move the page out from
     // under you the moment its last row finished.
-    expect(libraryVisibleFilters(counts({ all: 3, synced: 3 }), 'attention').map((f) => f.id)).toEqual([
-      'all',
-      'attention',
-      'synced',
-    ]);
+    expect(
+      libraryVisibleFilters(counts({ all: 3, synced: 3 }), 'attention').map((f) => f.id),
+    ).toEqual(['all', 'attention', 'synced']);
   });
 
   it('renders them in the declared order, never the order they filled up', () => {
-    expect(libraryVisibleFilters(counts({ all: 9, attention: 1, running: 1, synced: 1, scheduled: 1, unscheduled: 1 }), 'all').map((f) => f.id)).toEqual(
-      LIBRARY_FILTERS.map((f) => f.id),
-    );
+    expect(
+      libraryVisibleFilters(
+        counts({ all: 9, attention: 1, running: 1, synced: 1, scheduled: 1, unscheduled: 1 }),
+        'all',
+      ).map((f) => f.id),
+    ).toEqual(LIBRARY_FILTERS.map((f) => f.id));
   });
 });
 
@@ -264,9 +267,9 @@ describe('the card state', () => {
 
   it('an error outranks a run still in flight', () => {
     // A failed run needs a human whether or not the poller has caught up.
-    expect(
-      libraryCardState(row({ pipeline_state: { status: 'running', error: 'boom' } })),
-    ).toBe('error');
+    expect(libraryCardState(row({ pipeline_state: { status: 'running', error: 'boom' } }))).toBe(
+      'error',
+    );
   });
 
   it('a never-touched playlist is ok, not short', () => {
@@ -304,7 +307,11 @@ describe('sorting', () => {
 
   it('keeps the incoming order within a state', () => {
     // The backend sends newest-updated first; that is a sensible second key.
-    expect(librarySortedRows(rows).slice(3).map((r) => r.id)).toEqual([1, 5]);
+    expect(
+      librarySortedRows(rows)
+        .slice(3)
+        .map((r) => r.id),
+    ).toEqual([1, 5]);
   });
 
   it('does not reorder the caller’s array', () => {
@@ -438,7 +445,10 @@ describe('ordering the library', () => {
     // Not the raw name: a renamed playlist shows its alias, so sorting on the
     // original would order the list by something invisible.
     expect(librarySortedRows(rows, 'name').map((r) => r.name)).toEqual(['apple', 'Mango', 'Zebra']);
-    const renamed = [row({ id: 1, name: 'Zebra', display_name: 'aardvark' }), row({ id: 2, name: 'apple' })];
+    const renamed = [
+      row({ id: 1, name: 'Zebra', display_name: 'aardvark' }),
+      row({ id: 2, name: 'apple' }),
+    ];
     expect(librarySortedRows(renamed, 'name')[0].id).toBe(1);
   });
 
@@ -472,7 +482,12 @@ describe('ordering the library', () => {
 
   it('every declared sort id is handled, none falls through to state silently', () => {
     const byId = Object.fromEntries(
-      LIBRARY_SORTS.map((s) => [s.id, librarySortedRows(rows, s.id).map((r) => r.id).join()]),
+      LIBRARY_SORTS.map((s) => [
+        s.id,
+        librarySortedRows(rows, s.id)
+          .map((r) => r.id)
+          .join(),
+      ]),
     );
     // name/tracks/recent must each differ from the default ordering.
     for (const id of ['name', 'tracks', 'recent']) {
@@ -509,10 +524,12 @@ describe('when the ownership figure may be stated', () => {
   const full = { total_count: 50, discovered_count: 50 };
 
   it('is known once every track has been checked', () => {
-    expect(libraryOwnedKnown(row({ ...full, in_library_count: 47, library_checked_count: 50 }))).toBe(
-      true,
+    expect(
+      libraryOwnedKnown(row({ ...full, in_library_count: 47, library_checked_count: 50 })),
+    ).toBe(true);
+    expect(libraryOwned(row({ ...full, in_library_count: 47, library_checked_count: 50 }))).toBe(
+      47,
     );
-    expect(libraryOwned(row({ ...full, in_library_count: 47, library_checked_count: 50 }))).toBe(47);
   });
 
   it('is UNKNOWN for a playlist the matcher has never checked', () => {
@@ -529,9 +546,9 @@ describe('when the ownership figure may be stated', () => {
     // The sync skips rows with no usable id or name, so a partial check would
     // let a small "not downloaded" number stand for a playlist where many more
     // were never examined.
-    expect(libraryOwnedKnown(row({ ...full, in_library_count: 12, library_checked_count: 20 }))).toBe(
-      false,
-    );
+    expect(
+      libraryOwnedKnown(row({ ...full, in_library_count: 12, library_checked_count: 20 })),
+    ).toBe(false);
   });
 
   it('is UNKNOWN for an empty playlist, which cannot be short of anything', () => {
