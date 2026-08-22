@@ -13,10 +13,11 @@
 
 import type { CSSProperties, ReactElement } from 'react';
 
-import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { MirroredMatch, ServerPlaylist } from '../-sync.server';
 
+import { recordServerLink } from '../-sync.api';
 import { timeAgo } from '../-sync.mirrored';
 import {
   fetchMirroredMatches,
@@ -209,8 +210,28 @@ export function ServerPlaylistList({ onOpenCompare }: ServerPlaylistListProps) {
     serverType?: string;
   } | null>(null);
   const [placeholder, setPlaceholder] = useState<string | null>(null);
+  /** Held in a ref so `openCompare` stays stable across loads. */
+  const serverTypeRef = useRef<string | undefined>(undefined);
   const [refreshing, setRefreshing] = useState(false);
   /** The several-matches case (183): pick one before the compare view opens. */
+  /**
+   * Every path that resolves "this server playlist IS that mirror" ends at
+   * onOpenCompare, so recording the link here covers the single-match case,
+   * the no-match case and the disambiguation the user just answered — without
+   * going anywhere near the sync path.
+   *
+   * Write only: nothing reads it yet.
+   */
+  const openCompare = useCallback(
+    (playlist: ServerPlaylist, mirrored: MirroredMatch | null): void => {
+      if (mirrored && serverTypeRef.current) {
+        recordServerLink(mirrored.id, playlist.id, serverTypeRef.current);
+      }
+      onOpenCompare(playlist, mirrored);
+    },
+    [onOpenCompare],
+  );
+
   const [disambig, setDisambig] = useState<{
     playlist: ServerPlaylist;
     candidates: MirroredMatch[];
@@ -235,6 +256,7 @@ export function ServerPlaylistList({ onOpenCompare }: ServerPlaylistListProps) {
         setPlaceholder('No playlists found on your media server.');
         return;
       }
+      serverTypeRef.current = data.server_type;
       setState({ synced, unsynced, serverType: data.server_type });
     } catch (error) {
       setPlaceholder(`Error: ${error instanceof Error ? error.message : 'unknown error'}`);
@@ -251,7 +273,7 @@ export function ServerPlaylistList({ onOpenCompare }: ServerPlaylistListProps) {
   const pickMirrored = useCallback(
     async (playlist: ServerPlaylist, mirroredId: number) => {
       try {
-        onOpenCompare(playlist, await fetchMirroredPlaylistById(mirroredId));
+        openCompare(playlist, await fetchMirroredPlaylistById(mirroredId));
       } catch (error) {
         window.showToast?.(
           `Failed to load mirrored playlist: ${error instanceof Error ? error.message : 'unknown error'}`,
@@ -259,18 +281,18 @@ export function ServerPlaylistList({ onOpenCompare }: ServerPlaylistListProps) {
         );
       }
     },
-    [onOpenCompare],
+    [openCompare],
   );
 
   /** openServerPlaylistEditor's three-way branch (172-183). */
   const openPlaylist = useCallback(
     async (playlist: ServerPlaylist) => {
       const matches = await fetchMirroredMatches(playlist.name);
-      if (matches.length === 1) onOpenCompare(playlist, matches[0]);
-      else if (matches.length === 0) onOpenCompare(playlist, null);
+      if (matches.length === 1) openCompare(playlist, matches[0]);
+      else if (matches.length === 0) openCompare(playlist, null);
       else setDisambig({ playlist, candidates: matches });
     },
-    [onOpenCompare],
+    [openCompare],
   );
 
   return (

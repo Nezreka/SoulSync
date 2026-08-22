@@ -4,6 +4,7 @@ Inbound music request endpoint — accept a search query from external sources
 """
 
 import threading
+import time
 import uuid
 from datetime import datetime, timedelta
 
@@ -95,8 +96,165 @@ def stop_cleanup_thread(timeout: float = 2.0) -> None:
         _cleanup_stop_event.clear()
 
 
+# How long a request's transfer is watched before we stop looking, and how
+# often the shared watcher sweeps. Comfortably inside the 1-hour record TTL, so
+# a watch can never outlive the record it updates.
+_COMPLETION_TIMEOUT_SECONDS = 15 * 60
+_COMPLETION_POLL_SECONDS = 10
+
+_watcher_thread = None
+_watcher_lock = threading.Lock()
+# The watcher's OWN stop event, not the cleanup thread's. Sharing one coupled
+# two threads with different lifecycles: stopping cleanup killed the watcher,
+# and because _ensure_watcher only restarts a dead thread — onto an event that
+# is still set — it would exit again immediately and never sweep again.
+_watcher_stop_event = threading.Event()
+
+# Callbacks go out on a small pool, never on the sweep. Each is an HTTP POST
+# with a ten second timeout, so notifying fifty settled requests in line could
+# hold the sweep for eight minutes and one unreachable notify_url would stall
+# every other caller's status. Bounded, so it cannot become the thread-per-
+# request problem this design exists to avoid.
+_notify_pool = None
+
+
+def _notify(req):
+    """POST a terminal request record to its callback, if it asked for one.
+
+    Blocking; callers on the sweep must go through _notify_async.
+    """
+    url = req.get('notify_url')
+    if not url:
+        return
+    payload = {k: v for k, v in req.items() if k not in ('created_at', 'notify_url', 'watch_until')}
+    try:
+        http_requests.post(url, json=payload, timeout=10)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Failed to POST to notify_url {url}: {e}")
+
+
+def _notify_async(req):
+    """Hand a callback to the pool so a slow endpoint cannot stall the sweep."""
+    if not req.get('notify_url'):
+        return
+    global _notify_pool
+    with _watcher_lock:
+        if _notify_pool is None:
+            from concurrent.futures import ThreadPoolExecutor
+            _notify_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="api-request-notify")
+        pool = _notify_pool
+    try:
+        pool.submit(_notify, req)
+    except Exception as e:  # noqa: BLE001 - a full pool must not break the sweep
+        logger.warning(f"Could not dispatch notify_url callback: {e}")
+
+
+def _resolve_downloading_requests(soulseek, run_async):
+    """One sweep: settle every watched request against a SINGLE bulk read.
+
+    ONE API CALL FOR ALL OF THEM, not one per request. The endpoint allows 60
+    requests a minute and each is watched for up to 15 minutes, so a per-request
+    poll would mean hundreds of threads issuing hundreds of slskd calls a
+    second — which is precisely the search flooding #1166 exists to prevent. A
+    fix for one bug is not allowed to cause the other.
+
+    Returns the records that reached a terminal state, for notification.
+    """
+    with _requests_lock:
+        watched = {
+            rid: req for rid, req in _pending_requests.items()
+            if req.get('status') == 'downloading' and req.get('download_id')
+        }
+    if not watched:
+        return []
+
+    try:
+        transfers = run_async(soulseek.get_all_downloads()) or []
+    except Exception as e:  # noqa: BLE001 - a failed sweep must not settle anything
+        logger.debug("Request watcher could not read transfers: %s", e)
+        return []
+
+    by_id = {}
+    for t in transfers:
+        tid = getattr(t, 'id', None) or (t.get('id') if isinstance(t, dict) else None)
+        if tid:
+            by_id[str(tid)] = t
+
+    from core.downloads.status import classify_engine_state
+
+    now = time.monotonic()
+    settled = []
+    with _requests_lock:
+        for rid, _ in watched.items():
+            req = _pending_requests.get(rid)
+            if req is None or req.get('status') != 'downloading':
+                continue
+
+            transfer = by_id.get(str(req.get('download_id')))
+            state = getattr(transfer, 'state', None) if transfer is not None else None
+            verdict = classify_engine_state(state)
+
+            if verdict == 'success':
+                req['status'] = 'completed'
+            elif verdict in ('failed', 'cancelled'):
+                req['status'] = 'failed'
+                req['error'] = f"Download {verdict}: {state or 'unknown'}"
+            # `watch_until` must EXIST to expire. Defaulting a missing one to 0
+            # made `now >= 0` always true, so any request marked `downloading`
+            # without a deadline timed out on its first sweep — and the symptom,
+            # a request that never reaches a terminal state, looks exactly like
+            # the bug this endpoint was reported for. Only the handoff sets both
+            # today; this makes a second writer fail visibly instead.
+            elif req.get('watch_until') and now >= req['watch_until']:
+                # The transfer may well still be running. Calling it failed
+                # because WE stopped watching is a worse lie than saying so.
+                req['timed_out'] = True
+                logger.info("Request %s still downloading after the watch window", rid)
+                continue
+            else:
+                continue
+
+            req['completed_at'] = datetime.now().isoformat()
+            settled.append(dict(req))
+    return settled
+
+
+def _watcher_loop(app):
+    """Single background sweep for every in-flight request."""
+    while not _watcher_stop_event.wait(timeout=_COMPLETION_POLL_SECONDS):
+        try:
+            with app.app_context():
+                from utils.async_helpers import run_async
+                soulseek = app.soulsync.get('download_orchestrator')
+                if not soulseek:
+                    continue
+                for req in _resolve_downloading_requests(soulseek, run_async):
+                    _notify_async(req)
+        except Exception as e:  # noqa: BLE001 - the sweep must never die
+            logger.error(f"Request watcher sweep failed: {e}")
+
+
+def _ensure_watcher(app):
+    """Start the shared watcher once, lazily, on the first real request."""
+    global _watcher_thread
+    with _watcher_lock:
+        if _watcher_thread is not None and _watcher_thread.is_alive():
+            return
+        _watcher_thread = threading.Thread(
+            target=_watcher_loop, args=(app,), name="api-request-watcher", daemon=True,
+        )
+        _watcher_thread.start()
+        logger.info("Started api/request transfer watcher (interval=%ss)", _COMPLETION_POLL_SECONDS)
+
+
 def _run_search_and_download(request_id, query, notify_url):
-    """Background worker: search, download, update status, notify."""
+    """Background worker: search, start the download, hand off, notify.
+
+    Returns as soon as the download is HANDED OFF. It used to sit here polling
+    the transfer, which cost a live thread per request for up to fifteen
+    minutes — at the endpoint's 60/minute that is hundreds of threads. The
+    shared watcher settles them all from one bulk read instead.
+    """
     try:
         from utils.async_helpers import run_async
 
@@ -106,42 +264,58 @@ def _run_search_and_download(request_id, query, notify_url):
 
         soulseek = current_app._get_current_object().soulsync.get('download_orchestrator')
         if not soulseek:
+            # Initialised BEFORE the guard: the record can be cleaned up between
+            # queueing and this check, and `terminal` was only bound inside the
+            # `if`, so notifying raised UnboundLocalError. The outer handler
+            # swallowed it, reporting the request as failed for a reason that
+            # was about this function rather than the download.
+            terminal = None
             with _requests_lock:
                 if request_id in _pending_requests:
-                    _pending_requests[request_id]['status'] = 'failed'
-                    _pending_requests[request_id]['error'] = 'Download source not configured'
+                    req = _pending_requests[request_id]
+                    req['status'] = 'failed'
+                    req['error'] = 'Download source not configured'
+                    req['completed_at'] = datetime.now().isoformat()
+                    terminal = dict(req)
+            if terminal:
+                _notify(terminal)
             return
 
         result = run_async(soulseek.search_and_download_best(query))
 
+        terminal = None
         with _requests_lock:
             if request_id in _pending_requests:
+                req = _pending_requests[request_id]
                 if result:
-                    _pending_requests[request_id]['status'] = 'downloading'
-                    _pending_requests[request_id]['download_id'] = result
+                    # NOT terminal, so it is not stamped and no callback fires.
+                    # The watcher settles it and notifies then — a webhook that
+                    # always says "downloading" and never follows up is the same
+                    # defect as a status that never leaves it. (#1168)
+                    req['status'] = 'downloading'
+                    req['download_id'] = result
+                    req['watch_until'] = time.monotonic() + _COMPLETION_TIMEOUT_SECONDS
                 else:
-                    _pending_requests[request_id]['status'] = 'not_found'
-                    _pending_requests[request_id]['error'] = 'No match found'
-                _pending_requests[request_id]['completed_at'] = datetime.now().isoformat()
+                    req['status'] = 'not_found'
+                    req['error'] = 'No match found'
+                    req['completed_at'] = datetime.now().isoformat()
+                    terminal = dict(req)
 
-        # Send notification to callback URL if provided
-        if notify_url:
-            try:
-                with _requests_lock:
-                    payload = dict(_pending_requests.get(request_id, {}))
-                    # Remove non-serializable datetime
-                    payload.pop('created_at', None)
-                http_requests.post(notify_url, json=payload, timeout=10)
-            except Exception as e:
-                logger.warning(f"Failed to POST to notify_url {notify_url}: {e}")
+        if terminal:
+            _notify(terminal)
 
     except Exception as e:
         logger.error(f"Request {request_id} failed: {e}")
+        terminal = None
         with _requests_lock:
             if request_id in _pending_requests:
-                _pending_requests[request_id]['status'] = 'failed'
-                _pending_requests[request_id]['error'] = str(e)
-                _pending_requests[request_id]['completed_at'] = datetime.now().isoformat()
+                req = _pending_requests[request_id]
+                req['status'] = 'failed'
+                req['error'] = str(e)
+                req['completed_at'] = datetime.now().isoformat()
+                terminal = dict(req)
+        if terminal:
+            _notify(terminal)
 
 
 def register_routes(bp):
@@ -180,6 +354,10 @@ def register_routes(bp):
                 'completed_at': None,
                 'download_id': None,
                 'error': None,
+                # Carried on the record so the SHARED watcher can call back when
+                # it settles this request; the requesting thread is long gone by
+                # then, having handed the transfer off rather than sat on it.
+                'notify_url': notify_url,
             }
 
         # Emit webhook_received event so automation engine triggers fire
@@ -194,6 +372,9 @@ def register_routes(bp):
 
         # Start background search-download (Feature A: works without automations)
         app = current_app._get_current_object()
+        # One watcher for every request, started on first use. See
+        # _resolve_downloading_requests for why it is not one per request.
+        _ensure_watcher(app)
         thread = threading.Thread(
             target=lambda: _run_with_app_context(app, request_id, query, notify_url),
             daemon=True
@@ -202,18 +383,30 @@ def register_routes(bp):
 
         logger.info(f"Music request queued: '{query}' (id={request_id})")
 
+        # `api_success(..., status=202)`, NOT `api_success(...), 202`. The helper
+        # already returns (response, status), so appending another status built
+        # ((response, 200), 202) — a nested tuple Flask refuses, which it
+        # reported as a 500. The request itself queued and downloaded fine, so
+        # the endpoint looked healthy in the logs while every caller saw the
+        # failure. (#1168)
         return api_success({
             "request_id": request_id,
             "status": "queued",
             "query": query,
-        }), 202
+        }, status=202)
 
     @bp.route("/request/<request_id>", methods=["GET"])
     @require_api_key
     def get_request_status(request_id):
         """Check the status of a music request.
 
-        Returns current status: queued → searching → downloading → completed/not_found/failed
+        queued → searching → downloading → completed / not_found / failed
+
+        `downloading` is transitional: a shared background watcher settles it
+        on `completed` or `failed`. It can still be the LAST state you
+        see if the transfer outlives the watch window, in which case
+        `timed_out` is true and the download may yet be running — the endpoint
+        stopped looking, which is not the same as the download stopping.
         """
         with _requests_lock:
             req = _pending_requests.get(request_id)
@@ -228,6 +421,10 @@ def register_routes(bp):
             "download_id": req.get('download_id'),
             "error": req.get('error'),
             "completed_at": req.get('completed_at'),
+            # Documented above, so it has to be HERE. Promising a field the
+            # caller cannot read is the same defect as promising a status the
+            # code never sets, which is what this endpoint was reported for.
+            "timed_out": bool(req.get('timed_out')),
         })
 
 

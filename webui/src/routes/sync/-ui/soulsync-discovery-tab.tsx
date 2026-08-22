@@ -25,13 +25,18 @@ import {
 } from '../-sync.lb-tabs';
 import { SourceCard } from './source-card';
 
-declare global {
-  interface Window {
-    openMirroredPlaylistModal?: (playlistId: number) => Promise<void> | void;
-  }
+export interface SoulsyncDiscoveryTabProps {
+  /**
+   * Open the mirrored playlist's detail modal. Injected so this tab uses the
+   * page's ONE modal — it used to reach for the legacy global, which is a
+   * second implementation of the same modal over the same endpoint. Optional:
+   * the tab stands alone in its own tests, and the mirror still succeeds
+   * without a modal to show for it.
+   */
+  onOpenMirrored?: (playlistId: number) => void;
 }
 
-export function SoulsyncDiscoveryTab() {
+export function SoulsyncDiscoveryTab({ onOpenMirrored }: SoulsyncDiscoveryTabProps = {}) {
   const [records, setRecords] = useState<SsdRecord[] | null>(null);
   const [placeholder, setPlaceholder] = useState('🔄 Loading SoulSync Discovery playlists...');
   const [refreshing, setRefreshing] = useState(false);
@@ -121,7 +126,7 @@ export function SoulsyncDiscoveryTab() {
 
       if (mirrorData.playlist_id) {
         try {
-          await window.openMirroredPlaylistModal?.(mirrorData.playlist_id);
+          onOpenMirrored?.(mirrorData.playlist_id);
         } catch {
           // Non-fatal — the mirror exists; the detail modal is a convenience.
         }

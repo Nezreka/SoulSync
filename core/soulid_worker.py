@@ -644,7 +644,12 @@ class SoulIDWorker:
                 # Song soul ID: artist + track (links singles to album versions)
                 song_soul_id = generate_soul_id(artist_name, title)
 
-                # Album track soul ID: artist + album + track (specific to this release)
+                # updated_at moves with every soul_id write (L2-011): a row with
+                # no soul_id is filtered OUT of the MetaSync export entirely, so
+                # minting one is the moment that row starts existing for
+                # consumers. Without the touch, a full walk that ran before this
+                # worker meant the row never appeared in any later incremental.
+                # Album track soul ID: artist + album + track (this release)
                 album_soul_id = ''
                 if album_title:
                     album_soul_id = generate_soul_id(artist_name, album_title, title)

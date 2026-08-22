@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { AdlQuarantineEntry, AdlSubView } from './-adl.types';
+import type { AdlQuarantineEntry, AdlReviewSummary, AdlSubView } from './-adl.types';
 
-import { fetchQuarantine, fetchVerificationConfig } from './-adl.api';
+import { fetchQuarantine, fetchReviewQueueSummary, fetchVerificationConfig } from './-adl.api';
 
 export interface AdlVerificationState {
   /**
@@ -16,6 +16,15 @@ export interface AdlVerificationState {
   subView: AdlSubView;
   quarantine: AdlQuarantineEntry[];
   quarantineLoaded: boolean;
+  /**
+   * server counts, polled. null until the first one lands.
+   *
+   * the quarantine list is loaded ONCE and then only when you click into the
+   * tab, so its length went stale the moment anything downloaded. the number at
+   * the top only moved when you happened to open the area. this is what the
+   * badge reads instead.
+   */
+  summary: AdlReviewSummary | null;
   openUnverified: ReadonlySet<string>;
   openQuarantine: ReadonlySet<string>;
   openGroups: ReadonlySet<string>;
@@ -27,10 +36,14 @@ export interface AdlVerificationController {
   acoustidEnabled: boolean;
   setSubView: (view: AdlSubView) => void;
   loadQuarantine: (force?: boolean) => Promise<void>;
+  refreshSummary: () => Promise<void>;
   toggleUnverified: (key: string) => void;
   toggleQuarantine: (id: string) => void;
   toggleGroup: (key: string) => void;
 }
+
+/** how often the review counts refresh. */
+export const REVIEW_SUMMARY_POLL_MS = 15000;
 
 /**
  * The review queue behind the ⚠ pill: config, quarantine data and sub-view.
@@ -46,6 +59,7 @@ export function useAdlVerification(): AdlVerificationController {
     subView: 'unverified',
     quarantine: [],
     quarantineLoaded: false,
+    summary: null,
     openUnverified: new Set<string>(),
     openQuarantine: new Set<string>(),
     openGroups: new Set<string>(),
@@ -64,6 +78,12 @@ export function useAdlVerification(): AdlVerificationController {
   const loadingRef = useRef(false);
   const loadedRef = useRef(false);
 
+  /**
+   * Set every render, read only when loadQuarantine runs. Lets the two call
+   * each other without becoming each other's dependency.
+   */
+  const refreshSummaryRef = useRef<(() => Promise<void>) | null>(null);
+
   const loadQuarantine = useCallback(async (force = false) => {
     // One in flight at a time, and skip entirely unless forced once loaded —
     // this hits a filesystem scan server-side.
@@ -74,7 +94,31 @@ export function useAdlVerification(): AdlVerificationController {
     loadedRef.current = true;
     loadingRef.current = false;
     setState((prev) => ({ ...prev, quarantine: entries, quarantineLoaded: true }));
+    void refreshSummaryRef.current?.();
   }, []);
+
+  /**
+   * Pull the counts. Kept in a ref as well so `loadQuarantine` can call it
+   * without the two of them depending on each other. approving five files should
+   * move the badge immediately, not on the next tick.
+   */
+  const refreshSummary = useCallback(async () => {
+    const next = await fetchReviewQueueSummary();
+    // null means the fetch failed. keep the last known counts rather than
+    // flashing zero at someone who has 72 files waiting.
+    if (next) setState((prev) => ({ ...prev, summary: next }));
+  }, []);
+  refreshSummaryRef.current = refreshSummary;
+
+  /**
+   * REVIEW_SUMMARY_POLL_MS, not the downloads poll's 2s. Nothing here changes
+   * fast and it touches the filesystem, so a slower beat is plenty.
+   */
+  useEffect(() => {
+    void refreshSummary();
+    const timer = setInterval(() => void refreshSummary(), REVIEW_SUMMARY_POLL_MS);
+    return () => clearInterval(timer);
+  }, [refreshSummary]);
 
   /**
    * Read the config once and decide whether the unverified queue can exist.
@@ -138,6 +182,7 @@ export function useAdlVerification(): AdlVerificationController {
     acoustidEnabled: state.acoustidEnabled !== false,
     setSubView,
     loadQuarantine,
+    refreshSummary,
     toggleUnverified,
     toggleQuarantine,
     toggleGroup,

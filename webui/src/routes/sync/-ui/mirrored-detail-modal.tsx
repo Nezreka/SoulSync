@@ -184,8 +184,9 @@ export function MirroredDetailModal({
             <button type="button" className="mm-btn mm-btn-ghost" onClick={onEditSource}>
               Edit Source
             </button>
+            {/* Runs the pipeline now; the header's "Auto-Sync" schedules it. */}
             <button type="button" className="mm-btn mm-btn-secondary" onClick={onRunPipeline}>
-              Auto-Sync
+              Sync now
             </button>
             <button type="button" className="mm-btn mm-btn-ghost" onClick={onClose}>
               Close

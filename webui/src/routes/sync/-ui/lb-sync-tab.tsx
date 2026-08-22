@@ -23,7 +23,7 @@ import {
   LB_SUB_TABS,
   fetchLbCategories,
   fetchLbPlaylistTracks,
-  lbCardProgressLine,
+  lbCoverageCounts,
   mirrorLbAfterDiscovery,
   postLbCacheRefresh,
   unwrapJspfPlaylist,
@@ -31,7 +31,26 @@ import {
 import { SYNC_SOURCES } from '../-sync.sources';
 import { freshSourceState } from '../-sync.state';
 import { useSourceVertical } from '../-sync.use-vertical';
+import { CardCoverage } from './card-coverage';
 import { SourceCard } from './source-card';
+
+/**
+ * ListenBrainz/Last.fm cards render the SAME coverage bar as every other card;
+ * only the numbers behind it are theirs (percentage is matched/total in both
+ * phases — see lbCoverageCounts). Fresh returns null so the element hides.
+ */
+function lbCoverageLine(state: Parameters<typeof lbCoverageCounts>[0]) {
+  const counts = lbCoverageCounts(state);
+  if (!counts) return null;
+  return (
+    <CardCoverage
+      total={counts.total}
+      matched={counts.matched}
+      failed={counts.failed}
+      percentage={counts.percentage}
+    />
+  );
+}
 
 /** The shared card list both MB-style tabs render. */
 export function LbCardList({
@@ -64,7 +83,7 @@ export function LbCardList({
             countText={`${card.count} tracks`}
             owner={`by ${card.creator}`}
             phase={state.phase}
-            progressLine={lbCardProgressLine(state)}
+            progressLine={lbCoverageLine(state)}
             onClick={() => onOpen(card)}
           />
         );

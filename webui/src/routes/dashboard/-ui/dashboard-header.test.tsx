@@ -11,6 +11,8 @@
  */
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { vanillaDashboardHtml } from './dash-artefact';
@@ -294,5 +296,91 @@ describe('click seams', () => {
     });
     const urls = fetchMock.mock.calls.map((call) => String(call[0]));
     expect(urls[0]).toBe('/api/enrichment/deezer/resume');
+  });
+});
+
+/**
+ * Asserted as stylesheet text because jsdom has no layout engine: it cannot
+ * measure a flex item, so it cannot notice one holding a row wider than the
+ * viewport. This particular overflow is worth pinning because it does not stay
+ * on the dashboard — an unclipped row wider than the screen makes the whole
+ * PAGE scroll sideways, on every page that shares the shell.
+ */
+describe('the hello strip does not push the page sideways on a phone', () => {
+  const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8').replace(
+    /\/\*[\s\S]*?\*\//g,
+    '',
+  );
+  const phoneBlocks = [...css.matchAll(/@media[^{]*max-width:\s*768px[^{]*\{([\s\S]*?)\n\}/g)].map(
+    (m) => m[1],
+  );
+
+  it('lets the greeting text shrink instead of holding the row open', () => {
+    // A flex item holding text keeps min-width:auto, which refuses to go below
+    // its longest unbreakable word — so a long profile name sets the floor.
+    const block = phoneBlocks.find((b) => b.includes('.hello-greeting > span'));
+    expect(block, 'no phone rule shrinks .hello-greeting > span').toBeTruthy();
+    expect(block).toMatch(/min-width:\s*0/);
+  });
+
+  it('breaks a long username that has no space to wrap at', () => {
+    const block = phoneBlocks.find((b) => b.includes('.hello-greeting > span'));
+    expect(block).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
+  it('shrinks the 176px hero illustration', () => {
+    const block = phoneBlocks.find((b) => b.includes('.page-header-icon'));
+    expect(block, 'no phone rule shrinks the dashboard hero').toBeTruthy();
+  });
+});
+
+/**
+ * Asserted as stylesheet text: jsdom has no layout and no paint order, so it
+ * cannot tell you which of two overlapping elements is on top. This one was
+ * found by rendering the real CSS in Chromium at a width where the orb strip
+ * wraps, and screenshotting it.
+ */
+describe('a hovered orb outranks the orbs it overlaps', () => {
+  const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
+  const hoverRule =
+    /#dashboard-page \.header-actions > \[class([$*])="-button-container"\]:hover[\s\S]{0,240}?\}/.exec(
+      css,
+    );
+
+  it('lifts the hovered CONTAINER, not just the tooltip inside it', () => {
+    // The tooltip already carries z-index 5000 and that is not enough: it is
+    // absolutely positioned inside its own orb's container, so it competes from
+    // in there rather than against the sibling containers.
+    expect(hoverRule, 'no rule lifts the hovered orb container').toBeTruthy();
+    const z = /z-index:\s*(\d+)/.exec(hoverRule![0]);
+    expect(z, 'the hover rule sets no z-index').toBeTruthy();
+    // Must clear the tooltip's own 5000, and stay under the modal layer so a
+    // modal still covers a tooltip.
+    expect(Number(z![1])).toBeGreaterThan(5000);
+    expect(Number(z![1])).toBeLessThan(99999);
+  });
+
+  it('uses class*=, because the live element carries a SECOND class', () => {
+    // worker-orbs.js appends its own, so the attribute reads
+    // "lastfm-enrich-button-container worker-orb-reveal". [class$=] tests the
+    // whole attribute, so it ends with worker-orb-reveal and matches NOTHING —
+    // the first attempt at this fix shipped that way and did exactly nothing.
+    expect(hoverRule![1], '[class$=] matches no orb once worker-orbs adds its class').toBe('*');
+  });
+
+  it('the selector actually matches a real orb element', () => {
+    // Asserted against the DOM rather than the stylesheet, so a selector that
+    // compiles but matches nothing cannot pass.
+    const el = document.createElement('div');
+    el.className = 'lastfm-enrich-button-container worker-orb-reveal';
+    expect(el.matches('[class*="-button-container"]')).toBe(true);
+    expect(el.matches('[class$="-button-container"]')).toBe(false);
+  });
+
+  it('gives every orb a baseline z-index, so the strip stacks by rule not DOM order', () => {
+    const base =
+      /#dashboard-page \.header-actions > \[class\*="-button-container"\]\s*\{([^}]*)\}/.exec(css);
+    expect(base, 'no baseline rule for the orb containers').toBeTruthy();
+    expect(base![1]).toMatch(/z-index:\s*\d+/);
   });
 });

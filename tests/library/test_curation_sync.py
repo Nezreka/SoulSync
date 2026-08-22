@@ -17,6 +17,7 @@ class _DB:
     def __init__(self, fail_on=None):
         self.stored = {}
         self.stamped = 0
+        self.status = None
         self._fail_on = fail_on
 
     def replace_curation_signals(self, server, user, rows):
@@ -25,8 +26,9 @@ class _DB:
         self.stored[(server, user)] = rows
         return len(rows)
 
-    def mark_curation_sync(self):
+    def mark_curation_sync(self, status=None):
         self.stamped += 1
+        self.status = status
 
 
 class _Client:
@@ -107,7 +109,7 @@ def test_a_server_that_raises_does_not_stamp_or_clear():
     summary = sync_curation_signals(db, {"navidrome": _Client(raises=True)})
     assert db.stored == {}, "a failed read wrote over stored signals"
     assert summary["stamped"] is False
-    assert db.stamped == 0
+    assert db.status["complete"] is False
 
 
 def test_a_server_returning_nothing_does_not_stamp():
@@ -116,7 +118,7 @@ def test_a_server_returning_nothing_does_not_stamp():
     db = _DB()
     summary = sync_curation_signals(db, {"navidrome": _Client({})})
     assert summary["stamped"] is False
-    assert db.stamped == 0
+    assert db.status["complete"] is False
 
 
 def test_a_client_without_the_method_is_skipped_not_fatal():
@@ -129,13 +131,21 @@ def test_a_client_without_the_method_is_skipped_not_fatal():
     assert summary["stamped"] is True
 
 
-def test_a_none_client_is_skipped():
+def test_a_none_client_is_an_unreachable_expected_server():
+    """The caller named plex as active, so it is expected to contribute. A
+    "complete" sweep that quietly omits everyone on it is the deletion path."""
     db = _DB()
     summary = sync_curation_signals(db, {"plex": None})
     assert summary["stamped"] is False
+    assert db.status["complete"] is False
+    assert db.status["expected_servers"] == ["plex"]
 
 
 def test_one_users_write_failing_does_not_lose_the_others():
+    """Alice's rows are kept — but the snapshot is INCOMPLETE (L2-001). Bob's
+    stored signals are now whatever they were before, and the fresh half claims
+    to be the whole picture. Stamping that as a good sweep is what let the
+    cleaner delete tracks Bob had favourited."""
     db = _DB(fail_on=("navidrome", "bob"))
     summary = sync_curation_signals(db, {
         "navidrome": _Client({"alice": [_sig(favorite=True)],
@@ -144,17 +154,70 @@ def test_one_users_write_failing_does_not_lose_the_others():
     assert ("navidrome", "alice") in db.stored
     assert ("navidrome", "bob") not in db.stored
     assert summary["users"] == 1
-    assert summary["stamped"] is True, "alice was read fine — that is real progress"
+    assert summary["complete"] is False
+    assert summary["failed"] == ["navidrome/bob"]
+    assert db.status["complete"] is False
 
 
-def test_every_server_failing_leaves_the_stamp_alone():
+def test_a_complete_sweep_is_recorded_as_complete():
+    db = _DB()
+    summary = sync_curation_signals(db, {
+        "navidrome": _Client({"alice": [_sig(favorite=True)]}),
+    })
+    assert summary["complete"] is True
+    assert db.status == {"complete": True, "expected_servers": ["navidrome"],
+                         "servers": ["navidrome"], "failed": [], "users": 1,
+                         "rows": 1}
+
+
+def test_a_server_with_no_readable_users_is_a_failure_not_an_empty_answer():
+    """A curation-capable server that returns nothing was not read. Treating it
+    as "these people curate nothing" is the deletion path."""
+    db = _DB()
+    summary = sync_curation_signals(db, {"navidrome": _Client({})})
+    assert summary["complete"] is False
+    assert db.status["complete"] is False
+
+
+def test_no_capable_server_is_recorded_as_a_complete_empty_sweep():
+    """So the cleaner can tell "curation cannot work here" (run normally) from
+    "curation has never run yet" (keep everything)."""
+    db = _DB()
+    summary = sync_curation_signals(db, {"plex": _ClientWithoutSupport()})
+    assert summary["complete"] is True
+    assert db.status["expected_servers"] == []
+
+
+def test_a_legacy_adapter_is_only_stamped_on_a_clean_sweep():
+    """An adapter whose mark_curation_sync takes no argument cannot carry the
+    incomplete caveat, so a partial sweep must not stamp it at all."""
+
+    class _LegacyDB(_DB):
+        def mark_curation_sync(self):  # no status parameter
+            self.stamped += 1
+
+    db = _LegacyDB(fail_on=("navidrome", "bob"))
+    summary = sync_curation_signals(db, {
+        "navidrome": _Client({"alice": [_sig(favorite=True)],
+                              "bob": [_sig(favorite=True)]}),
+    })
+    assert summary["stamped"] is False
+    assert db.stamped == 0
+
+
+def test_every_server_failing_is_recorded_as_an_incomplete_sweep():
+    """The failure is written down rather than left implicit: an absent record
+    and a failed sweep both have to keep the cleaner's hands off, and only one
+    of them can say why."""
     db = _DB()
     summary = sync_curation_signals(db, {
         "navidrome": _Client(raises=True),
         "jellyfin": _Client(raises=True),
     })
     assert summary["servers"] == []
-    assert db.stamped == 0
+    assert summary["stamped"] is False
+    assert db.status["complete"] is False
+    assert db.status["failed"] == ["jellyfin", "navidrome"]
 
 
 # ── multi-user credentials (phase 3) ──────────────────────────────────────

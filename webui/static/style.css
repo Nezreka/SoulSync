@@ -9481,6 +9481,37 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     display: inline-block;
 }
 
+/* The hello strip on a phone.
+
+   `.hello-greeting` is a flex row of [176px hero illustration][greeting text].
+   A flex item holding text keeps min-width:auto, which refuses to shrink below
+   its longest unbreakable WORD — so a profile named "boulderbaddad" set at 27px
+   held the row wider than the viewport, and because nothing clips it the whole
+   PAGE scrolled sideways. Every other page inherited the sideways scroll.
+
+   min-width:0 lets the text wrap instead of pushing; overflow-wrap handles a
+   single long username with no space to break at. */
+@media (max-width: 768px) {
+    #dashboard-page .page-header-icon { width: 96px; height: 96px; }
+
+    .hello-greeting {
+        font-size: 20px;
+        gap: 10px;
+        letter-spacing: -0.2px;
+    }
+    .hello-greeting > span {
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+    .header-hello { max-width: 100%; }
+
+    /* The interpunct is a ::before on each chip after the first, so when the
+       row wraps it lands at the START of the new line as a dangling dot. A gap
+       separates them without needing a character. */
+    .hello-stats { gap: 5px 14px; }
+    .hello-stat + .hello-stat::before { display: none; }
+}
+
 /* Artist line on rail cards — its own hit-target straight to the artist
    page. A <button> now, so undo the UA chrome and keep the sub's look;
    the underline on hover is the only tell. */
@@ -9491,8 +9522,16 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ya-card-sub--link:hover { text-decoration: underline; color: #fff; }
-/* Six buttons now — they wrap instead of crushing the title. */
-.library-status-actions { flex-wrap: wrap; row-gap: 6px; }
+/* wrapping lives on the base rule further down, it is later in the file and
+   was overriding this. left here so nobody re-adds it. */
+.library-status-actions { row-gap: 6px; }
+
+/* eleven buttons don't fit beside the title under ~1200px, so let the header
+   wrap and the buttons drop to their own line. without this the actions squeeze
+   the title until "1,204 albums · 41.2 GB" stacks one word per line.
+   the dash-card[data-card="library"] rule further down wins on specificity but
+   never declares flex-wrap, so this one still lands. */
+.library-status-header { flex-wrap: wrap; }
 
 .header-actions {
     display: flex;
@@ -9502,6 +9541,31 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     flex-wrap: wrap;
     margin-top: 12px;
     width: 100%;
+}
+
+/* THE HOVERED ORB RISES ABOVE ITS SIBLINGS.
+   Each orb is <container><button><tooltip></container>, with the tooltip
+   absolutely positioned INSIDE its own container. `.header-actions` wraps, so
+   at some widths the strip is two rows and a row-1 tooltip drops across row 2,
+   where the later orbs — later siblings — paint over it.
+
+   `[class*=]`, NOT `[class$=]`. worker-orbs.js appends its own class, so the
+   live attribute reads "lastfm-enrich-button-container worker-orb-reveal" and
+   an attribute-ENDS-WITH selector matches none of them. A first attempt at this
+   fix used `$=` and silently applied to nothing at all.
+
+   Every container carries a baseline z-index so the strip stacks by rule rather
+   than by DOM order, and the hovered one is lifted clear above it. The
+   tooltip's own z-index 5000 cannot do this job: it competes from inside its
+   container, not against the containers. 6000 clears it and stays far below the
+   modal layer, since a modal should still cover a tooltip. */
+#dashboard-page .header-actions > [class*="-button-container"] {
+    z-index: 1;
+}
+
+#dashboard-page .header-actions > [class*="-button-container"]:hover,
+#dashboard-page .header-actions > [class*="-button-container"]:focus-within {
+    z-index: 6000;
 }
 
 /* Watchlist / Wishlist quick-nav — top-right of header */
@@ -12505,6 +12569,34 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     line-height: 1.45;
 }
 
+/* One Refresh for the whole modal, in the header. The monitor, both boards and
+   the history each grew their own, all calling the same handler. */
+.auto-sync-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.auto-sync-refresh {
+    padding: 7px 14px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.auto-sync-refresh:hover {
+    background: rgba(var(--accent-rgb), 0.14);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: rgb(var(--accent-light-rgb));
+}
+
 .auto-sync-close {
     width: 32px;
     height: 32px;
@@ -12523,9 +12615,11 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     color: #ef4444;
 }
 
+/* Auto-fit rather than a fixed four: the strip is three tiles now, and the
+   failure one only exists when there ARE failures. */
 .auto-sync-summary {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 10px;
     padding: 14px 20px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
@@ -13225,6 +13319,34 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     border-color: rgba(var(--accent-rgb), 0.22);
 }
 
+/* The one number in this strip you would act on. */
+.auto-sync-summary-bad {
+    border-color: rgba(224, 85, 78, 0.35) !important;
+    background: rgba(224, 85, 78, 0.09) !important;
+}
+
+.auto-sync-summary-bad span,
+.auto-sync-summary-bad small {
+    color: #f0928c !important;
+}
+
+/* The timezone, folded away: it already defaults to the browser's own. */
+.auto-sync-tz-summary {
+    align-self: flex-start;
+    padding: 6px 0;
+    border: none;
+    background: none;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12.5px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.auto-sync-tz-summary:hover { color: rgba(255, 255, 255, 0.85); }
+.auto-sync-tz-summary b { color: rgba(255, 255, 255, 0.8); font-weight: 600; }
+
+.auto-sync-weekly-editor-hint.auto-sync-tz-bad { color: #e3a63c; }
+
 .auto-sync-playlist.unavailable {
     cursor: default;
     opacity: 0.5;
@@ -13603,6 +13725,26 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 }
 
 .auto-sync-loading,
+/* A failed load used to offer only a close button, so the sole recovery was to
+   close and reopen — a dead end the user had to guess their way out of. */
+.auto-sync-error-retry {
+    margin-top: 14px;
+    padding: 8px 18px;
+    border-radius: 8px;
+    border: 1px solid rgba(var(--accent-rgb), 0.35);
+    background: rgba(var(--accent-rgb), 0.12);
+    color: rgb(var(--accent-light-rgb));
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.auto-sync-error-retry:hover {
+    background: rgba(var(--accent-rgb), 0.2);
+    border-color: rgba(var(--accent-rgb), 0.55);
+}
+
 .auto-sync-error {
     padding: 48px;
 }
@@ -14875,9 +15017,15 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     margin-top: 5px;
 }
 
+/* minmax(0, ...) everywhere below, never a bare `1fr`.
+   A bare `1fr` is `minmax(auto, 1fr)`, and that `auto` minimum is the item's
+   MIN-CONTENT size — so the track refuses to go narrower than the widest
+   unbreakable thing inside it. On a phone that was the nine-chip source filter
+   strip, which held .sync-main-panel at 748px inside a 390px viewport and made
+   the whole document scroll sideways. Measured, not guessed. */
 .sync-content-area {
     display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     /* Sidebar hidden by default, shown when sync starts */
     gap: 25px;
     /* min-height: calc(90vh - 200px);  Minimum height, but allow expansion */
@@ -14887,7 +15035,7 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 /* Hide sidebar on laptop and smaller screens */
 @media (max-width: 1300px) {
     .sync-content-area {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
         /* Single column - main panel takes full width */
         gap: 0;
     }
@@ -14931,7 +15079,7 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 }
 
 .sync-content-area--with-sidebar {
-    grid-template-columns: 2.5fr 0.75fr;
+    grid-template-columns: minmax(0, 2.5fr) minmax(0, 0.75fr);
 }
 
 /*
@@ -14943,7 +15091,7 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
  */
 @media (max-width: 1300px) {
     .sync-content-area--with-sidebar {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
         gap: 0;
     }
 }
@@ -19348,6 +19496,866 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     align-items: center;
     justify-content: space-between;
     width: 100%;
+}
+
+/* ── Playlist cover art ───────────────────────────────────────────────────
+   image_url was already being fetched and carried on every one of these rows
+   and then dropped; these rules are what render it. Two hosts:
+
+     .playlist-card-art   a NEW tile on the account cards (Spotify, Deezer-ARL),
+                          which had no icon element at all.
+     .playlist-card-icon  the EXISTING 40px brand-tinted tile on every source
+                          card — the art fills it, so nothing moves and the
+                          tint becomes the empty state rather than the normal
+                          one.
+
+   The tile keeps its size when empty, so a mixed list of arted and art-less
+   cards still lines up. */
+.playlist-card-art {
+    width: 40px;
+    height: 40px;
+    flex: 0 0 auto;
+    margin-right: 16px;
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Both existing tiles need clipping now that an image can fill them; without
+   this the cover renders as a hard-edged square over the rounded tint. */
+.playlist-card-icon,
+.mirrored-playlist-card .source-icon {
+    overflow: hidden;
+}
+
+.playlist-card-art-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.playlist-card-art-glyph {
+    line-height: 1;
+}
+
+/* The 2x2 collage — a playlist's artwork when its source supplied no poster,
+   built from four DISTINCT album covers off its discovered tracks. Only ever
+   rendered at four; one to three shows a single cover instead, because a grid
+   with holes in it reads as a broken image. */
+.playlist-card-collage {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    width: 100%;
+    height: 100%;
+    gap: 0;
+}
+
+.playlist-card-collage img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* One dropdown in place of ten drag lanes, a filterable sidebar and a bulk
+   popover — all of which existed to express a single integer per playlist. */
+.mirrored-card-schedule {
+    flex: 0 0 auto;
+    max-width: 132px;
+    padding: 5px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(0, 0, 0, 0.3);
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 11.5px;
+    cursor: pointer;
+}
+
+.mirrored-card-schedule:hover:not(:disabled) {
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: #fff;
+}
+
+.mirrored-card-schedule:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+/* ── The playlist card ────────────────────────────────────────────────────
+   Artwork first; state carried BY the artwork rather than beside it.
+
+   The resting card is a cover, a name, one line and a schedule. No buttons, no
+   chips, no colour. A healthy card shows no ring at all — a ring on every card
+   would be forty of them announcing that nothing is wrong. Problems sort to the
+   front instead, so nothing has to shout to be found. */
+.pl-grid {
+    display: grid;
+    /* Explicit counts rather than auto-fill: auto-fill kept packing six and
+       more onto a wide screen, which turns a library into a contact sheet.
+       Five is the cap; the cards stay big enough for the cover to lead. */
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    padding: 2px 6px 10px;
+}
+
+@media (max-width: 760px) {
+    .pl-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (min-width: 1180px) {
+    .pl-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1560px) {
+    .pl-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* Four is the cap. Five still read as a contact sheet on a wide monitor;
+   the cover has to stay big enough to be the thing you recognise. */
+@media (min-width: 1960px) {
+    .pl-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+.pl-card {
+    position: relative;
+    display: grid;
+    /* Tightened from 72px art / 13px padding / 15px gap. The card was 100px
+       tall to hold 68px of content, and at thirty-eight playlists the cost of
+       that is a row and a half of screen. The cover is still the thing you
+       recognise at 64px; the ring is corner-anchored to the art box, so it
+       follows without adjustment. */
+    grid-template-columns: 64px minmax(0, 1fr);
+    gap: 13px;
+    align-items: center;
+    padding: 10px;
+    border-radius: 15px;
+    background: rgba(18, 18, 22, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.18s, transform 0.18s, background 0.18s;
+}
+
+.pl-card:hover,
+.pl-card:focus-visible {
+    border-color: rgba(255, 255, 255, 0.13);
+    transform: translateY(-2px);
+    background: rgba(22, 22, 27, 0.95);
+}
+
+.pl-card-art { position: relative; width: 64px; height: 64px; flex: 0 0 auto; }
+
+.pl-card-art-img {
+    width: 100%;
+    height: 100%;
+    border-radius: 10px;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.05);
+    font-size: 22px;
+    transition: filter 0.2s;
+}
+
+.pl-card-art-img .playlist-card-art-img { width: 100%; height: 100%; object-fit: cover; }
+/* A playlist with nothing discovered yet has no cover to derive, so it falls
+   back to its service mark. At 26px and half opacity on a dark tile that mark
+   did not register, and six cards in a library of thirty-eight read as failed
+   image loads rather than as "nothing found yet". Bigger and fully opaque, on
+   a tile that is visibly a placeholder rather than a hole. */
+.pl-card-art-img .tab-icon { width: 34px; height: 34px; opacity: 0.9; }
+
+.pl-card-art-img:has(.playlist-card-art-glyph) {
+    background:
+        radial-gradient(circle at 50% 45%, rgba(255, 255, 255, 0.07), transparent 68%),
+        rgba(255, 255, 255, 0.035);
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+/* An incomplete cover desaturates, so the card reads differently even out of
+   focus — the state is legible before any digits are. */
+.pl-card[data-state="short"] .pl-card-art-img,
+.pl-card[data-state="error"] .pl-card-art-img {
+    filter: saturate(0.55) brightness(0.72);
+}
+
+/* The ring: a conic arc on the cover's corner, the coverage as its sweep and
+   its number in the middle. Only ever rendered when it has something to say. */
+.pl-ring {
+    position: absolute;
+    right: -6px;
+    bottom: -6px;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    --ring-color: #e3a63c;
+    background: conic-gradient(var(--ring-color) calc(var(--pct, 0) * 1%), rgba(255, 255, 255, 0.1) 0);
+    box-shadow: 0 0 0 3px #0d0d10;
+}
+
+.pl-ring::after {
+    content: attr(data-pct);
+    position: absolute;
+    inset: 3px;
+    border-radius: 50%;
+    background: #111114;
+    display: grid;
+    place-items: center;
+    font-size: 8.5px;
+    font-weight: 700;
+    color: var(--ring-color);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+}
+
+.pl-ring--error { --ring-color: #e0554e; }
+.pl-ring--working { --ring-color: rgb(var(--accent-rgb)); animation: pl-ring-pulse 1.6s ease-in-out infinite; }
+
+@keyframes pl-ring-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}
+
+.pl-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+    /* NO z-index here, deliberately.
+       Lifting the body above the veil looks like it protects the schedule pill,
+       and it does — by putting the body's own box over Sync now and the
+       overflow menu, which stretch to the same right edge. Every click meant
+       for those buttons then landed on the card and opened the detail modal.
+       What actually keeps the pill reachable is `pointer-events: none` on the
+       veil, which lets clicks fall through to whatever is under it. */
+}
+
+.pl-card-name { display: flex; align-items: center; gap: 7px; min-width: 0; }
+
+/* Set-and-forget settings need a tell. Quiet by default — it marks a mode, not
+   a problem — and it sits after the name so it never pushes the name around. */
+.pl-card-organize {
+    flex: 0 0 auto;
+    font-size: 11px;
+    opacity: 0.55;
+    cursor: help;
+}
+.pl-card:hover .pl-card-organize { opacity: 0.85; }
+
+.pl-card-name b {
+    font-size: 14.5px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pl-card-meta {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.34);
+    font-variant-numeric: tabular-nums;
+}
+
+.pl-card-pill {
+    align-self: flex-start;
+    margin-top: 2px;
+    padding: 3px 9px;
+    border-radius: 100px;
+    font-size: 10.5px;
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    background: rgba(255, 255, 255, 0.045);
+    color: rgba(255, 255, 255, 0.55);
+}
+
+/* Actions live under a veil, so a wall of cards carries one thing each rather
+   than six. The gradient keeps the artwork visible behind the buttons. */
+.pl-card-hover {
+    position: absolute;
+    inset: 0;
+    border-radius: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 0 13px;
+    background: linear-gradient(90deg, rgba(13, 13, 16, 0) 30%, rgba(13, 13, 16, 0.93) 68%);
+    opacity: 0;
+    transition: opacity 0.16s;
+    pointer-events: none;
+}
+
+/* The veil is PAINT ONLY. It spans the whole card so the gradient can fade
+   the artwork behind the buttons, but it must never swallow clicks: the
+   schedule pill sits underneath it, and an inset:0 layer with pointer-events
+   made the pill unclickable exactly when hovering revealed the controls. Only
+   the buttons themselves take pointer events. */
+.pl-card:hover .pl-card-hover,
+.pl-card:focus-within .pl-card-hover {
+    opacity: 1;
+}
+
+.pl-card-hover > * {
+    pointer-events: auto;
+}
+
+.pl-card-fix {
+    padding: 7px 13px;
+    border-radius: 9px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid rgba(var(--accent-rgb), 0.45);
+    background: rgba(var(--accent-rgb), 0.2);
+    color: rgb(var(--accent-light-rgb));
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.pl-card-fix:hover { background: rgba(var(--accent-rgb), 0.3); }
+
+.pl-card-fix--danger {
+    border-color: rgba(224, 85, 78, 0.45);
+    background: rgba(224, 85, 78, 0.18);
+    color: #f0928c;
+}
+
+.pl-card-more {
+    width: 30px;
+    height: 30px;
+    flex: 0 0 auto;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    background: rgba(255, 255, 255, 0.045);
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+}
+
+.pl-card-more:hover { color: #fff; }
+
+@media (prefers-reduced-motion: reduce) {
+    .pl-card { transition: none; }
+    .pl-card:hover { transform: none; }
+    .pl-ring--working { animation: none; }
+}
+
+/* The overflow menu — five actions that used to be five icon-only buttons on
+   every card at once, each with tooltip-only meaning. */
+.pl-menu {
+    position: fixed;
+    z-index: 1400;
+    min-width: 188px;
+    padding: 6px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(20, 20, 24, 0.98);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.pl-menu-item {
+    padding: 8px 12px;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.pl-menu-item:hover { background: rgba(255, 255, 255, 0.07); color: #fff; }
+
+/* The schedule picker: a longer menu, so it scrolls rather than running off. */
+.pl-menu--schedule { max-height: 60vh; overflow-y: auto; min-width: 210px; }
+
+.pl-menu-heading {
+    padding: 8px 12px 4px;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.pl-menu-item--on { color: rgb(var(--accent-light-rgb)); }
+
+.pl-menu-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
+
+.pl-menu-tick { font-size: 11px; }
+
+/* The pill is a control now — it is the only place a cadence gets set. */
+.pl-card-pill--inert { opacity: 0.55; cursor: default; }
+
+/* An unscheduled playlist says nothing at rest.
+   Most playlists have no cadence, so a chip reading "Not scheduled" on each of
+   them made the most-repeated thing on the page the one carrying no
+   information, and the few that ARE scheduled stopped standing out. The pill
+   keeps its box so nothing reflows on hover; it just stops shouting.
+   VISIBILITY, NOT DISPLAY: the space stays reserved, so revealing it cannot
+   push the card taller and jog the grid under the cursor. */
+.pl-card-pill--quiet {
+    opacity: 0;
+    transition: opacity 0.16s ease;
+}
+
+/* focus-within, not just hover, or the pill is unreachable by keyboard. */
+.pl-card:hover .pl-card-pill--quiet,
+.pl-card:focus-within .pl-card-pill--quiet { opacity: 0.75; }
+
+.pl-card-pill--inert.pl-card-pill--quiet { opacity: 0; }
+.pl-card:hover .pl-card-pill--inert.pl-card-pill--quiet,
+.pl-card:focus-within .pl-card-pill--inert.pl-card-pill--quiet { opacity: 0.55; }
+
+.pl-card-pill--action { cursor: pointer; transition: border-color 0.16s, color 0.16s; }
+
+.pl-card-pill--action:hover {
+    border-color: rgba(var(--accent-rgb), 0.45);
+    color: rgb(var(--accent-light-rgb));
+}
+
+/* Separates a per-playlist SETTING from the actions below it. */
+/* The repeated-failure glyph. Distinct from the ring, which reports the run
+   happening now: a card can be green and still have failed its last three. */
+.pl-card-health {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.pl-card-health--failing { background: rgba(224, 85, 78, 0.2); color: #f0928c; }
+.pl-card-health--warning { background: rgba(227, 166, 60, 0.2); color: #efc375; }
+
+/* The quality profile select, moved off the board's scheduled card. */
+.pl-menu-profile {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 4px 4px 8px;
+}
+
+.pl-menu-profile select {
+    width: 100%;
+    padding: 6px 8px;
+    border-radius: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(0, 0, 0, 0.32);
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 12px;
+}
+
+.pl-menu-sep {
+    height: 1px;
+    margin: 4px 8px;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* The custom-interval field, from the board's bulk popover. */
+.pl-menu-custom {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 12px 8px;
+    align-items: center;
+}
+
+.pl-menu-custom input {
+    width: 88px;
+    padding: 5px 8px;
+    border-radius: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(0, 0, 0, 0.32);
+    color: #fff;
+    font-size: 12px;
+}
+
+.pl-menu-custom button {
+    padding: 5px 12px;
+    border-radius: 7px;
+    border: 1px solid rgba(var(--accent-rgb), 0.4);
+    background: rgba(var(--accent-rgb), 0.16);
+    color: rgb(var(--accent-light-rgb));
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.pl-menu-error {
+    flex: 1 0 100%;
+    color: #e3a63c;
+    font-size: 11px;
+}
+
+.pl-menu-item--danger { color: #f0928c; }
+.pl-menu-item--danger:hover { background: rgba(224, 85, 78, 0.14); color: #ff9e97; }
+
+/* A card mid-rename keeps the card's footprint so the grid does not reflow. */
+.pl-card--renaming { align-items: center; padding: 20px 16px; }
+.pl-card--renaming .mirrored-rename-input { width: 100%; }
+
+/* ── The playlist library ─────────────────────────────────────────────────
+   The sync page organised by STATE rather than by source. Quiet text tabs
+   (the dashboard's band-tab idiom) carry the states; source drops to a chip
+   row, which is what source always actually was. */
+.library-heading {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-right: auto;
+}
+
+.library-summary {
+    margin: 0;
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.45);
+    font-variant-numeric: tabular-nums;
+}
+
+.library-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 20px;
+    margin: 4px 6px 14px;
+}
+
+.library-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    align-items: baseline;
+}
+
+/* Background-less text tabs: one strip of chrome, not a second box. */
+.library-tab {
+    background: none;
+    border: none;
+    padding: 0 0 6px;
+    border-bottom: 2px solid transparent;
+    font-size: 15px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.38);
+    cursor: pointer;
+    transition: color 0.18s, border-color 0.18s;
+}
+
+.library-tab:hover {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.library-tab.active {
+    color: #fff;
+    border-bottom-color: rgb(var(--accent-rgb));
+}
+
+.library-tab-count {
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.35);
+    font-variant-numeric: tabular-nums;
+}
+
+.library-sources {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.library-source {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 11px;
+    border-radius: 100px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 11.5px;
+    text-transform: capitalize;
+    cursor: pointer;
+    transition: background 0.18s, border-color 0.18s, color 0.18s;
+}
+
+.library-source:hover {
+    color: rgba(255, 255, 255, 0.85);
+    border-color: rgba(255, 255, 255, 0.22);
+}
+
+.library-source.active {
+    background: rgba(var(--accent-rgb), 0.16);
+    border-color: rgba(var(--accent-rgb), 0.45);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.library-source-clear {
+    background: none;
+    border: none;
+    padding: 4px 6px;
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.library-source-clear:hover {
+    color: rgba(255, 255, 255, 0.75);
+}
+
+@media (max-width: 699px) {
+    .library-filters {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .library-tabs {
+        gap: 14px;
+    }
+}
+
+/* ── Add playlist sheet ───────────────────────────────────────────────────
+   One entry point in place of choosing between twelve source tabs before you
+   have even pasted anything. Paste a link (service detected, not chosen), pick
+   a connected account, or import a file. */
+/* Separates the two actions that CHANGE something from the four that only
+   report what already happened. */
+.sync-header-divider {
+    width: 1px;
+    align-self: stretch;
+    margin: 2px 4px;
+    background: rgba(255, 255, 255, 0.14);
+}
+
+.sync-add-playlist-btn {
+    background: rgba(var(--accent-rgb), 0.16);
+    border: 1px solid rgba(var(--accent-rgb), 0.45);
+    color: rgb(var(--accent-light-rgb));
+    font-weight: 600;
+}
+
+.sync-add-playlist-btn:hover {
+    background: rgba(var(--accent-rgb), 0.26);
+    border-color: rgba(var(--accent-rgb), 0.7);
+}
+
+/* Pops in AT the button, like the card's overflow menu. Adding a playlist is a
+   small act; dimming the whole page and taking over the middle of it overstated
+   what was happening. */
+.add-playlist-sheet {
+    position: fixed;
+    z-index: 1300;
+    width: 420px;
+    max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    background: rgba(20, 20, 24, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 14px;
+    box-shadow: 0 20px 52px rgba(0, 0, 0, 0.6);
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 16px 18px 20px;
+}
+
+.add-playlist-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.add-playlist-head h3 {
+    font-size: 15px;
+    font-weight: 700;
+    margin: 0;
+}
+
+.add-playlist-close {
+    width: 26px;
+    height: 26px;
+    flex: 0 0 auto;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.add-playlist-close:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+.add-playlist-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.add-playlist-label {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.add-playlist-row {
+    display: flex;
+    gap: 10px;
+}
+
+.add-playlist-row input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 11px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(0, 0, 0, 0.35);
+    color: #fff;
+    font-size: 13.5px;
+}
+
+.add-playlist-row input:focus {
+    outline: none;
+    border-color: rgba(var(--accent-rgb), 0.55);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.14);
+}
+
+.add-playlist-submit {
+    flex: 0 0 auto;
+    padding: 11px 22px;
+    border-radius: 10px;
+    border: 1px solid rgba(var(--accent-rgb), 0.5);
+    background: rgba(var(--accent-rgb), 0.2);
+    color: rgb(var(--accent-light-rgb));
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.add-playlist-submit:hover {
+    background: rgba(var(--accent-rgb), 0.3);
+}
+
+.add-playlist-hint {
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: #e0a33e;
+}
+
+.add-playlist-hint--ok {
+    color: rgb(var(--accent-light-rgb));
+}
+
+.add-playlist-accounts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.add-playlist-account,
+.add-playlist-file {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.18s, border-color 0.18s;
+}
+
+.add-playlist-account:hover,
+.add-playlist-file:hover {
+    background: rgba(var(--accent-rgb), 0.14);
+    border-color: rgba(var(--accent-rgb), 0.4);
+}
+
+.add-playlist-file {
+    align-self: flex-start;
+}
+
+/* ── Card coverage bar ────────────────────────────────────────────────────
+   Replaces four different ways of saying the same thing (the sync writer's
+   ♪/✓/✗/%, the check-note pair, the slash-text line and ListenBrainz's own).
+   The bar is the better fact: it carries the total as well as the win, which
+   is why the dashboard's sync row dropped its redundant download chip.
+
+   The numbers still differ per source on purpose — see card-coverage.tsx. */
+.playlist-card-coverage {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 116px;
+}
+
+.pcc-bar {
+    height: 4px;
+    border-radius: 100px;
+    background: rgba(255, 255, 255, 0.09);
+    overflow: hidden;
+}
+
+.pcc-bar > i {
+    display: block;
+    height: 100%;
+    border-radius: 100px;
+    background: rgb(var(--accent-rgb));
+    transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Failures are the one number here you would act on, so they tint the bar
+   as well as adding the chip — legible before you read any digits. */
+.pcc-bar--has-failures > i {
+    background: #e0a33e;
+}
+
+.pcc-legend {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.55);
+    white-space: nowrap;
+}
+
+.pcc-count {
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.82);
+}
+
+.pcc-failed {
+    color: #e0a33e;
+    font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pcc-bar > i { transition: none; }
 }
 
 .playlist-card-content {
@@ -40682,6 +41690,13 @@ div.artist-hero-badge {
 /* Album cards — Spotify browse tiles: padded panel, rounded cover with its
    own shadow, title + meta BELOW the art instead of stamped over it. */
 .enh-compact-item.album-card {
+    /* aspect-ratio: auto is LOAD-BEARING. A bare `.album-card` rule further up
+       belongs to the artist-detail release card, which is deliberately square
+       with its text overlaid on the art. This card shares the class name and
+       has the opposite design — title and meta BELOW the cover — so inheriting
+       that square forced the card to the cover's height and `overflow: hidden`
+       clipped every word. Search results were art with no title at all. */
+    aspect-ratio: auto;
     display: flex; flex-direction: column; padding: 14px;
     background: #17171b; border-radius: 12px; cursor: pointer;
     transition: background 0.25s ease, transform 0.2s ease, box-shadow 0.2s ease;
@@ -62838,6 +63853,30 @@ body.max-performance #page-particles-canvas {
     box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.15);
 }
 
+/* count on the review pill. amber not accent, this is a "you have stuff
+   waiting" number and it should read differently from the filter pills. */
+.adl-pill-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    margin-left: 7px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: rgba(245, 158, 11, 0.22);
+    color: #fbbf24;
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1;
+    vertical-align: middle;
+}
+
+.adl-pill.active .adl-pill-badge {
+    background: rgba(245, 158, 11, 0.3);
+    color: #fcd34d;
+}
+
 .adl-count {
     font-size: 0.78rem;
     color: rgba(255, 255, 255, 0.3);
@@ -63944,7 +64983,13 @@ body.max-performance #page-particles-canvas {
 .library-status-actions {
     display: flex;
     gap: 8px;
-    flex-shrink: 0;
+    /* eleven buttons now, the library verbs plus the quick links. they have to
+       be allowed to SHRINK or they never wrap, they just run off the side of
+       the card. flex-shrink 0 was fine at six and clipped at eleven. */
+    flex-wrap: wrap;
+    flex-shrink: 1;
+    min-width: 0;
+    justify-content: flex-end;
 }
 
 .library-status-btn {
@@ -63991,6 +65036,46 @@ body.max-performance #page-particles-canvas {
     border-color: rgba(239, 68, 68, 0.3);
     background: rgba(239, 68, 68, 0.1);
     color: #f87171;
+}
+
+/* thin rule between "do something to the library" and "go somewhere". margin
+   auto on neither side, it should sit right where the list breaks. */
+.library-status-divider {
+    width: 1px;
+    align-self: stretch;
+    min-height: 20px;
+    margin: 0 4px;
+    background: rgba(255, 255, 255, 0.1);
+    flex-shrink: 0;
+}
+
+/* Review with files waiting. amber, same language as the badge on the
+   downloads page, so the two read as the same thing in two places. */
+.library-status-btn-attention {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.35);
+    color: #fbbf24;
+}
+
+.library-status-btn-attention:hover {
+    background: rgba(245, 158, 11, 0.2);
+    border-color: rgba(245, 158, 11, 0.5);
+    color: #fcd34d;
+}
+
+.library-status-btn-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: rgba(245, 158, 11, 0.28);
+    color: #fcd34d;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
 }
 
 .library-status-stats {
@@ -70552,8 +71637,29 @@ body.max-performance .dash-card::after {
                 opacity 0.22s ease;
 }
 
-/* Labels stay collapsed for every chip (icon-only strip); the active
-   source is named by the panel header, so the chip needn't swell (SY1). */
+/* SY1 collapsed every label because the strip held FIFTEEN chips and naming
+   them all would have been a wall. The strip holds three. There is room, and
+   three unlabelled icons whose meaning lives only in a tooltip is exactly the
+   thing the card redesign removed — so the labels come back.
+
+   The collapse machinery above stays: it is what the routed chips (Spotify
+   Link, iTunes Link) still use when they appear and drop out again. */
+@media (min-width: 721px) {
+    /* The chip has to stop being a fixed 40x40 circle with overflow:hidden, or
+       the label has nowhere to appear however wide you let the label itself be
+       — measured: max-width alone left it 10px wide. Below 721 they stay
+       icon-only, which is the breakpoint the strip already uses to shrink. */
+    .sync-tabs .sync-tab-button {
+        width: auto;
+        min-width: 40px;
+        padding: 0 15px 0 11px;
+        gap: 8px;
+    }
+    .sync-tabs .sync-tab-button > .sync-tab-label {
+        max-width: 16ch;
+        opacity: 1;
+    }
+}
 
 /* Chain-link badge for the ``Link`` variants (Spotify Link, Deezer
  * Link, iTunes Link). Bottom-right corner of the chip, accent-tinted
@@ -77267,4 +78373,417 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     .reassign-steps {
         padding: 12px 16px 0;
     }
+}
+
+/* ── Activity ────────────────────────────────────────────────────────
+   Syncs you ran and runs the schedule ran, under one roof. They were two
+   header buttons answering the same question, and you had to know which one
+   had touched your playlist before you knew where to look.
+
+   The BODY is what scrolls, not the modal: the tab strip has to stay put, or
+   switching tabs from halfway down a long history leaves you halfway down a
+   different one. Namespaced `sync-activity-` because an unrelated
+   `.activity-*` family already exists for the live activity feed. */
+.sync-activity-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+}
+.sync-activity-overlay.hidden { display: none; }
+
+.sync-activity-modal {
+    width: 860px;
+    max-width: 95vw;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: linear-gradient(135deg, rgba(26, 26, 26, 0.98) 0%, rgba(16, 16, 16, 0.99) 100%);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+}
+
+.sync-activity-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 24px 14px;
+}
+.sync-activity-head h3 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 650;
+    color: #fff;
+}
+.sync-activity-close {
+    border: 0;
+    background: none;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+    color: rgba(255, 255, 255, 0.5);
+    transition: color 0.15s;
+}
+.sync-activity-close:hover { color: #fff; }
+
+.sync-activity-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 0 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.sync-activity-tab {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 14px;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.55);
+    /* The underline is drawn on the element itself so an inactive tab reserves
+       the same 2px and nothing shifts by a pixel as you switch. */
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: color 0.15s, border-color 0.15s;
+}
+.sync-activity-tab:hover { color: rgba(255, 255, 255, 0.85); }
+.sync-activity-tab.active {
+    color: #fff;
+    border-bottom-color: rgb(var(--accent-light-rgb));
+}
+.sync-activity-tab-badge {
+    min-width: 17px;
+    padding: 1px 5px;
+    border-radius: 100px;
+    font-size: 10px;
+    font-weight: 700;
+    text-align: center;
+    color: #ff9e97;
+    background: rgba(224, 85, 78, 0.18);
+}
+
+.sync-activity-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 16px 24px 22px;
+}
+
+/* The sort control. Deliberately a native <select>: four orders do not earn a
+   popover, and this page already has three of those. */
+.library-sort {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.4);
+}
+.library-sort select {
+    padding: 4px 8px;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.75);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    cursor: pointer;
+}
+.library-sort select:focus {
+    outline: none;
+    border-color: rgba(var(--accent-rgb), 0.5);
+}
+
+/* Search over the playlist library.
+   It sits in what was the widest empty space on the page — between the heading
+   and Update list — because that gap was doing nothing and finding one playlist
+   among thirty-eight had no answer but scrolling. */
+.library-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+    margin-right: 12px;
+    flex: 0 1 320px;
+    min-width: 0;
+}
+
+.library-search-input {
+    width: 100%;
+    padding: 7px 30px 7px 13px;
+    border-radius: 100px;
+    font-size: 12.5px;
+    font-family: inherit;
+    color: rgba(255, 255, 255, 0.85);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: border-color 0.16s, background 0.16s;
+}
+.library-search-input::placeholder { color: rgba(255, 255, 255, 0.32); }
+.library-search-input:focus {
+    outline: none;
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(var(--accent-rgb), 0.5);
+}
+/* The UA's own clear affordance is a light-mode X that is invisible here, and
+   it sits where ours goes. */
+.library-search-input::-webkit-search-cancel-button { display: none; }
+
+.library-search-clear {
+    position: absolute;
+    right: 8px;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    padding: 2px 4px;
+    color: rgba(255, 255, 255, 0.4);
+    transition: color 0.15s;
+}
+.library-search-clear:hover { color: #fff; }
+
+@media (max-width: 768px) {
+    /* Its own line under the heading: at 320px it would squeeze the title
+       into two words. */
+    /* .playlist-header does not wrap by default, so `flex-basis: 100%` alone
+       could not put the box on its own line — measured at 186px, sharing the
+       row with the heading and Update list. */
+    .playlist-header { flex-wrap: wrap; }
+    .library-search {
+        flex: 1 1 100%;
+        order: 3;
+        margin: 8px 0 0;
+    }
+}
+
+/* ── The sync redesign on smaller screens ────────────────────────────
+   Laptop is handled by the grid's own steps: one column to 760, two to 1179,
+   three to 1559, four above. Phone and tablet need more than a narrower grid,
+   because the design leans on two things neither of them has — hover, and
+   horizontal room. */
+
+/* THE ACTION ROW STOPS BEING AN OVERLAY.
+   `.pl-card-hover` is an inset:0 layer holding Sync now and the overflow menu,
+   which works on a wide card because the buttons sit in empty space to the
+   right of the text. Revealing that same layer on touch — which the page must
+   do, since :hover never fires there — drops the buttons directly ON TOP of
+   the playlist name, the meta line and the schedule pill. Visible and
+   overlapping is worse than invisible.
+
+   So on touch, and in any window too narrow for the buttons to have their own
+   space, the layer leaves the overlay entirely and becomes a third grid row:
+   artwork and text on top, actions underneath, nothing covering anything. */
+@media (hover: none), (max-width: 760px) {
+    .pl-card {
+        /* Column stays 72px: the coverage ring is positioned against the art
+           box, so shrinking it moves the ring off the artwork. */
+        row-gap: 11px;
+    }
+
+    .pl-card-hover {
+        position: static;
+        inset: auto;
+        grid-column: 1 / -1;
+        opacity: 1;
+        padding: 0;
+        border-radius: 0;
+        /* The gradient existed to keep artwork legible BEHIND the buttons.
+           Nothing is behind them now. */
+        background: none;
+        justify-content: flex-start;
+        pointer-events: auto;
+    }
+
+    /* Nothing is hidden any more, so nothing needs revealing. */
+    .pl-card-pill--quiet { opacity: 0.75; }
+    .pl-card-pill--inert.pl-card-pill--quiet { opacity: 0.55; }
+}
+
+/* STRIPS SCROLL, THEY DO NOT STACK.
+   Seven header actions and eleven source chips wrapped into six rows of
+   controls above the content — on a phone that is the entire first screen
+   before a single playlist is visible. One swipeable line each costs nothing
+   and gives the page back. */
+@media (max-width: 768px) {
+    .sync-header-actions,
+    .library-sources,
+    .library-tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        /* Momentum, and a little end padding so the last chip is not flush
+           against the edge mid-scroll. */
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 2px;
+    }
+    .sync-header-actions::-webkit-scrollbar,
+    .library-sources::-webkit-scrollbar,
+    .library-tabs::-webkit-scrollbar { display: none; }
+
+    /* Without this they compress to fit instead of scrolling. */
+    .sync-header-actions > *,
+    .library-sources > *,
+    .library-tabs > * { flex-shrink: 0; }
+
+    /* A SCROLLER HAS TO LOOK LIKE ONE.
+       The strip already scrolled, but it ended in the container's own tidy
+       padding, so eleven sources looked like three sources and a hard edge —
+       there was nothing to suggest the rest were a swipe away. The fade says
+       the row continues, and the snap makes the swipe land on a chip instead
+       of halfway through one.
+
+       The trailing padding is what keeps the fade off the last chip's text
+       once you reach the end. */
+    /* THE ROW STOPS BEING A FLEX CONTAINER, which is what actually makes the
+       strip scroll.
+
+       overflow-x:auto alone did nothing, and measuring it in a real browser at
+       390px said why: the strip was 736px wide inside a 246px parent. It never
+       shrank, so it had no overflow of its OWN to scroll — it simply overflowed
+       upward until .sync-main-panel (overflow-x: hidden) clipped it, which is
+       why the chips were unreachable rather than merely off-screen.
+
+       It refused to shrink because a flex item's automatic minimum size is its
+       min-content width, and `flex-basis: 100%` could not save it either: the
+       percentage resolves against a parent whose main size is indefinite here,
+       so it falls back to content size. min-width:0 on the chain did not fix it
+       (measured, not assumed).
+
+       As a BLOCK-level child the strip is simply as wide as its parent, full
+       stop — no intrinsic floor to fight — and its own overflow-x can finally
+       do the scrolling. Verified in Chromium at 390px: .sync-main-panel stops
+       overflowing entirely and the strip reports scrollWidth 736 in a 246px
+       box. */
+    .library-filters { display: block; }
+    .library-tabs {
+        display: flex;
+        /* The row's flex `gap` does nothing once it is a block. */
+        margin-bottom: 10px;
+    }
+
+    .library-sources {
+        display: flex;
+        flex-basis: auto;
+        padding-right: 30px;
+        scroll-snap-type: x proximity;
+        -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 30px), transparent);
+        mask-image: linear-gradient(90deg, #000 calc(100% - 30px), transparent);
+    }
+    .library-source { scroll-snap-align: start; }
+
+    /* Same disease as the filter row, same cure. `.sync-header-row` is a flex
+       container and `.sync-header-actions` is an item that will not shrink
+       below its min-content width — seven buttons — so instead of scrolling it
+       widened the header, the shell and then the DOCUMENT, and every page in
+       the app scrolled sideways. Measured at 390px: the page came out 793px
+       wide. As a block-level child the strip is parent-width and scrolls
+       itself. */
+    .sync-header-row { display: block; }
+    .sync-header-actions { margin-top: 12px; }
+
+    /* CONTAINERS, MEASURED.
+       At 390px the nesting ate 190 of 390 pixels before a card's own text
+       began — page-shell margin and padding, then the panel's, then the scroll
+       container's, then the grid's, each a value tuned for a desktop panel and
+       simply repeated on a phone. Halving them gives roughly a third of the
+       screen back to content.
+
+       The shell change is scoped to #sync-page rather than .page-shell because
+       that class is shared by every React page; the same trim would help all of
+       them, but that is a decision about the whole app, not this one screen. */
+    #sync-page {
+        margin-left: 8px;
+        margin-right: 8px;
+        padding: 16px 12px 18px;
+        border-radius: 16px;
+    }
+
+    .sync-main-panel,
+    .sync-sidebar { padding: 5px; }
+
+    .playlist-scroll-container { padding: 5px; }
+
+    .pl-grid { padding: 2px 2px 10px; }
+
+    .library-filters { margin-left: 2px; margin-right: 2px; }
+
+    .sync-header { margin-bottom: 16px; }
+    .sync-title { font-size: 22px; }
+
+    /* The divider marked a grouping that a scrolling strip cannot express. */
+    .sync-header-divider { display: none; }
+}
+
+/* usePopoverPosition clamps a menu into the viewport, but no clamp can help a
+   menu WIDER than the phone it is on. */
+@media (max-width: 480px) {
+    .pl-menu,
+    .pl-menu--schedule {
+        min-width: 0;
+        width: calc(100vw - 24px);
+        max-width: calc(100vw - 24px);
+    }
+    .add-playlist-sheet { width: calc(100vw - 24px); }
+}
+
+/* Activity goes full-screen on a phone. A centred 860px dialog with a long
+   scrolling history inside it wastes the only screen dimension there is. */
+@media (max-width: 768px) {
+    .sync-activity-modal {
+        width: 100%;
+        max-width: 100%;
+        height: 100%;
+        max-height: 100%;
+        border: 0;
+        border-radius: 0;
+    }
+    .sync-activity-head { padding: 14px 16px 10px; }
+    .sync-activity-tabs { padding: 0 16px; }
+    .sync-activity-body { padding: 12px 16px 18px; }
+
+    .sync-activity-tabs,
+    .sync-history-tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+    .sync-activity-tabs::-webkit-scrollbar,
+    .sync-history-tabs::-webkit-scrollbar { display: none; }
+    .sync-history-tab { flex-shrink: 0; }
+
+    /* A history row is seven things in a line — thumb, name, source, stats,
+       time, delete, re-sync. It wraps rather than crushing every one of them. */
+    .sync-history-entry {
+        flex-wrap: wrap;
+        row-gap: 8px;
+        gap: 10px;
+    }
+    .sync-history-entry-text { flex: 1 1 60%; }
+    .sync-history-entry-time { margin-left: auto; }
+    .sync-history-progress-text {
+        flex-wrap: wrap;
+        row-gap: 6px;
+    }
+}
+
+/* The narrowest phones: the title stops being nowrap-ellipsis, because at this
+   width the ellipsis arrives after about two words. */
+@media (max-width: 420px) {
+    .sync-history-entry-title {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+    }
+    .sync-history-thumb,
+    .sync-history-thumb-placeholder { width: 36px; height: 36px; }
 }

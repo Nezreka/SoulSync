@@ -9,6 +9,7 @@
  */
 
 import type { ExportJob, ExportMode, ExportStartResponse } from './-sync.export';
+import type { SyncHistoryEntry, SyncHistoryResyncTrack } from './-sync.history';
 import type { MirrorPayload } from './-sync.import';
 import type { MirroredPipelineState } from './-sync.pipeline';
 import type { SourceVerticalConfig } from './-sync.sources';
@@ -494,6 +495,29 @@ async function readPipelineResponse(
   return text ? (JSON.parse(text) as Record<string, unknown>) : {};
 }
 
+/**
+ * POST .../server-link — record which server playlist this mirror is.
+ *
+ * The relationship is a NAME match made fresh on every visit today, which is
+ * why the disambiguation modal exists. This stores the answer once the server
+ * tab has resolved it.
+ *
+ * WRITE ONLY for now: nothing reads the columns yet. Fire-and-forget, and
+ * deliberately swallowing its own failure — a link that does not land must
+ * never disturb the tab that called it.
+ */
+export function recordServerLink(
+  playlistId: number,
+  serverPlaylistId: string,
+  serverType: string,
+): void {
+  void fetch(`/api/mirrored-playlists/${playlistId}/server-link`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ server_playlist_id: serverPlaylistId, server_type: serverType }),
+  }).catch(() => undefined);
+}
+
 /** POST .../pipeline/run — an empty JSON body, as the vanilla sends (2468-2472). */
 export async function runMirroredPipeline(
   playlistId: number | string,
@@ -708,4 +732,63 @@ export async function fetchSyncLogs(): Promise<{ logs?: unknown } | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Sync history — the endpoints behind the Activity modal's first tab.
+ *
+ * `/api/sync/start` and `/api/sync/cancel` are the SAME engine
+ * fetchAccountSyncStatus polls, which is why a re-sync reuses that status call
+ * rather than adding a third one.
+ */
+export async function fetchSyncHistory(
+  page: number,
+  limit: number,
+  source: string | null,
+): Promise<{
+  entries?: SyncHistoryEntry[];
+  stats?: Record<string, number>;
+  total?: number;
+  error?: string;
+}> {
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (source) params.set('source', source);
+  return readJson(await fetch(`/api/sync/history?${params}`));
+}
+
+/** GET one entry — the only call that returns its stored `tracks`. */
+export async function fetchSyncHistoryEntry(
+  entryId: number,
+): Promise<{ success?: boolean; entry?: SyncHistoryEntry; error?: string }> {
+  return readJson(await fetch(`/api/sync/history/${entryId}`));
+}
+
+export async function deleteSyncHistoryEntry(
+  entryId: number,
+): Promise<{ success?: boolean; error?: string }> {
+  return readJson(await fetch(`/api/sync/history/${entryId}`, { method: 'DELETE' }));
+}
+
+export async function startSync(body: {
+  playlist_id: string;
+  playlist_name: string;
+  tracks: SyncHistoryResyncTrack[];
+}): Promise<{ success?: boolean; error?: string }> {
+  return readJson(
+    await fetch('/api/sync/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+export async function cancelSync(playlistId: string): Promise<{ success?: boolean }> {
+  return readJson(
+    await fetch('/api/sync/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playlist_id: playlistId }),
+    }),
+  );
 }

@@ -9,6 +9,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   cancelSourceSync,
+  deleteSyncHistoryEntry,
+  fetchSyncHistory,
+  fetchSyncHistoryEntry,
   deleteBeatportChart,
   deleteYouTubePlaylist,
   detectLbSeries,
@@ -57,6 +60,7 @@ import {
   fetchPersonalizedPlaylists,
   fetchPipelineHistory,
   patchMirroredPreferences,
+  recordServerLink,
   runAutomation,
   updateAutomation,
 } from './-sync.api';
@@ -685,5 +689,64 @@ describe('the sidebar log feed', () => {
       vi.fn(() => Promise.reject(new Error('offline'))),
     );
     await expect(fetchSyncLogs()).resolves.toBeNull();
+  });
+});
+
+describe('recordServerLink', () => {
+  /*
+   * The relationship between a mirror and its server playlist is a NAME match
+   * made fresh on every visit, which is why a disambiguation modal exists.
+   * This records the answer once the server tab has resolved it.
+   *
+   * WRITE ONLY for now: nothing reads the columns yet. The write lands first so
+   * it can be checked against real installs before behaviour depends on it.
+   */
+  it('posts the resolved pair to the mirror it belongs to', async () => {
+    stubFetch({ success: true });
+    recordServerLink(7, 'plex-12345', 'plex');
+    await Promise.resolve();
+    expect(wire(calls[0])).toEqual({
+      url: '/api/mirrored-playlists/7/server-link',
+      method: 'POST',
+      body: { server_playlist_id: 'plex-12345', server_type: 'plex' },
+    });
+  });
+
+  it('returns nothing, so no caller can accidentally await it', () => {
+    stubFetch({ success: true });
+    expect(recordServerLink(1, 'a', 'plex')).toBeUndefined();
+  });
+
+  it('swallows its own failure — a lost link must not disturb the tab', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    expect(() => recordServerLink(7, 'x', 'plex')).not.toThrow();
+    await Promise.resolve();
+  });
+});
+
+describe('sync history endpoints (wishlist-tools.js 3934-4310)', () => {
+  it('fetchSyncHistory carries page and limit, and OMITS source for All', () => {
+    // A `source=` param with an empty value is not the same request as no
+    // param: the endpoint would filter on the empty string and return nothing.
+    stubFetch({ entries: [] });
+    return fetchSyncHistory(2, 20, null).then(() => {
+      expect(calls[0].url).toBe('/api/sync/history?page=2&limit=20');
+    });
+  });
+
+  it('fetchSyncHistory adds source when a tab is picked', async () => {
+    stubFetch({ entries: [] });
+    await fetchSyncHistory(1, 20, 'spotify');
+    expect(calls[0].url).toBe('/api/sync/history?page=1&limit=20&source=spotify');
+  });
+
+  it('fetchSyncHistoryEntry and the delete hit the same per-entry path', async () => {
+    stubFetch({ success: true });
+    await fetchSyncHistoryEntry(7);
+    await deleteSyncHistoryEntry(7);
+    expect(calls.map((c) => `${c.method ?? 'GET'} ${c.url}`)).toEqual([
+      'GET /api/sync/history/7',
+      'DELETE /api/sync/history/7',
+    ]);
   });
 });

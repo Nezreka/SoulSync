@@ -78,11 +78,36 @@ function syncRetryConditionalRows() {
 }
 window.syncRetryConditionalRows = syncRetryConditionalRows;
 
-function debouncedAutoSaveSettings() {
+// The Settings -> Quality controls that a PROFILE captures but the whole-page
+// save sends as ordinary config keys. Editing one of these while previewing a
+// non-default profile is deliberately not persisted by the page save (see the
+// substitution block in saveSettings), so the edit only reaches the profile
+// once the user clicks that row's Update (v) button. Without a nudge that
+// looked like a silent failure: toggle it, switch profiles, come back, and it
+// reads Off again with nothing having told you why.
+const _QP_BUNDLE_CONTROL_IDS = new Set([
+    'acoustid-require-verified', 'downsample-hires', 'audio-completeness-check',
+    'import-replace-lower-quality', 'lossy-copy-enabled', 'lossy-copy-codec',
+    'lossy-copy-bitrate', 'lossy-copy-delete-original',
+]);
+
+// Show the "you are editing <profile>" banner when a profile-captured control
+// is edited while previewing somebody else's profile. Only a notice — the save
+// itself is left alone, because saveSettings already substitutes the real
+// default's values back in for exactly these keys.
+function _qpNudgeIfEditingForeignProfile(event) {
+    const id = event && event.target && event.target.id;
+    if (!id || !_QP_BUNDLE_CONTROL_IDS.has(id)) return;
+    if (_qpEditingProfileId === null || _qpEditingProfileId === _qpDefaultProfileId()) return;
+    qpShowEditingBanner();
+}
+
+function debouncedAutoSaveSettings(event) {
     // Ignore changes made while the page is programmatically populating its
     // fields on load — those aren't user edits and must not trigger a full
     // save (which re-initializes every backend service client).
     if (window._suppressSettingsAutoSave) return;
+    _qpNudgeIfEditingForeignProfile(event);
     // ISOLATION: the video side reuses this shared settings page, so editing a
     // VIDEO field (TMDB key, region, autoplay…) would otherwise fire this MUSIC
     // auto-save — which reads the server toggle from the DOM and would persist

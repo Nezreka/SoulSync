@@ -29,6 +29,7 @@ import {
   SYNC_DEFAULT_TAB,
   SYNC_HEADER_ACTIONS,
   SYNC_TABS,
+  syncStripTabs,
   normalizeSyncTab,
   type SyncTabId,
 } from '../-sync.shell';
@@ -37,6 +38,7 @@ export interface SyncShellProps {
   /** One node per tab id. A tab with no entry renders an empty panel. */
   panels: Partial<Record<SyncTabId, ReactNode>>;
   onAutoSync: () => void;
+  onActivity: () => void;
   /** The right-hand sidebar (S2). Rendered as the second grid column. */
   sidebar?: ReactNode;
   /**
@@ -53,6 +55,12 @@ export interface SyncShellProps {
    * 3732), and its unconditional sidebar re-hide is what the page keys off.
    * Filtering out same-tab clicks here would change that.
    */
+  /**
+   * Opens the Add-playlist sheet. The PRIMARY action on this page: it is the
+   * one entry point that replaces choosing a source tab before you have even
+   * pasted anything.
+   */
+  onAddPlaylist?: (anchor: { top: number; left: number; el: HTMLElement }) => void;
   onTabChange?: () => void;
   /**
    * Hand the host a function that opens a tab programmatically.
@@ -72,8 +80,16 @@ export interface SyncShellProps {
   registerOpenTab?: (open: (tab: SyncTabId) => void) => void;
 }
 
-/** 2237-2241. Three of the four are vanilla seams; see -sync.shell.ts. */
-function runHeaderAction(key: string, onAutoSync: () => void) {
+/** 2237-2241. The rest are vanilla seams; see -sync.shell.ts. */
+function runHeaderAction(key: string, onAutoSync: () => void, onActivity: () => void) {
+  if (key === 'discovery-pool') {
+    window.openDiscoveryPoolModal?.();
+    return;
+  }
+  if (key === 'wing-it-pool') {
+    window.openWingItPoolModal?.();
+    return;
+  }
   if (key === 'auto-sync') {
     onAutoSync();
     return;
@@ -82,8 +98,11 @@ function runHeaderAction(key: string, onAutoSync: () => void) {
     window.openManualLibraryMatchTool?.();
     return;
   }
-  if (key === 'sync-history') {
-    window.openSyncHistoryModal?.();
+  if (key === 'activity') {
+    // React now, not window.openSyncHistoryModal: Activity holds the sync
+    // history AND the scheduled-run history, and the vanilla modal knows about
+    // only the first of those.
+    onActivity();
     return;
   }
   // 2241 passes the literal 'playlist' — the modal is shared with other pages
@@ -93,7 +112,9 @@ function runHeaderAction(key: string, onAutoSync: () => void) {
 
 export function SyncShell({
   panels,
+  onAddPlaylist,
   onAutoSync,
+  onActivity,
   sidebar,
   sidebarVisible,
   onTabChange,
@@ -146,20 +167,42 @@ export function SyncShell({
               because the port does not emit inline styles; the rule is a 1:1
               transcription of those three declarations. */}
           <div className="sync-header-actions">
-            {SYNC_HEADER_ACTIONS.map((action) => (
+            {/* Primary, and first: adding a playlist is what this page is FOR.
+                The four buttons beside it are all "what happened" surfaces. */}
+            {onAddPlaylist && (
               <button
-                key={action.key}
                 type="button"
-                className={`btn btn--sm btn--secondary sync-history-btn${
-                  action.key === 'auto-sync' ? ' auto-sync-manager-btn' : ''
-                }`}
-                title={action.title}
-                onClick={() => {
-                  runHeaderAction(action.key, onAutoSync);
+                className="btn btn--sm sync-add-playlist-btn"
+                title="Paste a link, pick a connected account, or import a file"
+                onClick={(e) => {
+                  // Pops in AT the button, like the card's overflow menu. The
+                  // element rides along so clicking the button again closes the
+                  // sheet instead of racing the outside-click handler.
+                  const box = e.currentTarget.getBoundingClientRect();
+                  onAddPlaylist({ top: box.bottom + 8, left: box.left, el: e.currentTarget });
                 }}
               >
-                {action.label}
+                + Add playlist
               </button>
+            )}
+            {SYNC_HEADER_ACTIONS.map((action, index) => (
+              <Fragment key={action.key}>
+                {/* Divides the two actions that CHANGE something from the four
+                    that only report what already happened. */}
+                {index === 1 && <span className="sync-header-divider" />}
+                <button
+                  type="button"
+                  className={`btn btn--sm btn--secondary sync-history-btn${
+                    action.key === 'auto-sync' ? ' auto-sync-manager-btn' : ''
+                  }`}
+                  title={action.title}
+                  onClick={() => {
+                    runHeaderAction(action.key, onAutoSync, onActivity);
+                  }}
+                >
+                  {action.label}
+                </button>
+              </Fragment>
             ))}
           </div>
         </div>
@@ -170,7 +213,7 @@ export function SyncShell({
       >
         <div className="sync-main-panel">
           <div className="sync-tabs" role="tablist">
-            {SYNC_TABS.map((t) => (
+            {syncStripTabs(tab).map((t) => (
               <Fragment key={t.id}>
                 <button
                   type="button"
@@ -190,7 +233,6 @@ export function SyncShell({
                   <span className="sync-tab-label">{t.label}</span>
                 </button>
                 {/* 2253: the divider sits after Server Playlists only. */}
-                {t.id === 'server' ? <div className="sync-tab-divider" /> : null}
               </Fragment>
             ))}
           </div>

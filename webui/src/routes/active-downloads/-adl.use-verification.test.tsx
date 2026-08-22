@@ -6,7 +6,11 @@ import { server } from '@/test/msw';
 
 import type { AdlQuarantineEntry } from './-adl.types';
 
-import { groupQuarantine, useAdlVerification } from './-adl.use-verification';
+import {
+  REVIEW_SUMMARY_POLL_MS,
+  groupQuarantine,
+  useAdlVerification,
+} from './-adl.use-verification';
 
 const entry = (over: Partial<AdlQuarantineEntry> = {}): AdlQuarantineEntry =>
   ({ id: 'q1', group_key: 'g1', original_filename: 'a.flac', ...over }) as AdlQuarantineEntry;
@@ -29,9 +33,27 @@ function stubQuarantine(entries: AdlQuarantineEntry[] = [], delayMs = 0) {
   return state;
 }
 
+/** Stub the review counts and count how many times they are pulled. */
+function stubSummary(quarantine = 0, unverified = 0) {
+  const state = { calls: 0 };
+  server.use(
+    http.get('/api/review-queue/summary', () => {
+      state.calls += 1;
+      return HttpResponse.json({
+        success: true,
+        quarantine,
+        unverified,
+        total: quarantine + unverified,
+      });
+    }),
+  );
+  return state;
+}
+
 beforeEach(() => {
   stubConfig({ success: true, acoustid_enabled: true, require_verified: false });
   stubQuarantine([]);
+  stubSummary();
 });
 
 afterEach(() => {
@@ -280,5 +302,86 @@ describe('grouping alternative candidates', () => {
 
   it('returns nothing for no entries', () => {
     expect(groupQuarantine([])).toEqual([]);
+  });
+});
+
+/**
+ * TheHomeGuy: "the number at the top didnt update till i happened to click into
+ * the area to check for songs."
+ *
+ * He was right. The quarantine list loads ONCE and then only when you switch
+ * into the tab, so its length was whatever it was last time you looked. The
+ * count comes off a polled server endpoint now.
+ */
+describe('review counts', () => {
+  it('pulls the summary on mount without anyone opening the tab', async () => {
+    const summary = stubSummary(72, 2);
+    const { result } = renderHook(() => useAdlVerification());
+
+    await waitFor(() => expect(result.current.state.summary).not.toBeNull());
+    expect(result.current.state.summary).toEqual({ quarantine: 72, unverified: 2, total: 74 });
+    expect(summary.calls).toBeGreaterThan(0);
+    // the expensive list was NOT fetched to get a number.
+    expect(result.current.state.quarantineLoaded).toBe(false);
+  });
+
+  it('registers a repeating pull, and that pull really refetches', async () => {
+    const summary = stubSummary(5);
+    // grab the callback the hook schedules. driving it beats advancing fake
+    // timers here, msw's fetch does not resolve under them.
+    const scheduled: Array<() => void> = [];
+    const realSetInterval = globalThis.setInterval;
+    const spy = vi.spyOn(globalThis, 'setInterval').mockImplementation(((
+      fn: () => void,
+      ms?: number,
+      ...rest: unknown[]
+    ) => {
+      // ONLY capture our own. waitFor schedules its own interval and
+      // swallowing that one hangs the whole test.
+      if (ms === REVIEW_SUMMARY_POLL_MS) {
+        scheduled.push(fn);
+        return 0 as unknown as ReturnType<typeof setInterval>;
+      }
+      return realSetInterval(fn, ms, ...rest);
+    }) as unknown as typeof setInterval);
+
+    const { result } = renderHook(() => useAdlVerification());
+    await waitFor(() => expect(result.current.state.summary).not.toBeNull());
+    spy.mockRestore();
+
+    expect(scheduled).toHaveLength(1);
+
+    const before = summary.calls;
+    await act(async () => {
+      scheduled[0]?.();
+    });
+    await waitFor(() => expect(summary.calls).toBeGreaterThan(before));
+  });
+
+  it('holds the last count when the fetch blips instead of flashing zero', async () => {
+    stubSummary(72);
+    const { result } = renderHook(() => useAdlVerification());
+    await waitFor(() => expect(result.current.state.summary?.quarantine).toBe(72));
+
+    server.use(http.get('/api/review-queue/summary', () => HttpResponse.error()));
+    vi.useFakeTimers();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REVIEW_SUMMARY_POLL_MS + 60);
+    });
+    vi.useRealTimers();
+    expect(result.current.state.summary?.quarantine).toBe(72);
+  });
+
+  it('refreshes the count right after the list reloads, not on the next tick', async () => {
+    const summary = stubSummary(72);
+    const { result } = renderHook(() => useAdlVerification());
+    await waitFor(() => expect(result.current.state.summary).not.toBeNull());
+
+    const before = summary.calls;
+    await act(async () => {
+      await result.current.loadQuarantine(true);
+    });
+    // approving five files reloads the list; the badge must follow immediately.
+    await waitFor(() => expect(summary.calls).toBeGreaterThan(before));
   });
 });

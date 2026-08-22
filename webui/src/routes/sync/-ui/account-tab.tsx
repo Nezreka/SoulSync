@@ -41,6 +41,7 @@ import { freshSourceState } from '../-sync.state';
 import { asString, deezerMirrorTracks } from '../-sync.url-tabs';
 import { fetchAndHydrateState } from '../-sync.use-vertical';
 import { cardProgressLine } from './card-progress';
+import { playlistArtUrl } from './playlist-art';
 import { SourceCard } from './source-card';
 import { hydrateStatesForLoaded } from './url-import-tab';
 
@@ -311,6 +312,7 @@ function AccountVerticalTab({
                 id={`${chrome.cardIdPrefix}-${sourceId}`}
                 cardClassName={chrome.cardClassName}
                 icon="🎵"
+                artUrl={playlistArtUrl(p)}
                 name={asString(p.name)}
                 countText={`${(p.track_count as number | undefined) ?? 0} tracks`}
                 phase={state.phase}

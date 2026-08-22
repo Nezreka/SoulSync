@@ -74,7 +74,7 @@ def _safe_batch_dirname(batch_id: str) -> str:
 _ALBUM_BUNDLE_CLEANED_SOURCES = ('soulseek', 'torrent', 'usenet')
 
 
-def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> None:
+def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
     """#999 atomic album publishing (opt-in): if this batch staged its tracks
     (private mirror, so Plex never saw a partial album), move them into the live
     library NOW — before the batch_complete/scan emit below — then repoint each
@@ -85,11 +85,11 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> None:
     AND it's a fresh whole-album batch. Any failure leaves the staged files where
     they are (quarantine) and is logged — never a partial library publish."""
     if not batch.get('_atomic_active'):
-        return
+        return True
     staging_root = batch.get('_atomic_staging_root')
     transfer_dir = batch.get('_atomic_transfer_dir')
     if not staging_root or not transfer_dir or not os.path.isdir(staging_root):
-        return
+        return True
     try:
         from core.downloads.atomic_album_publish import publish_album_batch
         from core.imports.file_ops import safe_move_file
@@ -142,13 +142,22 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> None:
                     logger.debug("[Atomic Publish] repair re-register failed for %s: %s",
                                  _folder, _reg_err)
 
-        n_fail = len(result.get('failed', []))
-        logger.info("[Atomic Publish] Batch %s: published %d file(s)%s",
-                    batch_id, len(pubmap),
-                    (f"; {n_fail} kept in staging for retry" if n_fail else ""))
+        failures = result.get('failed', [])
+        if failures:
+            stuck = result.get('rollback_failed', [])
+            logger.error(
+                "[Atomic Publish] Batch %s NOT published: %d file(s) failed (%s); "
+                "everything rolled back to staging for retry%s",
+                batch_id, len(failures), failures[0][1] if failures else "unknown",
+                f"; {len(stuck)} could not be rolled back" if stuck else "")
+            return False
+        logger.info("[Atomic Publish] Batch %s: published %d file(s)",
+                    batch_id, len(pubmap))
+        return True
     except Exception as e:
         logger.error("[Atomic Publish] Batch %s publish failed (staged files kept): %s",
                      batch_id, e, exc_info=True)
+        return False
 
 
 def _cleanup_private_album_bundle_staging(batch_id: str, batch: dict) -> None:
@@ -291,6 +300,11 @@ class LifecycleDeps:
     spotify_public_discovery_states: dict
     ensure_wishlist_track_format: Callable | None = None
     ensure_spotify_track_format: Callable | None = None
+    # Returns the cap on TOTAL active workers across every batch, or None when
+    # no global gate applies (a source that is not rate-limited the way
+    # Soulseek is). Optional so a caller that has not been updated keeps the
+    # old per-batch behaviour rather than losing its limit entirely.
+    get_global_max_concurrent: Callable[[], int | None] | None = None
 
     def __post_init__(self) -> None:
         if self.ensure_wishlist_track_format is None:
@@ -328,10 +342,43 @@ def start_next_batch_of_downloads(batch_id: str, deps: LifecycleDeps) -> None:
             queue_index = batch['queue_index']
             active_count = batch['active_count']
 
-            logger.info(f"[Batch Lock] Starting workers for {batch_id}: active={active_count}, max={max_concurrent}, queue_pos={queue_index}/{len(queue)}")
+            # THE GLOBAL GATE (#1166).
+            #
+            # max_concurrent is PER BATCH, and so is the lock above, so nothing
+            # stopped two batches each starting "1 of 1" at the same moment. A
+            # wishlist that groups tracks into ten album batches therefore ran
+            # ten Soulseek searches against a configured limit of one — each
+            # batch honestly logging Active: 1/1 while the real total was ten.
+            # That is what floods Soulseek and earns a rate-limit.
+            #
+            # The cap is on the SUM across every batch. Batches are not turned
+            # away, only held: a blocked one starts nothing now and is woken by
+            # on_download_completed when any batch anywhere frees a slot.
+            global_max = None
+            if deps.get_global_max_concurrent is not None:
+                try:
+                    global_max = deps.get_global_max_concurrent()
+                except Exception as gate_error:  # noqa: BLE001
+                    # A broken gate must not stop downloads entirely; fall back
+                    # to the per-batch limit, which is the old behaviour.
+                    logger.error(f"[Batch Lock] Global concurrency gate failed, using per-batch limit: {gate_error}")
+                    global_max = None
+
+            logger.info(f"[Batch Lock] Starting workers for {batch_id}: active={active_count}, max={max_concurrent}, queue_pos={queue_index}/{len(queue)}, global_max={global_max}")
 
             # Start downloads up to the concurrent limit
             while active_count < max_concurrent and queue_index < len(queue):
+                if global_max is not None:
+                    total_active = sum(
+                        b.get('active_count', 0) for b in download_batches.values()
+                    )
+                    if total_active >= global_max:
+                        logger.info(
+                            f"[Batch Lock] {batch_id} holding at the GLOBAL limit "
+                            f"({total_active}/{global_max} active across all batches) — "
+                            f"{len(queue) - queue_index} still queued"
+                        )
+                        break
                 task_id = queue[queue_index]
 
                 # CRITICAL V2 FIX: Skip cancelled tasks instead of trying to restart them
@@ -398,7 +445,85 @@ _FINISHED_TASK_STATUSES = ('completed', 'failed', 'cancelled', 'not_found',
                            'already_owned')
 
 
+def _wake_waiting_batches(finished_batch_id: str, deps: LifecycleDeps) -> None:
+    """Offer a just-freed worker slot to the batches the global gate is holding.
+
+    Without this the cap would turn a concurrency bug into a stall, which is
+    worse: a freed slot was only ever offered back to the batch that freed it,
+    which is fine when every batch has its own limit and useless when they share
+    one.
+
+    Called on BOTH completion paths. The batch finishing its LAST task returns
+    early — and that is exactly when a slot frees and somebody else should get
+    it, so waking only on the "more work to do" path misses the common case
+    entirely. (It did; a test caught it.)
+
+    Each woken batch re-checks the cap itself under its own lock, so this is a
+    nudge rather than a decision. The list is built under tasks_lock and the
+    calls made outside it: start_next_batch_of_downloads takes the batch lock
+    and THEN tasks_lock, so calling it while holding tasks_lock inverts that
+    order — the deadlock this codebase has already been bitten by.
+    """
+    if deps.get_global_max_concurrent is None:
+        return
+
+    waiting = []
+    try:
+        with tasks_lock:
+            for other_id, other in download_batches.items():
+                if other_id == finished_batch_id:
+                    continue
+                if other.get('phase') in ('complete', 'error', 'cancelled', 'failed'):
+                    continue
+                if other.get('queue_index', 0) < len(other.get('queue', [])):
+                    waiting.append(other_id)
+    except Exception as scan_error:  # noqa: BLE001
+        logger.error(f"[Batch Manager] Could not scan for waiting batches: {scan_error}")
+        return
+
+    # STOP AS SOON AS THE LIMIT REFILLS. One slot freed, so usually one batch
+    # can take it — waking the other thirty-seven would have each of them
+    # acquire two locks only to find the limit full and log about it. Re-reading
+    # the total between wakes keeps a completion O(batches that can actually
+    # start) instead of O(all batches).
+    try:
+        global_max = deps.get_global_max_concurrent()
+    except Exception:  # noqa: BLE001
+        global_max = None
+
+    for other_id in waiting:
+        if global_max is not None:
+            with tasks_lock:
+                total_active = sum(b.get('active_count', 0) for b in download_batches.values())
+            if total_active >= global_max:
+                break
+        try:
+            start_next_batch_of_downloads(other_id, deps)
+        except Exception as wake_error:  # noqa: BLE001
+            logger.error(f"[Batch Manager] Error waking batch {other_id}: {wake_error}")
+
+
 def on_download_completed(batch_id: str, task_id: str, success: bool, deps: LifecycleDeps) -> None:
+    """Handle a finished task, then offer the freed slot to whoever is waiting.
+
+    A wrapper, because the slot has to be offered on EVERY exit path and always
+    with tasks_lock released. The inner function returns early when its batch
+    finishes its last task — which is exactly when a slot frees and somebody
+    else should get it — and it does so from deep inside the lock. Waking from
+    in there deadlocks the engine outright: threading.Lock is not reentrant and
+    the wake needs the same lock. Both mistakes were made on the way here; the
+    first was caught by a test that failed, the second by one that hung.
+
+    `finally`, not a trailing call: the lock is released by the time the inner
+    function has returned, and a slot may have freed even if it raised.
+    """
+    try:
+        _on_download_completed(batch_id, task_id, success, deps)
+    finally:
+        _wake_waiting_batches(batch_id, deps)
+
+
+def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: LifecycleDeps) -> None:
     """Called when a download completes to start the next one in queue."""
     with tasks_lock:
         if batch_id not in download_batches:
@@ -580,14 +705,25 @@ def on_download_completed(batch_id: str, task_id: str, success: bool, deps: Life
 
             # FIXED: Ensure batch is not already marked as complete to prevent duplicate processing
             if batch.get('phase') != 'complete':
+                # #999 atomic album publish (opt-in, no-op unless staged): move
+                # the staged album into the live library BEFORE anything is
+                # marked complete, so Plex sees the whole album at once.
+                #
+                # L2-002: the publish decides whether this batch IS complete. It
+                # used to run after the phase flip and its result was only
+                # logged, so a failed publish still produced a Complete batch
+                # with history, scan and completion events for an album that was
+                # never published. A failure leaves the phase alone; the batch
+                # stays in monitoring and the next completion check retries.
+                if not _publish_atomic_album(batch_id, batch, deps):
+                    logger.error(
+                        "[Batch Manager] Batch %s: atomic album publish failed — "
+                        "not marking complete, staged files kept for retry", batch_id)
+                    return
+
                 # Mark batch as complete and set completion timestamp for auto-cleanup
                 batch['phase'] = 'complete'
                 batch['completion_time'] = time.time()  # Track when batch completed
-
-                # #999 atomic album publish (opt-in, no-op unless staged): move
-                # the staged album into the live library BEFORE the scan/emit
-                # below, so Plex sees the whole album at once.
-                _publish_atomic_album(batch_id, batch, deps)
 
                 # Record sync history completion
                 from database.music_database import MusicDatabase
@@ -819,14 +955,20 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                     # Check if this is an auto-initiated batch
                     is_auto_batch = batch.get('auto_initiated', False)
 
+                    # #999 atomic album publish (opt-in, no-op unless staged):
+                    # publish the staged album into the live library before the
+                    # batch is marked complete. L2-002: a failed publish must not
+                    # produce a Complete batch for an album that is still staged.
+                    if not _publish_atomic_album(batch_id, batch, deps):
+                        logger.error(
+                            "[Completion Check V2] Batch %s: atomic album publish "
+                            "failed — not marking complete, staged files kept for "
+                            "retry", batch_id)
+                        return False
+
                     # Mark batch as complete and set completion timestamp for auto-cleanup
                     batch['phase'] = 'complete'
                     batch['completion_time'] = time.time()  # Track when batch completed
-
-                    # #999 atomic album publish (opt-in, no-op unless staged):
-                    # publish the staged album into the live library before the
-                    # scan/emit below.
-                    _publish_atomic_album(batch_id, batch, deps)
 
                     # Add activity for batch completion
                     playlist_name = batch.get('playlist_name', 'Unknown Playlist')

@@ -410,3 +410,78 @@ def test_runtime_state_impl_matches_protocol() -> None:
     state.mark_failed('b1', 'oops')
     assert state.fields['x'] == 1
     assert state.fields['error'] == 'oops'
+
+
+# ── the per-batch limit after a staged album ───────────────────────────────
+
+def test_a_staged_album_stops_being_capped_at_one_worker() -> None:
+    """Soulseek album batches are capped at ONE worker for source reuse: hold a
+    peer and pull the album from them rather than scattering requests. That is
+    right for the fallback path, which really does download track by track.
+
+    It is wrong once the bundle has staged. Every file is already on disk and
+    the per-track tasks exist only to MATCH them (try_staging_match) — they
+    never touch Soulseek, so serialising them throttles local disk work with a
+    rule about network etiquette. Boulder watched a twelve-track album stage in
+    one go and then crawl one track at a time.
+    """
+    state = _FakeState()
+    plugin = MagicMock()
+    plugin.download_album_to_staging.return_value = {
+        'success': True, 'files': ['/tmp/a.flac'] * 12, 'error': None,
+    }
+    try_dispatch(
+        batch_id='b1', is_album=True,
+        album_context={'name': 'DAMN.'}, artist_context={'name': 'Kendrick Lamar'},
+        config_get=_config({
+            'download_source.mode': 'soulseek',
+            'download_source.max_concurrent': 3,
+            'import.staging_path': '/staging/path',
+        }),
+        plugin_resolver=lambda _name: plugin, state=state,
+    )
+    assert state.fields['album_bundle_state'] == 'staged'
+    assert state.fields['max_concurrent'] == 3, 'a staged album is still serialised'
+
+
+def test_a_FALLBACK_album_keeps_its_single_worker() -> None:
+    """The fallback really does download track by track from a peer, so source
+    reuse still applies and the cap must stay where it is.
+    """
+    state = _FakeState()
+    plugin = MagicMock()
+    plugin.download_album_to_staging.return_value = {
+        'success': False, 'error': 'no folder found', 'fallback': True,
+    }
+    try_dispatch(
+        batch_id='b1', is_album=True,
+        album_context={'name': 'Mr. Morale'}, artist_context={'name': 'Kendrick Lamar'},
+        config_get=_config({
+            'download_source.mode': 'soulseek',
+            'download_source.max_concurrent': 3,
+            'import.staging_path': '/staging/path',
+        }),
+        plugin_resolver=lambda _name: plugin, state=state,
+    )
+    assert state.fields['album_bundle_state'] == 'fallback'
+    assert 'max_concurrent' not in state.fields, 'the fallback must keep source reuse'
+
+
+def test_a_bad_concurrency_setting_leaves_the_batch_limit_alone() -> None:
+    state = _FakeState()
+    plugin = MagicMock()
+    plugin.download_album_to_staging.return_value = {
+        'success': True, 'files': ['/tmp/a.flac'], 'error': None,
+    }
+    try_dispatch(
+        batch_id='b1', is_album=True,
+        album_context={'name': 'GNX'}, artist_context={'name': 'Kendrick Lamar'},
+        config_get=_config({
+            'download_source.mode': 'soulseek',
+            'download_source.max_concurrent': 'not a number',
+            'import.staging_path': '/staging/path',
+        }),
+        plugin_resolver=lambda _name: plugin, state=state,
+    )
+    assert state.fields['album_bundle_state'] == 'staged'
+    assert 'max_concurrent' not in state.fields

@@ -25,10 +25,14 @@ import type { MirroredMatch, ServerPlaylist } from '../-sync.server';
 import type { SyncTabId } from '../-sync.shell';
 
 import { metadataSourceLabel } from '../-sync.modal-core';
+import { normalizeSyncTab } from '../-sync.shell';
 import { useAutoSync } from '../-sync.use-autosync';
+import { useSyncHistory } from '../-sync.use-history';
 import { useSyncPage } from '../-sync.use-page';
 import { QobuzTab, TidalTab } from './account-tab';
 import { DeezerArlTab, SpotifyTab } from './account-tabs';
+import { ActivityModal, type ActivityTab } from './activity-modal';
+import { AddPlaylistSheet } from './add-playlist-sheet';
 import { AutoSyncModal } from './autosync-modal';
 import { BeatportTab } from './beatport-tab';
 import { ImportFileTab } from './import-file-tab';
@@ -49,9 +53,22 @@ interface CompareView {
   mirrored: MirroredMatch | null;
 }
 
+/**
+ * The legacy mirrored detail modal. This page no longer opens it — the React
+ * modal is used everywhere here — but the declaration stays for the one
+ * fallback below, and because other pages still call the vanilla function.
+ */
+declare global {
+  interface Window {
+    openMirroredPlaylistModal?: (playlistId: number) => Promise<void> | void;
+  }
+}
+
 export function SyncPage() {
   const page = useSyncPage();
   const [autoSyncOpen, setAutoSyncOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [activityTab, setActivityTab] = useState<ActivityTab>('syncs');
   const [compare, setCompare] = useState<CompareView | null>(null);
 
   /**
@@ -64,11 +81,90 @@ export function SyncPage() {
   }, []);
 
   /**
+   * The Add-playlist sheet, and the link it routed.
+   *
+   * The sheet only DECIDES which tab a link belongs to; the tab still loads it,
+   * so the four bespoke loaders are untouched. The pending link is held here
+   * because the tab that must parse it may not be mounted at the moment the
+   * sheet closes — opening it is what mounts it.
+   */
+  const [addAnchor, setAddAnchor] = useState<{
+    top: number;
+    left: number;
+    el: HTMLElement;
+  } | null>(null);
+  const [pending, setPending] = useState<{ tab: string; url: string } | null>(null);
+  const routeAdd = useCallback((tab: string, url?: string) => {
+    if (url) setPending({ tab, url });
+    openTab.current?.(normalizeSyncTab(tab));
+  }, []);
+  const clearPending = useCallback(() => {
+    setPending(null);
+  }, []);
+
+  /**
+   * The mirrored tab's detail-modal opener.
+   *
+   * Everything on this page opens the SAME modal now. The legacy
+   * `openMirroredPlaylistModal` is a second implementation over the same
+   * endpoint with different visuals, and the Auto-Sync monitor and the
+   * SoulSync Discovery tab were reaching for it — so the same playlist looked
+   * different depending on which button you pressed. The vanilla function is
+   * left alive because other PAGES still call it.
+   */
+  const openMirroredDetail = useRef<((playlistId: number) => void) | undefined>(undefined);
+  const registerOpenDetail = useCallback((open: (playlistId: number) => void) => {
+    openMirroredDetail.current = open;
+  }, []);
+  const showMirroredDetail = useCallback((playlistId: number) => {
+    // Mirrored is the default tab, so the opener is registered before anything
+    // can ask for it. The fallback covers a future where it is not.
+    if (openMirroredDetail.current) openMirroredDetail.current(playlistId);
+    else void window.openMirroredPlaylistModal?.(playlistId);
+  }, []);
+  /** The pending url, but only for the tab it was meant for. */
+  const pendingFor = useCallback(
+    (tab: string) => (pending && pending.tab === tab ? pending.url : undefined),
+    [pending],
+  );
+
+  /**
    * `runPipeline` is the page's ONE controller, injected rather than reached
    * for on `window` — `runMirroredPlaylistPipeline` lives in auto-sync.js,
    * which the flip deletes.
    */
-  const autoSync = useAutoSync({ open: autoSyncOpen, runPipeline: page.pipeline.run });
+  /**
+   * Open for the Auto-Sync modal OR for Activity's scheduled-runs tab, which
+   * reads the same run history. Leaving it closed there would show an empty
+   * list on a tab whose whole job is that list.
+   */
+  const autoSync = useAutoSync({
+    open: autoSyncOpen || (activityOpen && activityTab === 'runs'),
+    runPipeline: page.pipeline.run,
+  });
+  const syncHistory = useSyncHistory({
+    active: activityOpen && activityTab === 'syncs',
+    // The download-type re-sync path is the vanilla download modal, which this
+    // port does not own and does not replace.
+    openDownloadModal: async (entry) => {
+      setActivityOpen(false);
+      await window.openDownloadMissingModalForArtistAlbum?.(
+        String(entry.playlist_id ?? `resync_${entry.id}`),
+        entry.playlist_name ?? '',
+        entry.tracks ?? [],
+        entry.album_context ?? {
+          id: `resync_album_${entry.id}`,
+          name: entry.playlist_name,
+          album_type: entry.sync_type === 'album' ? 'album' : 'compilation',
+          images: entry.thumb_url ? [{ url: entry.thumb_url }] : [],
+          total_tracks: entry.total_tracks,
+        },
+        entry.artist_context ?? { id: 'resync_artist', name: 'Various Artists' },
+        false,
+        entry.sync_type === 'album' ? 'artist_album' : 'playlist',
+      );
+    },
+  });
 
   /**
    * The live metadata-source name. The vanilla interpolates
@@ -146,12 +242,16 @@ export function SyncPage() {
       <SpotifyPublicTab
         vertical={page.verticals.spotify_public}
         onOpen={(sourceId) => openSourceModal('spotify_public', sourceId)}
+        pendingUrl={pendingFor('spotify-public')}
+        onPendingConsumed={clearPending}
       />
     ),
     'itunes-link': (
       <ITunesLinkTab
         vertical={page.verticals.itunes_link}
         onOpen={(sourceId) => openSourceModal('itunes_link', sourceId)}
+        pendingUrl={pendingFor('itunes-link')}
+        onPendingConsumed={clearPending}
       />
     ),
     tidal: (
@@ -174,19 +274,23 @@ export function SyncPage() {
       <DeezerLinkTab
         vertical={page.verticals.deezer}
         onOpen={(sourceId) => openSourceModal('deezer', sourceId)}
+        pendingUrl={pendingFor('deezer-link')}
+        onPendingConsumed={clearPending}
       />
     ),
     youtube: (
       <YouTubeTab
         vertical={page.verticals.youtube}
         onOpen={(sourceId) => openSourceModal('youtube', sourceId)}
+        pendingUrl={pendingFor('youtube')}
+        onPendingConsumed={clearPending}
       />
     ),
     'listenbrainz-sync': (
       <ListenBrainzSyncTab vertical={page.verticals.listenbrainz} onOpen={openLbCard} />
     ),
     'lastfm-sync': <LastfmSyncTab vertical={page.verticals.listenbrainz} onOpen={openLbCard} />,
-    'soulsync-discovery-sync': <SoulsyncDiscoveryTab />,
+    'soulsync-discovery-sync': <SoulsyncDiscoveryTab onOpenMirrored={showMirroredDetail} />,
     'import-file': <ImportFileTab onImported={onImported} />,
     mirrored: (
       <MirroredTab
@@ -195,15 +299,27 @@ export function SyncPage() {
         sourceName={sourceName}
         pipeline={page.pipeline}
         registerReload={page.registerMirroredReload}
+        registerOpenDetail={registerOpenDetail}
       />
     ),
   };
 
   return (
     <>
+      {addAnchor && (
+        <AddPlaylistSheet
+          anchor={{ top: addAnchor.top, left: addAnchor.left }}
+          anchorEl={addAnchor.el}
+          onRoute={routeAdd}
+          onClose={() => setAddAnchor(null)}
+        />
+      )}
       <SyncShell
         panels={panels}
+        // Toggles: pressing the button again closes the sheet.
+        onAddPlaylist={(next) => setAddAnchor((prev) => (prev ? null : next))}
         onAutoSync={() => setAutoSyncOpen(true)}
+        onActivity={() => setActivityOpen(true)}
         sidebar={
           <SyncSidebar
             state={page.actions}
@@ -223,6 +339,39 @@ export function SyncPage() {
         mirroredSource={sourceName}
       />
 
+      <ActivityModal
+        open={activityOpen}
+        tab={activityTab}
+        onTab={setActivityTab}
+        onClose={() => setActivityOpen(false)}
+        now={autoSync.now}
+        failedRuns={autoSync.state.runHistory.filter((r) => r.status === 'error').length}
+        syncs={{
+          entries: syncHistory.entries,
+          stats: syncHistory.stats,
+          total: syncHistory.total,
+          page: syncHistory.page,
+          pageSize: syncHistory.pageSize,
+          source: syncHistory.source,
+          loading: syncHistory.loading,
+          error: syncHistory.error,
+          resyncs: syncHistory.resyncs,
+          onSelectSource: syncHistory.selectSource,
+          onPage: syncHistory.goToPage,
+          onResync: syncHistory.resync,
+          onCancel: syncHistory.cancel,
+          onDelete: syncHistory.remove,
+        }}
+        runs={{
+          history: autoSync.state.runHistory,
+          total: autoSync.state.runHistoryTotal,
+          filter: autoSync.historyFilter,
+          onFilterChange: autoSync.setHistoryFilter,
+          onLoadMore: autoSync.loadMoreHistory,
+          onRunAgain: (playlistId) => autoSync.runNow(playlistId),
+        }}
+      />
+
       {autoSyncOpen ? (
         <AutoSyncModal
           state={autoSync.state}
@@ -233,7 +382,13 @@ export function SyncPage() {
           onHistoryFilterChange={autoSync.setHistoryFilter}
           onLoadMoreHistory={autoSync.loadMoreHistory}
           onRefresh={autoSync.refresh}
-          onClose={() => setAutoSyncOpen(false)}
+          onClose={() => {
+            setAutoSyncOpen(false);
+            // That modal writes the same automations the library's Scheduled /
+            // Unscheduled tabs are built from, through its own copy of the
+            // state. Without this the tab keeps the cadence it last read.
+            page.reloadMirrored();
+          }}
           boardActions={boardActions}
           weeklyActions={weeklyActions}
           onBulkSchedule={autoSync.bulkSchedule}
@@ -242,7 +397,7 @@ export function SyncPage() {
           // vanilla mirrored modal, which five vanilla files call and the flip
           // does not delete. MirroredTab's own React detail modal is internal
           // to that tab, so this is the vanilla's own target, not a second one.
-          onOpenDetails={(playlistId) => window.openMirroredPlaylistModal?.(playlistId)}
+          onOpenDetails={showMirroredDetail}
           // runNow takes only the id; the modal offers the name too. Dropping
           // it here is the adapter, not a lost argument.
           onRunAgain={(playlistId) => autoSync.runNow(playlistId)}

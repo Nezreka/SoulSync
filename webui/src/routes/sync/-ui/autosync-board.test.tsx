@@ -344,9 +344,10 @@ describe('AutoSyncBoard (741-859)', () => {
     expect((actions.onBulkMenu as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe('tidal');
   });
 
-  it('wires the Refresh button in the intro', () => {
-    const { actions } = renderBoard([]);
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
-    expect(actions.onRefresh).toHaveBeenCalledTimes(1);
+  it('has no Refresh of its own — the modal header owns the only one', () => {
+    // The board, the weekly board, the monitor and the history each grew a
+    // Refresh calling the same handler. One survives, in the header.
+    renderBoard([]);
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
   });
 });

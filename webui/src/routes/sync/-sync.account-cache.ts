@@ -27,6 +27,10 @@
  * span the complaint is about; a hard reload legitimately starts fresh.
  */
 
+import type { Dispatch, SetStateAction } from 'react';
+
+import { useEffect, useState } from 'react';
+
 import type { UrlTabPlaylist } from './-sync.url-tabs';
 
 const remembered = new Map<string, UrlTabPlaylist[]>();
@@ -56,4 +60,43 @@ export function recallAccountPlaylists(source: string): UrlTabPlaylist[] | null 
 export function forgetAccountPlaylists(source?: string): void {
   if (source) remembered.delete(source);
   else remembered.clear();
+}
+
+/**
+ * Namespace for the paste-a-link tabs, so their rows can never collide with an
+ * account tab's under the same service name. `deezer` is the live example: the
+ * Deezer LINK tab and the Deezer-ARL ACCOUNT tab are different lists of
+ * different things, and only the prefix keeps them apart.
+ */
+export function urlTabCacheKey(source: string): string {
+  return `url:${source}`;
+}
+
+/**
+ * `useState` for a URL tab's loaded playlists, except it survives leaving the
+ * page.
+ *
+ * Boulder, live: "went to deezer link. gave a link. let it pull the playlist.
+ * clicked sync. went to explorer page. back to sync page. playlist card for
+ * that playlist is gone. pill is there instead."
+ *
+ * Same root cause the account tabs already had fixed above, one layer over:
+ * these three tabs keep their rows in component state, and /sync is a route —
+ * navigating away unmounts the whole page. The url-history PILL survived only
+ * because it lives in localStorage, which is why the card vanishing looks like
+ * data loss when the sync itself is still running happily on the server.
+ *
+ * A drop-in for useState, functional updates included, because every call site
+ * uses `setPlaylists(prev => …)`. The write is an effect rather than a side
+ * effect inside the updater: React may invoke an updater twice, and a reducer
+ * that mutates module state is the kind of thing that works until it doesn't.
+ */
+export function useRememberedPlaylists(
+  cacheKey: string,
+): [UrlTabPlaylist[], Dispatch<SetStateAction<UrlTabPlaylist[]>>] {
+  const [rows, setRows] = useState<UrlTabPlaylist[]>(() => recallAccountPlaylists(cacheKey) ?? []);
+  useEffect(() => {
+    rememberAccountPlaylists(cacheKey, rows);
+  }, [cacheKey, rows]);
+  return [rows, setRows];
 }

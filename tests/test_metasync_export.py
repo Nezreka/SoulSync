@@ -257,6 +257,28 @@ def test_an_untouched_child_is_still_left_out(db, client):
     assert _incremental(client, "track", "2026-08-21T00:00:00") == []
 
 
+def test_minting_a_soul_id_makes_the_row_appear_in_the_incremental(db, client):
+    """A row with no soul_id is filtered OUT of the export entirely, so minting
+    one is the moment it starts existing for consumers. The SoulID worker used
+    to write it without touching updated_at, so a full walk that ran before the
+    worker meant the row never appeared in any later incremental either."""
+    a_ids, _, _ = _seed(db, artists=1, albums_per_artist=0, tracks_per_album=0)
+    conn = db._get_connection()
+    conn.execute("UPDATE lib2_artists SET soul_id = NULL WHERE id = ?", (a_ids[0],))
+    conn.commit()
+    assert _incremental(client, "artist", "2026-08-01T00:00:00") == []
+
+    # What the worker's write now does, verbatim.
+    conn = db._get_connection()
+    conn.execute("UPDATE lib2_artists SET soul_id = ?, soul_id_path = ?, "
+                 "updated_at = CURRENT_TIMESTAMP "
+                 "WHERE id = ? AND (soul_id IS NULL OR soul_id = '')",
+                 ("soul_artist_0", "canonical", a_ids[0]))
+    conn.commit()
+
+    assert _incremental(client, "artist", "2026-08-01T00:00:00") == ["soul_artist_0"]
+
+
 def test_a_canonical_claim_shows_up_in_the_incremental(db, client):
     """canonical_source/canonical_album_id are exported fields."""
     _, al_ids, _ = _seed(db, artists=1, albums_per_artist=1, tracks_per_album=0)

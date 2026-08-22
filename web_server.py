@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.2.2"
+_SOULSYNC_BASE_VERSION = "3.2.3"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -1734,6 +1734,41 @@ def _get_batch_max_concurrent(is_album=False, source=None):
                 return 1
     return _get_max_concurrent()
 
+def _soulseek_is_active_download_source():
+    """Whether Soulseek is doing the downloading right now.
+
+    Soulseek is the source that punishes parallel searching — too many at once
+    and the server rate-limits or bans you. Other sources do not need the same
+    gate, so the global cap is scoped to when Soulseek is actually in play:
+    directly, or first in the hybrid order.
+    """
+    mode = config_manager.get('download_source.mode', 'soulseek')
+    if mode == 'soulseek':
+        return True
+    if mode == 'hybrid':
+        hybrid_order = config_manager.get('download_source.hybrid_order', []) or []
+        if isinstance(hybrid_order, str):
+            hybrid_order = [hybrid_order]
+        first_source = next((str(x).strip().lower() for x in hybrid_order if str(x).strip()), '')
+        return first_source == 'soulseek'
+    return False
+
+
+def _get_global_max_concurrent():
+    """The cap on TOTAL active workers across every batch (#1166).
+
+    max_concurrent has always been per batch, so a wishlist split into ten album
+    batches ran ten Soulseek searches against a configured limit of one — each
+    batch correctly reporting Active: 1/1 while the real total was ten.
+
+    Returns None when no global gate applies, which leaves the per-batch limit
+    as the only one, exactly as before.
+    """
+    if not _soulseek_is_active_download_source():
+        return None
+    return max(1, int(_get_max_concurrent() or 1))
+
+
 # --- Session Download Statistics ---
 # Track individual download completions (matches dashboard.py behavior)
 
@@ -2108,6 +2143,42 @@ def validate_and_heal_batch_states():
 
             if healed_batches:
                 logger.info(f"[Batch Healing] Healed {len(healed_batches)} batches: {healed_batches}")
+
+            # SAFETY NET FOR THE GLOBAL GATE (#1166).
+            #
+            # A batch held at the global limit is normally woken by whoever
+            # frees the slot. If that completion never fires — a worker dies in
+            # a way nothing reports — the held batches would wait forever, and
+            # the cap would have turned a concurrency bug into a permanent
+            # stall. This runs every 30s and only when a slot is genuinely
+            # free, so it costs nothing in the normal case and cannot itself
+            # exceed the limit: each woken batch re-checks the cap under its own
+            # lock before starting anything.
+            try:
+                _global_max = _get_global_max_concurrent()
+            except Exception:  # noqa: BLE001
+                _global_max = None
+            if _global_max is not None:
+                _total_active = sum(
+                    b.get('active_count', 0) for b in download_batches.values()
+                )
+                # AT MOST ONE BATCH PER FREE SLOT. Queueing every held batch
+                # would have each acquire two locks only to find the limit full
+                # and log about it — with a cap of one that is thirty-seven
+                # pointless wakes every thirty seconds. The wake-on-completion
+                # path stops early for the same reason.
+                _free_slots = _global_max - _total_active
+                if _free_slots > 0:
+                    for _bid, _bdata in download_batches.items():
+                        if _free_slots <= 0:
+                            break
+                        if _bid in batches_needing_workers:
+                            continue
+                        if _bdata.get('phase') in ('complete', 'error', 'cancelled', 'failed'):
+                            continue
+                        if _bdata.get('queue_index', 0) < len(_bdata.get('queue', [])):
+                            batches_needing_workers.append(_bid)
+                            _free_slots -= 1
 
         # ---- All work below runs WITHOUT tasks_lock held ----
 
@@ -9013,6 +9084,32 @@ def list_quarantine():
         return jsonify({"success": True, "entries": entries})
     except Exception as e:
         logger.error(f"[Quarantine] Error listing entries: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/review-queue/summary', methods=['GET'])
+def review_queue_summary():
+    """counts for the review badge, cheap enough to poll.
+
+    the page used to load the quarantine list once and never again, so the
+    number at the top was whatever it was when you last opened the tab. this is
+    a listdir plus one indexed count, so the badge can just ride the downloads
+    poll and the dashboard can show it too.
+    """
+    try:
+        from core.imports.quarantine import count_quarantine_entries
+        from database.music_database import MusicDatabase
+
+        quarantined = count_quarantine_entries(_get_quarantine_dir())
+        unverified = MusicDatabase().count_library_history_unverified()
+        return jsonify({
+            "success": True,
+            "quarantine": quarantined,
+            "unverified": unverified,
+            "total": quarantined + unverified,
+        })
+    except Exception as e:
+        logger.error(f"[ReviewQueue] Error building summary: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -19312,6 +19409,7 @@ def _build_lifecycle_deps():
         tidal_discovery_states=tidal_discovery_states,
         deezer_discovery_states=deezer_discovery_states,
         spotify_public_discovery_states=spotify_public_discovery_states,
+        get_global_max_concurrent=_get_global_max_concurrent,
     )
 
 
@@ -37471,11 +37569,19 @@ def get_mirrored_playlists_endpoint():
         # playlists that's 1.5s of modal load time just for status counts.
         batch_counts = database.get_all_mirrored_playlist_status_counts(profile_id=profile_id)
         for pl in playlists:
-            counts = batch_counts.get(pl['id'], {'total': 0, 'discovered': 0, 'wishlisted': 0, 'in_library': 0})
+            counts = batch_counts.get(pl['id'], {
+                'total': 0, 'discovered': 0, 'wishlisted': 0,
+                'in_library': 0, 'library_checked': 0,
+            })
             pl['discovered_count'] = counts['discovered']
             pl['total_count'] = counts['total']
             pl['wishlisted_count'] = counts['wishlisted']
             pl['in_library_count'] = counts['in_library']
+            # How many of this playlist's tracks the sync matcher has ever
+            # checked. 0 means nobody has looked, which is NOT the same as
+            # owning none of it, and the card must not report the second when it
+            # only knows the first.
+            pl['library_checked_count'] = counts.get('library_checked', 0)
             source_ref = describe_mirrored_source_ref(pl)
             pl['source_ref'] = source_ref.source_ref
             pl['source_ref_kind'] = source_ref.source_ref_kind
@@ -37974,6 +38080,42 @@ def delete_mirrored_playlist_endpoint(playlist_id):
         return jsonify({"error": "Playlist not found"}), 404
     except Exception as e:
         logger.error(f"Error deleting mirrored playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>/server-link', methods=['POST'])
+def link_mirrored_playlist_server_endpoint(playlist_id):
+    """Record which server playlist this mirror corresponds to.
+
+    The relationship is matched BY NAME today, fresh on every visit to the
+    server tab, which is why a disambiguation modal exists at all. This stores
+    the answer once the server tab has actually resolved it.
+
+    WRITE ONLY, for now. Nothing reads these columns: the write is landing on
+    its own so it can be checked against real installs before any behaviour
+    depends on it. Best-effort by design — a failure here must never disturb the
+    tab that called it.
+    """
+    try:
+        database = get_database()
+        profile_id = get_current_profile_id()
+        if not _owned_mirrored_playlist(database, playlist_id):
+            return jsonify({"error": "Playlist not found"}), 404
+
+        data = request.get_json(silent=True) or {}
+        server_playlist_id = str(data.get('server_playlist_id') or '')
+        server_type = str(data.get('server_type') or '')
+        if not server_playlist_id or not server_type:
+            return jsonify({"error": "server_playlist_id and server_type are required"}), 400
+
+        linked = database.link_mirrored_playlist_to_server(
+            playlist_id,
+            server_playlist_id,
+            server_type,
+            profile_id=profile_id,
+        )
+        return jsonify({"success": bool(linked)})
+    except Exception as e:
+        logger.error(f"Error linking mirrored playlist {playlist_id} to server: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/mirrored-playlists/<int:playlist_id>/clear-discovery', methods=['POST'])

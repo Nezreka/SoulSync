@@ -24,6 +24,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { fetchReviewQueueSummary } from '@/routes/active-downloads/-adl.api';
+
 import type { ServiceStatusPayload } from '../-dash.api';
 import type { DbStats, LibraryCardView } from '../-dash.library';
 
@@ -264,6 +266,39 @@ const CHECKING: LibraryCardView = {
   message: null,
 };
 
+/** How often the dashboard re-checks the review queue. */
+const REVIEW_POLL_MS = 30000;
+
+/**
+ * How many downloads are sitting waiting on a human.
+ *
+ * There was no way to know without opening the downloads page and clicking
+ * into the tab, so people had files waiting for days. TheHomeGuy asked for
+ * exactly this. Slower poll than the downloads page uses, nothing here moves
+ * fast and the dashboard is already busy.
+ */
+function useReviewCount(): number | null {
+  const [count, setCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    const pull = async () => {
+      const summary = await fetchReviewQueueSummary();
+      // null means the fetch failed. leave the last number up rather than
+      // claiming there is nothing to review.
+      if (live && summary) setCount(summary.total);
+    };
+    void pull();
+    const timer = setInterval(() => void pull(), REVIEW_POLL_MS);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  return count;
+}
+
 function SettingsLink() {
   return (
     <span className="link" onClick={() => void window.navigateToPage?.('settings')}>
@@ -295,6 +330,7 @@ async function backupNow(): Promise<void> {
 
 export function LibraryCard() {
   const { dbStats, dbStatsSeen, status, scanning, progress, scan, deepScan } = useLibraryCard();
+  const reviewCount = useReviewCount();
   const view = dbStatsSeen ? libraryCardView(dbStats, status, scanning, new Date()) : CHECKING;
 
   return (
@@ -449,6 +485,116 @@ export function LibraryCard() {
                   <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
                 </svg>
                 Backup
+              </button>
+              {/* everything above acts ON the library. everything below just
+                  takes you somewhere. the divider is so ten buttons don't read
+                  as one wall. */}
+              <span className="library-status-divider" aria-hidden="true" />
+              <button
+                className={
+                  reviewCount
+                    ? 'library-status-btn library-status-btn-secondary library-status-btn-attention'
+                    : 'library-status-btn library-status-btn-secondary'
+                }
+                id="library-status-review-btn"
+                title={
+                  reviewCount
+                    ? `${reviewCount} downloaded file${reviewCount === 1 ? '' : 's'} waiting on you to approve or delete`
+                    : 'Downloads that failed verification, or imported without a hard match'
+                }
+                onClick={() => void window.navigateToPage?.('active-downloads')}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                </svg>
+                Review
+                {reviewCount ? (
+                  <span className="library-status-btn-badge">{reviewCount}</span>
+                ) : null}
+              </button>
+              <button
+                className="library-status-btn library-status-btn-secondary"
+                id="library-status-wishlist-btn"
+                title="Tracks SoulSync is still trying to find"
+                onClick={() => void window.navigateToPage?.('wishlist')}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21.2l7.8-7.7 1-1.1a5.5 5.5 0 0 0 0-7.8z" />
+                </svg>
+                Wishlist
+              </button>
+              <button
+                className="library-status-btn library-status-btn-secondary"
+                id="library-status-downloads-btn"
+                title="Active and queued downloads"
+                onClick={() => void window.navigateToPage?.('active-downloads')}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Downloads
+              </button>
+              <button
+                className="library-status-btn library-status-btn-secondary"
+                id="library-status-discover-btn"
+                title="Find music you don't have yet"
+                onClick={() => void window.navigateToPage?.('discover')}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+                </svg>
+                Discover
+              </button>
+              <button
+                className="library-status-btn library-status-btn-secondary"
+                id="library-status-sync-btn"
+                title="Playlists and their sync schedules"
+                onClick={() => void window.navigateToPage?.('sync')}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <polyline points="23 4 23 10 17 10" />
+                  <polyline points="1 20 1 14 7 14" />
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                </svg>
+                Sync
               </button>
             </div>
           </div>

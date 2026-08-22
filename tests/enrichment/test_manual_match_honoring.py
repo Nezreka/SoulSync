@@ -19,7 +19,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.enrichment.manual_match_honoring import honor_stored_match
+from core.enrichment.manual_match_honoring import (
+    MATCHED, NO_STORED_ID, UNAVAILABLE, honor_stored_match,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +57,8 @@ class _FakeDB:
                 id INTEGER PRIMARY KEY,
                 spotify_album_id TEXT,
                 deezer_id TEXT,
-                itunes_album_id TEXT
+                itunes_album_id TEXT,
+                spotify_match_status TEXT
             )
         """)
         cur.execute("""
@@ -116,12 +119,12 @@ def test_honors_stored_id_when_present(db):
         log_prefix='Spotify',
     )
 
-    assert result is True
+    assert result == MATCHED
     fetch.assert_called_once_with('SP-ABC')
     on_match.assert_called_once_with(42, 'SP-ABC', api_payload)
 
 
-def test_returns_false_when_no_stored_id(db):
+def test_returns_no_stored_id_when_no_stored_id(db):
     """Pin: no stored ID → returns False, no fetch attempted, no
     callback. Caller proceeds with its search-by-name fallback."""
     db.insert_album(42, spotify_album_id=None)
@@ -135,12 +138,12 @@ def test_returns_false_when_no_stored_id(db):
         log_prefix='Spotify',
     )
 
-    assert result is False
+    assert result == NO_STORED_ID
     fetch.assert_not_called()
     on_match.assert_not_called()
 
 
-def test_returns_false_when_stored_id_empty_string(db):
+def test_returns_no_stored_id_when_stored_id_empty_string(db):
     """Pin: empty string treated same as NULL — no fetch, return False."""
     db.insert_album(42, spotify_album_id='')
     fetch = MagicMock()
@@ -152,11 +155,11 @@ def test_returns_false_when_stored_id_empty_string(db):
         client_fetch_fn=fetch, on_match_fn=on_match,
     )
 
-    assert result is False
+    assert result == NO_STORED_ID
     fetch.assert_not_called()
 
 
-def test_returns_false_when_entity_not_in_db(db):
+def test_returns_no_stored_id_when_entity_not_in_db(db):
     """Pin: missing row → returns False, no fetch, no callback."""
     fetch = MagicMock()
     on_match = MagicMock()
@@ -167,7 +170,7 @@ def test_returns_false_when_entity_not_in_db(db):
         client_fetch_fn=fetch, on_match_fn=on_match,
     )
 
-    assert result is False
+    assert result == NO_STORED_ID
     fetch.assert_not_called()
 
 
@@ -176,28 +179,51 @@ def test_returns_false_when_entity_not_in_db(db):
 # ---------------------------------------------------------------------------
 
 
-def test_returns_false_when_fetch_raises(db):
-    """Pin: client.get_X(stored_id) raises → caught, logged at warning,
-    returns False so caller falls through to search. Worker must not
-    crash on a transient API failure."""
+def test_a_fetch_failure_keeps_the_stored_id_instead_of_searching(db):
+    """L2-005: a transient API failure is not evidence that the stored ID is
+    wrong. Returning "no stored id" sent the worker into a fuzzy name search,
+    which then overwrote a deliberately chosen match with whatever came back.
+
+    The failure is recorded as ``error`` (with its retry timestamp) so the
+    entity is not re-picked on the very next cycle with no backoff."""
     db.insert_album(42, spotify_album_id='SP-ABC')
     fetch = MagicMock(side_effect=RuntimeError("API down"))
     on_match = MagicMock()
+    marked = []
 
     result = honor_stored_match(
         db=db, entity_table='albums', entity_id=42,
         id_column='spotify_album_id',
         client_fetch_fn=fetch, on_match_fn=on_match,
+        mark_status_fn=lambda kind, eid, status: marked.append((kind, eid, status)),
     )
 
-    assert result is False
+    assert result == UNAVAILABLE
+    assert result, "must be truthy so the caller skips search-by-name"
+    assert marked == [('album', 42, 'error')]
     on_match.assert_not_called()
 
 
-def test_returns_false_when_fetch_returns_none(db):
-    """Pin: stored ID points at a removed/invalid catalog entry →
-    fetch returns None → falls through to search instead of writing
-    junk to DB."""
+def test_a_broken_status_writer_does_not_break_the_refresh(db):
+    db.insert_album(42, spotify_album_id='SP-ABC')
+
+    def _boom(*_a):
+        raise RuntimeError("db locked")
+
+    result = honor_stored_match(
+        db=db, entity_table='albums', entity_id=42,
+        id_column='spotify_album_id',
+        client_fetch_fn=MagicMock(side_effect=RuntimeError("API down")),
+        on_match_fn=MagicMock(), mark_status_fn=_boom,
+    )
+
+    assert result == UNAVAILABLE
+
+
+def test_an_empty_fetch_also_keeps_the_stored_id(db):
+    """A source that answers "I have nothing for this id" is indistinguishable
+    from one that is having a bad day, and both cases used to release the id to
+    a name search. Releasing it takes an explicit re-match."""
     db.insert_album(42, spotify_album_id='SP-DEAD')
     fetch = MagicMock(return_value=None)
     on_match = MagicMock()
@@ -208,11 +234,11 @@ def test_returns_false_when_fetch_returns_none(db):
         client_fetch_fn=fetch, on_match_fn=on_match,
     )
 
-    assert result is False
+    assert result == UNAVAILABLE
     on_match.assert_not_called()
 
 
-def test_returns_false_when_fetch_returns_empty_dict(db):
+def test_an_empty_dict_response_also_keeps_the_stored_id(db):
     """Pin: empty dict treated same as None — falsy result skips
     callback."""
     db.insert_album(42, spotify_album_id='SP-EMPTY')
@@ -225,7 +251,7 @@ def test_returns_false_when_fetch_returns_empty_dict(db):
         client_fetch_fn=fetch, on_match_fn=on_match,
     )
 
-    assert result is False
+    assert result == UNAVAILABLE
     on_match.assert_not_called()
 
 
@@ -263,7 +289,7 @@ def test_works_with_tracks_table(db):
         client_fetch_fn=fetch, on_match_fn=on_match,
     )
 
-    assert result is True
+    assert result == MATCHED
     fetch.assert_called_once_with('SP-T-1')
 
 
@@ -281,7 +307,7 @@ def test_works_with_alternate_columns(db):
         client_fetch_fn=fetch, on_match_fn=on_match,
     )
 
-    assert result is True
+    assert result == MATCHED
     fetch.assert_called_once_with('12345')
 
 
@@ -298,5 +324,46 @@ def test_rejects_invalid_table_name(db):
         client_fetch_fn=fetch, on_match_fn=on_match,
     )
 
-    assert result is False
+    assert result == NO_STORED_ID
     fetch.assert_not_called()
+
+
+def test_an_already_matched_entity_is_not_downgraded_by_a_hiccup(db):
+    """Backoff must not cost the user their chip: an album that reads
+    ``matched`` is not the row a retry loop keeps re-picking, and turning it
+    red for a provider outage misreports a match that is still good."""
+    db.insert_album(42, spotify_album_id='SP-ABC',
+                    spotify_match_status='matched')
+    marked = []
+
+    result = honor_stored_match(
+        db=db, entity_table='albums', entity_id=42,
+        id_column='spotify_album_id',
+        client_fetch_fn=MagicMock(side_effect=RuntimeError("API down")),
+        on_match_fn=MagicMock(),
+        mark_status_fn=lambda kind, eid, status: marked.append((kind, eid, status)),
+        status_column='spotify_match_status',
+    )
+
+    assert result == UNAVAILABLE
+    assert marked == []
+
+
+def test_an_unsettled_entity_still_gets_its_backoff(db):
+    """The row a retry loop WOULD keep re-picking: an id is stored but no
+    status was ever written, so nothing stops the next cycle choosing it again
+    immediately."""
+    db.insert_album(43, spotify_album_id='SP-XYZ')
+    marked = []
+
+    result = honor_stored_match(
+        db=db, entity_table='albums', entity_id=43,
+        id_column='spotify_album_id',
+        client_fetch_fn=MagicMock(side_effect=RuntimeError("API down")),
+        on_match_fn=MagicMock(),
+        mark_status_fn=lambda kind, eid, status: marked.append((kind, eid, status)),
+        status_column='spotify_match_status',
+    )
+
+    assert result == UNAVAILABLE
+    assert marked == [('album', 43, 'error')]

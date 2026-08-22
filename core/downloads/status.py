@@ -115,6 +115,33 @@ _ENGINE_CANCELLED_STATES = ('Cancelled', 'Canceled')
 _ENGINE_SUCCESS_STATES = ('Succeeded', 'Completed, Succeeded')
 
 
+def classify_engine_state(state: Any) -> str:
+    """Read an engine/slskd state string as one of the four things it can mean.
+
+    Returns ``'cancelled'``, ``'failed'``, ``'success'`` or ``'pending'``.
+
+    THE ORDER MATTERS. slskd reports compound states — "Completed, Errored",
+    "Completed, Cancelled" — so testing for "Completed" first would read a
+    failed transfer as a successful one. Cancelled and failed are checked before
+    success for exactly that reason, which is the same priority the branches
+    below already use.
+
+    Public so callers outside this module classify a state the same way rather
+    than writing their own list of strings; the API's inbound request endpoint
+    needs it to tell a finished download from an abandoned one.
+    """
+    state_str = str(state or '')
+    if not state_str:
+        return 'pending'
+    if any(token in state_str for token in _ENGINE_CANCELLED_STATES):
+        return 'cancelled'
+    if any(token in state_str for token in _ENGINE_FAILURE_STATES):
+        return 'failed'
+    if any(token in state_str for token in _ENGINE_SUCCESS_STATES):
+        return 'success'
+    return 'pending'
+
+
 def _engine_state_str(record: Any) -> str:
     if record is None:
         return ''

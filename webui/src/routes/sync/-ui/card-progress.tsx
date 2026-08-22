@@ -23,8 +23,10 @@ import type { ReactNode } from 'react';
 
 import type { SourceVerticalConfig } from '../-sync.sources';
 import type { SourcePlaylistState } from '../-sync.state';
+import type { CardCoverageValue } from './card-coverage';
 
-import { checkNoteCounts, slashTextProgressLine } from '../-sync.url-tabs';
+import { checkNoteCounts, slashTextCounts } from '../-sync.url-tabs';
+import { CardCoverage } from './card-coverage';
 
 /**
  * The sync line's counters (tidal 1172-1177). Null when there is no sync
@@ -44,28 +46,32 @@ export function syncCardCounts(
 }
 
 /**
- * The whole line. `null` hides the element (fresh cards); `''` renders it
- * visible and empty (non-fresh with nothing to report yet).
+ * Normalise a card's state into the ONE coverage shape, or null/'' for the two
+ * non-rendering cases. The three branches are the three writers, unchanged —
+ * this function decides WHICH numbers apply, `CardCoverage` decides how they
+ * look, and neither recomputes the other's percentage.
+ *
+ * Returns:
+ *   null   the element is hidden entirely (fresh cards)
+ *   ''     visible but empty — the check-note sources' total===0 state
+ *   value  the coverage numbers to render
  */
-export function cardProgressLine(
+export function cardCoverageValue(
   state: SourcePlaylistState,
   config: SourceVerticalConfig,
-): ReactNode | null {
+): CardCoverageValue | '' | null {
   if (state.phase === 'fresh') return null;
 
-  // The sync writer wins whenever it has something (1192-1194).
+  // The sync writer wins whenever it has something (1192-1194). Its percentage
+  // is (matched+failed)/total and must stay that way.
   const sync = syncCardCounts(state.lastSyncProgress);
   if (sync) {
-    return (
-      <div className="playlist-card-sync-status">
-        <span className="sync-stat total-tracks">♪ {sync.total}</span>
-        <span className="sync-separator">/</span>
-        <span className="sync-stat matched-tracks">✓ {sync.matched}</span>
-        <span className="sync-separator">/</span>
-        <span className="sync-stat failed-tracks">✗ {sync.failed}</span>
-        <span className="sync-stat percentage">({sync.percentage}%)</span>
-      </div>
-    );
+    return {
+      total: sync.total,
+      matched: sync.matched,
+      failed: sync.failed,
+      percentage: sync.percentage,
+    };
   }
 
   if (config.ux.cardProgressFormat === 'check-note-spans') {
@@ -73,22 +79,39 @@ export function cardProgressLine(
       spotify_total: state.spotifyTotal,
       spotify_matches: state.spotifyMatches,
     });
+    // The check-note writers gate on total>0 (deezer 3372, spotify-public
+    // 7298, itunes 8324) and leave the element visible but empty below it.
     if (!counts) return '';
-    return (
-      <div className="playlist-card-sync-status">
-        <span className="sync-stat matched-tracks">✓ {counts.matches}</span>
-        <span className="sync-separator">/</span>
-        <span className="sync-stat total-tracks">♪ {counts.total}</span>
-      </div>
-    );
+    // These sources never counted failures and never printed a percentage;
+    // passing nulls keeps it that way while still filling the bar.
+    return { total: counts.total, matched: counts.matches, failed: null, percentage: null };
   }
 
   // NO total>0 gate here: the slash-text writers paint unconditionally
-  // (tidal 961-967, qobuz 2165-2171, youtube 9120-9125) — a 0-track card
-  // shows '♪ 0 / ✓ 0 / ✗ 0 / 0%'. Only the check-note writers gate (deezer
-  // 3372, spotify-public 7298, itunes 8324), which checkNoteCounts does.
-  return slashTextProgressLine({
+  // (tidal 961-967, qobuz 2165-2171, youtube 9120-9125), so a 0-track card
+  // still renders a (zeroed) coverage line rather than an empty element.
+  const slash = slashTextCounts({
     spotify_total: state.spotifyTotal,
     spotify_matches: state.spotifyMatches,
   });
+  return {
+    total: slash.total,
+    matched: slash.matches,
+    failed: slash.failed,
+    percentage: slash.percentage,
+  };
+}
+
+/**
+ * The whole line. `null` hides the element (fresh cards); `''` renders it
+ * visible and empty (non-fresh with nothing to report yet).
+ */
+export function cardProgressLine(
+  state: SourcePlaylistState,
+  config: SourceVerticalConfig,
+): ReactNode | null {
+  const value = cardCoverageValue(state, config);
+  if (value === null) return null;
+  if (value === '') return '';
+  return <CardCoverage {...value} />;
 }
