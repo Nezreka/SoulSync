@@ -527,7 +527,12 @@ class ProwlarrClient:
                 params=params,
                 timeout=timeout or self.DEFAULT_TIMEOUT,
             )
-            if resp.status_code == 429:
+            # getattr, not resp.status_code: this runs before the `resp.ok`
+            # check below, so it is the FIRST thing to touch the response, and a
+            # stub or an adapter that only implements `.ok` used to get this far
+            # untouched. Reading an attribute nothing promised broke a test that
+            # had every right to pass.
+            if getattr(resp, 'status_code', None) == 429:
                 # Prowlarr passes an indexer's rate limit back as a 429. Tell the
                 # shared budget so BOTH sides back off, instead of the other half
                 # of the app walking into the same wall a second later.
