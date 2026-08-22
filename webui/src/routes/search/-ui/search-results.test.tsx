@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -452,3 +454,38 @@ describe('SearchResults', () => {
     expect(document.getElementById('enh-videos-section')).toBeNull();
   });
 });
+
+/**
+ * Asserted against style.css because jsdom has no layout: it cannot notice a
+ * card clipped to its cover's height, so a result showing art and no title
+ * looks identical to a correct one in every rendered test.
+ */
+describe('an album result shows its title', () => {
+  // Comments STRIPPED first. The comment above this very rule explains the fix
+  // by naming the declaration, so matching raw text made the guard pass on its
+  // own prose with the declaration deleted.
+  const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8').replace(
+    /\/\*[\s\S]*?\*\//g,
+    '',
+  );
+
+  it('the search card opts OUT of the square it inherits', () => {
+    // A bare `.album-card` rule belongs to the artist-detail release card,
+    // which is deliberately square with its text overlaid on the art. This
+    // card shares the class name and has the opposite design — title and meta
+    // BELOW the cover. Inheriting `aspect-ratio: 1` pinned it to the cover's
+    // height and `overflow: hidden` clipped every word, so search results were
+    // art with no title at all.
+    const block = /\.enh-compact-item\.album-card\s*\{([^}]*)\}/.exec(css);
+    expect(block, 'no .enh-compact-item.album-card rule').toBeTruthy();
+    expect(block![1]).toMatch(/aspect-ratio:\s*auto/);
+  });
+
+  it('the bare .album-card rule still IS square, so this stays necessary', () => {
+    // If that rule ever stops forcing a square, the opt-out becomes dead code
+    // rather than load-bearing — and this test should be the thing that says so.
+    const bare = /\n\.album-card\s*\{([^}]*)\}/.exec(css);
+    expect(bare, 'the colliding rule vanished — re-check the opt-out').toBeTruthy();
+    expect(bare![1]).toMatch(/aspect-ratio:\s*1/);
+  });
+})

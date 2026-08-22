@@ -41653,6 +41653,13 @@ div.artist-hero-badge {
 /* Album cards — Spotify browse tiles: padded panel, rounded cover with its
    own shadow, title + meta BELOW the art instead of stamped over it. */
 .enh-compact-item.album-card {
+    /* aspect-ratio: auto is LOAD-BEARING. A bare `.album-card` rule further up
+       belongs to the artist-detail release card, which is deliberately square
+       with its text overlaid on the art. This card shares the class name and
+       has the opposite design — title and meta BELOW the cover — so inheriting
+       that square forced the card to the cover's height and `overflow: hidden`
+       clipped every word. Search results were art with no title at all. */
+    aspect-ratio: auto;
     display: flex; flex-direction: column; padding: 14px;
     background: #17171b; border-radius: 12px; cursor: pointer;
     transition: background 0.25s ease, transform 0.2s ease, box-shadow 0.2s ease;
