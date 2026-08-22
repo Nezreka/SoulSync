@@ -275,3 +275,56 @@ def test_a_noop_publish_still_reports_success(monkeypatch, tmp_path):
         "_atomic_staging_root": str(tmp_path / "gone"),
         "_atomic_transfer_dir": str(tmp_path / "music"),
     }) is True
+
+
+def test_rollback_repoints_a_real_sqlite_row(monkeypatch, tmp_path):
+    """The rollback repoint against a REAL database, not a fake connection.
+
+    The unit tests drive `publish_album_batch` with a dict standing in for the
+    tracks table, which proves the logic and not the wiring. This one runs the
+    actual `_db_update` closure from lifecycle against real sqlite, so the SQL,
+    the commit and the reverse call are all exercised: track one publishes and
+    repoints for real, track two's move fails, and the row has to come back.
+    """
+    import database.music_database as mdb_mod
+    import core.imports.file_ops as fops
+    from pathlib import Path
+
+    db = mdb_mod.MusicDatabase(database_path=str(tmp_path / "music.db"))
+    monkeypatch.setattr(mdb_mod, "MusicDatabase", lambda *a, **k: db)
+
+    batch = {"is_album_download": True}
+    transfer = _wire(monkeypatch, tmp_path, flag=True, batch=batch)
+    one = pl._maybe_stage_album_track(
+        {"batch_id": "B"}, os.path.join(transfer, "Artist", "Album", "01.flac"))
+    two = os.path.join(os.path.dirname(one), "02.flac")
+    for p in (one, two):
+        Path(p).parent.mkdir(parents=True, exist_ok=True)
+        Path(p).write_bytes(b"AUDIO")
+
+    conn = db._get_connection()
+    conn.execute("INSERT INTO artists (id, name) VALUES (1, 'Artist')")
+    conn.execute("INSERT INTO albums (id, artist_id, title) VALUES (1, 1, 'Album')")
+    conn.execute(
+        "INSERT INTO tracks (id, album_id, artist_id, title, file_path) "
+        "VALUES (1, 1, 1, 'Song', ?)", (one,))
+    conn.commit()
+    conn.close()
+
+    real_move = fops.safe_move_file
+
+    def _second_fails(src, dst):
+        if str(src).endswith("02.flac"):
+            raise OSError("disk full")
+        return real_move(src, dst)
+
+    monkeypatch.setattr(fops, "safe_move_file", _second_fails)
+
+    assert lc._publish_atomic_album("B", batch) is False
+
+    conn = db._get_connection()
+    stored = conn.execute("SELECT file_path FROM tracks WHERE id = 1").fetchone()[0]
+    conn.close()
+
+    assert stored == one, "the library row followed the file back to staging"
+    assert os.path.isfile(stored), "no row may point at a file that is not there"
