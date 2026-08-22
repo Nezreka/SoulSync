@@ -19,7 +19,7 @@ from core.worker_utils import (
     release_titles,
     set_album_api_track_count,
 )
-from core.enrichment.manual_match_honoring import honor_stored_match
+from core.enrichment.manual_match_honoring import MATCHED, honor_stored_match
 
 logger = get_logger("itunes_worker")
 
@@ -605,14 +605,22 @@ class iTunesWorker:
 
         # Issue #501: honor manual matches (see SpotifyWorker for full
         # explanation — same pattern across every per-source worker).
-        if honor_stored_match(
+        _stored = honor_stored_match(
             db=self.db, entity_table='albums', entity_id=album_id,
             id_column='itunes_album_id',
             client_fetch_fn=self.client.get_album,
             on_match_fn=self._refresh_album_via_stored_id,
+            mark_status_fn=self._mark_status,
+            status_column='itunes_match_status',
             log_prefix='iTunes',
-        ):
-            self.stats['matched'] += 1
+        )
+        if _stored:
+            # L2-005: a stored ID the source could not confirm right now is
+            # NOT released to a fuzzy name search below — a transient provider
+            # failure is not evidence that the ID is wrong, and searching
+            # overwrote deliberately chosen matches with whatever came back.
+            if _stored == MATCHED:
+                self.stats['matched'] += 1
             return
 
         query = f"{artist_name} {album_name}" if artist_name else album_name
@@ -646,14 +654,22 @@ class iTunesWorker:
         artist_name = item.get('artist', '')
 
         # Issue #501: honor manual matches.
-        if honor_stored_match(
+        _stored = honor_stored_match(
             db=self.db, entity_table='tracks', entity_id=track_id,
             id_column='itunes_track_id',
             client_fetch_fn=self.client.get_track_details,
             on_match_fn=self._refresh_track_via_stored_id,
+            mark_status_fn=self._mark_status,
+            status_column='itunes_match_status',
             log_prefix='iTunes',
-        ):
-            self.stats['matched'] += 1
+        )
+        if _stored:
+            # L2-005: a stored ID the source could not confirm right now is
+            # NOT released to a fuzzy name search below — a transient provider
+            # failure is not evidence that the ID is wrong, and searching
+            # overwrote deliberately chosen matches with whatever came back.
+            if _stored == MATCHED:
+                self.stats['matched'] += 1
             return
 
         query = f"{artist_name} {track_name}" if artist_name else track_name
@@ -760,7 +776,7 @@ class iTunesWorker:
                 year = album_obj.release_date[:4] if len(album_obj.release_date) >= 4 else None
                 if year and year.isdigit():
                     cursor.execute("""
-                        UPDATE albums SET year = ?
+                        UPDATE albums SET year = ?, updated_at = CURRENT_TIMESTAMP
                         WHERE id = ? AND (year IS NULL OR year = '' OR year = '0')
                     """, (year, album_id))
                 # #824: also store the FULL release date when iTunes has one

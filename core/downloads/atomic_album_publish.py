@@ -162,37 +162,73 @@ def publish_album_batch(
         db_path_update_fn: optional ``fn(staging_path, final_path)`` to repoint a
             track's DB ``file_path`` from staging to final. Injected.
 
-    Returns ``{published: [(staging, final)], failed: [(staging, err)]}``. A
-    per-file failure leaves THAT file staged (never partially in the library) and
-    is reported — the caller keeps the staging tree for retry/quarantine.
+    Returns ``{success, published: [(staging, final)], failed: [(staging, err)],
+    rollback_failed: [(final, err)]}``.
+
+    All or nothing (L2-002). "The whole album appears at once" is the entire
+    point of atomic publishing, so a per-file failure is not survivable by
+    leaving the rest live: the caller would report Complete for an album that is
+    half in the library and half in staging, with no retryable task for the
+    missing half. Any failure — a move, a mapping, or the DB repoint that tells
+    the library where the file now is — rolls every already-moved file back into
+    staging and reports ``success=False``, leaving the batch exactly as it was
+    so a retry can publish the whole thing.
+
+    ``db_path_update_fn`` may return the number of rows it repointed. Zero rows
+    for an AUDIO file means the library still points at a staging path that is
+    about to stop existing, which is a failed publish, not a warning.
     """
     published: List[Tuple[str, str]] = []
     failed: List[Tuple[str, str]] = []
+
+    def _roll_back() -> List[Tuple[str, str]]:
+        """Put every published file back in staging. Returns what would not go."""
+        stuck: List[Tuple[str, str]] = []
+        for staged_path, final_path in reversed(published):
+            try:
+                move_fn(final_path, staged_path)
+            except Exception as e:  # noqa: BLE001
+                logger.error("[Atomic Publish] rollback failed %s -> %s: %s",
+                             final_path, staged_path, e)
+                stuck.append((final_path, str(e)))
+        return stuck
 
     for staged in iter_staged_files(staging_root):
         final = to_final_path(staged, staging_root, transfer_dir)
         if not final:
             failed.append((staged, "could not map staged path back to a library path"))
-            continue
+            break
         try:
             move_fn(staged, final)
         except Exception as e:  # noqa: BLE001 — report + keep staged, never lose the file
             logger.error("[Atomic Publish] move failed %s -> %s: %s", staged, final, e)
             failed.append((staged, str(e)))
-            continue
+            break
         published.append((staged, final))
         if db_path_update_fn is not None:
             try:
-                db_path_update_fn(staged, final)
-            except Exception as e:  # noqa: BLE001 — file is published; DB fix is best-effort
+                rows = db_path_update_fn(staged, final)
+            except Exception as e:  # noqa: BLE001
                 logger.error("[Atomic Publish] DB path update failed %s -> %s: %s",
                              staged, final, e)
+                failed.append((staged, f"DB path update failed: {e}"))
+                break
+            is_audio = os.path.splitext(staged)[1].lower() in _AUDIO_EXTS
+            if is_audio and isinstance(rows, int) and rows < 1:
+                logger.error("[Atomic Publish] DB path update matched no row for %s", staged)
+                failed.append((staged, "DB path update matched no library row"))
+                break
 
-    # Remove the staging tree only when everything published (no orphan left behind).
-    if not failed:
+    rollback_failed: List[Tuple[str, str]] = []
+    if failed:
+        rollback_failed = _roll_back()
+        published = []
+    else:
+        # Remove the staging tree only when everything published.
         _prune_empty_tree(staging_root)
 
-    return {"published": published, "failed": failed}
+    return {"success": not failed, "published": published, "failed": failed,
+            "rollback_failed": rollback_failed}
 
 
 def discard_staging_root(staging_root: Optional[str]) -> bool:

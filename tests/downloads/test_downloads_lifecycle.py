@@ -852,3 +852,51 @@ class TestGlobalGateDoesNotStampede:
 
         started = [c for c in rec.calls if c[0] == 'submit_dl']
         assert len(started) == 3, f'3 slots free, expected 3 starts, got {len(started)}'
+
+
+# ---------------------------------------------------------------------------
+# L2-002: a failed atomic publish must not produce a Complete batch
+# ---------------------------------------------------------------------------
+
+def _one_task_batch():
+    download_tasks['t1'] = {'status': 'completed', 'track_info': {'name': 'X'}}
+    download_batches['b1'] = {
+        'queue': ['t1'], 'queue_index': 1, 'active_count': 1,
+        'max_concurrent': 1, 'permanently_failed_tracks': [],
+        'cancelled_tracks': set(), 'playlist_name': 'P',
+    }
+
+
+def test_a_failed_publish_leaves_the_batch_incomplete(monkeypatch):
+    """The batch used to be stamped complete BEFORE the publish ran, and the
+    publish's result was only logged — so history, scan and completion events
+    all fired for an album that never reached the library."""
+    _one_task_batch()
+    monkeypatch.setattr(lc, '_publish_atomic_album', lambda *a, **kw: False)
+    deps, _ = _build_deps()
+
+    lc.on_download_completed('b1', 't1', True, deps)
+
+    assert download_batches['b1'].get('phase') != 'complete'
+    assert 'completion_time' not in download_batches['b1']
+
+
+def test_a_successful_publish_completes_the_batch_as_before(monkeypatch):
+    _one_task_batch()
+    monkeypatch.setattr(lc, '_publish_atomic_album', lambda *a, **kw: True)
+    deps, _ = _build_deps()
+
+    lc.on_download_completed('b1', 't1', True, deps)
+
+    assert download_batches['b1'].get('phase') == 'complete'
+
+
+def test_completion_check_v2_also_refuses_a_failed_publish(monkeypatch):
+    _one_task_batch()
+    monkeypatch.setattr(lc, '_publish_atomic_album', lambda *a, **kw: False)
+    deps, _ = _build_deps()
+
+    result = lc.check_batch_completion_v2('b1', deps)
+
+    assert result is False
+    assert download_batches['b1'].get('phase') != 'complete'

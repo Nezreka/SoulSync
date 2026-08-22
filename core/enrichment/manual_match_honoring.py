@@ -53,6 +53,11 @@ def _read_id_column(db, entity_table: str, entity_id, id_column: str) -> Optiona
     return str(value).strip() if value else None
 
 
+MATCHED = 'matched'
+UNAVAILABLE = 'error'
+NO_STORED_ID = ''
+
+
 def honor_stored_match(
     *,
     db,
@@ -61,8 +66,10 @@ def honor_stored_match(
     id_column: str,
     client_fetch_fn: Callable[[str], Any],
     on_match_fn: Callable[[Any, str, Any], None],
+    mark_status_fn: Optional[Callable[[str, Any, str], None]] = None,
+    status_column: Optional[str] = None,
     log_prefix: str = '',
-) -> bool:
+) -> str:
     """Fast-path enrichment via a stored source ID — preserves manual
     matches.
 
@@ -84,45 +91,78 @@ def honor_stored_match(
         log_prefix: Display name for log lines (``'Spotify'`` /
             ``'iTunes'`` / etc).
 
-    Returns:
-        True if a stored ID was found AND the fetch returned data AND
-        the on-match callback ran. Caller skips its search-by-name
-        flow and counts a match.
+        mark_status_fn: Optional ``fn(entity_kind, entity_id, status)``
+            — the worker's own ``_mark_status``. Used to persist an
+            ``error`` (with its ``*_last_attempted`` retry timestamp)
+            when a stored ID exists but the source could not confirm
+            it. Without it the failure leaves no trace and the entity
+            is picked again on the very next cycle, with no backoff.
+        status_column: The worker's ``<service>_match_status`` column.
+            An entity that already reads ``matched`` is NOT downgraded
+            to ``error`` by a transient failure — its chip would turn
+            red for a match that is still perfectly good, and it is
+            not the row a retry loop would pick anyway.
 
-        False if no stored ID is set, the fetch failed, or the fetch
-        returned empty. Caller falls through to its existing search-
-        by-name flow (the legacy behavior for un-matched entities).
+    Returns one of three states (L2-005):
+        ``MATCHED``     — the stored ID was refreshed. Caller counts a
+            match and skips search-by-name.
+        ``UNAVAILABLE`` — a stored ID IS set but the source could not
+            confirm it right now (fetch raised, or returned nothing).
+            Caller must NOT search by name: a transient provider
+            failure is not evidence that the stored ID is wrong, and
+            searching would overwrite a deliberately chosen ID with
+            whatever a fuzzy name match happens to return. The ID is
+            released only by an explicit re-match, never by a timeout.
+        ``NO_STORED_ID`` (falsy) — nothing is stored, so the caller
+            falls through to its existing search-by-name flow.
 
     Notes:
-        - Exceptions in ``client_fetch_fn`` are caught and logged at
-          warning level — caller falls through to search.
+        - Exceptions in ``client_fetch_fn`` are caught and logged.
         - Exceptions in ``on_match_fn`` propagate (those are real
           DB errors the worker should know about).
     """
     stored_id = _read_id_column(db, entity_table, entity_id, id_column)
     if not stored_id:
-        return False
+        return NO_STORED_ID
+
+    entity_kind = entity_table[:-1]
+
+    def _unavailable(reason: str) -> str:
+        already_matched = False
+        if status_column is not None:
+            try:
+                already_matched = _read_id_column(
+                    db, entity_table, entity_id, status_column) == 'matched'
+            except Exception as read_exc:  # noqa: BLE001 - older schema, no column
+                logger.debug(
+                    f"[{log_prefix}] could not read {status_column}: {read_exc}"
+                )
+        if mark_status_fn is not None and not already_matched:
+            try:
+                mark_status_fn(entity_kind, entity_id, 'error')
+            except Exception as mark_exc:  # noqa: BLE001 - bookkeeping only
+                logger.debug(
+                    f"[{log_prefix}] could not record the failed stored-ID "
+                    f"refresh for {entity_kind} #{entity_id}: {mark_exc}"
+                )
+        logger.warning(
+            f"[{log_prefix}] Stored ID {stored_id} for {entity_kind} "
+            f"#{entity_id} could not be confirmed ({reason}) — keeping it "
+            f"rather than searching by name"
+        )
+        return UNAVAILABLE
 
     try:
         api_data = client_fetch_fn(stored_id)
     except Exception as exc:
-        logger.warning(
-            f"[{log_prefix}] Stored-ID fetch failed for "
-            f"{entity_table[:-1]} #{entity_id} (id={stored_id}): {exc}"
-        )
-        return False
+        return _unavailable(str(exc))
 
     if not api_data:
-        logger.debug(
-            f"[{log_prefix}] Stored ID {stored_id} for "
-            f"{entity_table[:-1]} #{entity_id} returned empty data — "
-            f"falling through to search-by-name"
-        )
-        return False
+        return _unavailable("the source returned no data")
 
     on_match_fn(entity_id, stored_id, api_data)
     logger.info(
         f"[{log_prefix}] Honored manual match: "
-        f"{entity_table[:-1]} #{entity_id} → {id_column}={stored_id}"
+        f"{entity_kind} #{entity_id} → {id_column}={stored_id}"
     )
-    return True
+    return MATCHED

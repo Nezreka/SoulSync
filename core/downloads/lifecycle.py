@@ -74,7 +74,7 @@ def _safe_batch_dirname(batch_id: str) -> str:
 _ALBUM_BUNDLE_CLEANED_SOURCES = ('soulseek', 'torrent', 'usenet')
 
 
-def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> None:
+def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
     """#999 atomic album publishing (opt-in): if this batch staged its tracks
     (private mirror, so Plex never saw a partial album), move them into the live
     library NOW — before the batch_complete/scan emit below — then repoint each
@@ -85,11 +85,11 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> None:
     AND it's a fresh whole-album batch. Any failure leaves the staged files where
     they are (quarantine) and is logged — never a partial library publish."""
     if not batch.get('_atomic_active'):
-        return
+        return True
     staging_root = batch.get('_atomic_staging_root')
     transfer_dir = batch.get('_atomic_transfer_dir')
     if not staging_root or not transfer_dir or not os.path.isdir(staging_root):
-        return
+        return True
     try:
         from core.downloads.atomic_album_publish import publish_album_batch
         from core.imports.file_ops import safe_move_file
@@ -97,13 +97,22 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> None:
 
         db = MusicDatabase()
 
-        def _db_update(staged_path: str, final_path: str) -> None:
+        def _db_update(staged_path: str, final_path: str):
+            """Repoint one file, returning how many library rows moved with it.
+
+            The count is the publish's proof that the library knows where the
+            file went; an audio file that repoints nothing leaves the library
+            pointing at a staging path this publish is about to remove. None
+            means the driver could not tell us, which is "unknown", not "zero" —
+            an unknown must not fail a publish that may well have worked."""
             conn = db._get_connection()
             try:
                 cur = conn.cursor()
                 cur.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
                             (final_path, staged_path))
                 conn.commit()
+                rowcount = getattr(cur, 'rowcount', None)
+                return int(rowcount) if isinstance(rowcount, int) else None
             finally:
                 conn.close()
 
@@ -129,13 +138,22 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> None:
                     logger.debug("[Atomic Publish] repair re-register failed for %s: %s",
                                  _folder, _reg_err)
 
-        n_fail = len(result.get('failed', []))
-        logger.info("[Atomic Publish] Batch %s: published %d file(s)%s",
-                    batch_id, len(pubmap),
-                    (f"; {n_fail} kept in staging for retry" if n_fail else ""))
+        failures = result.get('failed', [])
+        if failures:
+            stuck = result.get('rollback_failed', [])
+            logger.error(
+                "[Atomic Publish] Batch %s NOT published: %d file(s) failed (%s); "
+                "everything rolled back to staging for retry%s",
+                batch_id, len(failures), failures[0][1] if failures else "unknown",
+                f"; {len(stuck)} could not be rolled back" if stuck else "")
+            return False
+        logger.info("[Atomic Publish] Batch %s: published %d file(s)",
+                    batch_id, len(pubmap))
+        return True
     except Exception as e:
         logger.error("[Atomic Publish] Batch %s publish failed (staged files kept): %s",
                      batch_id, e, exc_info=True)
+        return False
 
 
 def _cleanup_private_album_bundle_staging(batch_id: str, batch: dict) -> None:
@@ -675,14 +693,25 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
 
             # FIXED: Ensure batch is not already marked as complete to prevent duplicate processing
             if batch.get('phase') != 'complete':
+                # #999 atomic album publish (opt-in, no-op unless staged): move
+                # the staged album into the live library BEFORE anything is
+                # marked complete, so Plex sees the whole album at once.
+                #
+                # L2-002: the publish decides whether this batch IS complete. It
+                # used to run after the phase flip and its result was only
+                # logged, so a failed publish still produced a Complete batch
+                # with history, scan and completion events for an album that was
+                # never published. A failure leaves the phase alone; the batch
+                # stays in monitoring and the next completion check retries.
+                if not _publish_atomic_album(batch_id, batch, deps):
+                    logger.error(
+                        "[Batch Manager] Batch %s: atomic album publish failed — "
+                        "not marking complete, staged files kept for retry", batch_id)
+                    return
+
                 # Mark batch as complete and set completion timestamp for auto-cleanup
                 batch['phase'] = 'complete'
                 batch['completion_time'] = time.time()  # Track when batch completed
-
-                # #999 atomic album publish (opt-in, no-op unless staged): move
-                # the staged album into the live library BEFORE the scan/emit
-                # below, so Plex sees the whole album at once.
-                _publish_atomic_album(batch_id, batch, deps)
 
                 # Record sync history completion
                 from database.music_database import MusicDatabase
@@ -914,14 +943,20 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                     # Check if this is an auto-initiated batch
                     is_auto_batch = batch.get('auto_initiated', False)
 
+                    # #999 atomic album publish (opt-in, no-op unless staged):
+                    # publish the staged album into the live library before the
+                    # batch is marked complete. L2-002: a failed publish must not
+                    # produce a Complete batch for an album that is still staged.
+                    if not _publish_atomic_album(batch_id, batch, deps):
+                        logger.error(
+                            "[Completion Check V2] Batch %s: atomic album publish "
+                            "failed — not marking complete, staged files kept for "
+                            "retry", batch_id)
+                        return False
+
                     # Mark batch as complete and set completion timestamp for auto-cleanup
                     batch['phase'] = 'complete'
                     batch['completion_time'] = time.time()  # Track when batch completed
-
-                    # #999 atomic album publish (opt-in, no-op unless staged):
-                    # publish the staged album into the live library before the
-                    # scan/emit below.
-                    _publish_atomic_album(batch_id, batch, deps)
 
                     # Add activity for batch completion
                     playlist_name = batch.get('playlist_name', 'Unknown Playlist')
