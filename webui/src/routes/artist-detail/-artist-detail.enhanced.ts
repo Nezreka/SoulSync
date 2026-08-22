@@ -86,29 +86,74 @@ export function extractFormat(filePath: unknown): string {
 }
 
 /**
- * Albums grouped for the three Enhanced sections.
+ * The one place a release's type is decided, used by BOTH the sections and the
+ * stats bar (TheHomeGuy, Aug 2026).
  *
- * record_type is lowercased HERE but not in the stats bar below — so an album
- * typed "EP" lands in the EPs section while the stats bar still counts it as
- * neither. Reproduced rather than harmonised; changing it would move counts
- * Boulder has been reading for months.
+ * They used to decide separately: the grouping lowercased record_type, the
+ * stats bar compared it strictly. So a row typed "EP" rendered under EPs and
+ * counted as NONE of the three numbers above it. The two halves of the same
+ * screen disagreed by construction, which is most of why the album count did
+ * not match the standard view's.
+ *
+ * 'compile' is deezer's spelling of compilation, normalised here so the two
+ * don't split into separate buckets.
  */
+export function releaseType(album: EnhancedAlbum): string {
+  const raw = (album.record_type || '').trim().toLowerCase();
+  if (!raw) return 'album';
+  return raw === 'compile' ? 'compilation' : raw;
+}
+
+/** Albums grouped for the Enhanced sections. */
 export function groupAlbumsByType(albums: EnhancedAlbum[] = []): Record<string, EnhancedAlbum[]> {
   const grouped: Record<string, EnhancedAlbum[]> = { album: [], ep: [], single: [] };
   for (const album of albums) {
-    const type = (album.record_type || 'album').toLowerCase();
+    const type = releaseType(album);
     if (grouped[type]) grouped[type].push(album);
     else grouped[type] = [album];
   }
   return grouped;
 }
 
-/** Only these three render, in this order — any other bucket is grouped but unused. */
+/** The named sections, in this order. Anything else follows via OTHER_SECTION_LABELS. */
 export const ENHANCED_SECTIONS: { type: string; label: string }[] = [
   { type: 'album', label: 'Albums' },
   { type: 'ep', label: 'EPs' },
   { type: 'single', label: 'Singles' },
 ];
+
+/** Titles for the buckets that used to be grouped and then silently dropped. */
+const OTHER_SECTION_LABELS: Record<string, string> = {
+  compilation: 'Compilations',
+  live: 'Live',
+  soundtrack: 'Soundtracks',
+  remix: 'Remixes',
+};
+
+/**
+ * Every section to render, named ones first.
+ *
+ * The renderer used to walk ENHANCED_SECTIONS only, so a release whose type was
+ * anything else was fetched, grouped and then never shown. Compilations are the
+ * common case and a greatest-hits-heavy artist could have several sitting in
+ * the library with no way to see them here.
+ */
+export function enhancedSectionsFor(albums: EnhancedAlbum[] = []): { type: string; label: string }[] {
+  const known = new Set(ENHANCED_SECTIONS.map((s) => s.type));
+  const extras: { type: string; label: string }[] = [];
+  const seen = new Set<string>();
+  for (const album of albums) {
+    const type = releaseType(album);
+    if (known.has(type) || seen.has(type)) continue;
+    seen.add(type);
+    extras.push({
+      type,
+      label: OTHER_SECTION_LABELS[type] ?? type.charAt(0).toUpperCase() + type.slice(1),
+    });
+  }
+  extras.sort((a, b) => a.label.localeCompare(b.label));
+  return [...ENHANCED_SECTIONS, ...extras];
+}
 
 export interface EnhancedStatItem {
   value: string | number;
@@ -130,9 +175,15 @@ export interface EnhancedStats {
 /**
  * The stats bar.
  *
- * Note the asymmetry in the counts, verbatim from the vanilla: an album with NO
- * record_type counts as an album, but the EP and Single counts are strict
- * equality, so a record_type of "EP" counts as none of the three.
+ * Counts come from `releaseType`, the same classifier the sections use. They
+ * used to be computed separately with strict equality, so a row typed "EP"
+ * counted as none of the three while still rendering under EPs.
+ *
+ * A release with no record_type still counts as an album. That is a guess, and
+ * on a library where enrichment has not run it is the main reason this number
+ * reads higher than the standard view's owned count: nothing sets record_type
+ * during a media-server scan, only the enrichment workers do. Left as-is
+ * because changing it moves a number people read; see the note in the report.
  *
  * The vanilla's statsItems also carried an `icon` per row that its template
  * never rendered. Dead data, so it is not carried over — emitting it would ADD
@@ -141,9 +192,11 @@ export interface EnhancedStats {
 export function enhancedStats(data: EnhancedData): EnhancedStats {
   const albums = data.albums ?? [];
 
-  const totalAlbums = albums.filter((a) => (a.record_type || 'album') === 'album').length;
-  const totalEps = albums.filter((a) => a.record_type === 'ep').length;
-  const totalSingles = albums.filter((a) => a.record_type === 'single').length;
+  // Same classifier the sections use, so a number can never disagree with the
+  // list under it again.
+  const totalAlbums = albums.filter((a) => releaseType(a) === 'album').length;
+  const totalEps = albums.filter((a) => releaseType(a) === 'ep').length;
+  const totalSingles = albums.filter((a) => releaseType(a) === 'single').length;
   const totalTracks = albums.reduce((sum, a) => sum + (a.tracks ? a.tracks.length : 0), 0);
 
   let totalDurationMs = 0;

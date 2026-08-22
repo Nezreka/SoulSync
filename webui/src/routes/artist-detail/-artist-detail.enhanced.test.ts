@@ -130,12 +130,25 @@ describe('enhancedStats', () => {
     expect(stats.items[2].value).toBe(1);
   });
 
-  it('counts an uppercase "EP" as NONE of the three', () => {
-    // The stats bar does not lowercase, unlike groupAlbumsByType. Reproduced
-    // verbatim: the album shows in the EPs section but not in the EP count.
+  it('counts an uppercase "EP" as an EP, like the section it renders in', () => {
+    // Was pinned the other way during the port: the stats bar compared strictly
+    // while groupAlbumsByType lowercased, so this row rendered under EPs and
+    // counted as none of the three. The number and the list under it now come
+    // from one classifier (TheHomeGuy, Aug 2026).
     const stats = enhancedStats({ albums: [{ record_type: 'EP', tracks: [] }] });
-    expect(stats.items.slice(0, 3).map((s) => s.value)).toEqual([0, 0, 0]);
+    expect(stats.items.slice(0, 3).map((s) => s.value)).toEqual([0, 1, 0]);
     expect(groupAlbumsByType([{ record_type: 'EP' }]).ep).toHaveLength(1);
+  });
+
+  it('folds deezer\'s "compile" into compilation so they are one bucket', () => {
+    const grouped = groupAlbumsByType([{ record_type: 'compile' }, { record_type: 'compilation' }]);
+    expect(grouped.compilation).toHaveLength(2);
+    expect(grouped.compile).toBeUndefined();
+  });
+
+  it('does not count a compilation as an album', () => {
+    const stats = enhancedStats({ albums: [{ record_type: 'compilation', tracks: [] }] });
+    expect(stats.items.slice(0, 3).map((s) => s.value)).toEqual([0, 0, 0]);
   });
 
   it('totals tracks across albums, tolerating an album with none', () => {
