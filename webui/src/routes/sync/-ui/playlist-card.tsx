@@ -253,9 +253,7 @@ export function PlaylistCard({
             </span>
           ) : null}
         </div>
-        <div className="pl-card-meta card-meta">
-          {status ?? playlistCardMeta(row, when)}
-        </div>
+        <div className="pl-card-meta card-meta">{status ?? playlistCardMeta(row, when)}</div>
         {/* The schedule is a CONTROL, not a label: with Auto-Sync's board
             gone this is the only place a cadence gets set. It still reads as a
             quiet pill at rest — a dropdown sitting open on every card was the

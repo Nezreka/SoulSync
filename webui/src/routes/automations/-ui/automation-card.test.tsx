@@ -208,14 +208,20 @@ describe('the schedule line answers the card‘s most-asked question', () => {
 
   it('stops an event automation claiming to Listen while paused', () => {
     render(
-      <AutomationCard paused automation={auto({ id: 1, enabled: 1, trigger_type: 'app_started' })} />,
+      <AutomationCard
+        paused
+        automation={auto({ id: 1, enabled: 1, trigger_type: 'app_started' })}
+      />,
     );
     expect(next().textContent).toBe('Paused');
   });
 
   it('says switched off rather than paused for an automation the user turned off', () => {
     render(
-      <AutomationCard paused automation={auto({ id: 1, enabled: 0, trigger_type: 'app_started' })} />,
+      <AutomationCard
+        paused
+        automation={auto({ id: 1, enabled: 0, trigger_type: 'app_started' })}
+      />,
     );
     expect(next().textContent).toBe('Switched off');
     expect(card().className).toContain('disabled');
@@ -223,7 +229,9 @@ describe('the schedule line answers the card‘s most-asked question', () => {
   });
 
   it('says Listening for an armed event automation', () => {
-    render(<AutomationCard automation={auto({ id: 1, enabled: 1, trigger_type: 'app_started' })} />);
+    render(
+      <AutomationCard automation={auto({ id: 1, enabled: 1, trigger_type: 'app_started' })} />,
+    );
     expect(next().textContent).toBe('Listening');
   });
 
@@ -366,7 +374,9 @@ describe('the cadence is editable on the card face', () => {
     );
     expect(editable()).toBeNull();
     unmount();
-    render(<AutomationCard automation={auto({ id: 2, enabled: 1, trigger_type: 'app_started' })} />);
+    render(
+      <AutomationCard automation={auto({ id: 2, enabled: 1, trigger_type: 'app_started' })} />,
+    );
     expect(editable()).toBeNull();
   });
 

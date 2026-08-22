@@ -1,5 +1,6 @@
-import { thumb } from '@/platform/artwork-thumb';
 import { useEffect, useState } from 'react';
+
+import { thumb } from '@/platform/artwork-thumb';
 
 import type { EnhancedAlbum, EnhancedData } from '../-artist-detail.enhanced';
 

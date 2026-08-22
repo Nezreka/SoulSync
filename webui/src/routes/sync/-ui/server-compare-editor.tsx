@@ -179,7 +179,10 @@ function ServerRow({
               row is indistinguishable from one that was never matched and the
               user re-matches the same track forever. The real sync DOES use it. */}
           {track.has_manual_match ? (
-            <span className="empty-slot-matched-note" title="Your manual match is saved and will be used on the next sync — this track just isn't in the server playlist yet.">
+            <span
+              className="empty-slot-matched-note"
+              title="Your manual match is saved and will be used on the next sync — this track just isn't in the server playlist yet."
+            >
               Already matched &middot; will be added on sync
             </span>
           ) : null}

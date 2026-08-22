@@ -112,9 +112,7 @@ describe('what it shows as current', () => {
 describe('dismissal', () => {
   it('names the playlist for assistive tech', () => {
     renderMenu();
-    expect(screen.getByRole('menu').getAttribute('aria-label')).toBe(
-      'Sync schedule for Road Trip',
-    );
+    expect(screen.getByRole('menu').getAttribute('aria-label')).toBe('Sync schedule for Road Trip');
   });
 
   it('closes on Escape', () => {

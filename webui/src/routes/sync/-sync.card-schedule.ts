@@ -24,6 +24,13 @@ import { useCallback, useEffect, useState } from 'react';
 import type { AutoSyncHistoryEntry, MirroredRow } from './-sync.autosync';
 
 import {
+  createAutomation,
+  deleteAutomation,
+  fetchAutomations,
+  fetchPipelineHistory,
+  updateAutomation,
+} from './-sync.api';
+import {
   AUTO_SYNC_BUCKETS,
   autoSyncCanSchedulePlaylist,
   autoSyncIntervalLabel,
@@ -35,13 +42,6 @@ import {
   buildAutoSyncScheduleState,
   detectBrowserTimezone,
 } from './-sync.autosync';
-import {
-  createAutomation,
-  deleteAutomation,
-  fetchAutomations,
-  fetchPipelineHistory,
-  updateAutomation,
-} from './-sync.api';
 
 /** What a card knows about its own schedule. */
 export interface CardSchedule {
@@ -272,10 +272,9 @@ export function useCardSchedules(options: UseCardSchedulesOptions = {}): CardSch
         // An HOURLY row is a different trigger shape, so it is replaced rather
         // than updated into a weekly one — updating across shapes is how you
         // end up with a row that claims both.
-        const res =
-          existing?.weekly
-            ? await updateAutomation(existing.automationId, payload)
-            : await createAutomation(payload);
+        const res = existing?.weekly
+          ? await updateAutomation(existing.automationId, payload)
+          : await createAutomation(payload);
         const data = (await res.json()) as { error?: string };
         if (!res.ok || data.error) throw new Error(data.error || 'Failed to save schedule');
         if (existing && !existing.weekly) await deleteAutomation(existing.automationId);

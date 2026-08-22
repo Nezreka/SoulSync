@@ -2,8 +2,9 @@ import { queryOptions } from '@tanstack/react-query';
 
 import { apiClient, readJson } from '@/app/api-client';
 
-import { STATS_QUERY_KEY } from './-stats.api';
 import type { YearInListening, YearInListeningPayload } from './-year.types';
+
+import { STATS_QUERY_KEY } from './-stats.api';
 
 export async function fetchYearInListening(): Promise<YearInListening> {
   const payload = await readJson<YearInListeningPayload>(apiClient.get('stats/year'));

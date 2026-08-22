@@ -158,7 +158,12 @@ describe('fetchers', () => {
     window.openDownloadMissingModalForYouTube = modal;
     fetchMock
       .mockReturnValueOnce(
-        ok({ id: 'alb1', name: 'New One', image_url: 'cover.jpg', tracks: [{ id: 't1', name: 'Song A' }] }),
+        ok({
+          id: 'alb1',
+          name: 'New One',
+          image_url: 'cover.jpg',
+          tracks: [{ id: 't1', name: 'Song A' }],
+        }),
       )
       .mockReturnValueOnce(ok({ owned_tracks: { 'Song A': { owned: false } } }));
     await openFreshRelease({
@@ -238,16 +243,22 @@ describe('openArtistFromRail', () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
     await openArtistFromRail({ name: 'Aphex Twin', libraryArtistId: 'art_1' });
-    expect(nav).toHaveBeenCalledWith('artist-detail', { artistId: 'art_1', artistName: 'Aphex Twin' });
+    expect(nav).toHaveBeenCalledWith('artist-detail', {
+      artistId: 'art_1',
+      artistName: 'Aphex Twin',
+    });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('resolves an exact library name match (case-insensitive)', async () => {
     const nav = vi.fn();
     window.navigateToPage = nav as never;
-    vi.stubGlobal('fetch', vi.fn(async () => ({
-      json: async () => ({ artists: [{ id: 7, name: 'Aphex Twin' }] }),
-    })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        json: async () => ({ artists: [{ id: 7, name: 'Aphex Twin' }] }),
+      })),
+    );
     await openArtistFromRail({ name: 'aphex twin' });
     expect(nav).toHaveBeenCalledWith('artist-detail', { artistId: 7, artistName: 'Aphex Twin' });
   });
@@ -255,7 +266,10 @@ describe('openArtistFromRail', () => {
   it('falls to the provider id when the library misses', async () => {
     const nav = vi.fn();
     window.navigateToPage = nav as never;
-    vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => ({ artists: [] }) })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ json: async () => ({ artists: [] }) })),
+    );
     await openArtistFromRail({ name: 'Fresh Face', spotifyArtistId: 'sp9' });
     expect(nav).toHaveBeenCalledWith('artist-detail', {
       artistId: 'sp9',

@@ -94,9 +94,7 @@ export function urlTabCacheKey(source: string): string {
 export function useRememberedPlaylists(
   cacheKey: string,
 ): [UrlTabPlaylist[], Dispatch<SetStateAction<UrlTabPlaylist[]>>] {
-  const [rows, setRows] = useState<UrlTabPlaylist[]>(
-    () => recallAccountPlaylists(cacheKey) ?? [],
-  );
+  const [rows, setRows] = useState<UrlTabPlaylist[]>(() => recallAccountPlaylists(cacheKey) ?? []);
   useEffect(() => {
     rememberAccountPlaylists(cacheKey, rows);
   }, [cacheKey, rows]);

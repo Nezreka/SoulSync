@@ -23,7 +23,9 @@ describe('thumb', () => {
 
   it('leaves other local paths alone', () => {
     expect(thumb('/static/placeholder-album.png', 'grid')).toBe('/static/placeholder-album.png');
-    expect(thumb('/api/video/poster/movie/12?w=300', 'grid')).toBe('/api/video/poster/movie/12?w=300');
+    expect(thumb('/api/video/poster/movie/12?w=300', 'grid')).toBe(
+      '/api/video/poster/movie/12?w=300',
+    );
   });
 
   it('does not add a second query string', () => {

@@ -39,7 +39,14 @@ describe('toRecentPlays', () => {
 
   it('shapes rows, drops untitled ones, and respects the limit', () => {
     const rows = [
-      { title: 'Windowlicker', artist: 'Aphex Twin', album: 'Windowlicker EP', played_at: '2026-08-12 11:00:00', server_source: 'plex', image_url: '/art/1' },
+      {
+        title: 'Windowlicker',
+        artist: 'Aphex Twin',
+        album: 'Windowlicker EP',
+        played_at: '2026-08-12 11:00:00',
+        server_source: 'plex',
+        image_url: '/art/1',
+      },
       { title: '   ', artist: 'Nobody', played_at: '2026-08-12 10:00:00' },
       { title: 'Flim', artist: 'Aphex Twin', played_at: '2026-08-12 09:00:00', image_url: null },
       { title: 'Alberto Balsalm', artist: 'Aphex Twin', played_at: '2026-08-12 08:00:00' },

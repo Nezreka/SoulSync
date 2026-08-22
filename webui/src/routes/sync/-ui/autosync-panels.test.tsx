@@ -35,9 +35,7 @@ describe('AutoSyncMonitorPanel (1131-1160)', () => {
     return {
       onDetails,
       onRefresh,
-      ...render(
-        <AutoSyncMonitorPanel playlists={playlists} onDetails={onDetails} />,
-      ),
+      ...render(<AutoSyncMonitorPanel playlists={playlists} onDetails={onDetails} />),
     };
   };
 

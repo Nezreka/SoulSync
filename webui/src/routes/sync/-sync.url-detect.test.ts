@@ -8,14 +8,9 @@
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  extractDeezerPlaylistId,
-  extractITunesLinkId,
-  extractSpotifyPublicId,
-} from './-sync.urls';
-import { deezerInputResult, spotifyPublicUrlError } from './-sync.url-tabs';
 import type { DetectedSource } from './-sync.url-detect';
 
+import { SYNC_TABS } from './-sync.shell';
 import {
   DETECTED_SOURCE_SERVICE_LABELS,
   DETECTED_SOURCE_TAB_IDS,
@@ -24,7 +19,8 @@ import {
   isDetected,
   wrongTabError,
 } from './-sync.url-detect';
-import { SYNC_TABS } from './-sync.shell';
+import { deezerInputResult, spotifyPublicUrlError } from './-sync.url-tabs';
+import { extractDeezerPlaylistId, extractITunesLinkId, extractSpotifyPublicId } from './-sync.urls';
 import { SYNC_VERTICAL_IDS } from './-sync.verticals';
 
 describe('detectPlaylistUrl — the happy routes', () => {
@@ -84,10 +80,7 @@ describe('detectPlaylistUrl — the errors that used to be wrong', () => {
   it('names the fix for a Deezer SHARE link instead of calling it invalid', () => {
     // This is what Deezer's own Share button copies. Telling the user it is
     // invalid reads as the feature being broken.
-    for (const url of [
-      'https://link.deezer.com/s/30abcdef',
-      'https://deezer.page.link/xyz123',
-    ]) {
+    for (const url of ['https://link.deezer.com/s/30abcdef', 'https://deezer.page.link/xyz123']) {
       const d = detectPlaylistUrl(url);
       expect(d.source).toBeNull();
       expect(isDetected(d) ? '' : d.error).toContain('share link');

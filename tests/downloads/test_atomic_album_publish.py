@@ -337,3 +337,61 @@ def test_iter_staged_files_finds_everything(tmp_path):
     _mk(Path(staging) / "cover.png")
     assert len(ap.iter_staged_files(staging)) == 3
     assert ap.iter_staged_files(str(tmp_path / "absent")) == []
+
+
+def test_publish_order_does_not_depend_on_the_filesystem(tmp_path):
+    """os.walk hands back DIRECTORY order, which differs between machines: the
+    tracks below come out 02-then-01 on btrfs and 01-then-02 on ext4.
+
+    Publish order decides which files are already live when a later one fails,
+    so it decides what the rollback has to undo — an all-or-nothing publish
+    whose behaviour under failure depends on the host filesystem cannot be
+    reasoned about. It also silently disarmed the two rollback tests above: on a
+    box that walks 02 first the failing track is the FIRST one, nothing has
+    published yet, and the rollback never runs, so
+    test_rollback_takes_the_db_pointer_back_with_the_file passed with the
+    rollback deleted.
+    """
+    staging = str(tmp_path / "stage")
+    for name in ("02.flac", "01.flac", "10.flac", "cover.png"):
+        _mk(Path(staging) / "A" / "Al" / name)
+
+    found = ap.iter_staged_files(staging)
+
+    assert [os.path.basename(p) for p in found] == \
+        ["01.flac", "02.flac", "10.flac", "cover.png"]
+
+
+def test_publish_order_reads_track_numbers_as_numbers(tmp_path):
+    """Ordering is by track NUMBER, not by the spelling of the number.
+
+    post_processing zero-pads track numbers to a minimum of two digits, so an
+    album that runs past 99 gets "100 - Title.flac" alongside "09 - …", and a
+    plain string sort files 100 in among the ones. Rollback survives that (it
+    replays the files it really moved), but the publish log of a partial failure
+    is a human-readable record of what went live before what, and it has to
+    match the order the tracks are actually in.
+    """
+    staging = str(tmp_path / "stage")
+    for name in ("100 - c.flac", "09 - a.flac", "10 - b.flac", "99 - z.flac"):
+        _mk(Path(staging) / "A" / "Boxset" / name)
+
+    found = [os.path.basename(p) for p in ap.iter_staged_files(staging)]
+
+    assert found == ["09 - a.flac", "10 - b.flac", "99 - z.flac", "100 - c.flac"]
+    # ... which is exactly where a plain string sort disagrees.
+    assert found != sorted(found)
+
+
+def test_publish_order_is_total_even_for_names_that_only_differ_in_case(tmp_path):
+    """No pair of files may be left to os.walk to order. Folding case for the
+    numeric comparison introduces ties, so the raw path breaks them."""
+    staging = str(tmp_path / "stage")
+    for name in ("Track.flac", "track.flac"):
+        _mk(Path(staging) / "A" / "Al" / name)
+
+    first = ap.iter_staged_files(staging)
+    second = ap.iter_staged_files(staging)
+
+    assert first == second
+    assert len(first) == 2

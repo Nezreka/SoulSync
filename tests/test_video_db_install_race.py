@@ -76,3 +76,63 @@ def test_install_survives_concurrent_lazy_create(monkeypatch):
     assert videoapi.get_video_db() is sentinel
     # The leaked thread still got a usable handle for its own dying breath.
     assert isinstance(lazy_result.get("db"), _SlowDB)
+
+
+# ── the schema half of the same problem ────────────────────────────────────
+
+
+def test_a_column_another_process_added_mid_init_is_not_fatal(tmp_path, monkeypatch):
+    """_ensure_columns was a check-then-act, and two processes opening the same
+    video DB is not hypothetical.
+
+    Reproduced by this suite under `-n 8`: every xdist worker initialises the
+    one shared temp DB, so several read "channel_id absent", several ALTER, and
+    the losers die with `duplicate column name: channel_id`. That error was not
+    contained — _initialize_database rolls back and re-raises it, so the whole
+    video database came up unusable over a column that IS now there, and 29
+    tests errored in setup. In production the same window is a restart racing a
+    still-running enrichment worker.
+
+    Deterministic, and with real sqlite: the other connection is made to win
+    between this one's PRAGMA and its ALTER, which is precisely the window.
+    """
+    import sqlite3
+
+    import database.video_database as vdb
+
+    path = str(tmp_path / "v.db")
+    mine = sqlite3.connect(path)
+    mine.execute("CREATE TABLE videos(id INTEGER PRIMARY KEY)")
+    mine.commit()
+    theirs = sqlite3.connect(path)
+
+    class _LosesTheRace:
+        def execute(self, sql, *args):
+            if " ADD COLUMN " in sql:
+                theirs.execute(sql)          # the other process gets there first
+                theirs.commit()
+            return mine.execute(sql, *args)
+
+    monkeypatch.setattr(vdb, "_COLUMN_MIGRATIONS", [("videos", "channel_id", "TEXT")])
+
+    vdb.VideoDatabase._ensure_columns(_LosesTheRace())  # must not raise
+
+    assert "channel_id" in {r[1] for r in mine.execute("PRAGMA table_info(videos)")}
+
+
+def test_any_other_alter_failure_still_propagates(tmp_path, monkeypatch):
+    """Only the duplicate is swallowed. A missing table, a locked database or a
+    bad type is a real migration failure and must still take the init down —
+    otherwise this becomes a blanket `except OperationalError: pass` and the
+    next genuine schema break ships as a silently half-migrated database."""
+    import sqlite3
+
+    import pytest as _pytest
+
+    import database.video_database as vdb
+
+    mine = sqlite3.connect(str(tmp_path / "v.db"))
+    monkeypatch.setattr(vdb, "_COLUMN_MIGRATIONS", [("gone", "channel_id", "TEXT")])
+
+    with _pytest.raises(sqlite3.OperationalError, match="no such table"):
+        vdb.VideoDatabase._ensure_columns(mine)

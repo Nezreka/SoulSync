@@ -19,11 +19,10 @@
 
 import { useCallback, useState } from 'react';
 
-import type { FreshRelease, RecentlyAddedAlbum } from '../-dash.content';
-import { useLiveRefresh } from '../-dash.live-refresh';
-
-import { getShellBridge } from '@/platform/shell/bridge';
 import { thumb } from '@/platform/artwork-thumb';
+import { getShellBridge } from '@/platform/shell/bridge';
+
+import type { FreshRelease, RecentlyAddedAlbum } from '../-dash.content';
 
 import {
   fetchFreshReleases,
@@ -33,6 +32,7 @@ import {
   openFreshRelease,
   relativeAge,
 } from '../-dash.content';
+import { useLiveRefresh } from '../-dash.live-refresh';
 
 interface RailCardProps {
   /** Small corner check — the library already has this (discover's badge). */
@@ -52,7 +52,18 @@ interface RailCardProps {
   onOpen: () => void;
 }
 
-function RailCard({ owned, cover, fallbackCover, name, sub, caption, badge, titleAttr, onOpen, onArtistClick }: RailCardProps) {
+function RailCard({
+  owned,
+  cover,
+  fallbackCover,
+  name,
+  sub,
+  caption,
+  badge,
+  titleAttr,
+  onOpen,
+  onArtistClick,
+}: RailCardProps) {
   // Fallback ladder, one rung per failure: cover -> the artist's art -> ♫.
   // History thumb URLs can be stale or media-server-authed and die in the
   // browser even when they exist, so the second image matters as much as the
@@ -61,9 +72,21 @@ function RailCard({ owned, cover, fallbackCover, name, sub, caption, badge, titl
   const [rung, setRung] = useState(0);
   const src = candidates[rung];
   return (
-    <div className="ya-card dash-rail-card" title={titleAttr ?? `${name} — ${sub}`} onClick={onOpen}>
+    <div
+      className="ya-card dash-rail-card"
+      title={titleAttr ?? `${name} — ${sub}`}
+      onClick={onOpen}
+    >
       <div className="ya-card-img">
-        {src && <img key={src} src={thumb(src, 'grid')} alt="" loading="lazy" onError={() => setRung(rung + 1)} />}
+        {src && (
+          <img
+            key={src}
+            src={thumb(src, 'grid')}
+            alt=""
+            loading="lazy"
+            onError={() => setRung(rung + 1)}
+          />
+        )}
         <div className="ya-card-placeholder" style={src ? { display: 'none' } : undefined}>
           ♫
         </div>
@@ -71,7 +94,9 @@ function RailCard({ owned, cover, fallbackCover, name, sub, caption, badge, titl
       <div className="ya-card-gradient" />
       {owned && (
         <div className="ya-card-badges">
-          <div className="discover-album-badge owned" title="In your library">✓</div>
+          <div className="discover-album-badge owned" title="In your library">
+            ✓
+          </div>
         </div>
       )}
       {caption && <div className="dash-rail-caption">{caption}</div>}
@@ -133,7 +158,8 @@ export function ContentBand() {
 
   // A tab you can't switch to is clutter; a selected tab whose feed is empty
   // (recent empty, fresh not) silently shows the one with rows.
-  const active: BandTab = tab === 'recent' && !hasRecent ? 'fresh' : tab === 'fresh' && !hasFresh ? 'recent' : tab;
+  const active: BandTab =
+    tab === 'recent' && !hasRecent ? 'fresh' : tab === 'fresh' && !hasFresh ? 'recent' : tab;
   const fromDiscover = hasFresh && releases[0].fromDiscover;
   const now = Date.now();
 

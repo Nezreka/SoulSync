@@ -119,7 +119,9 @@ describe('libraryCardView — the five states', () => {
   });
 
   it('healthy without last_update reads Never; invalid dates too', () => {
-    expect(libraryCardView(stats, connected, false, NOW).subtitle).toContain('Last refreshed Never');
+    expect(libraryCardView(stats, connected, false, NOW).subtitle).toContain(
+      'Last refreshed Never',
+    );
     expect(
       libraryCardView({ ...stats, last_update: 'garbage' }, connected, false, NOW).subtitle,
     ).toContain('Last refreshed Never');

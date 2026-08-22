@@ -224,13 +224,27 @@ describe('stats route', () => {
       http.get('/api/stats/cached', () =>
         HttpResponse.json({
           success: true,
-          overview: { total_plays: 24, total_time_ms: 1, unique_artists: 1,
-                      unique_albums: 1, unique_tracks: 1 },
+          overview: {
+            total_plays: 24,
+            total_time_ms: 1,
+            unique_artists: 1,
+            unique_albums: 1,
+            unique_tracks: 1,
+          },
           // A previous window that should not exist for 'all'.
-          previous: { total_plays: 12, total_time_ms: 1, unique_artists: 1,
-                      unique_albums: 1, unique_tracks: 1 },
-          top_artists: [], top_albums: [], top_tracks: [],
-          timeline: [], genres: [], recent: [],
+          previous: {
+            total_plays: 12,
+            total_time_ms: 1,
+            unique_artists: 1,
+            unique_albums: 1,
+            unique_tracks: 1,
+          },
+          top_artists: [],
+          top_albums: [],
+          top_tracks: [],
+          timeline: [],
+          genres: [],
+          recent: [],
           health: { total_tracks: 12 },
         }),
       ),
@@ -308,12 +322,24 @@ describe('stats route', () => {
       http.get('/api/stats/cached', () =>
         HttpResponse.json({
           success: true,
-          overview: { total_plays: 3, total_time_ms: 1, unique_artists: 1,
-                      unique_albums: 1, unique_tracks: 1 },
-          clock: { grid: Array.from({ length: 7 }, () => Array(24).fill(0)),
-                   peak: { weekday: null, hour: null, plays: 0 }, total: 0 },
-          top_artists: [], top_albums: [], top_tracks: [],
-          timeline: [], genres: [], recent: [],
+          overview: {
+            total_plays: 3,
+            total_time_ms: 1,
+            unique_artists: 1,
+            unique_albums: 1,
+            unique_tracks: 1,
+          },
+          clock: {
+            grid: Array.from({ length: 7 }, () => Array(24).fill(0)),
+            peak: { weekday: null, hour: null, plays: 0 },
+            total: 0,
+          },
+          top_artists: [],
+          top_albums: [],
+          top_tracks: [],
+          timeline: [],
+          genres: [],
+          recent: [],
           health: { total_tracks: 1 },
         }),
       ),
@@ -346,11 +372,20 @@ describe('stats route', () => {
       http.get('/api/stats/cached', () =>
         HttpResponse.json({
           success: true,
-          overview: { total_plays: 3, total_time_ms: 1, unique_artists: 1,
-                      unique_albums: 1, unique_tracks: 1 },
+          overview: {
+            total_plays: 3,
+            total_time_ms: 1,
+            unique_artists: 1,
+            unique_albums: 1,
+            unique_tracks: 1,
+          },
           own_vs_play: [],
-          top_artists: [], top_albums: [], top_tracks: [],
-          timeline: [], genres: [], recent: [],
+          top_artists: [],
+          top_albums: [],
+          top_tracks: [],
+          timeline: [],
+          genres: [],
+          recent: [],
           health: { total_tracks: 1 },
         }),
       ),
@@ -366,11 +401,20 @@ describe('stats route', () => {
       http.get('/api/stats/cached', () =>
         HttpResponse.json({
           success: true,
-          overview: { total_plays: 24, total_time_ms: 1, unique_artists: 1,
-                      unique_albums: 1, unique_tracks: 1 },
+          overview: {
+            total_plays: 24,
+            total_time_ms: 1,
+            unique_artists: 1,
+            unique_albums: 1,
+            unique_tracks: 1,
+          },
           previous: null,
-          top_artists: [], top_albums: [], top_tracks: [],
-          timeline: [], genres: [], recent: [],
+          top_artists: [],
+          top_albums: [],
+          top_tracks: [],
+          timeline: [],
+          genres: [],
+          recent: [],
           health: { total_tracks: 12 },
         }),
       ),
@@ -379,7 +423,6 @@ describe('stats route', () => {
     expect(await screen.findByText('Total Plays')).toBeTruthy();
     expect(screen.queryByText(/vs previous/)).toBeNull();
   });
-
 });
 
 describe('stats route survives a backend outage', () => {

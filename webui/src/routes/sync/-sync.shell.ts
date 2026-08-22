@@ -171,8 +171,7 @@ export const SYNC_HEADER_ACTIONS: readonly SyncHeaderAction[] = [
   {
     key: 'wing-it-pool',
     label: 'Wing It Pool',
-    title:
-      'Review tracks Wing It auto-matched on a best-effort guess — verify or re-match them',
+    title: 'Review tracks Wing It auto-matched on a best-effort guess — verify or re-match them',
   },
   {
     key: 'library-match',

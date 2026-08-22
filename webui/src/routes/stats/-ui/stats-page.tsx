@@ -68,9 +68,8 @@ import {
 } from '../-stats.helpers';
 import { STATS_TAB_VALUES } from '../-stats.types';
 import { Route } from '../route';
-import { YearStory } from './year-story';
-
 import styles from './stats-page.module.css';
+import { YearStory } from './year-story';
 
 const STATS_TOOLTIP_STYLE = {
   background: 'rgba(12, 12, 12, 0.96)',
@@ -342,7 +341,6 @@ export function StatsPage() {
               </StatsSectionCard>
             </div>
           </div>
-
         </>
       ) : (
         <StatsEmptyState />
@@ -385,7 +383,11 @@ function OverviewCards({
       label: 'Listening Time',
       value: formatListeningTime(overview.total_time_ms),
     },
-    { key: 'unique_artists', label: 'Artists', value: formatCompactNumber(overview.unique_artists) },
+    {
+      key: 'unique_artists',
+      label: 'Artists',
+      value: formatCompactNumber(overview.unique_artists),
+    },
     { key: 'unique_albums', label: 'Albums', value: formatCompactNumber(overview.unique_albums) },
     { key: 'unique_tracks', label: 'Tracks', value: formatCompactNumber(overview.unique_tracks) },
   ] as const;
@@ -442,7 +444,6 @@ function StatsCardDelta({
     </div>
   );
 }
-
 
 /**
  * The shape of a listening week — plays by weekday x hour — plus the habit
@@ -530,7 +531,6 @@ function StatsListeningClock({
   );
 }
 
-
 /**
  * What share of the library a genre is, against what share of the listening.
  *
@@ -549,11 +549,7 @@ function StatsOwnVsPlayCard({
   rows: StatsOwnVsPlay[];
 }) {
   if (!rows.length) {
-    return (
-      <div className={styles.statsClockEmpty}>
-        Not enough tagged artists to compare yet.
-      </div>
-    );
+    return <div className={styles.statsClockEmpty}>Not enough tagged artists to compare yet.</div>;
   }
 
   return (
@@ -598,9 +594,7 @@ function StatsOwnVsPlayCard({
 
       {neglected.length ? (
         <div className={styles.statsNeglected}>
-          <div className={styles.statsNeglectedTitle}>
-            Never played ({neglected.length})
-          </div>
+          <div className={styles.statsNeglectedTitle}>Never played ({neglected.length})</div>
           {neglected.slice(0, 5).map((album) => (
             <div key={album.id} className={styles.statsNeglectedRow}>
               <span className={styles.statsNeglectedName}>{album.name}</span>

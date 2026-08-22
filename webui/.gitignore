@@ -2,3 +2,9 @@
 node_modules
 static/dist
 test-results
+
+# Per-case oxlint config written by tests/test_vanilla_globals_resolve.py. It
+# has to live here (oxlint resolves -c against its own cwd and a Windows binary
+# cannot read a WSL /tmp path) and is unlinked on the way out — but a killed run
+# leaves one behind, and 43 of them would otherwise show up as untracked.
+.oxlintrc.globalcheck.*.json

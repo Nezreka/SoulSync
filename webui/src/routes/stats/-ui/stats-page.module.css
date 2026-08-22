@@ -902,7 +902,9 @@
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
 
 .statsTab:hover {
@@ -999,7 +1001,11 @@
 }
 
 /* Own vs Play — library share against listening share. */
-.statsOwnPlay { display: flex; flex-direction: column; gap: 8px; }
+.statsOwnPlay {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
 .statsOwnPlayRow {
   display: grid;
@@ -1016,7 +1022,11 @@
   text-overflow: ellipsis;
 }
 
-.statsOwnPlayBars { display: flex; flex-direction: column; gap: 3px; }
+.statsOwnPlayBars {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
 
 .statsOwnPlayOwned,
 .statsOwnPlayPlayed {
@@ -1025,12 +1035,24 @@
   min-width: 2px;
 }
 
-.statsOwnPlayOwned { background: rgba(255, 255, 255, 0.28); }
-.statsOwnPlayPlayed { background: rgb(var(--accent-rgb)); }
+.statsOwnPlayOwned {
+  background: rgba(255, 255, 255, 0.28);
+}
+.statsOwnPlayPlayed {
+  background: rgb(var(--accent-rgb));
+}
 
-.statsOwnPlayGap { font-size: 12px; font-weight: 700; text-align: right; }
-.statsOwnPlayGapUp { color: #4ade80; }
-.statsOwnPlayGapDown { color: #f87171; }
+.statsOwnPlayGap {
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+}
+.statsOwnPlayGapUp {
+  color: #4ade80;
+}
+.statsOwnPlayGapDown {
+  color: #f87171;
+}
 
 .statsOwnPlayLegend {
   display: flex;
@@ -1049,8 +1071,13 @@
   margin-left: 8px;
 }
 
-.statsOwnPlayKeyOwned { background: rgba(255, 255, 255, 0.28); margin-left: 0; }
-.statsOwnPlayKeyPlayed { background: rgb(var(--accent-rgb)); }
+.statsOwnPlayKeyOwned {
+  background: rgba(255, 255, 255, 0.28);
+  margin-left: 0;
+}
+.statsOwnPlayKeyPlayed {
+  background: rgb(var(--accent-rgb));
+}
 
 .statsNeglected {
   margin-top: 14px;
@@ -1073,9 +1100,19 @@
   font-size: 12px;
 }
 
-.statsNeglectedName { color: rgba(255, 255, 255, 0.8); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.statsNeglectedArtist { color: rgba(255, 255, 255, 0.4); }
-.statsNeglectedCount { color: rgba(255, 255, 255, 0.35); text-align: right; }
+.statsNeglectedName {
+  color: rgba(255, 255, 255, 0.8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.statsNeglectedArtist {
+  color: rgba(255, 255, 255, 0.4);
+}
+.statsNeglectedCount {
+  color: rgba(255, 255, 255, 0.35);
+  text-align: right;
+}
 
 /* Entry point to the Year in Listening takeover. Styled as the page's one
    accented action — everything else in this header is a neutral control, and

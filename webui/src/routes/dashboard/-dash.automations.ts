@@ -79,7 +79,10 @@ export function triggerLabel(row: AutomationApiRow): string {
   }
   if (type === 'daily_time') return `Daily @ ${String(cfg.time || '00:00')}`;
   if (type === 'weekly_time') {
-    return weeklyLabel(String(cfg.time || '00:00'), Array.isArray(cfg.days) ? (cfg.days as string[]) : []);
+    return weeklyLabel(
+      String(cfg.time || '00:00'),
+      Array.isArray(cfg.days) ? (cfg.days as string[]) : [],
+    );
   }
   if (type === 'monthly_time') {
     return `Monthly · day ${String(cfg.day ?? 1)} @ ${String(cfg.time || '00:00')}`;

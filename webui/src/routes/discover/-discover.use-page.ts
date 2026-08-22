@@ -186,10 +186,14 @@ export function useDiscoverPage(): DiscoverPageController {
   // ── Tier 2: below the fold, gated on tier 1 ───────────────────────────
   // The four mix-registry feeders, the genre shelves and the caches all live
   // here now — they render well below the first viewport.
-  const genreExplorer = useQuery(shelfQuery('genre-explorer', fetchGenreExplorer, aboveFoldSettled));
+  const genreExplorer = useQuery(
+    shelfQuery('genre-explorer', fetchGenreExplorer, aboveFoldSettled),
+  );
   const popularPicks = useQuery(shelfQuery('popular-picks', fetchPopularPicks, aboveFoldSettled));
   const hiddenGems = useQuery(shelfQuery('hidden-gems', fetchHiddenGems, aboveFoldSettled));
-  const shuffle = useQuery(shelfQuery('discovery-shuffle', fetchDiscoveryShuffle, aboveFoldSettled));
+  const shuffle = useQuery(
+    shelfQuery('discovery-shuffle', fetchDiscoveryShuffle, aboveFoldSettled),
+  );
   const listeningMix = useQuery(shelfQuery('listening-mix', fetchListeningMix, aboveFoldSettled));
   const genreNewReleases = useQuery(
     shelfQuery('genre-new-releases', fetchGenreNewReleases, aboveFoldSettled),

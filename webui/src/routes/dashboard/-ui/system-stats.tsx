@@ -102,7 +102,9 @@ function StatCard({ id, title, tile }: { id: string; title: string; tile: StatTi
     <div className="stat-tile" id={id} title={tile.subtitle}>
       <p className="stat-card-value">{tile.value}</p>
       <p className="stat-card-title">{title}</p>
-      <p className="stat-card-subtitle" style={{ display: 'none' }}>{tile.subtitle}</p>
+      <p className="stat-card-subtitle" style={{ display: 'none' }}>
+        {tile.subtitle}
+      </p>
     </div>
   );
 }

@@ -28,11 +28,11 @@ import { useCallback, useState } from 'react';
 
 import type { RecentPlay, RecentPlayRow } from '../-dash.listening';
 
-import { playTrackByMetadata } from '../../../features/playback/play-track';
-import { getShellBridge } from '../../../platform/shell/bridge';
 import { openArtistFromRail } from '../-dash.content';
 import { toRecentPlays } from '../-dash.listening';
 import { useLiveRefresh } from '../-dash.live-refresh';
+import { playTrackByMetadata } from '../../../features/playback/play-track';
+import { getShellBridge } from '../../../platform/shell/bridge';
 
 // 25, not 12: this is the dashboard's whole view of what you have been
 // listening to, and a dozen rows runs out inside one album.
@@ -81,11 +81,16 @@ export function ListeningHistoryBand() {
             key={play.key}
             className="ya-card dash-rail-card"
             title={`Play ${play.title} — ${play.artist}${play.source ? ` · ${play.source}` : ''}`}
-            onClick={() => void playTrackByMetadata(getShellBridge(), play.title, play.artist, play.album)}
+            onClick={() =>
+              void playTrackByMetadata(getShellBridge(), play.title, play.artist, play.album)
+            }
           >
             <div className="ya-card-img">
               {play.imageUrl && <img src={play.imageUrl} alt="" loading="lazy" />}
-              <div className="ya-card-placeholder" style={play.imageUrl ? { display: 'none' } : undefined}>
+              <div
+                className="ya-card-placeholder"
+                style={play.imageUrl ? { display: 'none' } : undefined}
+              >
                 ♫
               </div>
             </div>

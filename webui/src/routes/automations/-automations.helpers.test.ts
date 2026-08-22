@@ -170,7 +170,6 @@ describe('filterOptions', () => {
   });
 });
 
-
 describe('automationHealth — the verdict, not an inventory', () => {
   const a = (over: Record<string, unknown>) => ({ id: 1, name: 'a', ...over }) as never;
 
@@ -244,7 +243,6 @@ describe('filterAutomations with a health lens', () => {
     expect(out.map((r) => (r as { id: number }).id)).toEqual([1]);
   });
 });
-
 
 describe('sectionSummary — a collapsed family still says something', () => {
   const a = (over: Record<string, unknown>) => ({ id: 1, name: 'a', ...over }) as never;

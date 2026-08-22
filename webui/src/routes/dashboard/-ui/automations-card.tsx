@@ -153,9 +153,7 @@ function QuickSettings() {
   const [maxPerf, setMaxPerf] = useState(
     () => localStorage.getItem('soulsync-max-performance') === '1',
   );
-  const [accent, setAccent] = useState(
-    () => localStorage.getItem('soulsync-accent') || '#1db954',
-  );
+  const [accent, setAccent] = useState(() => localStorage.getItem('soulsync-accent') || '#1db954');
 
   /** Apply instantly via init.js's own applier, then persist to the server
    *  config (partial POST — the handler merges key-by-key). Without the
@@ -180,9 +178,7 @@ function QuickSettings() {
   const [particles, setParticles] = useState(
     () => localStorage.getItem('soulsync-particles') !== 'false',
   );
-  const [orbs, setOrbs] = useState(
-    () => localStorage.getItem('soulsync-worker-orbs') !== 'false',
-  );
+  const [orbs, setOrbs] = useState(() => localStorage.getItem('soulsync-worker-orbs') !== 'false');
 
   const toggleReduce = () => {
     const next = !reduce;
