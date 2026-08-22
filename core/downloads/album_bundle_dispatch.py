@@ -216,13 +216,36 @@ def try_dispatch(
         "[Album Bundle] %s staged %d files for '%s' — handing off to per-track staging matcher",
         mode, len(outcome.get('files', [])), album_name,
     )
-    state.update_fields(batch_id, {
+    # THE PER-BATCH LIMIT OF 1 DOES NOT APPLY TO A STAGED ALBUM.
+    #
+    # Soulseek album batches are capped at one worker for source reuse: hold one
+    # peer and pull the album from them rather than scattering requests. That is
+    # right for the FALLBACK path, which really does download track by track.
+    #
+    # It is not right here. The bundle has already downloaded and staged every
+    # file. The per-track tasks below exist to MATCH those local files
+    # (try_staging_match) and never touch Soulseek at all, so serialising them
+    # throttles local disk work with a rule about network etiquette — a
+    # twelve-track album matched one at a time for no reason.
+    #
+    # Safe to lift now in a way it was not before: the global concurrency gate
+    # (#1166) caps total active workers across every batch, which is the job
+    # this 1 was quietly also doing. Raising the per-batch limit cannot flood
+    # anything while that holds.
+    staged_fields = {
         'phase': 'analysis',
         'album_bundle_state': 'staged',
         'album_bundle_partial': bool(outcome.get('partial')),
         'album_bundle_expected_count': outcome.get('expected_count'),
         'album_bundle_completed_count': outcome.get('completed_count', len(outcome.get('files', []))),
-    })
+    }
+    try:
+        staged_fields['max_concurrent'] = max(
+            1, int(config_get('download_source.max_concurrent', 3) or 1)
+        )
+    except (TypeError, ValueError):
+        pass  # a bad config value leaves the batch's existing limit alone
+    state.update_fields(batch_id, staged_fields)
     # Engaged-and-succeeded: we DON'T early-return because the
     # per-track flow needs to run to create + complete the per-track
     # task rows. Those tasks will hit try_staging_match and pull the
