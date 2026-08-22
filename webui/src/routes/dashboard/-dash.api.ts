@@ -288,23 +288,39 @@ export type SyncHistoryResult =
   | { status: 'error' };
 
 /**
- * `loadDashboardSyncHistory` (pages-extra.js) — GET /api/sync/history?limit=10.
+ * `loadDashboardSyncHistory` (pages-extra.js) — the sync band's history feed.
  *
  * A 401 is a real state, not an error: the session lapsed while the tab
  * believed it was unlocked, and the caller must surface the correct unlock
- * screen (`loginRequired` picks login vs launch-PIN). The playlist filter is
- * the vanilla's: keep `sync_type === 'playlist'` OR entries with no sync_type,
- * excluding album downloads and wishlist runs.
+ * screen (`loginRequired` picks login vs launch-PIN).
+ *
+ * The playlist filter is applied SERVER-side now. It used to fetch 10 rows and
+ * drop the album ones here, which meant the band got however many playlist runs
+ * happened to survive — five recent album downloads left five, and the band was
+ * matching eight schedules against them. Three playlists showed "no runs yet"
+ * and refused to open while their pipelines were completing fine (Boulder,
+ * Aug 2026). A filter after LIMIT is not a filter.
+ *
+ * The limit is also no longer 10. Every schedule needs to find its own latest
+ * run in here, so the window has to cover the schedules a person actually has,
+ * not a number that was fine when this was a short "recent syncs" list. The
+ * rows are cheap: the query leaves out tracks_json and track_results.
  */
+export const SYNC_HISTORY_LIMIT = 100;
+
 export async function fetchDashboardSyncHistory(): Promise<SyncHistoryResult> {
   try {
-    const response = await fetch('/api/sync/history?limit=10');
+    const response = await fetch(
+      `/api/sync/history?limit=${SYNC_HISTORY_LIMIT}&sync_type=playlist`,
+    );
     if (response.status === 401) {
       const info = (await response.json().catch(() => ({}))) as { login_required?: boolean };
       return { status: 'unauthorized', loginRequired: Boolean(info.login_required) };
     }
     if (!response.ok) return { status: 'error' };
     const data = (await response.json()) as { entries?: SyncHistoryEntry[] };
+    // Belt and braces: the server filters now, but an older backend answering a
+    // cached frontend would still hand albums over.
     const entries = (data.entries || []).filter(
       (entry) => entry.sync_type === 'playlist' || !entry.sync_type,
     );

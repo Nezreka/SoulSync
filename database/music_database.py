@@ -18189,7 +18189,8 @@ class MusicDatabase:
             return ["(profile_id = ? OR profile_id IS NULL)"], [1]
         return ["profile_id = ?"], [int(profile_id)]
 
-    def get_sync_history(self, source=None, page=1, limit=20, profile_id=None):
+    def get_sync_history(self, source=None, page=1, limit=20, profile_id=None,
+                         sync_type=None):
         """Return (entries, total) for sync_history, newest first. Full tracks_json excluded from list."""
         try:
             conn = self._get_connection()
@@ -18199,6 +18200,22 @@ class MusicDatabase:
             if source:
                 conditions.append("source = ?")
                 params.append(source)
+            if sync_type:
+                # Filtered HERE, not by the caller after the fact. The dashboard
+                # band used to ask for 10 rows and then drop the album ones in
+                # javascript, so five album downloads left it five playlist runs
+                # to match eight schedules against, and three playlists reported
+                # "no runs yet" while their pipelines were completing fine
+                # (Boulder, Aug 2026). A filter after LIMIT is not a filter.
+                #
+                # NULL sync_type is legacy playlist history, so it rides along
+                # with 'playlist' exactly as the client-side filter did.
+                if sync_type == 'playlist':
+                    conditions.append("(sync_type = ? OR sync_type IS NULL OR sync_type = '')")
+                    params.append(sync_type)
+                else:
+                    conditions.append("sync_type = ?")
+                    params.append(sync_type)
             owner_conditions, owner_params = self._sync_history_owner_conditions(profile_id)
             conditions += owner_conditions
             params += owner_params

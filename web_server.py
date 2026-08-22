@@ -21907,11 +21907,16 @@ def get_sync_history():
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 20))
         source = request.args.get('source') or None
+        # 'playlist' also returns legacy rows with no sync_type. Filtering here
+        # rather than in the caller is the point: a client that fetches N rows
+        # and then discards the album ones has fewer than N of what it asked for.
+        sync_type = request.args.get('sync_type') or None
 
         db = MusicDatabase()
         profile_id = get_current_profile_id()
         entries, total = db.get_sync_history(
-            source=source, page=page, limit=limit, profile_id=profile_id
+            source=source, page=page, limit=limit, profile_id=profile_id,
+            sync_type=sync_type,
         )
         stats = db.get_sync_history_stats(profile_id=profile_id)
 
