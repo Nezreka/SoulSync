@@ -232,6 +232,78 @@ def test_an_unknown_rowcount_does_not_fail_the_publish(tmp_path):
     assert res["success"] is True
 
 
+def test_rollback_takes_the_db_pointer_back_with_the_file(tmp_path):
+    """The half the all-or-nothing change forgot.
+
+    Track 1 moves and repoints cleanly, track 2's move then fails, so track 1
+    goes back to staging. Its library row stayed on the final path, and that
+    path no longer exists: the track reads as missing until somebody retries,
+    and forever if the batch is cancelled. Same split state the rollback exists
+    to prevent, pointing the other way.
+    """
+    transfer = str(tmp_path / "music")
+    staging = ap.staging_root_for_batch(transfer, "b10")
+    one = _mk(Path(staging) / "A" / "Al" / "01.flac")
+    _mk(Path(staging) / "A" / "Al" / "02.flac")
+
+    db = {one: one}
+
+    def _move_second_fails(src, dst):
+        if src.endswith("02.flac"):
+            raise OSError("disk full")
+        _move(src, dst)
+
+    def _repoint(staged, final):
+        hits = [k for k, v in db.items() if v == staged]
+        for k in hits:
+            db[k] = final
+        return len(hits)
+
+    res = ap.publish_album_batch(staging, transfer, _move_second_fails, _repoint)
+
+    assert res["success"] is False
+    assert res["rollback_failed"] == []
+    assert os.path.isfile(one), "the file went back to staging"
+    assert db[one] == one, "and the library row went back with it"
+    assert os.path.isfile(db[one]), "no row may point at a file that is not there"
+
+
+def test_a_file_that_will_not_roll_back_keeps_its_db_row(tmp_path):
+    """Move first, repoint only if the move worked.
+
+    If the file is stuck at its final path, the row has to keep saying final.
+    Repointing it to staging anyway would strand a file the library can no
+    longer find, which is worse than the state we were rolling back from.
+    """
+    transfer = str(tmp_path / "music")
+    staging = ap.staging_root_for_batch(transfer, "b11")
+    one = _mk(Path(staging) / "A" / "Al" / "01.flac")
+    _mk(Path(staging) / "A" / "Al" / "02.flac")
+    final_one = os.path.join(transfer, "A", "Al", "01.flac")
+
+    db = {one: one}
+
+    def _move_out_ok_back_stuck(src, dst):
+        if src.endswith("02.flac"):
+            raise OSError("disk full")
+        if src == final_one:
+            raise OSError("file is locked")  # the rollback move
+        _move(src, dst)
+
+    def _repoint(staged, final):
+        hits = [k for k, v in db.items() if v == staged]
+        for k in hits:
+            db[k] = final
+        return len(hits)
+
+    res = ap.publish_album_batch(staging, transfer, _move_out_ok_back_stuck, _repoint)
+
+    assert res["success"] is False
+    assert len(res["rollback_failed"]) == 1
+    assert db[one] == final_one, "the file is still there, so the row must say so"
+    assert os.path.isfile(db[one])
+
+
 def test_discard_removes_genuine_staging_root(tmp_path):
     transfer = str(tmp_path / "music")
     staging = ap.staging_root_for_batch(transfer, "b9")

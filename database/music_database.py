@@ -18403,9 +18403,11 @@ class MusicDatabase:
         try:
             parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
         except ValueError:
+            # `from None`: the caller sent a bad string, that's the whole story.
+            # chaining fromisoformat's internals onto a 400 just adds noise.
             raise ValueError(
                 "since must be an ISO-8601 timestamp "
-                f"(e.g. 2026-08-19T00:00:00), got {value!r}")
+                f"(e.g. 2026-08-19T00:00:00), got {value!r}") from None
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")

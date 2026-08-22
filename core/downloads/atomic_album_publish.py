@@ -177,12 +177,33 @@ def publish_album_batch(
     ``db_path_update_fn`` may return the number of rows it repointed. Zero rows
     for an AUDIO file means the library still points at a staging path that is
     about to stop existing, which is a failed publish, not a warning.
+
+    A rollback takes the db pointer back with the file. It is called in reverse
+    as ``db_path_update_fn(final, staged)``, so the same function that publishes
+    a row also un-publishes it, and only for files that really were repointed.
     """
     published: List[Tuple[str, str]] = []
     failed: List[Tuple[str, str]] = []
+    # Which files actually had their library row repointed at the final path.
+    # Not the same as `published`: a file whose move worked but whose repoint
+    # raised is published and NOT repointed, and rolling its db row back would
+    # be undoing something that never happened.
+    repointed: set = set()
 
     def _roll_back() -> List[Tuple[str, str]]:
-        """Put every published file back in staging. Returns what would not go."""
+        """Put every published file back in staging, and take the library's
+        pointer back with it. Returns what would not go.
+
+        The repoint is the half that is easy to forget. Moving the file back on
+        its own leaves the db insisting the track is live at a path that no
+        longer exists, which is the same split state the all-or-nothing rule
+        exists to prevent, just pointing the other way.
+
+        Order matters: move first, repoint only if that move actually worked. A
+        file still sitting at its final path because the rollback could not
+        shift it MUST keep a db row that says final, or we would strand a file
+        the library can no longer find.
+        """
         stuck: List[Tuple[str, str]] = []
         for staged_path, final_path in reversed(published):
             try:
@@ -191,6 +212,15 @@ def publish_album_batch(
                 logger.error("[Atomic Publish] rollback failed %s -> %s: %s",
                              final_path, staged_path, e)
                 stuck.append((final_path, str(e)))
+                continue
+            if db_path_update_fn is None or staged_path not in repointed:
+                continue
+            try:
+                db_path_update_fn(final_path, staged_path)
+            except Exception as e:  # noqa: BLE001
+                logger.error("[Atomic Publish] DB rollback failed %s -> %s: %s",
+                             final_path, staged_path, e)
+                stuck.append((final_path, f"DB path rollback failed: {e}"))
         return stuck
 
     for staged in iter_staged_files(staging_root):
@@ -213,6 +243,7 @@ def publish_album_batch(
                              staged, final, e)
                 failed.append((staged, f"DB path update failed: {e}"))
                 break
+            repointed.add(staged)
             is_audio = os.path.splitext(staged)[1].lower() in _AUDIO_EXTS
             if is_audio and isinstance(rows, int) and rows < 1:
                 logger.error("[Atomic Publish] DB path update matched no row for %s", staged)
