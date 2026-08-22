@@ -8659,6 +8659,32 @@ def list_quarantine():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/review-queue/summary', methods=['GET'])
+def review_queue_summary():
+    """counts for the review badge, cheap enough to poll.
+
+    the page used to load the quarantine list once and never again, so the
+    number at the top was whatever it was when you last opened the tab. this is
+    a listdir plus one indexed count, so the badge can just ride the downloads
+    poll and the dashboard can show it too.
+    """
+    try:
+        from core.imports.quarantine import count_quarantine_entries
+        from database.music_database import MusicDatabase
+
+        quarantined = count_quarantine_entries(_get_quarantine_dir())
+        unverified = MusicDatabase().count_library_history_unverified()
+        return jsonify({
+            "success": True,
+            "quarantine": quarantined,
+            "unverified": unverified,
+            "total": quarantined + unverified,
+        })
+    except Exception as e:
+        logger.error(f"[ReviewQueue] Error building summary: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/quarantine/<entry_id>', methods=['DELETE'])
 def delete_quarantine_item(entry_id):
     """Delete a single quarantined file + sidecar."""

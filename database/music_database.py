@@ -521,6 +521,35 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_ignore_profile ON wishlist_ignore (profile_id, track_id)")
 
+            # #652 again. the "don't pick this same bad upload again" list used
+            # to be built by reading the sidecars sitting in ss_quarantine. so
+            # the review queue WAS the blocklist, and emptying the queue (approve,
+            # delete, clear all) also wiped the memory of what already failed.
+            # ranking is deterministic, so the same file wins again, downloads
+            # again, fails the same check again. that's why approving something
+            # five times keeps bringing it back.
+            #
+            # so the verdict lives here now, it survives the folder getting
+            # cleared. nothing in the review queue removes these rows, approve
+            # included, see approve_quarantine_entry for why. deleting means
+            # "this file is bad" which is the best reason there is to keep
+            # blocking it, and approving is either harmless (the track imported,
+            # nobody searches for it again) or the only thing that breaks the
+            # loop (it didn't import, so pick someone else next time).
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS quarantine_source_blocks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    trigger TEXT DEFAULT 'unknown',
+                    expected_artist TEXT DEFAULT '',
+                    expected_track TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(username, filename)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_qsb_source ON quarantine_source_blocks (username, filename)")
+
             # Notification history (Kazimir): every toast the UI raises is
             # journaled here so a reflexive "Clear All" in the bell panel
             # loses nothing — the History modal reads this, filterable +
@@ -17749,6 +17778,97 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting recently added albums: {e}")
             return []
+
+    # keep a lid on it. one row per bad upload, a heavy user might rack up a few
+    # thousand a year. 25k is far past that and still tiny, but unbounded growth
+    # in a table nothing ever prunes is how you get a surprise years later.
+    QUARANTINE_BLOCK_CAP = 25000
+
+    def add_quarantine_source_block(self, username: str, filename: str,
+                                    trigger: str = 'unknown',
+                                    expected_artist: str = '',
+                                    expected_track: str = '') -> bool:
+        """remember that this exact (uploader, file) failed verification.
+
+        called from move_to_quarantine. survives the quarantine folder being
+        cleared, which is the whole point, see the table comment.
+        """
+        if not username or not filename:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR IGNORE INTO quarantine_source_blocks
+                        (username, filename, trigger, expected_artist, expected_track)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (str(username), str(filename), str(trigger or 'unknown'),
+                      str(expected_artist or ''), str(expected_track or '')))
+                inserted = cursor.rowcount > 0
+                if inserted:
+                    cursor.execute("SELECT COUNT(*) FROM quarantine_source_blocks")
+                    total = cursor.fetchone()[0]
+                    if total > self.QUARANTINE_BLOCK_CAP:
+                        cursor.execute("""
+                            DELETE FROM quarantine_source_blocks
+                            WHERE id IN (
+                                SELECT id FROM quarantine_source_blocks
+                                ORDER BY created_at ASC, id ASC
+                                LIMIT ?
+                            )
+                        """, (total - self.QUARANTINE_BLOCK_CAP,))
+                conn.commit()
+                return inserted
+        except Exception as e:
+            logger.error("Error recording quarantine source block: %s", e)
+            return False
+
+    def get_quarantine_source_blocks(self) -> set:
+        """every blocked (username, filename). read on the search path so it
+        stays a single indexed query, no joins."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT username, filename FROM quarantine_source_blocks")
+                return {(str(r[0]), str(r[1])) for r in cursor.fetchall()}
+        except Exception as e:
+            logger.error("Error loading quarantine source blocks: %s", e)
+            return set()
+
+    def remove_quarantine_source_block(self, username: str, filename: str) -> bool:
+        """unblock one upload.
+
+        nothing in the review queue calls this, see the table comment. it's here
+        so a block CAN be lifted deliberately, not as part of tidying the list.
+        """
+        if not username or not filename:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM quarantine_source_blocks WHERE username = ? AND filename = ?",
+                    (str(username), str(filename)))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error removing quarantine source block: %s", e)
+            return False
+
+    def count_library_history_unverified(self) -> int:
+        """just the count for the review badge. the full fetch pulls every row
+        with SELECT *, way too much work to render a number every few seconds."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM library_history
+                WHERE verification_status IN ('unverified', 'force_imported')
+            """)
+            return int(cursor.fetchone()[0] or 0)
+        except Exception as e:
+            logger.error("Error counting unverified library history: %s", e)
+            return 0
 
     def get_library_history_unverified(self) -> list[dict]:
         """Return every library_history row that still needs human confirmation.

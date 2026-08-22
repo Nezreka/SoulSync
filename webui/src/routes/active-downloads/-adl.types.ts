@@ -185,6 +185,19 @@ export interface AdlVerificationConfig {
   require_verified?: boolean;
 }
 
+/**
+ * Server-side counts for the review queue.
+ *
+ * The quarantine list used to load once and never again, so its number sat at
+ * whatever it was when you last opened the tab. This is a listdir plus one
+ * indexed count, cheap enough to poll.
+ */
+export interface AdlReviewSummary {
+  quarantine: number;
+  unverified: number;
+  total: number;
+}
+
 /** A quarantined file plus its sidecar. */
 export interface AdlQuarantineEntry {
   id: string;

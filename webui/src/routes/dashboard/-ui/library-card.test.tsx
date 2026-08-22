@@ -6,7 +6,15 @@
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { fetchReviewQueueSummary } from '@/routes/active-downloads/-adl.api';
+
 import { LibraryCard } from './library-card';
+
+vi.mock('@/routes/active-downloads/-adl.api', () => ({
+  fetchReviewQueueSummary: vi.fn(async () => null),
+}));
+
+const reviewSummary = vi.mocked(fetchReviewQueueSummary);
 
 const fetchMock = vi.fn();
 const showToast = vi.fn();
@@ -29,6 +37,8 @@ beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockImplementation(() => Promise.reject(new Error('down')));
   showToast.mockReset();
+  reviewSummary.mockReset();
+  reviewSummary.mockResolvedValue(null);
   vi.stubGlobal('fetch', fetchMock);
   window.showToast = showToast;
 });
@@ -86,6 +96,11 @@ describe('the strip shape', () => {
       'library-status-verify-btn',
       'library-status-repair-btn',
       'library-status-backup-btn',
+      'library-status-review-btn',
+      'library-status-wishlist-btn',
+      'library-status-downloads-btn',
+      'library-status-discover-btn',
+      'library-status-sync-btn',
       // the four-stat row retired with the header's hello strip —
       // albums + db size live in the subtitle now
       'library-status-progress',
@@ -257,5 +272,64 @@ describe('the scan flow', () => {
     });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(showToast).not.toHaveBeenCalled();
+  });
+});
+
+
+/**
+ * TheHomeGuy asked for a way to know there is something to review without
+ * going to the downloads page and clicking into the tab. Plus the strip picked
+ * up the rest of the links people actually want.
+ */
+describe('the quick access links', () => {
+  const navigate = vi.fn();
+
+  beforeEach(() => {
+    navigate.mockReset();
+    window.navigateToPage = navigate;
+  });
+
+  afterEach(() => {
+    delete window.navigateToPage;
+  });
+
+  it.each([
+    ['library-status-wishlist-btn', 'wishlist'],
+    ['library-status-downloads-btn', 'active-downloads'],
+    ['library-status-discover-btn', 'discover'],
+    ['library-status-sync-btn', 'sync'],
+    ['library-status-review-btn', 'active-downloads'],
+  ])('%s goes to %s', async (id, page) => {
+    const view = await mountCard();
+    fireEvent.click(view.container.querySelector(`#${id}`)!);
+    expect(navigate).toHaveBeenCalledWith(page);
+  });
+
+  it('shows the waiting count on Review and calls it out', async () => {
+    reviewSummary.mockResolvedValue({ quarantine: 72, unverified: 2, total: 74 });
+    const view = await mountCard();
+
+    const btn = view.container.querySelector('#library-status-review-btn')!;
+    // the real class list, not just "the rule exists". a badge nobody can
+    // select is the shape that has shipped here before.
+    expect(btn.className).toContain('library-status-btn-attention');
+    expect(btn.querySelector('.library-status-btn-badge')?.textContent).toBe('74');
+  });
+
+  it('stays quiet when there is nothing waiting', async () => {
+    reviewSummary.mockResolvedValue({ quarantine: 0, unverified: 0, total: 0 });
+    const view = await mountCard();
+
+    const btn = view.container.querySelector('#library-status-review-btn')!;
+    expect(btn.className).not.toContain('library-status-btn-attention');
+    expect(btn.querySelector('.library-status-btn-badge')).toBeNull();
+  });
+
+  it('stays quiet when the count cannot be read at all', async () => {
+    reviewSummary.mockResolvedValue(null);
+    const view = await mountCard();
+
+    const btn = view.container.querySelector('#library-status-review-btn')!;
+    expect(btn.querySelector('.library-status-btn-badge')).toBeNull();
   });
 });

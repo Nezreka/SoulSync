@@ -9522,8 +9522,16 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ya-card-sub--link:hover { text-decoration: underline; color: #fff; }
-/* Six buttons now — they wrap instead of crushing the title. */
-.library-status-actions { flex-wrap: wrap; row-gap: 6px; }
+/* wrapping lives on the base rule further down, it is later in the file and
+   was overriding this. left here so nobody re-adds it. */
+.library-status-actions { row-gap: 6px; }
+
+/* eleven buttons don't fit beside the title under ~1200px, so let the header
+   wrap and the buttons drop to their own line. without this the actions squeeze
+   the title until "1,204 albums · 41.2 GB" stacks one word per line.
+   the dash-card[data-card="library"] rule further down wins on specificity but
+   never declares flex-wrap, so this one still lands. */
+.library-status-header { flex-wrap: wrap; }
 
 .header-actions {
     display: flex;
@@ -63809,6 +63817,30 @@ body.max-performance #page-particles-canvas {
     box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.15);
 }
 
+/* count on the review pill. amber not accent, this is a "you have stuff
+   waiting" number and it should read differently from the filter pills. */
+.adl-pill-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    margin-left: 7px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: rgba(245, 158, 11, 0.22);
+    color: #fbbf24;
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1;
+    vertical-align: middle;
+}
+
+.adl-pill.active .adl-pill-badge {
+    background: rgba(245, 158, 11, 0.3);
+    color: #fcd34d;
+}
+
 .adl-count {
     font-size: 0.78rem;
     color: rgba(255, 255, 255, 0.3);
@@ -64915,7 +64947,13 @@ body.max-performance #page-particles-canvas {
 .library-status-actions {
     display: flex;
     gap: 8px;
-    flex-shrink: 0;
+    /* eleven buttons now, the library verbs plus the quick links. they have to
+       be allowed to SHRINK or they never wrap, they just run off the side of
+       the card. flex-shrink 0 was fine at six and clipped at eleven. */
+    flex-wrap: wrap;
+    flex-shrink: 1;
+    min-width: 0;
+    justify-content: flex-end;
 }
 
 .library-status-btn {
@@ -64962,6 +65000,46 @@ body.max-performance #page-particles-canvas {
     border-color: rgba(239, 68, 68, 0.3);
     background: rgba(239, 68, 68, 0.1);
     color: #f87171;
+}
+
+/* thin rule between "do something to the library" and "go somewhere". margin
+   auto on neither side, it should sit right where the list breaks. */
+.library-status-divider {
+    width: 1px;
+    align-self: stretch;
+    min-height: 20px;
+    margin: 0 4px;
+    background: rgba(255, 255, 255, 0.1);
+    flex-shrink: 0;
+}
+
+/* Review with files waiting. amber, same language as the badge on the
+   downloads page, so the two read as the same thing in two places. */
+.library-status-btn-attention {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.35);
+    color: #fbbf24;
+}
+
+.library-status-btn-attention:hover {
+    background: rgba(245, 158, 11, 0.2);
+    border-color: rgba(245, 158, 11, 0.5);
+    color: #fcd34d;
+}
+
+.library-status-btn-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: rgba(245, 158, 11, 0.28);
+    color: #fcd34d;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
 }
 
 .library-status-stats {

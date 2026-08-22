@@ -4,6 +4,7 @@ import type {
   AdlBatchHistoryEntry,
   AdlDownloadsResponse,
   AdlQuarantineEntry,
+  AdlReviewSummary,
   AdlTaskDetail,
   AdlVerificationConfig,
 } from './-adl.types';
@@ -78,6 +79,31 @@ export async function fetchVerificationConfig(): Promise<AdlVerificationConfig> 
     return await readJson<AdlVerificationConfig>(apiClient.get('verification/config'));
   } catch {
     return { acoustid_enabled: true };
+  }
+}
+
+/**
+ * Counts for the review badge.
+ *
+ * Separate from `fetchQuarantine` on purpose: that one reads every sidecar to
+ * build the list, this is a listdir plus one indexed count, so it can ride a
+ * poll without costing anything.
+ */
+export async function fetchReviewQueueSummary(): Promise<AdlReviewSummary | null> {
+  try {
+    const data = await readJson<{ success?: boolean } & Partial<AdlReviewSummary>>(
+      apiClient.get('review-queue/summary'),
+    );
+    if (!data?.success) return null;
+    return {
+      quarantine: data.quarantine ?? 0,
+      unverified: data.unverified ?? 0,
+      total: data.total ?? 0,
+    };
+  } catch {
+    // null, not zeroes. a blipped fetch must not redraw the badge as "nothing
+    // to review" when there might be plenty.
+    return null;
   }
 }
 

@@ -106,18 +106,35 @@ def get_quarantined_source_keys(quarantine_dir: str) -> set:
     re-queueing in an infinite loop. Users wake up to hundreds of
     duplicate `.quarantined` files for the same source URL.
 
-    The keys come from the sidecar JSON's
-    ``context.original_search_result`` field which `move_to_quarantine`
-    persists from the originating SearchResult. Sidecars missing either
-    field (legacy thin sidecars written pre-Feb 2026, or orphaned
-    files) are skipped silently — they can't gate anything anyway.
+    Two sources, unioned:
 
-    Returns an empty set when the directory doesn't exist or has no
-    parseable sidecars. Never raises; filesystem / JSON errors are
-    swallowed at debug level so a corrupt sidecar can't block the
-    download pipeline.
+    - the ``quarantine_source_blocks`` table, written by
+      `move_to_quarantine`. this is the durable one and the only one
+      that survives the review queue being emptied.
+    - the sidecar JSONs still sitting in the folder, read from
+      ``context.original_search_result``. kept so installs that
+      quarantined things before the table existed still gate on them,
+      and so an approve/delete that half-failed can't open a hole.
+
+    sidecars missing either field (legacy thin ones written pre-Feb
+    2026, or orphaned files) are skipped, they can't gate anything.
+
+    never raises. db, filesystem and JSON errors are all swallowed at
+    debug level so nothing here can block the download pipeline. an
+    empty set means "don't filter anything", which is how it behaved
+    before any of this existed.
     """
     keys: set = set()
+
+    # the durable half. sidecars only live as long as the review queue does, and
+    # approve/delete/clear all delete them, so on their own they forget every
+    # bad upload the moment someone tidies up. these rows don't.
+    try:
+        from database.music_database import MusicDatabase
+        keys |= MusicDatabase().get_quarantine_source_blocks()
+    except Exception as exc:
+        logger.debug("get_quarantined_source_keys: db blocks unavailable: %s", exc)
+
     if not quarantine_dir or not os.path.isdir(quarantine_dir):
         return keys
 
@@ -221,6 +238,26 @@ def find_quarantine_siblings(quarantine_dir: str, entry_id: str) -> List[str]:
         for e in entries
         if e.get("id") != entry_id and e.get("group_key") == target_key
     ]
+
+
+def count_quarantine_entries(quarantine_dir: str) -> int:
+    """how many quarantined files there are, without reading any sidecars.
+
+    same thing list_quarantine_entries counts, one per .quarantined file, but
+    it's a listdir and nothing else. the badge polls this, so it can't be doing
+    N json reads every few seconds.
+    """
+    if not quarantine_dir or not os.path.isdir(quarantine_dir):
+        return 0
+    try:
+        return sum(
+            1 for name in os.listdir(quarantine_dir)
+            if name.endswith(_QUARANTINE_SUFFIX)
+            and os.path.isfile(os.path.join(quarantine_dir, name))
+        )
+    except OSError as exc:
+        logger.debug("count_quarantine_entries: listdir failed: %s", exc)
+        return 0
 
 
 def list_quarantine_entries(quarantine_dir: str) -> List[Dict[str, Any]]:
@@ -520,6 +557,19 @@ def approve_quarantine_entry(
     except OSError as exc:
         logger.warning("approve: failed to remove sidecar %s: %s", sidecar_path, exc)
 
+    # NOTE approve does NOT unblock the source, on purpose.
+    #
+    # it's tempting: the user looked at the file and said import it, so calling
+    # it bad afterwards feels wrong. but work through both outcomes. if the
+    # re-import lands, the track is in the library and nobody searches for it
+    # again, so the block never costs anything. if it doesn't land, the track is
+    # still wanted, and the block is the only thing making the next search pick
+    # a DIFFERENT source instead of the same broken file.
+    #
+    # that second case is the bug TheHomeGuy reported, he approved the same
+    # songs about five times. unblocking here would leave it exactly as it was.
+    # the block is one specific (uploader, file), not the uploader, so nothing
+    # else that person shares is affected.
     return restored_path, context, trigger
 
 

@@ -29,6 +29,12 @@ export interface AdlHeaderProps {
   hasRunningWork: boolean;
   /** False when the review queue is quarantine-only. */
   acoustidEnabled: boolean;
+  /**
+   * How many files are waiting on a human, from the server. Null until the
+   * first count lands, and the badge stays hidden until then rather than
+   * flashing a 0 at someone who has 72 waiting.
+   */
+  reviewCount: number | null;
   onFilter: (filter: AdlFilter) => void;
   onCancelAll: () => void;
   onClearCompleted: () => void;
@@ -40,6 +46,7 @@ export function AdlHeader({
   counts,
   hasRunningWork,
   acoustidEnabled,
+  reviewCount,
   onFilter,
   onCancelAll,
   onClearCompleted,
@@ -96,6 +103,9 @@ export function AdlHeader({
             onClick={() => onFilter('unverified')}
           >
             {reviewPill.label}
+            {/* the pill said nothing about how much was waiting, so a full
+                queue looked the same as an empty one until you clicked it. */}
+            {reviewCount ? <span className="adl-pill-badge">{reviewCount}</span> : null}
           </button>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>

@@ -344,6 +344,7 @@ describe('AdlHeader', () => {
     counts,
     hasRunningWork: false,
     acoustidEnabled: true,
+    reviewCount: null,
     onFilter: vi.fn(),
     onCancelAll: vi.fn(),
     onClearCompleted: vi.fn(),
