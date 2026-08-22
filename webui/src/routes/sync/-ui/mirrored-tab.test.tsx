@@ -89,7 +89,6 @@ function Harness(props: Partial<Parameters<typeof MirroredTab>[0]> = {}) {
   );
 }
 
-
 /**
  * Run one of a card's overflow actions.
  *
@@ -104,7 +103,6 @@ function runCardAction(label: string, cardIndex = 0): void {
   ) as HTMLElement;
   fireEvent.click(item);
 }
-
 
 describe('MirroredTab — load and card', () => {
   it('renders the card: cover, brand mark, name, one meta line, schedule', async () => {
@@ -1164,8 +1162,8 @@ describe('MirroredTab — the Scheduled tab keeps up with the menu', () => {
       />,
     );
 
-    return waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument())
-      .then(async () => {
+    return waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument()).then(
+      async () => {
         const scheduledTab = () =>
           [...document.querySelectorAll('.library-tab')].find((t) =>
             t.textContent?.startsWith('Scheduled'),
@@ -1180,7 +1178,8 @@ describe('MirroredTab — the Scheduled tab keeps up with the menu', () => {
 
         // The tab is gone because nothing is scheduled any more.
         await waitFor(() => expect(scheduledTab()).toBeFalsy());
-      });
+      },
+    );
   });
 });
 
@@ -1199,8 +1198,7 @@ describe('MirroredTab — the sort control', () => {
     await waitFor(() => expect(screen.getByText('Zebra')).toBeInTheDocument());
   }
 
-  const names = () =>
-    [...document.querySelectorAll('.pl-card-name b')].map((n) => n.textContent);
+  const names = () => [...document.querySelectorAll('.pl-card-name b')].map((n) => n.textContent);
 
   it('reorders the grid by the name a user sees', async () => {
     await renderMany();

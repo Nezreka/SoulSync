@@ -169,8 +169,7 @@ export function useSyncHistory(options: UseSyncHistoryOptions) {
             if (progress.phase === 'finished') {
               toast(`Re-sync complete: ${progress.matched}/${progress.total} matched`, 'success');
             }
-            const linger =
-              progress.phase === 'finished' ? FINISHED_LINGER_MS : ENDED_LINGER_MS;
+            const linger = progress.phase === 'finished' ? FINISHED_LINGER_MS : ENDED_LINGER_MS;
             setTimeout(() => {
               setResyncs((prev) => {
                 const next = { ...prev };

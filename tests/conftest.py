@@ -1336,6 +1336,15 @@ def reset_state(_inert_video_enrichment_engine, _inert_video_download_monitor):
     # sleep a real minute waiting for a slot it was never really queued for.
     from core.deezer_throttle import _reset_for_tests as _reset_deezer_throttle
     _reset_deezer_throttle()
+    # Prowlarr search throttle: third one of exactly this shape
+    # (core.prowlarr_throttle). One process-wide window shared by the music
+    # download plugins and the video acquisition paths, reservations are future
+    # times, so left alone they march forward all session and a later test
+    # sleeps for a slot it was never really queued for. It already cost the
+    # #1151 fan-out timing guard a false failure: 1.99s against a 0.15s budget,
+    # every bit of it a previous test's reservation.
+    from core.prowlarr_throttle import _reset_for_tests as _reset_prowlarr_throttle
+    _reset_prowlarr_throttle()
     # Enrichment status TTL cache (core.enrichment.api): a cached stats dict
     # must never leak into the next test's registry (same service id, new fake).
     from core.enrichment.api import _invalidate_status_cache

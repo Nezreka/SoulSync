@@ -102,9 +102,7 @@ describe('rows', () => {
   });
 
   it('shows the recorded reason when a run failed', () => {
-    renderHistory([
-      run({ status: 'failed', errors: 1, error_text: 'AcoustID API key missing' }),
-    ]);
+    renderHistory([run({ status: 'failed', errors: 1, error_text: 'AcoustID API key missing' })]);
     fireEvent.click(document.querySelector('.repair-run-head') as HTMLElement);
     expect(screen.getByText('AcoustID API key missing')).toBeTruthy();
   });

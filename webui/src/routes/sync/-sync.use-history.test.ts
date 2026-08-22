@@ -123,9 +123,7 @@ describe('re-syncing a row', () => {
       entry: { id: 7, source: 'discover' },
     });
     const start = vi.spyOn(api, 'startSync');
-    const { result } = renderHook(() =>
-      useSyncHistory({ active: true, openDownloadModal }),
-    );
+    const { result } = renderHook(() => useSyncHistory({ active: true, openDownloadModal }));
     await act(async () => {
       await result.current.resync(7);
     });
@@ -139,9 +137,7 @@ describe('re-syncing a row', () => {
       entry: { id: 7, playlist_name: 'Road Trip', source: 'spotify', tracks: [{ name: 'A' }] },
     });
     const start = vi.spyOn(api, 'startSync').mockResolvedValue({ success: true });
-    const { result } = renderHook(() =>
-      useSyncHistory({ active: true, now: () => 1_700_000 }),
-    );
+    const { result } = renderHook(() => useSyncHistory({ active: true, now: () => 1_700_000 }));
     await act(async () => {
       await result.current.resync(7);
     });
@@ -149,7 +145,14 @@ describe('re-syncing a row', () => {
       playlist_id: 'resync_7_1700000',
       playlist_name: 'Road Trip',
       tracks: [
-        { id: '', name: 'A', artists: ['Unknown Artist'], album: '', duration_ms: 0, popularity: 0 },
+        {
+          id: '',
+          name: 'A',
+          artists: ['Unknown Artist'],
+          album: '',
+          duration_ms: 0,
+          popularity: 0,
+        },
       ],
     });
     expect(result.current.resyncs[7]).toBeTruthy();
@@ -190,12 +193,10 @@ describe('the poll', () => {
       entry: { id: 7, source: 'spotify' },
     });
     vi.spyOn(api, 'startSync').mockResolvedValue({ success: true });
-    const status = vi
-      .spyOn(api, 'fetchAccountSyncStatus')
-      .mockResolvedValue({
-        status: 'syncing',
-        progress: { matched_tracks: 1, failed_tracks: 1, total_tracks: 4 },
-      } as never);
+    const status = vi.spyOn(api, 'fetchAccountSyncStatus').mockResolvedValue({
+      status: 'syncing',
+      progress: { matched_tracks: 1, failed_tracks: 1, total_tracks: 4 },
+    } as never);
 
     const { result } = renderHook(() => useSyncHistory({ active: true, toast }));
     await act(async () => {

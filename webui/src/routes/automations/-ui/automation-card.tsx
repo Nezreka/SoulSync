@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import type { AutomationSchedule } from '../-automations.format';
 import type { Automation } from '../-automations.types';
 
-import type { AutomationSchedule } from '../-automations.format';
-
 import { updateAutomationTrigger } from '../-automations.api';
-import { automationMeta, automationSchedule, formatAction, formatTrigger } from '../-automations.format';
+import {
+  automationMeta,
+  automationSchedule,
+  formatAction,
+  formatTrigger,
+} from '../-automations.format';
 import { automationIcon, formatNotify } from '../-automations.icons';
 import {
   type AutomationRunState,
@@ -175,7 +179,11 @@ function TriggerCadence({
     if (editing) return;
     const raw = Number.parseInt(String(config.interval ?? 1), 10);
     setInterval(Number.isFinite(raw) && raw > 0 ? raw : 1);
-    setUnit((UNITS as readonly string[]).includes(String(config.unit)) ? (config.unit as IntervalUnit) : 'hours');
+    setUnit(
+      (UNITS as readonly string[]).includes(String(config.unit))
+        ? (config.unit as IntervalUnit)
+        : 'hours',
+    );
     setTime(typeof config.time === 'string' && config.time ? config.time : '00:00');
     // config is a fresh object identity each render; the values are the input.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -189,7 +197,9 @@ function TriggerCadence({
         : { ...config, interval: Math.max(1, interval), unit };
       await updateAutomationTrigger(a.id, next);
       window.showToast?.(
-        daily ? `${a.name} now runs daily at ${time}` : `${a.name} now runs every ${interval} ${unit}`,
+        daily
+          ? `${a.name} now runs daily at ${time}`
+          : `${a.name} now runs every ${interval} ${unit}`,
         'success',
       );
       setEditing(false);
@@ -262,7 +272,12 @@ function TriggerCadence({
           </select>
         </>
       )}
-      <button type="button" className="auto-cadence-save" disabled={saving} onClick={() => void save()}>
+      <button
+        type="button"
+        className="auto-cadence-save"
+        disabled={saving}
+        onClick={() => void save()}
+      >
         {saving ? '…' : 'Save'}
       </button>
       <button type="button" className="auto-cadence-cancel" onClick={() => setEditing(false)}>

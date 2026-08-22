@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import type { YearInListening } from './-year.types';
+
 import {
   DEFAULT_YEAR_CARD_OPTIONS,
   MAX_YEAR_CARD_STATS,
@@ -11,7 +13,6 @@ import {
   type YearCardOptions,
   type YearCardStatKey,
 } from './-year.card';
-import type { YearInListening } from './-year.types';
 
 function makeYear(overrides: Partial<YearInListening> = {}): YearInListening {
   return {
@@ -83,7 +84,14 @@ describe('buildYearCardModel — content', () => {
   });
 
   it('never renders more rows than fit on a card', () => {
-    const all: YearCardStatKey[] = ['plays', 'minutes', 'artists', 'albums', 'tracks', 'active_days'];
+    const all: YearCardStatKey[] = [
+      'plays',
+      'minutes',
+      'artists',
+      'albums',
+      'tracks',
+      'active_days',
+    ];
 
     expect(buildYearCardModel(makeYear(), opts({ stats: all })).stats).toHaveLength(
       MAX_YEAR_CARD_STATS,

@@ -275,7 +275,6 @@ describe('the scan flow', () => {
   });
 });
 
-
 /**
  * TheHomeGuy asked for a way to know there is something to review without
  * going to the downloads page and clicking into the tab. Plus the strip picked

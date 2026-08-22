@@ -80,9 +80,11 @@ describe('sections', () => {
     expect(titles).toEqual(['Albums', 'EPs']);
   });
 
-  it('never renders a bucket outside album/ep/single', () => {
-    // groupAlbumsByType creates a bucket for any record_type; the view ignores
-    // it, exactly as the vanilla did.
+  it('renders a bucket outside album/ep/single instead of dropping it', () => {
+    // Was pinned the other way: the view walked a fixed album/ep/single list,
+    // so anything else was fetched, grouped and then never shown. Compilations
+    // are the common case and there was no way to see them at all
+    // (TheHomeGuy, Aug 2026).
     render(
       <EnhancedView
         onReload={vi.fn()}
@@ -91,7 +93,20 @@ describe('sections', () => {
         status={READY}
       />,
     );
-    expect(document.querySelector('.enhanced-section')).toBeNull();
+    expect(document.querySelector('.enhanced-section')).not.toBeNull();
+    expect(document.body.textContent).toContain('Live');
+  });
+
+  it('gives compilations their own named section', () => {
+    render(
+      <EnhancedView
+        onReload={vi.fn()}
+        isAdmin={false}
+        data={{ albums: [{ id: 10, title: 'Greatest Hits', record_type: 'compilation', tracks: [] }] }}
+        status={READY}
+      />,
+    );
+    expect(document.body.textContent).toContain('Compilations');
   });
 
   it('counts releases and tracks in the section header', () => {

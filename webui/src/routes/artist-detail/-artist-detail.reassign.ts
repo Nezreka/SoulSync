@@ -67,16 +67,22 @@ async function getJson<T>(url: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function searchReassignArtists(source: string, query: string): Promise<ReassignArtist[]> {
+export async function searchReassignArtists(
+  source: string,
+  query: string,
+): Promise<ReassignArtist[]> {
   const url = `/api/reassign/artists?source=${encodeURIComponent(source)}&q=${encodeURIComponent(query)}`;
   const data = await getJson<{ success: boolean; artists?: ReassignArtist[] }>(url);
-  return data.success ? data.artists ?? [] : [];
+  return data.success ? (data.artists ?? []) : [];
 }
 
-export async function fetchReassignAlbums(source: string, artistId: string): Promise<ReassignAlbum[]> {
+export async function fetchReassignAlbums(
+  source: string,
+  artistId: string,
+): Promise<ReassignAlbum[]> {
   const url = `/api/reassign/albums?source=${encodeURIComponent(source)}&artist_id=${encodeURIComponent(artistId)}`;
   const data = await getJson<{ success: boolean; albums?: ReassignAlbum[] }>(url);
-  return data.success ? data.albums ?? [] : [];
+  return data.success ? (data.albums ?? []) : [];
 }
 
 export async function previewReassign(body: {

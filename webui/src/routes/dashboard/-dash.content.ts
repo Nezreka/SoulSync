@@ -75,12 +75,19 @@ export async function openArtistFromRail(input: {
   }
   if (name) {
     try {
-      const response = await fetch(`/api/library/artists?search=${encodeURIComponent(name)}&limit=5`);
-      const data = (await response.json()) as { artists?: Array<{ id?: number | string; name?: string }> };
+      const response = await fetch(
+        `/api/library/artists?search=${encodeURIComponent(name)}&limit=5`,
+      );
+      const data = (await response.json()) as {
+        artists?: Array<{ id?: number | string; name?: string }>;
+      };
       const lower = name.toLowerCase();
       const exact = (data.artists ?? []).find((a) => (a.name ?? '').toLowerCase() === lower);
       if (exact && exact.id != null) {
-        void window.navigateToPage?.('artist-detail', { artistId: exact.id, artistName: exact.name });
+        void window.navigateToPage?.('artist-detail', {
+          artistId: exact.id,
+          artistName: exact.name,
+        });
         return;
       }
     } catch {
@@ -215,8 +222,7 @@ function fromRow(row: WatchlistReleaseRow & DiscoverAlbumRow, fromDiscover: bool
     albumItunesId: row.album_itunes_id ?? '',
     albumDeezerId: row.album_deezer_id ?? '',
     sourceProvider:
-      row.source ??
-      (row.album_spotify_id ? 'spotify' : row.album_deezer_id ? 'deezer' : 'itunes'),
+      row.source ?? (row.album_spotify_id ? 'spotify' : row.album_deezer_id ? 'deezer' : 'itunes'),
     owned: Boolean((row as WatchlistReleaseRow).owned),
     fromDiscover,
   };
@@ -283,7 +289,10 @@ interface OwnedEntry {
  * Every track owned → owned. "Most" is not enough: playing an album the user
  * is missing half of, instead of offering to complete it, buries the gap.
  */
-export function albumIsOwned(ownedTracks: Record<string, OwnedEntry>, trackNames: string[]): OwnedEntry | null {
+export function albumIsOwned(
+  ownedTracks: Record<string, OwnedEntry>,
+  trackNames: string[],
+): OwnedEntry | null {
   if (trackNames.length === 0) return null;
   let first: OwnedEntry | null = null;
   for (const name of trackNames) {

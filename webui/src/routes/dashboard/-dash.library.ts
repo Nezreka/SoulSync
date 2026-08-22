@@ -295,8 +295,9 @@ export function syncCardView(entry: SyncHistoryEntry, nowMs: number): SyncCardVi
   // label (the type says 'manual' for those; 'album' is what the row IS).
   const typeLabel = entry.is_album_download
     ? 'album'
-    : (entry.sync_type ? String(entry.sync_type).toLowerCase() : null);
-
+    : entry.sync_type
+      ? String(entry.sync_type).toLowerCase()
+      : null;
 
   return {
     id: entry.id,

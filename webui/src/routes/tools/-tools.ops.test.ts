@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { RepairJob } from './-tools.types';
+
 import {
   CATEGORY_ORDER,
   cadenceFromHours,
@@ -140,10 +141,7 @@ describe('jobFamilies', () => {
       ],
       NOW,
     );
-    expect(families.map((f) => f.category)).toEqual([
-      'Files & storage',
-      'Invented By The Backend',
-    ]);
+    expect(families.map((f) => f.category)).toEqual(['Files & storage', 'Invented By The Backend']);
   });
 
   it('counts running, due and pending per family', () => {
@@ -202,8 +200,6 @@ describe('mostOverdueJob', () => {
   });
 
   it('ignores disabled jobs — an off job is not late, it is off', () => {
-    expect(
-      mostOverdueJob([job({ enabled: false, next_run: hoursFromNow(-500) })], NOW),
-    ).toBeNull();
+    expect(mostOverdueJob([job({ enabled: false, next_run: hoursFromNow(-500) })], NOW)).toBeNull();
   });
 });

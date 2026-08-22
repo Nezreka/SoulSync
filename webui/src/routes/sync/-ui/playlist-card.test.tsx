@@ -6,9 +6,9 @@
  * design, and it is the first thing a future change would erode.
  */
 
+import { fireEvent, render, screen } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { MirroredPlaylistRow } from '../-sync.mirrored';
@@ -81,9 +81,9 @@ describe('the ring — what a healthy card does NOT show', () => {
 describe('the meta line', () => {
   it('states the count alone when everything is fine', () => {
     // "140 tracks · 140 discovered" says the same thing twice.
-    expect(playlistCardMeta(row({ total_count: 140, discovered_count: 140 }), 'synced 3h ago')).toBe(
-      '140 tracks · synced 3h ago',
-    );
+    expect(
+      playlistCardMeta(row({ total_count: 140, discovered_count: 140 }), 'synced 3h ago'),
+    ).toBe('140 tracks · synced 3h ago');
   });
 
   it('says what is in the library only when it differs', () => {

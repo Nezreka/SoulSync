@@ -36,7 +36,13 @@ const FULL_YEAR: YearInListening = {
     },
   ],
   discoveries: [
-    { name: 'Brand New Act', first_played: '2026-02-01', plays: 34, id: '99', image_url: '/img/new.jpg' },
+    {
+      name: 'Brand New Act',
+      first_played: '2026-02-01',
+      plays: 34,
+      id: '99',
+      image_url: '/img/new.jpg',
+    },
   ],
   peak_day: { date: '2026-05-20', plays: 47 },
   top_hour: { hour: 22, plays: 300 },
@@ -91,7 +97,9 @@ describe('YearStory', () => {
   it('opens from the URL alone', async () => {
     renderStory();
 
-    expect(await screen.findByRole('dialog', { name: 'Your Year in Listening' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('dialog', { name: 'Your Year in Listening' }),
+    ).toBeInTheDocument();
   });
 
   it('stays shut when the param is absent', async () => {
@@ -99,7 +107,9 @@ describe('YearStory', () => {
 
     await screen.findByTestId('stats-page');
 
-    expect(screen.queryByRole('dialog', { name: 'Your Year in Listening' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('dialog', { name: 'Your Year in Listening' }),
+    ).not.toBeInTheDocument();
   });
 
   it('opens on the period, so the reader knows what window this is', async () => {
@@ -141,7 +151,7 @@ describe('YearStory', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Next' }));
 
     const counter = await screen.findByLabelText('1,247');
-    expect(counter).not.toHaveTextContent('1,247');   // it starts from zero
+    expect(counter).not.toHaveTextContent('1,247'); // it starts from zero
 
     // countUpDuration scales with magnitude — ~1.45s for a number this size,
     // which is past waitFor's 1s default.
@@ -157,7 +167,10 @@ describe('YearStory', () => {
   });
 
   it('collapses to a single slide that says so when there is nothing to tell', async () => {
-    serveYear({ has_data: false, totals: { plays: 0, minutes: 0, artists: 0, albums: 0, tracks: 0, active_days: 0 } });
+    serveYear({
+      has_data: false,
+      totals: { plays: 0, minutes: 0, artists: 0, albums: 0, tracks: 0, active_days: 0 },
+    });
     renderStory();
 
     await screen.findByText('Your Year in Listening');
@@ -397,7 +410,8 @@ describe('YearStory', () => {
     }
 
     const pressed = ['Plays', 'Listening time', 'Artists', 'Days with music'].filter(
-      (label) => screen.getByRole('button', { name: label }).getAttribute('aria-pressed') === 'true',
+      (label) =>
+        screen.getByRole('button', { name: label }).getAttribute('aria-pressed') === 'true',
     );
     expect(pressed).toHaveLength(1);
   });

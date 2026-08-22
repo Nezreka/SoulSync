@@ -1,7 +1,5 @@
 import { useState } from 'react';
 
-import { ReassignModal } from './reassign-modal';
-
 import type { EnhancedAlbum, EnhancedTrack } from '../-artist-detail.enhanced';
 
 import {
@@ -21,6 +19,7 @@ import { analyzeAlbumReplayGainRequest } from '../-artist-detail.tags-rg';
 import { ArtPicker } from './art-picker';
 import { BatchTagPreviewModal } from './batch-tag-preview-modal';
 import { ManualMatchModal } from './manual-match-modal';
+import { ReassignModal } from './reassign-modal';
 import { ReorganizeModal } from './reorganize-modal';
 import { SmartDeleteDialog, ALBUM_DELETE_COPY } from './smart-delete-dialog';
 

@@ -348,10 +348,7 @@ describe('AutoSyncBoardIntro (826-834 / 950-960)', () => {
   it('renders the board-specific copy, and carries no Refresh of its own', () => {
     const onRefresh = vi.fn();
     const { container } = render(
-      <AutoSyncBoardIntro
-        heading="Drag playlists onto a day"
-        blurb="blurb"
-      />,
+      <AutoSyncBoardIntro heading="Drag playlists onto a day" blurb="blurb" />,
     );
     expect(container.querySelector('strong')?.textContent).toBe('Drag playlists onto a day');
     // This intro renders on BOTH boards, so its button was two of the four

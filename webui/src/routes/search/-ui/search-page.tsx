@@ -505,7 +505,9 @@ function JumpChips({
           type="button"
           className="enh-jump-chip"
           onClick={() =>
-            document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            document
+              .getElementById(sectionId)
+              ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
           }
         >
           {label}

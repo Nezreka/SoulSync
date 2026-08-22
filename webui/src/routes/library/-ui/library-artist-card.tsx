@@ -1,5 +1,6 @@
-import { thumb } from '@/platform/artwork-thumb';
 import { useState } from 'react';
+
+import { thumb } from '@/platform/artwork-thumb';
 
 import type { ArtistBadge, LibraryArtist } from '../-library.types';
 
@@ -105,7 +106,9 @@ function ArtistImage({ artist, hasImage }: { artist: LibraryArtist; hasImage: bo
   // `key` remounts rather than swapping src on the element that just errored,
   // so each stage gets a clean load cycle. Not test-observable: jsdom never
   // fetches images, so the error events above are synthetic either way.
-  return <img key={stage} src={thumb(src, 'grid')} alt={artist.name} loading="lazy" onError={onError} />;
+  return (
+    <img key={stage} src={thumb(src, 'grid')} alt={artist.name} loading="lazy" onError={onError} />
+  );
 }
 
 /** One artist tile. Markup mirrors buildLibraryArtistCardHTML so the CSS applies unchanged. */

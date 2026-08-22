@@ -34,9 +34,9 @@ describe('intervalLabel', () => {
 describe('weeklyLabel', () => {
   it('collapses full/empty weeks to Daily and orders days Mon–Sun', () => {
     expect(weeklyLabel('09:00', [])).toBe('Daily @ 09:00');
-    expect(
-      weeklyLabel('09:00', ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']),
-    ).toBe('Daily @ 09:00');
+    expect(weeklyLabel('09:00', ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'])).toBe(
+      'Daily @ 09:00',
+    );
     // Toggled on out of order — renders canonical.
     expect(weeklyLabel('04:30', ['fri', 'mon'])).toBe('Mon, Fri @ 04:30');
   });

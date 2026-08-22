@@ -135,7 +135,9 @@ const ACTION_SENTENCES: Record<string, Sentence> = {
     if (!found) return `Checked ${plural(scanned, 'file')}, no duplicates`;
     const freed = num(r.space_freed_mb);
     const tail = removed ? `removed ${plural(removed, 'file')}` : `${found} to review`;
-    return freed ? `Found ${found} duplicates, ${tail} (${freed} MB)` : `Found ${found} duplicates, ${tail}`;
+    return freed
+      ? `Found ${found} duplicates, ${tail} (${freed} MB)`
+      : `Found ${found} duplicates, ${tail}`;
   },
   // refreshed / errors
   refresh_mirrored: (r) => {
@@ -353,7 +355,9 @@ export function automationMeta(
     // `?? undefined` because lastResultFacts returns null for "nothing worth
     // showing", while every other field here uses undefined for absent.
     // Prefer a sentence over the handler's raw dict keys; falls back to them.
-    result: a.last_error ? undefined : (automationOutcome(a.action_type, a.last_result) ?? undefined),
+    result: a.last_error
+      ? undefined
+      : (automationOutcome(a.action_type, a.last_result) ?? undefined),
   };
 }
 

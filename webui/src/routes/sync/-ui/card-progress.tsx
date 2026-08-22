@@ -23,7 +23,6 @@ import type { ReactNode } from 'react';
 
 import type { SourceVerticalConfig } from '../-sync.sources';
 import type { SourcePlaylistState } from '../-sync.state';
-
 import type { CardCoverageValue } from './card-coverage';
 
 import { checkNoteCounts, slashTextCounts } from '../-sync.url-tabs';

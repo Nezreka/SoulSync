@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import type { YearInListening } from './-year.types';
+
 import {
   buildYearSlides,
   describeListeningTime,
@@ -9,7 +11,6 @@ import {
   monthBarHeight,
   peakMonthPlays,
 } from './-year.helpers';
-import type { YearInListening } from './-year.types';
 
 function makeYear(overrides: Partial<YearInListening> = {}): YearInListening {
   return {
@@ -19,7 +20,9 @@ function makeYear(overrides: Partial<YearInListening> = {}): YearInListening {
     months: [{ month: '2026-01', label: 'Jan 2026', plays: 100, minutes: 4000, top_artist: 'A' }],
     top_artists: [{ name: 'A', plays: 60, months_on_top: 3 }],
     top_albums: [{ name: 'The Album', artist: 'A', plays: 40 }],
-    top_tracks: [{ name: 'T', artist: 'A', album: 'Al', plays: 12, first_played: null, last_played: null }],
+    top_tracks: [
+      { name: 'T', artist: 'A', album: 'Al', plays: 12, first_played: null, last_played: null },
+    ],
     discoveries: [{ name: 'New', first_played: '2026-02-01', plays: 9 }],
     peak_day: { date: '2026-05-20', plays: 14 },
     top_hour: { hour: 22, plays: 30 },
@@ -136,10 +139,16 @@ describe('formatHour', () => {
 
 describe('buildYearSlides', () => {
   it('tells the whole story when the year is full', () => {
-    expect(buildYearSlides(makeYear({ top_artists: [
-      { name: 'A', plays: 60, months_on_top: 3 },
-      { name: 'B', plays: 20, months_on_top: 1 },
-    ] }))).toEqual([
+    expect(
+      buildYearSlides(
+        makeYear({
+          top_artists: [
+            { name: 'A', plays: 60, months_on_top: 3 },
+            { name: 'B', plays: 20, months_on_top: 1 },
+          ],
+        }),
+      ),
+    ).toEqual([
       'opening',
       'totals',
       'months',
@@ -158,7 +167,9 @@ describe('buildYearSlides', () => {
   });
 
   it('trusts the play count over the has_data flag', () => {
-    const empty = makeYear({ totals: { plays: 0, minutes: 0, artists: 0, albums: 0, tracks: 0, active_days: 0 } });
+    const empty = makeYear({
+      totals: { plays: 0, minutes: 0, artists: 0, albums: 0, tracks: 0, active_days: 0 },
+    });
 
     expect(buildYearSlides(empty)).toEqual(['opening']);
   });

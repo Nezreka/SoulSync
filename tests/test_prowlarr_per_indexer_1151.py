@@ -207,7 +207,8 @@ def test_search_each_indexer_runs_them_concurrently(monkeypatch):
     started: list = []
 
     async def _slow(query, categories=None, indexer_ids=None, limit=100,
-                    search_type='search', extra_params=None, timeout=None):
+                    search_type='search', extra_params=None, timeout=None,
+                    throttle=True):
         started.append(indexer_ids[0])
         await asyncio.sleep(0.05)
         return [_result(indexer_ids[0])]
@@ -232,7 +233,8 @@ def test_search_each_indexer_separates_successes_from_failures(monkeypatch):
     client = ProwlarrClient()
 
     async def _mixed(query, categories=None, indexer_ids=None, limit=100,
-                     search_type='search', extra_params=None, timeout=None):
+                     search_type='search', extra_params=None, timeout=None,
+                    throttle=True):
         if indexer_ids[0] == 2:
             raise ProwlarrSearchError('read timeout')
         return [_result(indexer_ids[0])]
@@ -267,7 +269,8 @@ def test_the_fan_out_is_bounded(monkeypatch):
     peak = 0
 
     async def _tracked(query, categories=None, indexer_ids=None, limit=100,
-                       search_type='search', extra_params=None, timeout=None):
+                       search_type='search', extra_params=None, timeout=None,
+                    throttle=True):
         nonlocal live, peak
         live += 1
         peak = max(peak, live)
@@ -294,7 +297,8 @@ def test_cancellation_propagates_rather_than_becoming_a_failure(monkeypatch):
     client = ProwlarrClient()
 
     async def _cancelled(query, categories=None, indexer_ids=None, limit=100,
-                         search_type='search', extra_params=None, timeout=None):
+                         search_type='search', extra_params=None, timeout=None,
+                    throttle=True):
         raise asyncio.CancelledError()
 
     monkeypatch.setattr(client, 'search', _cancelled)
@@ -315,7 +319,8 @@ def test_the_fan_out_never_takes_longer_than_the_single_request_it_replaces(monk
     client = ProwlarrClient()
 
     async def _hangs(query, categories=None, indexer_ids=None, limit=100,
-                     search_type='search', extra_params=None, timeout=None):
+                     search_type='search', extra_params=None, timeout=None,
+                    throttle=True):
         await asyncio.sleep(30)
         return []
 
@@ -342,7 +347,8 @@ def test_results_that_arrived_inside_the_budget_are_kept(monkeypatch):
     client = ProwlarrClient()
 
     async def _mixed(query, categories=None, indexer_ids=None, limit=100,
-                     search_type='search', extra_params=None, timeout=None):
+                     search_type='search', extra_params=None, timeout=None,
+                    throttle=True):
         if indexer_ids[0] == 2:
             await asyncio.sleep(30)
         return [_result(indexer_ids[0])]
@@ -366,7 +372,8 @@ def test_a_repeated_indexer_id_is_searched_once(monkeypatch):
     asked: list = []
 
     async def _record(query, categories=None, indexer_ids=None, limit=100,
-                      search_type='search', extra_params=None, timeout=None):
+                      search_type='search', extra_params=None, timeout=None,
+                    throttle=True):
         asked.append(indexer_ids[0])
         return [_result(indexer_ids[0])]
 

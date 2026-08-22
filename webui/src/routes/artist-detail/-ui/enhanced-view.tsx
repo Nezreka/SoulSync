@@ -1,11 +1,12 @@
-import { thumb } from '@/platform/artwork-thumb';
 import { useEffect, useState } from 'react';
+
+import { thumb } from '@/platform/artwork-thumb';
 
 import type { EnhancedAlbum, EnhancedData } from '../-artist-detail.enhanced';
 
 import {
   albumRowMeta,
-  ENHANCED_SECTIONS,
+  enhancedSectionsFor,
   enhancedStats,
   groupAlbumsByType,
   sectionCountLabel,
@@ -33,9 +34,9 @@ interface Props {
  * The Enhanced Management view: a stats bar over per-type sections of
  * expandable album rows (renderEnhancedView, library.js:2885).
  *
- * Only album/ep/single sections render. groupAlbumsByType will happily create a
- * bucket for any other record_type, and the vanilla ignored it the same way —
- * an album typed "live" is grouped and then never shown.
+ * Every bucket renders, named ones first. It used to walk a fixed album/ep/
+ * single list, so a release typed anything else (compilation is the common one)
+ * was fetched, grouped, and then never shown at all.
  */
 export function EnhancedView({ data, status, isAdmin, onReload }: Props) {
   /**
@@ -120,7 +121,7 @@ export function EnhancedView({ data, status, isAdmin, onReload }: Props) {
         onArtistPatched={() => setArtistVersion((v) => v + 1)}
       />
       <EnhancedStatsBar data={data} />
-      {ENHANCED_SECTIONS.map(({ type, label }) => {
+      {enhancedSectionsFor(data.albums ?? []).map(({ type, label }) => {
         const albums = grouped[type] ?? [];
         // An empty section is omitted entirely, not rendered as a header with
         // nothing under it.

@@ -18,7 +18,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MirroredMatch, ServerPlaylist } from '../-sync.server';
 
 import { recordServerLink } from '../-sync.api';
-
 import { timeAgo } from '../-sync.mirrored';
 import {
   fetchMirroredMatches,

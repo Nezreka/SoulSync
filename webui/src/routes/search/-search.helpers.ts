@@ -32,7 +32,9 @@ export function loadRecentSearches(): string[] {
   try {
     const raw: unknown = JSON.parse(window.localStorage.getItem(RECENT_KEY) || '[]');
     return Array.isArray(raw)
-      ? raw.filter((q): q is string => typeof q === 'string' && q.trim() !== '').slice(0, RECENT_MAX)
+      ? raw
+          .filter((q): q is string => typeof q === 'string' && q.trim() !== '')
+          .slice(0, RECENT_MAX)
       : [];
   } catch {
     return [];
@@ -43,10 +45,10 @@ export function loadRecentSearches(): string[] {
 export function saveRecentSearch(query: string): string[] {
   const q = query.trim();
   if (!q) return loadRecentSearches();
-  const next = [q, ...loadRecentSearches().filter((x) => x.toLowerCase() !== q.toLowerCase())].slice(
-    0,
-    RECENT_MAX,
-  );
+  const next = [
+    q,
+    ...loadRecentSearches().filter((x) => x.toLowerCase() !== q.toLowerCase()),
+  ].slice(0, RECENT_MAX);
   try {
     window.localStorage.setItem(RECENT_KEY, JSON.stringify(next));
   } catch {

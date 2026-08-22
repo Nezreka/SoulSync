@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { fetchAlbumPlayTracks, yearInListeningQueryOptions } from '../-year.api';
+import type { YearAlbum, YearInListening, YearSlideKind } from '../-year.types';
+
 import {
   countUpDuration,
   countUpValue,
   prefersReducedMotion,
   staggerDelay,
 } from '../-year.animation';
+import { fetchAlbumPlayTracks, yearInListeningQueryOptions } from '../-year.api';
 import {
   DEFAULT_YEAR_CARD_OPTIONS,
   MAX_YEAR_CARD_STATS,
@@ -35,8 +37,6 @@ import {
   monthBarHeight,
   peakMonthPlays,
 } from '../-year.helpers';
-import type { YearAlbum, YearInListening, YearSlideKind } from '../-year.types';
-
 import styles from './year-story.module.css';
 
 /**
@@ -243,15 +243,7 @@ function Reveal({
  * render as ragged holes. The fallback carries the first letter so a row is
  * still identifiable at a glance.
  */
-function Art({
-  src,
-  name,
-  className,
-}: {
-  src?: string | null;
-  name: string;
-  className: string;
-}) {
+function Art({ src, name, className }: { src?: string | null; name: string; className: string }) {
   const [failed, setFailed] = useState(false);
   if (!src || failed) {
     return (
@@ -446,11 +438,7 @@ function YearSlide({
           <p className={styles.kicker}>The albums you lived in</p>
           <div className={styles.albumGrid}>
             {year.top_albums.slice(0, 4).map((album, index) => (
-              <AlbumCard
-                key={`${album.name}-${album.artist ?? ''}`}
-                album={album}
-                index={index}
-              />
+              <AlbumCard key={`${album.name}-${album.artist ?? ''}`} album={album} index={index} />
             ))}
           </div>
           <p className={styles.footnote}>Click an album to play it.</p>
@@ -808,7 +796,10 @@ function YearCard({ year }: { year: YearInListening }) {
                   title={YEAR_CARD_LAYOUTS[key].blurb}
                   onClick={() => set('layout', key as YearCardLayout)}
                 >
-                  <span className={`${styles.layoutGlyph} ${styles[`glyph_${key}`] ?? ''}`} aria-hidden="true" />
+                  <span
+                    className={`${styles.layoutGlyph} ${styles[`glyph_${key}`] ?? ''}`}
+                    aria-hidden="true"
+                  />
                   {YEAR_CARD_LAYOUTS[key].label}
                 </button>
               ))}
@@ -859,7 +850,10 @@ function YearCard({ year }: { year: YearInListening }) {
 
           <fieldset className={styles.cardGroup}>
             <legend className={styles.cardControlLabel}>
-              Numbers <span className={styles.cardCount}>{statCount}/{MAX_YEAR_CARD_STATS}</span>
+              Numbers{' '}
+              <span className={styles.cardCount}>
+                {statCount}/{MAX_YEAR_CARD_STATS}
+              </span>
             </legend>
             <div className={styles.chipRow}>
               {YEAR_CARD_STAT_DEFS.map((def) => {

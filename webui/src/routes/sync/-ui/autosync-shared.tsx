@@ -482,13 +482,7 @@ export function AutoSyncLane({
 }
 
 /** 826-834 / 950-960. The strip above both boards. */
-export function AutoSyncBoardIntro({
-  heading,
-  blurb,
-}: {
-  heading: string;
-  blurb: string;
-}) {
+export function AutoSyncBoardIntro({ heading, blurb }: { heading: string; blurb: string }) {
   return (
     <div className="auto-sync-board-intro">
       <div>

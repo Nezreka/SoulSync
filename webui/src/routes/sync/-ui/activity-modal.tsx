@@ -88,7 +88,12 @@ export function ActivityModal({
       <div className="sync-activity-modal" role="dialog" aria-modal="true" aria-label="Activity">
         <div className="sync-activity-head">
           <h3>Activity</h3>
-          <button type="button" className="sync-activity-close" aria-label="Close" onClick={onClose}>
+          <button
+            type="button"
+            className="sync-activity-close"
+            aria-label="Close"
+            onClick={onClose}
+          >
             &times;
           </button>
         </div>

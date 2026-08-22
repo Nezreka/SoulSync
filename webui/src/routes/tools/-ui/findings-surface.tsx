@@ -31,6 +31,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
 import type {
   BulkFixStatus,
   CacheHealthStats,
@@ -38,7 +39,6 @@ import type {
   RepairJob,
   RepairJobRun,
 } from '../-tools.types';
-import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
 
 import {
   bulkFindingAction,
@@ -697,7 +697,10 @@ export function FindingsSurface({
                     // you cleared one group (the #1142 family).
                     findingType: group.finding_type,
                   })
-                : { success: true, deleted: (await dismissFindingType(group.finding_type)).updated };
+                : {
+                    success: true,
+                    deleted: (await dismissFindingType(group.finding_type)).updated,
+                  };
             toast(
               result.success
                 ? `Cleared ${(result.deleted || 0).toLocaleString()} findings`
@@ -913,7 +916,11 @@ export function FindingsSurface({
    *  auto-fixes never grows a control that always reads zero. */
   const statusSegments =
     (counts?.auto_fixed || 0) > 0
-      ? [...STATUS_SEGMENTS.slice(0, 3), { value: 'auto_fixed', label: 'Auto-fixed' }, STATUS_SEGMENTS[3]]
+      ? [
+          ...STATUS_SEGMENTS.slice(0, 3),
+          { value: 'auto_fixed', label: 'Auto-fixed' },
+          STATUS_SEGMENTS[3],
+        ]
       : STATUS_SEGMENTS;
 
   /**

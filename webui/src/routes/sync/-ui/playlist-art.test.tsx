@@ -87,7 +87,15 @@ describe('playlistArtUrl', () => {
   });
 
   it('is safe on the shapes a SELECT * or an untyped payload can produce', () => {
-    for (const row of [null, undefined, 'a string', 42, {}, { image_url: null }, { image_url: 7 }]) {
+    for (const row of [
+      null,
+      undefined,
+      'a string',
+      42,
+      {},
+      { image_url: null },
+      { image_url: 7 },
+    ]) {
       expect(playlistArtUrl(row)).toBeUndefined();
     }
   });
@@ -103,9 +111,17 @@ describe('playlistCoverTiles', () => {
   });
 
   it('is empty for the shapes a nullable JSON column really produces', () => {
-    for (const row of [null, undefined, {}, { cover_tiles: null }, { cover_tiles: '' },
-                       { cover_tiles: '[]' }, { cover_tiles: 'not json' },
-                       { cover_tiles: '{"a":1}' }, { cover_tiles: 42 }]) {
+    for (const row of [
+      null,
+      undefined,
+      {},
+      { cover_tiles: null },
+      { cover_tiles: '' },
+      { cover_tiles: '[]' },
+      { cover_tiles: 'not json' },
+      { cover_tiles: '{"a":1}' },
+      { cover_tiles: 42 },
+    ]) {
       expect(playlistCoverTiles(row)).toEqual([]);
     }
   });
@@ -146,7 +162,14 @@ describe('PlaylistCollage', () => {
 
   it('asks the cache for card-sized copies, like every other cover here', () => {
     const { container } = render(
-      <PlaylistCollage tiles={['/api/image-cache/a', '/api/image-cache/b', '/api/image-cache/c', '/api/image-cache/d']} />,
+      <PlaylistCollage
+        tiles={[
+          '/api/image-cache/a',
+          '/api/image-cache/b',
+          '/api/image-cache/c',
+          '/api/image-cache/d',
+        ]}
+      />,
     );
     expect(container.querySelector('img')?.getAttribute('src')).toBe('/api/image-cache/a?v=card');
   });

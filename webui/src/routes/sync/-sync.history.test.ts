@@ -55,7 +55,7 @@ describe('the source tabs', () => {
     expect(tabs.map((t) => t.source)).toEqual([null, 'spotify', 'deezer', 'tidal']);
   });
 
-  it("All counts the STATS, not the filtered page total", () => {
+  it('All counts the STATS, not the filtered page total', () => {
     // The page total moves with the active filter, so a strip built from it
     // would report on itself as you clicked around.
     const tabs = syncHistorySourceTabs({ spotify: 10, tidal: 2 }, 'tidal');
@@ -261,8 +261,9 @@ describe('reading one poll of the sync status', () => {
   });
 
   it('does not leave a dangling dash when there is no current track', () => {
-    expect(syncHistoryProgress({ status: 'syncing', progress: { current_step: 'Matching' } }).step)
-      .toBe('Matching');
+    expect(
+      syncHistoryProgress({ status: 'syncing', progress: { current_step: 'Matching' } }).step,
+    ).toBe('Matching');
   });
 
   it('never divides by a zero total', () => {

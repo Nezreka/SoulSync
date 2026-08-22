@@ -23,6 +23,7 @@ import type { SourceVerticalConfig } from '../-sync.sources';
 import type { UrlTabPlaylist } from '../-sync.url-tabs';
 import type { SourceVertical } from '../-sync.use-vertical';
 
+import { urlTabCacheKey, useRememberedPlaylists } from '../-sync.account-cache';
 import {
   fetchDeezerLinkPlaylist,
   fetchSourcePlaylistsStates,
@@ -65,7 +66,6 @@ import { URL_HISTORY_SOURCES } from '../-sync.urls';
 import { fetchAndHydrateState } from '../-sync.use-vertical';
 import { cardProgressLine } from './card-progress';
 import { playlistArtUrl } from './playlist-art';
-import { urlTabCacheKey, useRememberedPlaylists } from '../-sync.account-cache';
 import { SourceCard } from './source-card';
 import { UrlHistoryBar, useUrlHistory } from './url-history-bar';
 

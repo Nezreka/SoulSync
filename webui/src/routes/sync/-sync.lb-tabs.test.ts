@@ -135,7 +135,12 @@ describe('the LB card numbers (_refreshOneLbSyncCard 253-283)', () => {
    */
   it('fresh hides; discovery counters carry the pct fallback', () => {
     expect(
-      lbCoverageCounts({ phase: 'fresh', spotifyTotal: 5, spotifyMatches: 1, discoveryProgress: 10 }),
+      lbCoverageCounts({
+        phase: 'fresh',
+        spotifyTotal: 5,
+        spotifyMatches: 1,
+        discoveryProgress: 10,
+      }),
     ).toBeNull();
     expect(
       lbCoverageCounts({
@@ -726,5 +731,4 @@ describe('lbCoverageCounts — the numbers behind the card bar', () => {
   it('fresh returns null so the card hides the element entirely', () => {
     expect(lbCoverageCounts(lbInput({ phase: 'fresh' }))).toBeNull();
   });
-
 });

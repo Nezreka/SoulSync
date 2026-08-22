@@ -2,8 +2,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { parseDbUtc } from './-dash.autosync';
 import { automationCardRows, triggerLabel } from './-dash.automations';
+import { parseDbUtc } from './-dash.autosync';
 
 const NOW = Date.parse('2026-08-11T12:00:00Z');
 
@@ -17,12 +17,44 @@ describe('parseDbUtc', () => {
 
 describe('triggerLabel', () => {
   it('covers the engine trigger map and falls back to events', () => {
-    expect(triggerLabel({ id: 1, trigger_type: 'schedule', trigger_config: { interval: 6, unit: 'hours' } })).toBe('Every 6 hours');
-    expect(triggerLabel({ id: 1, trigger_type: 'schedule', trigger_config: '{"interval": 2, "unit": "days"}' })).toBe('Every 2 days');
-    expect(triggerLabel({ id: 1, trigger_type: 'daily_time', trigger_config: { time: '04:30' } })).toBe('Daily @ 04:30');
-    expect(triggerLabel({ id: 1, trigger_type: 'weekly_time', trigger_config: { time: '09:00', days: ['mon'] } })).toBe('Mon @ 09:00');
-    expect(triggerLabel({ id: 1, trigger_type: 'monthly_time', trigger_config: { day: 15, time: '02:00' } })).toBe('Monthly · day 15 @ 02:00');
-    expect(triggerLabel({ id: 1, trigger_type: 'event', trigger_config: { event: 'watchlist.new_release' } })).toBe('On watchlist new release');
+    expect(
+      triggerLabel({
+        id: 1,
+        trigger_type: 'schedule',
+        trigger_config: { interval: 6, unit: 'hours' },
+      }),
+    ).toBe('Every 6 hours');
+    expect(
+      triggerLabel({
+        id: 1,
+        trigger_type: 'schedule',
+        trigger_config: '{"interval": 2, "unit": "days"}',
+      }),
+    ).toBe('Every 2 days');
+    expect(
+      triggerLabel({ id: 1, trigger_type: 'daily_time', trigger_config: { time: '04:30' } }),
+    ).toBe('Daily @ 04:30');
+    expect(
+      triggerLabel({
+        id: 1,
+        trigger_type: 'weekly_time',
+        trigger_config: { time: '09:00', days: ['mon'] },
+      }),
+    ).toBe('Mon @ 09:00');
+    expect(
+      triggerLabel({
+        id: 1,
+        trigger_type: 'monthly_time',
+        trigger_config: { day: 15, time: '02:00' },
+      }),
+    ).toBe('Monthly · day 15 @ 02:00');
+    expect(
+      triggerLabel({
+        id: 1,
+        trigger_type: 'event',
+        trigger_config: { event: 'watchlist.new_release' },
+      }),
+    ).toBe('On watchlist new release');
   });
 });
 

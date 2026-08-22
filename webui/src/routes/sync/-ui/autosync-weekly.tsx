@@ -249,11 +249,7 @@ export function AutoSyncWeeklyEditor({
               </small>
             </>
           ) : (
-            <button
-              type="button"
-              className="auto-sync-tz-summary"
-              onClick={() => setTzOpen(true)}
-            >
+            <button type="button" className="auto-sync-tz-summary" onClick={() => setTzOpen(true)}>
               Runs in <b>{draft.tz}</b> · change
             </button>
           )}

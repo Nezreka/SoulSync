@@ -56,8 +56,6 @@ export function buildHelloStats(input: {
 
 /** How many enrichment workers are actually running right now. 'active' is
  *  the one stateClass -dash.core assigns for running-and-not-paused. */
-export function countBusyWorkers(
-  pills: Record<string, { stateClass: string | null }>,
-): number {
+export function countBusyWorkers(pills: Record<string, { stateClass: string | null }>): number {
   return Object.values(pills).filter((pill) => pill.stateClass === 'active').length;
 }

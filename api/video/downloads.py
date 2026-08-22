@@ -28,6 +28,11 @@ from flask import jsonify, request
 
 from utils.logging_config import get_logger
 
+# How long a manual search will wait for a Prowlarr budget slot before giving
+# up. Long enough to ride out a couple of background searches, short enough that
+# nobody thinks the page hung.
+MANUAL_SEARCH_MAX_WAIT_SECONDS = 12.0
+
 logger = get_logger("video_api.downloads")
 
 # Video-specific OUTPUT library folders (video.db). The INPUT folder is the shared
@@ -665,8 +670,14 @@ def register_routes(bp):
             raw, live = sres["hits"], True
         elif source in ("torrent", "usenet"):
             from core.video.prowlarr_search import prowlarr_search
+            # A person is waiting on this response, so bound the time it will
+            # sit in the shared Prowlarr budget (core.prowlarr_throttle). The
+            # background wishlist drain queues happily; a manual search should
+            # say "busy, try again" rather than hold a request worker while the
+            # drain empties the window.
             pres = prowlarr_search(scope, title, year=body.get("year"),
                                    season=want_season, episode=want_episode, source=source,
+                                   max_wait_seconds=MANUAL_SEARCH_MAX_WAIT_SECONDS,
                                    **_external_ids(body))
             if not pres.get("configured"):
                 return jsonify({"scope": scope, "results": [],
@@ -711,8 +722,14 @@ def register_routes(bp):
             # Prowlarr is synchronous — like the old mock, results come back in one shot
             # (no polling id), so the client renders immediately.
             from core.video.prowlarr_search import prowlarr_search
+            # A person is waiting on this response, so bound the time it will
+            # sit in the shared Prowlarr budget (core.prowlarr_throttle). The
+            # background wishlist drain queues happily; a manual search should
+            # say "busy, try again" rather than hold a request worker while the
+            # drain empties the window.
             pres = prowlarr_search(scope, title, year=body.get("year"),
                                    season=want_season, episode=want_episode, source=source,
+                                   max_wait_seconds=MANUAL_SEARCH_MAX_WAIT_SECONDS,
                                    **_external_ids(body))
             if not pres.get("configured"):
                 return jsonify({"error": "Prowlarr isn't configured — set its URL + key on Settings → Downloads."})

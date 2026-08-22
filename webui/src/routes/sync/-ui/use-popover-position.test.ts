@@ -140,7 +140,9 @@ describe('usePopoverPosition', () => {
 
     const el = document.createElement('div');
     el.getBoundingClientRect = () => ({ width: 200, height }) as DOMRect;
-    const { result } = renderHook(() => usePopoverPosition({ top: 460, left: 100 }, { current: el }));
+    const { result } = renderHook(() =>
+      usePopoverPosition({ top: 460, left: 100 }, { current: el }),
+    );
     expect(result.current).toEqual({ top: 460, left: 100 }); // 800 - 300 - 8
 
     height = 500;

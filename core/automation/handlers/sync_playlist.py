@@ -202,7 +202,23 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
             and last_hash == tracks_hash
             and last_matched >= len(tracks_json)
         ):
-            # Exact same tracks, all matched last time — nothing to do.
+            # Exact same tracks, all matched last time — nothing to DOWNLOAD.
+            # The run still happened, so it still gets recorded: skipping the
+            # bookkeeping too is what left the dashboard card with no run to
+            # show, saying "no runs yet" and refusing to open, for a playlist
+            # whose pipeline had just completed (Boulder, Aug 2026).
+            try:
+                from core.downloads.history import record_sync_history_noop
+                record_sync_history_noop(
+                    db,
+                    sync_id_key,
+                    pl.get('name') or '',
+                    tracks_json,
+                    profile_id=pl.get('profile_id'),
+                    quality_profile_id=quality_profile_id,
+                )
+            except Exception as hist_err:  # noqa: BLE001 - never fail a sync on bookkeeping
+                deps.logger.debug("no-op sync history failed: %s", hist_err)
             deps.update_progress(
                 auto_id,
                 log_line=f'All {len(tracks_json)} tracks unchanged since last sync — skipping',

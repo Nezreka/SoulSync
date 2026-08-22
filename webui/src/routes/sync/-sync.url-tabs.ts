@@ -9,7 +9,6 @@
 import type { UrlHistoryEntry } from './-sync.urls';
 
 import { wrongTabError } from './-sync.url-detect';
-
 import {
   extractDeezerPlaylistId,
   isDeezerShareUrl,
@@ -77,7 +76,9 @@ export function spotifyPublicUrlError(url: string): string | null {
     !url.startsWith('spotify:playlist:') &&
     !url.startsWith('spotify:album:')
   ) {
-    return wrongTabError(url, 'spotify_public') ?? 'Please enter a valid Spotify playlist or album URL';
+    return (
+      wrongTabError(url, 'spotify_public') ?? 'Please enter a valid Spotify playlist or album URL'
+    );
   }
   return null;
 }

@@ -24,11 +24,11 @@ const SORTS: { key: WishlistListSort; label: string; title: string }[] = [
 function sortGroups(groups: WishlistArtistGroup[], sort: WishlistListSort): WishlistArtistGroup[] {
   const copy = [...groups];
   if (sort === 'name') return copy.sort((a, b) => a.name.localeCompare(b.name));
-  if (sort === 'size') return copy.sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+  if (sort === 'size')
+    return copy.sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
   // failing: stuck counts first, then size, then name — the triage order.
   return copy.sort(
-    (a, b) =>
-      b.failingCount - a.failingCount || b.total - a.total || a.name.localeCompare(b.name),
+    (a, b) => b.failingCount - a.failingCount || b.total - a.total || a.name.localeCompare(b.name),
   );
 }
 

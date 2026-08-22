@@ -3,9 +3,9 @@
  * tab handler at sync-services.js 3694-3811.
  */
 
+import { act, fireEvent, render } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { act, fireEvent, render } from '@testing-library/react';
 import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -130,11 +130,7 @@ describe('the tab strip', () => {
     // through Add playlist now, which detects the service from the link.
     const { container } = renderShell();
     const btns = Array.from(container.querySelectorAll('.sync-tab-button'));
-    expect(btns.map((b) => b.getAttribute('data-tab'))).toEqual([
-      'mirrored',
-      'server',
-      'beatport',
-    ]);
+    expect(btns.map((b) => b.getAttribute('data-tab'))).toEqual(['mirrored', 'server', 'beatport']);
   });
 
   it('opens on Mirrored — the library, not a source directory', () => {

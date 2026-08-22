@@ -15,8 +15,9 @@
 import type { ReactNode } from 'react';
 
 import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
-import { findingTypeBlurb, groupCountForStatus, sortInboxGroups } from '../-tools.groups';
+
 import { findingSeverityClass, findingSeverityIcon } from '../-tools.core';
+import { findingTypeBlurb, groupCountForStatus, sortInboxGroups } from '../-tools.groups';
 
 export interface FindingsInboxProps {
   /** Already filtered by the toolbar; ordering is this component's job. */

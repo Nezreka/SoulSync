@@ -107,75 +107,73 @@ export function AddPlaylistSheet({ anchor, anchorEl, onRoute, onClose }: AddPlay
         </button>
       </div>
 
-        <div className="add-playlist-section">
-          <label className="add-playlist-label" htmlFor="add-playlist-url">
-            Paste a link
-          </label>
-          <div className="add-playlist-row">
-            <input
-              id="add-playlist-url"
-              type="text"
-              autoFocus
-              value={input}
-              placeholder="A playlist or album link from Spotify, Apple Music, Deezer or YouTube"
-              onChange={(e) => {
-                setInput(e.target.value);
-                setSubmitted(false);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') submit();
-              }}
-            />
-            <button
-              type="button"
-              className="add-playlist-submit"
-              // Never disabled: a disabled button explains nothing, and the
-              // whole point here is to SAY what is wrong with the link.
-              onClick={submit}
-            >
-              Add
-            </button>
-          </div>
-          {hint && (
-            <p className={`add-playlist-hint${recognised ? ' add-playlist-hint--ok' : ''}`}>
-              {hint}
-            </p>
-          )}
-        </div>
-
-        <div className="add-playlist-section">
-          <span className="add-playlist-label">Or from a connected account</span>
-          <div className="add-playlist-accounts">
-            {ADD_PLAYLIST_ACCOUNTS.map((account) => (
-              <button
-                key={account.tab}
-                type="button"
-                className="add-playlist-account"
-                onClick={() => {
-                  onRoute(account.tab);
-                  onClose();
-                }}
-              >
-                <span aria-hidden="true">{account.glyph}</span>
-                {account.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="add-playlist-section">
-          <span className="add-playlist-label">Or from a file</span>
+      <div className="add-playlist-section">
+        <label className="add-playlist-label" htmlFor="add-playlist-url">
+          Paste a link
+        </label>
+        <div className="add-playlist-row">
+          <input
+            id="add-playlist-url"
+            type="text"
+            autoFocus
+            value={input}
+            placeholder="A playlist or album link from Spotify, Apple Music, Deezer or YouTube"
+            onChange={(e) => {
+              setInput(e.target.value);
+              setSubmitted(false);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') submit();
+            }}
+          />
           <button
             type="button"
-            className="add-playlist-file"
-            onClick={() => {
-              onRoute('import-file');
-              onClose();
-            }}
+            className="add-playlist-submit"
+            // Never disabled: a disabled button explains nothing, and the
+            // whole point here is to SAY what is wrong with the link.
+            onClick={submit}
           >
-            📄 Import CSV, TSV, TXT or M3U
+            Add
           </button>
         </div>
+        {hint && (
+          <p className={`add-playlist-hint${recognised ? ' add-playlist-hint--ok' : ''}`}>{hint}</p>
+        )}
+      </div>
+
+      <div className="add-playlist-section">
+        <span className="add-playlist-label">Or from a connected account</span>
+        <div className="add-playlist-accounts">
+          {ADD_PLAYLIST_ACCOUNTS.map((account) => (
+            <button
+              key={account.tab}
+              type="button"
+              className="add-playlist-account"
+              onClick={() => {
+                onRoute(account.tab);
+                onClose();
+              }}
+            >
+              <span aria-hidden="true">{account.glyph}</span>
+              {account.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="add-playlist-section">
+        <span className="add-playlist-label">Or from a file</span>
+        <button
+          type="button"
+          className="add-playlist-file"
+          onClick={() => {
+            onRoute('import-file');
+            onClose();
+          }}
+        >
+          📄 Import CSV, TSV, TXT or M3U
+        </button>
+      </div>
     </div>
   );
 }
