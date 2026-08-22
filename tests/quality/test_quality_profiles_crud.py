@@ -354,3 +354,139 @@ def test_apply_quality_profile_to_settings_pushes_into_config_manager(db, monkey
 
 def test_apply_quality_profile_to_settings_returns_none_for_unknown_id(db):
     assert db.apply_quality_profile_to_settings(999999) is None
+
+
+# ---------------------------------------------------------------------------
+# The write-through only touches what the caller actually sent (#1103)
+# ---------------------------------------------------------------------------
+
+_BUNDLE_ON = {
+    "acoustid_required": 1,
+    "downsample_enabled": 1,
+    "deep_audio_verify": 1,
+    "replace_lower_quality": 1,
+    "lossy_copy_enabled": 1,
+    "lossy_copy_codec": "opus",
+    "lossy_copy_bitrate": "256",
+    "lossy_copy_delete_original": 1,
+}
+
+# Exactly what settings.js::collectQualityProfileFromUI() posts to
+# POST /api/quality-profile — the ladder and nothing else.
+_LADDER_ONLY = {
+    "version": 3,
+    "preset": "custom",
+    "fallback_enabled": True,
+    "search_mode": "priority",
+    "rank_candidates_by_quality": False,
+    "upgrade_policy": "acceptable",
+    "upgrade_cutoff_index": 0,
+    "ranked_targets": [{"format": "flac"}],
+}
+
+
+def _arm_bundle(db):
+    """Turn every non-ladder setting on, the way the profile CRUD would."""
+    conn = db._get_connection()
+    try:
+        conn.execute(
+            "UPDATE quality_profiles SET "
+            + ", ".join(f"{c}=?" for c in _BUNDLE_ON)
+            + " WHERE is_default=1",
+            tuple(_BUNDLE_ON.values()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _bundle_row(db):
+    conn = db._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM quality_profiles WHERE is_default=1").fetchone()
+        return {c: row[c] for c in _BUNDLE_ON}
+    finally:
+        conn.close()
+
+
+def test_a_ladder_only_save_does_not_reset_the_other_settings(db):
+    """The Settings page posts six fields; the row holds fourteen.
+
+    Coercing the eight it never mentions would turn lossy-copy, AcoustID
+    strictness and replace-lower-quality off every time somebody reordered the
+    target ladder — and those eight are owned by the config, which reaches this
+    row through sync_default_quality_profile_from_config().
+    """
+    _arm_bundle(db)
+
+    assert db.set_quality_profile(dict(_LADDER_ONLY)) is True
+
+    assert _bundle_row(db) == _BUNDLE_ON
+
+
+def test_a_preset_apply_does_not_reset_them_either(db):
+    """A Quick Set preset carries fewer keys still (ranked_targets, preset,
+    version, fallback_enabled, qualities) — same rule applies."""
+    _arm_bundle(db)
+
+    assert db.set_quality_profile(db.get_quality_preset("lossless")) is True
+
+    assert _bundle_row(db) == _BUNDLE_ON
+
+
+def test_naming_a_field_writes_it_including_switching_it_off(db):
+    """Presence decides, not truthiness — otherwise a caller could turn these
+    on but never off, which is the half-working state #1103 reported."""
+    _arm_bundle(db)
+
+    assert db.set_quality_profile({
+        **_LADDER_ONLY,
+        "replace_lower_quality": False,
+        "lossy_copy_enabled": False,
+        "lossy_copy_codec": "aac",
+    }) is True
+
+    row = _bundle_row(db)
+    assert row["replace_lower_quality"] == 0
+    assert row["lossy_copy_enabled"] == 0
+    assert row["lossy_copy_codec"] == "aac"
+    # Untouched keys keep their value.
+    assert row["acoustid_required"] == 1
+    assert row["lossy_copy_bitrate"] == "256"
+    assert row["lossy_copy_delete_original"] == 1
+
+
+def test_a_full_get_payload_round_trips(db):
+    """GET returns all fourteen; posting that back must be a no-op rather than
+    dropping the eight the endpoint used to ignore."""
+    _arm_bundle(db)
+    before = db.get_quality_profile()
+
+    assert db.set_quality_profile(before) is True
+
+    after = db.get_quality_profile()
+    for field in _BUNDLE_ON:
+        assert after[field] == before[field], field
+
+
+def test_the_ladder_is_still_written_unconditionally(db):
+    """Guard for the sparse UPDATE: the six ladder columns must never fall out
+    of the statement just because the bundle ones did."""
+    assert db.set_quality_profile({
+        **_LADDER_ONLY,
+        "fallback_enabled": False,
+        "search_mode": "best_quality",
+        "rank_candidates_by_quality": True,
+        "upgrade_policy": "until_cutoff",
+        "upgrade_cutoff_index": 2,
+        "ranked_targets": [{"label": "Only FLAC", "format": "flac"}],
+    }) is True
+
+    reloaded = db.get_quality_profile()
+    assert reloaded["fallback_enabled"] is False
+    assert reloaded["search_mode"] == "best_quality"
+    assert reloaded["rank_candidates_by_quality"] is True
+    assert reloaded["upgrade_policy"] == "until_cutoff"
+    assert reloaded["upgrade_cutoff_index"] == 2
+    assert reloaded["ranked_targets"] == [{"label": "Only FLAC", "format": "flac"}]

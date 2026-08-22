@@ -11216,33 +11216,55 @@ class MusicDatabase:
             logger.error(f"Failed to save quality profile: {e}")
             return False
 
+    # The columns `_write_default_quality_profile_row` writes unconditionally
+    # (the ranked-target ladder and its flags), and the ones it writes only
+    # when the caller actually named them. See that method for why the split
+    # exists.
+    _QUALITY_LADDER_COLUMNS = (
+        "ranked_targets", "fallback_enabled", "search_mode",
+        "rank_candidates_by_quality", "upgrade_policy", "upgrade_cutoff_index",
+    )
+    _QUALITY_BUNDLE_COLUMNS = (
+        "acoustid_required", "downsample_enabled", "deep_audio_verify",
+        "replace_lower_quality", "lossy_copy_enabled", "lossy_copy_codec",
+        "lossy_copy_bitrate", "lossy_copy_delete_original",
+    )
+
     def _write_default_quality_profile_row(self, profile: dict) -> None:
         """Write-through helper for `set_quality_profile`: updates the
-        ``is_default=1`` row in `quality_profiles` to match."""
-        import json
-        try:
-            cutoff_index = max(0, int(profile.get("upgrade_cutoff_index") or 0))
-        except (TypeError, ValueError):
-            cutoff_index = 0
-        upgrade_policy = profile.get("upgrade_policy")
-        if upgrade_policy not in ("acceptable", "until_cutoff", "until_top"):
-            upgrade_policy = "acceptable"
+        ``is_default=1`` row in `quality_profiles` to match.
+
+        Writes the ladder columns always and a bundle column only when
+        ``profile`` actually carries that key. The asymmetry is the point:
+        ``GET /api/quality-profile`` returns all fourteen fields, but the
+        Settings page posts back only the six ladder ones
+        (``settings.js::collectQualityProfileFromUI``) and a Quick Set preset
+        carries even fewer. The other eight belong to the global config and
+        reach this row through
+        :meth:`sync_default_quality_profile_from_config` after a settings
+        save, so a POST that never mentioned them must leave them alone —
+        writing a coerced default for an absent key would silently reset
+        lossy-copy, AcoustID strictness and replace-lower-quality every time
+        somebody reordered the target ladder.
+
+        Naming a key still works, including turning one off: presence decides,
+        not truthiness. That is what makes a full round-trip of the GET
+        payload behave the way a caller expects, which it previously did not
+        (PR #1103 reported exactly that, but fixed it by writing all fourteen
+        unconditionally, which is the reset described above).
+        """
+        params = self._quality_profile_bundle_params(profile)
+        columns = list(self._QUALITY_LADDER_COLUMNS)
+        columns += [c for c in self._QUALITY_BUNDLE_COLUMNS if c in profile]
+        # Interpolated, but only ever from the two class-level tuples above —
+        # `profile` decides which of those names are used, never what they are.
+        assignments = ", ".join(f"{c}=:{c}" for c in columns)
         conn = self._get_connection()
         try:
             conn.execute(
-                """UPDATE quality_profiles
-                      SET ranked_targets=?, fallback_enabled=?, search_mode=?,
-                          rank_candidates_by_quality=?, upgrade_policy=?,
-                          upgrade_cutoff_index=?, updated_at=CURRENT_TIMESTAMP
-                    WHERE is_default=1""",
-                (
-                    json.dumps(profile.get("ranked_targets") or []),
-                    1 if profile.get("fallback_enabled", True) else 0,
-                    profile.get("search_mode") if profile.get("search_mode") in ("priority", "best_quality") else "priority",
-                    1 if profile.get("rank_candidates_by_quality") else 0,
-                    upgrade_policy,
-                    cutoff_index,
-                ),
+                f"UPDATE quality_profiles SET {assignments}, "
+                "updated_at=CURRENT_TIMESTAMP WHERE is_default=1",
+                {c: params[c] for c in columns},
             )
             conn.commit()
         finally:
