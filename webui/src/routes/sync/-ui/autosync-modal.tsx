@@ -197,6 +197,33 @@ export function AutoSyncModal({
 
   const summary = autoSyncSummary(state);
 
+  /**
+   * Escape closes, like every other overlay on this page.
+   *
+   * The vanilla had no key handler here, and the port inherited that — but it
+   * is not a house style worth matching: the genre browser, the server search
+   * overlay and the server disambiguation modal all wire Escape. This one was
+   * simply the odd one out, and it is the largest surface of the four.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  /**
+   * ONE description of what this modal is.
+   *
+   * The vanilla gave the error, loading and ready states three different
+   * blurbs — so the explanation of the feature changed depending on whether its
+   * data had arrived. This is the accurate one; the state-specific message
+   * belongs in the body, where it already is.
+   */
+  const BLURB =
+    'Schedule mirrored playlists through the same playlist-pipeline engine used by Automations.';
+
   // 594: a click on the overlay itself — never on the modal — closes it.
   const overlay = (children: React.ReactNode) => (
     <div
@@ -218,17 +245,32 @@ export function AutoSyncModal({
         <h3>Auto-Sync Manager</h3>
         <p>{blurb}</p>
       </div>
-      <button type="button" className="auto-sync-close" onClick={onClose}>
-        &times;
-      </button>
+      {/* ONE Refresh. The vanilla grew four — monitor, hourly board, weekly
+          board and history — all calling this same handler, so which one you
+          reached for depended only on where you happened to be looking. */}
+      <div className="auto-sync-header-actions">
+        <button type="button" className="auto-sync-refresh" onClick={onRefresh}>
+          Refresh
+        </button>
+        <button type="button" className="auto-sync-close" onClick={onClose}>
+          &times;
+        </button>
+      </div>
     </div>
   );
 
   if (loadError) {
     return overlay(
       <div className="auto-sync-modal">
-        {header('Could not load schedule data.')}
-        <div className="auto-sync-error">{loadError}</div>
+        {header(BLURB)}
+        <div className="auto-sync-error">
+          <p>{loadError}</p>
+          {/* Without this the only way out of a failed load was to close the
+              modal and reopen it — which the user has to guess at. */}
+          <button type="button" className="auto-sync-error-retry" onClick={onRefresh}>
+            Try again
+          </button>
+        </div>
       </div>,
     );
   }
@@ -236,9 +278,7 @@ export function AutoSyncModal({
   if (loading) {
     return overlay(
       <div className="auto-sync-modal">
-        {header(
-          'Drop mirrored playlists onto an interval to schedule refresh, discovery, sync, and wishlist processing.',
-        )}
+        {header(BLURB)}
         <div className="auto-sync-loading">Loading schedule...</div>
       </div>,
     );
@@ -246,32 +286,36 @@ export function AutoSyncModal({
 
   return overlay(
     <div className="auto-sync-modal">
-      {header(
-        'Schedule mirrored playlists through the same playlist-pipeline engine used by Automations.',
-      )}
+      {header(BLURB)}
+      {/* One fact per slot, and the better fact.
+          - "scheduled playlists" and "active schedules" were the same number
+            until something was paused. Paused is the interesting half, so it
+            rides along and only appears when it is not zero.
+          - "mirrored tracks" was never about scheduling at all. Failed runs
+            are, and they are the one number here you would act on. */}
       <div className="auto-sync-summary">
         <div>
           <span>{summary.scheduledCount}</span>
-          <small>scheduled playlists</small>
-        </div>
-        <div>
-          <span>{summary.enabledCount}</span>
-          <small>active schedules</small>
+          <small>
+            scheduled {summary.scheduledCount === 1 ? 'playlist' : 'playlists'}
+            {summary.pausedCount > 0 ? ` · ${summary.pausedCount} paused` : ''}
+          </small>
         </div>
         <div>
           <span>{summary.pipelineCount}</span>
           <small>automation pipelines</small>
         </div>
-        <div>
-          <span>{summary.totalTracks}</span>
-          <small>mirrored tracks</small>
-        </div>
+        {summary.historyErrorCount > 0 && (
+          <div className="auto-sync-summary-bad">
+            <span>{summary.historyErrorCount}</span>
+            <small>failed {summary.historyErrorCount === 1 ? 'run' : 'runs'}</small>
+          </div>
+        )}
       </div>
 
       <AutoSyncMonitorPanel
         playlists={state.playlists}
         onDetails={onOpenDetails}
-        onRefresh={onRefresh}
       />
 
       <div className="auto-sync-tabs">
@@ -351,7 +395,6 @@ export function AutoSyncModal({
           filter={historyFilter}
           onFilterChange={onHistoryFilterChange}
           onLoadMore={onLoadMoreHistory}
-          onRefresh={onRefresh}
           onRunAgain={onRunAgain}
           now={now}
         />

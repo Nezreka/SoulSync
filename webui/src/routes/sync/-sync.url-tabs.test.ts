@@ -18,6 +18,7 @@ import {
   itunesLinkTypeBadge,
   itunesLinkUrlError,
   readUrlHistory,
+  slashTextCounts,
   slashTextProgressLine,
   spotifyPublicAlreadyLoaded,
   spotifyPublicCardIcon,
@@ -79,7 +80,13 @@ describe('input validation toasts (verbatim)', () => {
 
   it('spotify-public (6615-6625) — urls + URIs', () => {
     expect(spotifyPublicUrlError('')).toBe('Please enter a Spotify URL');
+    // A link this page CAN read, just not here, now names the tab that wants
+    // it rather than describing the field the user is standing in.
     expect(spotifyPublicUrlError('https://deezer.com/playlist/1')).toBe(
+      'That is a Deezer link. Paste it on the Deezer Link tab to load it.',
+    );
+    // Anything unrecognisable still gets the tab's own message, verbatim.
+    expect(spotifyPublicUrlError('https://example.com/whatever')).toBe(
       'Please enter a valid Spotify playlist or album URL',
     );
     expect(spotifyPublicUrlError('https://open.spotify.com/playlist/abc')).toBeNull();
@@ -288,5 +295,30 @@ describe('url-history storage (getUrlHistory 8662-8669)', () => {
     localStorage.setItem('soulsync-url-history-youtube', 'not-json');
     expect(readUrlHistory('youtube')).toEqual([]);
     expect(readUrlHistory('unknown-source')).toEqual([]);
+  });
+});
+
+describe('slashTextCounts — one arithmetic for the card bar and the legacy string', () => {
+  it('failed is total-matches and percent is matches/total', () => {
+    expect(slashTextCounts({ spotify_total: 10, spotify_matches: 7 })).toEqual({
+      total: 10,
+      matches: 7,
+      failed: 3,
+      percentage: 70,
+    });
+  });
+
+  it('missing counters default to zero rather than NaN', () => {
+    expect(slashTextCounts({})).toEqual({ total: 0, matches: 0, failed: 0, percentage: 0 });
+  });
+
+  it('the string is built FROM it, so the two can never disagree', () => {
+    // The card renders the numbers and the vanilla string renders the text;
+    // splitting them was only safe because both read this one function.
+    const input = { spotify_total: 9, spotify_matches: 5 };
+    const c = slashTextCounts(input);
+    expect(slashTextProgressLine(input)).toBe(
+      `♪ ${c.total} / ✓ ${c.matches} / ✗ ${c.failed} / ${c.percentage}%`,
+    );
   });
 });

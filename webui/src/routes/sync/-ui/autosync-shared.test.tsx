@@ -345,17 +345,18 @@ describe('AutoSyncLane (809-826 / 933-949)', () => {
 });
 
 describe('AutoSyncBoardIntro (826-834 / 950-960)', () => {
-  it('renders the board-specific copy and wires Refresh', () => {
+  it('renders the board-specific copy, and carries no Refresh of its own', () => {
     const onRefresh = vi.fn();
     const { container } = render(
       <AutoSyncBoardIntro
         heading="Drag playlists onto a day"
         blurb="blurb"
-        onRefresh={onRefresh}
       />,
     );
     expect(container.querySelector('strong')?.textContent).toBe('Drag playlists onto a day');
-    fireEvent.click(container.querySelector('button') as HTMLElement);
-    expect(onRefresh).toHaveBeenCalledTimes(1);
+    // This intro renders on BOTH boards, so its button was two of the four
+    // duplicate Refreshes on its own. The modal header owns the only one now.
+    expect(container.querySelector('button')).toBeNull();
+    expect(onRefresh).not.toHaveBeenCalled();
   });
 });

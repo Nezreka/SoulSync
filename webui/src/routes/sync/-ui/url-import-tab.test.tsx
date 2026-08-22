@@ -5,11 +5,12 @@
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { UrlTabPlaylist } from '../-sync.url-tabs';
 
 import { fetchYouTubePlaylists } from '../-sync.api';
+import { forgetAccountPlaylists } from '../-sync.account-cache';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { useSourceVertical } from '../-sync.use-vertical';
 import { UrlHistoryBar, useUrlHistory } from './url-history-bar';
@@ -50,7 +51,16 @@ function stubFetch(): void {
   );
 }
 
+beforeEach(() => {
+  // The URL tabs remember their rows across mounts now, so this must be
+  // cleared BEFORE each test as well as after: an afterEach alone still lets
+  // the file's FIRST test start on rows left by whatever ran before it, which
+  // showed up as an order-dependent failure rather than a consistent one.
+  forgetAccountPlaylists();
+});
+
 afterEach(() => {
+  forgetAccountPlaylists();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   localStorage.clear();
@@ -108,8 +118,10 @@ describe('DeezerLinkTab', () => {
     expect(screen.getByText('2 tracks')).toBeInTheDocument();
     // The state hydration painted the discovered phase + check-note spans.
     await waitFor(() => expect(screen.getByText('Discovery Complete')).toBeInTheDocument());
-    expect(screen.getByText('✓ 1')).toBeInTheDocument();
-    expect(screen.getByText('♪ 2')).toBeInTheDocument();
+    expect(screen.getByText('1 / 2')).toBeInTheDocument();
+    // check-note sources print no percentage — unifying the markup must not
+    // have invented one.
+    expect(document.querySelector('.pcc-pct')).toBeNull();
 
     const mirror = calls.find((c) => c.url === '/api/mirror-playlist');
     expect(mirror).toBeDefined();

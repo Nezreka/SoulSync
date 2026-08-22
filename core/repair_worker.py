@@ -3409,11 +3409,20 @@ class RepairWorker:
                                    (corrected_track_number, track_id))
                 album_id = details.get('album_id')
                 if album_id:
+                    # Every one of these columns is exported by MetaSync, so
+                    # each write moves updated_at (L2-011) — otherwise the full
+                    # export changes and no incremental ever mentions the row.
                     if corrected_album:
-                        cursor.execute("UPDATE albums SET title = ? WHERE id = ?", (corrected_album, album_id))
+                        cursor.execute("UPDATE albums SET title = ?, "
+                                       "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                       (corrected_album, album_id))
                     if corrected_year and corrected_year.isdigit():
-                        cursor.execute("UPDATE albums SET year = ? WHERE id = ?", (int(corrected_year), album_id))
-                    cursor.execute("UPDATE albums SET artist_id = ? WHERE id = ?", (new_artist_id, album_id))
+                        cursor.execute("UPDATE albums SET year = ?, "
+                                       "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                       (int(corrected_year), album_id))
+                    cursor.execute("UPDATE albums SET artist_id = ?, "
+                                   "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                   (new_artist_id, album_id))
                 conn.commit()
             finally:
                 conn.close()

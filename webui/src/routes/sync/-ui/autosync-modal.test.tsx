@@ -63,14 +63,33 @@ describe('the three shell states (588, 640-649, 652-731)', () => {
     expect(container.querySelector('.auto-sync-summary')).toBeNull();
   });
 
-  it('replaces the whole body on a load error', () => {
-    const { container } = renderModal({ loadError: 'it broke' });
-    expect(container.querySelector('.auto-sync-error')?.textContent).toBe('it broke');
-    expect(container.querySelector('.auto-sync-header p')?.textContent).toBe(
-      'Could not load schedule data.',
-    );
+  it('replaces the whole body on a load error, and offers a way out of it', () => {
+    const { container, props } = renderModal({ loadError: 'it broke' });
+    expect(container.querySelector('.auto-sync-error p')?.textContent).toBe('it broke');
     expect(container.querySelector('.auto-sync-tabs')).toBeNull();
     expect(container.querySelector('.auto-sync-loading')).toBeNull();
+
+    // Without this the only recovery was to close the modal and reopen it,
+    // which nothing on screen told the user to do.
+    const retry = container.querySelector('.auto-sync-error-retry') as HTMLElement;
+    expect(retry).not.toBeNull();
+    fireEvent.click(retry);
+    expect(props.onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('describes the feature the SAME way in every state', () => {
+    // The three states used to carry three different blurbs, so what Auto-Sync
+    // *is* changed depending on whether its data had arrived.
+    const blurbOf = (over: Parameters<typeof renderModal>[0]) => {
+      const { container, unmount } = renderModal(over);
+      const text = container.querySelector('.auto-sync-header p')?.textContent;
+      unmount();
+      return text;
+    };
+    const ready = blurbOf({});
+    expect(ready).toBeTruthy();
+    expect(blurbOf({ loading: true })).toBe(ready);
+    expect(blurbOf({ loadError: 'it broke' })).toBe(ready);
   });
 
   it('prefers the error over the loading state', () => {
@@ -106,7 +125,7 @@ describe('closing (594, 585)', () => {
 });
 
 describe('the summary counters (658-664)', () => {
-  it('counts both schedule kinds, active schedules, pipelines and tracks', () => {
+  it('shows one fact per slot, with paused riding along on the schedule count', () => {
     const { container } = renderModal({
       state: emptyState({
         playlists: [{ id: 1, track_count: 10 }, { id: 2, track_count: '5' }, { id: 3 }],
@@ -121,8 +140,40 @@ describe('the summary counters (658-664)', () => {
     const nums = Array.from(container.querySelectorAll('.auto-sync-summary span')).map(
       (s) => s.textContent,
     );
-    // 3 scheduled (2 hourly + 1 weekly), 2 active, 2 pipelines, 15 tracks.
-    expect(nums).toEqual(['3', '2', '2', '15']);
+    // 3 scheduled (2 hourly + 1 weekly) and 2 pipelines. "active schedules"
+    // was the same number as "scheduled" until something was paused, so the
+    // paused one rides on the first tile instead of taking a second; and
+    // "mirrored tracks" was never about scheduling at all.
+    expect(nums).toEqual(['3', '2']);
+    expect(container.querySelector('.auto-sync-summary small')?.textContent).toBe(
+      'scheduled playlists · 1 paused',
+    );
+  });
+
+  it('says nothing about paused when nothing is', () => {
+    const { container } = renderModal({
+      state: emptyState({
+        playlists: [{ id: 1, track_count: 10 }],
+        playlistSchedules: { '1': { hours: 24, enabled: true } as never },
+      }),
+    });
+    expect(container.querySelector('.auto-sync-summary small')?.textContent).toBe(
+      'scheduled playlist',
+    );
+  });
+
+  it('surfaces failed runs, which is the one number here you would act on', () => {
+    const { container } = renderModal({
+      state: emptyState({ runHistory: [{ status: 'error' }, { status: 'error' }] as never }),
+    });
+    const bad = container.querySelector('.auto-sync-summary-bad');
+    expect(bad?.querySelector('span')?.textContent).toBe('2');
+    expect(bad?.querySelector('small')?.textContent).toBe('failed runs');
+  });
+
+  it('hides the failure tile when there are none', () => {
+    const { container } = renderModal();
+    expect(container.querySelector('.auto-sync-summary-bad')).toBeNull();
   });
 
   it('reads enabled as plain truthiness here, unlike everywhere else (660)', () => {
@@ -371,9 +422,14 @@ describe('the bulk popover inside the modal', () => {
 });
 
 describe('the monitor and the panels are wired through', () => {
-  it('passes Refresh through from the monitor head', () => {
+  it('has exactly ONE Refresh, in the header, and it is wired', () => {
     const { container, props } = renderModal();
-    fireEvent.click(container.querySelector('.auto-sync-monitor-head button') as HTMLElement);
+    const refreshes = [...container.querySelectorAll('button')].filter(
+      (b) => b.textContent?.trim() === 'Refresh',
+    );
+    expect(refreshes).toHaveLength(1);
+    expect(refreshes[0].closest('.auto-sync-header')).not.toBeNull();
+    fireEvent.click(refreshes[0]);
     expect(props.onRefresh).toHaveBeenCalledTimes(1);
   });
 
@@ -397,5 +453,20 @@ describe('the monitor and the panels are wired through', () => {
     expect(props.onHistoryFilterChange).toHaveBeenCalledWith('error');
     fireEvent.click(container.querySelector('.auto-sync-history-load-more') as HTMLElement);
     expect(props.onLoadMoreHistory).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Escape', () => {
+  it('closes the modal', () => {
+    const { props } = renderModal();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(props.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores other keys', () => {
+    const { props } = renderModal();
+    fireEvent.keyDown(document, { key: 'Enter' });
+    fireEvent.keyDown(document, { key: 'a' });
+    expect(props.onClose).not.toHaveBeenCalled();
   });
 });

@@ -28,10 +28,43 @@ export interface MirroredPlaylistRow {
   source_playlist_id?: string;
   source_ref?: string;
   description?: string;
+  /** The poster the SOURCE supplied, when it supplied one. */
+  image_url?: string;
+  /**
+   * Up to four distinct album covers borrowed from the playlist's discovered
+   * tracks, as a JSON array string. The fallback for the many sources that send
+   * no poster at all — see backfill_missing_mirrored_covers.
+   */
+  cover_tiles?: string | null;
   track_count?: number;
   total_count?: number;
   discovered_count?: number;
+  /**
+   * Tracks SoulSync actually owns a file for, which is a different and stronger
+   * question than `discovered_count`. Discovery only matched a track to a
+   * source; this joins against the real `tracks` table by source id or by
+   * artist+title (web_server.py's batch status counts). A playlist can be fully
+   * discovered and own none of it.
+   */
+  in_library_count?: number;
+  /**
+   * How many of this playlist's tracks the sync matcher has ever checked.
+   *
+   * 0 means nobody has looked, which is NOT "you own none of it" — a playlist
+   * that has never synced since the flag existed has no answer either way, and
+   * reporting the second when we only know the first is how the previous
+   * attempt at this went wrong.
+   */
+  library_checked_count?: number;
   quality_profile_id?: number | null;
+  /**
+   * Download missing tracks into a playlist-named folder.
+   *
+   * A per-playlist setting whose ONLY UI was a scheduled card on the Auto-Sync
+   * board, so it became unreachable for any playlist that was not scheduled.
+   * It belongs with the playlist, not with its cadence.
+   */
+  organize_by_playlist?: boolean;
   updated_at?: string;
   mirrored_at?: string;
   pipeline_state?: {

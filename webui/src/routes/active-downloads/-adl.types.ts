@@ -58,6 +58,71 @@ export interface AdlDownload {
   /** History rows only. */
   created_at?: string;
   file_path?: string;
+
+  /**
+   * Where it came from — "YouTube"/"Tidal"/"Soulseek" (#1156). Present on
+   * every row now: live rows resolve it from the transfer username, history
+   * rows carry library_history.download_source. Empty until a source is
+   * picked (pending/searching).
+   */
+  download_source?: string;
+  /** In-flight rows only — what the engine is doing right now (#1156). */
+  live_detail?: AdlLiveDetail;
+}
+
+/**
+ * The live narration for one in-flight task (#1156). Every field is
+ * optional by design — the engine attaches what it knows at that moment,
+ * and the renderer shows what arrived. Searching rows carry the query
+ * ladder; downloading rows carry the chosen peer/file and raw queue state.
+ */
+export interface AdlLiveDetail {
+  source?: string;
+  query?: string;
+  query_index?: number;
+  query_count?: number;
+  responses?: number;
+  results?: number;
+  by_source?: Record<string, number>;
+  username?: string;
+  filename?: string;
+  candidate_index?: number;
+  candidate_count?: number;
+  picked?: {
+    quality?: string;
+    bitrate?: number | null;
+    size?: number | null;
+    confidence?: number;
+    queue_length?: number | null;
+    free_upload_slots?: number | null;
+    upload_speed?: number | null;
+  };
+  slskd_state?: string;
+  queued_seconds?: number;
+  tried_sources?: number;
+  exhausted_sources?: string[];
+  speed?: number;
+  size?: number;
+  bytes?: number;
+}
+
+/** GET /api/downloads/task/<id>/detail — the terminal-row expansion data. */
+export interface AdlTaskDetail {
+  task_id: string;
+  status: string;
+  status_kind: string;
+  title: string;
+  artist: string;
+  album: string;
+  source: string;
+  reason: string;
+  quarantine_entry_id: string;
+  file_path: string;
+  quality: string;
+  acoustid_result: string;
+  thumb_url: string;
+  expected: { title?: string; artist?: string };
+  downloaded: { title?: string; artist?: string; album?: string };
 }
 
 /** One live batch. `album_bundle` is present only for release downloads. */
@@ -118,6 +183,19 @@ export interface AdlBatchHistoryEntry {
 export interface AdlVerificationConfig {
   acoustid_enabled?: boolean;
   require_verified?: boolean;
+}
+
+/**
+ * Server-side counts for the review queue.
+ *
+ * The quarantine list used to load once and never again, so its number sat at
+ * whatever it was when you last opened the tab. This is a listdir plus one
+ * indexed count, cheap enough to poll.
+ */
+export interface AdlReviewSummary {
+  quarantine: number;
+  unverified: number;
+  total: number;
 }
 
 /** A quarantined file plus its sidecar. */

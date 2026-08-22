@@ -22,6 +22,12 @@ fetch is in flight. Same shape as ``ss:discovery-progress`` and
 Everything here is best-effort by construction: a progress callback that throws,
 a socket that is down, an older server that never emits — none of it may affect
 whether the playlist loads.
+
+Later: the same silence was reported again, on the OTHER deezer path. The ARL
+account tab passed a progress_cb and narrated; the paste-a-link tab passed None
+and sat on "Loading..." for minutes on a 1500-track playlist. Same feature, two
+paths, one of them wired. Both are covered here now, and the event constant
+moved to -sync.events.ts so the two consumers cannot drift apart.
 """
 
 import inspect
@@ -160,9 +166,44 @@ def test_the_card_ignores_frames_for_other_playlists():
 
 
 def test_the_event_name_matches_on_both_sides():
+    """The constant lives in -sync.events.ts, not in whichever component
+    happened to consume it first: BOTH deezer tabs listen for these frames
+    now, and a shared event defined inside one component's file is how two
+    consumers quietly drift apart."""
     core = read('webui/static/core.js')
-    tsx = read('webui/src/routes/sync/-ui/account-tabs.tsx')
-    assert f"'{EVENT}'" in core and f"= '{EVENT}'" in tsx
+    events = read('webui/src/routes/sync/-sync.events.ts')
+    assert f"'{EVENT}'" in core and f"= '{EVENT}'" in events
+
+
+def test_the_paste_a_link_tab_listens_too():
+    """The second consumer, and the one that was silent for a year: the ARL
+    account path passed a progress_cb and narrated, while the paste-a-link
+    path passed None and sat on "Loading..." for minutes (Boulder, on a
+    1500-track playlist)."""
+    tsx = read('webui/src/routes/sync/-ui/url-import-tab.tsx')
+    assert 'addEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT' in tsx
+    assert 'removeEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT' in tsx
+    before_removal = tsx[:tsx.index('removeEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT')]
+    assert 'finally' in before_removal[-400:], \
+        "removal has to be in the finally, or an error leaves it attached"
+
+
+def test_the_public_playlist_route_emits_as_well():
+    """Same event, same shape, so the existing core.js bridge and consumers
+    work unchanged."""
+    src = read('web_server.py')
+    i = src.index('def get_deezer_playlist(')
+    route = src[i:src.index('\n@app.route', i)]
+    assert 'progress_cb=_emit_progress' in route
+    assert f"socketio.emit('{SOCKET_EVENT}'" in route
+
+
+def test_the_public_playlist_fetch_accepts_a_callback():
+    from core.deezer_client import DeezerClient
+
+    sig = inspect.signature(DeezerClient.get_playlist)
+    assert 'progress_cb' in sig.parameters
+    assert sig.parameters['progress_cb'].default is None, "must stay optional"
 
 
 def test_the_built_bundle_carries_the_listener():

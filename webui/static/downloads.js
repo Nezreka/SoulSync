@@ -2380,15 +2380,251 @@ function _ensureCandidatesClickListener(statusEl) {
         _hideErrorTooltip();
         const taskId = this.dataset.taskId;
         if (!taskId) return;
-        // Decide at click-time from dataset set each render: completed and
-        // quarantined rows open the rich track-detail modal (it carries the
-        // play/listen + Accept/Search actions); plain failed/not-found go
-        // straight to the search modal.
+        // Decide at click-time from dataset set each render: in-flight rows
+        // open the live pop-in (#1156); completed and quarantined rows open
+        // the rich track-detail modal (it carries the play/listen +
+        // Accept/Search actions); plain failed/not-found go straight to the
+        // search modal.
+        if (this.dataset.liveOpen) {
+            _toggleLivePopover(taskId, this);
+            return;
+        }
+        // Cell clicks stopPropagation, so the outside-click closer never sees
+        // them — close any open pop-in before opening something else.
+        _hideLivePopover();
         if (this.dataset.detailOpen && typeof openTrackDetail === 'function') {
             openTrackDetail(taskId);
         } else {
             showCandidatesModal(taskId);
         }
+    });
+}
+
+// --- Live status pop-in (#1156): click an in-flight status cell to watch ---
+// Renders from the SAME 2s batch frames processModalStatusUpdate already
+// receives (socket + poll), so there is no extra transport: each render
+// stashes the task frame on the cell, the pop-in re-renders on every frame
+// while open, and closes itself the moment the task leaves the in-flight
+// states — wishx's "if it's no longer searching it just closes".
+const _LIVE_POPOVER_STATUSES = ['pending', 'searching', 'downloading', 'queued', 'post_processing'];
+let _livePopoverTaskId = null;
+
+function _getLivePopover() {
+    let el = document.getElementById('live-status-popover');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'live-status-popover';
+        document.body.appendChild(el);
+        // Outside click closes; clicks inside the pop-in don't.
+        document.addEventListener('click', (e) => {
+            if ((_livePopoverTaskId || _livePopoverBundleId) && !el.contains(e.target)) _hideLivePopover();
+        });
+    }
+    return el;
+}
+
+function _hideLivePopover() {
+    _livePopoverTaskId = null;
+    _livePopoverBundleId = null;
+    const el = document.getElementById('live-status-popover');
+    if (el) el.classList.remove('visible');
+}
+
+function _fmtLiveBytes(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v) || v <= 0) return '';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = v, unit = 0;
+    while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
+    return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function _liveDetailLines(task) {
+    // Keep in step with liveDetailLines in the React downloads page
+    // (webui/src/routes/active-downloads/-adl.helpers.ts) — same payload,
+    // same narration.
+    const d = task.live_detail || {};
+    const lines = [];
+    if (d.source && !d.username) lines.push(['Searching', d.source]);
+    if (d.query) {
+        const ladder = d.query_count ? ` (${(d.query_index || 0) + 1}/${d.query_count})` : '';
+        lines.push(['Query', `"${d.query}"${ladder}`]);
+    }
+    if (d.results != null) {
+        const peers = d.responses ? ` from ${d.responses} peer${d.responses === 1 ? '' : 's'}` : '';
+        lines.push(['Found', `${d.results} result${d.results === 1 ? '' : 's'}${peers}`]);
+    }
+    if (d.by_source && Object.keys(d.by_source).length) {
+        lines.push(['By source', Object.entries(d.by_source)
+            .sort((a, b) => b[1] - a[1]).map(([s, n]) => `${s} ${n}`).join(' · ')]);
+    }
+    if (d.username) {
+        lines.push(['Source', d.source === 'Soulseek' ? `Soulseek · peer ${d.username}` : (d.source || d.username)]);
+    }
+    if (d.filename) lines.push(['File', d.filename]);
+    if (d.candidate_count) lines.push(['Candidate', `${(d.candidate_index || 0) + 1} of ${d.candidate_count}`]);
+    if (d.picked) {
+        const bits = [];
+        if (d.picked.quality) bits.push(String(d.picked.quality).toUpperCase());
+        if (d.picked.bitrate) bits.push(`${d.picked.bitrate} kbps`);
+        if (d.picked.size) bits.push(_fmtLiveBytes(d.picked.size));
+        if (d.picked.confidence != null) bits.push(`confidence ${d.picked.confidence}`);
+        if (bits.length) lines.push(['Picked', bits.join(' · ')]);
+    }
+    if (d.picked && (d.picked.queue_length != null || d.picked.free_upload_slots != null)) {
+        // why a 'Queued, Remotely' is what it is: the peer's own queue and slots
+        const bits = [];
+        if (d.picked.free_upload_slots != null) bits.push(`${d.picked.free_upload_slots} free slots`);
+        if (d.picked.queue_length != null) bits.push(`queue ${d.picked.queue_length}`);
+        const avg = _fmtLiveBytes(d.picked.upload_speed);
+        if (avg) bits.push(`${avg}/s avg`);
+        if (bits.length) lines.push(['Peer stats', bits.join(' · ')]);
+    }
+    if (d.slskd_state) lines.push(['Queue state', d.slskd_state]);
+    if (d.queued_seconds != null) lines.push(['Waited', `${d.queued_seconds}s in the remote queue`]);
+    const speed = _fmtLiveBytes(d.speed);
+    if (speed) lines.push(['Speed', `${speed}/s`]);
+    if (d.size) {
+        const done = d.bytes ? `${_fmtLiveBytes(d.bytes)} / ` : '';
+        lines.push(['Size', `${done}${_fmtLiveBytes(d.size)}`]);
+    }
+    if (d.tried_sources) lines.push(['Tried', `${d.tried_sources} peer/file pairs so far`]);
+    if (d.exhausted_sources && d.exhausted_sources.length) lines.push(['Exhausted', d.exhausted_sources.join(' · ')]);
+    if (task.retry_info) lines.push(['Retry', String(task.retry_info)]);
+    return lines;
+}
+
+function _renderLivePopover(task) {
+    const el = _getLivePopover();
+    el.textContent = '';
+    const lines = _liveDetailLines(task);
+    if (!lines.length) {
+        el.textContent = "Waiting for the engine's next update…";
+        return;
+    }
+    for (const [label, value] of lines) {
+        const row = document.createElement('div');
+        const tag = document.createElement('span');
+        tag.className = 'live-popover-label';
+        tag.textContent = `${label}: `;
+        row.appendChild(tag);
+        row.appendChild(document.createTextNode(String(value)));
+        el.appendChild(row);
+    }
+}
+
+function _positionLivePopover(anchor) {
+    const el = _getLivePopover();
+    el.classList.add('visible');
+    const rect = anchor.getBoundingClientRect();
+    const popupRect = el.getBoundingClientRect();
+    let left = rect.left + rect.width / 2 - popupRect.width / 2;
+    let top = rect.bottom + 8;
+    if (left < 8) left = 8;
+    if (left + popupRect.width > window.innerWidth - 8) left = window.innerWidth - 8 - popupRect.width;
+    if (top + popupRect.height > window.innerHeight - 8) top = rect.top - popupRect.height - 8;
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
+}
+
+function _toggleLivePopover(taskId, statusEl) {
+    if (_livePopoverTaskId === taskId) { _hideLivePopover(); return; }
+    _hideLivePopover();
+    _livePopoverTaskId = taskId;
+    _renderLivePopover(statusEl._liveTask || {});
+    _positionLivePopover(statusEl);
+    // Dismiss when the scrollable modal body scrolls (anchor moves away).
+    const scrollParent = statusEl.closest('.download-missing-modal-body');
+    if (scrollParent && !scrollParent._livePopoverScrollBound) {
+        scrollParent._livePopoverScrollBound = true;
+        scrollParent.addEventListener('scroll', _hideLivePopover, { passive: true });
+    }
+}
+
+function _refreshLivePopoverFromFrame(task) {
+    if (!_livePopoverTaskId || task.task_id !== _livePopoverTaskId) return;
+    if (_LIVE_POPOVER_STATUSES.includes(task.status)) {
+        _renderLivePopover(task);
+    } else {
+        _hideLivePopover();
+    }
+}
+
+// The album-bundle variant (#1156): during phase 'album_downloading' there are
+// no per-track tasks — the release downloads as one unit. The waiting cells
+// (and the progress line) open the same pop-in, rendered from the batch's
+// album_bundle frame instead of a task frame.
+let _livePopoverBundleId = null;
+const _lastBundleFrames = {};
+
+function _bundleDetailLines(bundle) {
+    const b = bundle || {};
+    const lines = [];
+    if (b.source) lines.push(['Source', _downloadModalSourceLabel(b.source)]);
+    if (b.state) lines.push(['Stage', _downloadModalBundleStateLabel(b.state)]);
+    if (b.query) lines.push(['Query', `"${b.query}"`]);
+    if (b.count != null && String(b.state || '').toLowerCase() === 'selecting') {
+        lines.push(['Releases', String(b.count)]);
+    }
+    if (b.release) lines.push(['Release', b.release]);
+    if (b.seeders != null) lines.push(['Seeders', String(b.seeders)]);
+    if (b.grabs != null) lines.push(['Grabs', String(b.grabs)]);
+    const speed = _fmtLiveBytes(b.speed);
+    if (speed) lines.push(['Speed', `${speed}/s`]);
+    if (b.size) {
+        const done = b.downloaded ? `${_fmtLiveBytes(b.downloaded)} / ` : '';
+        lines.push(['Size', `${done}${_fmtLiveBytes(b.size)}`]);
+    }
+    if (b.progress_percent != null || b.progress != null) {
+        lines.push(['Progress', `${_downloadModalBundleProgressPercent(b)}%`]);
+    }
+    return lines;
+}
+
+function _renderBundlePopover(bundle) {
+    const el = _getLivePopover();
+    el.textContent = '';
+    const lines = _bundleDetailLines(bundle);
+    if (!lines.length) {
+        el.textContent = "Waiting for the release downloader's next update…";
+        return;
+    }
+    for (const [label, value] of lines) {
+        const row = document.createElement('div');
+        const tag = document.createElement('span');
+        tag.className = 'live-popover-label';
+        tag.textContent = `${label}: `;
+        row.appendChild(tag);
+        row.appendChild(document.createTextNode(String(value)));
+        el.appendChild(row);
+    }
+}
+
+function _toggleBundlePopover(playlistId, anchor) {
+    if (_livePopoverBundleId === playlistId) { _hideLivePopover(); return; }
+    _hideLivePopover();
+    _livePopoverBundleId = playlistId;
+    _renderBundlePopover(_lastBundleFrames[playlistId]);
+    _positionLivePopover(anchor);
+    const scrollParent = anchor.closest('.download-missing-modal-body');
+    if (scrollParent && !scrollParent._livePopoverScrollBound) {
+        scrollParent._livePopoverScrollBound = true;
+        scrollParent.addEventListener('scroll', _hideLivePopover, { passive: true });
+    }
+}
+
+function _refreshBundlePopoverFromFrame(playlistId, bundle) {
+    _lastBundleFrames[playlistId] = bundle;
+    if (_livePopoverBundleId === playlistId) _renderBundlePopover(bundle);
+}
+
+function _ensureBundleClickListener(el, playlistId) {
+    if (el._bundleClickBound) return;
+    el._bundleClickBound = true;
+    el.addEventListener('click', function (e) {
+        e.stopPropagation();
+        _hideErrorTooltip();
+        _toggleBundlePopover(playlistId, this);
     });
 }
 
@@ -2864,8 +3100,12 @@ function _downloadModalSourceLabel(source) {
 function _downloadModalBundleStateLabel(state) {
     const labels = {
         searching: 'searching for release',
+        selecting: 'choosing a release',
+        queued: 'release queued',
         downloading: 'downloading release',
+        staging: 'staging files',
         staged: 'matching tracks',
+        fallback: 'falling back to per-track',
         failed: 'release failed'
     };
     const key = String(state || '').toLowerCase();
@@ -2877,10 +3117,17 @@ function _downloadModalBundleProgressText(bundle) {
     const source = _downloadModalSourceLabel(bundle && bundle.source);
     const state = _downloadModalBundleStateLabel(bundle && bundle.state);
     const release = bundle && bundle.release ? ` - ${bundle.release}` : '';
+    // The search/selection phases used to render as dead air (#1156): show
+    // the query being searched and how many releases came back.
+    const stateKey = String((bundle && bundle.state) || '').toLowerCase();
+    const query = bundle && bundle.query && !bundle.release && (stateKey === 'searching' || stateKey === 'selecting')
+        ? ` — "${bundle.query}"` : '';
+    const found = bundle && bundle.count != null && stateKey === 'selecting'
+        ? ` · ${bundle.count} release${bundle.count === 1 ? '' : 's'}` : '';
     const speed = _downloadModalFormatSpeed(bundle && bundle.speed);
     const size = _downloadModalFormatBytes(bundle && bundle.size);
     const detail = speed || size ? ` (${[speed, size].filter(Boolean).join(' of ')})` : '';
-    return `${source} ${state} ${percent}%${release}${detail}`;
+    return `${source} ${state} ${percent}%${release}${query}${found}${detail}`;
 }
 
 function processModalStatusUpdate(playlistId, data) {
@@ -2953,8 +3200,14 @@ function processModalStatusUpdate(playlistId, data) {
         if (downloadFill) downloadFill.style.width = `${percent}%`;
         if (downloadText) {
             downloadText.textContent = _downloadModalBundleProgressText(bundle);
-            downloadText.title = 'SoulSync downloads one album release first, then matches the selected tracks from the staged files.';
+            downloadText.title = 'SoulSync downloads one album release first, then matches the selected tracks from the staged files. Click for live release status.';
+            downloadText.classList.add('has-candidates');
+            _ensureBundleClickListener(downloadText, playlistId);
         }
+
+        // The pop-in (#1156) renders from these frames; keep the latest and
+        // refresh an open one every 2s so the release search/grab narrates.
+        _refreshBundlePopoverFromFrame(playlistId, bundle);
 
         const modal = document.getElementById(`download-missing-modal-${playlistId}`);
         if (modal) {
@@ -2963,11 +3216,19 @@ function processModalStatusUpdate(playlistId, data) {
                 if (!statusEl.textContent || statusEl.textContent === '-' || statusEl.textContent.includes('Pending')) {
                     statusEl.textContent = 'Waiting for release';
                     statusEl.classList.add('album-bundle-waiting');
-                    statusEl.title = 'The album release is downloading first. Tracks will move to processing once SoulSync can match files from it.';
+                    statusEl.title = 'The album release is downloading first. Click for live release status.';
                 }
+                // Every waiting cell opens the bundle pop-in — there are no
+                // per-track tasks during a release download, so this is the
+                // only per-row affordance the phase can have.
+                statusEl.classList.add('has-candidates');
+                _ensureBundleClickListener(statusEl, playlistId);
             });
         }
     } else if (data.phase === 'downloading' || data.phase === 'complete' || data.phase === 'error') {
+        // Leaving the album-bundle phase: a bundle pop-in for this batch has
+        // nothing live to show anymore.
+        if (_livePopoverBundleId === playlistId) _hideLivePopover();
         console.debug(`📊 [Status Update] Processing ${data.phase} phase for playlistId: ${playlistId}, tasks: ${(data.tasks || []).length}`);
 
         if (document.getElementById(`analysis-progress-fill-${playlistId}`).style.width !== '100%') {
@@ -3104,6 +3365,7 @@ function processModalStatusUpdate(playlistId, data) {
                 delete statusEl.dataset.quarantineReason;
                 delete statusEl.dataset.quarantineTrack;
                 delete statusEl.dataset.detailOpen;
+                delete statusEl.dataset.liveOpen;
                 // statusText is static markup only; the verif-badge span is the
                 // one case that needs HTML. Everything else stays textContent
                 // (XSS-safe default).
@@ -3142,7 +3404,18 @@ function processModalStatusUpdate(playlistId, data) {
                         statusEl.dataset.detailOpen = '1';
                     }
                     _ensureCandidatesClickListener(statusEl);
+                } else if (_LIVE_POPOVER_STATUSES.includes(task.status)) {
+                    // In-flight rows open the live pop-in (#1156): where it's
+                    // searching, what it found, who it's pulling from.
+                    statusEl.classList.add('has-candidates');
+                    statusEl.dataset.taskId = task.task_id;
+                    statusEl.dataset.liveOpen = '1';
+                    _ensureCandidatesClickListener(statusEl);
                 }
+                // The pop-in renders from these frames; stash the latest and
+                // refresh (or auto-close) an open one on every frame.
+                statusEl._liveTask = task;
+                _refreshLivePopoverFromFrame(task);
                 console.debug(`✅ [Status Update] Updated track ${task.track_index} to: ${statusText}${isV2Task ? ' (V2)' : ''}`);
             } else {
                 console.warn(`❌ [Status Update] Status element not found: download-${playlistId}-${task.track_index}`);

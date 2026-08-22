@@ -52,6 +52,7 @@ describe('AccountPlaylistCard — the adopted-region contract', () => {
       <AccountPlaylistCard
         cardId="p1"
         row={SPOTIFY_ROW}
+        glyph="spotify"
         statusClass="status-needs-sync"
         statusLabel="Needs Sync"
         selectable
@@ -76,6 +77,49 @@ describe('AccountPlaylistCard — the adopted-region contract', () => {
     expect(screen.getByText('40 tracks')).toBeInTheDocument();
   });
 
+  it('shows the row cover, and the art tile adds NO id or class the engine selects on', () => {
+    render(
+      <AccountPlaylistCard
+        cardId="p1"
+        row={{ ...SPOTIFY_ROW, image_url: '/api/image-cache/cover' }}
+        glyph="spotify"
+        statusClass="status-needs-sync"
+        statusLabel="Needs Sync"
+        selectable
+        selected={false}
+        onOpenDetails={vi.fn()}
+        onViewProgress={vi.fn()}
+      />,
+    );
+    const img = document.querySelector('.playlist-card-art img') as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe('/api/image-cache/cover?v=card');
+    // The whole point of the tile being a sibling: the adopted region is intact.
+    expect(document.querySelector('#progress-p1')?.className).toBe('sync-progress-indicator');
+    expect(document.querySelector('#action-btn-p1')?.textContent).toBe('Sync / Download');
+    expect(document.querySelector('.playlist-card-status')?.className).toBe(
+      'playlist-card-status status-needs-sync',
+    );
+  });
+
+  it('a row with no cover shows the SOURCE MARK, so it stays identifiable', () => {
+    render(
+      <AccountPlaylistCard
+        cardId="p1"
+        row={SPOTIFY_ROW}
+        glyph="spotify"
+        statusClass="status-needs-sync"
+        statusLabel="Needs Sync"
+        selectable
+        selected={false}
+        onOpenDetails={vi.fn()}
+        onViewProgress={vi.fn()}
+      />,
+    );
+    // Real brand SVG (the same sprite the tab strip uses), not an emoji.
+    expect(document.querySelector('.playlist-card-art img')).toBeNull();
+    expect(document.querySelector('.playlist-card-art .spotify-icon')).not.toBeNull();
+  });
+
   it('a click on either BUTTON never toggles selection (1799)', () => {
     const onToggleSelect = vi.fn();
     const onOpenDetails = vi.fn();
@@ -83,6 +127,7 @@ describe('AccountPlaylistCard — the adopted-region contract', () => {
       <AccountPlaylistCard
         cardId="p1"
         row={SPOTIFY_ROW}
+        glyph="spotify"
         statusClass="status-synced"
         statusLabel="Synced"
         selectable
@@ -106,6 +151,7 @@ describe('AccountPlaylistCard — the adopted-region contract', () => {
       <AccountPlaylistCard
         cardId="deezer_arl_7"
         row={ARL_ROW}
+        glyph="spotify"
         statusClass="status-synced"
         statusLabel="Synced 2 days ago"
         extraClassName="deezer-arl-playlist-card"
@@ -127,6 +173,7 @@ describe('AccountPlaylistCard — the adopted-region contract', () => {
       <AccountPlaylistCard
         cardId="p1"
         row={SPOTIFY_ROW}
+        glyph="spotify"
         statusClass="status-synced"
         statusLabel="Synced"
         selectable
@@ -140,6 +187,7 @@ describe('AccountPlaylistCard — the adopted-region contract', () => {
       <AccountPlaylistCard
         cardId="p1"
         row={SPOTIFY_ROW}
+        glyph="spotify"
         statusClass="status-synced"
         statusLabel="Synced"
         selectable

@@ -185,6 +185,28 @@ class MetadataCache:
         'untitled', 'none', 'n/a', 'null',
     })
 
+    # Entity TYPES that hold a synthetic payload rather than a named entity:
+    # an album's track list, an artist's discography. They have no 'name' of
+    # their own, so the junk check below — which rejects a blank name — throws
+    # every one of them away.
+    #
+    # The original guard exempted synthetic entries by entity_ID suffix
+    # ('..._features', '..._tracks'), but no caller names them that way: the
+    # Deezer resolver passes a bare album id with entity_type='album_tracks',
+    # and the other two pass 'album_tracks_<id>' / 'explorer_disco_<name>'.
+    # So the exemption matched nothing and these caches never stored a single
+    # row — silently, at debug level. On a 1500-track Deezer playlist that is
+    # ~1,000 album lookups repeated in full on EVERY load, which is most of
+    # the multi-minute wait people report.
+    _SYNTHETIC_ENTITY_TYPES = frozenset({'album_tracks', 'artist_discography'})
+
+    def _is_synthetic_entity(self, entity_type: str, entity_id: str) -> bool:
+        """True for cache rows that intentionally carry no entity name."""
+        if entity_type in self._SYNTHETIC_ENTITY_TYPES:
+            return True
+        return bool(entity_id) and (
+            entity_id.endswith('_features') or entity_id.endswith('_tracks'))
+
     def _is_junk_entity(self, fields: dict) -> bool:
         """Check if extracted fields represent junk/placeholder data."""
         name = (fields.get('name') or '').strip().lower()
@@ -202,8 +224,9 @@ class MetadataCache:
             return
         try:
             fields = self._extract_fields(source, entity_type, raw_data)
-            # Skip validation for synthetic cache entries (_features, _tracks suffixes)
-            if not entity_id.endswith('_features') and not entity_id.endswith('_tracks') and self._is_junk_entity(fields):
+            # Skip validation for synthetic cache entries — they have no name
+            # to validate, so the junk check would reject all of them.
+            if not self._is_synthetic_entity(entity_type, entity_id) and self._is_junk_entity(fields):
                 logger.debug(f"Rejecting junk entity ({source}/{entity_type}/{entity_id}): name='{fields.get('name')}'")
                 return
             raw_json = json.dumps(raw_data, default=str)

@@ -1,9 +1,11 @@
 import { useRef, useState } from 'react';
 
-import type { AdlDownload } from '../-adl.types';
+import type { AdlDownload, AdlTaskDetail } from '../-adl.types';
 
+import { fetchTaskDetail } from '../-adl.api';
 import {
   batchColorIndex,
+  liveDetailLines,
   qualityChipTitle,
   showQualityChip,
   statusClass,
@@ -63,6 +65,74 @@ function RetryChip({ dl }: { dl: AdlDownload }) {
   );
 }
 
+/**
+ * The expanded detail panel (#1156).
+ *
+ * In-flight rows render the live narration straight off the 2s payload —
+ * where it's searching, what it found, who it's pulling from. Terminal rows
+ * render the fetched task detail (history-merged source/quality/AcoustID/
+ * file), and history rows render the fields they already carry.
+ */
+function RowDetailPanel({
+  dl,
+  detail,
+  terminal,
+}: {
+  dl: AdlDownload;
+  detail: AdlTaskDetail | null;
+  terminal: boolean;
+}) {
+  let lines: Array<[string, string]>;
+  if (!terminal) {
+    lines = liveDetailLines(dl);
+    if (!lines.length) {
+      return <div className="verif-quar-details">Waiting for the engine's next update…</div>;
+    }
+  } else if (detail) {
+    lines = (
+      [
+        ['Source', dl.download_source || detail.source],
+        ['Quality', detail.quality || dl.quality],
+        ['AcoustID', detail.acoustid_result],
+        ['File', detail.file_path],
+        ['Reason', detail.status_kind === 'completed' ? '' : detail.reason],
+        [
+          'Expected',
+          detail.expected?.title
+            ? `${detail.expected.artist ? `${detail.expected.artist} — ` : ''}${detail.expected.title}`
+            : '',
+        ],
+        [
+          'Downloaded',
+          detail.downloaded?.title
+            ? `${detail.downloaded.artist ? `${detail.downloaded.artist} — ` : ''}${detail.downloaded.title}`
+            : '',
+        ],
+      ] as Array<[string, string]>
+    ).filter(([, value]) => Boolean(value));
+  } else if (dl.is_persistent_history) {
+    lines = (
+      [
+        ['Source', dl.download_source || dl.batch_name],
+        ['Quality', dl.quality],
+        ['File', dl.file_path || ''],
+        ['Downloaded', dl.created_at || ''],
+      ] as Array<[string, string]>
+    ).filter(([, value]) => Boolean(value));
+  } else {
+    return <div className="verif-quar-details">Loading details…</div>;
+  }
+  return (
+    <div className="verif-quar-details">
+      {lines.map(([label, value]) => (
+        <div key={label}>
+          <span className="verif-detail-label">{label}:</span> {value}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export interface AdlRowProps {
   dl: AdlDownload;
   /**
@@ -102,6 +172,26 @@ export function AdlRow({ dl, onCancel, onRowAudit, actions }: AdlRowProps) {
   const cancellingRef = useRef(false);
   const [cancelling, setCancelling] = useState(false);
 
+  /**
+   * Row expansion (#1156). Local state survives the 2s poll because rows are
+   * keyed by task_id. Terminal real-task rows fetch their merged detail once
+   * on first open; history rows and in-flight rows render from what the row
+   * already carries.
+   */
+  const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState<AdlTaskDetail | null>(null);
+  const detailRequested = useRef(false);
+  const terminal = cls === 'completed' || cls === 'failed' || cls === 'cancelled';
+
+  const toggleOpen = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && terminal && !dl.is_persistent_history && !detailRequested.current) {
+      detailRequested.current = true;
+      void fetchTaskDetail(dl.task_id).then(setDetail);
+    }
+  };
+
   const meta = [dl.artist, dl.album].filter(Boolean).join(' · ');
   // "3 of 19" — only meaningful for a real multi-track batch.
   const position = dl.batch_total > 1 ? `${(dl.track_index || 0) + 1} of ${dl.batch_total}` : '';
@@ -128,7 +218,13 @@ export function AdlRow({ dl, onCancel, onRowAudit, actions }: AdlRowProps) {
             style: { cursor: 'pointer' },
             title: 'Click to show download details (audit trail, embedded tags, lyrics)',
           }
-        : {})}
+        : {
+            onClick: toggleOpen,
+            style: { cursor: 'pointer' },
+            title: open
+              ? 'Click to hide details'
+              : 'Click to show details (source, search progress, file, quality)',
+          })}
     >
       {colorIdx >= 0 ? (
         <div
@@ -142,13 +238,21 @@ export function AdlRow({ dl, onCancel, onRowAudit, actions }: AdlRowProps) {
       <div className="adl-row-info">
         <div className="adl-row-title">{dl.title || 'Unknown Track'}</div>
         {meta ? <div className="adl-row-meta">{meta}</div> : null}
-        {dl.batch_name ? (
+        {dl.batch_name || dl.download_source ? (
           <div className="adl-row-batch">
             {dl.batch_name}
             {position ? ` · Track ${position}` : ''}
+            {/* #1156: live rows finally name their source; history rows
+                already carry it as batch_name, so don't repeat it */}
+            {dl.download_source && dl.download_source !== dl.batch_name
+              ? `${dl.batch_name ? ' · ' : ''}${dl.download_source}`
+              : ''}
           </div>
         ) : null}
         {dl.error ? <div className="adl-row-error">{dl.error}</div> : null}
+        {open && !onRowAudit ? (
+          <RowDetailPanel dl={dl} detail={detail} terminal={terminal} />
+        ) : null}
       </div>
 
       <div className={`adl-row-status ${cls}`}>

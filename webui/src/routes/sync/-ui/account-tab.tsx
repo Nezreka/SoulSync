@@ -32,6 +32,7 @@ import type { SourceVerticalConfig } from '../-sync.sources';
 import type { UrlTabPlaylist } from '../-sync.url-tabs';
 import type { SourceVertical } from '../-sync.use-vertical';
 
+import { recallAccountPlaylists, rememberAccountPlaylists } from '../-sync.account-cache';
 import { fetchAccountPlaylist, fetchSourcePlaylists, postMirrorPlaylist } from '../-sync.api';
 import { mapWithConcurrency } from '../-sync.core';
 import { buildMirrorPayload } from '../-sync.import';
@@ -40,6 +41,7 @@ import { freshSourceState } from '../-sync.state';
 import { asString, deezerMirrorTracks } from '../-sync.url-tabs';
 import { fetchAndHydrateState } from '../-sync.use-vertical';
 import { cardProgressLine } from './card-progress';
+import { playlistArtUrl } from './playlist-art';
 import { SourceCard } from './source-card';
 import { hydrateStatesForLoaded } from './url-import-tab';
 
@@ -91,7 +93,9 @@ function AccountVerticalTab({
   onOpen: (sourceId: string) => void;
 }) {
   /** null = never loaded (the click-Refresh placeholder). */
-  const [playlists, setPlaylists] = useState<UrlTabPlaylist[] | null>(null);
+  const [playlists, setPlaylists] = useState<UrlTabPlaylist[] | null>(() =>
+    recallAccountPlaylists(chrome.base),
+  );
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
   const playlistsRef = useRef(playlists);
@@ -99,17 +103,24 @@ function AccountVerticalTab({
   /** Invalidates the background mirror loop when Refresh re-runs. */
   const loadGeneration = useRef(0);
 
-  const setPlaylistTracks = useCallback((id: string, tracks: unknown[]) => {
-    setPlaylists((prev) =>
-      // A track fetch that outlives a Refresh must NOT resurrect the cleared
-      // list — that would flash 'No <source> playlists found.' mid-load.
-      prev === null
-        ? prev
-        : prev.map((p) =>
-            String(p.id) === String(id) ? { ...p, tracks, track_count: tracks.length } : p,
-          ),
-    );
-  }, []);
+  const setPlaylistTracks = useCallback(
+    (id: string, tracks: unknown[]) => {
+      setPlaylists((prev) => {
+        // A track fetch that outlives a Refresh must NOT resurrect the cleared
+        // list — that would flash 'No <source> playlists found.' mid-load.
+        if (prev === null) return prev;
+        const next = prev.map((p) =>
+          String(p.id) === String(id) ? { ...p, tracks, track_count: tracks.length } : p,
+        );
+        // Remember the FILLED rows, not just the bare list: the crawl is what
+        // turns '0 tracks' into a real count, and coming back to a tab full of
+        // zeroes would look just as broken as coming back to an empty one.
+        rememberAccountPlaylists(chrome.base, next);
+        return next;
+      });
+    },
+    [chrome.base],
+  );
 
   /**
    * The per-playlist track crawl that feeds auto-mirroring (27-59).
@@ -170,6 +181,7 @@ function AccountVerticalTab({
       const rows = (await fetchSourcePlaylists(chrome.base)) as UrlTabPlaylist[];
       if (generation !== loadGeneration.current) return;
       setPlaylists(rows);
+      rememberAccountPlaylists(chrome.base, rows);
       rows.forEach((p) => {
         if (!vertical.states[String(p.id)]) vertical.seed(String(p.id), p);
       });
@@ -300,6 +312,7 @@ function AccountVerticalTab({
                 id={`${chrome.cardIdPrefix}-${sourceId}`}
                 cardClassName={chrome.cardClassName}
                 icon="🎵"
+                artUrl={playlistArtUrl(p)}
                 name={asString(p.name)}
                 countText={`${(p.track_count as number | undefined) ?? 0} tracks`}
                 phase={state.phase}

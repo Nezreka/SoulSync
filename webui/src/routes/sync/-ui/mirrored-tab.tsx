@@ -63,8 +63,6 @@ import { exportNotConnectedStatus } from '../-sync.export';
 import {
   mirroredHash,
   mirroredPhaseLine,
-  mirroredRatio,
-  mirroredSourceIcon,
   mirroredDiscoveryTracks,
   pipelinePhaseFor,
   timeAgo,
@@ -73,6 +71,31 @@ import { SOURCE_REF_FAILED, sourceRefUpdatedToast } from '../-sync.pipeline';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { asString } from '../-sync.url-tabs';
 import { useExportJobs } from '../-sync.use-export';
+import type { LibraryFilter, LibrarySort } from '../-sync.library';
+
+import {
+  libraryCardState,
+  librarySortedRows,
+  libraryFilterCounts,
+  LIBRARY_SORTS,
+  librarySearch,
+  librarySources,
+  librarySummary,
+  libraryVisibleFilters,
+  libraryVisibleRows,
+} from '../-sync.library';
+import { autoSyncCanSchedulePlaylist } from '../-sync.autosync';
+import { cardScheduleLabel, useCardSchedules } from '../-sync.card-schedule';
+import { autoSyncPlaylistHealth, detectBrowserTimezone } from '../-sync.autosync';
+import { patchMirroredPreferences } from '../-sync.api';
+import type { AutoSyncWeeklyDraft } from './autosync-weekly';
+
+import { AutoSyncWeeklyEditor } from './autosync-weekly';
+import { PlaylistCard, playlistCardPrimaryLabel } from './playlist-card';
+import { ScheduleMenu } from './schedule-menu';
+import { usePopoverDismiss } from './use-popover-dismiss';
+import { usePopoverPosition } from './use-popover-position';
+import { SourceIcon } from './source-icon';
 import { ExportModal, ExportStatusSpan } from './export-modal';
 import { MirroredDetailModal } from './mirrored-detail-modal';
 import { SourceRefModal } from './source-ref-modal';
@@ -101,18 +124,178 @@ export interface MirroredTabProps {
    * the returned controller is STABLE").
    */
   registerReload: (reload: () => void) => void;
+  /**
+   * Hand the page this tab's detail-modal opener.
+   *
+   * The React modal and the legacy `openMirroredPlaylistModal` are two
+   * implementations of the same thing over the same endpoint, and the page had
+   * surfaces opening each — so the same playlist looked different depending on
+   * which button you pressed. Registering upward lets everything on this page
+   * use the React one. (The vanilla function stays alive: other pages still
+   * call it, so it is the sync page's duplicate that goes, not the function.)
+   */
+  registerOpenDetail?: (open: (playlistId: number) => void) => void;
+}
+
+/**
+ * A mirrored card's overflow menu.
+ *
+ * Five actions that used to be five icon-only buttons on every card — ↺ ✏️ 🔗
+ * 📤 ✕ — each with tooltip-only meaning, on every row of the library at once.
+ * They are all real, and none of them is what you came to the page to do.
+ */
+function MirroredCardMenu({
+  row,
+  top,
+  left,
+  anchor,
+  onClose,
+  onRename,
+  onEditSource,
+  onExport,
+  onClear,
+  onDelete,
+  onToggleOrganize,
+}: {
+  row: MirroredPlaylistRow;
+  top: number;
+  left: number;
+  /** The trigger, so an outside click on IT does not fight the toggle. */
+  anchor?: HTMLElement | null;
+  onClose: () => void;
+  onRename: () => void;
+  onEditSource: () => void;
+  onExport: () => void;
+  onClear: () => void;
+  onDelete: () => void;
+  onToggleOrganize: (enabled: boolean) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const pos = usePopoverPosition({ top, left }, ref);
+
+  const profileHtml =
+    typeof window.playlistQualityProfileSelectHtml === 'function'
+      ? window.playlistQualityProfileSelectHtml(row.source_playlist_id, row.source, true)
+      : '';
+  const { source_playlist_id: sourcePlaylistId, source, quality_profile_id: profileId } = row;
+  useEffect(() => {
+    if (!profileHtml) return;
+    if (typeof window.hydratePlaylistQualityProfileSelects !== 'function') return;
+    void window.hydratePlaylistQualityProfileSelects(sourcePlaylistId, source, profileId);
+  }, [profileHtml, sourcePlaylistId, source, profileId]);
+
+  usePopoverDismiss({ ref, anchor, onClose });
+
+  const item = (label: string, run: () => void, danger = false) => (
+    <button
+      type="button"
+      className={`pl-menu-item${danger ? ' pl-menu-item--danger' : ''}`}
+      onClick={() => {
+        run();
+        onClose();
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div
+      className="pl-menu"
+      ref={ref}
+      style={{ top: `${pos.top}px`, left: `${pos.left}px` }}
+      role="menu"
+    >
+      {/* A per-playlist SETTING, not an action: it lived only on the Auto-Sync
+          board's scheduled cards, which made it unreachable for any playlist
+          that was not scheduled. It belongs with the playlist. */}
+      <button
+        type="button"
+        className={`pl-menu-item${row.organize_by_playlist ? ' pl-menu-item--on' : ''}`}
+        title="Download missing tracks into a playlist-named folder (artist - track)"
+        onClick={() => {
+          onToggleOrganize(!row.organize_by_playlist);
+          onClose();
+        }}
+      >
+        Organize by playlist
+        {row.organize_by_playlist ? <span className="pl-menu-tick">✓</span> : null}
+      </button>
+      {/* The per-playlist Quality Profile, also stranded on the board's
+          scheduled cards. It is markup from a legacy global, hydrated after
+          mount — the same contract autosync-shared used, moved rather than
+          reimplemented, because the select's options come from a store React
+          does not own. Absent global, absent control: exactly as before. */}
+      {profileHtml ? (
+        <div
+          className="pl-menu-profile"
+          onClick={(e) => {
+            e.stopPropagation();
+          }}
+        >
+          <span className="pl-menu-heading">Quality profile</span>
+          <span dangerouslySetInnerHTML={{ __html: profileHtml }} />
+        </div>
+      ) : null}
+      <div className="pl-menu-sep" />
+      {item('Rename', onRename)}
+      {item('Edit source link', onEditSource)}
+      {item('Export', onExport)}
+      {/* Only offered when there IS a discovery to clear (575-582). */}
+      {(row.discovered_count || 0) > 0 && item('Clear discovery', onClear)}
+      {item('Delete', onDelete, true)}
+    </div>
+  );
 }
 
 export function MirroredTab({
   vertical,
   onOpen,
-  sourceName = 'Spotify',
   pipeline,
   registerReload,
+  registerOpenDetail,
 }: MirroredTabProps) {
   const config = SYNC_SOURCES.mirrored;
   const [rows, setRows] = useState<MirroredPlaylistRow[] | null>(null);
   const [placeholder, setPlaceholder] = useState('Loading mirrored playlists...');
+  /** The library view: filter by STATE, and optionally narrow by source. */
+  const [filter, setFilter] = useState<LibraryFilter>('all');
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<LibrarySort>('state');
+  const [sources, setSources] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleSource = useCallback((source: string) => {
+    setSources((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(source)) next.add(source);
+      return next;
+    });
+  }, []);
+  const clearSources = useCallback(() => {
+    setSources(new Set());
+  }, []);
+
+  /** Each card's own sync interval — see -sync.card-schedule. */
+  const cardSchedules = useCardSchedules();
+
+  /** The overflow menu: which row, and where its trigger sits. */
+  const [menu, setMenu] = useState<{
+    row: MirroredPlaylistRow;
+    top: number;
+    left: number;
+    anchor: HTMLElement;
+  } | null>(
+    null,
+  );
+  /** The schedule picker, and the weekly editor it can open. */
+  const [schedMenu, setSchedMenu] = useState<{
+    row: MirroredPlaylistRow;
+    top: number;
+    left: number;
+    anchor: HTMLElement;
+  } | null>(null);
+  const [weeklyDraft, setWeeklyDraft] = useState<AutoSyncWeeklyDraft | null>(null);
+
+
   const [renaming, setRenaming] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState('');
   /** The row whose export picker is open (exportMirroredPlaylist, 663). */
@@ -188,10 +371,19 @@ export function MirroredTab({
     void load();
   }, [load]);
 
-  // Memoised so the registration below does not re-fire on every render.
+  /**
+   * Memoised so the registration below does not re-fire on every render.
+   *
+   * Reloads the SCHEDULES as well as the rows. A cadence can be changed from
+   * outside this tab entirely — the Bulk schedule modal owns its own copy of
+   * the same automations — and this tab's Scheduled / Unscheduled tabs are
+   * built from the map held here. Refetching rows alone left a playlist sitting
+   * under "Scheduled" after it had been unscheduled somewhere else.
+   */
   const reload = useCallback(() => {
     void load();
-  }, [load]);
+    void cardSchedules.reload();
+  }, [load, cardSchedules.reload]);
 
   /**
    * The controller is the page's; this is the half of it only this tab can
@@ -334,6 +526,41 @@ export function MirroredTab({
     }
   }, []);
 
+  /**
+   * Organize-by-playlist, moved off the Auto-Sync board.
+   *
+   * Optimistic, then reconciled by the reload: the checkbox on the board was
+   * instant and a round-trip before the tick moves would feel broken.
+   */
+  const setOrganize = useCallback(
+    async (row: MirroredPlaylistRow, enabled: boolean) => {
+      try {
+        const res = await patchMirroredPreferences(row.id, { organize_by_playlist: enabled });
+        const data = (await res.json()) as { error?: string };
+        if (!res.ok || data.error) throw new Error(data.error || 'Failed to update preference');
+        window.showToast?.(
+          enabled
+            ? `"${row.name ?? 'Playlist'}" downloads into its own folder`
+            : `"${row.name ?? 'Playlist'}" downloads into the library root`,
+          'success',
+        );
+        await load();
+      } catch (err) {
+        window.showToast?.(
+          `Error: ${err instanceof Error ? err.message : String(err)}`,
+          'error',
+        );
+      }
+    },
+    [load],
+  );
+  /** Same ref-not-dependency reasoning as registerReload above. */
+  const registerOpenDetailRef = useRef(registerOpenDetail);
+  registerOpenDetailRef.current = registerOpenDetail;
+  useEffect(() => {
+    registerOpenDetailRef.current?.((playlistId) => void openDetail(playlistId));
+  }, [openDetail]);
+
   const commitSourceRef = useCallback(
     async (row: MirroredPlaylistRow, sourceRef: string, fromDetail: boolean) => {
       const name = row.name ?? '';
@@ -447,26 +674,76 @@ export function MirroredTab({
   // One clock read per render — the vanilla calls timeAgo per card at 527.
   const now = Date.now();
 
+  const allRows = rows ?? [];
+  /**
+   * The ids that have a cadence, for the Scheduled / Unscheduled tabs. Derived
+   * from the same map the cards read for their pills, so a tab can never
+   * disagree with the pill on the card it is filtering to.
+   */
+  const scheduledIds = new Set(
+    Object.keys(cardSchedules.schedules)
+      .map(Number)
+      .filter((id) => !Number.isNaN(id)),
+  );
+
+  /**
+   * Search narrows BEFORE the tabs count, so "Complete 2" describes what the
+   * search left rather than the whole library — a count that ignored the
+   * search would send you to a tab that then showed nothing.
+   */
+  const searchedRows = librarySearch(allRows, query);
+  const counts = libraryFilterCounts(searchedRows, sources, scheduledIds);
+  const visibleFilters = libraryVisibleFilters(counts, filter);
+  // Source chips list every source in the LIBRARY, not in the search result:
+  // chips that vanished as you typed would move under the cursor.
+  const sourceList = librarySources(allRows);
+  const visibleRows = libraryVisibleRows(searchedRows, filter, sources, scheduledIds);
+
   return (
     <div>
       <div className="playlist-header">
-        <h3>Mirrored Playlists</h3>
-        <button
-          type="button"
-          className="pool-trigger-btn"
-          title="View matched and failed discovery tracks"
-          onClick={() => window.openDiscoveryPoolModal?.()}
-        >
-          Discovery Pool
-        </button>
-        <button
-          type="button"
-          className="pool-trigger-btn"
-          title="Review tracks Wing It auto-matched on a best-effort guess — verify or re-match them"
-          onClick={() => window.openWingItPoolModal?.()}
-        >
-          Wing It Pool
-        </button>
+        <div className="library-heading">
+          <h3>Your playlists</h3>
+          {/* Says something TRUE, and omits what it has nothing to say about —
+              a fresh install gets a sentence, not a row of zeroes. */}
+          {/* While searching, the count has to describe what you are LOOKING
+              at — "38 playlists" over three visible cards is just wrong. */}
+          <p className="library-summary">
+            {query.trim()
+              ? `${visibleRows.length} of ${allRows.length} playlists`
+              : librarySummary(rows ?? [])}
+          </p>
+        </div>
+        {/* The gap between the heading and Update list was the widest empty
+            space on the page, and finding one playlist among thirty-eight had
+            no answer but scrolling. */}
+        {allRows.length > 0 && (
+          <div className="library-search">
+            <input
+              type="search"
+              className="library-search-input"
+              placeholder="Search playlists"
+              aria-label="Search playlists"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                // Escape clears rather than blurs: a search box you cannot empty
+                // without selecting the text is a box you have to fight.
+                if (e.key === 'Escape') setQuery('');
+              }}
+            />
+            {query && (
+              <button
+                type="button"
+                className="library-search-clear"
+                aria-label="Clear search"
+                onClick={() => setQuery('')}
+              >
+                &times;
+              </button>
+            )}
+          </div>
+        )}
         <button
           type="button"
           className="refresh-button mirrored"
@@ -476,32 +753,92 @@ export function MirroredTab({
           Update list
         </button>
       </div>
-      <div className="playlist-scroll-container" id="mirrored-playlist-container">
-        {rows === null || rows.length === 0 ? (
+      {rows !== null && rows.length > 0 && (
+        <div className="library-filters">
+          {/* State first: what a user came to find out is which playlists still
+              need something doing to them, not where they came from. */}
+          <div className="library-tabs" role="tablist">
+            {visibleFilters.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                role="tab"
+                aria-selected={filter === f.id}
+                className={`library-tab${filter === f.id ? ' active' : ''}`}
+                onClick={() => setFilter(f.id)}
+              >
+                {f.label} <span className="library-tab-count">{counts[f.id]}</span>
+              </button>
+            ))}
+          </div>
+          {/* A plain <select>: four orders is a menu's worth of nothing, and a
+              popover here would be the third one on this page. Only offered
+              once there is enough to reorder. */}
+          {allRows.length > 3 && (
+            <label className="library-sort">
+              <span>Sort</span>
+              <select value={sort} onChange={(e) => setSort(e.target.value as LibrarySort)}>
+                {LIBRARY_SORTS.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {/* Source demoted to a filter, which is what it always actually was. */}
+          {sourceList.length > 1 && (
+            <div className="library-sources">
+              {sourceList.map((source) => (
+                <button
+                  key={source}
+                  type="button"
+                  className={`library-source${sources.has(source) ? ' active' : ''}`}
+                  onClick={() => toggleSource(source)}
+                >
+                  <SourceIcon source={source} /> {source}
+                </button>
+              ))}
+              {sources.size > 0 && (
+                <button type="button" className="library-source-clear" onClick={clearSources}>
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      <div className="playlist-scroll-container pl-grid-scroll" id="mirrored-playlist-container">
+        {rows === null || visibleRows.length === 0 ? (
           <div className="playlist-placeholder">
             {rows === null
               ? placeholder
-              : 'Playlists you parse from any service will appear here as persistent backups.'}
+              : rows.length === 0
+                ? 'Playlists you add from any service will appear here.'
+                : query.trim()
+                  ? // Naming the query beats "Nothing in this filter", which
+                    // leaves you wondering whether it was the search or the tab.
+                    `No playlist matches “${query.trim()}”.`
+                  : 'Nothing in this filter.'}
           </div>
         ) : (
-          rows.map((row) => {
+          <div className="pl-grid">
+            {librarySortedRows(visibleRows, sort).map((row) => {
+            const displayName = row.display_name || row.name || '';
+            // The live phase line, unchanged — its percentages and its
+            // Discovered N/M are information the resting meta line cannot
+            // carry, so the existing (tested) writer still produces them.
             const hash = mirroredHash(row.id);
-            const state = vertical.states[hash];
-            // The live state wins; the pipeline phase is synthesised only in
-            // its absence (534-542).
-            const phase = state?.phase ?? pipelinePhaseFor(row);
-            const line = mirroredPhaseLine(
-              phase,
-              state
+            const live = vertical.states[hash];
+            const phaseLine = mirroredPhaseLine(
+              live?.phase ?? pipelinePhaseFor(row),
+              live
                 ? {
-                    discoveryProgress: state.discoveryProgress,
-                    spotifyMatches: state.spotifyMatches,
-                    spotifyTotal: state.spotifyTotal,
-                    // A live Auto-Sync run writes these onto the same state
-                    // (applyPipelineState), so the pipeline arms read them
-                    // from there rather than the stale row.
-                    pipeline_progress: state.pipeline_progress,
-                    pipeline_phase: state.pipeline_phase,
+                    discoveryProgress: live.discoveryProgress,
+                    spotifyMatches: live.spotifyMatches,
+                    spotifyTotal: live.spotifyTotal,
+                    pipeline_progress: live.pipeline_progress,
+                    pipeline_phase: live.pipeline_phase,
                   }
                 : {
                     pipeline_progress: row.pipeline_state?.progress,
@@ -509,136 +846,176 @@ export function MirroredTab({
                   },
               row,
             );
-            const ratio = mirroredRatio(row, sourceName);
-            const discovered = row.discovered_count || 0;
-            return (
-              <div
-                key={row.id}
-                className="mirrored-playlist-card"
-                id={`mirrored-card-${row.id}`}
-                onClick={() => onCardClick(row)}
-              >
-                <div className={`source-icon ${row.source ?? ''}`}>
-                  {mirroredSourceIcon(row.source)}
-                </div>
-                <div className="mirrored-card-info">
-                  {renaming === row.id ? (
-                    <input
-                      className="card-name mirrored-rename-input"
-                      autoFocus
-                      value={renameValue}
-                      placeholder="Leave blank to use the original name"
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      onKeyDown={(e) => {
-                        e.stopPropagation();
-                        if (e.key === 'Enter') void commitRename(row);
-                        // Escape is the vanilla's null-return cancel (2386).
-                        if (e.key === 'Escape') setRenaming(null);
-                      }}
-                      onBlur={() => setRenaming(null)}
-                    />
-                  ) : (
-                    <div className="card-name">{row.display_name || row.name}</div>
-                  )}
-                  {row.custom_name && (
-                    <div
-                      className="card-original-name"
-                      title="Original (upstream) playlist name — still tracked"
-                    >
-                      ↳ {row.name}
-                    </div>
-                  )}
-                  <div className="card-meta">
-                    <span className={`source-badge ${row.source ?? ''}`}>{row.source}</span>
-                    <span>{row.track_count} tracks</span>
-                    <span>Mirrored {timeAgo(row.updated_at || row.mirrored_at, now)}</span>
-                    {ratio && (
-                      <span className={`discovery-ratio${ratio.complete ? ' complete' : ''}`}>
-                        {ratio.text}
-                      </span>
-                    )}
-                    {line && <span style={{ color: line.color }}>{line.text}</span>}
-                    {exportJobs.statuses[row.id] && (
-                      <ExportStatusSpan status={exportJobs.statuses[row.id]} />
-                    )}
-                  </div>
-                </div>
-                {discovered > 0 && (
-                  <button
-                    type="button"
-                    className="mirrored-card-clear"
-                    title="Clear discovery data"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void onClear(row);
-                    }}
-                  >
-                    ↺
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="mirrored-card-pipeline"
-                  title="Refresh, discover, sync, and queue missing tracks"
-                  onClick={(e) => {
+            const exportStatus = exportJobs.statuses[row.id];
+            const state = libraryCardState(row);
+            return renaming === row.id ? (
+              // Rename stays INLINE on the card: a modal for one text field is
+              // heavier than the edit itself.
+              <div className="pl-card pl-card--renaming" key={row.id}>
+                <input
+                  className="card-name mirrored-rename-input"
+                  autoFocus
+                  value={renameValue}
+                  placeholder="Leave blank to use the original name"
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
                     e.stopPropagation();
-                    void pipeline.run(row.id, row.name ?? '');
+                    if (e.key === 'Enter') void commitRename(row);
+                    if (e.key === 'Escape') setRenaming(null);
                   }}
-                >
-                  Auto-Sync
-                </button>
-                <button
-                  type="button"
-                  className="mirrored-card-rename"
-                  title="Rename (changes the name shown here and used when syncing)"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setRenameValue(row.custom_name ?? '');
-                    setRenaming(row.id);
-                  }}
-                >
-                  ✏️
-                </button>
-                <button
-                  type="button"
-                  className="mirrored-card-link"
-                  title="Edit original playlist link"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setRefEditFromDetail(false);
-                    setEditingRef(row);
-                  }}
-                >
-                  🔗
-                </button>
-                <button
-                  type="button"
-                  className="mirrored-card-export"
-                  title="Export to ListenBrainz / JSPF"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setExporting(row);
-                  }}
-                >
-                  📤
-                </button>
-                <button
-                  type="button"
-                  className="mirrored-card-delete"
-                  title="Delete mirror"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void onDelete(row);
-                  }}
-                >
-                  ✕
-                </button>
+                  onBlur={() => setRenaming(null)}
+                />
               </div>
+            ) : (
+              <PlaylistCard
+                key={row.id}
+                row={row}
+                name={displayName}
+                nameTitle={
+                  row.custom_name ? `${displayName} — originally "${row.name ?? ''}"` : displayName
+                }
+                // "Mirrored 30m ago", the vanilla's own wording — it names what
+                // the timestamp actually is (the last mirror refresh), where a
+                // bare "30m ago" leaves you guessing.
+                when={`Mirrored ${timeAgo(row.updated_at || row.mirrored_at, Date.now())}`}
+                schedule={cardScheduleLabel(cardSchedules.schedules[String(row.id)], Date.now())}
+                scheduled={Boolean(cardSchedules.schedules[String(row.id)])}
+                health={autoSyncPlaylistHealth(cardSchedules.history, row.id)}
+                status={
+                  exportStatus ? (
+                    <ExportStatusSpan status={exportStatus} />
+                  ) : phaseLine ? (
+                    <span className="card-phase" style={{ color: phaseLine.color }}>
+                      {phaseLine.text}
+                    </span>
+                  ) : null
+                }
+                onOpen={() => onCardClick(row)}
+                primary={
+                  // The pipeline endpoint rejects file/beatport outright, and
+                  // lastfm cannot be scheduled either — same guard the board
+                  // uses, so the card never offers a run that 400s.
+                  !autoSyncCanSchedulePlaylist(row)
+                    ? null
+                    : {
+                  label: playlistCardPrimaryLabel(row),
+                  danger: state === 'error',
+                  onClick: () => {
+                    // "View progress" opens the card; everything else runs the
+                    // pipeline, which IS refresh + discover + sync + queue the
+                    // missing tracks — so "Find N missing" is literal, not a
+                    // friendlier name for something else.
+                    if (state === 'working') onCardClick(row);
+                    else void pipeline.run(row.id, row.name ?? '');
+                  },
+                      }
+                }
+                onSchedule={
+                  autoSyncCanSchedulePlaylist(row)
+                    ? (anchor) => {
+                        // Toggles, like the overflow trigger.
+                        const box = anchor.getBoundingClientRect();
+                        setSchedMenu((prev) =>
+                          prev?.row.id === row.id
+                            ? null
+                            : { row, top: box.bottom + 6, left: box.left, anchor },
+                        );
+                      }
+                    : undefined
+                }
+                onMore={(anchor) => {
+                  // A TOGGLE, not a set: clicking the trigger of an open menu
+                  // closes it, which is what the control looks like it does.
+                  const box = anchor.getBoundingClientRect();
+                  setMenu((prev) =>
+                    prev?.row.id === row.id
+                      ? null
+                      : { row, top: box.bottom + 6, left: box.right - 188, anchor },
+                  );
+                }}
+              />
             );
-          })
+            })}
+          </div>
         )}
       </div>
+      {schedMenu && (
+        <ScheduleMenu
+          row={schedMenu.row}
+          hours={cardSchedules.schedules[String(schedMenu.row.id)]?.hours ?? null}
+          weekly={Boolean(cardSchedules.schedules[String(schedMenu.row.id)]?.weekly)}
+          anchor={{ top: schedMenu.top, left: schedMenu.left }}
+          anchorEl={schedMenu.anchor}
+          onClose={() => setSchedMenu(null)}
+          onPickHours={(hours) => void cardSchedules.set(schedMenu.row, hours)}
+          onPickWeekly={(days) => void cardSchedules.setWeekly(schedMenu.row, { days })}
+          onCustomWeekly={() => {
+            const current = cardSchedules.schedules[String(schedMenu.row.id)]?.weeklyConfig;
+            setWeeklyDraft({
+              playlistId: Number(schedMenu.row.id),
+              days: current?.days ?? ['mon'],
+              time: current?.time ?? '09:00',
+              tz: current?.tz ?? detectBrowserTimezone(),
+            });
+          }}
+        />
+      )}
+      {weeklyDraft && (
+        /* All that survives of the weekly BOARD. The board rendered the same
+           card once per selected day because a calendar has to; a draft in an
+           editor does not. */
+        <AutoSyncWeeklyEditor
+          draft={weeklyDraft}
+          playlistName={
+            rows?.find((r) => r.id === weeklyDraft.playlistId)?.display_name ??
+            rows?.find((r) => r.id === weeklyDraft.playlistId)?.name ??
+            ''
+          }
+          hasExisting={Boolean(
+            cardSchedules.schedules[String(weeklyDraft.playlistId)]?.weekly,
+          )}
+          onChange={setWeeklyDraft}
+          onSave={() => {
+            const target = rows?.find((r) => r.id === weeklyDraft.playlistId);
+            if (target) {
+              void cardSchedules.setWeekly(target, {
+                days: weeklyDraft.days,
+                time: weeklyDraft.time,
+                tz: weeklyDraft.tz,
+              });
+            }
+            setWeeklyDraft(null);
+          }}
+          onUnschedule={() => {
+            const target = rows?.find((r) => r.id === weeklyDraft.playlistId);
+            if (target) void cardSchedules.set(target, null);
+            setWeeklyDraft(null);
+          }}
+          onClose={() => setWeeklyDraft(null)}
+        />
+      )}
+      {menu && (
+        <MirroredCardMenu
+          row={menu.row}
+          top={menu.top}
+          left={menu.left}
+          anchor={menu.anchor}
+          onClose={() => setMenu(null)}
+          onRename={() => {
+            setRenameValue(menu.row.custom_name ?? '');
+            setRenaming(menu.row.id);
+          }}
+          onEditSource={() => {
+            setRefEditFromDetail(false);
+            setEditingRef(menu.row);
+          }}
+          onExport={() => setExporting(menu.row)}
+          onClear={() => void onClear(menu.row)}
+          onDelete={() => void onDelete(menu.row)}
+          onToggleOrganize={(enabled) => void setOrganize(menu.row, enabled)}
+        />
+      )}
       {exporting && (
         <ExportModal
           // The picker's subtitle uses the card's shown name (607).

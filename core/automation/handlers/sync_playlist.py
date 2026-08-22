@@ -74,6 +74,12 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
                 'album': album_obj,
                 'duration_ms': md.get('duration_ms', 0),
                 'id': md.get('id', ''),
+                # Carried purely so the sync can write its per-track verdict back
+                # onto this row. `id` above is the SOURCE id and cannot serve:
+                # for a ListenBrainz playlist it is a 'file:...' reference, and
+                # after discovery it is whichever provider matched (often Deezer).
+                # SpotifyTrack reads named fields, so this rides along unused.
+                'db_track_id': t.get('id'),
             }
             if md.get('track_number'):
                 _track_entry['track_number'] = md['track_number']
@@ -112,6 +118,7 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
                     'album': album_obj,
                     'duration_ms': t.get('duration_ms', 0),
                     'id': hint['id'],
+                    'db_track_id': t.get('id'),
                 })
             elif t.get('source_track_id') and (t.get('track_name') or '').strip():
                 # Has a valid source ID and track name — usable for wishlist.
@@ -121,6 +128,7 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
                     'album': album_obj,
                     'duration_ms': t.get('duration_ms', 0),
                     'id': t['source_track_id'],
+                    'db_track_id': t.get('id'),
                 })
             else:
                 skipped_count += 1  # No usable ID or name — truly can't process.

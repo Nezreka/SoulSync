@@ -14,6 +14,7 @@
 import type { ReactNode } from 'react';
 
 import { actionButtonText, phaseColor, phaseText } from '../-sync.core';
+import { PlaylistArt } from './playlist-art';
 
 export interface SourceCardProps {
   id?: string;
@@ -21,6 +22,11 @@ export interface SourceCardProps {
   icon: string;
   /** Extra class on the icon element (YouTube's 'youtube-icon', 8893). */
   iconClassName?: string;
+  /**
+   * Cover art. Fills the icon tile when present; `icon` stays the fallback, so
+   * a card whose source never carries art looks exactly as it did before.
+   */
+  artUrl?: string | null;
   name: string;
   countText: string;
   /** Omitted entirely for the URL-import cards (their info row has no owner span). */
@@ -45,6 +51,7 @@ export function SourceCard({
   cardClassName,
   icon,
   iconClassName,
+  artUrl,
   name,
   countText,
   owner,
@@ -59,7 +66,9 @@ export function SourceCard({
 }: SourceCardProps) {
   return (
     <div className={`youtube-playlist-card ${cardClassName}`} id={id} onClick={onClick}>
-      <div className={`playlist-card-icon ${iconClassName ?? ''}`}>{icon}</div>
+      <div className={`playlist-card-icon ${iconClassName ?? ''}`}>
+        <PlaylistArt url={artUrl} glyph={icon} />
+      </div>
       <div className="playlist-card-content">
         <div className="playlist-card-name">{name}</div>
         <div className="playlist-card-info">

@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { SsdTrack } from './-sync.lb-tabs';
+import type { LbProgressInput, SsdTrack } from './-sync.lb-tabs';
 
 import { extractFunction } from '../../test/vanilla-extract';
 import {
@@ -21,7 +21,7 @@ import {
   fetchLbCategories,
   fetchLbPlaylistTracks,
   fetchSsdRecords,
-  lbCardProgressLine,
+  lbCoverageCounts,
   mirrorLbAfterDiscovery,
   resolveLbMirrorTarget,
   postLbCacheRefresh,
@@ -125,54 +125,56 @@ describe('unwrapJspfPlaylist (sync-listenbrainz.js 89-105)', () => {
   });
 });
 
-describe('lbCardProgressLine (_refreshOneLbSyncCard 253-283)', () => {
-  it('fresh hides; discovery counters render with the pct fallback', () => {
+describe('the LB card numbers (_refreshOneLbSyncCard 253-283)', () => {
+  /*
+   * These were written against lbCardProgressLine, the vanilla's "♪ T / ✓ M /
+   * ✗ F / P%" string. The cards render the shared coverage bar now, so that
+   * string had no caller left and pinning it pinned dead code. The PARITY that
+   * mattered was never the punctuation — it was the four numbers, which is
+   * what these assert.
+   */
+  it('fresh hides; discovery counters carry the pct fallback', () => {
     expect(
-      lbCardProgressLine({
-        phase: 'fresh',
-        spotifyTotal: 5,
-        spotifyMatches: 1,
-        discoveryProgress: 10,
-      }),
-    ).toBe(null);
+      lbCoverageCounts({ phase: 'fresh', spotifyTotal: 5, spotifyMatches: 1, discoveryProgress: 10 }),
+    ).toBeNull();
     expect(
-      lbCardProgressLine({
+      lbCoverageCounts({
         phase: 'discovered',
         spotifyTotal: 10,
         spotifyMatches: 7,
         discoveryProgress: 0,
       }),
-    ).toBe('♪ 10 / ✓ 7 / ✗ 3 / 70%');
+    ).toEqual({ total: 10, matched: 7, failed: 3, percentage: 70 });
     // Total 0 → the discovery progress stands in for the percent.
     expect(
-      lbCardProgressLine({
+      lbCoverageCounts({
         phase: 'discovering',
         spotifyTotal: 0,
         spotifyMatches: 0,
         discoveryProgress: 40,
       }),
-    ).toBe('♪ 0 / ✓ 0 / ✗ 0 / 40%');
+    ).toEqual({ total: 0, matched: 0, failed: 0, percentage: 40 });
   });
 
   it('syncing reads lastSyncProgress; failed falls back to total-matched; percent is matched/total', () => {
     expect(
-      lbCardProgressLine({
+      lbCoverageCounts({
         phase: 'syncing',
         spotifyTotal: 99,
         spotifyMatches: 99,
         discoveryProgress: 99,
         lastSyncProgress: { total_tracks: 10, matched_tracks: 4 },
       }),
-    ).toBe('♪ 10 / ✓ 4 / ✗ 6 / 40%');
+    ).toEqual({ total: 10, matched: 4, failed: 6, percentage: 40 });
     expect(
-      lbCardProgressLine({
+      lbCoverageCounts({
         phase: 'sync_complete',
         spotifyTotal: 0,
         spotifyMatches: 0,
         discoveryProgress: 0,
         lastSyncProgress: { total_tracks: 10, matched_tracks: 4, failed_tracks: 1 },
       }),
-    ).toBe('♪ 10 / ✓ 4 / ✗ 1 / 40%');
+    ).toEqual({ total: 10, matched: 4, failed: 1, percentage: 40 });
   });
 });
 
@@ -664,4 +666,65 @@ describe('resolveLbMirrorTarget (10975-11004) — direct', () => {
     expect(resolveLbMirrorTarget('m', 'Weekly Jams', undefined).owner).toBe('ListenBrainz');
     expect(resolveLbMirrorTarget('m', 'Last.fm Radio: x', undefined).owner).toBe('Last.fm');
   });
+});
+
+/** LbProgressInput requires all four counters; these tests each care about a
+ *  couple at a time, so the rest default to the zeroes a fresh card carries. */
+function lbInput(patch: Partial<LbProgressInput> & { phase: string }): LbProgressInput {
+  return { spotifyTotal: 0, spotifyMatches: 0, discoveryProgress: 0, ...patch };
+}
+
+describe('lbCoverageCounts — the numbers behind the card bar', () => {
+  it('sync phases use matched/total, NOT (matched+failed)/total like other sources', () => {
+    // The parity that must not drift (sync-listenbrainz.js 271). Every other
+    // vertical counts failures as processed; ListenBrainz does not, in either
+    // phase, and the shared coverage bar renders whatever this returns.
+    expect(
+      lbCoverageCounts(
+        lbInput({
+          phase: 'syncing',
+          lastSyncProgress: { total_tracks: 10, matched_tracks: 6, failed_tracks: 2 },
+        }),
+      ),
+    ).toEqual({ total: 10, matched: 6, failed: 2, percentage: 60 });
+  });
+
+  it('falls back to total-matched when the sync payload omits failures', () => {
+    expect(
+      lbCoverageCounts(
+        lbInput({
+          phase: 'sync_complete',
+          lastSyncProgress: { total_tracks: 8, matched_tracks: 5 },
+        }),
+      ),
+    ).toEqual({ total: 8, matched: 5, failed: 3, percentage: 63 });
+  });
+
+  it('accepts the spotify_* aliases the payload sometimes uses instead', () => {
+    expect(
+      lbCoverageCounts(
+        lbInput({
+          phase: 'syncing',
+          lastSyncProgress: { spotify_total: 4, spotify_matches: 1 },
+        }),
+      ),
+    ).toMatchObject({ total: 4, matched: 1, percentage: 25 });
+  });
+
+  it('non-sync phases read the discovery counters', () => {
+    expect(
+      lbCoverageCounts(lbInput({ phase: 'discovered', spotifyTotal: 5, spotifyMatches: 4 })),
+    ).toEqual({ total: 5, matched: 4, failed: 1, percentage: 80 });
+  });
+
+  it('a zero total falls back to the discovery progress, not to 0%', () => {
+    expect(
+      lbCoverageCounts(lbInput({ phase: 'discovering', spotifyTotal: 0, discoveryProgress: 42 })),
+    ).toMatchObject({ total: 0, percentage: 42 });
+  });
+
+  it('fresh returns null so the card hides the element entirely', () => {
+    expect(lbCoverageCounts(lbInput({ phase: 'fresh' }))).toBeNull();
+  });
+
 });

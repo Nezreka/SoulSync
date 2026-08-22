@@ -9,7 +9,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
-import { SYNC_LOGS_EVENT, useSyncLogsEvent } from './-sync.events';
+import {
+  DEEZER_PLAYLIST_PROGRESS_EVENT,
+  SYNC_LOGS_EVENT,
+  deezerProgressLabel,
+  useSyncLogsEvent,
+} from './-sync.events';
 
 describe('the vanilla half of the seam', () => {
   /**
@@ -89,5 +94,44 @@ describe('the log channel', () => {
     const after = add.mock.calls.filter(([name]) => name === SYNC_LOGS_EVENT).length;
     expect(after).toBe(before);
     add.mockRestore();
+  });
+});
+
+describe('deezerProgressLabel (#TheHomeGuy — "it just sits there saying Loading...")', () => {
+  const frame = (over = {}) => ({
+    playlist_id: '15653026843',
+    done: 340,
+    total: 877,
+    phase: 'track numbers',
+    ...over,
+  });
+
+  it('turns a frame into something a person can read', () => {
+    expect(deezerProgressLabel(frame(), '15653026843')).toBe('track numbers 340/877 (39%)');
+  });
+
+  it('ignores frames for a different playlist', () => {
+    expect(deezerProgressLabel(frame(), '999')).toBeNull();
+  });
+
+  it('matches the id loosely, since one side arrives as a number', () => {
+    expect(
+      deezerProgressLabel(frame({ playlist_id: 15653026843 as unknown as string }), '15653026843'),
+    ).toBe('track numbers 340/877 (39%)');
+  });
+
+  it('says nothing when there is no total to divide by', () => {
+    expect(deezerProgressLabel(frame({ total: 0 }), '15653026843')).toBeNull();
+  });
+
+  it('says nothing for a missing frame', () => {
+    expect(deezerProgressLabel(null, '15653026843')).toBeNull();
+    expect(deezerProgressLabel(undefined, '15653026843')).toBeNull();
+  });
+
+  it('never exceeds 100%', () => {
+    expect(deezerProgressLabel(frame({ done: 900, total: 877 }), '15653026843')).toContain(
+      '(100%)',
+    );
   });
 });

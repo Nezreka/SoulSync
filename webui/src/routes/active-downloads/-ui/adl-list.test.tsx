@@ -255,8 +255,11 @@ describe('AdlRow', () => {
     expect(onRowAudit).toHaveBeenCalled();
 
     cleanup();
+    // A plain row is clickable too since #1156 — but it expands the detail
+    // panel instead of opening the audit modal.
     const plain = render(<AdlRow dl={row()} />);
-    expect((plain.container.querySelector('.adl-row') as HTMLElement).style.cursor).toBe('');
+    fireEvent.click(plain.container.querySelector('.adl-row') as HTMLElement);
+    expect(plain.container.querySelector('.verif-quar-details')).not.toBeNull();
   });
 
   it('renders a placeholder when there is no artwork', () => {
@@ -341,6 +344,7 @@ describe('AdlHeader', () => {
     counts,
     hasRunningWork: false,
     acoustidEnabled: true,
+    reviewCount: null,
     onFilter: vi.fn(),
     onCancelAll: vi.fn(),
     onClearCompleted: vi.fn(),

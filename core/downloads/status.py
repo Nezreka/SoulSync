@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Optional
 
+from core.downloads.live_detail import build_live_detail, resolve_source_label
 from core.runtime_state import (
     download_batches,
     download_tasks,
@@ -112,6 +113,33 @@ _RELEASE_SOURCE_NAMES = frozenset(('torrent', 'usenet'))
 _ENGINE_FAILURE_STATES = ('Errored', 'Failed', 'Rejected', 'TimedOut', 'Aborted')
 _ENGINE_CANCELLED_STATES = ('Cancelled', 'Canceled')
 _ENGINE_SUCCESS_STATES = ('Succeeded', 'Completed, Succeeded')
+
+
+def classify_engine_state(state: Any) -> str:
+    """Read an engine/slskd state string as one of the four things it can mean.
+
+    Returns ``'cancelled'``, ``'failed'``, ``'success'`` or ``'pending'``.
+
+    THE ORDER MATTERS. slskd reports compound states — "Completed, Errored",
+    "Completed, Cancelled" — so testing for "Completed" first would read a
+    failed transfer as a successful one. Cancelled and failed are checked before
+    success for exactly that reason, which is the same priority the branches
+    below already use.
+
+    Public so callers outside this module classify a state the same way rather
+    than writing their own list of strings; the API's inbound request endpoint
+    needs it to tell a finished download from an abandoned one.
+    """
+    state_str = str(state or '')
+    if not state_str:
+        return 'pending'
+    if any(token in state_str for token in _ENGINE_CANCELLED_STATES):
+        return 'cancelled'
+    if any(token in state_str for token in _ENGINE_FAILURE_STATES):
+        return 'failed'
+    if any(token in state_str for token in _ENGINE_SUCCESS_STATES):
+        return 'success'
+    return 'pending'
 
 
 def _engine_state_str(record: Any) -> str:
@@ -261,6 +289,16 @@ def _apply_engine_state_fallback(
     task_status['progress'] = _engine_progress_pct(record)
 
 
+def _attach_live_detail(task_status: dict, task: dict, live_info: Optional[dict]) -> None:
+    """Decorate one per-task payload with its live_detail (#1156).
+
+    Uses the FINAL status already written to task_status (the builder mutates
+    it after reading the raw task), so the detail matches the badge shown."""
+    detail = build_live_detail(task, live_info, task_status.get('status') or '')
+    if detail:
+        task_status['live_detail'] = detail
+
+
 def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: dict, deps: StatusDeps) -> dict:
     """Build status payload for a single batch.
 
@@ -371,6 +409,7 @@ def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: d
                 _apply_engine_state_fallback(
                     task_id, task, task_status, batch_id, deps,
                 )
+                _attach_live_detail(task_status, task, None)
                 batch_tasks.append(task_status)
                 continue
 
@@ -513,6 +552,10 @@ def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: d
                         _apply_engine_state_fallback(
                             task_id, task, task_status, batch_id, deps,
                         )
+            _live_row = None
+            if task_filename and task_username:
+                _live_row = live_transfers_lookup.get(deps.make_context_key(task_username, task_filename))
+            _attach_live_detail(task_status, task, _live_row)
             batch_tasks.append(task_status)
         batch_tasks.sort(key=lambda x: x['track_index'])
         response_data['tasks'] = batch_tasks
@@ -717,6 +760,7 @@ def _build_history_download_item(entry: dict) -> dict:
         'file_path': entry.get('file_path') or '',
         'verification_status': entry.get('verification_status'),
         'is_persistent_history': True,
+        'download_source': source,
     }
 
 
@@ -776,11 +820,12 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
             live_identities.add(_download_identity(title, artist, album))
             # Determine download progress percentage
             progress = 0
+            live_info = None
             if status == 'completed':
                 progress = 100
             elif status == 'post_processing':
                 progress = 95
-            elif status in ('downloading', 'searching'):
+            elif status in ('downloading', 'searching', 'queued'):
                 # Check live transfer data for real progress
                 task_filename = task.get('filename') or track_info.get('filename')
                 task_username = task.get('username') or track_info.get('username')
@@ -790,7 +835,7 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                     if live_info:
                         progress = live_info.get('percentComplete', 0)
 
-            items.append({
+            item = {
                 'task_id': task_id,
                 'title': title,
                 'artist': artist,
@@ -821,7 +866,13 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                 'timestamp': task.get('status_change_time', 0),
                 'priority': _STATUS_PRIORITY.get(status, 9),
                 'is_persistent_history': False,
-            })
+                # Where it came from, for LIVE rows too (#1156): the label used
+                # to appear only once the row aged into persistent history, so
+                # a just-completed download never said "YouTube"/"Tidal".
+                'download_source': resolve_source_label(task.get('username')),
+            }
+            _attach_live_detail(item, task, live_info)
+            items.append(item)
 
     # --- Unverified history (unconditional, no limit) ---
     # Always load every library_history row that still needs human confirmation
@@ -931,6 +982,7 @@ def _build_album_bundle_status(batch: dict) -> dict:
         'seeders': batch.get('album_bundle_seeders'),
         'grabs': batch.get('album_bundle_grabs'),
         'count': batch.get('album_bundle_count'),
+        'query': batch.get('album_bundle_query'),
     }
     return {key: value for key, value in status.items() if value is not None}
 

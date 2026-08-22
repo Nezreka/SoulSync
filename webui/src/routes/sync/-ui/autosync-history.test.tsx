@@ -186,10 +186,8 @@ describe('load more and the running total (1235-1241, 1433-1438)', () => {
     const { container, props } = renderPanel([entry()], { total: 10 });
     fireEvent.click(container.querySelector('.auto-sync-history-load-more') as HTMLElement);
     expect(props.onLoadMore).toHaveBeenCalledTimes(1);
-    fireEvent.click(
-      container.querySelector('.auto-sync-history-intro-controls > button') as HTMLElement,
-    );
-    expect(props.onRefresh).toHaveBeenCalledTimes(1);
+    // No Refresh here any more — the modal header owns the only one.
+    expect(container.querySelector('.auto-sync-history-intro-controls > button')).toBeNull();
   });
 });
 

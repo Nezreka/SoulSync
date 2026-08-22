@@ -215,6 +215,37 @@ class ListeningStatsWorker:
                 self.stats['tracks_updated'] += len(updates)
                 logger.info(f"Updated play counts for {len(updates)} tracks")
 
+        # Step 2b: Per-user curation signals (favourites / ratings / playlist
+        # membership) for the Expired Download Cleaner.
+        #
+        # GATED, and that matters: this poll runs on virtually every install
+        # (listening_stats.enabled defaults on), while the cleaner is an opt-in
+        # repair job that ships disabled. Without the gate every user would pay
+        # per-user server scans every 30 minutes to feed a feature they never
+        # turned on. curation_sweep_due() also throttles to a few hours —
+        # retention windows are weeks, so half-hourly freshness buys nothing.
+        #
+        # Wrapped so a curation failure can never take down play counts or
+        # scrobbling, and a failed sweep deliberately leaves the previous
+        # signals and stamp alone: that ages out and makes the cleaner keep
+        # everything rather than delete it.
+        try:
+            from core.library.curation_sync import (
+                curation_sweep_due,
+                navidrome_user_credentials,
+                sync_curation_signals,
+            )
+            if curation_sweep_due(self.config_manager, self.db):
+                self.current_item = f"Reading curation signals from {active_server}..."
+                per_user = {}
+                if active_server == 'navidrome':
+                    # Subsonic can only report one user's stars per credential.
+                    per_user['navidrome'] = navidrome_user_credentials(self.db)
+                sync_curation_signals(self.db, {active_server: client},
+                                      user_credentials=per_user)
+        except Exception as e:
+            logger.warning(f"Curation signal sync failed for {active_server}: {e}")
+
         # Step 3: Scrobble new events to ListenBrainz and Last.fm
         self.current_item = "Scrobbling to external services..."
         self._scrobble_new_events()

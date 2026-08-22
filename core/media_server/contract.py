@@ -103,6 +103,10 @@ KNOWN_PER_SERVER_METHODS = (
     'get_playlist_by_name',
     'get_play_history',
     'get_track_play_counts',
+    # Per-user favourites / ratings / playlist membership, for the Expired
+    # Download Cleaner's keep decision. Optional like the two above: a server
+    # that doesn't implement it simply contributes no signals.
+    'get_curation_signals',
     'update_artist_genres',
     'update_artist_poster',
     'update_album_poster',

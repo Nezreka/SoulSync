@@ -8,7 +8,7 @@ import os
 import re
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,6 +35,47 @@ def _row_value(row, column: str, default=None):
     except (IndexError, KeyError):
         return default
     return default if value is None else value
+
+# ── MetaSync export column sets ──────────────────────────────────────────
+#
+# Named explicitly, never SELECT *: column ORDER differs between a fresh
+# install and an upgraded one, and a future column must not silently join the
+# export. ``id`` is selected only so the route can build the keyset cursor —
+# the allowlist serializers in api/serializers.py drop it before it is served,
+# because a media-server primary key is install-local and meaningless off-box.
+_EXPORT_PROVIDER_STATUSES = (
+    'musicbrainz_match_status', 'spotify_match_status', 'itunes_match_status',
+    'deezer_match_status', 'audiodb_match_status', 'tidal_match_status',
+    'qobuz_match_status', 'jiosaavn_match_status', 'amazon_match_status',
+)
+
+_EXPORT_ARTIST_COLUMNS = (
+    'id', 'soul_id', 'soul_id_path', 'name', 'genres', 'updated_at',
+    'musicbrainz_id', 'spotify_artist_id', 'itunes_artist_id', 'deezer_id',
+    'discogs_id', 'amazon_id', 'tidal_id', 'qobuz_id', 'audiodb_id',
+    'genius_id', 'jiosaavn_id',
+    *_EXPORT_PROVIDER_STATUSES, 'discogs_match_status', 'genius_match_status',
+)
+
+_EXPORT_ALBUM_COLUMNS = (
+    'id', 'soul_id', 'title', 'year', 'release_date', 'track_count',
+    'record_type', 'label', 'genres', 'updated_at',
+    'musicbrainz_release_id', 'spotify_album_id', 'itunes_album_id',
+    'deezer_id', 'discogs_id', 'amazon_id', 'tidal_id', 'qobuz_id',
+    'audiodb_id', 'jiosaavn_id', 'bandcamp_url', 'upc',
+    'canonical_source', 'canonical_album_id', 'canonical_score',
+    *_EXPORT_PROVIDER_STATUSES, 'discogs_match_status', 'bandcamp_match_status',
+)
+
+_EXPORT_TRACK_COLUMNS = (
+    'id', 'soul_id', 'album_soul_id', 'title', 'track_number', 'disc_number',
+    'duration', 'bpm', 'explicit', 'year', 'isrc', 'updated_at',
+    'musicbrainz_recording_id', 'spotify_track_id', 'itunes_track_id',
+    'deezer_id', 'amazon_id', 'tidal_id', 'qobuz_id', 'audiodb_id',
+    'genius_id', 'jiosaavn_id', 'bandcamp_url',
+    *_EXPORT_PROVIDER_STATUSES, 'genius_match_status', 'bandcamp_match_status',
+)
+
 
 # Import matching engine for enhanced similarity logic
 try:
@@ -189,6 +230,47 @@ class RecentRelease:
     album_cover_url: Optional[str]
     track_count: int
     added_date: datetime
+
+def mirrored_cover_from_match(extra_data: dict) -> str:
+    """The cover art hiding inside a discovery match, or '' if there is none.
+
+    Most playlist sources hand us no poster at all when a playlist is mirrored —
+    Spotify links, YouTube, ListenBrainz, Last.fm and SoulSync Discovery all
+    arrive art-less, and Tidal's only started supplying one recently, so older
+    mirrors have nothing stored either. What they DO get, once discovery runs,
+    is a matched track with real metadata behind it, and that carries album art.
+
+    So a playlist's cover is derived from the first track discovery matches.
+    `_build_fix_modal_spotify_data` deliberately carries the image in two places
+    ("image_url is carried both at top level and inside album.images for parity
+    with Spotify API responses"), and older rows only have the nested one, so
+    both are read here.
+    """
+    if not isinstance(extra_data, dict):
+        return ''
+    if not extra_data.get('discovered'):
+        return ''
+    match = extra_data.get('matched_data') or extra_data.get('spotify_data')
+    if not isinstance(match, dict):
+        return ''
+
+    direct = match.get('image_url')
+    if isinstance(direct, str) and direct:
+        return direct
+
+    album = match.get('album')
+    if isinstance(album, dict):
+        images = album.get('images')
+        if isinstance(images, list):
+            for image in images:
+                if isinstance(image, dict):
+                    url = image.get('url')
+                    if isinstance(url, str) and url:
+                        return url
+                elif isinstance(image, str) and image:
+                    return image
+    return ''
+
 
 class MusicDatabase:
     """SQLite database manager for SoulSync music library data"""
@@ -360,6 +442,35 @@ class MusicDatabase:
                 )
             """)
 
+            # Per-user curation signals read back off the media server —
+            # what people deliberately CHOSE about a track (favourited,
+            # rated, added to a playlist), as opposed to play_count which
+            # only records what happened. Feeds the Expired Download
+            # Cleaner's keep decision.
+            #
+            # Keyed by ``track_key`` (normalised trailing path segments, see
+            # _path_suffix_key) rather than the media server's item id on
+            # purpose: item ids change when the library is rebuilt, and
+            # SoulSync's stored path and the server's differ on Docker/NAS.
+            # The path suffix survives both.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS curation_signals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    server TEXT NOT NULL,
+                    user_key TEXT NOT NULL,
+                    track_key TEXT NOT NULL,
+                    favorite INTEGER DEFAULT 0,
+                    rating REAL,
+                    in_playlist INTEGER DEFAULT 0,
+                    source_path TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(server, user_key, track_key)
+                )
+            """)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_curation_track_key "
+                "ON curation_signals (track_key)")
+
             # Migration ledger — a single, readable record of which one-time
             # migrations have run. ADDITIVE backstop only: existing migrations
             # keep their own idempotency gates (PRAGMA checks, marker tables,
@@ -409,6 +520,35 @@ class MusicDatabase:
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_ignore_profile ON wishlist_ignore (profile_id, track_id)")
+
+            # #652 again. the "don't pick this same bad upload again" list used
+            # to be built by reading the sidecars sitting in ss_quarantine. so
+            # the review queue WAS the blocklist, and emptying the queue (approve,
+            # delete, clear all) also wiped the memory of what already failed.
+            # ranking is deterministic, so the same file wins again, downloads
+            # again, fails the same check again. that's why approving something
+            # five times keeps bringing it back.
+            #
+            # so the verdict lives here now, it survives the folder getting
+            # cleared. nothing in the review queue removes these rows, approve
+            # included, see approve_quarantine_entry for why. deleting means
+            # "this file is bad" which is the best reason there is to keep
+            # blocking it, and approving is either harmless (the track imported,
+            # nobody searches for it again) or the only thing that breaks the
+            # loop (it didn't import, so pick someone else next time).
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS quarantine_source_blocks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    trigger TEXT DEFAULT 'unknown',
+                    expected_artist TEXT DEFAULT '',
+                    expected_track TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(username, filename)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_qsb_source ON quarantine_source_blocks (username, filename)")
 
             # Notification history (Kazimir): every toast the UI raises is
             # journaled here so a reflexive "Clear All" in the bell panel
@@ -818,6 +958,8 @@ class MusicDatabase:
 
             # Add explored_at to mirrored_playlists (migration)
             self._add_mirrored_playlist_explored_column(cursor)
+            self._add_mirrored_playlist_cover_tiles_column(cursor)
+            self._add_mirrored_playlist_server_link_columns(cursor)
             self._add_mirrored_playlist_organize_column(cursor)
             self._add_mirrored_playlist_custom_name_column(cursor)
             self._add_mirrored_playlist_quality_profile_column(cursor)
@@ -1640,9 +1782,14 @@ class MusicDatabase:
             # Auto writes can't clobber a manual lock; manual writes always apply.
             guard = "" if locked else " AND (canonical_locked IS NULL OR canonical_locked = 0)"
             cursor.execute(
+                # updated_at moves with the canonical claim (L2-011): these
+                # columns are part of the MetaSync payload, so a claim that did
+                # not touch the timestamp changed what a full export says while
+                # every incremental export kept omitting the row.
                 "UPDATE albums SET canonical_source = ?, canonical_album_id = ?, "
                 "canonical_score = ?, canonical_locked = ?, "
-                "canonical_resolved_at = CURRENT_TIMESTAMP "
+                "canonical_resolved_at = CURRENT_TIMESTAMP, "
+                "updated_at = CURRENT_TIMESTAMP "
                 f"WHERE id = ?{guard}",
                 (source, str(canonical_album_id), float(score), 1 if locked else 0, album_id),
             )
@@ -1888,6 +2035,54 @@ class MusicDatabase:
                 logger.info("Added custom_name column to mirrored_playlists table")
         except Exception as e:
             logger.error(f"Error adding custom_name column to mirrored_playlists: {e}")
+
+    def _add_mirrored_playlist_server_link_columns(self, cursor):
+        """Which server playlist a mirror corresponds to, once we know.
+
+        Today the relationship is matched BY NAME at read time: the server tab
+        fetches the mirrored list and marks a server playlist synced when the
+        names line up, and the disambiguation modal exists because that guess
+        can hit more than one. Nothing is stored, so the guess is made again on
+        every visit.
+
+        These columns record the answer when it has actually been resolved.
+        NOTHING READS THEM YET, deliberately: the write lands first and gets
+        checked against real data before any behaviour depends on it. Nullable
+        throughout, so every existing row means "not linked" and behaves exactly
+        as it does today.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = [c[1] for c in cursor.fetchall()]
+            for name, decl in (
+                ('server_playlist_id', 'TEXT DEFAULT NULL'),
+                ('server_type', 'TEXT DEFAULT NULL'),
+                ('server_linked_at', 'TIMESTAMP DEFAULT NULL'),
+            ):
+                if name not in cols:
+                    cursor.execute(
+                        f"ALTER TABLE mirrored_playlists ADD COLUMN {name} {decl}"
+                    )
+                    logger.info(f"Added {name} column to mirrored_playlists table")
+        except Exception as e:
+            logger.error(f"Error adding server link columns to mirrored_playlists: {e}")
+
+    def _add_mirrored_playlist_cover_tiles_column(self, cursor):
+        """Up to four distinct album covers, for the 2x2 collage.
+
+        `image_url` stays what it always was: the ONE poster a source supplied,
+        which still wins when it exists — a real playlist cover beats a mosaic
+        of its albums. This column is the fallback for the many sources that
+        send no poster at all, filled from what discovery matched.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'cover_tiles' not in cols:
+                cursor.execute("ALTER TABLE mirrored_playlists ADD COLUMN cover_tiles TEXT DEFAULT NULL")
+                logger.info("Added cover_tiles column to mirrored_playlists table")
+        except Exception as e:
+            logger.error(f"Error adding cover_tiles column to mirrored_playlists: {e}")
 
     def _add_mirrored_playlist_quality_profile_column(self, cursor):
         """Add the native per-playlist Quality Profile assignment.
@@ -5058,6 +5253,17 @@ class MusicDatabase:
             if 'soul_id' not in artist_cols:
                 cursor.execute("ALTER TABLE artists ADD COLUMN soul_id TEXT DEFAULT NULL")
                 logger.info("Added soul_id column to artists table")
+            # Which derivation produced the artist soul_id: 'canonical' (name +
+            # a provider's artist id), 'album' (name + the alphabetically-first
+            # album title IN THIS LIBRARY) or 'name' (name alone). Only
+            # 'canonical' is reproducible on another install — the album
+            # fallback depends on what that user happens to own, so two
+            # libraries holding the same artist derive different ids. Nothing
+            # recorded how much to trust a given artist soul_id before this.
+            # NULL means unknown (generated before this column existed).
+            if 'soul_id_path' not in artist_cols:
+                cursor.execute("ALTER TABLE artists ADD COLUMN soul_id_path TEXT DEFAULT NULL")
+                logger.info("Added soul_id_path column to artists table")
 
             # Albums: soul_id
             cursor.execute("PRAGMA table_info(albums)")
@@ -7293,6 +7499,21 @@ class MusicDatabase:
 
                     cursor.execute("DELETE FROM artists WHERE server_source = ?", (server_source,))
                     artists_deleted = cursor.rowcount
+
+                    # Stamp the rebuild. Wiping the library destroys every local
+                    # signal about a track — play_count above all — while
+                    # library_history keeps each download's original created_at,
+                    # so afterwards a much-loved track reads to the Expired
+                    # Download Cleaner as "old and never played". Recording WHEN
+                    # the library was rebuilt lets that job treat everything
+                    # downloaded before it as out of scope, permanently. Written
+                    # in the same transaction as the delete so a crash can never
+                    # leave the wipe applied without the stamp.
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO metadata (key, value, updated_at) "
+                        "VALUES (?, ?, CURRENT_TIMESTAMP)",
+                        ('library_rebuilt_at', datetime.now().isoformat()),
+                    )
 
                     conn.commit()
 
@@ -11024,33 +11245,55 @@ class MusicDatabase:
             logger.error(f"Failed to save quality profile: {e}")
             return False
 
+    # The columns `_write_default_quality_profile_row` writes unconditionally
+    # (the ranked-target ladder and its flags), and the ones it writes only
+    # when the caller actually named them. See that method for why the split
+    # exists.
+    _QUALITY_LADDER_COLUMNS = (
+        "ranked_targets", "fallback_enabled", "search_mode",
+        "rank_candidates_by_quality", "upgrade_policy", "upgrade_cutoff_index",
+    )
+    _QUALITY_BUNDLE_COLUMNS = (
+        "acoustid_required", "downsample_enabled", "deep_audio_verify",
+        "replace_lower_quality", "lossy_copy_enabled", "lossy_copy_codec",
+        "lossy_copy_bitrate", "lossy_copy_delete_original",
+    )
+
     def _write_default_quality_profile_row(self, profile: dict) -> None:
         """Write-through helper for `set_quality_profile`: updates the
-        ``is_default=1`` row in `quality_profiles` to match."""
-        import json
-        try:
-            cutoff_index = max(0, int(profile.get("upgrade_cutoff_index") or 0))
-        except (TypeError, ValueError):
-            cutoff_index = 0
-        upgrade_policy = profile.get("upgrade_policy")
-        if upgrade_policy not in ("acceptable", "until_cutoff", "until_top"):
-            upgrade_policy = "acceptable"
+        ``is_default=1`` row in `quality_profiles` to match.
+
+        Writes the ladder columns always and a bundle column only when
+        ``profile`` actually carries that key. The asymmetry is the point:
+        ``GET /api/quality-profile`` returns all fourteen fields, but the
+        Settings page posts back only the six ladder ones
+        (``settings.js::collectQualityProfileFromUI``) and a Quick Set preset
+        carries even fewer. The other eight belong to the global config and
+        reach this row through
+        :meth:`sync_default_quality_profile_from_config` after a settings
+        save, so a POST that never mentioned them must leave them alone —
+        writing a coerced default for an absent key would silently reset
+        lossy-copy, AcoustID strictness and replace-lower-quality every time
+        somebody reordered the target ladder.
+
+        Naming a key still works, including turning one off: presence decides,
+        not truthiness. That is what makes a full round-trip of the GET
+        payload behave the way a caller expects, which it previously did not
+        (PR #1103 reported exactly that, but fixed it by writing all fourteen
+        unconditionally, which is the reset described above).
+        """
+        params = self._quality_profile_bundle_params(profile)
+        columns = list(self._QUALITY_LADDER_COLUMNS)
+        columns += [c for c in self._QUALITY_BUNDLE_COLUMNS if c in profile]
+        # Interpolated, but only ever from the two class-level tuples above —
+        # `profile` decides which of those names are used, never what they are.
+        assignments = ", ".join(f"{c}=:{c}" for c in columns)
         conn = self._get_connection()
         try:
             conn.execute(
-                """UPDATE quality_profiles
-                      SET ranked_targets=?, fallback_enabled=?, search_mode=?,
-                          rank_candidates_by_quality=?, upgrade_policy=?,
-                          upgrade_cutoff_index=?, updated_at=CURRENT_TIMESTAMP
-                    WHERE is_default=1""",
-                (
-                    json.dumps(profile.get("ranked_targets") or []),
-                    1 if profile.get("fallback_enabled", True) else 0,
-                    profile.get("search_mode") if profile.get("search_mode") in ("priority", "best_quality") else "priority",
-                    1 if profile.get("rank_candidates_by_quality") else 0,
-                    upgrade_policy,
-                    cutoff_index,
-                ),
+                f"UPDATE quality_profiles SET {assignments}, "
+                "updated_at=CURRENT_TIMESTAMP WHERE is_default=1",
+                {c: params[c] for c in columns},
             )
             conn.commit()
         finally:
@@ -17126,18 +17369,151 @@ class MusicDatabase:
             logger.error(f"Error getting watchlist scan run events for {run_id}: {e}")
             return []
 
+    @staticmethod
+    def _path_suffix_key(path, segments: int = 2):
+        """Normalised trailing path segments — see
+        ``core.library.expired_cleanup.path_suffix_key``. Imported lazily so
+        the pure module stays the single definition without this module
+        gaining an import-time dependency on it."""
+        from core.library.expired_cleanup import path_suffix_key
+        return path_suffix_key(path, segments)
+
+    # ── Curation signals (media-server favourites / ratings / playlists) ──
+
+    CURATION_SYNC_KEY = 'curation_signals_synced_at'
+    # The structured outcome of the last sweep. The bare timestamp above cannot
+    # express "half of it failed", and a fresh stamp over a half-written
+    # snapshot is indistinguishable from "nobody curated anything" — which is
+    # the state that deletes a library (L2-001).
+    CURATION_STATUS_KEY = 'curation_signals_sync_status'
+
+    def replace_curation_signals(self, server: str, user_key: str, signals) -> int:
+        """Replace one user's curation signals for one server, atomically.
+
+        Replace rather than merge: an unstarred track must actually lose its
+        protection, and a merge would keep it protected forever. The delete and
+        the insert share a transaction so a crash can never leave the user with
+        no signals — which would read as "nobody wants any of this".
+
+        ``signals`` items need ``track_key``; ``favorite``, ``rating``,
+        ``in_playlist`` and ``source_path`` are optional.
+
+        Raises on any storage failure. This is a safety API: swallowing the
+        error and returning 0 made a failed write indistinguishable from "this
+        user curated nothing", and the caller then stamped the sweep as a
+        success (L2-001). The caller decides what a failure means; it must never
+        have to guess whether one happened.
+        """
+        rows = [s for s in (signals or []) if isinstance(s, dict) and s.get('track_key')]
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM curation_signals WHERE server = ? AND user_key = ?",
+                (str(server), str(user_key)))
+            cursor.executemany(
+                "INSERT OR REPLACE INTO curation_signals "
+                "(server, user_key, track_key, favorite, rating, in_playlist, "
+                " source_path, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP)",
+                [(str(server), str(user_key), s['track_key'],
+                  1 if s.get('favorite') else 0,
+                  s.get('rating'),
+                  1 if s.get('in_playlist') else 0,
+                  s.get('source_path'))
+                 for s in rows])
+            conn.commit()
+        return len(rows)
+
+    def get_curation_signals_by_track_key(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Every stored signal, grouped by track_key, for the cleanup decision.
+
+        Raises on a read failure (L2-001). An empty dict has to mean "nobody
+        curated anything"; returning it for a schema or I/O error handed the
+        cleaner that exact conclusion and let it delete favourited files.
+        """
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT track_key, server, user_key, favorite, rating, in_playlist "
+            "FROM curation_signals")
+        for track_key, server, user_key, favorite, rating, in_playlist in cursor.fetchall():
+            grouped.setdefault(track_key, []).append({
+                'server': server,
+                'user': user_key,
+                'favorite': bool(favorite),
+                'rating': rating,
+                'in_playlist': bool(in_playlist),
+            })
+        return grouped
+
+    def mark_curation_sync(self, status: Optional[Dict[str, Any]] = None) -> None:
+        """Record the outcome of a curation sweep.
+
+        ``status`` is the structured record the cleaner reads; it must carry a
+        ``complete`` flag saying whether EVERY expected server and user was
+        stored. The plain timestamp is kept alongside it for older readers.
+        Raises on failure — a stamp that silently did not land is a stamp the
+        cleaner will read as older than it is, and eventually as absent.
+        """
+        now = datetime.now().isoformat()
+        if status is None:
+            # A caller that has nothing structured to say is asserting a plain
+            # successful sweep. Clear any older record rather than leaving one
+            # behind that would keep describing a sweep this one replaced.
+            self.set_preference(self.CURATION_STATUS_KEY, '')
+        else:
+            payload = dict(status)
+            payload.setdefault('complete', True)
+            payload['at'] = now
+            self.set_preference(self.CURATION_STATUS_KEY,
+                                json.dumps(payload, ensure_ascii=False))
+        self.set_preference(self.CURATION_SYNC_KEY, now)
+
+    def get_curation_sync_at(self):
+        """When the last curation sweep finished, or None. Raises on failure."""
+        return self.get_preference(self.CURATION_SYNC_KEY)
+
+    def get_curation_status(self) -> Optional[Dict[str, Any]]:
+        """The last sweep's structured outcome, or None if none was recorded.
+
+        Raises on a read failure, for the same reason as the signals above: the
+        caller must be able to tell "never swept" from "cannot tell".
+        """
+        raw = self.get_preference(self.CURATION_STATUS_KEY)
+        if not raw:
+            return None
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            # A corrupted record is not evidence of a good sweep.
+            return {'complete': False, 'at': None, 'corrupt': True}
+        return parsed if isinstance(parsed, dict) else {'complete': False, 'at': None}
+
     def get_origin_cleanup_candidates(self):
         """Origin-tracked downloads (watchlist/playlist) annotated with the
         matching library track's play_count, for the Expired Download Cleaner.
-        play_count is 0 when no library track matches the recorded path
-        (orphan history row → treated as not-listened)."""
+
+        ``play_count`` is None — meaning UNKNOWN, not zero — when no library
+        track can be matched to the download. The caller must treat that as
+        "cannot tell" and keep the file: this job deletes the user's data, and
+        an unmatched row is exactly the state a orphaned/renamed/not-yet-scanned
+        track is in.
+
+        Matching is exact-path first, then a trailing-segment fallback. The
+        exact join alone silently failed on every install where SoulSync's
+        paths differ from the media server's (Docker, NAS) — play_count read 0
+        for every candidate and the "you played it" protection never fired at
+        all. Where a suffix is ambiguous the HIGHEST play count wins, because
+        ambiguity must fail toward keeping the file.
+        """
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT lh.id, lh.origin, lh.origin_context, lh.created_at,
                        lh.file_path, lh.title, lh.artist_name,
-                       COALESCE(t.play_count, 0) AS play_count
+                       t.play_count AS play_count
                 FROM library_history lh
                 LEFT JOIN tracks t ON t.file_path = lh.file_path
                 WHERE lh.event_type = 'download'
@@ -17145,7 +17521,27 @@ class MusicDatabase:
             """)
             cols = ['id', 'origin', 'origin_context', 'created_at',
                     'file_path', 'title', 'artist_name', 'play_count']
-            return [dict(zip(cols, row, strict=True)) for row in cursor.fetchall()]
+            rows = [dict(zip(cols, row, strict=True)) for row in cursor.fetchall()]
+
+            # Only pay for the fallback map when the exact join actually missed.
+            unmatched = [r for r in rows if r['play_count'] is None and r['file_path']]
+            if unmatched:
+                suffix_plays = {}
+                cursor.execute(
+                    "SELECT file_path, COALESCE(play_count, 0) FROM tracks "
+                    "WHERE file_path IS NOT NULL AND file_path != ''")
+                for track_path, plays in cursor.fetchall():
+                    key = self._path_suffix_key(track_path)
+                    if not key:
+                        continue
+                    previous = suffix_plays.get(key)
+                    if previous is None or plays > previous:
+                        suffix_plays[key] = plays
+                for row in unmatched:
+                    matched = suffix_plays.get(self._path_suffix_key(row['file_path']))
+                    if matched is not None:
+                        row['play_count'] = matched
+            return rows
         except Exception as e:
             logger.debug(f"Error getting origin cleanup candidates: {e}")
             return []
@@ -17446,6 +17842,97 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting recently added albums: {e}")
             return []
+
+    # keep a lid on it. one row per bad upload, a heavy user might rack up a few
+    # thousand a year. 25k is far past that and still tiny, but unbounded growth
+    # in a table nothing ever prunes is how you get a surprise years later.
+    QUARANTINE_BLOCK_CAP = 25000
+
+    def add_quarantine_source_block(self, username: str, filename: str,
+                                    trigger: str = 'unknown',
+                                    expected_artist: str = '',
+                                    expected_track: str = '') -> bool:
+        """remember that this exact (uploader, file) failed verification.
+
+        called from move_to_quarantine. survives the quarantine folder being
+        cleared, which is the whole point, see the table comment.
+        """
+        if not username or not filename:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR IGNORE INTO quarantine_source_blocks
+                        (username, filename, trigger, expected_artist, expected_track)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (str(username), str(filename), str(trigger or 'unknown'),
+                      str(expected_artist or ''), str(expected_track or '')))
+                inserted = cursor.rowcount > 0
+                if inserted:
+                    cursor.execute("SELECT COUNT(*) FROM quarantine_source_blocks")
+                    total = cursor.fetchone()[0]
+                    if total > self.QUARANTINE_BLOCK_CAP:
+                        cursor.execute("""
+                            DELETE FROM quarantine_source_blocks
+                            WHERE id IN (
+                                SELECT id FROM quarantine_source_blocks
+                                ORDER BY created_at ASC, id ASC
+                                LIMIT ?
+                            )
+                        """, (total - self.QUARANTINE_BLOCK_CAP,))
+                conn.commit()
+                return inserted
+        except Exception as e:
+            logger.error("Error recording quarantine source block: %s", e)
+            return False
+
+    def get_quarantine_source_blocks(self) -> set:
+        """every blocked (username, filename). read on the search path so it
+        stays a single indexed query, no joins."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT username, filename FROM quarantine_source_blocks")
+                return {(str(r[0]), str(r[1])) for r in cursor.fetchall()}
+        except Exception as e:
+            logger.error("Error loading quarantine source blocks: %s", e)
+            return set()
+
+    def remove_quarantine_source_block(self, username: str, filename: str) -> bool:
+        """unblock one upload.
+
+        nothing in the review queue calls this, see the table comment. it's here
+        so a block CAN be lifted deliberately, not as part of tidying the list.
+        """
+        if not username or not filename:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM quarantine_source_blocks WHERE username = ? AND filename = ?",
+                    (str(username), str(filename)))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error removing quarantine source block: %s", e)
+            return False
+
+    def count_library_history_unverified(self) -> int:
+        """just the count for the review badge. the full fetch pulls every row
+        with SELECT *, way too much work to render a number every few seconds."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM library_history
+                WHERE verification_status IN ('unverified', 'force_imported')
+            """)
+            return int(cursor.fetchone()[0] or 0)
+        except Exception as e:
+            logger.error("Error counting unverified library history: %s", e)
+            return 0
 
     def get_library_history_unverified(self) -> list[dict]:
         """Return every library_history row that still needs human confirmation.
@@ -17900,6 +18387,163 @@ class MusicDatabase:
             logger.error(f"API: Error listing albums: {e}")
             return {"albums": [], "total": 0}
 
+    # ── MetaSync export ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _normalize_since(value: Any) -> str:
+        """One aware-UTC ``'YYYY-MM-DD HH:MM:SS'`` string for the export filter.
+
+        A naive input is read as UTC because that is what SQLite's
+        CURRENT_TIMESTAMP writes; anything with an offset is converted, so two
+        callers naming the same instant in different zones get the same slice.
+        """
+        text = str(value or "").strip()
+        if not text:
+            return text
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            # `from None`: the caller sent a bad string, that's the whole story.
+            # chaining fromisoformat's internals onto a 400 just adds noise.
+            raise ValueError(
+                "since must be an ISO-8601 timestamp "
+                f"(e.g. 2026-08-19T00:00:00), got {value!r}") from None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+    def api_export_entities(self, entity: str, cursor: str = "",
+                            since: str = "", limit: int = 500) -> List[Dict[str, Any]]:
+        """Page through artists/albums/tracks for the MetaSync export.
+
+        Keyset pagination, NOT offset: these tables are large and the
+        enrichment workers shift rows under a walk, so OFFSET both skips and
+        duplicates rows mid-export. ``id`` is TEXT on all three tables, so the
+        ``>`` comparison and the ORDER BY share one lexicographic order — which
+        is all a complete walk needs (numeric-looking ids sort as text, and
+        that is fine because both halves agree).
+
+        Columns are named explicitly rather than ``SELECT *``: column ORDER
+        differs between a fresh install and an upgraded one. Every value is
+        read through ``_row_value`` so a database lagging the code by a
+        migration yields None instead of failing the whole export.
+
+        Rows with no usable ``soul_id`` are skipped, including the
+        ``soul_unnamed_*`` fallback (soulid_worker :263 / :580) which embeds
+        the library primary key — a Plex ratingKey or Jellyfin GUID. Those are
+        install-local and must never leave the box.
+
+        Read-only.
+        """
+        # The instant a row's EXPORTED payload last changed — its own timestamp
+        # or a parent's (L2-011). An album carries its artist's name and a track
+        # carries the artist name plus the album title and year, so renaming an
+        # artist rewrites what the export says about every one of its albums and
+        # tracks while touching none of their timestamps. A consumer that had
+        # already walked them would never be told.
+        # julianday() on every side, never a text MAX: the timestamps in these
+        # columns are a mix of 'YYYY-MM-DD HH:MM:SS' and ISO-with-a-'T', and
+        # 'T' > ' ' — a lexicographic MAX would pick the older one whenever the
+        # two rows were written in different formats. COALESCE to 0 so an
+        # unparseable or absent parent timestamp cannot NULL out the whole
+        # comparison and drop the row from every incremental export.
+        _day = "COALESCE(julianday({0}), 0)"
+        effective = {
+            'artist': _day.format("t.updated_at"),
+            'album': f"MAX({_day.format('t.updated_at')}, {_day.format('ar.updated_at')})",
+            'track': (f"MAX({_day.format('t.updated_at')}, "
+                      f"{_day.format('ar.updated_at')}, "
+                      f"{_day.format('al.updated_at')})"),
+        }
+        specs = {
+            'artist': (_EXPORT_ARTIST_COLUMNS, "FROM artists t", ""),
+            'album': (
+                _EXPORT_ALBUM_COLUMNS,
+                "FROM albums t LEFT JOIN artists ar ON ar.id = t.artist_id",
+                ", ar.name AS artist_name",
+            ),
+            # ar.name, never t.track_artist: soulid_worker._process_tracks
+            # computes the track soul_id from the JOINED artist name, so an
+            # importer normalizing any other string derives a different key
+            # than the one stored in the row.
+            'track': (
+                _EXPORT_TRACK_COLUMNS,
+                ("FROM tracks t JOIN artists ar ON ar.id = t.artist_id "
+                 "LEFT JOIN albums al ON al.id = t.album_id"),
+                ", ar.name AS artist_name, al.title AS album_title",
+            ),
+        }
+        if entity not in specs:
+            raise ValueError(f"unknown entity {entity!r} (expected artist, album or track)")
+
+        columns, from_clause, extra_select = specs[entity]
+        try:
+            limit = max(1, min(1000, int(limit)))
+        except (TypeError, ValueError):
+            limit = 500
+
+        # Select only columns this database actually has. _row_value covers a
+        # missing column when READING a row, but naming one in the SQL fails
+        # the whole query with "no such column" — so an install that lags a
+        # migration (or predates soul_id_path) would export nothing at all.
+        # The absent ones still appear in the payload, as None.
+        table = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}[entity]
+
+        # The soul_unnamed_ filter lives in SQL, not in the Python loop below,
+        # and that placement is load-bearing: dropping rows AFTER the LIMIT
+        # would return a short page, and the route reads `len(items) == limit`
+        # to decide whether to keep walking — so a batch containing unnamed
+        # rows would end the export early and silently lose everything after
+        # it. ESCAPE because `_` is LIKE's single-character wildcard.
+        where = [
+            "t.soul_id IS NOT NULL",
+            "t.soul_id != ''",
+            r"t.soul_id NOT LIKE 'soul\_unnamed\_%' ESCAPE '\'",
+        ]
+        params: list = []
+        if cursor:
+            where.append("t.id > ?")
+            params.append(str(cursor))
+        if since:
+            # Compared as INSTANTS, not as text (L2-010). SQLite writes
+            # CURRENT_TIMESTAMP as 'YYYY-MM-DD HH:MM:SS' while the API accepts
+            # ISO-8601 with a 'T' and an offset, and 'T' > ' ' in ASCII — so a
+            # caller asking for everything since midnight got nothing at all
+            # from that same day, and an offset was ranked by its own text
+            # rather than by the moment it denotes. julianday() parses both
+            # sides, and the input is normalised to UTC once, here.
+            where.append(f"{effective[entity]} >= julianday(?)")
+            params.append(self._normalize_since(since))
+
+        try:
+            conn = self._get_connection()
+            db_cursor = conn.cursor()
+            db_cursor.execute(f"PRAGMA table_info({table})")
+            present = {r[1] for r in db_cursor.fetchall()}
+            live_cols = [c for c in columns if c in present]
+
+            select_cols = ", ".join(f"t.{c}" for c in live_cols) + extra_select
+            sql = (f"SELECT {select_cols} {from_clause} "
+                   f"WHERE {' AND '.join(where)} ORDER BY t.id ASC LIMIT ?")
+            db_cursor.execute(sql, params + [limit])
+            rows = db_cursor.fetchall()
+        except Exception as e:
+            logger.error(f"API: Error exporting {entity}s: {e}")
+            raise
+
+        out: List[Dict[str, Any]] = []
+        joined = ('artist_name', 'album_title')
+        for row in rows:
+            soul_id = _row_value(row, 'soul_id')
+            if not soul_id or str(soul_id).startswith('soul_unnamed_'):
+                continue
+            item = {c: _row_value(row, c) for c in columns}
+            for extra in joined:
+                if extra in extra_select:
+                    item[extra] = _row_value(row, extra)
+            out.append(item)
+        return out
+
     # ── Mirrored Playlists ───────────────────────────────────────────────
 
     def mirror_playlist(self, source: str, source_playlist_id: str, name: str,
@@ -18017,8 +18661,119 @@ class MusicDatabase:
             logger.error(f"Error mirroring playlist: {e}")
             return None
 
+    def link_mirrored_playlist_to_server(
+        self,
+        playlist_id: int,
+        server_playlist_id: str,
+        server_type: str,
+        *,
+        profile_id: Optional[int] = None,
+    ) -> bool:
+        """Record which server playlist a mirror corresponds to.
+
+        Called when the relationship has actually been RESOLVED — the server tab
+        matched exactly one mirror by name, or the user picked one in the
+        disambiguation modal. Owner-scoped like every other request-facing
+        mirror write, so a foreign mirror is indistinguishable from a missing
+        one.
+
+        Nothing reads these columns yet. This is the write half landing on its
+        own so it can be checked against real data before anything depends on
+        it.
+        """
+        if not server_playlist_id or not server_type:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
+                cursor.execute(
+                    "UPDATE mirrored_playlists SET server_playlist_id = ?, server_type = ?, "
+                    "server_linked_at = CURRENT_TIMESTAMP WHERE id = ?" + owner_sql,
+                    [str(server_playlist_id), str(server_type), int(playlist_id), *owner_params],
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error linking mirrored playlist {playlist_id} to server: {e}")
+            return False
+
+    def backfill_missing_mirrored_covers(self, profile_id: int = 1) -> int:
+        """Give already-discovered playlists the covers they never got.
+
+        Collects up to four DISTINCT album covers from what discovery matched,
+        for the 2x2 collage. `image_url` is left alone throughout: it means the
+        poster the SOURCE supplied, which still wins when there is one.
+
+        The derivation above only fires when a track GAINS matched data, so
+        every playlist discovered before it existed stays bare — which is most
+        of them. This fills those in from the discovery results already sitting
+        in their tracks' extra_data.
+
+        Cheap by construction and self-limiting: it starts with a count of
+        playlists still missing a cover and returns immediately when that is
+        zero, which is the case on every run after the first. Only art-less
+        playlists are read, and each one is written at most once.
+        """
+        filled = 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id FROM mirrored_playlists "
+                    "WHERE profile_id = ? AND cover_tiles IS NULL",
+                    (int(profile_id),)
+                )
+                bare = [row['id'] for row in cursor.fetchall()]
+                if not bare:
+                    return 0
+
+                for playlist_id in bare:
+                    cursor.execute(
+                        "SELECT extra_data FROM mirrored_playlist_tracks "
+                        "WHERE playlist_id = ? AND extra_data IS NOT NULL "
+                        "ORDER BY position",
+                        (playlist_id,)
+                    )
+                    # DISTINCT covers: a playlist of one album would otherwise
+                    # make a collage of the same tile four times, which reads as
+                    # a rendering bug rather than a design.
+                    tiles = []
+                    for row in cursor.fetchall():
+                        try:
+                            extra = json.loads(row['extra_data'])
+                        except (json.JSONDecodeError, TypeError):
+                            continue
+                        cover = mirrored_cover_from_match(extra)
+                        if cover and cover not in tiles:
+                            tiles.append(cover)
+                            if len(tiles) == 4:
+                                break
+                    # Always written, even empty: an undiscovered playlist has
+                    # no covers to find and must not be re-scanned on every
+                    # visit. `image_url` is NEVER touched — it means one thing,
+                    # the poster the source supplied, and a mosaic of album art
+                    # is not that.
+                    cursor.execute(
+                        "UPDATE mirrored_playlists SET cover_tiles = ? WHERE id = ?",
+                        (json.dumps(tiles), playlist_id)
+                    )
+                    if tiles:
+                        filled += 1
+                conn.commit()
+        except Exception as e:
+            # Best-effort decoration: a playlist without a cover still works,
+            # and this must never stop the library rendering.
+            logger.error(f"Error backfilling mirrored covers: {e}")
+        return filled
+
     def get_mirrored_playlists(self, profile_id: int = 1) -> List[Dict]:
         """Return all mirrored playlists for a profile, newest first."""
+        # Most sources supply no poster of their own, so a playlist borrows one
+        # from the first track discovery matched. Doing it here means the first
+        # visit after an upgrade fixes the whole library; every later visit
+        # short-circuits on the count and costs nothing.
+        self.backfill_missing_mirrored_covers(profile_id)
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -18445,7 +19200,33 @@ class MusicDatabase:
                     WHERE playlist_id = ?
                 """.rstrip() + owner_sql + " ORDER BY position",
                     [playlist_id, *owner_params])
-                return [dict(row) for row in cursor.fetchall()]
+                tracks = [dict(row) for row in cursor.fetchall()]
+
+                # Give each DISCOVERED track the album art its match carries.
+                #
+                # The mirror-track projections never sent an image_url, so the
+                # column is empty for essentially every source and the detail
+                # modal showed rows of blank squares. Discovery does know the
+                # artwork — it is inside the match it wrote to extra_data — so
+                # it is read back out here.
+                #
+                # Read-time decoration, not a write: this is per track and per
+                # open, where the playlist COVER is one value that earns being
+                # stored.
+                for track in tracks:
+                    if track.get('image_url'):
+                        continue
+                    raw = track.get('extra_data')
+                    if not raw:
+                        continue
+                    try:
+                        extra = json.loads(raw) if isinstance(raw, str) else raw
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    cover = mirrored_cover_from_match(extra)
+                    if cover:
+                        track['image_url'] = cover
+                return tracks
         except Exception as e:
             logger.error(f"Error getting mirrored playlist tracks: {e}")
             return []
@@ -18537,6 +19318,16 @@ class MusicDatabase:
                     "UPDATE mirrored_playlist_tracks SET extra_data = ? WHERE id = ?",
                     (json.dumps(existing), track_id)
                 )
+                # A newly discovered track can change what the collage should
+                # be, so drop the cached tiles and let the next library read
+                # rebuild them. Cheaper than recomputing four distinct covers on
+                # every single track write, and it is the read that needs them.
+                if mirrored_cover_from_match(existing):
+                    cursor.execute(
+                        "UPDATE mirrored_playlists SET cover_tiles = NULL "
+                        "WHERE id = (SELECT playlist_id FROM mirrored_playlist_tracks WHERE id = ?)",
+                        (track_id,)
+                    )
                 conn.commit()
                 return cursor.rowcount > 0
         except Exception as e:
@@ -18621,13 +19412,52 @@ class MusicDatabase:
                     WHERE mp.profile_id = ?
                 """, (profile_id,))
                 for row in cursor.fetchall():
-                    result[row['playlist_id']] = {'total': 0, 'discovered': 0, 'wishlisted': 0, 'in_library': 0}
+                    result[row['playlist_id']] = {
+                        'total': 0, 'discovered': 0, 'wishlisted': 0,
+                        'in_library': 0, 'library_checked': 0,
+                    }
 
                 # Core counts: total + discovered, grouped per playlist
                 cursor.execute("""
                     SELECT mpt.playlist_id,
                            COUNT(*) as total,
-                           SUM(CASE WHEN mpt.extra_data LIKE '%"discovered": true%' THEN 1 ELSE 0 END) as discovered
+                           SUM(CASE WHEN mpt.extra_data LIKE '%"discovered": true%' THEN 1 ELSE 0 END) as discovered,
+                           -- Written by the SYNC MATCHER, not derived here. A join
+                           -- cannot answer this: it fails on collaborations and
+                           -- casing, and normalising at query time is a full scan
+                           -- of `tracks` per row. Free to read — same scan, one
+                           -- more CASE.
+                           -- THE FLAG FIRST, THE JOIN ONLY AS FALLBACK.
+                           --
+                           -- The flag is what the sync matcher decided, and it is
+                           -- right about the cases a join cannot reach:
+                           -- collaborations and casing. But it only exists for
+                           -- playlists synced since it was added, so dropping the
+                           -- join outright regressed the id-first fix that landed
+                           -- for the 45/50 Hot Hits undercount.
+                           --
+                           -- So: trust the flag where there is one, including when
+                           -- it says NOT owned, and fall back to the old join only
+                           -- for tracks nobody has checked. The expensive branch
+                           -- therefore stops running for a playlist the moment it
+                           -- syncs once.
+                           SUM(CASE
+                               WHEN mpt.extra_data LIKE '%"in_library": true%' THEN 1
+                               WHEN mpt.extra_data LIKE '%"library_checked_at"%' THEN 0
+                               WHEN (
+                                   (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
+                                    AND EXISTS (SELECT 1 FROM tracks ti
+                                                WHERE ti.spotify_track_id = mpt.source_track_id))
+                                   OR EXISTS (SELECT 1 FROM artists a
+                                              JOIN tracks t ON t.artist_id = a.id
+                                              WHERE a.name = mpt.artist_name
+                                                AND t.title = mpt.track_name)
+                               ) THEN 1
+                               ELSE 0 END) as in_library,
+                           -- How many rows have EVER been checked. Without this a
+                           -- never-synced playlist reads as "you own none of it"
+                           -- rather than "nobody has looked".
+                           SUM(CASE WHEN mpt.extra_data LIKE '%"library_checked_at"%' THEN 1 ELSE 0 END) as library_checked
                     FROM mirrored_playlist_tracks mpt
                     JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
                     WHERE mp.profile_id = ?
@@ -18636,9 +19466,14 @@ class MusicDatabase:
                 for row in cursor.fetchall():
                     pid = row['playlist_id']
                     if pid not in result:
-                        result[pid] = {'total': 0, 'discovered': 0, 'wishlisted': 0, 'in_library': 0}
+                        result[pid] = {
+                            'total': 0, 'discovered': 0, 'wishlisted': 0,
+                            'in_library': 0, 'library_checked': 0,
+                        }
                     result[pid]['total'] = row['total'] or 0
                     result[pid]['discovered'] = row['discovered'] or 0
+                    result[pid]['in_library'] = row['in_library'] or 0
+                    result[pid]['library_checked'] = row['library_checked'] or 0
 
                 # Wishlist counts in one shot
                 try:
@@ -18659,35 +19494,28 @@ class MusicDatabase:
                 except Exception as e:
                     logger.debug(f"Batch wishlist counts failed: {e}")
 
-                # In-library counts in one shot. ID-FIRST: a mirrored track's
-                # source id against enriched tracks' spotify_track_id
-                # (idx_tracks_spotify_id), OR the case-sensitive name
-                # join (idx_artists_name + idx_tracks_title). The name join
-                # alone undercounted — the sync matcher lands tracks under
-                # normalized names the exact join never credits.
-                try:
-                    cursor.execute("""
-                        SELECT mpt.playlist_id, COUNT(DISTINCT mpt.id) as in_library
-                        FROM mirrored_playlist_tracks mpt
-                        JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
-                        WHERE mp.profile_id = ?
-                          AND (
-                            (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                             AND EXISTS (SELECT 1 FROM tracks ti
-                                         WHERE ti.spotify_track_id = mpt.source_track_id))
-                            OR EXISTS (SELECT 1 FROM artists a
-                                       JOIN tracks t ON t.artist_id = a.id
-                                       WHERE a.name = mpt.artist_name
-                                         AND t.title = mpt.track_name)
-                          )
-                        GROUP BY mpt.playlist_id
-                    """, (profile_id,))
-                    for row in cursor.fetchall():
-                        pid = row['playlist_id']
-                        if pid in result:
-                            result[pid]['in_library'] = row['in_library'] or 0
-                except Exception as e:
-                    logger.debug(f"Batch library counts failed: {e}")
+                # NOTE: in_library is no longer derived here. It used to be a
+                # join with two paths and both were wrong. The ID path compared
+                # `tracks.spotify_track_id` to the mirrored row's source id,
+                # which is only a Spotify id by coincidence — a ListenBrainz
+                # playlist stores 'file:...' references, so it matched NOTHING.
+                # That left an exact case-sensitive artist+title join, which
+                # fails on ordinary things: "Taylor Swift feat. HAIM" against a
+                # library holding "Taylor Swift", "Empire of the Sun" against
+                # "Empire Of The Sun".
+                #
+                # Measured on a real 50-track ListenBrainz playlist: 47 owned by
+                # the media server's own reckoning, 18 reported here. The error
+                # was also differential — near enough for Spotify, badly wrong
+                # elsewhere — which is worse than uniform error, because it looks
+                # right wherever you happen to check it.
+                #
+                # It comes from the SYNC MATCHER now, which already resolves all
+                # of the above, and is read as a stored flag in the query above.
+                # Normalising names at query time was measured and is not
+                # affordable: LOWER() on either side drops the index and scans
+                # the whole `tracks` table per row.
+
         except Exception as e:
             logger.error(f"Error getting batch mirrored playlist status counts: {e}")
         return result

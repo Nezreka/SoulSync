@@ -177,6 +177,24 @@ export function detectBrowserTimezone(): string {
  * time → 09:00, unknown days dropped, missing tz → browser tz → UTC, so the
  * payload always passes next_run_at validation.
  */
+/**
+ * Is this a timezone the runtime actually knows?
+ *
+ * The field is free text, and a typo does not fail loudly — it produces a
+ * schedule that quietly never fires at the hour you meant. Asking Intl to
+ * format with it is the cheapest real check: an unknown zone throws a
+ * RangeError, a known one does not.
+ */
+export function isValidTimezone(tz: string): boolean {
+  if (!tz) return false;
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: tz }).format(0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function autoSyncWeeklyTrigger({
   time,
   days,
@@ -1355,6 +1373,15 @@ export function autoSyncNormalizeTab(tab: string | undefined): AutoSyncTab {
 export interface AutoSyncSummary {
   scheduledCount: number;
   enabledCount: number;
+  /**
+   * Scheduled but switched off.
+   *
+   * The strip used to show "scheduled playlists" and "active schedules" as two
+   * big numbers, which are the same number until something is paused — two
+   * tiles to express one fact plus an exception. The exception is the
+   * interesting half, so it is derived here and shown only when it is not zero.
+   */
+  pausedCount: number;
   pipelineCount: number;
   totalTracks: number;
   /** 700-703. Drives the red badge on the Run History tab. */
@@ -1382,9 +1409,13 @@ export function autoSyncSummary(state: {
 }): AutoSyncSummary {
   const hourly = Object.values(state.playlistSchedules || {});
   const weekly = Object.values(state.weeklySchedules || {});
+  const scheduledCount = hourly.length + weekly.length;
+  const enabledCount =
+    hourly.filter((s) => s.enabled).length + weekly.filter((s) => s.enabled).length;
   return {
-    scheduledCount: hourly.length + weekly.length,
-    enabledCount: hourly.filter((s) => s.enabled).length + weekly.filter((s) => s.enabled).length,
+    scheduledCount,
+    enabledCount,
+    pausedCount: Math.max(0, scheduledCount - enabledCount),
     pipelineCount: (state.automationPipelines || []).length,
     totalTracks: (state.playlists || []).reduce(
       (sum, p) => sum + (parseInt(String(p.track_count), 10) || 0),

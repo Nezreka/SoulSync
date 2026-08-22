@@ -275,6 +275,14 @@ class SoulSyncClient(MediaServerClient):
         scanned = 0
 
         for root, _dirs, files in os.walk(self._transfer_path):
+            # Prune hidden directories in place. The atomic-publish staging tree
+            # lives at <transfer>/.soulsync_atomic_staging, so without this the
+            # scan would index a half-downloaded album as real library tracks —
+            # exactly the partial-album visibility that feature exists to
+            # prevent, just inflicted by SoulSync on itself instead of by Plex.
+            # Also skips the usual hidden clutter (.Trash, .DS_Store dirs, …),
+            # none of which is ever a music library.
+            _dirs[:] = [d for d in _dirs if not d.startswith('.')]
             for filename in files:
                 ext = os.path.splitext(filename)[1].lower()
                 if ext not in AUDIO_EXTENSIONS:

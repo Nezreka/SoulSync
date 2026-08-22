@@ -32,6 +32,11 @@ import {
   parseYouTubeUrl,
   postMirrorPlaylist,
 } from '../-sync.api';
+import {
+  DEEZER_PLAYLIST_PROGRESS_EVENT,
+  type DeezerPlaylistProgressFrame,
+  deezerProgressLabel,
+} from '../-sync.events';
 import { buildMirrorPayload } from '../-sync.import';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { freshSourceState } from '../-sync.state';
@@ -59,6 +64,8 @@ import {
 import { URL_HISTORY_SOURCES } from '../-sync.urls';
 import { fetchAndHydrateState } from '../-sync.use-vertical';
 import { cardProgressLine } from './card-progress';
+import { playlistArtUrl } from './playlist-art';
+import { urlTabCacheKey, useRememberedPlaylists } from '../-sync.account-cache';
 import { SourceCard } from './source-card';
 import { UrlHistoryBar, useUrlHistory } from './url-history-bar';
 
@@ -223,6 +230,31 @@ interface LinkTabChrome {
   cardClassName: string;
 }
 
+/**
+ * Load a URL the Add-playlist sheet routed here.
+ *
+ * The sheet decides WHICH tab a link belongs to; the tab still does the
+ * loading, so nothing about the four bespoke loaders changes. Firing on a
+ * change of `pendingUrl` (not on mount) means re-opening a tab does not
+ * re-parse whatever was added last time, and `onPendingConsumed` clears the
+ * page's slot so the same link can be routed again later if the user wants.
+ */
+function usePendingUrl(
+  pendingUrl: string | undefined,
+  parse: (url: string) => void,
+  onPendingConsumed?: () => void,
+) {
+  const parseRef = useRef(parse);
+  parseRef.current = parse;
+  const consumedRef = useRef(onPendingConsumed);
+  consumedRef.current = onPendingConsumed;
+  useEffect(() => {
+    if (!pendingUrl) return;
+    parseRef.current(pendingUrl);
+    consumedRef.current?.();
+  }, [pendingUrl]);
+}
+
 function LinkTabShell({
   chrome,
   config,
@@ -234,6 +266,7 @@ function LinkTabShell({
   input,
   setInput,
   busy,
+  busyLabel,
   parse,
   isAlreadyLoaded,
   onOpen,
@@ -248,6 +281,8 @@ function LinkTabShell({
   typeBadge?: (p: UrlTabPlaylist) => { text: string; color: string };
   input: string;
   setInput: (value: string) => void;
+  /** Overrides the plain "Loading..." while busy — used to narrate progress. */
+  busyLabel?: string | null;
   busy: boolean;
   parse: (url: string) => void;
   isAlreadyLoaded: (url: string) => boolean;
@@ -262,7 +297,7 @@ function LinkTabShell({
         placeholder={chrome.placeholder}
         buttonLabel={chrome.buttonLabel}
         busy={busy}
-        busyLabel="Loading..."
+        busyLabel={busyLabel || 'Loading...'}
         value={input}
         onChange={setInput}
         onSubmit={() => parse(input.trim())}
@@ -297,6 +332,7 @@ function LinkTabShell({
                 id={`${chrome.cardIdPrefix}-${id}`}
                 cardClassName={chrome.cardClassName}
                 icon={cardIcon(p)}
+                artUrl={playlistArtUrl(p)}
                 name={asString(p.name)}
                 countText={`${trackCount} tracks`}
                 phase={state.phase}
@@ -315,14 +351,24 @@ function LinkTabShell({
 export function DeezerLinkTab({
   vertical,
   onOpen,
+  pendingUrl,
+  onPendingConsumed,
 }: {
   vertical: SourceVertical;
   onOpen: (sourceId: string, playlist: UrlTabPlaylist) => void;
+  /** A link routed here by the Add-playlist sheet. */
+  pendingUrl?: string;
+  onPendingConsumed?: () => void;
 }) {
   const config = SYNC_SOURCES.deezer;
-  const [playlists, setPlaylists] = useState<UrlTabPlaylist[]>([]);
+  // Survives leaving /sync — see useRememberedPlaylists.
+  const [playlists, setPlaylists] = useRememberedPlaylists(urlTabCacheKey('deezer'));
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  // Live label for the load button. Resolving a big playlist is ~1 rate-limited
+  // request per unique album — minutes on a 1500-track list — and the only
+  // feedback used to be the word "Loading...", which reads as hung.
+  const [progress, setProgress] = useState<string | null>(null);
   const historyOps = useUrlHistory('deezer');
   const playlistsRef = useRef(playlists);
   playlistsRef.current = playlists;
@@ -340,6 +386,23 @@ export function DeezerLinkTab({
         return;
       }
       setBusy(true);
+      setProgress(null);
+      // Full-screen overlay, not just the button label: a few words changing
+      // inside a small button is easy to miss, and this wait is minutes long.
+      // Same overlay the Deezer ACCOUNT tab already uses for the identical
+      // wait, so the two paths now look the same.
+      const label = 'Loading Deezer playlist';
+      window.showLoadingOverlay?.(`${label}...`);
+      // Only ever rewrites TEXT, so if the frames never arrive (older server,
+      // socket down) the load still completes normally and the overlay still
+      // clears in the finally — the wait just goes back to being silent.
+      const onProgress = (event: Event) => {
+        const frame = (event as CustomEvent<DeezerPlaylistProgressFrame>).detail;
+        const text = deezerProgressLabel(frame, checked.id);
+        setProgress(text);
+        if (text) window.showLoadingOverlay?.(`${label} — ${text}`);
+      };
+      window.addEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT, onProgress);
       try {
         const playlist = await fetchDeezerLinkPlaylist(checked.id);
         setPlaylists((prev) => [...prev, playlist]);
@@ -376,11 +439,16 @@ export function DeezerLinkTab({
           'error',
         );
       } finally {
+        window.removeEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT, onProgress);
+        window.hideLoadingOverlay?.();
+        setProgress(null);
         setBusy(false);
       }
     },
     [config, vertical, historyOps],
   );
+
+  usePendingUrl(pendingUrl, parse, onPendingConsumed);
 
   return (
     <LinkTabShell
@@ -403,6 +471,7 @@ export function DeezerLinkTab({
       input={input}
       setInput={setInput}
       busy={busy}
+      busyLabel={progress}
       parse={(url) => void parse(url)}
       isAlreadyLoaded={(url) => {
         const checked = deezerInputResult(url);
@@ -418,6 +487,8 @@ export function DeezerLinkTab({
 function PublicLinkTab({
   vertical,
   onOpen,
+  pendingUrl,
+  onPendingConsumed,
   config,
   chrome,
   validateError,
@@ -431,6 +502,9 @@ function PublicLinkTab({
 }: {
   vertical: SourceVertical;
   onOpen: (sourceId: string, playlist: UrlTabPlaylist) => void;
+  /** A link routed here by the Add-playlist sheet. */
+  pendingUrl?: string;
+  onPendingConsumed?: () => void;
   config: SourceVerticalConfig;
   chrome: LinkTabChrome;
   validateError: (url: string) => string | null;
@@ -443,7 +517,7 @@ function PublicLinkTab({
   cardIcon: (p: UrlTabPlaylist) => string;
   typeBadge: (p: UrlTabPlaylist) => { text: string; color: string };
 }) {
-  const [playlists, setPlaylists] = useState<UrlTabPlaylist[]>([]);
+  const [playlists, setPlaylists] = useRememberedPlaylists(urlTabCacheKey(chrome.historySource));
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const historyOps = useUrlHistory(chrome.historySource);
@@ -523,6 +597,8 @@ function PublicLinkTab({
     ],
   );
 
+  usePendingUrl(pendingUrl, parse, onPendingConsumed);
+
   return (
     <LinkTabShell
       chrome={chrome}
@@ -546,6 +622,9 @@ function PublicLinkTab({
 export function SpotifyPublicTab(props: {
   vertical: SourceVertical;
   onOpen: (sourceId: string, playlist: UrlTabPlaylist) => void;
+  /** A link routed here by the Add-playlist sheet. */
+  pendingUrl?: string;
+  onPendingConsumed?: () => void;
 }) {
   return (
     <PublicLinkTab
@@ -578,6 +657,9 @@ export function SpotifyPublicTab(props: {
 export function ITunesLinkTab(props: {
   vertical: SourceVertical;
   onOpen: (sourceId: string, playlist: UrlTabPlaylist) => void;
+  /** A link routed here by the Add-playlist sheet. */
+  pendingUrl?: string;
+  onPendingConsumed?: () => void;
 }) {
   return (
     <PublicLinkTab
@@ -611,12 +693,17 @@ export function ITunesLinkTab(props: {
 export function YouTubeTab({
   vertical,
   onOpen,
+  pendingUrl,
+  onPendingConsumed,
 }: {
   vertical: SourceVertical;
   onOpen: (sourceId: string, playlist: UrlTabPlaylist) => void;
+  /** A link routed here by the Add-playlist sheet. */
+  pendingUrl?: string;
+  onPendingConsumed?: () => void;
 }) {
   const config = SYNC_SOURCES.youtube;
-  const [playlists, setPlaylists] = useState<UrlTabPlaylist[]>([]);
+  const [playlists, setPlaylists] = useRememberedPlaylists(urlTabCacheKey('youtube'));
   /** In-flight parses — each renders the vanilla's temp 'Parsing…' card (8879). */
   const [pendingUrls, setPendingUrls] = useState<string[]>([]);
   const [input, setInput] = useState('');
@@ -727,6 +814,8 @@ export function YouTubeTab({
     [config, vertical, historyOps, loadedUrls],
   );
 
+  usePendingUrl(pendingUrl, parse, onPendingConsumed);
+
   return (
     <div>
       <UrlInputSection
@@ -770,6 +859,7 @@ export function YouTubeTab({
                   cardClassName=""
                   icon="▶"
                   iconClassName="youtube-icon"
+                  artUrl={playlistArtUrl(p)}
                   name={asString(p.name)}
                   countText={`${tracks.length} tracks`}
                   phase={state.phase}

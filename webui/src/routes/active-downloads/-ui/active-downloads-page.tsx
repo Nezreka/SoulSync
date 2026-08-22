@@ -208,6 +208,7 @@ export function ActiveDownloadsPage() {
             counts={counts}
             hasRunningWork={hasRunningWork}
             acoustidEnabled={verification.acoustidEnabled}
+            reviewCount={verification.state.summary?.total ?? null}
             onFilter={downloads.setFilter}
             onCancelAll={() => void onCancelAll()}
             onClearCompleted={() => void onClearCompleted()}
@@ -227,8 +228,12 @@ export function ActiveDownloadsPage() {
               subView={verification.state.subView}
               acoustidEnabled={verification.acoustidEnabled}
               unverifiedCount={visible.length}
-              quarantineCount={verification.state.quarantine.length}
-              quarantineLoaded={verification.state.quarantineLoaded}
+              quarantineCount={
+                verification.state.summary?.quarantine ?? verification.state.quarantine.length
+              }
+              quarantineLoaded={
+                verification.state.quarantineLoaded || verification.state.summary !== null
+              }
               onSubView={verification.setSubView}
               onApproveAll={() =>
                 void approveAllUnverified(reviewableHistoryIds(state.downloads), refresh)

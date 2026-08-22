@@ -104,6 +104,25 @@ def move_to_quarantine(file_path: str, context: dict, reason: str, automation_en
     except Exception as exc:
         logger.warning("Failed to write quarantine metadata: %s", exc)
 
+    # #652: also record the source in the db. the sidecar used to be the only
+    # thing remembering this upload was bad, and approve/delete/clear all delete
+    # sidecars, so clearing the review list handed the same broken file straight
+    # back to the picker. the db row outlives the folder.
+    _blocked_user = str(original_search.get("username") or "")
+    _blocked_file = str(original_search.get("filename") or "")
+    if _blocked_user and _blocked_file:
+        try:
+            from database.music_database import MusicDatabase
+            MusicDatabase().add_quarantine_source_block(
+                _blocked_user, _blocked_file, trigger=trigger,
+                expected_artist=metadata.get("expected_artist", ""),
+                expected_track=metadata.get("expected_track", ""),
+            )
+        except Exception as exc:
+            # never let this stop the quarantine move. the sidecar still gates
+            # it until someone clears the folder.
+            logger.warning("Failed to record quarantine source block: %s", exc)
+
     logger.warning("File quarantined: %s - Reason: %s", quarantine_path, reason)
 
     if automation_engine:

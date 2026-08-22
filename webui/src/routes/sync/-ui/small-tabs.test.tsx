@@ -244,7 +244,9 @@ describe('SoulsyncDiscoveryTab', () => {
     const toast = vi.fn();
     const openMirrored = vi.fn();
     window.showToast = toast;
-    window.openMirroredPlaylistModal = openMirrored;
+    // The tab now takes the opener as a PROP — the page injects its own modal
+    // rather than the tab reaching for the legacy global.
+    window.openMirroredPlaylistModal = vi.fn();
     responder = (url) => {
       if (url.includes('/kinds')) return { success: true, kinds: [] };
       if (url.includes('/personalized/playlists'))
@@ -262,7 +264,7 @@ describe('SoulsyncDiscoveryTab', () => {
       return {};
     };
     stubFetch();
-    render(<SoulsyncDiscoveryTab />);
+    render(<SoulsyncDiscoveryTab onOpenMirrored={openMirrored} />);
     await waitFor(() => expect(screen.getByText('Hidden Gems')).toBeInTheDocument());
     expect(screen.getByText('Stale — refresh to regenerate')).toBeInTheDocument();
     await act(async () => {
@@ -275,6 +277,7 @@ describe('SoulsyncDiscoveryTab', () => {
     );
     expect(toast).toHaveBeenCalledWith("Mirrored 'Hidden Gems' with 1 tracks", 'success');
     expect(openMirrored).toHaveBeenCalledWith(42);
+    expect(window.openMirroredPlaylistModal).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByText('Ready')).toBeInTheDocument());
     expect(screen.getByText('1 tracks')).toBeInTheDocument();
   });
