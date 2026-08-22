@@ -141,6 +141,18 @@ def iter_staged_files(staging_root: str) -> List[str]:
     for root, _dirs, files in os.walk(staging_root):
         for name in files:
             out.append(os.path.join(root, name))
+    # SORTED, and it is load-bearing. os.walk hands back directory order, which
+    # is the filesystem's business and differs between machines: the same album
+    # publishes 01 then 02 on ext4 and 02 then 01 on btrfs. Publish order decides
+    # which files are already live when a later one fails, so it decides what the
+    # rollback has to undo — and an all-or-nothing publish whose behaviour under
+    # failure depends on the host filesystem cannot be reasoned about at all.
+    #
+    # It also silently disarmed the rollback tests below: on a box that walks
+    # 02 first, the failing track is the FIRST one, nothing has published yet,
+    # and the rollback never runs. The guard for the db-pointer rollback passed
+    # with the rollback deleted.
+    out.sort()
     return out
 
 

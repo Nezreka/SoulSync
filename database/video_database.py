@@ -489,11 +489,34 @@ class VideoDatabase:
 
     @staticmethod
     def _ensure_columns(conn) -> None:
-        """Add any new columns to an existing DB (idempotent ALTER TABLE)."""
+        """Add any new columns to an existing DB (idempotent ALTER TABLE).
+
+        The PRAGMA read is a hint, not the decision. It used to be the decision,
+        and that is a check-then-act: two processes opening the same video DB at
+        once both read "column absent", both ALTER, and the loser dies with
+        "duplicate column name" — which _initialize_database rolls back and
+        re-raises, so the whole database comes up unusable over a column that IS
+        now there. Reproduced by the test suite under `-n 8`, where every xdist
+        worker initialises the one shared temp DB; in production the same window
+        is a restart racing a still-running worker.
+
+        The error is swallowed ONLY for the duplicate, and only for the column
+        this iteration was adding: any other OperationalError (locked, no such
+        table, bad type) is still a real failure and still propagates. Losing
+        the race means somebody else did the work — which is exactly the
+        outcome asked for.
+        """
         for table, col, coltype in _COLUMN_MIGRATIONS:
             cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-            if col not in cols:
+            if col in cols:
+                continue
+            try:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    raise
+                logger.debug(
+                    "video schema: %s.%s was added by another process mid-init", table, col)
 
     @staticmethod
     def _run_data_migrations(conn, prev_version: int) -> None:

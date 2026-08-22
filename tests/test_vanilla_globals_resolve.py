@@ -40,6 +40,7 @@ now fails.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -122,7 +123,15 @@ def test_no_new_unresolved_globals(filename, tmp_path):
     }
     # oxlint resolves -c relative to its own cwd and cannot read a WSL /tmp path
     # from a Windows binary, so the config lands inside the project.
-    config_path = _WEBUI / ".oxlintrc.globalcheck.json"
+    #
+    # ONE FILE PER CASE. A single shared name was fine while this test ran alone
+    # and is not fine under `-n 8`: 43 parametrized cases spread over 8 xdist
+    # workers wrote DIFFERENT global sets to the same path and unlinked it under
+    # each other, so a case linted its neighbour's globals and reported no-undef
+    # for names that were legitimately excluded — 24 red files, every one of
+    # them fine. The script name is already unique per case; the pid keeps two
+    # concurrent runs apart as well.
+    config_path = _WEBUI / f".oxlintrc.globalcheck.{os.getpid()}.{filename}.json"
     config_path.write_text(json.dumps(config), encoding="utf-8")
     try:
         proc = subprocess.run(

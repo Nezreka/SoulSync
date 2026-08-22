@@ -337,3 +337,27 @@ def test_iter_staged_files_finds_everything(tmp_path):
     _mk(Path(staging) / "cover.png")
     assert len(ap.iter_staged_files(staging)) == 3
     assert ap.iter_staged_files(str(tmp_path / "absent")) == []
+
+
+def test_publish_order_does_not_depend_on_the_filesystem(tmp_path):
+    """os.walk hands back DIRECTORY order, which differs between machines: the
+    tracks below come out 02-then-01 on btrfs and 01-then-02 on ext4.
+
+    Publish order decides which files are already live when a later one fails,
+    so it decides what the rollback has to undo — an all-or-nothing publish
+    whose behaviour under failure depends on the host filesystem cannot be
+    reasoned about. It also silently disarmed the two rollback tests above: on a
+    box that walks 02 first the failing track is the FIRST one, nothing has
+    published yet, and the rollback never runs, so
+    test_rollback_takes_the_db_pointer_back_with_the_file passed with the
+    rollback deleted.
+    """
+    staging = str(tmp_path / "stage")
+    for name in ("02.flac", "01.flac", "10.flac", "cover.png"):
+        _mk(Path(staging) / "A" / "Al" / name)
+
+    found = ap.iter_staged_files(staging)
+
+    assert found == sorted(found)
+    assert [os.path.basename(p) for p in found] == \
+        ["01.flac", "02.flac", "10.flac", "cover.png"]

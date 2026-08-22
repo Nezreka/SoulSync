@@ -63,6 +63,19 @@ def scan(monkeypatch):
         monkeypatch.setattr(ws, 'get_client_for_source', lambda s, **kw: clients.get(s))
 
         scanner = ws.WatchlistScanner.__new__(ws.WatchlistScanner)
+        # PIN THE CHAIN. Every assertion below is about the ORDER sources are
+        # asked in, and the un-preferred path derives that from
+        # get_primary_source() — which reads the shared, process-wide
+        # config_manager. Any earlier test in the same xdist worker that sets a
+        # different primary source silently reorders this one's chain, and the
+        # failure reads as a real regression ("walked on past a source that
+        # answered correctly", calls == ['itunes']) rather than as leakage.
+        # Caught under `-n 8`; the default this pins to is what the tests always
+        # meant. The `preferred` path deliberately keeps the real
+        # get_source_priority — that IS what test_per_artist_override_still_wins
+        # is checking.
+        scanner._watchlist_source_priority = lambda: list(
+            ws.get_source_priority('deezer'))
         scanner._get_lookback_period_setting = lambda: '30'
         scanner._get_rescan_cutoff = lambda: None
         scanner._rescan_cutoff_log_marker = None

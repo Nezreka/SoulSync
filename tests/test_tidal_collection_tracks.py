@@ -457,9 +457,25 @@ class TestGetPlaylistVirtualId:
             Track(id='1002', name='Innerbloom', artists=['RÜFÜS DU SOL']),
         ]
 
+        # The real fallthrough issues `self.session.get(.../playlists/<id>)`,
+        # so THAT is what has to stay untouched. The guard used to patch
+        # `core.tidal_client.requests.get` instead — an object the code path
+        # under test cannot reach at all (get_collection_tracks, its only user
+        # here, is mocked out), while being the ONE shared requests module every
+        # background enrichment thread also calls through. It could not fail for
+        # the reason it claimed and could only fail for an unrelated one, which
+        # is exactly what happened: a live enrichment worker's request flipped
+        # `.called` and turned a Tidal playlist test red.
+        session_urls: list[str] = []
+
+        def _record(url, *args, **kwargs):
+            session_urls.append(str(url))
+            return _FakeResp(404, text="not found")
+
+        client.session = SimpleNamespace(get=_record, headers={})
+
         with patch.object(client, 'get_collection_tracks', return_value=fake_collection), \
-             patch.object(client, '_ensure_valid_token') as mock_token, \
-             patch('core.tidal_client.requests.get') as mock_get:
+             patch.object(client, '_ensure_valid_token') as mock_token:
             playlist = client.get_playlist("tidal-favorites")
 
         assert isinstance(playlist, Playlist)
@@ -471,7 +487,7 @@ class TestGetPlaylistVirtualId:
         # Virtual path should NOT touch the real /playlists/<id>
         # endpoint OR the auth precheck (get_collection_tracks
         # handles its own auth gate downstream).
-        assert not mock_get.called
+        assert session_urls == []
         assert not mock_token.called
 
     def test_real_playlist_id_falls_through_to_normal_path(self):
