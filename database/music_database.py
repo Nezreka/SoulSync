@@ -11213,7 +11213,14 @@ class MusicDatabase:
 
     def _write_default_quality_profile_row(self, profile: dict) -> None:
         """Write-through helper for `set_quality_profile`: updates the
-        ``is_default=1`` row in `quality_profiles` to match."""
+        ``is_default=1`` row in `quality_profiles` to match.
+
+        Must mirror every column the Settings -> Quality page can edit —
+        this silently dropped several of them (acoustid_required,
+        downsample_enabled, deep_audio_verify, replace_lower_quality, and
+        the lossy_copy_* group), so toggling them in the UI reported
+        success but never reached the row `get_quality_profile()` actually
+        reads, leaving the change with no effect."""
         import json
         try:
             cutoff_index = max(0, int(profile.get("upgrade_cutoff_index") or 0))
@@ -11222,13 +11229,19 @@ class MusicDatabase:
         upgrade_policy = profile.get("upgrade_policy")
         if upgrade_policy not in ("acceptable", "until_cutoff", "until_top"):
             upgrade_policy = "acceptable"
+        lossy_copy_codec = profile.get("lossy_copy_codec") or "mp3"
+        lossy_copy_bitrate = str(profile.get("lossy_copy_bitrate") or "320")
         conn = self._get_connection()
         try:
             conn.execute(
                 """UPDATE quality_profiles
                       SET ranked_targets=?, fallback_enabled=?, search_mode=?,
                           rank_candidates_by_quality=?, upgrade_policy=?,
-                          upgrade_cutoff_index=?, updated_at=CURRENT_TIMESTAMP
+                          upgrade_cutoff_index=?, acoustid_required=?,
+                          downsample_enabled=?, deep_audio_verify=?,
+                          replace_lower_quality=?, lossy_copy_enabled=?,
+                          lossy_copy_codec=?, lossy_copy_bitrate=?,
+                          lossy_copy_delete_original=?, updated_at=CURRENT_TIMESTAMP
                     WHERE is_default=1""",
                 (
                     json.dumps(profile.get("ranked_targets") or []),
@@ -11237,6 +11250,14 @@ class MusicDatabase:
                     1 if profile.get("rank_candidates_by_quality") else 0,
                     upgrade_policy,
                     cutoff_index,
+                    1 if profile.get("acoustid_required") else 0,
+                    1 if profile.get("downsample_enabled") else 0,
+                    1 if profile.get("deep_audio_verify") else 0,
+                    1 if profile.get("replace_lower_quality") else 0,
+                    1 if profile.get("lossy_copy_enabled") else 0,
+                    lossy_copy_codec,
+                    lossy_copy_bitrate,
+                    1 if profile.get("lossy_copy_delete_original") else 0,
                 ),
             )
             conn.commit()
