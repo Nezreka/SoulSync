@@ -4272,7 +4272,8 @@ function startSyncPolling(playlistId) {
             const response = await fetch(`/api/sync/status/${playlistId}`);
             const state = await response.json();
             console.log(`📊 Poll response:`, state);
-            const syncFrame = { playlist_id: playlistId, playlist_name: playlist?.name || '', ...state };
+            const playlistName = state.playlist_name || state.progress?.playlist_name || '';
+            const syncFrame = { playlist_id: playlistId, playlist_name: playlistName, ...state };
             window.dispatchEvent(new CustomEvent('ss:sync-progress', { detail: syncFrame }));
             updateMusicSyncTask(syncFrame);
 
@@ -5102,7 +5103,10 @@ function _lastfmImportActiveHTML() {
     const t = _lastfmImportTask;
     if (!t) return '';
     const active = _lastfmImportActive();
-    const pct = active && _taskHasPct(t.progress) ? _taskClampPct(t.progress) : (active ? null : 100);
+    const hasProgress = _taskHasPct(t.progress);
+    const pct = active
+        ? (hasProgress ? _taskClampPct(t.progress) : null)
+        : (t.status === 'complete' ? 100 : (hasProgress ? _taskClampPct(t.progress) : null));
     const cls = t.status === 'error' ? 'error' : (!active ? 'done' : '');
     const inserted = Number(t.inserted || 0);
     const duplicates = Number(t.duplicates || 0);
@@ -6827,3 +6831,4 @@ const additionalStyles = `
 document.head.insertAdjacentHTML('beforeend', additionalStyles);
 
 // ============================================================================
+

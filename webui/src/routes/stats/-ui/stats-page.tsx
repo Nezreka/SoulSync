@@ -93,7 +93,7 @@ const STATS_CHART_CURSOR = {
 } as const;
 
 const ARTIST_DETAIL_SOURCE = 'library' as const;
-const STATS_DETAIL_QUERY_KEY = ['stats', 'listening-events'] as const;
+const STATS_DETAIL_QUERY_KEY = ['stats-listening-events'] as const;
 
 export function StatsPage() {
   const bridge = useReactPageShell('stats');
@@ -104,7 +104,8 @@ export function StatsPage() {
   const syncTimeoutRef = useRef<number | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [lastfmUsername, setLastfmUsername] = useState('');
-  const [listeningDetailFilter, setListeningDetailFilter] = useState<StatsListeningEventsFilter | null>(null);
+  const [listeningDetailFilter, setListeningDetailFilter] =
+    useState<StatsListeningEventsFilter | null>(null);
 
   const cachedStatsQuery = useQuery({
     ...statsCachedQueryOptions(range),
@@ -129,6 +130,7 @@ export function StatsPage() {
       return fetchStatsListeningEvents(range, listeningDetailFilter);
     },
     enabled: !!listeningDetailFilter,
+    staleTime: 30_000,
   });
 
   useEffect(() => {
@@ -352,6 +354,7 @@ export function StatsPage() {
               <StatsSectionCard title="When You Listen">
                 <StatsListeningClock
                   clock={cachedStats?.clock}
+                  rangeLabel={getStatsRangeLabel(range)}
                   rhythm={cachedStats?.rhythm}
                   onCellSelect={(weekday, hour) =>
                     setListeningDetailFilter({ type: 'weekday_hour', weekday, hour })
@@ -410,7 +413,8 @@ export function StatsPage() {
       {listeningDetailFilter ? (
         <StatsListeningDetailModal
           payload={listeningDetailsQuery.data}
-          loading={listeningDetailsQuery.isPending}
+          filter={listeningDetailFilter}
+          loading={listeningDetailsQuery.isPending && !listeningDetailsQuery.data}
           error={listeningDetailsQuery.error}
           onClose={() => setListeningDetailFilter(null)}
           onPlay={(track) => playStatsTrack(bridge, track)}
@@ -470,7 +474,14 @@ function LastfmImportControl({
       <div className={styles.lastfmImportBar} aria-hidden="true">
         <div
           className={styles.lastfmImportFill}
-          style={{ width: pct != null && (active || status?.status === 'partial') ? `${pct}%` : status?.status === 'complete' ? '100%' : '0%' }}
+          style={{
+            width:
+              pct != null && (active || status?.status === 'partial')
+                ? `${pct}%`
+                : status?.status === 'complete'
+                  ? '100%'
+                  : '0%',
+          }}
         />
       </div>
       {needsUsername ? (
@@ -487,7 +498,11 @@ function LastfmImportControl({
         className={styles.lastfmImportRun}
         onClick={onRun}
         disabled={disabled}
-        title={status?.api_key_configured ? 'Sync Last.fm listening now' : 'Configure Last.fm API key first'}
+        title={
+          status?.api_key_configured
+            ? 'Sync Last.fm listening now'
+            : 'Configure Last.fm API key first'
+        }
       >
         {active ? 'Running' : 'Run'}
       </button>
@@ -512,12 +527,15 @@ function lastfmImportSubline(status: LastfmListeningImportStatus | undefined): s
     return `${status.phase || 'Importing'} · ${inserted} added · ${duplicates} skipped`;
   }
   if (status.status === 'error') return status.error || 'Last.fm import failed';
-  if (status.status === 'partial') return 'Previous import stopped before the backfill finished. Run to continue.';
+  if (status.status === 'partial')
+    return 'Previous import stopped before the backfill finished. Run to continue.';
   if (!status.username && status.authenticated_user_available) {
     return 'Uses the Last.fm account authorized in Settings.';
   }
   if (status.last_success_at) {
-    const next = status.next_run_in_seconds ? ` · next check in ${formatShortDuration(status.next_run_in_seconds)}` : '';
+    const next = status.next_run_in_seconds
+      ? ` · next check in ${formatShortDuration(status.next_run_in_seconds)}`
+      : '';
     return `Last checked ${status.last_success_at}${next}`;
   }
   return 'Run once to start hourly Last.fm listening sync.';
@@ -629,10 +647,12 @@ function StatsCardDelta({
 function StatsListeningClock({
   clock,
   onCellSelect,
+  rangeLabel,
   rhythm,
 }: {
   clock: StatsClock | undefined;
   onCellSelect: (weekday: number, hour: number) => void;
+  rangeLabel: string;
   rhythm: StatsRhythm | undefined;
 }) {
   const grid = clock?.grid;
@@ -647,6 +667,13 @@ function StatsListeningClock({
 
   return (
     <div className={styles.statsClock}>
+      <div className={styles.statsClockContext}>
+        <div>
+          <span className={styles.statsClockContextLabel}>Weekly pattern</span>
+          <span className={styles.statsClockContextRange}>in {rangeLabel}</span>
+        </div>
+        <strong>{formatCompactNumber(clock.total)} plays</strong>
+      </div>
       <div className={styles.statsClockGrid}>
         {grid.map((row, weekday) => (
           <div key={weekday} className={styles.statsClockRow}>
@@ -1130,21 +1157,49 @@ function StatsRecentPlays({
   );
 }
 
+function getListeningDetailFallbackTitle(filter: StatsListeningEventsFilter): string {
+  if (filter.type === 'date') return formatDetailDateTitle(filter.date);
+  if (filter.type === 'weekday_hour') {
+    return `${WEEKDAY_LABELS[filter.weekday] ?? 'Selected day'} ${formatHourLabel(filter.hour)}`;
+  }
+  return formatHourLabel(filter.hour);
+}
+
+function formatDetailDateTitle(date: string): string {
+  const parsed = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(parsed);
+}
 function StatsListeningDetailModal({
   error,
+  filter,
   loading,
   onClose,
   onPlay,
   payload,
 }: {
   error: unknown;
+  filter: StatsListeningEventsFilter;
   loading: boolean;
   onClose: () => void;
   onPlay: (track: { title: string; artist: string; album: string }) => Promise<void>;
-  payload: { title?: string; total?: number; limit?: number; items?: StatsListeningEventTrack[] } | undefined;
+  payload:
+    | { title?: string; total?: number; limit?: number; items?: StatsListeningEventTrack[] }
+    | undefined;
 }) {
   const tracks = payload?.items ?? [];
   const total = payload?.total ?? 0;
+  const title = payload?.title || getListeningDetailFallbackTitle(filter);
+  const summary = loading
+    ? 'Finding the matching plays...'
+    : `${formatCompactNumber(total)} ${total === 1 ? 'play' : 'plays'}${
+        total > tracks.length ? `, showing latest ${tracks.length}` : ''
+      }`;
   return (
     <div className={styles.statsDetailBackdrop} role="presentation" onMouseDown={onClose}>
       <div
@@ -1157,23 +1212,26 @@ function StatsListeningDetailModal({
         <div className={styles.statsDetailHeader}>
           <div>
             <div className={styles.statsDetailEyebrow}>Listening Details</div>
-            <h3>{payload?.title || 'Loading...'}</h3>
-            <p>
-              {loading
-                ? 'Loading plays...'
-                : `${formatCompactNumber(total)} ${total === 1 ? 'play' : 'plays'}${
-                    total > tracks.length ? `, showing latest ${tracks.length}` : ''
-                  }`}
-            </p>
+            <h3>{title}</h3>
+            <p>{summary}</p>
           </div>
-          <button type="button" className={styles.statsDetailClose} onClick={onClose} aria-label="Close">
+          <button
+            type="button"
+            className={styles.statsDetailClose}
+            onClick={onClose}
+            aria-label="Close"
+          >
             x
           </button>
         </div>
 
         {error ? <SectionSubtleError message={getErrorMessage(error)} /> : null}
-        {!error && loading ? <div className={styles.statsDetailLoading}>Loading listening details...</div> : null}
-        {!error && !loading && tracks.length === 0 ? <EmptyListState message="No plays found" /> : null}
+        {!error && loading ? (
+          <div className={styles.statsDetailLoading}>Loading listening details...</div>
+        ) : null}
+        {!error && !loading && tracks.length === 0 ? (
+          <EmptyListState message="No plays found" />
+        ) : null}
 
         {!error && tracks.length ? (
           <div className={styles.statsDetailList}>
@@ -1191,7 +1249,10 @@ function StatsListeningDetailModal({
                   <div className={styles.statsDetailTrackTitle}>{track.title}</div>
                   <div className={styles.statsDetailTrackMeta}>
                     {track.artist_db_id ? (
-                      <ArtistDetailLink artistId={track.artist_db_id} className={styles.statsArtistLink}>
+                      <ArtistDetailLink
+                        artistId={track.artist_db_id}
+                        className={styles.statsArtistLink}
+                      >
                         {track.artist || 'Unknown artist'}
                       </ArtistDetailLink>
                     ) : (
@@ -1202,7 +1263,9 @@ function StatsListeningDetailModal({
                 </div>
                 <div className={styles.statsDetailWhen}>
                   <span>{formatDetailPlayedAt(track.played_at)}</span>
-                  {track.server_source ? <span>{track.server_source}</span> : null}
+                  {track.server_source ? (
+                    <span className={styles.statsDetailSource}>{track.server_source}</span>
+                  ) : null}
                 </div>
                 <button
                   type="button"

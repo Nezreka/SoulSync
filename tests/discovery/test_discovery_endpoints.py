@@ -703,7 +703,11 @@ def test_start_sync_happy_path():
     assert states['h1']['sync_playlist_id'] == 'spotify_public_h1'
     assert states['h1']['sync_progress'] == {}
     # sync infra seeded + worker registered
-    assert infra['sync_states']['spotify_public_h1'] == {"status": "starting", "progress": {}}
+    assert infra['sync_states']['spotify_public_h1'] == {
+        "status": "starting",
+        "playlist_name": "My Mix",
+        "progress": {"playlist_name": "My Mix", "total_tracks": 2, "progress": 0},
+    }
     assert infra['active_sync_workers']['spotify_public_h1'] == 'future:spotify_public_h1'
     # submit got name/tracks/image
     assert submitted == [('spotify_public_h1', 'My Mix', [{'id': 'a'}, {'id': 'b'}], 'cover.jpg')]
@@ -1101,3 +1105,4 @@ def test_update_match_no_state_and_no_originals_still_404():
         'identifier': 'gone', 'track_index': 0, 'spotify_track': {'id': 'x'}})
     body, code = update_discovery_match({}, gj, **kw)
     assert code == 404 and body == {'error': 'Discovery state not found'}
+
