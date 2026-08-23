@@ -99,7 +99,9 @@ export async function triggerListeningStatsSync(): Promise<void> {
   }
 }
 
-export async function runLastfmListeningImport(username?: string): Promise<LastfmListeningImportStatus> {
+export async function runLastfmListeningImport(
+  username?: string,
+): Promise<LastfmListeningImportStatus> {
   const payload = await readJson<LastfmListeningImportStatus>(
     apiClient.post('lastfm/listening-import/run', {
       json: { username: username?.trim() || undefined, enabled: true },
@@ -129,7 +131,7 @@ export async function fetchStatsListeningEvents(
     searchParams.hour = String(filter.hour);
   }
   const payload = await readJson<StatsListeningEventsPayload>(
-    apiClient.get('stats/listening-events', { searchParams }),
+    apiClient.get('stats/listening-events', { searchParams, timeout: 30_000 }),
   );
   if (!payload.success) {
     throw new Error(payload.error || 'Failed to load listening details');

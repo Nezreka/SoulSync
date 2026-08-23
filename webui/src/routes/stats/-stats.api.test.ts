@@ -5,6 +5,7 @@ import { HttpResponse, http, server } from '@/test/msw';
 import {
   fetchListeningStatsStatus,
   fetchStatsCached,
+  fetchStatsListeningEvents,
   fetchStatsDbStorage,
   fetchStatsLibraryDiskUsage,
   resolveStatsTrack,
@@ -104,6 +105,38 @@ describe('stats api', () => {
       stats: { last_poll: '2026-05-14 10:00:00' },
     });
     await expect(triggerListeningStatsSync()).resolves.toBeUndefined();
+  });
+
+  it('fetches listening detail rows for day and month buckets', async () => {
+    const seen: Array<Record<string, string | null>> = [];
+    server.use(
+      http.get('/api/stats/listening-events', ({ request }) => {
+        const url = new URL(request.url);
+        seen.push({
+          range: url.searchParams.get('range'),
+          type: url.searchParams.get('type'),
+          date: url.searchParams.get('date'),
+          limit: url.searchParams.get('limit'),
+        });
+        return HttpResponse.json({ success: true, title: 'details', total: 0, items: [] });
+      }),
+    );
+
+    await expect(
+      fetchStatsListeningEvents('7d', { type: 'date', date: '2026-08-22' }),
+    ).resolves.toMatchObject({
+      success: true,
+    });
+    await expect(
+      fetchStatsListeningEvents('12m', { type: 'date', date: '2026-08' }),
+    ).resolves.toMatchObject({
+      success: true,
+    });
+
+    expect(seen).toEqual([
+      { range: '7d', type: 'date', date: '2026-08-22', limit: '100' },
+      { range: '12m', type: 'date', date: '2026-08', limit: '100' },
+    ]);
   });
 
   it('resolves and streams tracks through the stats playback helpers', async () => {

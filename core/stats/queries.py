@@ -346,9 +346,18 @@ def get_listening_events(
     if filter_type == 'date':
         if not date:
             raise ValueError('date is required')
-        clauses.append('DATE(lh.played_at) = ?')
-        params.append(date)
-        title = date
+        if _is_month_bucket(date):
+            clauses.append("lh.played_at >= date(? || '-01')")
+            clauses.append("lh.played_at < date(? || '-01', '+1 month')")
+            params.extend([date, date])
+            title = date
+        elif _is_day_bucket(date):
+            clauses.append('lh.played_at >= date(?)')
+            clauses.append("lh.played_at < date(?, '+1 day')")
+            params.extend([date, date])
+            title = date
+        else:
+            raise ValueError('date must be YYYY-MM-DD or YYYY-MM')
     elif filter_type == 'weekday_hour':
         if weekday is None or hour is None:
             raise ValueError('weekday and hour are required')
@@ -422,6 +431,13 @@ def get_listening_events(
     return {'title': title, 'total': total, 'limit': limit, 'items': items}
 
 
+def _is_day_bucket(value: str) -> bool:
+    return len(value) == 10 and value[4] == '-' and value[7] == '-'
+
+
+def _is_month_bucket(value: str) -> bool:
+    return len(value) == 7 and value[4] == '-'
+
 def resolve_track(database, image_url_fixer: ImageUrlFixer, title: str, artist: str) -> Optional[dict]:
     """Resolve a track by title+artist to its file_path / metadata. Returns None if not found."""
     conn = database._get_connection()
@@ -494,3 +510,4 @@ def get_listening_status(worker) -> dict:
             'stats': {},
         }
     return worker.get_stats()
+

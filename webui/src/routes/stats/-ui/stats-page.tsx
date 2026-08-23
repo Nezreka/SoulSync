@@ -130,6 +130,7 @@ export function StatsPage() {
       return fetchStatsListeningEvents(range, listeningDetailFilter);
     },
     enabled: !!listeningDetailFilter,
+    retry: false,
     staleTime: 30_000,
   });
 
@@ -1166,6 +1167,15 @@ function getListeningDetailFallbackTitle(filter: StatsListeningEventsFilter): st
 }
 
 function formatDetailDateTitle(date: string): string {
+  if (/^\d{4}-\d{2}$/.test(date)) {
+    const parsedMonth = new Date(`${date}-01T00:00:00`);
+    if (!Number.isNaN(parsedMonth.getTime())) {
+      return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(
+        parsedMonth,
+      );
+    }
+  }
+
   const parsed = new Date(`${date}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) return date;
   return new Intl.DateTimeFormat(undefined, {

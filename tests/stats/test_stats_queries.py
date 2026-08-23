@@ -167,6 +167,57 @@ def test_get_recent_tracks_joins_album_art_through_db_track_id(db, fix_url):
     assert rows[0]['artist_db_id'] == aid
 
 
+
+# ---------------------------------------------------------------------------
+# get_listening_events
+# ---------------------------------------------------------------------------
+
+def test_get_listening_events_day_bucket_returns_rows(db):
+    _seed_history(db, "Morning", "Artist", "Album", "2026-08-22 09:00:00")
+    _seed_history(db, "Night", "Artist", "Album", "2026-08-22T22:30:00")
+    _seed_history(db, "Other", "Artist", "Album", "2026-08-23 09:00:00")
+
+    out = queries.get_listening_events(
+        db,
+        None,
+        time_range='all',
+        filter_type='date',
+        date='2026-08-22',
+        limit=10,
+    )
+
+    assert out['total'] == 2
+    assert [item['title'] for item in out['items']] == ["Night", "Morning"]
+
+
+def test_get_listening_events_month_bucket_returns_rows(db):
+    _seed_history(db, "Aug One", "Artist", "Album", "2026-08-01 00:00:00")
+    _seed_history(db, "Aug Two", "Artist", "Album", "2026-08-31 23:59:59")
+    _seed_history(db, "Sep", "Artist", "Album", "2026-09-01 00:00:00")
+
+    out = queries.get_listening_events(
+        db,
+        None,
+        time_range='all',
+        filter_type='date',
+        date='2026-08',
+        limit=10,
+    )
+
+    assert out['total'] == 2
+    assert [item['title'] for item in out['items']] == ["Aug Two", "Aug One"]
+
+
+def test_get_listening_events_rejects_unknown_date_bucket(db):
+    with pytest.raises(ValueError, match='YYYY-MM-DD or YYYY-MM'):
+        queries.get_listening_events(
+            db,
+            None,
+            time_range='all',
+            filter_type='date',
+            date='2026',
+        )
+
 # ---------------------------------------------------------------------------
 # resolve_track
 # ---------------------------------------------------------------------------
@@ -452,3 +503,4 @@ def test_trigger_listening_sync_swallows_worker_errors():
     _time.sleep(0.1)  # give thread time to crash
     # Counter not incremented because exception was raised before increment
     assert _BrokenWorker.stats['polls_completed'] == 0
+
