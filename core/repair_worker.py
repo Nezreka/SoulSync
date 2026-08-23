@@ -3068,24 +3068,15 @@ class RepairWorker:
         if not remove_ids:
             return {'success': False, 'error': 'No duplicates to remove'}
 
-        # Collect file paths before deleting DB entries
-        remove_paths = []
+        # Collect file paths before deleting DB entries. The file move is the
+        # destructive operation users asked for; keep the DB row when the file
+        # cannot be located so a media-server refresh does not simply recreate
+        # the duplicate entry with no visible failure.
+        remove_entries = []
         for t in tracks:
             tid = t.get('track_id') or t.get('id')
             if tid and str(tid) != str(best_id) and t.get('file_path'):
-                remove_paths.append(t['file_path'])
-
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            placeholders = ','.join(['?'] * len(remove_ids))
-            cursor.execute(f"DELETE FROM tracks WHERE id IN ({placeholders})", remove_ids)
-            conn.commit()
-            removed = cursor.rowcount
-        finally:
-            if conn:
-                conn.close()
+                remove_entries.append((tid, t['file_path']))
 
         # Move duplicate files to the <transfer>/deleted quarantine instead of hard
         # deleting them — recoverable, and consistent with the older duplicate
@@ -3098,7 +3089,23 @@ class RepairWorker:
         deleted_root = os.path.join(self.transfer_folder, 'deleted')
         files_deleted = 0
         files_failed = 0
-        for fpath in remove_paths:
+        db_remove_ids = []
+        active_server = 'unknown'
+        if self._config_manager:
+            try:
+                getter = getattr(self._config_manager, 'get_active_media_server', None)
+                if callable(getter):
+                    active_server = getter() or 'unknown'
+                else:
+                    active_server = self._config_manager.get('active_media_server', 'unknown') or 'unknown'
+            except Exception:
+                active_server = 'unknown'
+        navidrome_hint = (
+            ' In Navidrome, enable "Report Real Path" for the SoulSync player and run a full refresh.'
+            if str(active_server).lower() == 'navidrome' else ''
+        )
+
+        for tid, fpath in remove_entries:
             resolved = _resolve_file_path(fpath, self.transfer_folder, download_folder, config_manager=self._config_manager)
             if not resolved or not os.path.exists(resolved):
                 # #971/Docker: the stored path didn't map to a file the container
@@ -3108,22 +3115,23 @@ class RepairWorker:
                 files_failed += 1
                 logger.warning(
                     "Duplicate cleanup: could not locate file to remove (DB path %r "
-                    "did not resolve to an existing file). DB entry removed, file left "
+                    "did not resolve to an existing file). DB row kept and file left "
                     "on disk — check your Docker volume mapping and Settings > Library "
-                    "> Music Paths.", fpath)
+                    "> Music Paths.%s", fpath, navidrome_hint)
                 continue
             try:
                 dest = self._quarantine_dest(resolved, deleted_root)
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 shutil.move(resolved, dest)
                 files_deleted += 1
+                db_remove_ids.append(tid)
             except OSError as e:
                 # Was `except OSError: pass` — a Docker PUID/PGID permission mismatch
                 # on the media volume silently no-op'd the removal with no log.
                 files_failed += 1
                 logger.warning(
                     "Duplicate cleanup: failed to move %s to the deleted folder (%s). "
-                    "DB entry removed, file left on disk — in Docker this is usually a "
+                    "DB row kept and file left on disk — in Docker this is usually a "
                     "PUID/PGID permission mismatch on the media volume.", resolved, e)
                 continue
             # Clean up empty parent directories (best effort, cosmetic; never remove
@@ -3142,11 +3150,37 @@ class RepairWorker:
             except OSError:
                 pass
 
+        removed = 0
+        if db_remove_ids:
+            conn = None
+            try:
+                conn = self.db._get_connection()
+                cursor = conn.cursor()
+                placeholders = ','.join(['?'] * len(db_remove_ids))
+                cursor.execute(f"DELETE FROM tracks WHERE id IN ({placeholders})", db_remove_ids)
+                conn.commit()
+                removed = cursor.rowcount
+            finally:
+                if conn:
+                    conn.close()
+
+        if files_failed and not files_deleted:
+            return {
+                'success': False,
+                'error': (
+                    f'Could not remove duplicate file(s): {files_failed} path(s) could not be located. '
+                    f'No database rows were removed. Check Settings → Library → Music Paths.'
+                    f'{navidrome_hint}'
+                ),
+                'files_deleted': files_deleted,
+                'files_failed': files_failed,
+            }
+
         msg = f'Kept best quality copy, removed {removed} duplicate(s)'
         if files_deleted:
             msg += f' and moved {files_deleted} file(s) to the deleted folder'
         if files_failed:
-            msg += f' — {files_failed} file(s) could NOT be removed (see logs)'
+            msg += f' — {files_failed} file(s) could NOT be removed and were left in the database'
         return {'success': True, 'action': 'removed_duplicates', 'message': msg,
                 'files_deleted': files_deleted, 'files_failed': files_failed}
 
@@ -3886,6 +3920,11 @@ class RepairWorker:
                 lines.append(f"Probed base directories: {joined}")
             else:
                 lines.append("No base directories were available to probe.")
+        if str(active_server).lower() == 'navidrome':
+            lines.append(
+                'Navidrome users: open Profile → Players → SoulSync and enable '
+                '"Report Real Path", then run a full database refresh in SoulSync.'
+            )
         lines.append(
             "Fix: Settings → Library → Music Paths → add the path where "
             "this container can read your library files."

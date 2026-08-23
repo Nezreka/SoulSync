@@ -10,6 +10,32 @@ from utils.logging_config import get_logger
 logger = get_logger("repair_job.dead_files")
 
 
+def _active_media_server(config_manager) -> str:
+    if not config_manager:
+        return 'unknown'
+    try:
+        getter = getattr(config_manager, 'get_active_media_server', None)
+        if callable(getter):
+            return getter() or 'unknown'
+        return config_manager.get('active_media_server', 'unknown') or 'unknown'
+    except Exception:
+        return 'unknown'
+
+
+def _path_mapping_hint(config_manager) -> str:
+    active = _active_media_server(config_manager)
+    if str(active).lower() == 'navidrome':
+        return (
+            'Active media server: navidrome. In Navidrome, open Profile → Players → '
+            'SoulSync and enable "Report Real Path", then run a full database refresh. '
+            'Also confirm Settings → Library → Music Paths contains the path SoulSync can read.'
+        )
+    return (
+        f'Active media server: {active}. Check Docker volume mapping and '
+        'Settings → Library → Music Paths.'
+    )
+
+
 def _resolve_file_path(file_path, transfer_folder, download_folder=None, config_manager=None):
     """Backwards-compat wrapper. Use ``resolve_library_file_path`` directly."""
     return resolve_library_file_path(
@@ -158,17 +184,20 @@ class DeadFileCleanerJob(RepairJob):
         if (dead_rows
                 and result.scanned >= min_tracks_for_guard
                 and len(dead_rows) >= result.scanned * max_unresolved_fraction):
+            sample_path = dead_rows[0][4] if dead_rows and len(dead_rows[0]) > 4 else None
+            hint = _path_mapping_hint(context.config_manager)
             logger.error(
                 "Dead file scan: %d/%d tracks unresolvable (>= %.0f%%) — aborting without "
-                "creating findings; this is a path-mapping/mount problem, not deleted files.",
-                len(dead_rows), result.scanned, max_unresolved_fraction * 100)
+                "creating findings; this is a path-mapping/mount problem, not deleted files. "
+                "Example DB path: %r. %s",
+                len(dead_rows), result.scanned, max_unresolved_fraction * 100, sample_path, hint)
             result.errors += 1
             if context.report_progress:
                 context.report_progress(
                     phase='Aborted — too many unreachable paths',
                     log_line=(f"{len(dead_rows)} of {result.scanned} tracks point to paths SoulSync "
-                              f"can't reach — almost always a path-mapping issue (Docker mount, or "
-                              f"Settings → Library → Music Paths), not deleted files. No findings created."),
+                              f"can't reach — almost always a path-mapping issue, not deleted files. "
+                              f"No findings created. Example DB path: {sample_path or 'unknown'}. {hint}"),
                     log_type='error'
                 )
             if context.update_progress:
