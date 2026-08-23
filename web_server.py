@@ -31727,6 +31727,40 @@ def get_similar_artists_update_status():
         logger.error(f"Error getting similar artists status: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+
+def _watchlist_spotify_artist_info(artist_data, fallback_id):
+    """Normalize official or Spotify-Free artist metadata for the watchlist UI."""
+    if not artist_data:
+        return None
+
+    images = artist_data.get('images') or []
+    image_url = None
+    if images:
+        first_image = images[0]
+        if isinstance(first_image, dict):
+            image_url = first_image.get('url')
+        elif isinstance(first_image, str):
+            image_url = first_image
+    image_url = image_url or artist_data.get('image_url')
+
+    followers = artist_data.get('followers', 0)
+    if isinstance(followers, dict):
+        followers = followers.get('total', 0)
+    try:
+        followers = int(followers or 0)
+    except (TypeError, ValueError):
+        followers = 0
+
+    return {
+        'id': artist_data.get('id') or fallback_id,
+        'name': artist_data.get('name') or '',
+        'image_url': image_url,
+        'followers': followers,
+        'popularity': artist_data.get('popularity') or 0,
+        'genres': artist_data.get('genres') or []
+    }
+
+
 @app.route('/api/watchlist/artist/<artist_id>/config', methods=['GET', 'POST'])
 def watchlist_artist_config(artist_id):
     """Get or update watchlist artist configuration"""
@@ -31770,24 +31804,27 @@ def watchlist_artist_config(artist_id):
             amazon_id = result[18] if len(result) > 18 else None  # amazon_artist_id from query
             musicbrainz_id = result[19] if len(result) > 19 else None  # musicbrainz_artist_id from query
 
-            # Get artist info from Spotify (only for Spotify artists)
+            # Get artist info from the Spotify wrapper so Premium-gated official
+            # calls can fall through to the no-creds Spotify metadata source.
             artist_info = None
-            if not is_itunes_artist and spotify_client and spotify_client.is_authenticated() and spotify_id and not _spotify_rate_limited():
+            spotify_metadata_available = False
+            if spotify_client:
                 try:
-                    from core.api_call_tracker import api_call_tracker
-                    api_call_tracker.record_call('spotify', endpoint='artist')
-                    artist_data = spotify_client.sp.artist(spotify_id)
-                    if artist_data:
-                        artist_info = {
-                            'id': artist_data['id'],
-                            'name': artist_data['name'],
-                            'image_url': artist_data['images'][0]['url'] if artist_data.get('images') else None,
-                            'followers': artist_data.get('followers', {}).get('total', 0),
-                            'popularity': artist_data.get('popularity', 0),
-                            'genres': artist_data.get('genres', [])
-                        }
+                    if hasattr(spotify_client, 'is_spotify_metadata_available'):
+                        spotify_metadata_available = spotify_client.is_spotify_metadata_available()
+                    else:
+                        spotify_metadata_available = spotify_client.is_authenticated()
+                except Exception:
+                    spotify_metadata_available = False
+
+            if not is_itunes_artist and spotify_client and spotify_id and spotify_metadata_available:
+                try:
+                    artist_info = _watchlist_spotify_artist_info(
+                        spotify_client.get_artist(spotify_id),
+                        spotify_id,
+                    )
                 except Exception as e:
-                    logger.error(f"Could not fetch artist info from Spotify: {e}")
+                    logger.warning(f"Could not fetch watchlist artist info from Spotify metadata: {e}")
 
             # Fallback to database info if Spotify fetch failed
             if not artist_info:

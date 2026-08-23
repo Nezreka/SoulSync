@@ -435,17 +435,18 @@ describe('watchlist route', () => {
     expect(router.state.location.search).not.toMatchObject({ detailId: 'sp-aphex' });
   });
 
-  it('the gear opens artist config, the card body opens artist detail', async () => {
+  it('the overflow menu opens artist config, the artist name opens artist detail', async () => {
     stubFetch();
     const { router } = renderWatchlistRoute();
 
     await waitFor(() => expect(screen.getByText('Aphex Twin')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Settings for Aphex Twin' }));
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for Aphex Twin' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit rules' }));
     await waitFor(() => {
       expect(router.state.location.search).toMatchObject({ configId: 'sp-aphex' });
     });
-    // The gear must not also trip the card's detail click.
+    // The menu must not also trip the artist detail click.
     expect(router.state.location.search).not.toMatchObject({ detailId: 'sp-aphex' });
 
     fireEvent.click(screen.getByText('Aphex Twin'));

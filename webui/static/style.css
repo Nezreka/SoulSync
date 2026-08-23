@@ -67410,7 +67410,7 @@ body.max-performance #page-particles-canvas {
     gap: 8px;
     align-items: center;
     flex-wrap: wrap;
-    margin-bottom: 20px;
+    margin-bottom: 12px;
     padding: 0 4px;
 }
 
@@ -67486,7 +67486,7 @@ body.max-performance #page-particles-canvas {
     display: flex;
     gap: 10px;
     align-items: center;
-    margin-bottom: 16px;
+    margin-bottom: 10px;
     padding: 0 4px;
 }
 
@@ -67616,7 +67616,7 @@ body.max-performance #page-particles-canvas {
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 10px;
     padding: 8px 16px;
-    margin-bottom: 16px;
+    margin-bottom: 10px;
 }
 
 /* ── Override banner ── */
@@ -67664,6 +67664,747 @@ body.max-performance #page-particles-canvas {
     color: rgba(255, 255, 255, 0.35);
     max-width: 360px;
     line-height: 1.5;
+}
+
+.watchlist-attention-strip {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.watchlist-attention-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-height: 58px;
+    padding: 11px 14px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.watchlist-attention-card.is-green {
+    border-color: rgba(76, 217, 100, 0.22);
+    background: rgba(76, 217, 100, 0.065);
+}
+
+.watchlist-attention-card.is-amber {
+    border-color: rgba(255, 193, 7, 0.24);
+    background: rgba(255, 193, 7, 0.07);
+}
+
+.watchlist-attention-card.is-blue {
+    border-color: rgba(96, 165, 250, 0.22);
+    background: rgba(96, 165, 250, 0.06);
+}
+
+.watchlist-attention-card--wide {
+    grid-column: span 2;
+}
+
+.watchlist-attention-value {
+    font-size: 22px;
+    line-height: 1;
+    font-weight: 800;
+    color: #fff;
+}
+
+.watchlist-attention-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: rgba(255, 255, 255, 0.45);
+    font-weight: 700;
+}
+
+.watchlist-add-panel,
+.watchlist-recent-panel,
+.watchlist-roster-panel,
+.watchlist-inspector {
+    background: linear-gradient(135deg, rgba(24, 24, 24, 0.88), rgba(14, 14, 14, 0.92));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
+}
+
+.watchlist-add-panel {
+    display: grid;
+    grid-template-columns: minmax(160px, 0.6fr) minmax(0, 1.4fr);
+    gap: 12px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+}
+
+.watchlist-add-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.58);
+    font-size: 13px;
+}
+
+.watchlist-add-kicker,
+.watchlist-panel-kicker {
+    color: rgb(var(--accent-light-rgb));
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 800;
+}
+
+.watchlist-add-form {
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr) auto auto;
+    gap: 8px;
+    align-items: center;
+    position: relative;
+}
+
+.watchlist-add-input {
+    width: 100%;
+    min-width: 0;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.045);
+    color: #fff;
+    font: inherit;
+    box-sizing: border-box;
+}
+
+.watchlist-add-input:focus {
+    outline: none;
+    border-color: rgba(var(--accent-rgb), 0.45);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.08);
+}
+
+.watchlist-add-status {
+    min-width: 92px;
+    padding: 0 4px;
+    color: rgba(255, 255, 255, 0.42);
+    font-size: 12px;
+    font-weight: 750;
+    white-space: nowrap;
+    text-align: right;
+}
+
+.watchlist-add-clear {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.045);
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.watchlist-add-clear:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+.watchlist-add-results {
+    grid-column: 2;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.watchlist-add-result {
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    min-width: 0;
+    padding: 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025));
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.watchlist-add-result:hover {
+    transform: translateY(-1px);
+    border-color: rgba(var(--accent-rgb), 0.26);
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.09), rgba(255, 255, 255, 0.035));
+}
+
+.watchlist-add-result img,
+.watchlist-add-avatar {
+    width: 52px;
+    height: 52px;
+    border-radius: 10px;
+    object-fit: cover;
+    background: rgba(var(--accent-rgb), 0.12);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.68);
+    font-weight: 800;
+    font-size: 18px;
+}
+
+.watchlist-add-result-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.watchlist-add-result-main span,
+.watchlist-release-card span,
+.watchlist-inspector-releases span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #fff;
+    font-weight: 700;
+}
+
+.watchlist-add-result-main small,
+.watchlist-release-card small,
+.watchlist-inspector-releases small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.watchlist-add-result-main small b {
+    color: rgba(255, 255, 255, 0.7);
+    font-weight: 800;
+}
+
+.watchlist-add-result-action {
+    min-width: 58px;
+    height: 34px;
+    padding: 0 12px;
+    border-radius: 9px;
+    border: 1px solid rgba(var(--accent-rgb), 0.22);
+    background: rgba(var(--accent-rgb), 0.14);
+    color: rgb(var(--accent-light-rgb));
+    font: inherit;
+    font-size: 12px;
+    font-weight: 850;
+    cursor: pointer;
+}
+
+.watchlist-add-result-action:hover:not(:disabled) {
+    border-color: rgba(var(--accent-rgb), 0.42);
+    background: rgba(var(--accent-rgb), 0.24);
+    color: #fff;
+}
+
+.watchlist-add-result-action:disabled {
+    opacity: 0.55;
+    cursor: wait;
+}
+
+.watchlist-add-empty,
+.watchlist-recent-empty,
+.watchlist-inspector-empty {
+    padding: 14px;
+    color: rgba(255, 255, 255, 0.42);
+    font-size: 13px;
+}
+
+.watchlist-recent-panel {
+    padding: 14px;
+    margin-bottom: 12px;
+}
+
+.watchlist-panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.watchlist-panel-head h3,
+.watchlist-panel-head h4 {
+    margin: 2px 0 0;
+    color: #fff;
+    font-size: 17px;
+}
+
+.watchlist-panel-head.compact {
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.watchlist-panel-head.compact h4 {
+    font-size: 13px;
+}
+
+.watchlist-panel-head > span,
+.watchlist-panel-head.compact span {
+    color: rgba(255, 255, 255, 0.42);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.watchlist-recent-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.watchlist-release-card {
+    position: relative;
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    padding: 8px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.035);
+    min-width: 0;
+}
+
+.watchlist-release-card img,
+.watchlist-release-fallback {
+    width: 52px;
+    height: 52px;
+    border-radius: 8px;
+    object-fit: cover;
+    background: rgba(255, 255, 255, 0.06);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.watchlist-release-card div {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.watchlist-release-card em {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    border-radius: 999px;
+    padding: 2px 6px;
+    background: rgba(76, 217, 100, 0.16);
+    color: #72e58d;
+    font-size: 10px;
+    font-style: normal;
+    font-weight: 800;
+}
+
+.watchlist-command-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+    gap: 14px;
+    align-items: start;
+}
+
+.watchlist-roster-panel {
+    padding: 12px;
+    min-width: 0;
+}
+
+.watchlist-roster-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    color: rgba(255, 255, 255, 0.48);
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.watchlist-page-container .watchlist-artists-grid--rows {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+    gap: 10px;
+    padding: 0;
+}
+
+.watchlist-page-container .watchlist-artists-grid--rows .watchlist-artist-card {
+    display: grid;
+    grid-template-columns: 82px minmax(0, 1fr) auto;
+    grid-template-areas:
+        "art info menu"
+        "art stats health"
+        "art tags tags";
+    align-items: start;
+    gap: 8px 14px;
+    min-height: 112px;
+    padding: 12px;
+    border-radius: 12px;
+    transform: none;
+    overflow: visible;
+    contain: none;
+}
+
+.watchlist-page-container .watchlist-artists-grid--rows .watchlist-artist-card:hover {
+    transform: none;
+}
+
+.watchlist-artist-card--active {
+    border-color: rgba(var(--accent-rgb), 0.42) !important;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.1), rgba(18, 18, 18, 0.96)) !important;
+}
+
+.watchlist-artists-grid--rows .watchlist-card-image {
+    grid-area: art;
+    width: 82px;
+    height: 82px;
+    aspect-ratio: auto;
+    border-radius: 12px;
+}
+
+.watchlist-artists-grid--rows .watchlist-card-image::after {
+    display: none;
+}
+
+.watchlist-artists-grid--rows .watchlist-card-info {
+    grid-area: info;
+    margin: 0;
+    padding: 0;
+    gap: 5px;
+    min-width: 0;
+}
+
+.watchlist-artists-grid--rows .watchlist-card-name {
+    font-size: 16px;
+}
+
+.watchlist-row-stats {
+    grid-area: stats;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    color: rgba(255, 255, 255, 0.46);
+    font-size: 12px;
+}
+
+.watchlist-row-stats span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.watchlist-row-tags {
+    grid-area: tags;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    min-width: 0;
+}
+
+.watchlist-artists-grid--rows .watchlist-card-sources,
+.watchlist-artists-grid--rows .watchlist-card-pills {
+    padding: 0;
+    min-width: 0;
+}
+
+.watchlist-row-empty-rule {
+    width: fit-content;
+    border-radius: 999px;
+    padding: 4px 8px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.42);
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.watchlist-row-health {
+    grid-area: health;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 5px;
+}
+
+.watchlist-row-health span {
+    border-radius: 999px;
+    padding: 3px 7px;
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.065);
+    color: rgba(255, 255, 255, 0.46);
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+}
+
+.watchlist-row-menu-trigger {
+    grid-area: menu;
+    position: relative;
+    justify-self: end;
+    z-index: 5;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.35);
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 14px;
+    font-weight: 900;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.72;
+    transition: all 0.15s ease;
+}
+
+.watchlist-row-menu-trigger:hover,
+.watchlist-row-menu-trigger[aria-expanded="true"] {
+    opacity: 1;
+    color: #fff;
+    background: rgba(var(--accent-rgb), 0.22);
+    border-color: rgba(var(--accent-rgb), 0.35);
+}
+
+.watchlist-row-menu {
+    position: fixed;
+    z-index: 10000;
+    min-width: 210px;
+    padding: 6px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(18, 18, 20, 0.98);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
+.watchlist-row-menu button {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 10px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.72);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 750;
+    text-align: left;
+    cursor: pointer;
+}
+
+.watchlist-row-menu button:hover {
+    background: rgba(255, 255, 255, 0.07);
+    color: #fff;
+}
+
+.watchlist-row-menu-sep {
+    height: 1px;
+    margin: 5px 4px;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.watchlist-row-menu .watchlist-row-menu-danger {
+    color: #ff8e8e;
+}
+
+.watchlist-row-menu .watchlist-row-menu-danger:hover {
+    background: rgba(255, 82, 82, 0.14);
+    color: #ffb0b0;
+}
+
+.watchlist-inspector {
+    position: sticky;
+    top: 16px;
+    padding: 16px;
+    min-width: 0;
+}
+
+.watchlist-inspector-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    margin-bottom: 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.watchlist-inspector-hero .watchlist-card-image-fallback,
+.watchlist-inspector-hero img {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 10;
+    border-radius: 12px;
+    object-fit: cover;
+    font-size: 44px;
+    background: rgba(255, 255, 255, 0.055);
+}
+
+.watchlist-inspector-hero h3 {
+    margin: 2px 0;
+    color: #fff;
+    font-size: 21px;
+    line-height: 1.18;
+    overflow-wrap: anywhere;
+}
+
+.watchlist-inspector-hero h3::after {
+    content: attr(data-artist-name);
+    display: block;
+    margin-top: 2px;
+}
+
+.watchlist-inspector-hero small {
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.watchlist-inspector-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.watchlist-inspector-actions .wl-chip--red {
+    grid-column: 1 / -1;
+}
+
+.watchlist-inspector-warning {
+    padding: 10px;
+    border-radius: 10px;
+    background: rgba(255, 193, 7, 0.08);
+    border: 1px solid rgba(255, 193, 7, 0.18);
+    color: rgba(255, 213, 79, 0.9);
+    font-size: 12px;
+    margin-bottom: 12px;
+}
+
+.watchlist-inspector-section {
+    padding: 12px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.inspector-pills {
+    padding: 0;
+}
+
+.watchlist-inspector-sources {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.watchlist-inspector-releases {
+    display: grid;
+    gap: 8px;
+}
+
+.watchlist-inspector-releases > div {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+    min-width: 0;
+}
+
+.watchlist-inspector-releases img {
+    width: 40px;
+    height: 40px;
+    border-radius: 7px;
+    object-fit: cover;
+}
+
+@media (max-width: 1180px) {
+    .watchlist-attention-strip {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .watchlist-recent-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .watchlist-command-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .watchlist-inspector {
+        position: static;
+    }
+}
+
+@media (max-width: 980px) {
+    .watchlist-page-container .watchlist-artists-grid--rows .watchlist-artist-card {
+        grid-template-columns: 76px minmax(0, 1fr) auto;
+        min-height: 106px;
+    }
+
+    .watchlist-artists-grid--rows .watchlist-card-image {
+        width: 76px;
+        height: 76px;
+    }
+
+    .watchlist-row-health {
+        justify-content: flex-start;
+    }
+}
+
+@media (max-width: 720px) {
+    .watchlist-attention-strip,
+    .watchlist-add-panel,
+    .watchlist-recent-row {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .watchlist-add-results {
+        grid-column: 1;
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .watchlist-add-form {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .watchlist-add-status {
+        text-align: left;
+    }
+
+    .watchlist-add-clear {
+        position: absolute;
+        right: 4px;
+        bottom: 4px;
+    }
+
+    .watchlist-page-container .watchlist-artists-grid--rows .watchlist-artist-card {
+        grid-template-columns: 62px minmax(0, 1fr) auto;
+        grid-template-areas:
+            "art info menu"
+            "stats stats stats"
+            "tags tags tags"
+            "health health health";
+        gap: 10px;
+        min-height: 0;
+    }
+
+    .watchlist-artists-grid--rows .watchlist-card-image {
+        width: 62px;
+        height: 62px;
+    }
+
+    .watchlist-row-stats,
+    .watchlist-row-tags,
+    .watchlist-artists-grid--rows .watchlist-card-sources,
+    .watchlist-row-health {
+        justify-content: flex-start;
+    }
 }
 
 /* ═══════════════════════════════════════════════════════════════════
