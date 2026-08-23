@@ -4990,16 +4990,24 @@ function _musicWishlistActiveHTML() {
 }
 
 function updateMusicSyncTask(data) {
-    if (_musicSyncClearTimer) clearTimeout(_musicSyncClearTimer);
+    if (_musicSyncClearTimer) { clearTimeout(_musicSyncClearTimer); _musicSyncClearTimer = null; }
     const incoming = data || {};
-    if (Array.isArray(incoming.syncs) && incoming.syncs.length) {
+    const hasSyncList = Array.isArray(incoming.syncs);
+    const hasProcessPayload = !!(incoming.playlist_id || incoming.playlist_name || incoming.progress);
+
+    if (hasSyncList && !incoming.syncs.length && !hasProcessPayload) {
+        _musicSyncPulse = null;
+        _updateOverlayBell();
+        _patchOverlayActive();
+        return;
+    }
+
+    if (hasSyncList && incoming.syncs.length) {
         _musicSyncPulse = { ...incoming, processes: incoming.syncs, updated_at: Date.now() };
     } else {
         const previous = _musicSyncPulse || {};
         const previousProcesses = Array.isArray(previous.processes) ? previous.processes : [];
-        const process = incoming.playlist_id || incoming.playlist_name || incoming.progress
-            ? incoming
-            : null;
+        const process = hasProcessPayload ? incoming : null;
         _musicSyncPulse = {
             ...previous,
             ...incoming,
@@ -5055,7 +5063,7 @@ function _musicSyncSources() {
 }
 
 function _musicSyncActive() {
-    return _musicSyncSources().length > 0 || !!(_musicSyncPulse && Date.now() - _musicSyncPulse.updated_at < 8000);
+    return _musicSyncSources().length > 0;
 }
 
 function _musicSyncActiveHTML() {
@@ -5075,7 +5083,7 @@ function _musicSyncActiveHTML() {
 function updateLastfmListeningImportTask(data) {
     if (!data) return;
     if (_lastfmImportClearTimer) { clearTimeout(_lastfmImportClearTimer); _lastfmImportClearTimer = null; }
-    const active = data.running || data.status === 'running';
+    const active = data.running === true;
     if (active) {
         _lastfmImportTask = { ...data, updated_at: Date.now() };
     } else if (_lastfmImportTask || data.status === 'complete' || data.status === 'error' || data.status === 'cancelled') {
@@ -5099,9 +5107,12 @@ function _lastfmImportActiveHTML() {
     const inserted = Number(t.inserted || 0);
     const duplicates = Number(t.duplicates || 0);
     const total = Number(t.total_scrobbles || 0);
+    const page = Number(t.page || 0);
+    const totalPages = Number(t.total_pages || 0);
+    const pageLine = page && totalPages ? ` · page ${page.toLocaleString()}/${totalPages.toLocaleString()}` : '';
     const line = active
-        ? `${inserted.toLocaleString()} added${duplicates ? `, ${duplicates.toLocaleString()} skipped` : ''}${total ? ` · ${total.toLocaleString()} total` : ''}`
-        : (t.status === 'error' ? _escToast(t.error || 'Last.fm import failed') : 'Last.fm listening is up to date');
+        ? `${inserted.toLocaleString()} added${duplicates ? `, ${duplicates.toLocaleString()} skipped` : ''}${total ? ` · ${total.toLocaleString()} total` : ''}${pageLine}`
+        : (t.status === 'error' ? _escToast(t.error || 'Last.fm import failed') : _escToast(t.phase || 'Last.fm listening is up to date'));
     return _taskCardHTML('Importing Last.fm listening', pct, line, cls, _notifActionHTML('Open Stats', 'stats'));
 }
 

@@ -58,7 +58,14 @@ class LastFMListeningImportWorker:
     def status(self) -> Dict[str, Any]:
         state = dict(self._state or {})
         running = self.is_running()
-        if not running and state.get("status") == "complete" and _is_incomplete_backfill_state(state):
+        if not running and state.get("status") == "running":
+            state.update(
+                status="partial",
+                phase="Last.fm import needs to resume",
+                progress=_progress(_int(state.get("page")), _int(state.get("total_pages"))),
+                last_success_at=None,
+            )
+        elif not running and state.get("status") == "complete" and _is_incomplete_backfill_state(state):
             state.update(
                 status="partial",
                 phase="Last.fm import needs to resume",
@@ -338,9 +345,10 @@ class LastFMListeningImportWorker:
         conn = self.db._get_connection()
         try:
             cursor = conn.cursor()
+            duplicates = self._probable_duplicate_keys(cursor, clean)
             inserted = 0
             for ev in clean:
-                if self._has_probable_duplicate(cursor, ev):
+                if _event_key(ev) in duplicates:
                     continue
                 cursor.execute(
                     """
@@ -366,22 +374,34 @@ class LastFMListeningImportWorker:
             conn.close()
 
     @staticmethod
-    def _has_probable_duplicate(cursor, ev: Dict[str, Any]) -> bool:
-        ts = _played_at_ts(ev.get("played_at"))
-        if ts <= 0:
-            return False
+    def _probable_duplicate_keys(cursor, events: List[Dict[str, Any]]) -> set[tuple[str, str, int]]:
+        windows = [(_event_key(ev), _played_at_ts(ev.get("played_at"))) for ev in events]
+        windows = [(key, ts) for key, ts in windows if ts > 0]
+        if not windows:
+            return set()
+        min_ts = min(ts for _key, ts in windows) - 120
+        max_ts = max(ts for _key, ts in windows) + 120
         cursor.execute(
             """
-            SELECT 1
+            SELECT LOWER(title), LOWER(COALESCE(artist, '')), strftime('%s', played_at)
             FROM listening_history
-            WHERE LOWER(title) = LOWER(?)
-              AND LOWER(COALESCE(artist, '')) = LOWER(?)
-              AND ABS(strftime('%s', played_at) - ?) <= 120
-            LIMIT 1
+            WHERE played_at >= datetime(?, 'unixepoch')
+              AND played_at <= datetime(?, 'unixepoch')
             """,
-            (ev.get("title") or "", ev.get("artist") or "", ts),
+            (min_ts, max_ts),
         )
-        return cursor.fetchone() is not None
+        existing = []
+        for title_l, artist_l, played_ts in cursor.fetchall():
+            try:
+                existing.append((title_l or "", artist_l or "", int(played_ts)))
+            except (TypeError, ValueError):
+                continue
+        duplicates = set()
+        for key, ts in windows:
+            title_l, artist_l, _ = key
+            if any(title_l == ex_title and artist_l == ex_artist and abs(ex_ts - ts) <= 120 for ex_title, ex_artist, ex_ts in existing):
+                duplicates.add(key)
+        return duplicates
 
     def _load_state(self) -> Dict[str, Any]:
         try:
@@ -426,6 +446,14 @@ def normalize_lastfm_scrobble(track: Dict[str, Any]) -> Optional[Dict[str, Any]]
         "server_source": SOURCE,
         "db_track_id": None,
     }
+
+
+def _event_key(ev: Dict[str, Any]) -> tuple[str, str, int]:
+    return (
+        (ev.get("title") or "").strip().lower(),
+        (ev.get("artist") or "").strip().lower(),
+        _played_at_ts(ev.get("played_at")),
+    )
 
 
 def _text(value: Any) -> str:
