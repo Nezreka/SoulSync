@@ -26133,6 +26133,120 @@ def cancel_tidal_sync(playlist_id):
 # Global state for Deezer playlist discovery management
 deezer_discovery_states = {}  # Key: playlist_id, Value: discovery state
 deezer_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="deezer_discovery")
+deezer_playlist_load_jobs = {}
+deezer_playlist_load_lock = threading.Lock()
+
+
+def _run_deezer_playlist_load_job(job_id, playlist_id):
+    with deezer_playlist_load_lock:
+        state = deezer_playlist_load_jobs.get(job_id)
+        if state:
+            state['status'] = 'running'
+            state['started_at'] = time.time()
+
+    def _emit_progress(done, total, phase):
+        frame = {
+            'playlist_id': str(playlist_id),
+            'done': done,
+            'total': total,
+            'phase': phase,
+        }
+        with deezer_playlist_load_lock:
+            state = deezer_playlist_load_jobs.get(job_id)
+            if state:
+                state['progress'] = frame
+                state['updated_at'] = time.time()
+        try:
+            socketio.emit('deezer:playlist_progress', frame)
+        except Exception as emit_err:   # noqa: BLE001 - narration must never break the fetch
+            logger.debug("deezer playlist progress emit failed: %s", emit_err)
+
+    try:
+        logger.info("Started async Deezer playlist load for %s (job=%s)", playlist_id, job_id)
+        playlist = _get_deezer_client().get_playlist(playlist_id, progress_cb=_emit_progress)
+        if not playlist:
+            raise ValueError("Deezer playlist not found")
+        with deezer_playlist_load_lock:
+            state = deezer_playlist_load_jobs.get(job_id)
+            if state:
+                state.update({
+                    'status': 'complete',
+                    'playlist': playlist,
+                    'track_count': len(playlist.get('tracks', [])),
+                    'updated_at': time.time(),
+                })
+        logger.info("Loaded %d tracks from Deezer playlist: %s (job=%s)",
+                    len(playlist.get('tracks', [])), playlist.get('name'), job_id)
+    except Exception as e:
+        logger.error("Async Deezer playlist load failed for %s (job=%s): %s",
+                     playlist_id, job_id, e, exc_info=True)
+        with deezer_playlist_load_lock:
+            state = deezer_playlist_load_jobs.get(job_id)
+            if state:
+                state.update({'status': 'error', 'error': str(e), 'updated_at': time.time()})
+
+
+def _run_deezer_arl_playlist_load_job(job_id, playlist_id):
+    with deezer_playlist_load_lock:
+        state = deezer_playlist_load_jobs.get(job_id)
+        if state:
+            state['status'] = 'running'
+            state['started_at'] = time.time()
+
+    def _emit_progress(done, total, phase):
+        frame = {
+            'playlist_id': str(playlist_id),
+            'done': done,
+            'total': total,
+            'phase': phase,
+        }
+        with deezer_playlist_load_lock:
+            state = deezer_playlist_load_jobs.get(job_id)
+            if state:
+                state['progress'] = frame
+                state['updated_at'] = time.time()
+        try:
+            socketio.emit('deezer:playlist_progress', frame)
+        except Exception as emit_err:   # noqa: BLE001 - narration must never break the fetch
+            logger.debug("deezer ARL playlist progress emit failed: %s", emit_err)
+
+    try:
+        deezer_dl = download_orchestrator.client("deezer_dl") if download_orchestrator and hasattr(download_orchestrator, 'client') else None
+        if not deezer_dl or not deezer_dl.is_authenticated():
+            raise PermissionError("Deezer ARL not authenticated.")
+        logger.info("Started async Deezer ARL playlist load for %s (job=%s)", playlist_id, job_id)
+        playlist = deezer_dl.get_playlist_tracks(playlist_id, progress_cb=_emit_progress)
+        if not playlist:
+            raise ValueError("Playlist not found or unable to access.")
+        with deezer_playlist_load_lock:
+            state = deezer_playlist_load_jobs.get(job_id)
+            if state:
+                state.update({
+                    'status': 'complete',
+                    'playlist': playlist,
+                    'track_count': len(playlist.get('tracks', [])),
+                    'updated_at': time.time(),
+                })
+        logger.info("Loaded %d tracks from Deezer ARL playlist: %s (job=%s)",
+                    len(playlist.get('tracks', [])), playlist.get('name'), job_id)
+    except Exception as e:
+        logger.error("Async Deezer ARL playlist load failed for %s (job=%s): %s",
+                     playlist_id, job_id, e, exc_info=True)
+        with deezer_playlist_load_lock:
+            state = deezer_playlist_load_jobs.get(job_id)
+            if state:
+                state.update({'status': 'error', 'error': str(e), 'updated_at': time.time()})
+
+
+def _prune_deezer_playlist_load_jobs(max_age_seconds=3600):
+    cutoff = time.time() - max_age_seconds
+    with deezer_playlist_load_lock:
+        stale = [
+            job_id for job_id, state in deezer_playlist_load_jobs.items()
+            if state.get('status') in ('complete', 'error') and state.get('updated_at', 0) < cutoff
+        ]
+        for job_id in stale:
+            deezer_playlist_load_jobs.pop(job_id, None)
 
 def _get_deezer_client():
     """Get cached Deezer client."""
@@ -26260,6 +26374,39 @@ def get_deezer_arl_playlist_tracks(playlist_id):
         if not deezer_dl or not deezer_dl.is_authenticated():
             return jsonify({'error': 'Deezer ARL not authenticated.'}), 401
 
+        if request.args.get('async') in ('1', 'true', 'yes'):
+            _prune_deezer_playlist_load_jobs()
+            with deezer_playlist_load_lock:
+                for existing_id, existing in deezer_playlist_load_jobs.items():
+                    if (existing.get('kind') == 'arl'
+                            and existing.get('playlist_id') == str(playlist_id)
+                            and existing.get('status') in ('queued', 'running')):
+                        return jsonify({
+                            "pending": True,
+                            "job_id": existing_id,
+                            "playlist_id": str(playlist_id),
+                            "status": existing.get('status'),
+                            "progress": existing.get('progress') or {},
+                        }), 202
+
+                job_id = f"deezer_arl_playlist_{uuid.uuid4().hex[:12]}"
+                deezer_playlist_load_jobs[job_id] = {
+                    'job_id': job_id,
+                    'kind': 'arl',
+                    'playlist_id': str(playlist_id),
+                    'status': 'queued',
+                    'progress': {'playlist_id': str(playlist_id), 'done': 0, 'total': 0, 'phase': 'queued'},
+                    'created_at': time.time(),
+                    'updated_at': time.time(),
+                }
+            deezer_discovery_executor.submit(_run_deezer_arl_playlist_load_job, job_id, str(playlist_id))
+            return jsonify({
+                "pending": True,
+                "job_id": job_id,
+                "playlist_id": str(playlist_id),
+                "status": "queued",
+            }), 202
+
         # Narrate the wait. Resolving a 1200-track playlist means ~1,750
         # rate-limited requests, so this GET legitimately runs for minutes and a
         # bare spinner cannot tell working from hung — which is how it was
@@ -26307,6 +26454,39 @@ def get_deezer_playlist(playlist_id):
                                 "address instead."}), 400
             return jsonify({"error": "Invalid Deezer playlist ID or URL"}), 400
 
+        if request.args.get('async') in ('1', 'true', 'yes'):
+            _prune_deezer_playlist_load_jobs()
+            with deezer_playlist_load_lock:
+                for existing_id, existing in deezer_playlist_load_jobs.items():
+                    if (existing.get('kind') == 'link'
+                            and existing.get('playlist_id') == str(parsed_id)
+                            and existing.get('status') in ('queued', 'running')):
+                        return jsonify({
+                            "pending": True,
+                            "job_id": existing_id,
+                            "playlist_id": str(parsed_id),
+                            "status": existing.get('status'),
+                            "progress": existing.get('progress') or {},
+                        }), 202
+
+                job_id = f"deezer_playlist_{uuid.uuid4().hex[:12]}"
+                deezer_playlist_load_jobs[job_id] = {
+                    'job_id': job_id,
+                    'kind': 'link',
+                    'playlist_id': str(parsed_id),
+                    'status': 'queued',
+                    'progress': {'playlist_id': str(parsed_id), 'done': 0, 'total': 0, 'phase': 'queued'},
+                    'created_at': time.time(),
+                    'updated_at': time.time(),
+                }
+            deezer_discovery_executor.submit(_run_deezer_playlist_load_job, job_id, str(parsed_id))
+            return jsonify({
+                "pending": True,
+                "job_id": job_id,
+                "playlist_id": str(parsed_id),
+                "status": "queued",
+            }), 202
+
         # Narrate the wait, exactly as the ARL playlist endpoint does. A
         # 1500-track playlist resolves ~1,000 unique albums for real track
         # numbers, which is minutes — and this path emitted nothing at all, so
@@ -26338,6 +26518,26 @@ def get_deezer_playlist(playlist_id):
     except Exception as e:
         logger.error(f"Error fetching Deezer playlist: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/deezer/playlist-load/<job_id>', methods=['GET'])
+def get_deezer_playlist_load_status(job_id):
+    with deezer_playlist_load_lock:
+        state = deezer_playlist_load_jobs.get(job_id)
+        if not state:
+            return jsonify({"error": "Deezer playlist load not found"}), 404
+        status = state.get('status')
+        payload = {
+            "job_id": job_id,
+            "playlist_id": state.get('playlist_id'),
+            "status": status,
+            "progress": state.get('progress') or {},
+        }
+        if status == 'complete':
+            payload["playlist"] = state.get('playlist')
+        elif status == 'error':
+            payload["error"] = state.get('error') or 'Deezer playlist load failed'
+        return jsonify(payload)
 
 @app.route('/api/deezer/discovery/start/<playlist_id>', methods=['POST'])
 def start_deezer_discovery(playlist_id):
