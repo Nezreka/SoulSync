@@ -137,6 +137,28 @@ export interface ListeningStatsStatus {
   error?: string;
 }
 
+export interface LastfmListeningImportStatus {
+  success: boolean;
+  enabled?: boolean;
+  api_key_configured?: boolean;
+  authenticated_user_available?: boolean;
+  username?: string | null;
+  running?: boolean;
+  status?: 'idle' | 'running' | 'complete' | 'error' | 'cancelled' | 'skipped' | string;
+  phase?: string | null;
+  progress?: number | null;
+  imported?: number;
+  inserted?: number;
+  duplicates?: number;
+  total_scrobbles?: number | null;
+  page?: number;
+  total_pages?: number | null;
+  last_success_at?: string | null;
+  last_imported_at?: string | null;
+  next_run_in_seconds?: number;
+  error?: string;
+}
+
 export interface StatsDbStorageTable {
   name: string;
   size: number;
@@ -157,6 +179,33 @@ export interface StatsLibraryDiskUsagePayload {
   tracks_with_size?: number;
   tracks_without_size?: number;
   by_format?: Record<string, number>;
+  error?: string;
+}
+
+
+export type StatsListeningEventsFilter =
+  | { type: 'date'; date: string }
+  | { type: 'weekday_hour'; weekday: number; hour: number }
+  | { type: 'hour'; hour: number };
+
+export interface StatsListeningEventTrack {
+  title: string;
+  artist?: string | null;
+  album?: string | null;
+  played_at?: string | null;
+  duration_ms?: number | null;
+  server_source?: string | null;
+  image_url?: string | null;
+  artist_db_id?: string | number | null;
+  db_track_id?: string | number | null;
+}
+
+export interface StatsListeningEventsPayload {
+  success: boolean;
+  title?: string;
+  total?: number;
+  limit?: number;
+  items?: StatsListeningEventTrack[];
   error?: string;
 }
 

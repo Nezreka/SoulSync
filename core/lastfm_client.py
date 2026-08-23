@@ -276,6 +276,37 @@ class LastFMClient:
             return None
 
     @rate_limited
+    def get_user_recent_tracks(
+        self,
+        username: str,
+        page: int = 1,
+        limit: int = 200,
+        from_ts: Optional[int] = None,
+        to_ts: Optional[int] = None,
+        extended: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch one page of a user's Last.fm scrobbles.
+
+        ``user.getRecentTracks`` is public for public profiles and pages up to
+        200 rows. The importer owns pagination/resume; the client only exposes
+        the raw page plus Last.fm's ``@attr`` counts.
+        """
+        if not username:
+            return None
+        params: Dict[str, Any] = {
+            'user': username,
+            'page': str(max(1, int(page or 1))),
+            'limit': str(min(200, max(1, int(limit or 200)))),
+        }
+        if from_ts is not None:
+            params['from'] = str(int(from_ts))
+        if to_ts is not None:
+            params['to'] = str(int(to_ts))
+        if extended:
+            params['extended'] = '1'
+        return self._make_request('user.getRecentTracks', params, timeout=20, raise_on_transient=True)
+
+    @rate_limited
     def get_user_top_artists(self, username: str, period: str = 'overall', limit: int = 200) -> list:
         """Fetch user's top artists from Last.fm.
         Args:

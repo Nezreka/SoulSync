@@ -325,6 +325,103 @@ def get_recent_tracks(database, limit: int, image_url_fixer: Optional[ImageUrlFi
     ]
 
 
+def get_listening_events(
+    database,
+    image_url_fixer: Optional[ImageUrlFixer],
+    *,
+    time_range: str,
+    filter_type: str,
+    date: Optional[str] = None,
+    weekday: Optional[int] = None,
+    hour: Optional[int] = None,
+    limit: int = 100,
+) -> dict:
+    """Listening-history rows behind a clicked stats chart segment."""
+    limit = max(1, min(int(limit or 100), 250))
+    where = database._listening_time_filter(time_range, alias='lh')
+    clauses: list[str] = []
+    params: list[Any] = []
+    title = 'Listening details'
+
+    if filter_type == 'date':
+        if not date:
+            raise ValueError('date is required')
+        clauses.append('DATE(lh.played_at) = ?')
+        params.append(date)
+        title = date
+    elif filter_type == 'weekday_hour':
+        if weekday is None or hour is None:
+            raise ValueError('weekday and hour are required')
+        weekday_i = int(weekday)
+        hour_i = int(hour)
+        if not (0 <= weekday_i <= 6 and 0 <= hour_i <= 23):
+            raise ValueError('weekday/hour out of range')
+        clauses.append("CAST(strftime('%w', lh.played_at) AS INTEGER) = ?")
+        clauses.append("CAST(strftime('%H', lh.played_at) AS INTEGER) = ?")
+        params.extend([weekday_i, hour_i])
+        title = f"{['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][weekday_i]} {hour_i:02d}:00"
+    elif filter_type == 'hour':
+        if hour is None:
+            raise ValueError('hour is required')
+        hour_i = int(hour)
+        if not (0 <= hour_i <= 23):
+            raise ValueError('hour out of range')
+        clauses.append("CAST(strftime('%H', lh.played_at) AS INTEGER) = ?")
+        params.append(hour_i)
+        title = f"{hour_i:02d}:00"
+    else:
+        raise ValueError('unsupported filter type')
+
+    if clauses:
+        where = f"{where} AND {' AND '.join(clauses)}"
+
+    conn = database._get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM listening_history lh
+            {where}
+            """,
+            params,
+        )
+        total = cursor.fetchone()[0] or 0
+
+        cursor.execute(
+            f"""
+            SELECT lh.title, lh.artist, lh.album, lh.played_at, lh.duration_ms,
+                   lh.server_source, al.thumb_url, t.artist_id, t.id AS db_track_id
+            FROM listening_history lh
+            LEFT JOIN tracks t ON t.id = lh.db_track_id
+            LEFT JOIN albums al ON al.id = t.album_id
+            {where}
+            ORDER BY lh.played_at DESC
+            LIMIT ?
+            """,
+            params + [limit],
+        )
+        rows = cursor.fetchall()
+    finally:
+        conn.close()
+
+    items = [
+        {
+            'title': row[0],
+            'artist': row[1],
+            'album': row[2],
+            'played_at': row[3],
+            'duration_ms': row[4],
+            'server_source': row[5],
+            'image_url': (image_url_fixer(row[6]) if image_url_fixer else row[6]) if row[6] else None,
+            'artist_db_id': row[7],
+            'db_track_id': row[8],
+        }
+        for row in rows
+    ]
+    return {'title': title, 'total': total, 'limit': limit, 'items': items}
+
+
 def resolve_track(database, image_url_fixer: ImageUrlFixer, title: str, artist: str) -> Optional[dict]:
     """Resolve a track by title+artist to its file_path / metadata. Returns None if not found."""
     conn = database._get_connection()

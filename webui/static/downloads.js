@@ -4748,6 +4748,8 @@ let _musicWishlistTask = null;
 let _musicWishlistClearTimer = null;
 let _musicSyncPulse = null;
 let _musicSyncClearTimer = null;
+let _lastfmImportTask = null;
+let _lastfmImportClearTimer = null;
 
 function _taskClampPct(value, fallback = 0) {
     let pct = Number(value);
@@ -5070,14 +5072,48 @@ function _musicSyncActiveHTML() {
     return _taskCardHTML(title, pct, line, '', _notifActionHTML('Open Downloads', 'active-downloads'));
 }
 
+function updateLastfmListeningImportTask(data) {
+    if (!data) return;
+    if (_lastfmImportClearTimer) { clearTimeout(_lastfmImportClearTimer); _lastfmImportClearTimer = null; }
+    const active = data.running || data.status === 'running';
+    if (active) {
+        _lastfmImportTask = { ...data, updated_at: Date.now() };
+    } else if (_lastfmImportTask || data.status === 'complete' || data.status === 'error' || data.status === 'cancelled') {
+        _lastfmImportTask = { ...data, updated_at: Date.now() };
+        _lastfmImportClearTimer = setTimeout(() => { _lastfmImportTask = null; _updateOverlayBell(); _patchOverlayActive(); }, 10000);
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+function _lastfmImportActive() {
+    return !!(_lastfmImportTask && (_lastfmImportTask.running || _lastfmImportTask.status === 'running'));
+}
+
+function _lastfmImportActiveHTML() {
+    const t = _lastfmImportTask;
+    if (!t) return '';
+    const active = _lastfmImportActive();
+    const pct = active && _taskHasPct(t.progress) ? _taskClampPct(t.progress) : (active ? null : 100);
+    const cls = t.status === 'error' ? 'error' : (!active ? 'done' : '');
+    const inserted = Number(t.inserted || 0);
+    const duplicates = Number(t.duplicates || 0);
+    const total = Number(t.total_scrobbles || 0);
+    const line = active
+        ? `${inserted.toLocaleString()} added${duplicates ? `, ${duplicates.toLocaleString()} skipped` : ''}${total ? ` · ${total.toLocaleString()} total` : ''}`
+        : (t.status === 'error' ? _escToast(t.error || 'Last.fm import failed') : 'Last.fm listening is up to date');
+    return _taskCardHTML('Importing Last.fm listening', pct, line, cls, _notifActionHTML('Open Stats', 'stats'));
+}
+
 function _musicTasksActive() {
     return _musicAutomationActive() || _musicRepairActive() || _musicWatchlistActive()
-        || _musicMediaScanActive() || _musicWishlistActive() || _musicSyncActive();
+        || _musicMediaScanActive() || _musicWishlistActive() || _musicSyncActive()
+        || _lastfmImportActive();
 }
 
 function _musicActiveHTML() {
     return _musicAutomationActiveHTML() + _musicSyncActiveHTML() + _musicWishlistActiveHTML()
-        + _musicWatchlistActiveHTML() + _musicMediaScanActiveHTML() + _musicRepairActiveHTML();
+        + _lastfmImportActiveHTML() + _musicWatchlistActiveHTML() + _musicMediaScanActiveHTML() + _musicRepairActiveHTML();
 }
 
 function _seedMusicAutomationTask() {
@@ -5112,6 +5148,13 @@ function _seedMusicMediaScanTask() {
         .catch(() => {});
 }
 
+function _seedLastfmImportTask() {
+    fetch('/api/lastfm/listening-import/status')
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s && s.success) updateLastfmListeningImportTask(s); })
+        .catch(() => {});
+}
+
 function _updateOverlayBell() {
     const btn = document.getElementById('notif-bell-btn');
     if (btn) btn.classList.toggle('notif-bell-working',
@@ -5135,6 +5178,7 @@ function _ensureTaskPolling() {
             _seedMusicDownloadTask();
             _seedMusicRepairTask();
             _seedMusicMediaScanTask();
+            _seedLastfmImportTask();
         }, 12000);
     } else if (!active && _taskPollTimer) {
         clearInterval(_taskPollTimer);
@@ -5429,6 +5473,7 @@ function _openNotifPanel() {
     _seedMusicDownloadTask();
     _seedMusicRepairTask();
     _seedMusicMediaScanTask();
+    _seedLastfmImportTask();
 
     // Position above the bell button
     if (btn) {

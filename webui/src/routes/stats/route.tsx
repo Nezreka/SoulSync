@@ -2,7 +2,11 @@ import { createFileRoute } from '@tanstack/react-router';
 
 import { guardPageAccess } from '@/platform/shell/route-guard';
 
-import { listeningStatsStatusQueryOptions, statsCachedQueryOptions } from './-stats.api';
+import {
+  lastfmListeningImportStatusQueryOptions,
+  listeningStatsStatusQueryOptions,
+  statsCachedQueryOptions,
+} from './-stats.api';
 import { statsSearchSchema } from './-stats.types';
 import { StatsPage } from './-ui/stats-page';
 
@@ -25,6 +29,12 @@ export const Route = createFileRoute('/stats')({
       context.queryClient
         .fetchQuery({
           ...listeningStatsStatusQueryOptions(),
+          retry: false,
+        })
+        .catch(() => undefined),
+      context.queryClient
+        .fetchQuery({
+          ...lastfmListeningImportStatusQueryOptions(),
           retry: false,
         })
         .catch(() => undefined),

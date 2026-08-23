@@ -19,12 +19,15 @@ import { PageHeader } from '@/components/page-header';
 import { useReactPageShell, useShellStatus } from '@/platform/shell/route-controllers';
 
 import type {
+  LastfmListeningImportStatus,
   StatsAlbumRow,
   StatsArtistRow,
   StatsClock,
   StatsDbStoragePayload,
   StatsHealth,
   StatsLibraryDiskUsagePayload,
+  StatsListeningEventsFilter,
+  StatsListeningEventTrack,
   StatsNeglectedAlbum,
   StatsOwnVsPlay,
   StatsRange,
@@ -35,9 +38,12 @@ import type {
 } from '../-stats.types';
 
 import {
+  fetchStatsListeningEvents,
   invalidateStatsQueries,
+  lastfmListeningImportStatusQueryOptions,
   listeningStatsStatusQueryOptions,
   resolveStatsTrack,
+  runLastfmListeningImport,
   statsCachedQueryOptions,
   statsDbStorageQueryOptions,
   statsLibraryDiskUsageQueryOptions,
@@ -87,6 +93,7 @@ const STATS_CHART_CURSOR = {
 } as const;
 
 const ARTIST_DETAIL_SOURCE = 'library' as const;
+const STATS_DETAIL_QUERY_KEY = ['stats', 'listening-events'] as const;
 
 export function StatsPage() {
   const bridge = useReactPageShell('stats');
@@ -96,6 +103,8 @@ export function StatsPage() {
   const { range, tab, story } = Route.useSearch();
   const syncTimeoutRef = useRef<number | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [lastfmUsername, setLastfmUsername] = useState('');
+  const [listeningDetailFilter, setListeningDetailFilter] = useState<StatsListeningEventsFilter | null>(null);
 
   const cachedStatsQuery = useQuery({
     ...statsCachedQueryOptions(range),
@@ -103,11 +112,23 @@ export function StatsPage() {
   const listeningStatusQuery = useQuery({
     ...listeningStatsStatusQueryOptions(),
   });
+  const lastfmImportQuery = useQuery({
+    ...lastfmListeningImportStatusQueryOptions(),
+    refetchInterval: (query) => (query.state.data?.running ? 3000 : 60000),
+  });
   const dbStorageQuery = useQuery({
     ...statsDbStorageQueryOptions(),
   });
   const diskUsageQuery = useQuery({
     ...statsLibraryDiskUsageQueryOptions(),
+  });
+  const listeningDetailsQuery = useQuery({
+    queryKey: [...STATS_DETAIL_QUERY_KEY, range, listeningDetailFilter],
+    queryFn: () => {
+      if (!listeningDetailFilter) throw new Error('No listening detail selected');
+      return fetchStatsListeningEvents(range, listeningDetailFilter);
+    },
+    enabled: !!listeningDetailFilter,
   });
 
   useEffect(() => {
@@ -136,6 +157,31 @@ export function StatsPage() {
       window.showToast?.(error instanceof Error ? error.message : 'Sync failed', 'error');
     },
   });
+
+  const lastfmMutation = useMutation({
+    mutationFn: () => runLastfmListeningImport(lastfmUsername),
+    onSuccess: () => {
+      window.showToast?.('Last.fm listening import started', 'info');
+      void lastfmImportQuery.refetch();
+    },
+    onError: (error) => {
+      window.showToast?.(error instanceof Error ? error.message : 'Last.fm import failed', 'error');
+    },
+  });
+
+  useEffect(() => {
+    const username = lastfmImportQuery.data?.username;
+    if (username && !lastfmUsername) setLastfmUsername(username);
+  }, [lastfmImportQuery.data?.username, lastfmUsername]);
+
+  useEffect(() => {
+    const onProgress = () => {
+      void lastfmImportQuery.refetch();
+      void invalidateStatsQueries(queryClient);
+    };
+    window.addEventListener('ss:lastfm-import-progress', onProgress);
+    return () => window.removeEventListener('ss:lastfm-import-progress', onProgress);
+  }, [lastfmImportQuery, queryClient]);
 
   const cachedStats = cachedStatsQuery.data;
   const overview = cachedStats?.overview ?? EMPTY_STATS_OVERVIEW;
@@ -233,6 +279,13 @@ export function StatsPage() {
               ))}
             </div>
             <div className={styles.statsSyncControls}>
+              <LastfmImportControl
+                status={lastfmImportQuery.data}
+                username={lastfmUsername}
+                onUsernameChange={setLastfmUsername}
+                onRun={() => lastfmMutation.mutate()}
+                running={lastfmMutation.isPending}
+              />
               {isStandalone ? (
                 <span
                   className={styles.statsStandaloneNotice}
@@ -297,11 +350,20 @@ export function StatsPage() {
           <div className={styles.statsMainGrid}>
             <div className={styles.statsLeftCol}>
               <StatsSectionCard title="When You Listen">
-                <StatsListeningClock clock={cachedStats?.clock} rhythm={cachedStats?.rhythm} />
+                <StatsListeningClock
+                  clock={cachedStats?.clock}
+                  rhythm={cachedStats?.rhythm}
+                  onCellSelect={(weekday, hour) =>
+                    setListeningDetailFilter({ type: 'weekday_hour', weekday, hour })
+                  }
+                />
               </StatsSectionCard>
               <StatsSectionCard title="Listening Activity">
                 <div id="stats-timeline-chart" className={styles.chartContainer}>
-                  <StatsActivityChart timeline={cachedStats?.timeline ?? []} />
+                  <StatsActivityChart
+                    timeline={cachedStats?.timeline ?? []}
+                    onDateSelect={(date) => setListeningDetailFilter({ type: 'date', date })}
+                  />
                 </div>
               </StatsSectionCard>
               <StatsSectionCard title="Own vs Play">
@@ -345,6 +407,15 @@ export function StatsPage() {
       ) : (
         <StatsEmptyState />
       )}
+      {listeningDetailFilter ? (
+        <StatsListeningDetailModal
+          payload={listeningDetailsQuery.data}
+          loading={listeningDetailsQuery.isPending}
+          error={listeningDetailsQuery.error}
+          onClose={() => setListeningDetailFilter(null)}
+          onPlay={(track) => playStatsTrack(bridge, track)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -366,6 +437,105 @@ const PREVIOUS_PERIOD_LABEL: Partial<Record<StatsRange, string>> = {
   '30d': 'vs previous 30 days',
   '12m': 'vs previous 12 months',
 };
+
+function LastfmImportControl({
+  onRun,
+  onUsernameChange,
+  running,
+  status,
+  username,
+}: {
+  onRun: () => void;
+  onUsernameChange: (username: string) => void;
+  running: boolean;
+  status: LastfmListeningImportStatus | undefined;
+  username: string;
+}) {
+  const active = !!status?.running;
+  const pct = clampProgress(status?.progress);
+  const canUseAuthenticatedUser = !!status?.authenticated_user_available;
+  const needsUsername = !username && !status?.username && !canUseAuthenticatedUser;
+  const disabled = running || active || !status?.api_key_configured || needsUsername;
+  const subline = lastfmImportSubline(status);
+
+  return (
+    <div
+      className={`${styles.lastfmImportControl} ${active ? styles.lastfmImportControlActive : ''}`}
+      title={subline}
+    >
+      <div className={styles.lastfmImportMain}>
+        <span className={styles.lastfmImportBrand}>Last.fm</span>
+        <span className={styles.lastfmImportStatus}>{lastfmImportLabel(status)}</span>
+      </div>
+      <div className={styles.lastfmImportBar} aria-hidden="true">
+        <div
+          className={styles.lastfmImportFill}
+          style={{ width: pct != null && (active || status?.status === 'partial') ? `${pct}%` : status?.status === 'complete' ? '100%' : '0%' }}
+        />
+      </div>
+      {needsUsername ? (
+        <input
+          className={styles.lastfmImportInput}
+          value={username}
+          onChange={(event) => onUsernameChange(event.target.value)}
+          placeholder="Last.fm username"
+          aria-label="Last.fm username"
+        />
+      ) : null}
+      <button
+        type="button"
+        className={styles.lastfmImportRun}
+        onClick={onRun}
+        disabled={disabled}
+        title={status?.api_key_configured ? 'Sync Last.fm listening now' : 'Configure Last.fm API key first'}
+      >
+        {active ? 'Running' : 'Run'}
+      </button>
+    </div>
+  );
+}
+
+function lastfmImportLabel(status: LastfmListeningImportStatus | undefined): string {
+  if (!status?.api_key_configured) return 'not configured';
+  if (status.running) return `${clampProgress(status.progress) ?? 0}%`;
+  if (status.status === 'error') return 'needs attention';
+  if (status.status === 'partial') return 'resume needed';
+  if (status.last_success_at) return 'up to date';
+  return 'ready';
+}
+
+function lastfmImportSubline(status: LastfmListeningImportStatus | undefined): string {
+  if (!status?.api_key_configured) return 'Configure Last.fm API credentials in Settings.';
+  if (status.running) {
+    const inserted = formatCompactNumber(status.inserted || 0);
+    const duplicates = formatCompactNumber(status.duplicates || 0);
+    return `${status.phase || 'Importing'} · ${inserted} added · ${duplicates} skipped`;
+  }
+  if (status.status === 'error') return status.error || 'Last.fm import failed';
+  if (status.status === 'partial') return 'Previous import stopped before the backfill finished. Run to continue.';
+  if (!status.username && status.authenticated_user_available) {
+    return 'Uses the Last.fm account authorized in Settings.';
+  }
+  if (status.last_success_at) {
+    const next = status.next_run_in_seconds ? ` · next check in ${formatShortDuration(status.next_run_in_seconds)}` : '';
+    return `Last checked ${status.last_success_at}${next}`;
+  }
+  return 'Run once to start hourly Last.fm listening sync.';
+}
+
+function clampProgress(value: unknown): number | null {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function formatShortDuration(seconds: number): string {
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+}
 
 function OverviewCards({
   overview,
@@ -458,9 +628,11 @@ function StatsCardDelta({
  */
 function StatsListeningClock({
   clock,
+  onCellSelect,
   rhythm,
 }: {
   clock: StatsClock | undefined;
+  onCellSelect: (weekday: number, hour: number) => void;
   rhythm: StatsRhythm | undefined;
 }) {
   const grid = clock?.grid;
@@ -480,13 +652,17 @@ function StatsListeningClock({
           <div key={weekday} className={styles.statsClockRow}>
             <span className={styles.statsClockDay}>{WEEKDAY_LABELS[weekday]}</span>
             {row.map((plays, hour) => (
-              <span
+              <button
                 key={hour}
-                className={styles.statsClockCell}
+                type="button"
+                className={`${styles.statsClockCell} ${plays > 0 ? styles.statsClockCellActive : ''}`}
                 style={{ opacity: heatIntensity(plays, peakPlays) }}
-                title={`${WEEKDAY_LABELS[weekday]} ${formatHourLabel(hour)} — ${plays} ${
+                title={`${WEEKDAY_LABELS[weekday]} ${formatHourLabel(hour)} - ${plays} ${
                   plays === 1 ? 'play' : 'plays'
                 }`}
+                aria-label={`${WEEKDAY_LABELS[weekday]} ${formatHourLabel(hour)}: ${plays} plays`}
+                disabled={plays <= 0}
+                onClick={() => onCellSelect(weekday, hour)}
               />
             ))}
           </div>
@@ -625,7 +801,13 @@ function StatsSectionCard({
   );
 }
 
-function StatsActivityChart({ timeline }: { timeline: Array<{ date: string; plays: number }> }) {
+function StatsActivityChart({
+  onDateSelect,
+  timeline,
+}: {
+  onDateSelect: (date: string) => void;
+  timeline: Array<{ date: string; plays: number }>;
+}) {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={timeline} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
@@ -653,6 +835,13 @@ function StatsActivityChart({ timeline }: { timeline: Array<{ date: string; play
           radius={[4, 4, 0, 0]}
           fill="rgba(var(--accent-rgb), 0.55)"
           stroke="rgba(var(--accent-rgb), 0.8)"
+          cursor="pointer"
+          onClick={(data: unknown) => {
+            const row = data as { date?: string; payload?: { date?: string; plays?: number } };
+            const date = row.payload?.date ?? row.date;
+            const plays = row.payload?.plays ?? 0;
+            if (date && plays > 0) onDateSelect(date);
+          }}
         />
       </BarChart>
     </ResponsiveContainer>
@@ -941,6 +1130,103 @@ function StatsRecentPlays({
   );
 }
 
+function StatsListeningDetailModal({
+  error,
+  loading,
+  onClose,
+  onPlay,
+  payload,
+}: {
+  error: unknown;
+  loading: boolean;
+  onClose: () => void;
+  onPlay: (track: { title: string; artist: string; album: string }) => Promise<void>;
+  payload: { title?: string; total?: number; limit?: number; items?: StatsListeningEventTrack[] } | undefined;
+}) {
+  const tracks = payload?.items ?? [];
+  const total = payload?.total ?? 0;
+  return (
+    <div className={styles.statsDetailBackdrop} role="presentation" onMouseDown={onClose}>
+      <div
+        className={styles.statsDetailModal}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Listening details"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className={styles.statsDetailHeader}>
+          <div>
+            <div className={styles.statsDetailEyebrow}>Listening Details</div>
+            <h3>{payload?.title || 'Loading...'}</h3>
+            <p>
+              {loading
+                ? 'Loading plays...'
+                : `${formatCompactNumber(total)} ${total === 1 ? 'play' : 'plays'}${
+                    total > tracks.length ? `, showing latest ${tracks.length}` : ''
+                  }`}
+            </p>
+          </div>
+          <button type="button" className={styles.statsDetailClose} onClick={onClose} aria-label="Close">
+            x
+          </button>
+        </div>
+
+        {error ? <SectionSubtleError message={getErrorMessage(error)} /> : null}
+        {!error && loading ? <div className={styles.statsDetailLoading}>Loading listening details...</div> : null}
+        {!error && !loading && tracks.length === 0 ? <EmptyListState message="No plays found" /> : null}
+
+        {!error && tracks.length ? (
+          <div className={styles.statsDetailList}>
+            {tracks.map((track, index) => (
+              <div
+                key={`${track.title}-${track.artist ?? ''}-${track.played_at ?? ''}-${index}`}
+                className={styles.statsDetailRow}
+              >
+                {track.image_url ? (
+                  <img className={styles.statsDetailArt} src={track.image_url} alt="" />
+                ) : (
+                  <div className={styles.statsDetailArtFallback}>{(track.title || '?')[0]}</div>
+                )}
+                <div className={styles.statsDetailTrackMain}>
+                  <div className={styles.statsDetailTrackTitle}>{track.title}</div>
+                  <div className={styles.statsDetailTrackMeta}>
+                    {track.artist_db_id ? (
+                      <ArtistDetailLink artistId={track.artist_db_id} className={styles.statsArtistLink}>
+                        {track.artist || 'Unknown artist'}
+                      </ArtistDetailLink>
+                    ) : (
+                      <span>{track.artist || 'Unknown artist'}</span>
+                    )}
+                    {track.album ? ` · ${track.album}` : ''}
+                  </div>
+                </div>
+                <div className={styles.statsDetailWhen}>
+                  <span>{formatDetailPlayedAt(track.played_at)}</span>
+                  {track.server_source ? <span>{track.server_source}</span> : null}
+                </div>
+                <button
+                  type="button"
+                  className={styles.statsDetailPlay}
+                  onClick={() =>
+                    void onPlay({
+                      title: track.title,
+                      artist: track.artist || '',
+                      album: track.album || '',
+                    })
+                  }
+                  title="Play"
+                >
+                  ▶
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function StatsLibraryHealth({ health }: { health: StatsHealth }) {
   const shellStatus = useShellStatus();
   const jiosaavnEnabled = shellStatus?._experimental?.jiosaavn_enabled === true;
@@ -1213,6 +1499,18 @@ async function playStatsTrack(
     bridge.hideLoadingOverlay();
     window.showToast?.(getErrorMessage(error), 'error');
   }
+}
+
+function formatDetailPlayedAt(value: string | null | undefined): string {
+  if (!value) return '';
+  const parsed = new Date(value.includes('T') ? value : value.replace(' ', 'T'));
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 function getErrorMessage(error: unknown): string {

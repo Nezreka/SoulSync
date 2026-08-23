@@ -969,6 +969,10 @@ function initializeWebSocket() {
     });
     socket.on('scan:media', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateMediaScanFromData(data); if (typeof updateMusicMediaScanTask === 'function') updateMusicMediaScanTask(data); });
     socket.on('wishlist:stats', (data) => { updateWishlistStatsFromData(data); if (typeof updateMusicWishlistTask === 'function') updateMusicWishlistTask(data); });
+    socket.on('lastfm:import-progress', (data) => {
+        window.dispatchEvent(new CustomEvent('ss:lastfm-import-progress', { detail: data }));
+        if (typeof updateLastfmListeningImportTask === 'function') updateLastfmListeningImportTask(data);
+    });
     // Phase 6: Automation progress
     socket.on('automation:progress', (data) => {
         qaSignal('auto');

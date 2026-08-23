@@ -140,6 +140,12 @@ describe('the vanilla side of the progress seam', () => {
     expect(read('style.css')).toContain('@keyframes notif-active-slide');
   });
 
+  it('forwards Last.fm listening import progress to the notification rail', () => {
+    expect(read('core.js')).toContain("socket.on('lastfm:import-progress'");
+    expect(read('downloads.js')).toContain('function updateLastfmListeningImportTask(data)');
+    expect(read('downloads.js')).toContain("_notifActionHTML('Open Stats', 'stats')");
+  });
+
   it('loadAutomations refuses to repaint the legacy list behind React', () => {
     // Reachable via the shared builder: saveAutomation calls onSaved ->
     // loadAutomations after the React page has reclaimed the shell. Without

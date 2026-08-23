@@ -1517,6 +1517,7 @@ def _register_automation_handlers():
         init_automation_progress=_init_automation_progress,
         record_progress_history=_auto_progress.record_history,
         build_personalized_manager=_build_personalized_manager,
+        lastfm_import_worker=lastfm_import_worker,
     )
     _register_extracted_handlers(_automation_deps)
 
@@ -40937,6 +40938,28 @@ except Exception as e:
     logger.error(f"Listening stats worker initialization failed: {e}")
     listening_stats_worker = None
 
+lastfm_import_worker = None
+try:
+    from core.listening_import.lastfm import LastFMListeningImportWorker
+
+    def _emit_lastfm_import_progress(state):
+        try:
+            socketio.emit('lastfm:import-progress', state or {})
+        except Exception as e:
+            logger.debug("lastfm import progress emit failed: %s", e)
+
+    lastfm_import_db = MusicDatabase()
+    lastfm_import_worker = LastFMListeningImportWorker(
+        database=lastfm_import_db,
+        config_manager=config_manager,
+        cache_builder=(listening_stats_worker._build_stats_cache if listening_stats_worker else None),
+        progress_callback=_emit_lastfm_import_progress,
+    )
+    logger.info("Last.fm listening import worker initialized")
+except Exception as e:
+    logger.error(f"Last.fm listening import worker initialization failed: {e}")
+    lastfm_import_worker = None
+
 # --- Stats API Endpoints ---
 # Logic lives in core/stats/queries.py — these routes are thin handlers.
 
@@ -41089,6 +41112,34 @@ def stats_recent():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/stats/listening-events', methods=['GET'])
+def stats_listening_events():
+    """Rows behind a clicked listening stats chart segment."""
+    try:
+        time_range = request.args.get('range', '7d')
+        filter_type = request.args.get('type', '')
+        date = request.args.get('date') or None
+        limit = int(request.args.get('limit', 100))
+        weekday_arg = request.args.get('weekday')
+        hour_arg = request.args.get('hour')
+        weekday = int(weekday_arg) if weekday_arg is not None and weekday_arg != '' else None
+        hour = int(hour_arg) if hour_arg is not None and hour_arg != '' else None
+        data = _stats_queries.get_listening_events(
+            get_database(),
+            fix_artist_image_url,
+            time_range=time_range,
+            filter_type=filter_type,
+            date=date,
+            weekday=weekday,
+            hour=hour,
+            limit=limit,
+        )
+        return jsonify({'success': True, **data})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/lyrics/fetch', methods=['POST'])
 def fetch_lyrics_endpoint():
     """Fetch lyrics for the now-playing media player.
@@ -41219,6 +41270,61 @@ def listening_stats_status():
         return jsonify(_stats_queries.get_listening_status(listening_stats_worker))
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/lastfm/listening-import/status', methods=['GET'])
+def lastfm_listening_import_status():
+    """Get Last.fm listening-history import status."""
+    try:
+        if not lastfm_import_worker:
+            return jsonify({'success': False, 'enabled': False, 'error': 'Last.fm importer unavailable'})
+        status = lastfm_import_worker.status()
+        next_run = automation_engine.get_system_automation_next_run_seconds('import_lastfm_listening') if automation_engine else 0
+        username = config_manager.get('lastfm.username', '') or status.get('username') or ''
+        can_use_auth_user = bool(
+            config_manager.get('lastfm.api_key', '')
+            and config_manager.get('lastfm.api_secret', '')
+            and config_manager.get('lastfm.session_key', '')
+        )
+        return jsonify({
+            'success': True,
+            'enabled': bool(config_manager.get('lastfm.listening_sync_enabled', False)),
+            'api_key_configured': bool(config_manager.get('lastfm.api_key', '')),
+            'authenticated_user_available': can_use_auth_user,
+            'username': username,
+            'next_run_in_seconds': next_run,
+            **status,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/lastfm/listening-import/run', methods=['POST'])
+def lastfm_listening_import_run():
+    """Start or update the Last.fm listening-history import."""
+    try:
+        if not lastfm_import_worker:
+            return jsonify({'success': False, 'error': 'Last.fm importer unavailable'}), 400
+        body = request.get_json(silent=True) or {}
+        username = str(body.get('username') or config_manager.get('lastfm.username', '') or '').strip()
+        if username:
+            config_manager.set('lastfm.username', username)
+        if 'enabled' in body:
+            config_manager.set('lastfm.listening_sync_enabled', bool(body.get('enabled')))
+        result = lastfm_import_worker.start_import(username=username or None, full=bool(body.get('full')))
+        ok = result.get('status') not in ('error',)
+        return jsonify({'success': ok, **result}), 200 if ok else 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/lastfm/listening-import/cancel', methods=['POST'])
+def lastfm_listening_import_cancel():
+    """Cancel the active Last.fm listening-history import."""
+    try:
+        if not lastfm_import_worker:
+            return jsonify({'success': False, 'error': 'Last.fm importer unavailable'}), 400
+        lastfm_import_worker.cancel()
+        return jsonify({'success': True, **lastfm_import_worker.status()})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # ===================================================================
 # Repair Worker — Library maintenance and repair jobs
