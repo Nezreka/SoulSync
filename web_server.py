@@ -1621,7 +1621,7 @@ def _soulseek_is_active_download_source():
     Soulseek is the source that punishes parallel searching — too many at once
     and the server rate-limits or bans you. Other sources do not need the same
     gate, so the global cap is scoped to when Soulseek is actually in play:
-    directly, or first in the hybrid order.
+    directly, or anywhere in the hybrid order.
     """
     mode = config_manager.get('download_source.mode', 'soulseek')
     if mode == 'soulseek':
@@ -1630,8 +1630,7 @@ def _soulseek_is_active_download_source():
         hybrid_order = config_manager.get('download_source.hybrid_order', []) or []
         if isinstance(hybrid_order, str):
             hybrid_order = [hybrid_order]
-        first_source = next((str(x).strip().lower() for x in hybrid_order if str(x).strip()), '')
-        return first_source == 'soulseek'
+        return any(str(x).strip().lower() == 'soulseek' for x in hybrid_order)
     return False
 
 
