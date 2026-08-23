@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { WebLens } from '../-discover.artist-web';
 import type { CacheItem } from '../-discover.cache-sections';
@@ -17,7 +17,6 @@ import { bpMetaStats } from '../-discover.build-playlist';
 import { byltSections, type ByltSection } from '../-discover.bylt';
 import { CACHE_SECTIONS } from '../-discover.cache-sections';
 import { decadeClassicsName, decadeTrackToSpotify } from '../-discover.decade-shelf';
-import { buildLayoutRows } from '../-discover.layout';
 import { discoverLimiter } from '../-discover.limiter';
 import {
   lbStatusBase,
@@ -157,6 +156,121 @@ function LbSyncStatus({ identifier }: { identifier: string }) {
 function okData<T>(outcome: unknown): T | undefined {
   const o = outcome as { kind?: string; data?: T } | undefined;
   return o?.kind === 'ok' ? o.data : undefined;
+}
+
+interface DiscoveryActionCard {
+  id: string;
+  eyebrow: string;
+  title: string;
+  detail: string;
+  value: string;
+  target: string;
+}
+
+interface DiscoveryInsight {
+  eyebrow: string;
+  title: string;
+  detail: string;
+  value: string;
+  actionLabel: string;
+  target: string;
+}
+
+function scrollToDiscoveryTarget(target: string) {
+  document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function DiscoveryActionCard({ card }: { card: DiscoveryActionCard }) {
+  return (
+    <button
+      type="button"
+      className={`discover-action-card discover-action-card--${card.id}`}
+      onClick={() => scrollToDiscoveryTarget(card.target)}
+    >
+      <span className="discover-action-card__eyebrow">{card.eyebrow}</span>
+      <span className="discover-action-card__title">{card.title}</span>
+      <span className="discover-action-card__detail">{card.detail}</span>
+      <span className="discover-action-card__value">{card.value}</span>
+    </button>
+  );
+}
+
+function DiscoveryCommandPanel({
+  cards,
+  insight,
+  onBuildPlaylist,
+  onOpenMap,
+  onOpenRecommended,
+}: {
+  cards: DiscoveryActionCard[];
+  insight: DiscoveryInsight;
+  onBuildPlaylist: () => void;
+  onOpenMap: () => void;
+  onOpenRecommended: () => void;
+}) {
+  return (
+    <aside className="discover-command-panel" aria-label="Discovery shortcuts">
+      <div className="discover-command-panel__head">
+        <span className="discover-command-kicker">Discovery Queue</span>
+        <h2>Start Here</h2>
+        <p>The strongest moves from your library, listening history, release gaps, and builders.</p>
+      </div>
+      <button
+        type="button"
+        className="discover-next-move"
+        onClick={() => scrollToDiscoveryTarget(insight.target)}
+      >
+        <span className="discover-next-move__eyebrow">{insight.eyebrow}</span>
+        <strong>{insight.title}</strong>
+        <span>{insight.detail}</span>
+        <span className="discover-next-move__foot">
+          <em>{insight.value}</em>
+          <b>{insight.actionLabel}</b>
+        </span>
+      </button>
+      <div className="discover-action-grid">
+        {cards.map((card) => (
+          <DiscoveryActionCard key={card.id} card={card} />
+        ))}
+      </div>
+      <div className="discover-command-tools">
+        <button type="button" onClick={onBuildPlaylist}>
+          Build playlist
+        </button>
+        <button type="button" onClick={onOpenMap}>
+          Artist map
+        </button>
+        <button type="button" onClick={onOpenRecommended}>
+          Recommended
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+interface DiscoveryZoneProps {
+  id: string;
+  title: string;
+  subtitle: string;
+  tone: string;
+  metric: string;
+  children: React.ReactNode;
+}
+
+function DiscoveryZone({ id, title, subtitle, tone, metric, children }: DiscoveryZoneProps) {
+  return (
+    <section className={`discovery-zone discovery-zone--${tone}`} id={id}>
+      <header className="discovery-zone-head">
+        <div>
+          <span className="discovery-zone-kicker">{tone.replace('-', ' ')}</span>
+          <h2>{title}</h2>
+          <p>{subtitle}</p>
+        </div>
+        <span className="discovery-zone-metric">{metric}</span>
+      </header>
+      <div className="discovery-zone-body">{children}</div>
+    </section>
+  );
 }
 
 export function DiscoverPage() {
@@ -477,7 +591,6 @@ export function DiscoverPage() {
     },
     [lastfm.configured, mixes, byltRows.length, page],
   );
-  const rows = buildLayoutRows(hasContent);
 
   const cacheShelf = (id: DiscoverSectionId) => {
     const def = CACHE_SECTIONS.find((d) => d.id === id);
@@ -500,6 +613,7 @@ export function DiscoverPage() {
         return (
           <GenreExplorerSection
             genres={page.sectionState(id).items as { genre?: string }[]}
+            limit={18}
             onOpenGenre={openDive}
           />
         );
@@ -734,6 +848,90 @@ export function DiscoverPage() {
     }
   };
 
+  const recentAlbums = page.sectionState('recent-releases').items as RecentAlbum[];
+  const genreReleaseAlbums = page.sectionState('cache-genre-releases').items as CacheItem[];
+  const undiscoveredAlbums = page.sectionState('cache-undiscovered').items as CacheItem[];
+  const labelAlbums = page.sectionState('cache-label-explorer').items as CacheItem[];
+  const deepCuts = page.sectionState('cache-deep-cuts').items as CacheItem[];
+  const genrePills = page.sectionState('cache-genre-explorer').items as { genre?: string }[];
+  const personalSignalCount = mixes.mixes.length + listeningArtists.length + recArtists.length;
+  const actionableAlbumCount =
+    recentAlbums.length +
+    genreReleaseAlbums.length +
+    undiscoveredAlbums.length +
+    labelAlbums.length;
+  const librarySignalCount = deepCuts.length + decadeMixesHydrated.length;
+  const toolSignalCount = genrePills.length + lbMixesHydrated.length + lastfm.mixes.length;
+  const discoveryInsight: DiscoveryInsight =
+    actionableAlbumCount > 0
+      ? {
+          eyebrow: 'Next best move',
+          title: 'Fill the newest gaps first',
+          detail: 'New releases, label finds, and missing albums are ready to open or download.',
+          value: `${actionableAlbumCount} albums`,
+          actionLabel: 'Review gaps',
+          target: 'discover-zone-new-missing',
+        }
+      : personalSignalCount > 0
+        ? {
+            eyebrow: 'Next best move',
+            title: 'Follow the taste engine',
+            detail: 'Your mixes and artist recommendations are the strongest live signal today.',
+            value: `${personalSignalCount} signals`,
+            actionLabel: 'Open For You',
+            target: 'discover-zone-for-you',
+          }
+        : {
+            eyebrow: 'Next best move',
+            title: 'Build from a seed artist',
+            detail: 'Start with one artist and let SoulSync expand the discovery graph.',
+            value: `${toolSignalCount} tools`,
+            actionLabel: 'Build',
+            target: 'build-a-playlist',
+          };
+
+  const actionCards: DiscoveryActionCard[] = [
+    {
+      id: 'for-you',
+      eyebrow: 'Personal',
+      title: 'For You',
+      detail: 'Mixes, artist recs, and because-you-listen-to picks.',
+      value: `${personalSignalCount} signals`,
+      target: 'discover-zone-for-you',
+    },
+    {
+      id: 'new-missing',
+      eyebrow: 'Actionable',
+      title: 'New & Missing',
+      detail: 'Fresh releases and library gaps ready to open or download.',
+      value: `${actionableAlbumCount} albums`,
+      target: 'discover-zone-new-missing',
+    },
+    {
+      id: 'library',
+      eyebrow: 'Library',
+      title: 'Your Taste Map',
+      detail: 'Saved artists, albums, eras, and deep cuts from your collection.',
+      value: `${librarySignalCount} leads`,
+      target: 'discover-zone-library',
+    },
+    {
+      id: 'tools',
+      eyebrow: 'Explore',
+      title: 'Browse & Build',
+      detail: 'Genre explorer, stations, ListenBrainz, and custom builder.',
+      value: `${toolSignalCount} tools`,
+      target: 'discover-zone-tools',
+    },
+  ];
+
+  const renderZoneSections = (ids: DiscoverSectionId[]) =>
+    ids.filter(hasContent).map((id) => (
+      <div className={`discovery-zone-section discovery-zone-section--${id}`} key={id}>
+        {renderSection(id)}
+      </div>
+    ));
+
   const vizOpen = map.kind !== null || webRequest !== null;
 
   return (
@@ -760,52 +958,105 @@ export function DiscoverPage() {
 
       {!vizOpen && (
         <div className="discover-container">
-          <DiscoverHero
-            artist={hero.artist}
-            loading={page.hero.isPending}
-            count={hero.artists.length}
-            index={hero.index}
-            watchlist={hero.watchlist}
-            watchAllPhase={hero.watchAllPhase}
-            discographyHref={
-              hero.artist?.artist_id != null
-                ? detailPath(hero.artist.artist_id, hero.artist.source ?? null)
-                : '#'
-            }
-            onNavigate={hero.navigate}
-            onJump={hero.jump}
-            onToggleWatchlist={() => void hero.toggleWatchlist()}
-            onWatchAll={() => void hero.watchAll()}
-            onViewRecommended={() => setRecModalOpen(true)}
-            onOpenBlacklist={blacklist.openModal}
-          />
-          {/* One row, not two stacked billboards: the hero is the page's
-              only full-width statement — the viz hubs share a line beneath
-              it so the first SHELF arrives a screen earlier. */}
-          <div className="discover-hub-row">
-            <ArtistMapHub
-              onOpenWatchlist={() => void map.openWatchlist()}
-              onOpenGenre={() => void map.openGenre()}
-              // Explorer asks for an artist FIRST (9633) — the prompt resolves
-              // a real name, then the map explores it.
-              onOpenExplorer={() => setExplorerPromptOpen(true)}
+          <div className="discover-command-grid">
+            <div className="discover-command-hero">
+              <DiscoverHero
+                artist={hero.artist}
+                loading={page.hero.isPending}
+                count={hero.artists.length}
+                index={hero.index}
+                watchlist={hero.watchlist}
+                watchAllPhase={hero.watchAllPhase}
+                discographyHref={
+                  hero.artist?.artist_id != null
+                    ? detailPath(hero.artist.artist_id, hero.artist.source ?? null)
+                    : '#'
+                }
+                onNavigate={hero.navigate}
+                onJump={hero.jump}
+                onToggleWatchlist={() => void hero.toggleWatchlist()}
+                onWatchAll={() => void hero.watchAll()}
+                onViewRecommended={() => setRecModalOpen(true)}
+                onOpenBlacklist={blacklist.openModal}
+              />
+            </div>
+            <DiscoveryCommandPanel
+              cards={actionCards}
+              insight={discoveryInsight}
+              onBuildPlaylist={() => scrollToDiscoveryTarget('build-a-playlist')}
+              onOpenMap={() => void map.openWatchlist()}
+              onOpenRecommended={() => setRecModalOpen(true)}
             />
-            <ArtistWebHub onOpenLens={(lens) => setWebRequest({ lens })} />
           </div>
-          {rows.map((row) =>
-            row.kind === 'full' ? (
-              <div key={row.id}>{renderSection(row.id)}</div>
-            ) : (
-              // The sections must be the grid's DIRECT children:
-              // `.discover-row-2col > .discover-section` carries the
-              // min-width:0 that stops a wide shelf blowing the column out.
-              <div className="discover-row-2col" key={row.ids.join('+')}>
-                {row.ids.map((id) => (
-                  <Fragment key={id}>{renderSection(id)}</Fragment>
-                ))}
+          <DiscoveryZone
+            id="discover-zone-for-you"
+            title="For You"
+            subtitle="High-confidence mixes, artist paths, and records connected to what you already play."
+            tone="for-you"
+            metric={`${personalSignalCount} signals`}
+          >
+            {renderZoneSections([
+              'your-mixes-section',
+              'adv-wave',
+              'listening-recs-section',
+              'recommended-artists-section',
+              'discover-bylt-sections',
+            ])}
+          </DiscoveryZone>
+
+          <DiscoveryZone
+            id="discover-zone-new-missing"
+            title="New & Missing"
+            subtitle="Fresh releases and collection gaps worth opening, downloading, or syncing next."
+            tone="new-missing"
+            metric={`${actionableAlbumCount} albums`}
+          >
+            {renderZoneSections([
+              'recent-releases',
+              'cache-genre-releases',
+              'seasonal-albums-section',
+              'cache-undiscovered',
+              'cache-label-explorer',
+              'your-albums-section',
+            ])}
+          </DiscoveryZone>
+
+          <DiscoveryZone
+            id="discover-zone-library"
+            title="Library Signals"
+            subtitle="Saved artists, eras, and deep cuts turned into useful entry points."
+            tone="library"
+            metric={`${librarySignalCount} leads`}
+          >
+            {renderZoneSections(['your-artists-section', 'year-mixes-section', 'cache-deep-cuts'])}
+          </DiscoveryZone>
+
+          <DiscoveryZone
+            id="discover-zone-tools"
+            title="Explore & Build"
+            subtitle="The lab: maps, genres, radio, ListenBrainz, and custom playlists."
+            tone="tools"
+            metric={`${toolSignalCount} tools`}
+          >
+            <div className="discovery-zone-section discovery-zone-section--map-tools">
+              <div className="discover-hub-row discover-hub-row--tools">
+                <ArtistMapHub
+                  onOpenWatchlist={() => void map.openWatchlist()}
+                  onOpenGenre={() => void map.openGenre()}
+                  // Explorer asks for an artist FIRST (9633) — the prompt resolves
+                  // a real name, then the map explores it.
+                  onOpenExplorer={() => setExplorerPromptOpen(true)}
+                />
+                <ArtistWebHub onOpenLens={(lens) => setWebRequest({ lens })} />
               </div>
-            ),
-          )}
+            </div>
+            {renderZoneSections([
+              'cache-genre-explorer',
+              'lastfm-radio',
+              'listenbrainz',
+              'build-a-playlist',
+            ])}
+          </DiscoveryZone>
         </div>
       )}
 
@@ -922,7 +1173,10 @@ export function DiscoverPage() {
           onExplore={() => {
             const name = artists.info.pool?.artist_name;
             artists.info.close();
-            if (name) (setWebRequest(null), void map.openExplorer(name));
+            if (name) {
+              setWebRequest(null);
+              void map.openExplorer(name);
+            }
           }}
           onOpenRelated={(related) =>
             artists.info.open({
