@@ -50,13 +50,15 @@ def test_upgrade_candidates_only_monitored_upgrade_policies_with_files(imported_
     t_cutoff = _seed(conn, policy="until_cutoff")
     t_top = _seed(conn, policy="until_top")
     t_acceptable = _seed(conn, policy="acceptable")
+    t_none = _seed(conn, policy="none")
     t_unmonitored = _seed(conn, policy="until_cutoff", monitored=0)
     t_fileless = _seed(conn, policy="until_cutoff", with_file=False)
 
     ids = set(upgrade_candidate_track_ids(conn))
     assert t_cutoff in ids
     assert t_top in ids
-    assert t_acceptable not in ids
+    assert t_acceptable in ids
+    assert t_none not in ids
     assert t_unmonitored not in ids
     assert t_fileless not in ids
 

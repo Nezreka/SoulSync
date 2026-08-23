@@ -36,7 +36,7 @@ def test_get_quality_profile_dict_shape_unchanged(db):
     assert isinstance(profile["fallback_enabled"], bool)
     assert profile["search_mode"] in ("priority", "best_quality")
     assert isinstance(profile["rank_candidates_by_quality"], bool)
-    assert profile["upgrade_policy"] in ("acceptable", "until_cutoff", "until_top")
+    assert profile["upgrade_policy"] in ("none", "acceptable", "until_cutoff", "until_top")
     assert isinstance(profile["upgrade_cutoff_index"], int)
 
 

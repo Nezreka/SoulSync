@@ -68,19 +68,74 @@ def resolve_lib2_directory(file_path: Any, config_manager: Any = None) -> Option
     return resolved if resolved and os.path.isdir(resolved) else None
 
 
-def missing_path_root_is_healthy(file_path: Any, config_manager: Any = None) -> bool:
-    """Whether absence is credible enough to advance the missing lifecycle.
+#: How many directory levels above a stored path are probed when deciding
+#: whether the storage behind it is reachable at all.  A cost bound, not the
+#: safety bound -- what keeps the walk honest is that the directory it lands on
+#: must sit inside a known library root.  Eight covers every realistic
+#: ``root/artist/album/disc`` layout with room to spare.
+_ANCESTOR_PROBE_DEPTH = 8
 
-    A live direct parent is strong evidence for a single deleted file. For
-    mapped setups, every explicitly configured Library music root must be
-    mounted/readable; if any is unavailable we conservatively defer all misses
-    because a stored media-server path cannot always be assigned to one root.
+
+def resolve_lib2_ancestor(file_path: Any, config_manager: Any = None) -> Optional[str]:
+    """The nearest reachable directory *above* ``file_path``, or ``None``.
+
+    ``resolve_lib2_directory`` answers only for the immediate parent, which is
+    precisely the case a deleted or renamed *folder* breaks.  Climbing further
+    answers the question the missing lifecycle actually needs: is the storage
+    that should hold this file mounted?  Every level goes through the shared
+    resolver, because a stored path is frequently the media server's — often
+    relative — view of the filesystem, and testing the raw string then answers
+    for a path this process never had.
     """
     if not isinstance(file_path, str) or not file_path:
-        return False
-    parent = os.path.dirname(file_path) if os.path.isabs(file_path) else ""
-    if parent and os.path.isdir(parent):
-        return True
+        return None
+    bases = _library_base_dirs(config_manager)
+    if not bases:
+        return None
+    normalized = file_path.replace("\\", "/")
+    prefix = "/" if normalized.startswith("/") else ""
+    parts = [part for part in normalized.split("/")[:-1] if part]
+    for depth in range(min(len(parts), _ANCESTOR_PROBE_DEPTH)):
+        candidate = prefix + "/".join(parts[:len(parts) - depth])
+        if not candidate:
+            continue
+        resolved = resolve_lib2_path(candidate, config_manager)
+        # The directory must sit inside a known library root. Without that the
+        # walk keeps climbing until it hits something that trivially exists --
+        # ``/music``, ``/tmp``, ``/`` -- and would then call an unmounted share
+        # "reachable", which is the exact failure the missing lifecycle's
+        # health check exists to prevent (dd28-19).
+        if resolved and os.path.isdir(resolved) and _inside_any(resolved, bases):
+            return resolved
+    return None
+
+
+def _library_base_dirs(config_manager: Any = None) -> list:
+    """Existing directories a stored path may resolve against; never raises."""
+    try:
+        if config_manager is None:
+            from core.settings import config_manager as _cm
+            config_manager = _cm
+    except Exception:  # noqa: BLE001
+        config_manager = None
+    try:
+        from core.library.path_resolver import library_base_dirs
+        return [os.path.abspath(base) for base in library_base_dirs(config_manager)]
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("library base dirs unavailable: %s", exc)
+        return []
+
+
+def _inside_any(path: str, bases: list) -> bool:
+    resolved = os.path.abspath(path)
+    return any(
+        resolved == base or resolved.startswith(base.rstrip(os.sep) + os.sep)
+        for base in bases
+    )
+
+
+def _configured_library_roots(config_manager: Any = None) -> list:
+    """The Library music roots the user explicitly declared, absolute."""
     try:
         if config_manager is None:
             from core.settings import config_manager as _cm
@@ -88,16 +143,51 @@ def missing_path_root_is_healthy(file_path: Any, config_manager: Any = None) -> 
         configured = config_manager.get("library.music_paths", []) or []
     except Exception:  # noqa: BLE001
         configured = []
-    roots = [
+    if isinstance(configured, str):
+        configured = [configured]
+    return [
         os.path.abspath(os.path.expanduser(root.strip()))
         for root in configured
         if isinstance(root, str) and root.strip()
     ]
+
+
+def missing_path_root_is_healthy(file_path: Any, config_manager: Any = None) -> bool:
+    """Whether absence is credible enough to advance the missing lifecycle.
+
+    Evidence about *this* path outranks configuration, in this order:
+
+    1. A reachable directory at or above the file, inside a known library
+       root.  We can see the folder the row points into and the file is not in
+       it -- nothing a config file says makes that less true.  The lookup goes
+       through the shared resolver, so it also holds for the relative paths a
+       media server reports; the raw-string parent test requires an absolute
+       path and answered "unhealthy" for every such install, which silently
+       discarded every missing observation the scan ever made.
+    2. Otherwise fall back to the declared roots: all of them mounted means
+       absence is credible, one missing mount means defer, because a stored
+       media-server path cannot always be assigned to one root (dd28-19).
+
+    The order matters and was wrong once already: with the roots check first, a
+    single stale entry in Settings -> Music Library Paths -- a host path the
+    container cannot see, a share renamed years ago -- vetoed every miss in the
+    whole library, permanently, no matter how plainly reachable the file's own
+    folder was.
+    """
+    if not isinstance(file_path, str) or not file_path:
+        return False
+    parent = os.path.dirname(file_path) if os.path.isabs(file_path) else ""
+    if parent and os.path.isdir(parent):
+        return True
+    if resolve_lib2_ancestor(file_path, config_manager):
+        return True
+    roots = _configured_library_roots(config_manager)
     return bool(roots) and all(os.path.isdir(root) for root in roots)
 
 
 __all__ = [
     "missing_path_root_is_healthy",
+    "resolve_lib2_ancestor",
     "resolve_lib2_directory",
     "resolve_lib2_path",
 ]

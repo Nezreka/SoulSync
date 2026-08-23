@@ -1496,6 +1496,10 @@ export async function previewLibraryV2AlbumReorganize(
   const payload = await readJson<LibraryV2ReorganizePreview & { error?: string }>(
     apiClient.post(`library/v2/albums/${albumId}/reorganize/preview`, {
       json: { source: options.source ?? null, mode: options.mode ?? 'api' },
+      // A cold provider lookup regularly exceeds ky's 10-second default. The
+      // server still completes and warms its cache after the browser aborts,
+      // which made the same preview mysteriously work on the second attempt.
+      timeout: 120_000,
     }),
   );
   if (!payload.success) throw new Error(payload.error || 'Reorganize preview failed');

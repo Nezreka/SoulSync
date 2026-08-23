@@ -216,7 +216,8 @@ class _FakeClient:
     def client(self, name):
         return None
 
-    async def search(self, query, timeout=30, exclude_sources=None):
+    async def search(self, query, timeout=30, exclude_sources=None,
+                     progress_callback=None, search_mode=None):
         self.search_calls.append(query)
         return ([], None)
 

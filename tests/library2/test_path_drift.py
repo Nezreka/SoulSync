@@ -115,10 +115,12 @@ def test_non_audio_files_are_ignored():
 
 # ------------------------------------------------------------------- scan ---
 
-def test_scan_proposes_the_real_file_and_writes_nothing(drift_db, monkeypatch):
+def test_scan_proposes_the_real_file_and_writes_nothing(drift_db):
+    # No resolver patching: the stored filename genuinely does not exist while
+    # its directory genuinely does. Faking the resolver here would also fake
+    # `resolve_lib2_directory`, which is built on it — and the whole point of
+    # this scan is that the directory resolves while the file does not.
     db, conn, ids = drift_db
-    monkeypatch.setattr(PD, "resolve_lib2_path", lambda path, config_manager=None: (
-        path if path == ids["real"] else None))
 
     report = PD.scan_path_drift(db)
 
@@ -138,7 +140,7 @@ def test_scan_proposes_the_real_file_and_writes_nothing(drift_db, monkeypatch):
 
 def test_scan_skips_files_that_resolve_normally(drift_db, monkeypatch):
     db, _conn, ids = drift_db
-    monkeypatch.setattr(PD, "resolve_lib2_path",
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path",
                         lambda path, config_manager=None: ids["real"])
 
     report = PD.scan_path_drift(db)
@@ -146,15 +148,13 @@ def test_scan_skips_files_that_resolve_normally(drift_db, monkeypatch):
     assert report["checked"] == 0
 
 
-def test_scan_will_not_steal_a_file_another_row_already_owns(drift_db, monkeypatch):
+def test_scan_will_not_steal_a_file_another_row_already_owns(drift_db):
     db, conn, ids = drift_db
     conn.execute(
         "INSERT INTO lib2_track_files(track_id, path) VALUES(?,?)",
         (ids["track_id"], ids["real"]),
     )
     conn.commit()
-    monkeypatch.setattr(PD, "resolve_lib2_path", lambda path, config_manager=None: (
-        path if path == ids["real"] else None))
 
     report = PD.scan_path_drift(db)
     assert report["proposals"] == []
@@ -169,7 +169,7 @@ def test_scan_is_bounded(drift_db, monkeypatch):
             (ids["track_id"], f"/nowhere/{n}.flac"),
         )
     conn.commit()
-    monkeypatch.setattr(PD, "resolve_lib2_path", lambda path, config_manager=None: (
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda path, config_manager=None: (
         path if path == ids["real"] else None))
 
     report = PD.scan_path_drift(db, limit=3)
@@ -187,7 +187,7 @@ def test_apply_repoints_the_row_and_clears_the_missing_lifecycle(drift_db, monke
         (ids["file_id"],),
     )
     conn.commit()
-    monkeypatch.setattr(PD, "resolve_lib2_path", lambda path, config_manager=None: (
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda path, config_manager=None: (
         path if path == ids["real"] else None))
 
     result = PD.apply_path_drift_fix(db, ids["file_id"], ids["real"])
@@ -205,7 +205,7 @@ def test_apply_repoints_the_row_and_clears_the_missing_lifecycle(drift_db, monke
 
 def test_apply_refuses_a_candidate_that_is_gone(drift_db, monkeypatch):
     db, conn, ids = drift_db
-    monkeypatch.setattr(PD, "resolve_lib2_path", lambda path, config_manager=None: None)
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda path, config_manager=None: None)
 
     result = PD.apply_path_drift_fix(db, ids["file_id"], ids["real"])
     assert result["success"] is False
@@ -219,7 +219,7 @@ def test_apply_refuses_a_candidate_another_row_owns(drift_db, monkeypatch):
     conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?,?)",
                  (ids["track_id"], ids["real"]))
     conn.commit()
-    monkeypatch.setattr(PD, "resolve_lib2_path", lambda path, config_manager=None: (
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda path, config_manager=None: (
         path if path == ids["real"] else None))
 
     result = PD.apply_path_drift_fix(db, ids["file_id"], ids["real"])
@@ -278,7 +278,7 @@ def test_rescan_still_confirms_a_genuinely_absent_file(drift_db, monkeypatch):
 def test_apply_refuses_when_the_row_resolves_again(drift_db, monkeypatch):
     """Someone else fixed it (or the mount came back) between scan and apply."""
     db, conn, ids = drift_db
-    monkeypatch.setattr(PD, "resolve_lib2_path",
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path",
                         lambda path, config_manager=None: ids["real"])
 
     result = PD.apply_path_drift_fix(db, ids["file_id"], ids["real"])
@@ -315,3 +315,57 @@ def test_post_import_leaves_ambiguous_drift_suspected(drift_db):
     ).fetchone()
     assert (row["path"], row["file_state"]) == (ids["stored"], "missing_suspected")
     assert stats["repointed"] == 0 and stats["protected"] == 1
+
+
+def test_a_manual_refresh_repoints_a_renamed_file_instead_of_losing_it(drift_db):
+    """Order of operations is the fix: rename check first, verdict last.
+
+    Refresh & Scan used to *notice* the drift candidate and do nothing with
+    it — the row was merely kept at ``missing_suspected`` forever, its tag
+    cache stuck on "pending", waiting for a review-only repair job that ships
+    disabled. A scan a person asked for now applies the unambiguous proposal
+    and rescans the file on its corrected path in the same pass.
+    """
+    from core.library2.scan import rescan_files
+
+    db, conn, ids = drift_db
+    stats = rescan_files(db, manual=True)
+
+    row = conn.execute(
+        """SELECT path, file_state, missing_scan_count
+             FROM lib2_track_files WHERE id=?""",
+        (ids["file_id"],),
+    ).fetchone()
+    assert row["path"] == ids["real"]
+    assert row["file_state"] == "active"
+    assert row["missing_scan_count"] == 0
+    assert stats["path_repointed"] == 1
+    # The repointed row is a present file now and gets the ordinary refresh.
+    assert stats["scanned"] == 1
+    assert stats["missing"] == 0
+    assert stats["missing_confirmed"] == 0
+
+
+def test_a_manual_refresh_still_refuses_to_guess_between_two_candidates(drift_db):
+    """Precision over recall survives the automation.
+
+    Handing one track's file to another is the one failure this must never
+    create, so an ambiguous folder is left untouched and merely protected
+    from confirmation — exactly what the review-only tool exists for.
+    """
+    from core.library2.scan import rescan_files
+
+    db, conn, ids = drift_db
+    # Same 11 bytes as the real file, so size cannot break the tie either.
+    Path(ids["dir"], "1-01 - Bunny Girl.flac").write_bytes(b"other-audio")
+
+    stats = rescan_files(db, manual=True)
+
+    row = conn.execute(
+        "SELECT path, file_state FROM lib2_track_files WHERE id=?",
+        (ids["file_id"],),
+    ).fetchone()
+    assert row["path"] == ids["stored"]
+    assert row["file_state"] == "missing_suspected"
+    assert stats["path_repointed"] == 0
+    assert stats["path_drift"] == 1

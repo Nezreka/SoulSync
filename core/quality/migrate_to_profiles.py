@@ -47,9 +47,9 @@ def _profile_row_fields(profile: dict) -> dict:
     """Convert a legacy v3 quality-profile dict into `quality_profiles` row fields."""
     ranked = profile.get("ranked_targets") or []
     search_mode = profile.get("search_mode", "priority")
-    upgrade_policy = profile.get("upgrade_policy", "acceptable")
-    if upgrade_policy not in ("acceptable", "until_cutoff", "until_top"):
-        upgrade_policy = "acceptable"
+    upgrade_policy = profile.get("upgrade_policy", "none")
+    if upgrade_policy not in ("none", "acceptable", "until_cutoff", "until_top"):
+        upgrade_policy = "none"
     try:
         upgrade_cutoff_index = max(0, int(profile.get("upgrade_cutoff_index") or 0))
     except (TypeError, ValueError):

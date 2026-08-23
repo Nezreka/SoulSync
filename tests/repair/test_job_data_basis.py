@@ -18,11 +18,12 @@ def test_every_registered_repair_job_has_an_explicit_valid_data_basis():
 
 def test_representative_job_data_bases_are_deliberate():
     assert JOB_DATA_BASIS['metadata_gap_filler'] == 'lib2'
-    assert JOB_DATA_BASIS['quality_upgrade_scan'] == 'lib2'
+    assert JOB_DATA_BASIS['monitoring_list_reconcile'] == 'lib2'
     assert JOB_DATA_BASIS['empty_folder_cleaner'] == 'filesystem'
     assert set(JOB_DATA_BASIS.values()) == {'lib2', 'filesystem'}
     assert 'library_retag' not in JOB_DATA_BASIS
     assert 'lib2_mirror_reconcile' not in JOB_DATA_BASIS
+    assert 'quality_upgrade_scan' not in JOB_DATA_BASIS
 
 
 def test_worker_job_info_does_not_expose_internal_data_basis(monkeypatch):

@@ -46,6 +46,7 @@ class _FakeClient:
         self.mode = mode
         self.search_calls = []
         self.exclude_calls = []  # exclude_sources arg per search() call
+        self.search_modes = []
         self._client_map = {}
         for k, v in (subclients or {}).items():
             if k in self._CLIENT_NAMES:
@@ -57,10 +58,33 @@ class _FakeClient:
     def client(self, name):
         return self._client_map.get(name)
 
-    async def search(self, query, timeout=30, exclude_sources=None, progress_callback=None):
+    async def search(self, query, timeout=30, exclude_sources=None,
+                     progress_callback=None, search_mode=None):
         self.search_calls.append((query, timeout))
         self.exclude_calls.append(exclude_sources)
+        self.search_modes.append(search_mode)
         return (self._results, None)
+
+
+def test_worker_passes_the_item_profile_search_mode(monkeypatch):
+    from core.quality import selection
+
+    monkeypatch.setattr(
+        selection, "load_profile_by_id",
+        lambda profile_id=None: {
+            "search_mode": "best_quality",
+            "rank_candidates_by_quality": False,
+            "ranked_targets": [],
+        },
+    )
+    _seed_task(track_info={**_SOLO_TRACK, "quality_profile_id": 7})
+    client = _FakeClient(results=[])
+    deps, _ = _build_deps(
+        soulseek=client, matching=_FakeMatchEngine(queries=["Solo"]))
+
+    tw.download_track_worker("t1", "b1", deps)
+
+    assert client.search_modes and set(client.search_modes) == {"best_quality"}
 
 
 class _FakeMatchEngine:
@@ -504,7 +528,8 @@ def test_cancellation_mid_query_returns_without_completion():
     _seed_task()
     rec = _Recorder()
 
-    def _cancel_during_search(query, timeout=30, exclude_sources=None, progress_callback=None):
+    def _cancel_during_search(query, timeout=30, exclude_sources=None,
+                              progress_callback=None, search_mode=None):
         download_tasks['t1']['status'] = 'cancelled'
 
         async def _empty():
@@ -720,7 +745,8 @@ def test_search_ticker_never_takes_tasks_lock():
     from core.runtime_state import tasks_lock
 
     class _CallbackUnderLock(_FakeClient):
-        async def search(self, query, timeout=30, exclude_sources=None, progress_callback=None):
+        async def search(self, query, timeout=30, exclude_sources=None,
+                         progress_callback=None, search_mode=None):
             if progress_callback:
                 with tasks_lock:
                     progress_callback([object()] * 3, [], 2)

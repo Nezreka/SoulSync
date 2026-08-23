@@ -41,7 +41,9 @@ function resultFacts(r: SourceSearchResult): {
 }
 
 function cutoffIndex(profile: LibraryV2QualityProfile): number {
-  return profile.upgrade_policy === 'until_cutoff' ? profile.upgrade_cutoff_index : 0;
+  if (profile.upgrade_policy === 'until_cutoff') return profile.upgrade_cutoff_index;
+  if (profile.upgrade_policy === 'until_top') return 0;
+  return Math.max(0, profile.ranked_targets.length - 1);
 }
 
 /** Deep-dive D3: results below the profile's cutoff never get grabbed

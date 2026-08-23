@@ -9829,7 +9829,7 @@ class MusicDatabase:
             "lossy_copy_codec": row["lossy_copy_codec"] or "mp3",
             "lossy_copy_bitrate": row["lossy_copy_bitrate"] or "320",
             "lossy_copy_delete_original": bool(row["lossy_copy_delete_original"]),
-            "upgrade_policy": row["upgrade_policy"] or "acceptable",
+            "upgrade_policy": row["upgrade_policy"] or "none",
             "upgrade_cutoff_index": int(row["upgrade_cutoff_index"] or 0),
         }
 
@@ -9839,9 +9839,9 @@ class MusicDatabase:
         profile dict into ``quality_profiles`` column values. Shared by
         ``create_quality_profile`` and ``update_quality_profile``."""
         import json
-        policy = profile.get("upgrade_policy") or "acceptable"
-        if policy not in ("acceptable", "until_cutoff", "until_top"):
-            policy = "acceptable"
+        policy = profile.get("upgrade_policy") or "none"
+        if policy not in ("none", "acceptable", "until_cutoff", "until_top"):
+            policy = "none"
         try:
             cutoff_index = int(profile.get("upgrade_cutoff_index") or 0)
         except (TypeError, ValueError):

@@ -880,12 +880,28 @@ def reconcile_track_wishlist(
       wanted — prunes stale entries (the "und umgekehrt" half).
 
     ``user_initiated=False`` so a deliberate user cancel/ignore keeps sticking.
-    Returns ``{scanned, wanted, wishlisted, mirrored}``. Does not touch files.
+    Returns ``{scanned, wanted, wishlisted, added, pruned, refreshed,
+    mirrored}``. Does not touch files.
+
+    **Pruning is skipped while a Library-v2 bootstrap is alive.** The prune set
+    is "in the Wishlist but not wanted", which is only meaningful if the wanted
+    projection is complete. During a migration it is being built, so every
+    not-yet-imported track looks unwanted and this would delete exactly the
+    entries the user is waiting for — silently, an hour after every restart,
+    with the next run putting them back. Adding stays enabled: a superfluous
+    Wishlist row costs a search, a wrongly pruned one costs the download.
     """
     from core.library2.wanted import recompute_wanted, wanted_track_ids
     from core.library2.wishlist_mirror import mirror_projected_tracks_wishlist
 
-    stats = {"scanned": 0, "wanted": 0, "wishlisted": 0, "mirrored": 0}
+    stats = {"scanned": 0, "wanted": 0, "wishlisted": 0,
+             "added": 0, "pruned": 0, "refreshed": 0, "mirrored": 0}
+    try:
+        from core.library2.bootstrap import bootstrap_is_active
+        pruning_allowed = not bootstrap_is_active(db)
+    except Exception as exc:  # noqa: BLE001 — an unknown state is not a licence to delete
+        logger.debug("bootstrap activity check unavailable: %s", exc)
+        pruning_allowed = False
     conn = db._get_connection()
     try:
         recompute_stats = recompute_wanted(conn, profile_id=profile_id)
@@ -904,8 +920,16 @@ def reconcile_track_wishlist(
         wishlisted = _wishlisted_lib2_track_ids(conn, profile_id=profile_id)
         wishlisted_set = set(wishlisted)
         stats["wishlisted"] = len(wishlisted)
-        existing = select_existing_ids(conn, "lib2_tracks", wishlisted)
-        prune = [t for t in wishlisted if t in existing and t not in wanted_set]
+        if pruning_allowed:
+            existing = select_existing_ids(conn, "lib2_tracks", wishlisted)
+            prune = [t for t in wishlisted if t in existing and t not in wanted_set]
+        else:
+            prune = []
+            logger.info(
+                "wishlist reconcile (profile %s): pruning skipped, a Library v2 "
+                "bootstrap is running and the wanted projection is incomplete",
+                profile_id,
+            )
 
         # Only mirror tracks whose Wishlist membership or projected state
         # actually needs to change:
@@ -924,6 +948,16 @@ def reconcile_track_wishlist(
         #     genuinely-unchanged row.
         adds = [t for t in wanted if t not in wishlisted_set]
         refresh = [t for t in wanted if t in wishlisted_set and t in changed_set]
+        stats["added"] = len(adds)
+        stats["refreshed"] = len(refresh)
+        stats["pruned"] = len(prune)
+        if prune:
+            # An entry vanishing from the Wishlist is invisible after the fact;
+            # naming the tracks is the difference between a report we can
+            # answer and "my entries are gone again".
+            logger.info("wishlist reconcile: pruning %d no-longer-wanted track(s): %s",
+                        len(prune), prune[:50])
+
         target = sorted(set(adds) | set(prune) | set(refresh))
         total = len(target)
         for start in range(0, total, max(1, batch)):
@@ -937,9 +971,48 @@ def reconcile_track_wishlist(
                 progress(stats["scanned"], total)
         logger.info(
             "wishlist reconcile (profile %s): %d wanted, %d wishlisted, "
-            "%d mirror ops", profile_id, stats["wanted"], stats["wishlisted"],
-            stats["mirrored"],
+            "%d added, %d pruned, %d refreshed, %d mirror ops",
+            profile_id, stats["wanted"], stats["wishlisted"], stats["added"],
+            stats["pruned"], stats["refreshed"], stats["mirrored"],
         )
+        return stats
+    finally:
+        conn.close()
+
+
+def sync_scanned_tracks_wishlist(
+    db,
+    track_ids: List[int],
+    *,
+    profile_id: int = 1,
+) -> Dict[str, int]:
+    """Mirror the wanted projection for tracks a scan just changed.
+
+    "Refresh & Scan" is the moment the catalogue learns a file is gone or has
+    come back, and acquisition is the consumer of exactly that fact. Leaving it
+    for the hourly reconcile to rediscover meant a track could sit missing and
+    monitored for an hour without anything looking for it — and made the button
+    feel like it had done nothing, because the visible consequence arrived much
+    later than the click.
+
+    Scoped on purpose: this recomputes and mirrors only the handed-in tracks,
+    so an artist refresh costs an artist's worth of work, not a library's.
+    """
+    from core.library2.wanted import recompute_wanted
+    from core.library2.wishlist_mirror import mirror_projected_tracks_wishlist
+
+    ids = sorted({int(t) for t in track_ids if t})
+    stats = {"tracks": len(ids), "mirrored": 0}
+    if not ids:
+        return stats
+    conn = db._get_connection()
+    try:
+        recompute_wanted(conn, profile_id=profile_id, track_ids=ids)
+        conn.commit()
+        stats["mirrored"] = mirror_projected_tracks_wishlist(
+            db, conn, ids, profile_id=profile_id, user_initiated=False)
+        logger.info("post-scan wishlist sync: %d track(s), %d mirror op(s)",
+                    stats["tracks"], stats["mirrored"])
         return stats
     finally:
         conn.close()
@@ -951,6 +1024,7 @@ __all__ = [
     "demonitor_lib2_tracks_for_removed_wishlist",
     "reconcile_artist_watchlist",
     "reconcile_track_wishlist",
+    "sync_scanned_tracks_wishlist",
     "sync_watchlist_removal",
     "sync_wishlist_removal",
 ]

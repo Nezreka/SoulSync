@@ -63,7 +63,12 @@ export type LibraryV2AlbumOrigin = 'library' | 'discography' | (string & {});
 
 /** `until_top` is the persisted compatibility alias for `until_cutoff` with
  *  `upgrade_cutoff_index = 0`; it remains a first-class API read value. */
-export type LibraryV2UpgradePolicy = 'acceptable' | 'until_cutoff' | 'until_top' | (string & {});
+export type LibraryV2UpgradePolicy =
+  | 'none'
+  | 'acceptable'
+  | 'until_cutoff'
+  | 'until_top'
+  | (string & {});
 export type LibraryV2QualityProfileSource = 'track' | 'album' | 'artist' | 'global' | (string & {});
 
 export interface LibraryV2Pagination {
@@ -223,6 +228,17 @@ export interface LibraryV2TrackArtist {
   id: number;
   name: string;
   role: string;
+}
+
+/** Where a track's audio actually lives when the position itself holds no
+ *  file: the same recording on another release (docs §49.6c). */
+export interface LibraryV2LinkedFrom {
+  track_id: number;
+  album_id: number;
+  album_title: string | null;
+  album_type: string | null;
+  file_id: number;
+  path: string;
 }
 
 export interface LibraryV2TrackFile {
@@ -424,7 +440,10 @@ export interface LibraryV2Track {
   canonical_track_id: number | null;
   artists: LibraryV2TrackArtist[];
   file: LibraryV2TrackFile | null;
-  file_status: 'present' | 'missing_suspected' | 'missing' | 'duplicate_single';
+  /** `linked` = the audio is on disk, but under another release that carries
+   *  the same recording; `linked_from` names it. */
+  file_status: 'present' | 'missing_suspected' | 'missing' | 'duplicate_single' | 'linked';
+  linked_from?: LibraryV2LinkedFrom | null;
   metadata_gaps: string[];
   /** LV2-TAG-STATUS-01: whether metadata_gaps reflects a real read of this
    *  file's tags. Absent (older cached responses / test fixtures) is treated
@@ -563,15 +582,21 @@ export interface LibraryV2DiscographyStats {
   source: string | null;
 }
 
-/** B5: which optional track-table columns are shown. #/Title/Actions are
- *  always shown and have no entry here. */
+/** B5: track-table columns participating in the configurable order. Title is
+ *  always visible; the remaining entries can also be toggled. The compact
+ *  checkbox/bookmark/# utility columns and Actions stay fixed. */
 export interface LibraryV2TrackTableColumns {
+  title: boolean;
   disc: boolean;
   artists: boolean;
   duration: boolean;
   bpm: boolean;
   match: boolean;
+  /** Independent recognition by one or more connected media servers. */
+  media_server: boolean;
   quality: boolean;
+  /** Assigned track/album/artist/app quality profile. */
+  profile: boolean;
   features: boolean;
   metadata: boolean;
   /** iss28-01: effective Check summary, backed by AcoustID + verification provenance. */

@@ -298,7 +298,7 @@ class DownloadOrchestrator:
         return list(policy.source_chain)
 
     async def search(self, query: str, timeout: int = None, progress_callback=None,
-                     exclude_sources=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
+                     exclude_sources=None, search_mode=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
         """Search for tracks using configured source(s). Single-source
         modes route directly; hybrid mode delegates to
         ``engine.search_with_fallback`` which tries the chain in order.
@@ -340,7 +340,7 @@ class DownloadOrchestrator:
         policy = resolve_source_policy(
             mode="hybrid",
             hybrid_order=chain,
-            search_mode=load_search_mode(),
+            search_mode=search_mode or load_search_mode(),
         )
         if policy.search_all_sources:
             logger.info(f"Best-quality search ({' → '.join(chain)}): {query}")

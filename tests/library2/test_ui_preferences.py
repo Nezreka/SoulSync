@@ -27,9 +27,9 @@ def test_defaults_when_nothing_stored():
 
 def test_update_merges_into_existing_section_without_clobbering_siblings():
     conn = _conn()
-    update_ui_preferences(conn, {"track_table": {"columns": {"bpm": False}}})
+    update_ui_preferences(conn, {"track_table": {"columns": {"bpm": True}}})
     prefs = get_ui_preferences(conn)
-    assert prefs["track_table"]["columns"]["bpm"] is False
+    assert prefs["track_table"]["columns"]["bpm"] is True
     # Untouched sibling columns keep their default.
     assert prefs["track_table"]["columns"]["duration"] is True
     assert prefs["track_table"]["show_all_match_providers"] is False
@@ -45,11 +45,40 @@ def test_play_column_defaults_off():
     assert get_ui_preferences(conn)["track_table"]["columns"]["play"] is False
 
 
+def test_title_defaults_on_and_participates_in_column_order():
+    conn = _conn()
+    track_table = get_ui_preferences(conn)["track_table"]
+    assert track_table["columns"]["title"] is True
+    assert track_table["column_order"][0] == "title"
+
+
+def test_media_server_recognition_and_profile_columns_default_off():
+    conn = _conn()
+    columns = get_ui_preferences(conn)["track_table"]["columns"]
+    assert columns["media_server"] is False
+    assert columns["profile"] is False
+
+
 def test_file_size_and_resizable_column_defaults():
     conn = _conn()
     track_table = get_ui_preferences(conn)["track_table"]
-    assert track_table["columns"]["file_size"] is False
-    assert track_table["column_widths"] == {}
+    assert track_table["columns"]["file_size"] is True
+    assert track_table["column_widths"] == {
+        "number": 2.532,
+        "title": 13.62,
+        "disc": 5.93,
+        "artists": 6.488,
+        "duration": 5.154,
+        "bpm": 3.357,
+        "match": 28.79,
+        "profile": 50.496,
+        "file_size": 56.792,
+        "quality": 12.283,
+        "acoustid": 7.624,
+        "metadata": 7.149,
+        "features": 7.089,
+        "media_server": 6.495,
+    }
 
 
 def test_artist_table_columns_default_off_and_merge_independently():
@@ -66,7 +95,7 @@ def test_artist_table_columns_default_off_and_merge_independently():
     assert prefs["artist_table"]["columns"]["genres"] is True
     assert prefs["artist_table"]["columns"]["added"] is False
     # Sibling section untouched.
-    assert prefs["track_table"]["columns"]["bpm"] is True
+    assert prefs["track_table"]["columns"]["bpm"] is False
 
 
 def test_update_persists_across_connections(tmp_path):
@@ -90,10 +119,10 @@ def test_update_persists_across_connections(tmp_path):
 
 def test_second_update_merges_onto_first_not_onto_defaults():
     conn = _conn()
-    update_ui_preferences(conn, {"track_table": {"columns": {"bpm": False}}})
+    update_ui_preferences(conn, {"track_table": {"columns": {"bpm": True}}})
     update_ui_preferences(conn, {"track_table": {"columns": {"file_path": True}}})
     prefs = get_ui_preferences(conn)
-    assert prefs["track_table"]["columns"]["bpm"] is False
+    assert prefs["track_table"]["columns"]["bpm"] is True
     assert prefs["track_table"]["columns"]["file_path"] is True
 
 
@@ -112,18 +141,21 @@ def test_column_order_defaults_and_customization():
     prefs = get_ui_preferences(conn)
     # Default order exists.
     assert prefs["track_table"]["column_order"] == [
-        "play",
+        "title",
         "disc",
         "artists",
         "duration",
         "bpm",
         "match",
-        "quality",
-        "features",
-        "metadata",
-        "acoustid",
+        "profile",
         "file_size",
+        "quality",
+        "acoustid",
+        "metadata",
+        "features",
+        "play",
         "file_path",
+        "media_server",
     ]
     # Patch overrides it completely since lists are leaf values.
     custom_order = ["file_path", "play", "artists"]
@@ -131,7 +163,7 @@ def test_column_order_defaults_and_customization():
     prefs = get_ui_preferences(conn)
     assert prefs["track_table"]["column_order"] == custom_order
     # Columns sibling mapping remains untouched.
-    assert prefs["track_table"]["columns"]["bpm"] is True
+    assert prefs["track_table"]["columns"]["bpm"] is False
 
 
 def test_column_widths_merge_and_persist_without_clobbering_other_table_preferences():
@@ -142,7 +174,9 @@ def test_column_widths_merge_and_persist_without_clobbering_other_table_preferen
     )
     update_ui_preferences(conn, {"track_table": {"column_widths": {"title": 280}}})
     track_table = get_ui_preferences(conn)["track_table"]
-    assert track_table["column_widths"] == {"title": 280, "file_size": 96}
+    assert track_table["column_widths"]["title"] == 280
+    assert track_table["column_widths"]["file_size"] == 96
+    assert track_table["column_widths"]["duration"] == 5.154
     assert track_table["columns"]["duration"] is True
 
 

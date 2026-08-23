@@ -495,6 +495,7 @@ def _decide_snapshot_upgrade(snapshot: _UpgradeSnapshot, incoming_path: str):
         UpgradeDecision,
         is_upgrade_policy,
         profile_targets,
+        upgrade_complete,
     )
     from core.quality.model import rank_candidate
     from core.quality.selection import targets_from_profile
@@ -525,11 +526,19 @@ def _decide_snapshot_upgrade(snapshot: _UpgradeSnapshot, incoming_path: str):
     new_rank, new_score = rank_candidate(new_quality, targets)
     if not fallback_enabled and new_rank == len(targets):
         return UpgradeDecision(True, False, "Retained file is outside the strict profile", **base)
-    effective_cutoff = cutoff if policy == "until_cutoff" else 0
-    effective_cutoff = max(0, min(int(effective_cutoff or 0), len(targets) - 1))
-    if old_rank <= effective_cutoff:
+    if upgrade_complete(old_rank, len(targets), policy, cutoff):
         return UpgradeDecision(True, False, "The existing file already meets the upgrade cutoff", **base)
-    if not (new_rank < old_rank or (new_rank == old_rank and new_score > old_score + 0.001)):
+    if not (
+        new_rank < old_rank
+        or (
+            new_rank == old_rank
+            and new_score > old_score + 0.001
+            and (
+                new_rank == len(targets)
+                or str(new_quality.format).lower() == str(old_quality.format).lower()
+            )
+        )
+    ):
         return UpgradeDecision(
             True, False,
             f"Retained quality {new_quality.label()} is not better than {old_quality.label()}",
@@ -823,6 +832,12 @@ def _recover_moved_file_bookkeeping(context, artist_context=None, album_info=Non
         return False
 
     context['_post_move_recovered'] = True
+    # Reorganize is not a new import. Its runner owns the existing catalogue
+    # row and repoints it after this pipeline returns with a verified
+    # destination. Running the normal recovery writers here created a second
+    # file row at that destination before the old row was repointed there too.
+    if context.get('_library_reorganize') is True:
+        return True
     try:
         record_soulsync_library_entry(
             context,
@@ -882,6 +897,30 @@ def _confirm_existing_file_bookkeeping(context, artist_context=None, album_info=
         'the file is at its destination, but Library v2 could not register it',
     )
     return False
+
+
+def _record_completed_import_side_effects(
+    context, artist_context, album_info, automation_engine,
+):
+    """Register a genuine new import and emit its download events.
+
+    Reorganize deliberately reuses the file-processing half of this pipeline,
+    but it must leave registration to the runner so one existing file row is
+    updated instead of creating a second row for the same destination.
+    Returns ``True`` when ordinary import side effects ran.
+    """
+    if context.get('_library_reorganize') is True:
+        logger.info(
+            "[Reorganize] Destination ready; catalogue path update deferred "
+            "to the reorganize runner"
+        )
+        return False
+    record_download_provenance(context)
+    record_soulsync_library_entry(context, artist_context, album_info)
+    require_library_v2_registration(context)
+    emit_track_downloaded(context, automation_engine)
+    record_library_history_download(context)
+    return True
 
 
 def post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=None):
@@ -2127,15 +2166,12 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
 
         logger.info(f"Post-processing complete for: {context.get('_final_processed_path', final_path)}")
 
-        # Both catalogue writers run before the gate. The autolink cannot derive
-        # an identity for every file; the standalone writer derives it from
-        # `artist_context` instead, so failing on the first one's None reported a
-        # correctly imported file as failed and skipped the callbacks below.
-        record_download_provenance(context)
-        record_soulsync_library_entry(context, artist_context, album_info)
-        require_library_v2_registration(context)
-        emit_track_downloaded(context, automation_engine)
-        record_library_history_download(context)
+        # Genuine downloads run both catalogue writers before the registration
+        # gate. Reorganize is excluded: the runner updates the one existing
+        # file row after this pipeline proves the destination exists.
+        _record_completed_import_side_effects(
+            context, artist_context, album_info, automation_engine,
+        )
 
         try:
             completed_path = context.get('_final_processed_path', final_path)
@@ -2167,10 +2203,11 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         except Exception as cons_err:
             logger.error(f"[Post-Process] Album consistency registration failed: {cons_err}")
 
-        try:
-            check_and_remove_from_wishlist(context)
-        except Exception as wishlist_error:
-            logger.error(f"[Post-Process] Error checking wishlist removal: {wishlist_error}")
+        if context.get('_library_reorganize') is not True:
+            try:
+                check_and_remove_from_wishlist(context)
+            except Exception as wishlist_error:
+                logger.error(f"[Post-Process] Error checking wishlist removal: {wishlist_error}")
 
         task_id = context.get('task_id')
         batch_id = context.get('batch_id')

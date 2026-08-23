@@ -1,4 +1,4 @@
-"""Quality evaluation for acceptable / until_cutoff / until_top policies."""
+"""Quality evaluation for none / acceptable / until_cutoff / until_top policies."""
 
 from __future__ import annotations
 
@@ -34,6 +34,19 @@ def test_acceptable_never_upgrades_once_met():
     assert ev == {"meets_profile": True, "upgrade_candidate": False}
 
 
+def test_acceptable_upgrades_until_any_target_is_met():
+    targets, policy, cutoff = profile_targets(_profile("acceptable"))
+    ev = evaluate_file(
+        {"format": "mp3", "bitrate": 128}, targets, policy, cutoff)
+    assert ev == {"meets_profile": False, "upgrade_candidate": True}
+
+
+def test_none_never_upgrades_even_when_quality_is_unknown():
+    targets, policy, cutoff = profile_targets(_profile("none"))
+    assert evaluate_file(None, targets, policy, cutoff) == {
+        "meets_profile": None, "upgrade_candidate": False}
+
+
 def test_until_top_upgrades_below_first_target():
     targets, policy, cutoff = profile_targets(_profile("until_top"))
     ev = evaluate_file(_flac16(), targets, policy, cutoff)
@@ -51,7 +64,8 @@ def test_until_cutoff_respects_cutoff_index():
 def test_is_upgrade_policy():
     assert is_upgrade_policy("until_top")
     assert is_upgrade_policy("until_cutoff")
-    assert not is_upgrade_policy("acceptable")
+    assert is_upgrade_policy("acceptable")
+    assert not is_upgrade_policy("none")
     assert not is_upgrade_policy(None)
 
 
@@ -135,6 +149,16 @@ def test_missing_quality_without_targets_remains_unconstrained():
         ([{"format": "flac", "bit_depth": 24}, {"format": "flac", "bit_depth": 16}],
          ("flac", None, 44_100, 16), ("flac", None, 96_000, 24), True,
          "until_top", 1, True),
+        # Any accepted target stops `acceptable`; an unmatched old file may upgrade.
+        ([{"format": "flac"}],
+         ("mp3", 320, None, None), ("flac", None, 44_100, 16), True,
+         "acceptable", 0, True),
+        ([{"format": "flac"}, {"format": "mp3"}],
+         ("mp3", 320, None, None), ("flac", None, 44_100, 16), True,
+         "acceptable", 0, False),
+        ([{"format": "flac"}],
+         ("mp3", 320, None, None), ("flac", None, 44_100, 16), True,
+         "none", 0, False),
     ],
 )
 def test_upgrade_decision_requires_strict_real_quality_improvement(

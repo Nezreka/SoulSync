@@ -49,6 +49,18 @@ def test_rename_same_path_is_noop_ok(tmp_path):
     assert ok and f.exists()
 
 
+def test_rename_absolute_and_relative_alias_is_noop_ok(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    f = tmp_path / "Transfer" / "x.flac"
+    f.parent.mkdir()
+    f.write_bytes(b"a")
+
+    ok, err = _rename_track_in_place(str(f), "./Transfer/x.flac")
+
+    assert ok and err is None
+    assert f.exists() and f.read_bytes() == b"a"
+
+
 def test_rename_carries_sibling_format_file(tmp_path):
     # lossy-copy pair: canonical .flac + sibling .opus in the same folder
     src = tmp_path / "old" / "01 - Song.flac"

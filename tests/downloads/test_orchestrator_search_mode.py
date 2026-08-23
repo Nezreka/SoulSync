@@ -64,3 +64,13 @@ def test_best_quality_mode_uses_search_all_sources(monkeypatch):
 
     assert orch.engine.calls == [('all', ('soulseek', 'hifi'))]
     assert tracks == ['pool']
+
+
+def test_explicit_item_mode_overrides_the_global_default(monkeypatch):
+    monkeypatch.setattr(orch_mod, 'load_search_mode', lambda: 'priority')
+    orch = _hybrid_orch()
+
+    tracks, _ = _run(orch.search('q', search_mode='best_quality'))
+
+    assert orch.engine.calls == [('all', ('soulseek', 'hifi'))]
+    assert tracks == ['pool']

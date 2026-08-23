@@ -99,7 +99,7 @@ class EffectivePolicy:
             except (TypeError, ValueError):
                 profile_value["ranked_targets"] = []
         targets, fallback = targets_from_profile(profile_value)
-        upgrade_policy = str(profile_value.get("upgrade_policy") or "acceptable")
+        upgrade_policy = str(profile_value.get("upgrade_policy") or "none")
         cutoff = None
         if upgrade_policy in {"until_cutoff", "until_top"} and targets:
             cutoff = 0 if upgrade_policy == "until_top" else int(

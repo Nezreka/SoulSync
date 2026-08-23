@@ -12,6 +12,7 @@ import {
 import styles from './library-v2-page.module.css';
 
 function policyLabel(p: LibraryV2QualityProfile): string {
+  if (p.upgrade_policy === 'none') return 'Upgrades disabled';
   if (p.upgrade_policy === 'until_top') return 'Upgrades until top quality';
   if (p.upgrade_policy === 'until_cutoff') {
     return p.upgrade_cutoff_index > 0

@@ -76,6 +76,40 @@ def test_a_hand_edited_config_cannot_spawn_hundreds(pool_size):
     assert pool_size(5000) == 16
 
 
+def test_global_soulseek_gate_applies_when_soulseek_is_hybrid_fallback(monkeypatch):
+    """Torrent-first hybrid still falls back to Soulseek, so the global gate
+    has to apply before parallel wishlist batches can stampede slskd."""
+    import web_server
+
+    values = {
+        'download_source.mode': 'hybrid',
+        'download_source.hybrid_order': ['torrent', 'soulseek', 'youtube'],
+        'download_source.max_concurrent': 1,
+    }
+    monkeypatch.setattr(web_server, 'config_manager', type('C', (), {
+        'get': staticmethod(lambda key, default=None: values.get(key, default)),
+    })())
+
+    assert web_server._soulseek_is_active_download_source() is True
+    assert web_server._get_global_max_concurrent() == 1
+
+
+def test_global_soulseek_gate_stays_off_when_hybrid_has_no_soulseek(monkeypatch):
+    import web_server
+
+    values = {
+        'download_source.mode': 'hybrid',
+        'download_source.hybrid_order': ['torrent', 'youtube'],
+        'download_source.max_concurrent': 1,
+    }
+    monkeypatch.setattr(web_server, 'config_manager', type('C', (), {
+        'get': staticmethod(lambda key, default=None: values.get(key, default)),
+    })())
+
+    assert web_server._soulseek_is_active_download_source() is False
+    assert web_server._get_global_max_concurrent() is None
+
+
 def test_the_pool_is_actually_built_from_it():
     src = _source('web_server.py')
     assert 'ThreadPoolExecutor(max_workers=_download_pool_size()' in src, (

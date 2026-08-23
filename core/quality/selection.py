@@ -139,8 +139,8 @@ def quality_meets_profile(aq, targets: List[QualityTarget]) -> bool:
 _VALID_SEARCH_MODES = ("priority", "best_quality")
 
 
-def load_search_mode() -> str:
-    """Return the download search strategy from the user's quality profile.
+def load_search_mode(profile_id=None) -> str:
+    """Return the download search strategy from the selected quality profile.
 
     ``'priority'`` (default) keeps today's behaviour — the first source in the
     hybrid chain that meets a quality target wins. ``'best_quality'`` pools
@@ -148,10 +148,8 @@ def load_search_mode() -> str:
     quality. Any missing/unknown value resolves to ``'priority'`` so existing
     installs are unaffected.
     """
-    from database.music_database import MusicDatabase
-
     try:
-        profile = MusicDatabase().get_quality_profile()
+        profile = load_profile_by_id(profile_id)
         mode = profile.get("search_mode", "priority")
     except Exception:
         return "priority"

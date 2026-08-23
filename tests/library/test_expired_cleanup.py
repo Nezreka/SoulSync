@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from core.library.expired_cleanup import (
     retention_cutoff,
@@ -170,3 +171,45 @@ def test_sync_failure_keeps_history_row_for_retry(monkeypatch, tmp_path):
 
     assert "synchronization failed" in outcome["error"]
     assert history_calls == []
+
+
+def test_navidrome_virtual_path_is_reported_not_swallowed(monkeypatch):
+    """An unresolvable path is a mapping failure, not "already gone".
+
+    Navidrome hands SoulSync virtual paths unless "Report Real Path" is on.
+    Deleting the catalogue row for one of those would drop a track whose file
+    is still on disk, so the cleanup refuses and says how to fix it.
+    """
+    touched = []
+
+    class _DB:
+        def delete_track_by_file_path(self, value):
+            touched.append(value)
+
+        def delete_library_history_rows(self, ids):
+            touched.append(ids)
+            return 1
+
+    monkeypatch.setattr(
+        "core.library2.maintenance_sync.annotate_finding_details",
+        lambda *_args, **kwargs: kwargs["details"],
+    )
+    monkeypatch.setattr(
+        "core.repair_jobs.expired_download_cleaner.resolve_library_file_path",
+        lambda *_args, **_kwargs: None,
+    )
+
+    cfg = SimpleNamespace(
+        get=lambda _key, default=None: default,
+        get_active_media_server=lambda: "navidrome",
+    )
+    outcome = delete_origin_download(
+        _DB(),
+        {"id": 12, "file_path": "Muse/The Wow! Signal/01-06 - Hexagons.flac"},
+        cfg,
+    )
+
+    assert outcome["removed"] == 0
+    assert outcome["file_deleted"] is False
+    assert "Report Real Path" in outcome["error"]
+    assert touched == []

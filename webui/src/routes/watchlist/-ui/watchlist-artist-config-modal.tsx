@@ -206,7 +206,9 @@ export function WatchlistArtistConfigModal({
               />
             ) : null}
             <div className="watchlist-artist-config-hero-info">
-              <h2 className="watchlist-artist-config-hero-name">{artist?.name ?? ''}</h2>
+              <h2 className="watchlist-artist-config-hero-name" title={artist?.name ?? ''}>
+                Artist preferences
+              </h2>
               <div className="watchlist-artist-config-hero-stats">
                 <div className="watchlist-artist-config-stat">
                   <span className="watchlist-artist-config-stat-value">

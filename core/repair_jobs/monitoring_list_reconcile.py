@@ -21,7 +21,12 @@ class MonitoringListReconcileJob(RepairJob):
         "artist monitoring with the Watchlist, and reasserts monitored missing "
         "or upgrade-eligible tracks into the Wishlist. Explicit Library-v2 "
         "monitoring wins; imported/default artist flags follow the Watchlist. "
-        "No files are changed."
+        "No files are changed.\n\n"
+        "This is the single writer that puts wanted tracks into the Wishlist — "
+        "both genuinely missing files and files below their quality profile's "
+        "upgrade cutoff. Refresh & Scan already reports what it changed "
+        "straight to it, so on a healthy install this job should mostly find "
+        "nothing to do: it is the safety net, not the mechanism."
     )
     icon = "refresh-cw"
     default_enabled = True

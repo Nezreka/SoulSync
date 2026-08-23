@@ -1,13 +1,15 @@
 """Mirror Library-v2 track monitoring into the legacy Wishlist.
 
 Shared by the Library v2 API (monitor toggles, bulk monitor, profile assigns,
-manual upgrade scan) and the periodic ``quality_upgrade_scan`` repair job — one
-implementation so the queueing rules can't drift.
+manual upgrade scan) and the periodic ``monitoring_list_reconcile`` repair job
+— one implementation so the queueing rules can't drift. There used to be a
+second one: a dedicated upgrade job that queued the same candidates on its own
+cadence, which is exactly the drift this module exists to prevent.
 
 Key contract: ``add_to_wishlist(quality_profile_id=…)`` carries the app-wide
 quality profile onto the wishlist row, which every pipeline stage resolves
 live (``core/quality/selection.load_profile_by_id``). Under an upgrade policy
-(``until_top``/``until_cutoff``) a track that already HAS a file is only
+(``acceptable``/``until_top``/``until_cutoff``) a track that already HAS a file is only
 queued when its file is a genuine upgrade candidate.
 """
 
@@ -298,8 +300,8 @@ def mirror_projected_tracks_wishlist(
 
 
 def upgrade_candidate_track_ids(conn, *, profile_id: int = 1) -> List[int]:
-    """Wanted tracks with files whose profile keeps upgrading
-    (``until_top``/``until_cutoff``). The per-track upgrade re-check happens in
+    """Wanted tracks with files whose profile permits upgrades. The per-track
+    upgrade re-check happens in
     ``mirror_tracks_wishlist`` (only genuine candidates queue)."""
     from core.library2.wanted import PROJECTION_VERSION
     from core.library2.track_files import primary_order
@@ -338,10 +340,36 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1) -> List[int]:
     return sorted(candidates)
 
 
+def refresh_quality_profile_wishlist(db, quality_profile_id: int, *,
+                                     profile_id: int = 1) -> int:
+    """Re-evaluate every Library-v2 track using an edited profile."""
+    from core.library2.wanted import recompute_wanted
+
+    conn = db._get_connection()
+    try:
+        recompute_wanted(conn, profile_id=profile_id)
+        rows = conn.execute(
+            "SELECT track_id, wanted FROM lib2_wanted_tracks "
+            "WHERE profile_id=? AND effective_profile_id=?",
+            (int(profile_id), int(quality_profile_id)),
+        ).fetchall()
+        affected = {int(r[0]) for r in rows}
+        track_ids = {int(r[0]) for r in rows if r[1]}
+        from core.library2.monitor_sync import _wishlisted_lib2_track_ids
+        track_ids.update(affected & set(
+            _wishlisted_lib2_track_ids(conn, profile_id=profile_id)))
+        conn.commit()
+        return mirror_projected_tracks_wishlist(
+            db, conn, sorted(track_ids), profile_id=profile_id, user_initiated=False)
+    finally:
+        conn.close()
+
+
 __all__ = [
     "mirror_projected_tracks_wishlist",
     "mirror_tracks_wishlist",
     "track_direct_download_payload",
     "track_wishlist_payload",
     "upgrade_candidate_track_ids",
+    "refresh_quality_profile_wishlist",
 ]

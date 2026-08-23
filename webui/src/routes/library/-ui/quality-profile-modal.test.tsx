@@ -28,6 +28,17 @@ describe('library v2 quality-profile mutation', () => {
               repair_settings: {},
               is_default: false,
             },
+            {
+              id: 10,
+              name: 'No replacement',
+              description: null,
+              upgrade_policy: 'none',
+              upgrade_cutoff_index: 0,
+              ranked_targets: [],
+              repair_job_id: '',
+              repair_settings: {},
+              is_default: true,
+            },
           ],
         }),
       ),
@@ -55,6 +66,7 @@ describe('library v2 quality-profile mutation', () => {
       </QueryClientProvider>,
     );
 
+    expect(await screen.findByText('Upgrades disabled')).toBeVisible();
     fireEvent.click(await screen.findByRole('button', { name: /Lossless/ }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Profile assignment failed');

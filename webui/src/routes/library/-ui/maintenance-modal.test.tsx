@@ -38,7 +38,9 @@ describe('Library v2 maintenance tools', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Find Missing Metadata/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Check Album Tags/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Find Quality Upgrades/ })).toBeInTheDocument();
+    // Deliberately absent: queueing a below-cutoff track is not a job you run,
+    // it is what the wanted projection does continuously.
+    expect(screen.queryByRole('button', { name: /Find Quality Upgrades/ })).toBeNull();
   });
 
   it('shows a terminal job error instead of a successful zero result', async () => {

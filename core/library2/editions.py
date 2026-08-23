@@ -318,6 +318,71 @@ def _fill_missing_hard_id(cursor: Any, recording_id: int, column: str,
         (value, int(recording_id), value, int(recording_id)))
 
 
+def reconcile_recording_identity(cursor: Any) -> Dict[str, int]:
+    """Push hard ids a track has learned since into its recording.
+
+    ``ensure_release_track`` returns early once a release track exists, so a
+    track that gains its ISRC/MBID/Spotify id later — the tracklist fetch runs
+    long after the row is materialized — leaves its recording identifier-less
+    forever. Such a recording can never merge with the one the same song owns
+    on another release, which is precisely how "Call of Silence" ended up
+    present under its single and missing on the OST (docs §49.11).
+
+    Two outcomes per track: the id is free, so the recording simply takes it
+    (``filled``); or another recording already owns it, in which case that one
+    IS this song and the release track is re-pointed at it (``merged``).
+    Recordings left with no release track are dropped. Idempotent; never
+    merges on anything but a hard id, and never commits.
+    """
+    stats = {"filled": 0, "merged": 0, "pruned": 0}
+    rows = cursor.execute(
+        """SELECT rt.id AS release_track_id, rt.recording_id, t.id AS track_id,
+                  t.isrc, t.musicbrainz_id, t.spotify_id
+             FROM lib2_release_tracks rt
+             JOIN lib2_tracks t ON t.id = rt.track_id
+             JOIN lib2_recordings rec ON rec.id = rt.recording_id
+            WHERE (COALESCE(t.isrc,'') <> '' AND COALESCE(rec.isrc,'') = '')
+               OR (COALESCE(t.musicbrainz_id,'') <> ''
+                   AND COALESCE(rec.musicbrainz_id,'') = '')
+               OR (COALESCE(t.spotify_id,'') <> ''
+                   AND COALESCE(rec.spotify_id,'') = '')"""
+    ).fetchall()
+
+    touched_recordings = set()
+    for row in rows:
+        owner = _find_recording_by_hard_ids(
+            cursor, row["isrc"], row["musicbrainz_id"], row["spotify_id"])
+        if owner is not None and int(owner) != int(row["recording_id"]):
+            touched_recordings.add(int(row["recording_id"]))
+            cursor.execute(
+                "UPDATE lib2_release_tracks SET recording_id=? WHERE id=?",
+                (int(owner), int(row["release_track_id"])))
+            stats["merged"] += 1
+            target = int(owner)
+        else:
+            target = int(row["recording_id"])
+        before = stats["filled"]
+        for column in ("isrc", "musicbrainz_id", "spotify_id"):
+            if not row[column]:
+                continue
+            cursor.execute(
+                f"SELECT 1 FROM lib2_recordings WHERE id=? "
+                f"AND ({column} IS NULL OR {column}='')", (target,))
+            if cursor.fetchone() is None:
+                continue
+            _fill_missing_hard_id(cursor, target, column, row[column])
+            if stats["filled"] == before:
+                stats["filled"] += 1
+
+    for recording_id in touched_recordings:
+        cursor.execute(
+            "DELETE FROM lib2_recordings WHERE id=? AND NOT EXISTS ("
+            "  SELECT 1 FROM lib2_release_tracks WHERE recording_id=?)",
+            (recording_id, recording_id))
+        stats["pruned"] += cursor.rowcount or 0
+    return stats
+
+
 def ensure_release_track(cursor: Any, track_row: Any, edition_id: int) -> bool:
     """Materialize one lib2 track onto an edition (recording + release track).
 
@@ -553,6 +618,11 @@ def backfill_editions(cursor: Any, *, connection: Any = None,
         _report("release_tracks", seen, track_total)
 
     stats["review_findings"] = _review_unverified_canonical_links(cursor)
+    _commit()
+    # Ids a track has learned since its release track was materialized (docs
+    # §49.11). Runs last: the walk above may have just created the recording
+    # this pass merges into.
+    stats["identity"] = reconcile_recording_identity(cursor)
     _commit()
     if any(stats.values()):
         logger.info("Edition/recording backfill: %s", stats)

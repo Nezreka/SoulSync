@@ -78,7 +78,9 @@ export function DiscoverHero({
   const rotates = count > 1;
 
   return (
-    <div className="discover-hero">
+    <div
+      className={`discover-hero${empty ? ' discover-hero--empty' : ''}${loading ? ' discover-hero--loading' : ''}`}
+    >
       <div
         className="discover-hero-background"
         id="discover-hero-bg"
@@ -134,7 +136,9 @@ export function DiscoverHero({
 
       <div className="discover-hero-content">
         <div className="discover-hero-info">
-          <div className="discover-hero-label">FEATURED ARTIST</div>
+          <div className="discover-hero-label">
+            {artist ? 'FEATURED ARTIST' : loading ? 'LOADING SIGNALS' : 'DISCOVERY SETUP'}
+          </div>
           <h1 className="discover-hero-title" id="discover-hero-title">
             {/* Three states, not two: while the hero payload is in flight
                 (6-23s on the first visit after a restart — the server caches

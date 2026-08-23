@@ -155,6 +155,81 @@ def test_post_move_recovery_requires_a_real_destination(tmp_path, monkeypatch):
     assert calls == []
 
 
+def test_reorganize_post_move_recovery_never_registers_a_second_file(
+    tmp_path, monkeypatch,
+):
+    destination = tmp_path / "Transfer" / "Artist" / "Track.flac"
+    destination.parent.mkdir(parents=True)
+    destination.write_bytes(b"audio")
+    context = {
+        "_final_processed_path": str(destination),
+        "_library_reorganize": True,
+    }
+    calls = []
+    monkeypatch.setattr(
+        import_pipeline,
+        "record_soulsync_library_entry",
+        lambda *args: calls.append(("legacy", args)),
+    )
+
+    recovered = import_pipeline._recover_moved_file_bookkeeping(context)
+
+    assert recovered is True
+    assert context["_post_move_recovered"] is True
+    assert calls == []
+
+
+def test_reorganize_completion_skips_download_catalogue_and_events(monkeypatch):
+    calls = []
+    for name in (
+        "record_download_provenance",
+        "record_soulsync_library_entry",
+        "require_library_v2_registration",
+        "emit_track_downloaded",
+        "record_library_history_download",
+    ):
+        monkeypatch.setattr(
+            import_pipeline, name,
+            lambda *args, _name=name, **kwargs: calls.append(_name),
+        )
+
+    ran = import_pipeline._record_completed_import_side_effects(
+        {"_library_reorganize": True}, {"name": "Artist"},
+        {"album_name": "Album"}, None,
+    )
+
+    assert ran is False
+    assert calls == []
+
+
+def test_regular_import_completion_keeps_catalogue_and_events(monkeypatch):
+    calls = []
+    for name in (
+        "record_download_provenance",
+        "record_soulsync_library_entry",
+        "require_library_v2_registration",
+        "emit_track_downloaded",
+        "record_library_history_download",
+    ):
+        monkeypatch.setattr(
+            import_pipeline, name,
+            lambda *args, _name=name, **kwargs: calls.append(_name),
+        )
+
+    ran = import_pipeline._record_completed_import_side_effects(
+        {}, {"name": "Artist"}, {"album_name": "Album"}, None,
+    )
+
+    assert ran is True
+    assert calls == [
+        "record_download_provenance",
+        "record_soulsync_library_entry",
+        "require_library_v2_registration",
+        "emit_track_downloaded",
+        "record_library_history_download",
+    ]
+
+
 def test_existing_destination_is_not_success_when_library_registration_fails(
     tmp_path, monkeypatch,
 ):

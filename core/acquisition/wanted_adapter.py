@@ -87,6 +87,8 @@ def materialize_wanted_requests(
         marks = ",".join("?" for _ in normalized_ids)
         scope_sql = f" AND t.id IN ({marks})"
         args.extend(normalized_ids)
+    from core.library2.recording_links import owned_by_recording_sql
+    owned_elsewhere = owned_by_recording_sql(conn, "t")
     rows = conn.execute(
         f"""SELECT wt.profile_id, wt.track_id, wt.projection_version,
                    wt.updated_at AS wanted_updated_at,
@@ -107,7 +109,11 @@ def materialize_wanted_requests(
                     WHERE f.track_id=t.id
                       AND f.file_state='active'
                       AND f.path IS NOT NULL AND f.path<>''
-               ){scope_sql}
+               )
+               -- docs §49.7(3): a position whose audio already sits on disk
+               -- under another release is not a download job. Without this the
+               -- same recording is fetched once per release that lists it.
+               AND NOT ({owned_elsewhere}){scope_sql}
              GROUP BY wt.profile_id, wt.track_id, wt.projection_version,
                       wt.updated_at, t.updated_at, file_updated_at,
                       COALESCE(wt.effective_profile_id, t.quality_profile_id),

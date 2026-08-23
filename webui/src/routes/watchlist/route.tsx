@@ -8,6 +8,7 @@ import {
   watchlistCountQueryOptions,
   watchlistGlobalConfigQueryOptions,
   watchlistLabelsQueryOptions,
+  watchlistRecentReleasesQueryOptions,
   watchlistScanStatusQueryOptions,
 } from './-watchlist.api';
 import { watchlistSearchSchema } from './-watchlist.types';
@@ -29,6 +30,7 @@ export const Route = createFileRoute('/watchlist')({
       queryClient.ensureQueryData(watchlistArtistsQueryOptions(profile.profileId)),
       queryClient.ensureQueryData(watchlistScanStatusQueryOptions(profile.profileId)),
       queryClient.ensureQueryData(watchlistGlobalConfigQueryOptions(profile.profileId)),
+      queryClient.ensureQueryData(watchlistRecentReleasesQueryOptions(profile.profileId)),
     ];
 
     // Labels are a separate blueprint and a separate round trip; only pay for

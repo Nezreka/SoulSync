@@ -408,7 +408,7 @@ function MediaServerRecognitionBadge({ sources }: { sources: string[] | undefine
   );
 }
 
-/** Quality display: format and resolution (bit depth + sample rate). */
+/** One compact quality badge assembled from the user's enabled details. */
 function QualityDisplay({ file }: { file: LibraryV2Track['file'] | null | undefined }) {
   const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
   if (!file) {
@@ -417,6 +417,7 @@ function QualityDisplay({ file }: { file: LibraryV2Track['file'] | null | undefi
 
   const showFormat = prefsQuery.data?.track_table.quality_show_format ?? true;
   const showResolution = prefsQuery.data?.track_table.quality_show_resolution ?? true;
+  const showBitrate = prefsQuery.data?.track_table.quality_show_bitrate ?? true;
 
   const fmt = showFormat ? (file.format ?? '').toUpperCase() || null : null;
   const bitDepth = showResolution && file.bit_depth ? `${file.bit_depth}bit` : null;
@@ -425,34 +426,16 @@ function QualityDisplay({ file }: { file: LibraryV2Track['file'] | null | undefi
       ? `${Number((file.sample_rate / 1000).toFixed(file.sample_rate % 1000 === 0 ? 0 : 1))}kHz`
       : null;
   const resolution = [bitDepth, sampleRate].filter(Boolean).join('/');
-  const formatBadge = [fmt, resolution || null].filter(Boolean).join(' · ');
+  const kbps = showBitrate ? bitrateKbps(file.bitrate) : null;
+  const qualityBadge = [fmt, resolution || null, kbps ? `${kbps} kbps` : null]
+    .filter(Boolean)
+    .join(' · ');
 
-  if (!formatBadge) return null;
-
-  return (
-    <span className={styles.qualityDisplay}>
-      <span className={styles.qualityTag}>{formatBadge}</span>
-    </span>
-  );
-}
-
-/** Bitrate display: kbps value. */
-function BitrateDisplay({ file }: { file: LibraryV2Track['file'] | null | undefined }) {
-  const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
-  if (!file) {
-    return <span className={styles.qualityPlaceholderDash}>—</span>;
-  }
-
-  const showBitrate = prefsQuery.data?.track_table.quality_show_bitrate ?? true;
-  if (!showBitrate) return null;
-
-  const kbps = bitrateKbps(file.bitrate);
-
-  if (!kbps) return null;
+  if (!qualityBadge) return null;
 
   return (
     <span className={styles.qualityDisplay}>
-      <span className={styles.qualityTag}>{kbps} kbps</span>
+      <span className={styles.qualityTag}>{qualityBadge}</span>
     </span>
   );
 }
@@ -793,6 +776,25 @@ function IconActionButton({
   );
 }
 
+/** What a finished "Refresh & Scan" actually did, in one line.
+ *
+ *  Without this the button was indistinguishable from a no-op: the report
+ *  that started this work was "no matter how often I press it, nothing
+ *  happens" — and for the two files in question nothing did, silently. A scan
+ *  that repointed a renamed file or retired a deleted one has to say so.
+ */
+function refreshSummary(result: LibraryV2JobState['result']): string {
+  const count = (key: string) => Number(result?.[key] ?? 0) || 0;
+  const parts = [`${count('scanned')} file${count('scanned') === 1 ? '' : 's'} scanned`];
+  if (count('path_repointed')) parts.push(`${count('path_repointed')} renamed file relinked`);
+  if (count('recovered')) parts.push(`${count('recovered')} back`);
+  if (count('missing_confirmed')) parts.push(`${count('missing_confirmed')} now missing`);
+  if (count('missing_suspected')) parts.push(`${count('missing_suspected')} unverified`);
+  const drifting = count('path_drift') - count('path_repointed');
+  if (drifting > 0) parts.push(`${drifting} needing review in Stale Index Paths`);
+  return `Refresh & Scan: ${parts.join(', ')}.`;
+}
+
 export function ArtistRefreshButton({ artistId }: { artistId: number }) {
   const queryClient = useQueryClient();
   const mutation = useMutation({
@@ -802,7 +804,10 @@ export function ArtistRefreshButton({ artistId }: { artistId: number }) {
       if (state.error) throw new Error(state.error);
       return state;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
+    onSuccess: (state) => {
+      window.showToast?.(refreshSummary(state.result), 'success');
+      return queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+    },
   });
 
   return (
@@ -3153,12 +3158,10 @@ const MAINTENANCE_JOBS: Array<{
     desc: 'Find inconsistent album artist, year and artwork tags for this artist.',
     scope: 'artist',
   },
-  {
-    id: 'quality_upgrade_scan',
-    label: 'Find Quality Upgrades',
-    desc: 'Queue monitored tracks across the library that are below their profile cutoff.',
-    scope: 'library',
-  },
+  // No "Find Quality Upgrades" entry: queueing a track that sits below its
+  // profile cutoff is not a job you run, it is what the wanted projection does
+  // continuously (Monitoring List Reconcile mirrors the result into the
+  // Wishlist). The Automatic Search button is still there for "do it now".
 ];
 
 async function awaitMaintenanceResult(
@@ -7042,6 +7045,11 @@ function AlbumBlock({
 }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  // Browser `dblclick` can span changing descendants (title, cover, empty row
+  // space) and its click counter can carry surprising state across rerenders.
+  // A timestamp owned by THIS album makes the intent local and deterministic:
+  // only two clicks on the same album within this window open its detail page.
+  const lastAlbumClickAt = useRef<number | null>(null);
   const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
   const profileName =
     (profilesQuery.data ?? []).find((p) => p.id === album.quality_profile_id)?.name ?? null;
@@ -7057,9 +7065,29 @@ function AlbumBlock({
   const unowned =
     album.tracks_present === 0 && (album.origin === 'discography' || album.tracks_missing === 0);
   const complete = !unowned && album.tracks_missing === 0 && album.track_count > 0;
+  const openAlbumDetail = () => {
+    void navigate({
+      search: (previous) => ({ ...previous, album: album.id }),
+    });
+  };
+  const handleAlbumClick = () => {
+    const now = Date.now();
+    const previous = lastAlbumClickAt.current;
+    if (previous != null && now - previous >= 0 && now - previous <= 300) {
+      lastAlbumClickAt.current = null;
+      openAlbumDetail();
+      return;
+    }
+    lastAlbumClickAt.current = now;
+    setOpen((current) => !current);
+  };
   return (
     <div className={`${styles.albumBlock} ${open ? styles.albumBlockOpen : ''}`}>
-      <div className={styles.albumHead} onClick={() => setOpen(!open)}>
+      <div
+        className={styles.albumHead}
+        title="Click to expand or collapse · Double-click to open album detail"
+        onClick={handleAlbumClick}
+      >
         <span className={`${styles.chevron} ${open ? styles.chevronOpen : ''}`}>›</span>
         <MonitorToggle entity="albums" id={album.id} monitored={album.monitored} />
         <Artwork
@@ -7072,13 +7100,12 @@ function AlbumBlock({
         <div className={styles.albumHeadMeta}>
           <button
             type="button"
-            className={styles.albumHeadTitleLink}
-            title="Open album detail"
-            onClick={(e) => {
-              e.stopPropagation();
-              void navigate({
-                search: (previous) => ({ ...previous, album: album.id }),
-              });
+            className={styles.albumHeadTitleButton}
+            title="Click to expand or collapse · Double-click to open album detail"
+            aria-expanded={open}
+            onClick={(event) => {
+              event.stopPropagation();
+              handleAlbumClick();
             }}
           >
             {album.title}
@@ -7194,27 +7221,33 @@ function AlbumBlock({
  *  DEFAULT_PREFERENCES — used only until the real preferences query lands
  *  (it's cached/fast, so this is a brief flash at most). */
 const DEFAULT_TRACK_TABLE_COLUMNS: LibraryV2TrackTableColumns = {
+  title: true,
   disc: false,
-  artists: true,
+  artists: false,
   duration: true,
-  bpm: true,
-  match: true,
+  bpm: false,
+  match: false,
+  media_server: false,
   quality: true,
-  features: true,
+  profile: false,
+  features: false,
   metadata: true,
   acoustid: true,
-  file_size: false,
+  file_size: true,
   file_path: false,
   play: false,
 };
 
 const TRACK_TABLE_COLUMN_LABELS: Record<keyof LibraryV2TrackTableColumns, string> = {
+  title: 'Title',
   disc: 'Disc #',
   artists: 'Artists',
   duration: 'Duration',
   bpm: 'BPM',
   match: 'Match',
+  media_server: 'Media server',
   quality: 'Quality',
+  profile: 'Profile',
   features: 'Features',
   metadata: 'Metadata',
   acoustid: 'Check',
@@ -7222,6 +7255,10 @@ const TRACK_TABLE_COLUMN_LABELS: Record<keyof LibraryV2TrackTableColumns, string
   file_path: 'File path',
   play: 'Play button',
 };
+
+const TRACK_TABLE_LOCKED_COLUMNS: ReadonlySet<keyof LibraryV2TrackTableColumns> = new Set([
+  'title',
+]);
 
 type TrackSortKey = 'number' | 'title' | 'duration' | 'bpm' | 'file_size';
 type TrackSort = { key: TrackSortKey; dir: 'asc' | 'desc' };
@@ -7256,26 +7293,35 @@ function sortTracks(tracks: LibraryV2Track[], sort: TrackSort | null): LibraryV2
 
 const MIN_COLUMN_WIDTH = 1;
 const LEGACY_PIXEL_WIDTH_THRESHOLD = 100;
-const CHECKBOX_COLUMN_WIDTH = 28;
-const MONITOR_COLUMN_WIDTH = 30;
+const CHECKBOX_COLUMN_WIDTH = 24;
+const MONITOR_COLUMN_WIDTH = 28;
+const TRACK_NUMBER_COLUMN_WIDTH = 32;
 const ACTION_COLUMN_WIDTH = 80;
-const UTILITY_COLUMN_WIDTH = CHECKBOX_COLUMN_WIDTH + MONITOR_COLUMN_WIDTH + ACTION_COLUMN_WIDTH;
+const UTILITY_COLUMN_WIDTH =
+  CHECKBOX_COLUMN_WIDTH + MONITOR_COLUMN_WIDTH + TRACK_NUMBER_COLUMN_WIDTH + ACTION_COLUMN_WIDTH;
+
+const DEFAULT_TRACK_TABLE_COLUMN_WIDTHS: Record<string, number> = {
+  number: 2.532,
+  title: 13.62,
+  disc: 5.93,
+  artists: 6.488,
+  duration: 5.154,
+  bpm: 3.357,
+  match: 28.79,
+  media_server: 6.495,
+  // Format, resolution and bitrate share one compact, single-line badge.
+  quality: 12.283,
+  profile: 50.496,
+  features: 7.089,
+  metadata: 7.149,
+  acoustid: 7.624,
+  file_size: 56.792,
+};
 
 const DEFAULT_COLUMN_WEIGHTS: Record<string, number> = {
-  number: 3,
-  title: 24,
+  ...DEFAULT_TRACK_TABLE_COLUMN_WIDTHS,
+  // These opt-in columns had no saved width in the reference layout.
   play: 5,
-  disc: 5,
-  artists: 14,
-  duration: 8,
-  bpm: 6,
-  match: 12,
-  // iss28-06: this one column contains three deliberately aligned sub-cells.
-  quality: 40,
-  features: 9,
-  metadata: 10,
-  acoustid: 9,
-  file_size: 8,
   file_path: 20,
 };
 
@@ -7286,23 +7332,30 @@ const DEFAULT_COLUMN_WEIGHTS: Record<string, number> = {
  * The floor only affects the current render and is never persisted. */
 const RESPONSIVE_COLUMN_MIN_WIDTHS: Record<string, number> = {
   number: 42,
-  title: 112,
+  title: 120,
   play: 48,
-  disc: 52,
+  disc: 62,
   artists: 96,
-  duration: 76,
-  bpm: 56,
-  match: 82,
-  // The widest Quality sub-cell is 140px; include the table cell padding.
+  duration: 82,
+  bpm: 58,
+  // The complete configured provider set still fits in at most two compact
+  // rows. Unlike the other text columns Match must never be squeezed below
+  // this floor by either a drag or a narrow viewport.
+  match: 264,
+  media_server: 108,
+  // Keep the combined Quality badge readable before it needs clipping.
   quality: 164,
-  features: 82,
+  profile: 112,
+  features: 100,
   metadata: 104,
   acoustid: 112,
-  file_size: 84,
-  file_path: 120,
+  file_size: 86,
+  file_path: 128,
 };
 
 const DEFAULT_RESPONSIVE_COLUMN_MIN_WIDTH = 72;
+const TRACK_CELL_HORIZONTAL_PADDING = 24;
+const APPROXIMATE_MATCH_CHIP_STEP = 34;
 
 /** iss28-02: clamp a relative weight, not a CSS-pixel width. The old
  * preference values remain usable because normalization treats any positive
@@ -7397,14 +7450,20 @@ export function resizeColumnWidths(
   widths: Record<string, number>,
   keys: string[],
   key: string,
-  deltaPercent: number,
+  delta: number,
+  minimumWidths: Record<string, number> = {},
 ): Record<string, number> {
   const index = keys.indexOf(key);
-  if (index < 0 || index >= keys.length - 1 || !Number.isFinite(deltaPercent)) return widths;
+  if (index < 0 || index >= keys.length - 1 || !Number.isFinite(delta)) return widths;
   const neighbour = keys[index + 1];
   const pairTotal = widths[key] + widths[neighbour];
-  const minimum = Math.min(MIN_COLUMN_WIDTH, pairTotal / 2);
-  const nextCurrent = Math.max(minimum, Math.min(pairTotal - minimum, widths[key] + deltaPercent));
+  const requestedCurrentMinimum = Math.max(MIN_COLUMN_WIDTH, minimumWidths[key] ?? 0);
+  const requestedNeighbourMinimum = Math.max(MIN_COLUMN_WIDTH, minimumWidths[neighbour] ?? 0);
+  if (requestedCurrentMinimum + requestedNeighbourMinimum > pairTotal + 0.001) return widths;
+  const nextCurrent = Math.max(
+    requestedCurrentMinimum,
+    Math.min(pairTotal - requestedNeighbourMinimum, widths[key] + delta),
+  );
   return {
     ...widths,
     [key]: Math.round(nextCurrent * 1000) / 1000,
@@ -7418,19 +7477,25 @@ export function resizeColumnWidths(
  * narrows, columns that would hide a fixed-format value stop shrinking at
  * their semantic pixel minimum. The remaining room is redistributed across
  * columns that still have slack, preserving their relative preference. If a
- * viewport is narrower than all minima combined, the minima scale together;
- * clipping is then unavoidable, but the table still stays inside its card. */
+ * viewport is narrower than all minima combined, the table keeps those real
+ * minima and becomes horizontally scrollable instead of crushing every cell. */
 export function resolveResponsiveColumnWidths(
   keys: string[],
   weights: Record<string, number>,
   availableWidth: number,
+  minimumWidths: Record<string, number> = RESPONSIVE_COLUMN_MIN_WIDTHS,
 ): Record<string, number> {
   const uniqueKeys = Array.from(new Set(keys));
   if (uniqueKeys.length === 0) return {};
   if (!Number.isFinite(availableWidth) || availableWidth <= 0) {
     return Object.fromEntries(uniqueKeys.map((key) => [key, 0]));
   }
-  if (uniqueKeys.length === 1) return { [uniqueKeys[0]]: availableWidth };
+  if (uniqueKeys.length === 1) {
+    const key = uniqueKeys[0];
+    return {
+      [key]: Math.max(availableWidth, minimumWidths[key] ?? DEFAULT_RESPONSIVE_COLUMN_MIN_WIDTH),
+    };
+  }
 
   const rawWeights = Object.fromEntries(
     uniqueKeys.map((key) => {
@@ -7442,20 +7507,14 @@ export function resolveResponsiveColumnWidths(
     }),
   );
   const rawMinimums = Object.fromEntries(
-    uniqueKeys.map((key) => [
-      key,
-      RESPONSIVE_COLUMN_MIN_WIDTHS[key] ?? DEFAULT_RESPONSIVE_COLUMN_MIN_WIDTH,
-    ]),
+    uniqueKeys.map((key) => [key, minimumWidths[key] ?? DEFAULT_RESPONSIVE_COLUMN_MIN_WIDTH]),
   );
   const minimumTotal = Object.values(rawMinimums).reduce((sum, width) => sum + width, 0);
-  const minimumScale = minimumTotal > availableWidth ? availableWidth / minimumTotal : 1;
-  const minimums = Object.fromEntries(
-    uniqueKeys.map((key) => [key, rawMinimums[key] * minimumScale]),
-  );
+  const layoutWidth = Math.max(availableWidth, minimumTotal);
 
   const result: Record<string, number> = {};
   let remainingKeys = [...uniqueKeys];
-  let remainingWidth = availableWidth;
+  let remainingWidth = layoutWidth;
 
   // Pixel-space water filling: pin every column whose proportional target is
   // below its readable floor, then repeat with the columns that still flex.
@@ -7466,7 +7525,7 @@ export function resolveResponsiveColumnWidths(
     }
     const weightTotal = remainingKeys.reduce((sum, key) => sum + rawWeights[key], 0);
     const constrainedKey = remainingKeys.find(
-      (key) => (rawWeights[key] / weightTotal) * remainingWidth < minimums[key],
+      (key) => (rawWeights[key] / weightTotal) * remainingWidth < rawMinimums[key],
     );
     if (constrainedKey == null) {
       for (const key of remainingKeys) {
@@ -7474,8 +7533,8 @@ export function resolveResponsiveColumnWidths(
       }
       break;
     }
-    result[constrainedKey] = minimums[constrainedKey];
-    remainingWidth -= minimums[constrainedKey];
+    result[constrainedKey] = rawMinimums[constrainedKey];
+    remainingWidth -= rawMinimums[constrainedKey];
     remainingKeys = remainingKeys.filter((key) => key !== constrainedKey);
   }
 
@@ -7483,12 +7542,54 @@ export function resolveResponsiveColumnWidths(
     uniqueKeys.map((key) => [key, Math.round(result[key] * 1000) / 1000]),
   );
   const roundedTotal = Object.values(rounded).reduce((sum, width) => sum + width, 0);
-  const correction = Math.round((availableWidth - roundedTotal) * 1000) / 1000;
+  const correction = Math.round((layoutWidth - roundedTotal) * 1000) / 1000;
   const correctionKey =
-    uniqueKeys.find((key) => rounded[key] + correction >= minimums[key] - 0.001) ??
+    uniqueKeys.find((key) => rounded[key] + correction >= rawMinimums[key] - 0.001) ??
     uniqueKeys[uniqueKeys.length - 1];
   rounded[correctionKey] = Math.round((rounded[correctionKey] + correction) * 1000) / 1000;
   return rounded;
+}
+
+function pixelWidthsToWeights(
+  keys: string[],
+  widths: Record<string, number>,
+): Record<string, number> {
+  const total = keys.reduce((sum, key) => sum + Math.max(0, widths[key] ?? 0), 0);
+  if (!Number.isFinite(total) || total <= 0) return normalizeColumnWidths(keys);
+  const result = Object.fromEntries(
+    keys.map((key) => [
+      key,
+      Math.round((Math.max(0, widths[key] ?? 0) / total) * 100 * 1000) / 1000,
+    ]),
+  );
+  const roundedTotal = Object.values(result).reduce((sum, width) => sum + width, 0);
+  const correction = Math.round((100 - roundedTotal) * 1000) / 1000;
+  const correctionKey = keys.find((key) => result[key] + correction > 0) ?? keys.at(-1);
+  if (correctionKey) {
+    result[correctionKey] = Math.round((result[correctionKey] + correction) * 1000) / 1000;
+  }
+  return result;
+}
+
+/** Resize the boundary between two columns from the pixels actually on
+ * screen, then convert that exact layout back to persisted relative weights.
+ * Resolving from the old weights after each pointer move made every pinned
+ * column participate in the redistribution, so distant columns visibly
+ * jumped even though their divider had never been touched. */
+export function resizeResponsiveColumnWidths(
+  widths: Record<string, number>,
+  keys: string[],
+  key: string,
+  deltaPixels: number,
+  availableWidth: number,
+  minimumWidths: Record<string, number> = RESPONSIVE_COLUMN_MIN_WIDTHS,
+): Record<string, number> {
+  if (!Number.isFinite(deltaPixels) || !Number.isFinite(availableWidth) || availableWidth <= 0) {
+    return widths;
+  }
+  const renderedWidths = resolveResponsiveColumnWidths(keys, widths, availableWidth, minimumWidths);
+  const resizedPixels = resizeColumnWidths(renderedWidths, keys, key, deltaPixels, minimumWidths);
+  return pixelWidthsToWeights(keys, resizedPixels);
 }
 
 function dataColumnWidth(
@@ -7518,6 +7619,18 @@ function measureTrackTableWidth(element: HTMLDivElement | null): number | null {
 export function mergeColumnOrder<K extends string>(stored: K[] | undefined, defaults: K[]): K[] {
   const allowed = new Set(defaults);
   return Array.from(new Set([...(stored ?? []).filter((key) => allowed.has(key)), ...defaults]));
+}
+
+/** Title used to be a fixed cell outside `column_order`. Insert it at its old
+ * visual position for existing preferences, then persist its chosen position
+ * naturally as soon as the user reorders anything. */
+export function mergeTrackColumnOrder(
+  stored: (keyof LibraryV2TrackTableColumns)[] | undefined,
+  defaults: (keyof LibraryV2TrackTableColumns)[],
+): (keyof LibraryV2TrackTableColumns)[] {
+  const merged = mergeColumnOrder(stored, defaults);
+  if (stored?.includes('title')) return merged;
+  return ['title', ...merged.filter((key) => key !== 'title')];
 }
 
 function ResizableHeaderCell({
@@ -7722,6 +7835,7 @@ function ColumnsOptionsMenu<K extends string>({
   onToggle,
   columnOrder,
   onReorder,
+  lockedColumns,
   extra,
 }: {
   title: string;
@@ -7730,6 +7844,7 @@ function ColumnsOptionsMenu<K extends string>({
   onToggle: (key: K) => void;
   columnOrder?: K[];
   onReorder?: (newOrder: K[]) => void;
+  lockedColumns?: ReadonlySet<K>;
   extra?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -7765,75 +7880,85 @@ function ColumnsOptionsMenu<K extends string>({
                 <div
                   className={`${styles.tableOptionsColumnGrid} ${reorderable ? styles.tableOptionsColumnGridReorder : ''}`}
                 >
-                  {columnKeys.map((key, index) => (
-                    <div
-                      key={key}
-                      className={`${styles.tableOptionsRow} ${dragKey === key ? styles.tableOptionsRowDragging : ''}`}
-                      onDragOver={reorderable ? (e) => e.preventDefault() : undefined}
-                      onDrop={
-                        reorderable
-                          ? (e) => {
-                              e.preventDefault();
-                              moveTo(index);
-                              setDragKey(null);
-                            }
-                          : undefined
-                      }
-                    >
-                      {reorderable ? (
-                        <div className={styles.tableOptionsReorder}>
-                          <span
-                            className={styles.reorderHandle}
-                            draggable
-                            title="Drag to reorder"
-                            aria-label={`Drag to reorder ${columnLabels[key]}`}
-                            onDragStart={() => setDragKey(key)}
-                            onDragEnd={() => setDragKey(null)}
-                          >
-                            ⠿
-                          </span>
-                          <button
-                            type="button"
-                            title="Move up"
-                            disabled={index === 0}
-                            onClick={() => {
-                              const nextOrder = [...columnOrder!];
-                              const temp = nextOrder[index];
-                              nextOrder[index] = nextOrder[index - 1];
-                              nextOrder[index - 1] = temp;
-                              onReorder!(nextOrder);
-                            }}
-                            className={styles.reorderBtn}
-                          >
-                            ▲
-                          </button>
-                          <button
-                            type="button"
-                            title="Move down"
-                            disabled={index === columnKeys.length - 1}
-                            onClick={() => {
-                              const nextOrder = [...columnOrder!];
-                              const temp = nextOrder[index];
-                              nextOrder[index] = nextOrder[index + 1];
-                              nextOrder[index + 1] = temp;
-                              onReorder!(nextOrder);
-                            }}
-                            className={styles.reorderBtn}
-                          >
-                            ▼
-                          </button>
-                        </div>
-                      ) : null}
-                      <label className={styles.tableOptionsItem}>
-                        <input
-                          type="checkbox"
-                          checked={columns[key]}
-                          onChange={() => onToggle(key)}
-                        />
-                        {columnLabels[key]}
-                      </label>
-                    </div>
-                  ))}
+                  {columnKeys.map((key, index) => {
+                    const locked = lockedColumns?.has(key) ?? false;
+                    return (
+                      <div
+                        key={key}
+                        className={`${styles.tableOptionsRow} ${dragKey === key ? styles.tableOptionsRowDragging : ''}`}
+                        onDragOver={reorderable ? (e) => e.preventDefault() : undefined}
+                        onDrop={
+                          reorderable
+                            ? (e) => {
+                                e.preventDefault();
+                                moveTo(index);
+                                setDragKey(null);
+                              }
+                            : undefined
+                        }
+                      >
+                        {reorderable ? (
+                          <div className={styles.tableOptionsReorder}>
+                            <span
+                              className={styles.reorderHandle}
+                              draggable
+                              title="Drag to reorder"
+                              aria-label={`Drag to reorder ${columnLabels[key]}`}
+                              onDragStart={() => setDragKey(key)}
+                              onDragEnd={() => setDragKey(null)}
+                            >
+                              ⠿
+                            </span>
+                            <button
+                              type="button"
+                              title="Move up"
+                              disabled={index === 0}
+                              onClick={() => {
+                                const nextOrder = [...columnOrder!];
+                                const temp = nextOrder[index];
+                                nextOrder[index] = nextOrder[index - 1];
+                                nextOrder[index - 1] = temp;
+                                onReorder!(nextOrder);
+                              }}
+                              className={styles.reorderBtn}
+                            >
+                              ▲
+                            </button>
+                            <button
+                              type="button"
+                              title="Move down"
+                              disabled={index === columnKeys.length - 1}
+                              onClick={() => {
+                                const nextOrder = [...columnOrder!];
+                                const temp = nextOrder[index];
+                                nextOrder[index] = nextOrder[index + 1];
+                                nextOrder[index + 1] = temp;
+                                onReorder!(nextOrder);
+                              }}
+                              className={styles.reorderBtn}
+                            >
+                              ▼
+                            </button>
+                          </div>
+                        ) : null}
+                        <label
+                          className={styles.tableOptionsItem}
+                          title={locked ? `${columnLabels[key]} is always visible` : undefined}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={locked || columns[key]}
+                            disabled={locked}
+                            onChange={() => onToggle(key)}
+                          />
+                          {columnLabels[key]}
+                          {locked ? (
+                            <span className={styles.tableOptionsLocked}>Always visible</span>
+                          ) : null}
+                        </label>
+                      </div>
+                    );
+                  })}
                 </div>
               </section>
               {extra}
@@ -7888,9 +8013,13 @@ function TrackTableOptionsMenu({
       title="Table options — columns & match providers"
       columnLabels={TRACK_TABLE_COLUMN_LABELS}
       columns={columns}
-      onToggle={(key) => mutation.mutate({ track_table: { columns: { [key]: !columns[key] } } })}
+      onToggle={(key) => {
+        if (key === 'title') return;
+        mutation.mutate({ track_table: { columns: { [key]: !columns[key] } } });
+      }}
       columnOrder={columnOrder}
       onReorder={(newOrder) => mutation.mutate({ track_table: { column_order: newOrder } })}
+      lockedColumns={TRACK_TABLE_LOCKED_COLUMNS}
       extra={
         <div className={styles.tableOptionsExtraGrid}>
           <section className={styles.tableOptionsSection}>
@@ -8480,25 +8609,59 @@ export function AlbumTrackTable({
   const album = albumQuery.data;
   const [sort, setSort] = useState<TrackSort | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const columns = prefsQuery.data?.track_table.columns ?? DEFAULT_TRACK_TABLE_COLUMNS;
+  const columns: LibraryV2TrackTableColumns = {
+    ...(prefsQuery.data?.track_table.columns ?? DEFAULT_TRACK_TABLE_COLUMNS),
+    // Title can move, but it must never disappear — including when an old or
+    // manually edited preference blob contains `title: false`.
+    title: true,
+  };
   const showAllProviders = prefsQuery.data?.track_table.show_all_match_providers ?? false;
-  const columnWidths = prefsQuery.data?.track_table.column_widths ?? {};
+  const columnWidths =
+    prefsQuery.data?.track_table.column_widths ?? DEFAULT_TRACK_TABLE_COLUMN_WIDTHS;
   const defaultOrder: (keyof LibraryV2TrackTableColumns)[] = [
-    'play',
+    'title',
     'disc',
     'artists',
     'duration',
     'bpm',
     'match',
-    'quality',
-    'features',
-    'metadata',
-    'acoustid',
+    'profile',
     'file_size',
+    'quality',
+    'acoustid',
+    'metadata',
+    'features',
+    'play',
     'file_path',
+    'media_server',
   ];
-  const orderedKeys = mergeColumnOrder(prefsQuery.data?.track_table.column_order, defaultOrder);
-  const visibleColumnKeys = ['number', 'title', ...orderedKeys.filter((key) => columns[key])];
+  const orderedKeys = mergeTrackColumnOrder(
+    prefsQuery.data?.track_table.column_order,
+    defaultOrder,
+  );
+  const visibleColumnKeys = orderedKeys.filter((key) => columns[key]);
+  const visibleMatchProviderPreferences =
+    prefsQuery.data?.track_table.visible_match_providers ?? {};
+  const maximumVisibleTrackProviders = Object.values(matchQuery.data?.tracks ?? {}).reduce(
+    (maximum, services) =>
+      Math.max(
+        maximum,
+        services.filter(
+          (service) =>
+            visibleMatchProviderPreferences[service.service] !== false &&
+            (showAllProviders || service.available !== false),
+        ).length,
+      ),
+    0,
+  );
+  const responsiveMinimumWidths = {
+    ...RESPONSIVE_COLUMN_MIN_WIDTHS,
+    match: Math.max(
+      RESPONSIVE_COLUMN_MIN_WIDTHS.match,
+      TRACK_CELL_HORIZONTAL_PADDING +
+        Math.ceil(maximumVisibleTrackProviders / 2) * APPROXIMATE_MATCH_CHIP_STEP,
+    ),
+  };
   const visibleColumnsSignature = visibleColumnKeys.join('|');
   const persistedWidthsSignature = visibleColumnKeys
     .map((key) => `${key}:${columnWidths[key] ?? ''}`)
@@ -8511,6 +8674,8 @@ export function AlbumTrackTable({
   const resizeSnapshot = useRef<{
     key: string;
     widths: Record<string, number>;
+    availableWidth: number;
+    minimumWidths: Record<string, number>;
   } | null>(null);
 
   useLayoutEffect(() => {
@@ -8545,8 +8710,14 @@ export function AlbumTrackTable({
           visibleColumnKeys,
           columnWeights,
           tableWidth - UTILITY_COLUMN_WIDTH,
+          responsiveMinimumWidths,
         )
       : null;
+  const renderedTableWidth =
+    responsiveColumnWidths == null
+      ? null
+      : UTILITY_COLUMN_WIDTH +
+        Object.values(responsiveColumnWidths).reduce((sum, width) => sum + width, 0);
 
   const availableProviders = useMemo(() => {
     if (!matchQuery.data) return null;
@@ -8612,7 +8783,13 @@ export function AlbumTrackTable({
   }
 
   function startColumnResize(key: string) {
-    resizeSnapshot.current = { key, widths: columnWeights };
+    const liveTableWidth = measureTrackTableWidth(tableWrapElement) ?? tableWidth ?? 1;
+    resizeSnapshot.current = {
+      key,
+      widths: columnWeights,
+      availableWidth: Math.max(1, liveTableWidth - UTILITY_COLUMN_WIDTH),
+      minimumWidths: responsiveMinimumWidths,
+    };
   }
 
   function resizeColumn(key: string, deltaPixels: number, phase: 'preview' | 'commit' | 'cancel') {
@@ -8623,10 +8800,14 @@ export function AlbumTrackTable({
       resizeSnapshot.current = null;
       return;
     }
-    const liveTableWidth = measureTrackTableWidth(tableWrapElement) ?? tableWidth ?? 1;
-    const dataWidth = Math.max(1, liveTableWidth - UTILITY_COLUMN_WIDTH);
-    const deltaPercent = (deltaPixels / dataWidth) * 100;
-    const next = resizeColumnWidths(snapshot.widths, visibleColumnKeys, key, deltaPercent);
+    const next = resizeResponsiveColumnWidths(
+      snapshot.widths,
+      visibleColumnKeys,
+      key,
+      deltaPixels,
+      snapshot.availableWidth,
+      snapshot.minimumWidths,
+    );
     setColumnWeights(next);
     if (phase === 'commit') {
       resizeSnapshot.current = null;
@@ -8635,7 +8816,17 @@ export function AlbumTrackTable({
   }
 
   function resizeColumnByKeyboard(key: string, deltaPercent: number) {
-    const next = resizeColumnWidths(columnWeights, visibleColumnKeys, key, deltaPercent);
+    const liveTableWidth = measureTrackTableWidth(tableWrapElement) ?? tableWidth ?? 1;
+    const availableWidth = Math.max(1, liveTableWidth - UTILITY_COLUMN_WIDTH);
+    const deltaPixels = (deltaPercent / 100) * availableWidth;
+    const next = resizeResponsiveColumnWidths(
+      columnWeights,
+      visibleColumnKeys,
+      key,
+      deltaPixels,
+      availableWidth,
+      responsiveMinimumWidths,
+    );
     setColumnWeights(next);
     persistColumnWidths(next);
   }
@@ -8656,7 +8847,7 @@ export function AlbumTrackTable({
     });
   }
 
-  function headerResizeProps(key: string) {
+  function headerResizeProps(key: keyof LibraryV2TrackTableColumns) {
     const index = visibleColumnKeys.indexOf(key);
     const last = index === visibleColumnKeys.length - 1;
     return {
@@ -8673,6 +8864,17 @@ export function AlbumTrackTable({
   const renderHeaderCell = (key: keyof LibraryV2TrackTableColumns) => {
     if (!columns[key]) return null;
     switch (key) {
+      case 'title':
+        return (
+          <SortableHeader
+            key="title"
+            label="Title"
+            sortKey="title"
+            sort={sort}
+            onSort={toggleSort}
+            {...headerResizeProps('title')}
+          />
+        );
       case 'disc':
         return (
           <ResizableHeaderCell
@@ -8720,10 +8922,26 @@ export function AlbumTrackTable({
             Match
           </ResizableHeaderCell>
         );
+      case 'media_server':
+        return (
+          <ResizableHeaderCell
+            key="media_server"
+            columnKey="media_server"
+            {...headerResizeProps('media_server')}
+          >
+            Media server
+          </ResizableHeaderCell>
+        );
       case 'quality':
         return (
           <ResizableHeaderCell key="quality" columnKey="quality" {...headerResizeProps('quality')}>
             Quality
+          </ResizableHeaderCell>
+        );
+      case 'profile':
+        return (
+          <ResizableHeaderCell key="profile" columnKey="profile" {...headerResizeProps('profile')}>
+            Profile
           </ResizableHeaderCell>
         );
       case 'features':
@@ -8828,10 +9046,14 @@ export function AlbumTrackTable({
           onClear={() => setSelected(new Set())}
         />
       ) : null}
-      <table className={styles.trackTable}>
+      <table
+        className={styles.trackTable}
+        style={renderedTableWidth == null ? undefined : { minWidth: `${renderedTableWidth}px` }}
+      >
         <colgroup>
           <col style={{ width: `${CHECKBOX_COLUMN_WIDTH}px` }} />
           <col style={{ width: `${MONITOR_COLUMN_WIDTH}px` }} />
+          <col style={{ width: `${TRACK_NUMBER_COLUMN_WIDTH}px` }} />
           {visibleColumnKeys.map((key) => (
             <col
               key={key}
@@ -8860,14 +9082,11 @@ export function AlbumTrackTable({
               sortKey="number"
               sort={sort}
               onSort={toggleSort}
-              {...headerResizeProps('number')}
-            />
-            <SortableHeader
-              label="Title"
-              sortKey="title"
-              sort={sort}
-              onSort={toggleSort}
-              {...headerResizeProps('title')}
+              onResizeStart={startColumnResize}
+              onResize={resizeColumn}
+              onResizeReset={resetColumnLayout}
+              onKeyboardResize={resizeColumnByKeyboard}
+              resizable={false}
             />
             {orderedKeys.map(renderHeaderCell)}
             <th className={styles.colActions}>Actions</th>
@@ -9117,7 +9336,6 @@ function TrackRow({
   /** §73/I6: this track's live queue-status entry, if any is in flight. */
   queueStatus?: LibraryV2QueueStatusEntry;
 }) {
-  const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
   const missing = track.file_status === 'missing';
   const label = track.title ?? `Track ${track.track_number ?? '?'}`;
   const entity: Lib2EntityRef = {
@@ -9136,6 +9354,17 @@ function TrackRow({
   const renderBodyCell = (key: keyof LibraryV2TrackTableColumns) => {
     if (!columns[key]) return null;
     switch (key) {
+      case 'title':
+        return (
+          <td key="title" style={widthStyle('title')}>
+            {/* Legacy parity: present/missing shown inline with the title. */}
+            <span className={styles.trackTitleCell}>
+              <span className={missing ? styles.muted : undefined}>{label}</span>
+              <InlineFileStatus status={track.file_status} linkedFrom={track.linked_from} />
+              <QueueStatusBadge status={queueStatus} />
+            </span>
+          </td>
+        );
       case 'disc':
         return (
           <td key="disc" className={styles.colDisc} style={widthStyle('disc')}>
@@ -9176,58 +9405,63 @@ function TrackRow({
             )}
           </td>
         );
+      case 'media_server':
+        return (
+          <td
+            key="media_server"
+            className={styles.mediaServerCell}
+            style={widthStyle('media_server')}
+          >
+            {track.media_server_sources?.length ? (
+              <MediaServerRecognitionBadge sources={track.media_server_sources} />
+            ) : (
+              <span className={styles.muted}>—</span>
+            )}
+          </td>
+        );
       case 'quality': {
-        const showFormat = prefsQuery.data?.track_table.quality_show_format ?? true;
-        const showResolution = prefsQuery.data?.track_table.quality_show_resolution ?? true;
-        const showBitrate = prefsQuery.data?.track_table.quality_show_bitrate ?? true;
-        const showFormatCol = showFormat || showResolution;
-
         return (
           <td key="quality" className={styles.qualityText} style={widthStyle('quality')}>
-            <span className={styles.qualityCellRow}>
-              {/* 1. Format & Resolution */}
-              {showFormatCol ? (
-                <div className={styles.qualityColFormat}>
-                  <QualityDisplay file={track.file} />
-                </div>
-              ) : null}
-
-              {/* 2. Bitrate */}
-              {showBitrate ? (
-                <div className={styles.qualityColBitrate}>
-                  <BitrateDisplay file={track.file} />
-                </div>
-              ) : null}
-
-              {/* 3. Quality Profile (color-coded based on quality status) */}
-              <div className={styles.qualityColProfile}>
-                {profileName ? (
-                  <span
-                    className={`${styles.qualityProfileBadge} ${
-                      track.meets_profile === false
-                        ? styles.qpBelow
-                        : track.upgrade_candidate === true
-                          ? styles.qpUpgrade
-                          : track.meets_profile === null && track.file
-                            ? styles.qpUnknown
-                            : styles.qpDefault
-                    }`}
-                    title={
-                      track.meets_profile === false
-                        ? `Quality profile: ${profileLabel(profileName, track.quality_profile_source)} · Below profile`
-                        : track.upgrade_candidate === true
-                          ? `Quality profile: ${profileLabel(profileName, track.quality_profile_source)} · Upgrade candidate available`
-                          : track.meets_profile === null && track.file
-                            ? `Quality profile: ${profileLabel(profileName, track.quality_profile_source)} · Quality unknown - scan to evaluate`
-                            : `Quality profile: ${profileLabel(profileName, track.quality_profile_source)} · Meets profile`
-                    }
-                  >
-                    <SvgIcon name="star" />
-                    {profileLabel(profileName, track.quality_profile_source)}
-                  </span>
-                ) : null}
-              </div>
-            </span>
+            {/* The measured quality of a file that is not there any more is not
+                this row's quality — it is history, and the detail modal is
+                where history belongs. Leaving it in the column made a missing
+                track read as a present one at a glance, which is exactly how
+                the missing state stayed invisible. Same for the size cell. */}
+            <QualityDisplay file={missing ? null : track.file} />
+          </td>
+        );
+      }
+      case 'profile': {
+        const label = profileName ? profileLabel(profileName, track.quality_profile_source) : null;
+        return (
+          <td key="profile" className={styles.profileCell} style={widthStyle('profile')}>
+            {label ? (
+              <span
+                className={`${styles.qualityProfileBadge} ${
+                  track.meets_profile === false
+                    ? styles.qpBelow
+                    : track.upgrade_candidate === true
+                      ? styles.qpUpgrade
+                      : track.meets_profile === null && track.file
+                        ? styles.qpUnknown
+                        : styles.qpDefault
+                }`}
+                title={
+                  track.meets_profile === false
+                    ? `Quality profile: ${label} · Below profile`
+                    : track.upgrade_candidate === true
+                      ? `Quality profile: ${label} · Upgrade candidate available`
+                      : track.meets_profile === null && track.file
+                        ? `Quality profile: ${label} · Quality unknown - scan to evaluate`
+                        : `Quality profile: ${label} · Meets profile`
+                }
+              >
+                <SvgIcon name="star" />
+                {label}
+              </span>
+            ) : (
+              <span className={styles.muted}>—</span>
+            )}
           </td>
         );
       }
@@ -9278,7 +9512,7 @@ function TrackRow({
       case 'file_size':
         return (
           <td key="file_size" className={styles.fileSizeCell} style={widthStyle('file_size')}>
-            {track.file?.size == null ? (
+            {missing || track.file?.size == null ? (
               <span className={styles.muted}>—</span>
             ) : (
               formatFileSize(track.file.size)
@@ -9323,18 +9557,7 @@ function TrackRow({
           title={track.title ?? undefined}
         />
       </td>
-      <td className={styles.colNum} style={widthStyle('number')}>
-        {track.track_number ?? '—'}
-      </td>
-      <td style={widthStyle('title')}>
-        {/* Legacy parity: present/missing shown inline right after the title. */}
-        <span className={styles.trackTitleCell}>
-          <span className={missing ? styles.muted : undefined}>{label}</span>
-          <MediaServerRecognitionBadge sources={track.media_server_sources} />
-          <InlineFileStatus status={track.file_status} />
-          <QueueStatusBadge status={queueStatus} />
-        </span>
-      </td>
+      <td className={styles.colNum}>{track.track_number ?? '—'}</td>
       {columnOrder.map(renderBodyCell)}
       <td className={styles.trackActions}>
         <IconActionButton
@@ -9526,7 +9749,25 @@ export function TrackLyricsBadge({
 }
 
 /** Legacy parity: present/missing indicator that sits inline after the title. */
-function InlineFileStatus({ status }: { status: LibraryV2Track['file_status'] }) {
+function InlineFileStatus({
+  status,
+  linkedFrom,
+}: {
+  status: LibraryV2Track['file_status'];
+  linkedFrom?: LibraryV2Track['linked_from'];
+}) {
+  // §49.6(c): the row has no file of its own, but the same recording sits on
+  // disk under another release. Naming that release is the whole point — the
+  // user has to know where the audio is before deleting or replacing it.
+  if (status === 'linked' && linkedFrom)
+    return (
+      <span
+        className={styles.inlineDuplicate}
+        title={`Same recording as “${linkedFrom.album_title ?? 'another release'}”. One file: ${linkedFrom.path}`}
+      >
+        on “{linkedFrom.album_title ?? 'another release'}”
+      </span>
+    );
   if (status === 'duplicate_single')
     return <span className={styles.inlineDuplicate}>also on album</span>;
   if (status === 'missing_suspected')

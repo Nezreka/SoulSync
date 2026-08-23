@@ -530,8 +530,8 @@ def _migrate_lib2_profiles_to_app_wide(cursor: Any) -> None:
     the ids on lib2 rows never matched the app-wide ``quality_profiles`` rows
     the pipeline resolves. Remap by profile NAME (the seeds were identical:
     1=Balanced, 2=Upgrade until top quality), point unmatched assignments at
-    the app-wide default, then drop the old table. Dropping it is what makes
-    this idempotent — once gone, this is a no-op.
+    a default-derived app-wide profile for unmatched names, then drop the old
+    table. Dropping it is what makes this idempotent — once gone, this is a no-op.
     """
     cursor.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='lib2_quality_profiles'")
@@ -545,10 +545,24 @@ def _migrate_lib2_profiles_to_app_wide(cursor: Any) -> None:
         remap = {}
         cursor.execute("SELECT id, name FROM lib2_quality_profiles")
         old_rows = cursor.fetchall()
+        copy_columns = [
+            r[1] for r in cursor.execute("PRAGMA table_info(quality_profiles)")
+            if r[1] not in {"id", "name", "description", "is_default",
+                            "created_at", "updated_at"}
+        ]
         for old in old_rows:
             cursor.execute("SELECT id FROM quality_profiles WHERE name=?", (old[1],))
             match = cursor.fetchone()
-            remap[old[0]] = match[0] if match else default_id
+            if not match:
+                columns = ", ".join(copy_columns)
+                cursor.execute(
+                    f"INSERT INTO quality_profiles(name, description, {columns}, is_default) "
+                    f"SELECT ?, 'Migrated from Library v2', {columns}, 0 "
+                    f"FROM quality_profiles WHERE id=?",
+                    (old[1], default_id),
+                )
+                match = (cursor.lastrowid,)
+            remap[old[0]] = match[0]
 
         for table in ("lib2_artists", "lib2_albums", "lib2_tracks"):
             cursor.execute(f"PRAGMA table_info({table})")
@@ -1265,6 +1279,21 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
                 should_stop=should_stop)
         except Exception as e:  # noqa: BLE001
             logger.error("edition/recording backfill failed (will retry next start): %s", e)
+
+    if not _stopped():
+        # docs §49.11: a song that also appears on an album belongs to the
+        # album. Runs after the edition backfill on purpose — it needs the
+        # recordings that pass has just materialized.
+        try:
+            from core.library2.recording_links import prefer_album_home
+            moved = prefer_album_home(connection)
+            stats["recording_home"] = moved
+            if moved.get("rehomed"):
+                logger.info("Re-homed %d file(s) onto the album that owns the song",
+                            moved["rehomed"])
+            _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("recording-home pass failed (will retry next start): %s", e)
 
     return stats
 

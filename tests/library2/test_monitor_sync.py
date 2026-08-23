@@ -20,10 +20,12 @@ from core.library2.monitor_sync import (
     demonitor_lib2_tracks_for_removed_wishlist,
     reconcile_artist_watchlist,
     reconcile_track_wishlist,
+    sync_scanned_tracks_wishlist,
     sync_watchlist_removal,
     sync_wishlist_removal,
 )
 from core.library2.wanted import recompute_wanted
+from core.library2.wishlist_mirror import refresh_quality_profile_wishlist
 
 
 class _FakeDB:
@@ -176,6 +178,42 @@ def test_reconcile_skips_wanted_track_already_in_wishlist(imported_conn):
     assert "pw-t" not in db.added  # already present → not rebuilt/re-mirrored
     assert "pw-t" not in db.removed  # still wanted → not pruned
     assert stats["wanted"] >= 1  # still counted as wanted
+
+
+def test_profile_edit_immediately_withdraws_a_stale_upgrade(imported_conn):
+    conn = imported_conn
+    profile_id = conn.execute(
+        "INSERT INTO quality_profiles(name, ranked_targets, upgrade_policy) "
+        "VALUES('Edited', '[{\"format\":\"flac\",\"bit_depth\":24}]', "
+        "'until_cutoff')"
+    ).lastrowid
+    artist = _add_artist(conn, "Edited Profile", spotify_id="edited-a")
+    track = _add_track(conn, artist, "Already Owned", monitored=1,
+                       with_file=True, spotify_id="edited-t")
+    conn.execute(
+        "UPDATE lib2_tracks SET quality_profile_id=?, quality_profile_explicit=1 "
+        "WHERE id=?", (profile_id, track))
+    recompute_wanted(conn, track_ids=[track])
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS wishlist_tracks(
+               id INTEGER PRIMARY KEY AUTOINCREMENT, spotify_track_id TEXT,
+               source_type TEXT, source_info TEXT, profile_id INTEGER,
+               quality_profile_id INTEGER)""")
+    conn.execute(
+        "INSERT INTO wishlist_tracks(spotify_track_id, source_type, source_info, "
+        "profile_id, quality_profile_id) VALUES('edited-t', 'album', ?, 1, ?)",
+        (f'{{"source":"library_v2","lib2_track_id":{track}}}', profile_id),
+    )
+    conn.execute(
+        "UPDATE quality_profiles SET upgrade_policy='none' WHERE id=?",
+        (profile_id,),
+    )
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    refresh_quality_profile_wishlist(db, profile_id)
+
+    assert "edited-t" in db.removed
 
 
 def test_reconcile_recognizes_legacy_bare_id_with_album_payload(imported_conn):
@@ -581,3 +619,94 @@ def test_watchlist_provider_ids_are_compared_with_their_namespace(imported_conn)
     assert artist_is_watchlisted(
         conn, "Deezer Artist", {"deezer": "42"}, profile_id=1,
     ) is False
+
+
+def _stale_wishlist_row(conn, track_id: int, provider_id: str) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS wishlist_tracks(
+               id INTEGER PRIMARY KEY AUTOINCREMENT, spotify_track_id TEXT,
+               source_type TEXT, source_info TEXT, profile_id INTEGER)""")
+    conn.execute(
+        "INSERT INTO wishlist_tracks(spotify_track_id, source_type, source_info, "
+        "profile_id) VALUES(?, 'album', ?, 1)",
+        (provider_id, f'{{"source": "library_v2", "lib2_track_id": {track_id}}}'))
+
+
+def test_reconcile_counts_adds_and_prunes_apart(imported_conn):
+    """An entry vanishing is invisible after the fact unless the run says so.
+
+    ``mirrored`` covered adds and removals alike, so "my Wishlist entries are
+    gone again" was a report nobody could answer from the logs — you could not
+    even tell whether this job had removed them.
+    """
+    conn = imported_conn
+    artist = _add_artist(conn, "Counted", spotify_id="cnt-sp")
+    _add_track(conn, artist, "Wanted Missing", monitored=1, with_file=False,
+               spotify_id="cnt-add")
+    stale = _add_track(conn, artist, "No Longer Wanted", monitored=0,
+                       with_file=False, spotify_id="cnt-prune")
+    _stale_wishlist_row(conn, stale, "cnt-prune")
+    conn.commit()
+
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+    stats = reconcile_track_wishlist(db, profile_id=1)
+
+    # The imported fixture DB carries wanted tracks of its own, so the point
+    # is that the two directions are counted apart at all — not the absolute
+    # numbers.
+    assert stats["pruned"] == 1
+    assert stats["added"] >= 1
+    assert "cnt-add" in db.added
+    assert "cnt-prune" in db.removed
+    assert "cnt-prune" not in db.added
+
+
+def test_reconcile_never_prunes_while_a_bootstrap_is_running(
+        imported_conn, monkeypatch):
+    """The prune set is only meaningful once the projection is complete.
+
+    During a migration the wanted projection is still being built, so every
+    not-yet-imported track looks unwanted — and this would delete exactly the
+    entries the user is waiting for, silently, an hour after a restart, with
+    the next run putting them back. Adding stays on: a superfluous Wishlist row
+    costs a search, a wrongly pruned one costs the download.
+    """
+    conn = imported_conn
+    artist = _add_artist(conn, "Mid Migration", spotify_id="mm-sp")
+    _add_track(conn, artist, "Wanted Missing", monitored=1, with_file=False,
+               spotify_id="mm-add")
+    stale = _add_track(conn, artist, "Looks Unwanted", monitored=0,
+                       with_file=False, spotify_id="mm-prune")
+    _stale_wishlist_row(conn, stale, "mm-prune")
+    conn.commit()
+    monkeypatch.setattr("core.library2.bootstrap.bootstrap_is_active",
+                        lambda _db, **_kw: True)
+
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+    stats = reconcile_track_wishlist(db, profile_id=1)
+
+    assert stats["pruned"] == 0
+    assert db.removed == []
+    assert "mm-add" in db.added, "adding must keep working during a migration"
+
+
+def test_a_scan_hands_its_own_result_to_acquisition(imported_conn):
+    """The post-scan edge that removes the up-to-an-hour wait.
+
+    Refresh & Scan is the moment the catalogue learns a file is gone. Leaving
+    that for the hourly reconcile to rediscover meant a monitored missing track
+    sat there unsearched, and made the button look like it had done nothing.
+    """
+    conn = imported_conn
+    artist = _add_artist(conn, "Scanned", spotify_id="scn-sp")
+    track = _add_track(conn, artist, "Just Vanished", monitored=1,
+                       with_file=False, spotify_id="scn-gone")
+    _add_track(conn, artist, "Untouched", monitored=1, with_file=False,
+               spotify_id="scn-other")
+    conn.commit()
+
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+    stats = sync_scanned_tracks_wishlist(db, [track], profile_id=1)
+
+    assert stats["tracks"] == 1
+    assert db.added == ["scn-gone"], "scoped: only what the scan actually changed"

@@ -27,50 +27,74 @@ CREATE TABLE IF NOT EXISTS lib2_ui_preferences (
 )
 """
 
-# Deep-dive B5/B6 defaults: everything visible except the opt-in file path
-# column, matching the table's shape before this feature existed. ``disc``
-# (round 5) defaults off too — most albums are single-disc, so it's noise
-# until a user has a multi-disc release to look at.
+# Library track-table defaults captured from the intentionally configured
+# reference layout. The fixed checkbox, monitor, number, title and actions
+# columns are rendered independently and therefore do not appear here.
 DEFAULT_PREFERENCES: Dict[str, Any] = {
     "track_table": {
         "columns": {
+            # Title participates in ordering but intentionally cannot be hidden.
+            "title": True,
             "disc": False,
-            "artists": True,
+            "artists": False,
             "duration": True,
-            "bpm": True,
-            "match": True,
+            "bpm": False,
+            "match": False,
+            # Independent recognition by one or more connected media servers.
+            # Keep this separate from the title so the table remains scannable.
+            "media_server": False,
             "quality": True,
-            "features": True,
+            # The assigned quality profile is a separate concern from the
+            # physical file quality and therefore gets its own table column.
+            "profile": False,
+            "features": False,
             "metadata": True,
             # iss28-01: everyday Check summary backed by AcoustID plus the
             # human/force verification provenance.
             "acoustid": True,
-            # UI-03: physical size of the selected primary file. Opt-in to
-            # keep the default table compact on album-heavy pages.
-            "file_size": False,
+            # UI-03: physical size of the selected primary file.
+            "file_size": True,
             "file_path": False,
             # H1: row play button (reuses the Legacy player via the shell
             # bridge) — opt-in like file_path, not everyone wants it visible.
             "play": False,
         },
         "column_order": [
-            "play",
+            "title",
             "disc",
             "artists",
             "duration",
             "bpm",
             "match",
-            "quality",
-            "features",
-            "metadata",
-            "acoustid",
+            "profile",
             "file_size",
+            "quality",
+            "acoustid",
+            "metadata",
+            "features",
+            "play",
             "file_path",
+            "media_server",
         ],
         # UI-03/iss28-02: relative weights, normalized by the client to the
         # current table/browser width. Historical pixel values remain valid as
         # unnormalised weights and are therefore migrated without a DB write.
-        "column_widths": {},
+        "column_widths": {
+            "number": 2.532,
+            "title": 13.62,
+            "disc": 5.93,
+            "artists": 6.488,
+            "duration": 5.154,
+            "bpm": 3.357,
+            "match": 28.79,
+            "profile": 50.496,
+            "file_size": 56.792,
+            "quality": 12.283,
+            "acoustid": 7.624,
+            "metadata": 7.149,
+            "features": 7.089,
+            "media_server": 6.495,
+        },
         "show_all_match_providers": False,
         "visible_match_providers": {
             "spotify": True,

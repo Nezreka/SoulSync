@@ -119,7 +119,7 @@ def _quality_profile_dict(row: Any) -> Optional[Dict[str, Any]]:
         "id": row["id"],
         "name": row["name"],
         "description": row["description"] if "description" in keys else None,
-        "upgrade_policy": row["upgrade_policy"] or "acceptable",
+        "upgrade_policy": row["upgrade_policy"] or "none",
         "upgrade_cutoff_index": int(row["upgrade_cutoff_index"] or 0) if "upgrade_cutoff_index" in keys else 0,
         "ranked_targets": _ranked(row["ranked_targets"] if "ranked_targets" in keys else None),
         "repair_job_id": row["repair_job_id"] if "repair_job_id" in keys else "quality_upgrade",
@@ -780,6 +780,8 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
     ).fetchone()
 
     group_marks = ",".join("?" for _ in group)
+    from core.library2.recording_links import owned_by_recording_sql
+    owned_elsewhere = owned_by_recording_sql(conn, "t")
     album_rows = conn.execute(
         f"""
         WITH artist_albums AS (
@@ -829,9 +831,10 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                al.explicit, al.label, al.style, al.mood,
                COUNT(DISTINCT t.id) AS db_track_count,
                COUNT(DISTINCT CASE
-                   WHEN tf.id IS NOT NULL
-                    AND COALESCE(tf.file_state, 'active')
-                        NOT IN ('missing_confirmed','deleted')
+                   WHEN (tf.id IS NOT NULL
+                         AND COALESCE(tf.file_state, 'active')
+                             NOT IN ('missing_confirmed','deleted'))
+                     OR ({owned_elsewhere})
                    THEN t.id END) AS files_present,
                -- Guide §5: "My Library" means `origin='library' OR monitored`.
                -- A wanted TRACK on an otherwise unowned release satisfies that
@@ -853,6 +856,11 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                         WHERE f.track_id=t.id
                           AND COALESCE(f.file_state,'active')
                               NOT IN ('missing_confirmed','deleted'))
+                    -- §49.6(c): and it is not already on disk under another
+                    -- release. The album detail draws that row as present, so
+                    -- counting it as a gap here would be the same disagreement
+                    -- the comment above exists to prevent.
+                    AND NOT ({owned_elsewhere})
                    THEN t.id END) AS monitored_missing,
                COALESCE(asz.total_size_bytes, 0) AS total_size_bytes
         FROM artist_albums aa
@@ -1305,11 +1313,26 @@ def _serialize_track(
     projection: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
     provenance: Optional[Dict[str, Any]] = None,
     media_server_sources: Optional[List[str]] = None,
+    linked_from: Any = _NOT_LOADED,
 ) -> Dict[str, Any]:
     """Build a track dict with linked artists, primary file, and computed status."""
     if file_row is _NOT_LOADED:
         from core.library2.track_files import primary_file_row
         file_row = primary_file_row(conn, t["id"])
+    # §49.6(c): a position with no file of its own may still be on disk — under
+    # another release that carries the same recording. Borrow that file rather
+    # than drawing a gap the user is invited to re-download.
+    if linked_from is _NOT_LOADED:
+        linked_from = None
+        if not file_row:
+            from core.library2.recording_links import reference_owner
+            linked_from = reference_owner(conn, t["id"])
+            if linked_from:
+                borrowed = conn.execute(
+                    "SELECT * FROM lib2_track_files WHERE id=?",
+                    (linked_from["file_id"],),
+                ).fetchone()
+                file_row = dict(borrowed) if borrowed else None
     if artists is None:
         artists = _track_artists(conn, t["id"])
     if projection is None:
@@ -1333,6 +1356,8 @@ def _serialize_track(
     gaps = compute_metadata_gaps(file_row)
     scan_status = metadata_scan_status(file_row)
     fstat = file_status(file_row, t["canonical_track_id"])
+    if linked_from and fstat == "present":
+        fstat = "linked"
     file_info = None
     if file_row:
         prov = provenance or {}
@@ -1424,11 +1449,20 @@ def _serialize_track(
         "artists": artists,
         "file": file_info,
         "file_status": fstat,
+        "linked_from": linked_from or None,
         "metadata_gaps": gaps,
         "metadata_scan_status": scan_status,
         "media_server_sources": media_server_sources or [],
         "user_overrides": overrides,
     }
+
+
+def _borrowed_row(links: Dict[int, Dict[str, Any]],
+                  borrowed_files: Dict[int, Dict[str, Any]],
+                  track_id: int) -> Optional[Dict[str, Any]]:
+    """The file row a fileless position borrows, if it borrows one."""
+    link = links.get(track_id)
+    return borrowed_files.get(int(link["file_id"])) if link else None
 
 
 def _serialize_tracks(conn, tracks: List[Any], album=None) -> List[Dict[str, Any]]:
@@ -1438,6 +1472,20 @@ def _serialize_tracks(conn, tracks: List[Any], album=None) -> List[Dict[str, Any
     track_ids = [int(track["id"]) for track in tracks]
     from core.library2.track_files import primary_file_rows
     files = primary_file_rows(conn, track_ids)
+    # One resolve for the whole table instead of one per fileless row.
+    from core.library2.recording_links import reference_owners
+    links = reference_owners(conn, [tid for tid in track_ids if not files.get(tid)])
+    borrowed_files: Dict[int, Dict[str, Any]] = {}
+    if links:
+        file_ids = sorted({int(link["file_id"]) for link in links.values()})
+        marks = ",".join("?" for _ in file_ids)
+        borrowed_files = {
+            int(row["id"]): dict(row)
+            for row in conn.execute(
+                f"SELECT * FROM lib2_track_files WHERE id IN ({marks})",
+                tuple(file_ids),
+            ).fetchall()
+        }
     artists = _track_artists_many(conn, track_ids)
     projections = project_metadata_many(
         conn,
@@ -1466,7 +1514,10 @@ def _serialize_tracks(conn, tracks: List[Any], album=None) -> List[Dict[str, Any
             conn,
             track,
             album,
-            file_row=files.get(int(track["id"])),
+            file_row=(files.get(int(track["id"]))
+                      or _borrowed_row(links, borrowed_files, int(track["id"]))),
+            linked_from=(None if files.get(int(track["id"]))
+                         else links.get(int(track["id"]))),
             artists=artists.get(int(track["id"]), []),
             projection=projections[int(track["id"])],
             provenance=provenance.get(int(track["id"]), {}),

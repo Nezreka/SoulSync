@@ -149,6 +149,13 @@ SYSTEM_AUTOMATIONS = [
         'initial_delay': 1080,
     },
     {
+        'name': 'Last.fm Listening Sync',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'import_lastfm_listening',
+        'initial_delay': 1200,
+    },
+    {
         'name': 'Auto-Deep Scan Library',
         'trigger_type': 'schedule',
         'trigger_config': {'interval': 7, 'unit': 'days'},
@@ -1011,6 +1018,7 @@ class AutomationEngine:
         # Inject automation identity for progress tracking
         action_config['_automation_id'] = automation_id
         action_config['_automation_name'] = auto.get('name', '')
+        action_config['_manual_run'] = False
         # Merge event data so action handlers can access trigger context
         if event_data:
             action_config['_event_data'] = event_data
@@ -1186,6 +1194,7 @@ class AutomationEngine:
         # Inject automation identity for progress tracking
         action_config['_automation_id'] = automation_id
         action_config['_automation_name'] = auto.get('name', '')
+        action_config['_manual_run'] = bool(skip_delay)
         if profile_id is not None:
             action_config['_profile_id'] = profile_id
         # The profile this run acts AS: an explicit trigger profile, else the

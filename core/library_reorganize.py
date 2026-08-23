@@ -73,6 +73,38 @@ from utils.logging_config import get_logger
 logger = get_logger("library_reorganize")
 
 
+def _canonical_file_path(path: Any) -> str:
+    """Return one comparison form for relative, absolute and symlinked paths.
+
+    The library resolver normally returns an absolute container path while the
+    path builder may preserve a configured spelling such as ``./Transfer``.
+    ``normpath`` alone leaves those different even when they name the same
+    location, which made the old finalizer unlink the user's only copy as the
+    supposed source.
+    """
+    if path in (None, ""):
+        return ""
+    try:
+        return os.path.normcase(os.path.realpath(os.path.abspath(os.fspath(path))))
+    except (TypeError, ValueError, OSError):
+        return ""
+
+
+def _same_physical_file(left: Any, right: Any) -> bool:
+    """Whether two path spellings designate the same physical file/location."""
+    left_canonical = _canonical_file_path(left)
+    right_canonical = _canonical_file_path(right)
+    if not left_canonical or not right_canonical:
+        return False
+    if left_canonical == right_canonical:
+        return True
+    try:
+        return bool(os.path.exists(left) and os.path.exists(right)
+                    and os.path.samefile(left, right))
+    except (OSError, TypeError, ValueError):
+        return False
+
+
 def _safe_filename(name: str) -> str:
     """Strip path-illegal characters so we can use the value as a
     filename component on the staging path."""
@@ -1154,6 +1186,11 @@ def _build_post_process_context(
         # that stayed happily in the library (TheHomeGuy: 'Through Glass'
         # 283s vs Discogs' 241s). Size + parse corruption legs still run.
         'is_local_import': True,
+        # This pipeline run mutates an EXISTING library file. The reorganize
+        # runner owns its one catalogue path update after the destination is
+        # proven present; ordinary download registration would insert a second
+        # lib2_track_files row for the same track and destination.
+        '_library_reorganize': True,
         # Reorganize destinations must come from the CURRENT template alone.
         # The #829 existing-folder reuse would resolve to the folder the album
         # already lives in — the very folder reorganize is trying to move it
@@ -1337,7 +1374,7 @@ def preview_album_reorganize(
                 if transfer_dir and new_full and new_full.startswith(transfer_dir)
                 else new_full or ''
             )
-            if resolved and new_full and os.path.normpath(resolved) == os.path.normpath(new_full):
+            if resolved and new_full and _same_physical_file(resolved, new_full):
                 item['unchanged'] = True
         except Exception as e:
             item['reason'] = f"Couldn't compute destination path: {e}"
@@ -1350,7 +1387,7 @@ def preview_album_reorganize(
     for it in preview_tracks:
         if not it['matched'] or it['unchanged'] or not it['new_path']:
             continue
-        norm = os.path.normpath(it['new_path'])
+        norm = _canonical_file_path(it.get('new_path_abs') or it['new_path'])
         if norm in seen:
             it['collision'] = True
             seen[norm]['collision'] = True
@@ -1610,7 +1647,7 @@ def _finalize_track(ctx: _RunContext, track_id, resolved_src, new_path) -> bool:
                 f"— leaving original at {resolved_src} so the library scan can recover."
             )
             return False
-    if os.path.normpath(resolved_src) == os.path.normpath(new_path):
+    if _same_physical_file(resolved_src, new_path):
         return True  # in-place edit; DB already correct, nothing to remove
     with ctx.state_lock:
         ctx.src_dirs_touched.add(os.path.dirname(resolved_src))
@@ -2013,7 +2050,9 @@ def _rename_track_in_place(current_abs: str, new_abs: str) -> Tuple[bool, Option
     try:
         if current_abs and not os.path.exists(current_abs):
             return False, 'source file no longer on disk'
-        same = os.path.normpath(current_abs) == os.path.normpath(new_abs)
+        same = _same_physical_file(current_abs, new_abs)
+        if same:
+            return True, None
         if os.path.exists(new_abs) and not same:
             return False, 'destination already exists'
         os.makedirs(os.path.dirname(new_abs), exist_ok=True)
@@ -2350,7 +2389,7 @@ def _move_sibling_to_destination(sibling_src: str, canonical_dst: str) -> Option
     canonical_stem = os.path.splitext(os.path.basename(canonical_dst))[0]
     _, sibling_ext = os.path.splitext(sibling_src)
     sibling_dst = os.path.join(dst_dir, canonical_stem + sibling_ext)
-    if os.path.normpath(sibling_src) == os.path.normpath(sibling_dst):
+    if _same_physical_file(sibling_src, sibling_dst):
         return sibling_dst  # already at the right place
     if os.path.exists(sibling_dst):
         logger.warning(
@@ -2399,7 +2438,7 @@ def _carry_track_sidecars(src_audio: str, dst_audio: str) -> None:
         if not os.path.isfile(sidecar_src):
             continue
         sidecar_dst = os.path.join(dst_dir, dst_stem + ext)
-        if os.path.normpath(sidecar_src) == os.path.normpath(sidecar_dst):
+        if _same_physical_file(sidecar_src, sidecar_dst):
             continue
         if os.path.exists(sidecar_dst):
             try:

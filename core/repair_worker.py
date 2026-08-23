@@ -146,7 +146,6 @@ JOB_CATEGORIES = {
     'audio_corruption_detector': 'Audio quality',
     'fake_lossless_detector': 'Audio quality',
     'acoustid_scanner': 'Audio quality',
-    'quality_upgrade_scan': 'Audio quality',
     'quality_info_backfill': 'Audio quality',
     'short_preview_track': 'Audio quality',
     'replaygain_filler': 'Audio quality',
@@ -331,6 +330,19 @@ def _stale_legacy_subject(entity_id) -> Optional[Dict[str, Any]]:
     }
 
 
+def _path_mapping_hint(config_manager) -> str:
+    try:
+        active = config_manager.get_active_media_server()
+    except Exception:
+        active = None
+    if str(active or '').lower() == 'navidrome':
+        return (
+            'Navidrome may be reporting virtual paths. Enable "Report Real Path" '
+            'for the SoulSync player, then run a full database refresh.'
+        )
+    return 'Check Settings -> Library -> Music Paths so SoulSync can map this path.'
+
+
 class RepairWorker:
     """Multi-job background maintenance worker.
 
@@ -478,16 +490,12 @@ class RepairWorker:
 
     def _migrate_legacy_job_configs(self, config_manager) -> None:
         """Migrate stable pre-V2 repair identities once, without deleting them."""
-        quality_old = [
-            config_manager.get('repair.jobs.quality_upgrade', None),
-            config_manager.get('repair.jobs.quality_upgrade_scanner', None),
-        ]
-        quality_new = config_manager.get('repair.jobs.quality_upgrade_scan', None)
-        if any(isinstance(cfg, dict) for cfg in quality_old):
-            merged = self._merge_migrated_configs(
-                quality_old, quality_new, force_review=True)
-            config_manager.set('repair.jobs.quality_upgrade_scan', merged)
-
+        # The quality-upgrade lineage (quality_upgrade → quality_upgrade_scanner
+        # → quality_upgrade_scan) ends here: queueing an upgrade is not a job
+        # any more, it is what the wanted projection does continuously. There
+        # is nothing to migrate those saved configs INTO, and folding them into
+        # an unrelated job would let a long-disabled quality scanner switch it
+        # off. They are left in place, inert.
         disc_old = config_manager.get('repair.jobs.discography_backfill', None)
         disc_new = config_manager.get('repair.jobs.monitored_discography_refresh', None)
         if isinstance(disc_old, dict):
@@ -503,8 +511,7 @@ class RepairWorker:
         # P3 implementation-prefix renames are lossless one-to-one copies.
         from core.repair_jobs import JOB_ID_MIGRATIONS
         for old_id, new_id in JOB_ID_MIGRATIONS.items():
-            if old_id in {'quality_upgrade', 'quality_upgrade_scanner',
-                           'discography_backfill'}:
+            if old_id == 'discography_backfill':
                 continue
             old_cfg = config_manager.get(f'repair.jobs.{old_id}', None)
             new_cfg = config_manager.get(f'repair.jobs.{new_id}', None)
@@ -2842,8 +2849,8 @@ class RepairWorker:
                     'success': False,
                     'error': (
                         'Storage for this file is not reachable right now — '
-                        'refusing to record it as deleted. Check the mount or '
-                        'path mapping and try again.'
+                        'refusing to record it as deleted. '
+                        + _path_mapping_hint(self._config_manager)
                     ),
                 }
             return {'success': True, 'deleted_file': False}
@@ -4130,6 +4137,11 @@ class RepairWorker:
                 lines.append(f"Probed base directories: {joined}")
             else:
                 lines.append("No base directories were available to probe.")
+        if str(active_server).lower() == 'navidrome':
+            lines.append(
+                'Navidrome users: open Profile → Players → SoulSync and enable '
+                '"Report Real Path", then run a full database refresh in SoulSync.'
+            )
         lines.append(
             "Fix: Settings → Library → Music Paths → add the path where "
             "this container can read your library files."

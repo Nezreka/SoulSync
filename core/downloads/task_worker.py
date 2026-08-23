@@ -690,6 +690,8 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         # so per-item profiles changed what survived import but not what was
         # considered in the first place (#1150). None = app-wide default.
         _profile_id = track_data.get('quality_profile_id') if isinstance(track_data, dict) else None
+        from core.quality.selection import load_search_mode
+        _search_mode = load_search_mode(_profile_id)
 
         # 2. Sequential Query Search (matches GUI's start_search_worker_parallel logic)
         search_diagnostics = []  # Track what happened per query for detailed error messages
@@ -799,7 +801,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 # Perform search with timeout
                 tracks_result, _ = deps.run_async(deps.download_orchestrator.search(
                     query, timeout=30, exclude_sources=_exclude_sources or None,
-                    progress_callback=_search_progress,
+                    progress_callback=_search_progress, search_mode=_search_mode,
                 ))
                 logger.debug(f"Search completed for task {task_id}, got {len(tracks_result) if tracks_result else 0} results")
 

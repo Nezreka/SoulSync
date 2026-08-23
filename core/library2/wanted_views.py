@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Tuple
 from core.library2 import ADMIN_PROFILE_ID
 
 from .quality_eval import evaluate_file, profile_targets
+from .recording_links import owned_by_recording_sql
 from .track_files import primary_file_rows
 
 # A track is "consolidated away" when it deliberately has no file while its
@@ -105,6 +106,10 @@ def list_missing(conn: Any, *, search: str = "", page: int = 1, limit: int = 75,
     where = (
         "WHERE w.profile_id = :profile_id AND w.wanted = 1 "
         f"AND NOT ({_HAS_FILE_SQL}) AND NOT ({_CONSOLIDATED_ELSEWHERE_SQL})"
+        # §49.6(c): the same audio may already be on disk under another
+        # release. Listing it as missing would send the user to download a
+        # second copy of a file they already have.
+        f" AND NOT ({owned_by_recording_sql(conn, 't')})"
         + like_sql
     )
     params: Dict[str, Any] = {"profile_id": int(profile_id), **like_params}

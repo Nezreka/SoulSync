@@ -257,6 +257,11 @@ def test_get_wishlist_stats_uses_cycle_and_next_run():
         cycle_value="albums",
         actually_processing=True,
         next_run_seconds=123,
+        download_batches={
+            "active": {"playlist_id": "wishlist", "phase": "downloading"},
+            "done": {"playlist_id": "wishlist", "phase": "complete"},
+            "other": {"playlist_id": "spotify", "phase": "downloading"},
+        },
     )
 
     payload, status = get_wishlist_stats(runtime)
@@ -269,6 +274,7 @@ def test_get_wishlist_stats_uses_cycle_and_next_run():
         "next_run_in_seconds": 123,
         "is_auto_processing": True,
         "current_cycle": "albums",
+        "active_batches": 1,
     }
 
 

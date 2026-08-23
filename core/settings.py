@@ -708,7 +708,9 @@ class ConfigManager:
                 "api_key": "",
                 "api_secret": "",
                 "session_key": "",
-                "scrobble_enabled": False
+                "scrobble_enabled": False,
+                "username": "",
+                "listening_sync_enabled": False
             },
             "genius": {
                 "access_token": ""

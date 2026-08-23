@@ -32,7 +32,13 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from core.library2.paths import resolve_lib2_directory, resolve_lib2_path
+# Imported as a MODULE, not as two names: `from ... import resolve_lib2_path`
+# captures whatever the attribute happens to be at first import. This module is
+# imported lazily from the scan, so in a test suite the first import can land
+# inside a test that has the resolver patched — and that stand-in then stays
+# bound here for the rest of the session, making unrelated tests fail depending
+# on their order. Going through the module re-reads the attribute every call.
+from core.library2 import paths as _paths
 from core.quality.source_map import AUDIO_EXTENSIONS
 from utils.logging_config import get_logger
 
@@ -174,7 +180,7 @@ def has_drift_candidate(
         stored = str(stored_path or "")
         if not stored:
             return False
-        directory = resolve_lib2_directory(stored, config_manager)
+        directory = _paths.resolve_lib2_directory(stored, config_manager)
         if not directory:
             return False
         match = match_drifted_filename(
@@ -268,7 +274,7 @@ def scan_path_drift(
 
         for row in rows:
             stored = str(row["path"])
-            if resolve_lib2_path(stored, config_manager):
+            if _paths.resolve_lib2_path(stored, config_manager):
                 continue
             if checked >= max(0, int(limit)):
                 truncated = True
@@ -287,7 +293,7 @@ def scan_path_drift(
                 "alternatives": [],
             }
 
-            directory = resolve_lib2_directory(stored, config_manager)
+            directory = _paths.resolve_lib2_directory(stored, config_manager)
             if not directory:
                 entry.update(status="directory_unresolved",
                              reason="containing directory not reachable")
@@ -354,7 +360,7 @@ def apply_path_drift_fix(
         if row is None:
             return {"success": False, "error": "File row no longer exists"}
         stored = str(row["path"] or "")
-        if resolve_lib2_path(stored, config_manager):
+        if _paths.resolve_lib2_path(stored, config_manager):
             return {"success": False,
                     "error": "Stored path resolves again — rescan before applying"}
 
@@ -366,7 +372,7 @@ def apply_path_drift_fix(
         if _claimed_by_other_row(conn, int(file_id), proposed_stored):
             return {"success": False,
                     "error": "Proposed file is already indexed by another row"}
-        if not resolve_lib2_path(proposed_stored, config_manager):
+        if not _paths.resolve_lib2_path(proposed_stored, config_manager):
             return {"success": False,
                     "error": "Proposed path does not resolve in this namespace"}
 

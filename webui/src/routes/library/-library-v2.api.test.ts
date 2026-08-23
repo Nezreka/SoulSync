@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { apiClient } from '@/app/api-client';
 import { HttpResponse, http, server } from '@/test/msw';
 
 import {
@@ -765,6 +766,7 @@ describe('library v2 reorganize api', () => {
   });
 
   it('previews a reorganize with the chosen source/mode', async () => {
+    const postSpy = vi.spyOn(apiClient, 'post');
     server.use(
       http.post('/api/library/v2/albums/42/reorganize/preview', async ({ request }) => {
         expect(await request.json()).toEqual({ source: 'spotify', mode: 'tags' });
@@ -782,6 +784,11 @@ describe('library v2 reorganize api', () => {
     await expect(
       previewLibraryV2AlbumReorganize(42, { source: 'spotify', mode: 'tags' }),
     ).resolves.toMatchObject({ status: 'planned', album: 'Views' });
+    expect(postSpy).toHaveBeenCalledWith(
+      'library/v2/albums/42/reorganize/preview',
+      expect.objectContaining({ timeout: 120_000 }),
+    );
+    postSpy.mockRestore();
   });
 
   it('surfaces the "no legacy record" preview error', async () => {

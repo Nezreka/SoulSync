@@ -379,55 +379,17 @@
 .qualityText {
   white-space: nowrap;
   color: rgba(255, 255, 255, 0.8);
+  text-align: left;
 }
 
-.qualityCellRow {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  min-width: 0;
+.profileCell {
+  white-space: nowrap;
 }
 
-.qualityColFormat {
-  width: 140px;
-  max-width: 100%;
-  flex: 0 0 140px;
-  display: inline-flex;
-  justify-content: center;
-  align-items: center;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.qualityColBitrate {
-  width: 80px;
-  max-width: 100%;
-  flex: 0 0 80px;
-  display: inline-flex;
-  justify-content: center;
-  align-items: center;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.qualityColProfile {
-  width: 110px;
-  max-width: 100%;
-  flex: 0 0 110px;
-  display: inline-flex;
-  justify-content: center;
-  align-items: center;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.qualityColProfile .qualityProfileBadge {
+.profileCell .qualityProfileBadge {
   max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
 }
 
 .qualityPlaceholderDash {
@@ -437,10 +399,9 @@
 
 .qualityDisplay {
   display: inline-flex;
-  gap: 0.5rem;
+  max-width: 100%;
   align-items: center;
-  flex-wrap: wrap;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .qualityProfileBadge.qpDefault {
@@ -469,6 +430,9 @@
 
 .qualityTag {
   display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: clip;
   padding: 2px 6px;
   background: rgba(100, 150, 200, 0.12);
   border: 1px solid rgba(150, 180, 220, 0.3);
@@ -595,10 +559,10 @@ button.featureTag:disabled {
   text-overflow: ellipsis;
 }
 
-/* B1: album title is now the Lidarr-style link to the detail view (the
- * standalone "Open Detail" icon was removed) — same look as .albumHeadTitle,
- * reset to a button and underlined on hover to read as a link. */
-.albumHeadTitleLink {
+/* The title participates in the row interaction: one click expands/collapses,
+ * while a double-click opens the album detail page. Keeping it a button also
+ * gives keyboard users a reliable single-click equivalent. */
+.albumHeadTitleButton {
   font-weight: 600;
   font-size: 14px;
   color: #f3f3f3;
@@ -613,9 +577,8 @@ button.featureTag:disabled {
   max-width: 100%;
 }
 
-.albumHeadTitleLink:hover {
+.albumHeadTitleButton:hover {
   color: #fff;
-  text-decoration: underline;
 }
 
 .albumHeadSub {
@@ -669,7 +632,7 @@ button.featureTag:disabled {
 }
 
 /* Quality-profile badge — same lilac styling for both the album header and
- * the per-track quality cell, bordered so it reads as a distinct chip. */
+ * the per-track Profile column, bordered so it reads as a distinct chip. */
 .qualityProfileBadge {
   background: rgba(168, 85, 247, 0.16);
   color: rgb(196, 156, 250);
@@ -765,12 +728,14 @@ button.featureTag:disabled {
   background: rgba(0, 0, 0, 0.22);
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   padding: 4px 8px 8px;
-  overflow-x: hidden;
+  /* Preserve semantic column floors on genuinely narrow layouts. Crushing
+   * every column to avoid a scrollbar made controls wrap unpredictably and
+   * caused a resize handle to move several unrelated boundaries at once. */
+  overflow-x: auto;
 }
 
 .trackTable {
   width: 100%;
-  max-width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
   font-size: 12.5px;
@@ -793,7 +758,7 @@ button.featureTag:disabled {
   display: block;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
 }
 
 .columnResizeHandle {
@@ -855,7 +820,7 @@ button.featureTag:disabled {
   min-width: 0;
   max-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
   overflow-wrap: anywhere;
 }
 
@@ -1010,15 +975,15 @@ button.featureTag:disabled {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  min-width: 27px;
-  min-height: 25px;
-  padding: 3px 6px;
-  border: 1px solid rgba(134, 239, 172, 0.2);
-  border-radius: 7px;
-  background: rgba(16, 42, 31, 0.7);
-  color: rgba(187, 247, 208, 0.72);
-  font-size: 9px;
+  gap: 2px;
+  min-width: 23px;
+  min-height: 21px;
+  padding: 2px 5px;
+  border: 1px solid rgba(134, 239, 172, 0.14);
+  border-radius: 6px;
+  background: rgba(16, 42, 31, 0.48);
+  color: rgba(187, 247, 208, 0.62);
+  font-size: 8px;
   font-weight: 650;
   line-height: 1;
   white-space: nowrap;
@@ -1035,22 +1000,22 @@ button.featureTag:disabled {
 }
 
 .mediaServerRecognitionBadge svg {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   flex: 0 0 auto;
   stroke-width: 1.7;
 }
 
 .mediaServerRecognitionCheck {
-  color: rgba(74, 222, 128, 0.9);
-  font-size: 9px;
+  color: rgba(74, 222, 128, 0.78);
+  font-size: 8px;
   font-weight: 800;
 }
 
 .mediaServerRecognitionCount {
   min-width: 8px;
   color: rgba(255, 255, 255, 0.52);
-  font-size: 9px;
+  font-size: 8px;
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
@@ -1241,9 +1206,17 @@ button.featureTag:disabled {
 }
 
 .colPlay {
-  text-align: center;
+  text-align: left;
   width: 36px;
   white-space: nowrap;
+}
+
+.trackTable td.colPlay {
+  /* 48px responsive floor = 12px left inset + 28px button + 8px right
+   * breathing room. Clipping with the generic cell padding produced a stray
+   * ellipsis immediately after the play icon. */
+  padding-right: 8px;
+  text-overflow: clip;
 }
 
 .trackActions {
@@ -1267,25 +1240,34 @@ button.featureTag:disabled {
 }
 
 .trackTable .colCheckbox {
-  width: 30px;
+  width: 24px;
   padding-right: 4px;
   padding-left: 4px;
+  text-align: center;
+  vertical-align: middle;
 }
 
 .trackTable .colMonitor {
-  width: 44px;
-  padding-right: 2px;
-  padding-left: 2px;
+  width: 28px;
+  padding-right: 1px;
+  padding-left: 1px;
   text-align: center;
+  vertical-align: middle;
 }
 
 .trackTable .colNum {
-  /* Fixed table layout gives an unconstrained column an equal share of the
-   * remaining width instead of shrinking to content — for a 1-2 digit
-   * number that reads as far too much empty space around a tiny glyph. */
-  width: 64px;
-  padding-left: 8px;
-  padding-right: 8px;
+  width: 32px;
+  padding-left: 2px;
+  padding-right: 2px;
+  text-align: center;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+
+.trackTable .colNum .resizableHeaderContent,
+.trackTable .colNum .sortableHeader {
+  width: 100%;
+  justify-content: center;
 }
 
 .trackTable .trackActions .iconAction {
@@ -2897,6 +2879,7 @@ button.statusWarn:disabled {
 .trackMatchChips {
   display: flex;
   flex-wrap: wrap;
+  align-content: flex-start;
   gap: 4px;
 }
 
@@ -3981,7 +3964,7 @@ button.statusWarn:disabled {
 .filePathCell {
   max-width: 260px;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
   white-space: nowrap;
   color: rgba(255, 255, 255, 0.55);
   font-size: 11.5px;
@@ -3991,6 +3974,10 @@ button.statusWarn:disabled {
   white-space: nowrap;
   text-align: left;
   font-variant-numeric: tabular-nums;
+}
+
+.mediaServerCell {
+  white-space: nowrap;
 }
 
 .tableOptionsMenu {
@@ -4117,6 +4104,13 @@ button.statusWarn:disabled {
 
 .tableOptionsRow .tableOptionsItem:hover {
   background: transparent;
+}
+
+.tableOptionsLocked {
+  margin-left: auto;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 10.5px;
+  white-space: nowrap;
 }
 
 @media (max-width: 780px) {
@@ -4370,6 +4364,7 @@ textarea.searchInput {
     background 0.15s,
     border-color 0.15s;
   vertical-align: middle;
+  margin: 0;
 }
 
 .checkboxInput:hover:not(:disabled),

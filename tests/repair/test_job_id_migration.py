@@ -13,14 +13,18 @@ class _Config:
         self.values[key] = value
 
 
-def test_legacy_quality_configs_merge_into_review_mode():
+def test_legacy_quality_configs_are_left_inert():
+    """The quality-upgrade lineage ends rather than migrating onwards.
+
+    quality_upgrade → quality_upgrade_scanner → quality_upgrade_scan all did
+    the same thing, and that thing is not a job any more: the wanted projection
+    queues an upgrade candidate continuously and `monitoring_list_reconcile`
+    mirrors the result. There is nothing to migrate these configs INTO, and
+    folding them into an unrelated job would let a long-disabled quality
+    scanner switch that job off. So they are left exactly where they are.
+    """
     config = _Config({
         "repair.master_enabled": True,
-        "repair.jobs.quality_upgrade.settings": {
-            "include_lossless": True,
-            "shared": "older",
-        },
-        "repair.jobs.quality_upgrade.enabled": True,
         "repair.jobs.quality_upgrade": {
             "enabled": True,
             "interval_hours": 24,
@@ -36,15 +40,10 @@ def test_legacy_quality_configs_merge_into_review_mode():
 
     worker.set_config_manager(config)
 
-    migrated = config.values["repair.jobs.quality_upgrade_scan"]
-    assert migrated["enabled"] is True
-    assert migrated["interval_hours"] == 6
-    assert migrated["settings"] == {
-        "include_lossless": True,
-        "shared": "newer",
-        "minimum_bitrate": 256,
-        "mode": "review",
-    }
+    assert "repair.jobs.quality_upgrade_scan" not in config.values
+    # Untouched, not deleted: a downgrade must still find its own settings.
+    assert config.values["repair.jobs.quality_upgrade"]["enabled"] is True
+    assert config.values["repair.jobs.quality_upgrade_scanner"]["interval_hours"] == 6
     assert worker.enabled is True
 
 

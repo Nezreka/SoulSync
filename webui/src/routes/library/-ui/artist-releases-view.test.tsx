@@ -1,6 +1,6 @@
 import { createMemoryHistory } from '@tanstack/react-router';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
 import { HttpResponse, http, server } from '@/test/msw';
@@ -172,6 +172,85 @@ describe('Library V2 artist detail — All Releases views', () => {
 
     await waitFor(() => expect(screen.queryByText('Roseland NYC Live')).not.toBeInTheDocument());
     expect(screen.getByText('Dummy')).toBeInTheDocument();
+  });
+
+  it('uses single-click for inline expansion and double-click for album detail', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/:id', ({ params }) => {
+        const id = Number(params.id);
+        const title = id === 1 ? 'Dummy' : 'Roseland NYC Live';
+        return HttpResponse.json({
+          success: true,
+          album: {
+            ...album({ id, title }),
+            quality_profile: null,
+            primary_artist: { id: 1, name: 'Portishead' },
+            genres: [],
+            tracks: [
+              {
+                id: 100 + id,
+                title: `Inline track ${id}`,
+                track_number: 1,
+                disc_number: 1,
+                duration: null,
+                bpm: null,
+                explicit: null,
+                style: null,
+                mood: null,
+                isrc: null,
+                monitored: false,
+                quality_profile_id: 1,
+                canonical_track_id: null,
+                artists: [],
+                file: null,
+                file_status: 'missing',
+                metadata_gaps: [],
+              },
+            ],
+          },
+        });
+      }),
+      http.get('/api/library/v2/albums/:id/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [] }),
+      ),
+    );
+
+    const { router } = renderArtist('/library?artist=1&releases=all');
+    const dummyTitle = await screen.findByRole('button', { name: 'Dummy' });
+    const dummyRow = dummyTitle.parentElement?.parentElement as HTMLElement;
+    const now = vi.spyOn(Date, 'now');
+
+    // The blank/header area and the title now share the same one-click rule.
+    now.mockReturnValue(1_000);
+    fireEvent.click(dummyRow);
+    expect(await screen.findByText('Inline track 1')).toBeInTheDocument();
+    expect(router.state.location.search).not.toHaveProperty('album');
+
+    const roselandTitle = screen.getByRole('button', { name: 'Roseland NYC Live' });
+    now.mockReturnValue(1_000);
+    fireEvent.click(roselandTitle);
+    expect(await screen.findByText('Inline track 2')).toBeInTheDocument();
+    expect(router.state.location.search).not.toHaveProperty('album');
+
+    // Repeated, deliberate single clicks keep toggling and never accumulate
+    // into a later full-view navigation.
+    now.mockReturnValue(2_000);
+    fireEvent.click(roselandTitle);
+    now.mockReturnValue(3_000);
+    fireEvent.click(roselandTitle);
+    expect(router.state.location.search).not.toHaveProperty('album');
+
+    // Two clicks on the same album inside the explicit window are the only
+    // gesture that opens its full detail page.
+    now.mockReturnValue(4_000);
+    fireEvent.click(roselandTitle);
+    now.mockReturnValue(4_100);
+    fireEvent.click(roselandTitle);
+    now.mockRestore();
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ album: 2 }));
   });
 
   it('switches the header between compact and the rich legacy hero (ldp-05)', async () => {

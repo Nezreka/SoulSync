@@ -104,7 +104,8 @@ def test_migrates_parallel_profile_table_to_app_wide():
         id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)""")
     cur.executemany(
         "INSERT INTO lib2_quality_profiles(id, name) VALUES(?,?)",
-        [(1, "Balanced"), (2, "Upgrade until top quality"), (7, "My Hi-Res")])
+        [(1, "Balanced"), (2, "Upgrade until top quality"),
+         (7, "My Hi-Res"), (8, "Only In Old Library")])
     # The app-wide table has the same names but a different id for the custom one.
     from core.quality.schema import ensure_quality_profiles_schema
     ensure_quality_profiles_schema(conn)
@@ -119,6 +120,7 @@ def test_migrates_parallel_profile_table_to_app_wide():
     cur.execute("INSERT INTO lib2_artists(name, quality_profile_id) VALUES('A', 7)")
     cur.execute("INSERT INTO lib2_artists(name, quality_profile_id) VALUES('B', 2)")
     cur.execute("INSERT INTO lib2_artists(name, quality_profile_id) VALUES('C', 99)")
+    cur.execute("INSERT INTO lib2_artists(name, quality_profile_id) VALUES('D', 8)")
     conn.commit()
 
     ensure_library_v2_schema(conn)
@@ -128,13 +130,18 @@ def test_migrates_parallel_profile_table_to_app_wide():
     assert rows["A"] == 4      # custom profile remapped by name
     assert rows["B"] == 2      # same-name same-id stays
     assert rows["C"] == 1      # dangling pointer → default
+    migrated_id = conn.execute(
+        "SELECT id FROM quality_profiles WHERE name='Only In Old Library'"
+    ).fetchone()[0]
+    assert migrated_id != 1
+    assert rows["D"] == migrated_id
     provenance = {
         r["name"]: r["quality_profile_explicit"]
         for r in conn.execute(
             "SELECT name, quality_profile_explicit FROM lib2_artists"
         )
     }
-    assert provenance == {"A": 1, "B": 1, "C": 0}
+    assert provenance == {"A": 1, "B": 1, "C": 0, "D": 1}
     assert conn.execute(
         "SELECT COUNT(*) FROM sqlite_master WHERE name='lib2_quality_profiles'"
     ).fetchone()[0] == 0

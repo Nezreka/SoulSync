@@ -39,6 +39,23 @@ def scoped_conn(tmp_path):
     conn.close()
 
 
+def _stats(**overrides):
+    """The complete ``rescan_files`` stats shape, zeroed but for the overrides.
+
+    Spelling the whole dict out at every call site meant that adding a counter
+    broke three unrelated tests, which teaches people to stop asserting on the
+    shape at all. This keeps the exact-equality check — the one that catches a
+    counter being incremented twice — without the maintenance tax.
+    """
+    base = {
+        "scanned": 0, "updated": 0, "missing": 0, "path_drift": 0,
+        "path_repointed": 0, "missing_suspected": 0, "missing_confirmed": 0,
+        "recovered": 0,
+    }
+    base.update(overrides)
+    return base
+
+
 def test_none_scope_scans_whole_library(scoped_conn):
     conn, _album_ids = scoped_conn
     rows = _file_rows_in_scope(conn, album_ids=None)
@@ -71,7 +88,7 @@ def test_rescan_files_with_empty_scope_probes_nothing(scoped_conn, tmp_path):
 
     db_path = str(tmp_path / "lib2.db")
     stats = rescan_files(_Shim(db_path), album_ids=[])
-    assert stats == {"scanned": 0, "updated": 0, "missing": 0, "path_drift": 0}
+    assert stats == _stats()
 
 
 def test_explicit_file_scope_is_batched_below_sqlite_parameter_limits():
@@ -134,7 +151,7 @@ def test_rescan_refreshes_tag_and_gap_cache_independently_of_quality(
         """SELECT tags_json, missing_tags_json, metadata_gaps_json
              FROM lib2_track_files WHERE path='/m/a.flac'"""
     ).fetchone()
-    assert stats == {"scanned": 1, "updated": 0, "missing": 0, "path_drift": 0}
+    assert stats == _stats(scanned=1)
     assert json.loads(row["tags_json"])["title"] == "Album One"
     assert json.loads(row["missing_tags_json"]) == ["genre", "cover"]
     assert json.loads(row["metadata_gaps_json"]) == ["genre", "cover"]
@@ -188,7 +205,9 @@ def test_rescan_closes_snapshot_connection_before_file_io(
 
     stats = rescan_files(_Shim(), album_ids=[album_ids[0]])
 
-    assert stats == {"scanned": 1, "updated": 0, "missing": 0, "path_drift": 0}
+    assert stats == _stats(scanned=1)
+    # Still exactly two connections: nothing resolved to a miss, so the drift
+    # reconcile phase never opens one.
     assert state == {"active": 0, "opened": 2}
 
 
@@ -233,7 +252,8 @@ def test_healthy_consecutive_misses_confirm_and_recovery_resets_lifecycle(
             opened.row_factory = sqlite3.Row
             return opened
 
-    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _path: None)
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path",
+        lambda _path, config_manager=None: None)
     monkeypatch.setattr(
         "core.library2.paths.missing_path_root_is_healthy", lambda _path: True
     )
@@ -290,7 +310,8 @@ def test_unhealthy_root_does_not_advance_missing_lifecycle(
             opened.row_factory = sqlite3.Row
             return opened
 
-    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _path: None)
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path",
+        lambda _path, config_manager=None: None)
     monkeypatch.setattr(
         "core.library2.paths.missing_path_root_is_healthy", lambda _path: False
     )
@@ -464,3 +485,253 @@ def test_unknown_verification_tag_value_is_ignored(scoped_conn, tmp_path, monkey
     rescan_files(_Shim(), album_ids=[album_ids[0]])
 
     assert _verification(conn) is None
+
+
+def test_a_relative_stored_path_no_longer_defeats_the_missing_lifecycle(tmp_path):
+    """The bug behind "Refresh & Scan never marks anything as missing".
+
+    A media server reports paths relative to its own library root, so
+    ``os.path.isabs`` is False and the direct-parent branch could never run.
+    Everything then fell through to the configured-roots fallback, which is
+    False for anyone who never filled in Settings -> Music Library Paths — and
+    ``_persist_missing_observation`` returns without writing when the root is
+    unhealthy. The result was a file gone from disk that stayed ``active``
+    through any number of scans, with its tag cache stuck on "pending".
+    """
+    from core.library2.paths import missing_path_root_is_healthy
+
+    music = tmp_path / "music"
+    (music / "Sawano Hiroyuki" / "Call of Silence").mkdir(parents=True)
+
+    class _Config:
+        def get(self, key, default=None):
+            return {
+                "library.music_paths": [],
+                "soulseek.transfer_path": str(music),
+            }.get(key, default)
+
+    stored = "Sawano Hiroyuki/Call of Silence/01-05 - Call of Silence.flac"
+    assert missing_path_root_is_healthy(stored, _Config())
+
+
+def test_a_deleted_folder_is_still_credible_while_the_artist_folder_lives(tmp_path):
+    """The album folder went with the files; the storage is plainly there."""
+    from core.library2.paths import missing_path_root_is_healthy
+
+    music = tmp_path / "music"
+    (music / "Sawano Hiroyuki").mkdir(parents=True)
+
+    class _Config:
+        def get(self, key, default=None):
+            return {
+                "library.music_paths": [],
+                "soulseek.transfer_path": str(music),
+            }.get(key, default)
+
+    stored = "Sawano Hiroyuki/Deleted Album/01 - Gone.flac"
+    assert missing_path_root_is_healthy(stored, _Config())
+
+
+def test_unreachable_storage_still_defers_every_miss(tmp_path):
+    """The protection that must survive: an absent mount is not a deletion."""
+    from core.library2.paths import missing_path_root_is_healthy
+
+    class _Config:
+        def get(self, key, default=None):
+            return {
+                "library.music_paths": [],
+                "soulseek.transfer_path": str(tmp_path / "never-mounted"),
+            }.get(key, default)
+
+    assert not missing_path_root_is_healthy("Artist/Album/song.flac", _Config())
+
+
+def test_manual_refresh_confirms_a_credible_miss_on_the_first_pass(
+        scoped_conn, monkeypatch):
+    """The two-scan wait protects the unattended sweep, not the button.
+
+    Someone who presses "Refresh & Scan" asked a direct question. Making them
+    press twice to get an answer is what the report read as "it never notices
+    the file is gone".
+    """
+    from core.library2.scan import rescan_files
+
+    conn, album_ids = scoped_conn
+    db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+
+    class _Shim:
+        def _get_connection(self):
+            opened = sqlite3.connect(db_path)
+            opened.row_factory = sqlite3.Row
+            return opened
+
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path",
+        lambda _path, config_manager=None: None)
+    monkeypatch.setattr(
+        "core.library2.paths.missing_path_root_is_healthy", lambda _path: True
+    )
+
+    stats = rescan_files(_Shim(), album_ids=[album_ids[0]], manual=True)
+
+    row = conn.execute(
+        """SELECT file_state, missing_scan_count FROM lib2_track_files
+            WHERE path='/m/a.flac'"""
+    ).fetchone()
+    assert row["file_state"] == "missing_confirmed"
+    assert row["missing_scan_count"] == 1
+    assert stats["missing_confirmed"] == 1
+    assert stats["missing"] == 1
+
+
+def test_an_unattended_scan_keeps_the_two_pass_wait(scoped_conn, monkeypatch):
+    """Same input, no button: one miss is still only a suspicion."""
+    from core.library2.scan import rescan_files
+
+    conn, album_ids = scoped_conn
+    db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+
+    class _Shim:
+        def _get_connection(self):
+            opened = sqlite3.connect(db_path)
+            opened.row_factory = sqlite3.Row
+            return opened
+
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path",
+        lambda _path, config_manager=None: None)
+    monkeypatch.setattr(
+        "core.library2.paths.missing_path_root_is_healthy", lambda _path: True
+    )
+
+    stats = rescan_files(_Shim(), album_ids=[album_ids[0]])
+
+    row = conn.execute(
+        "SELECT file_state FROM lib2_track_files WHERE path='/m/a.flac'"
+    ).fetchone()
+    assert row["file_state"] == "missing_suspected"
+    assert stats["missing_suspected"] == 1
+    assert stats["missing_confirmed"] == 0
+
+
+def test_a_stale_configured_root_cannot_veto_a_folder_we_can_see(tmp_path):
+    """Second half of the same bug, found only after the first fix shipped.
+
+    The user's diagnostic proved the artist folder was reachable — eight files
+    in a sibling album resolved in the very same scan — and the miss was still
+    dropped. By elimination that leaves one branch: a configured Music Library
+    Path that does not exist in this process's filesystem view. One stale entry
+    (a host path the container cannot see, a share renamed years ago) then
+    vetoed every missing observation in the whole library, permanently.
+
+    Evidence about this specific path has to outrank that: we can see the
+    directory the row points into, and the file is not in it.
+    """
+    from core.library2.paths import missing_path_root_is_healthy
+
+    music = tmp_path / "music"
+    (music / "Sawano Hiroyuki" / "TV Anime Original Soundtrack").mkdir(parents=True)
+
+    class _Config:
+        def get(self, key, default=None):
+            return {
+                # Points at a path this process cannot see — the stale entry.
+                "library.music_paths": [str(tmp_path / "mnt" / "user" / "Music")],
+                "soulseek.transfer_path": str(music),
+            }.get(key, default)
+
+    stored = "Sawano Hiroyuki/TV Anime Original Soundtrack/01-03 - Gone.flac"
+    assert missing_path_root_is_healthy(stored, _Config())
+
+
+def test_a_stale_root_still_defers_a_path_nothing_can_vouch_for(tmp_path):
+    """The dd28-19 protection has to survive the reordering.
+
+    No reachable directory anywhere on this path, and a declared root that is
+    not mounted: that is what an absent share looks like, and its files may be
+    perfectly alive.
+    """
+    from core.library2.paths import missing_path_root_is_healthy
+
+    music = tmp_path / "music"
+    music.mkdir()
+
+    class _Config:
+        def get(self, key, default=None):
+            return {
+                "library.music_paths": [str(tmp_path / "offline-mount")],
+                "soulseek.transfer_path": str(music),
+            }.get(key, default)
+
+    assert not missing_path_root_is_healthy("Some Other Artist/Album/x.flac", _Config())
+
+
+def test_the_scan_reports_which_tracks_changed_availability(
+        scoped_conn, tmp_path, monkeypatch):
+    """The hand-off that lets Refresh & Scan feed acquisition directly.
+
+    Without it the catalogue knew a file was gone and the only consumer that
+    cares — the Wishlist — found out up to an hour later, from a job that
+    rescans the whole library to rediscover what this scan already knew.
+    """
+    from core.library2.scan import rescan_files
+
+    conn, album_ids = scoped_conn
+    db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+    track_id = conn.execute(
+        "SELECT track_id FROM lib2_track_files WHERE path='/m/a.flac'"
+    ).fetchone()[0]
+
+    class _Shim:
+        def _get_connection(self):
+            opened = sqlite3.connect(db_path)
+            opened.row_factory = sqlite3.Row
+            return opened
+
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path",
+        lambda _path, config_manager=None: None)
+    monkeypatch.setattr(
+        "core.library2.paths.missing_path_root_is_healthy", lambda _path: True
+    )
+
+    reported = []
+    rescan_files(_Shim(), album_ids=[album_ids[0]], manual=True,
+                 on_presence_change=reported.extend)
+    assert reported == [track_id]
+
+    # A second identical pass changes nothing, so it reports nothing: the
+    # signal is the transition, not the state.
+    reported.clear()
+    rescan_files(_Shim(), album_ids=[album_ids[0]], manual=True,
+                 on_presence_change=reported.extend)
+    assert reported == []
+
+
+def test_a_failing_presence_consumer_cannot_fail_the_scan(
+        scoped_conn, monkeypatch):
+    """The scan's own work is already committed by then."""
+    from core.library2.scan import rescan_files
+
+    conn, album_ids = scoped_conn
+    db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+
+    class _Shim:
+        def _get_connection(self):
+            opened = sqlite3.connect(db_path)
+            opened.row_factory = sqlite3.Row
+            return opened
+
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path",
+        lambda _path, config_manager=None: None)
+    monkeypatch.setattr(
+        "core.library2.paths.missing_path_root_is_healthy", lambda _path: True
+    )
+
+    def _explode(_ids):
+        raise RuntimeError("acquisition is down")
+
+    stats = rescan_files(_Shim(), album_ids=[album_ids[0]], manual=True,
+                         on_presence_change=_explode)
+
+    assert stats["missing_confirmed"] == 1
+    assert conn.execute(
+        "SELECT file_state FROM lib2_track_files WHERE path='/m/a.flac'"
+    ).fetchone()[0] == "missing_confirmed"

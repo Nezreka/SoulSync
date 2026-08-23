@@ -412,20 +412,18 @@ def outbox_status(conn) -> Dict[str, Any]:
 
 
 def retry_failed(conn) -> int:
-    """Flip 'failed' rows back to 'pending' (manual retry). Caller commits.
-
-    iss29-D07 — the honest version of what this guarantees. The statement below
-    resurrects EVERY failed row; it has no supersede filter of its own. Rows a
-    newer op overrides are not re-applied because the next :func:`drain` marks
-    them ``superseded`` before executing anything (dd28-13), so the protection
-    lives entirely in the drain and only holds while these two run as a pair.
-
-    Two ways to lose it, both worth knowing before this is reused: a backlog
-    larger than the drain's ``limit`` (default 500) leaves the tail pending for
-    a later pass whose supersede window has moved on, and any caller that
-    retries WITHOUT then draining re-arms exactly the failure dd28-13 fixed —
-    a removed wishlist entry coming back.
-    """
+    """Flip current failed rows back to pending; retire obsolete ones first."""
+    failed = [dict(row) for row in conn.execute(
+        "SELECT id, op, payload FROM lib2_mirror_outbox "
+        "WHERE status='failed' ORDER BY id")]
+    obsolete = _superseded_ids(conn, failed)
+    if obsolete:
+        marks = ",".join("?" for _ in obsolete)
+        conn.execute(
+            f"UPDATE lib2_mirror_outbox SET status='superseded', last_error=NULL, "
+            f"processed_at=CURRENT_TIMESTAMP WHERE id IN ({marks})",
+            tuple(obsolete),
+        )
     cur = conn.execute(
         "UPDATE lib2_mirror_outbox SET status='pending', attempts=0 "
         "WHERE status='failed'")

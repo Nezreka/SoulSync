@@ -1710,6 +1710,34 @@ def test_profile_assign_does_not_touch_monitoring_by_default(api):
     assert db.wishlist_adds == []
 
 
+def test_profile_assign_refreshes_an_existing_wishlist_payload(api):
+    client, db, ids = api
+    track = ids["ep_track"]
+    client.post(
+        f"/api/library/v2/tracks/{track}/monitor", json={"monitored": True})
+    with _conn(db) as conn:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS wishlist_tracks(
+                   id INTEGER PRIMARY KEY AUTOINCREMENT, spotify_track_id TEXT,
+                   source_type TEXT, source_info TEXT, profile_id INTEGER,
+                   quality_profile_id INTEGER)""")
+        conn.execute(
+            "INSERT INTO wishlist_tracks(spotify_track_id, source_type, source_info, "
+            "profile_id, quality_profile_id) VALUES('sp-t2', 'album', ?, 1, 1)",
+            (f'{{"source":"library_v2","lib2_track_id":{track}}}',),
+        )
+        conn.commit()
+    db.wishlist_adds.clear()
+
+    response = client.post(
+        f"/api/library/v2/tracks/{track}/quality-profile",
+        json={"quality_profile_id": 2},
+    ).get_json()
+
+    assert response["success"] is True
+    assert db.wishlist_adds[-1]["quality_profile_id"] == 2
+
+
 def test_profile_assign_preserves_explicit_children_and_can_restore_inheritance(api):
     """§52.2: parent changes refresh inherited projections only; a child can
     later clear its override and immediately follow the parent again."""
@@ -2935,16 +2963,16 @@ def test_ui_preferences_round_trip(api):
     assert defaults.status_code == 200
     body = defaults.get_json()
     assert body["success"] is True
-    assert body["preferences"]["track_table"]["columns"]["bpm"] is True
+    assert body["preferences"]["track_table"]["columns"]["bpm"] is False
     assert body["preferences"]["track_table"]["show_all_match_providers"] is False
 
     updated = client.put(
         "/api/library/v2/ui-preferences",
-        json={"track_table": {"columns": {"bpm": False}, "show_all_match_providers": True}},
+        json={"track_table": {"columns": {"bpm": True}, "show_all_match_providers": True}},
     )
     assert updated.status_code == 200
     prefs = updated.get_json()["preferences"]
-    assert prefs["track_table"]["columns"]["bpm"] is False
+    assert prefs["track_table"]["columns"]["bpm"] is True
     # Sibling column untouched by the partial patch.
     assert prefs["track_table"]["columns"]["duration"] is True
 

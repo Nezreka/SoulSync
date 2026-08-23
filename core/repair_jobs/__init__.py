@@ -32,7 +32,6 @@ JOB_DATA_BASIS: dict[str, str] = {
     'album_tag_consistency': 'lib2',
     'live_commentary_cleaner': 'lib2',
     'short_preview_track': 'lib2',
-    'quality_upgrade_scan': 'lib2',
     'skip_audit_cleanup': 'lib2',
     'monitored_discography_refresh': 'lib2',
     'audio_corruption_detector': 'lib2',
@@ -87,7 +86,6 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     'album_tag_consistency': frozenset({'observe', 'metadata', 'tags'}),
     'live_commentary_cleaner': frozenset({'observe', 'delete', 'wanted'}),
     'short_preview_track': frozenset({'observe', 'delete', 'wanted'}),
-    'quality_upgrade_scan': frozenset({'observe', 'wanted'}),
     'skip_audit_cleanup': frozenset({'none'}),
     'monitored_discography_refresh': frozenset({'discography', 'wanted'}),
     'audio_corruption_detector': frozenset({'observe', 'delete', 'wanted'}),
@@ -135,18 +133,22 @@ RETIRED_JOB_IDS = frozenset({
     'lib2_upgrade_scan',
     'lib2_skips_cleanup',
     'lib2_discography_refresh',
+    # Retired because `monitoring_list_reconcile` already queued every upgrade
+    # candidate on its own hourly pass, whether this job ran or not. Its review
+    # half was defeated by exactly that, so there was no configuration in which
+    # both jobs made sense at once.
+    'quality_upgrade_scan',
 })
 
 # Read-only compatibility for saved settings/automation references.  Runtime
 # registration and API responses expose only the neutral identities.
 JOB_ID_MIGRATIONS = {
     # Stable pre-V2 ids remain accepted by saved automations/API callers.
-    # Both quality jobs converge on the native scanner; RepairWorker performs
-    # the config merge and forces migrated installs into review mode.
-    'quality_upgrade_scanner': 'quality_upgrade_scan',
-    'quality_upgrade': 'quality_upgrade_scan',
+    # The quality-upgrade lineage has no live successor to migrate INTO:
+    # queueing upgrades is not a job any more, it is what the wanted
+    # projection does continuously. Their saved configs go inert rather than
+    # being folded into an unrelated job's enabled/interval.
     'discography_backfill': 'monitored_discography_refresh',
-    'lib2_upgrade_scan': 'quality_upgrade_scan',
     'lib2_skips_cleanup': 'skip_audit_cleanup',
     'lib2_discography_refresh': 'monitored_discography_refresh',
     # The two transitional jobs return as one neutral, complete invariant
@@ -162,6 +164,11 @@ JOB_ID_MIGRATIONS = {
 PRESERVED_RETIRED_FINDING_IDS = frozenset({
     'quality_upgrade_scanner',
     'quality_upgrade',
+    # Nothing regenerates a `quality_below_cutoff` finding any more, so the
+    # ones already sitting in the queue are the last of their kind. They stay
+    # approvable through `_fix_quality_below_cutoff` instead of being pruned
+    # out from under a user who was midway through reviewing them.
+    'quality_upgrade_scan',
     'discography_backfill',
 })
 
@@ -222,7 +229,6 @@ _JOB_MODULES = [
     'core.repair_jobs.genre_cleanup',
     'core.repair_jobs.genre_enrichment',
     'core.repair_jobs.comma_artist_splitter',
-    'core.repair_jobs.lib2_upgrade_scan',
     'core.repair_jobs.lib2_skips_cleanup',
     'core.repair_jobs.lib2_discography_refresh',
     'core.repair_jobs.monitoring_list_reconcile',

@@ -29,6 +29,7 @@ function sched(over: Partial<AutoSyncCardRow>): AutoSyncCardRow {
 function view(over: Partial<SyncCardView>): SyncCardView {
   return {
     id: 900,
+    playlistId: 'spotify-playlist-900',
     healthClass: 'health-good',
     sourceLabel: 'Spotify',
     timeStr: '2h ago',

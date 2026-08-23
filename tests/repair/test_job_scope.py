@@ -32,8 +32,11 @@ def test_scoped_jobs_declare_support():
 def test_native_jobs_use_neutral_ids():
     from core.repair_jobs import get_all_jobs
     registry = get_all_jobs()
-    assert "quality_upgrade_scan" in registry
     assert "skip_audit_cleanup" in registry
     assert "monitored_discography_refresh" in registry
     assert "monitoring_list_reconcile" in registry
     assert not any(job_id.startswith("lib2_") for job_id in registry)
+    # Queueing an upgrade candidate is not a job: the wanted projection does it
+    # continuously and `monitoring_list_reconcile` mirrors the result. A second
+    # job on its own cadence was the duplication this registry keeps out.
+    assert "quality_upgrade_scan" not in registry

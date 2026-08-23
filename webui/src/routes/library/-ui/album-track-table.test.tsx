@@ -13,9 +13,11 @@ import {
   clampColumnWidth,
   LibraryV2CanWriteContext,
   mergeColumnOrder,
+  mergeTrackColumnOrder,
   normalizeColumnWidths,
   resolveResponsiveColumnWidths,
   resizeColumnWidths,
+  resizeResponsiveColumnWidths,
   TrackCheckBadge,
 } from './library-v2-page';
 
@@ -62,9 +64,14 @@ function track(overrides: Partial<LibraryV2AlbumDetail['tracks'][number]> = {}) 
     canonical_track_id: null,
     artists: [],
     file: null,
-    file_status: 'missing' as const,
     metadata_gaps: [],
     ...overrides,
+    // A row that carries a file record is a present track unless the test says
+    // otherwise. Defaulting every fixture to 'missing' while handing it a file
+    // produced a shape the server cannot emit, and tests built on it asserted
+    // present-file behaviour on a row the UI is entitled to treat as gone.
+    file_status:
+      overrides.file_status ?? (overrides.file ? ('present' as const) : ('missing' as const)),
   };
 }
 
@@ -103,23 +110,33 @@ describe('library v2 album track table', () => {
       'duration',
       'file_size',
     ]);
+    expect(mergeTrackColumnOrder(['disc'], ['title', 'disc', 'duration'])).toEqual([
+      'title',
+      'disc',
+      'duration',
+    ]);
+    expect(mergeTrackColumnOrder(['disc', 'title'], ['title', 'disc', 'duration'])).toEqual([
+      'disc',
+      'title',
+      'duration',
+    ]);
 
     const defaultLayout = normalizeColumnWidths(['number', 'title']);
-    expect(defaultLayout).toEqual({ number: 3, title: 97 });
+    expect(defaultLayout).toEqual({ number: 2.532, title: 97.468 });
 
     const normalized = normalizeColumnWidths(['number', 'title', 'file_size'], {
       file_size: 120,
     });
     expect(Object.values(normalized).reduce((sum, value) => sum + value, 0)).toBeCloseTo(100);
     expect(normalized.title).toBeGreaterThan(normalized.file_size);
-    expect(normalized.number).toBe(3);
+    expect(normalized.number).toBe(2.532);
 
     const restoredLegacyNumber = normalizeColumnWidths(['number', 'title', 'file_size'], {
       number: 320,
       title: 200,
       file_size: 120,
     });
-    expect(restoredLegacyNumber.number).toBe(3);
+    expect(restoredLegacyNumber.number).toBeCloseTo(2.532, 2);
     expect(Object.values(restoredLegacyNumber).reduce((sum, value) => sum + value, 0)).toBe(100);
 
     const bounded = normalizeColumnWidths(['number', 'title', 'file_size'], {
@@ -172,8 +189,55 @@ describe('library v2 album track table', () => {
     expect(narrower.title / narrower.file_path).toBeCloseTo(48 / 47, 3);
 
     const veryNarrow = resolveResponsiveColumnWidths(keys, weights, 180);
-    expect(Object.values(veryNarrow).reduce((sum, width) => sum + width, 0)).toBeCloseTo(180);
-    expect(Math.min(...Object.values(veryNarrow))).toBeGreaterThan(0);
+    expect(veryNarrow).toEqual({
+      number: 42,
+      title: 120,
+      duration: 82,
+      file_path: 128,
+    });
+    expect(Object.values(veryNarrow).reduce((sum, width) => sum + width, 0)).toBe(372);
+  });
+
+  it('keeps unrelated responsive columns still while resizing one divider', () => {
+    const keys = ['number', 'title', 'duration', 'file_path'];
+    const weights = { number: 2, title: 48, duration: 10, file_path: 40 };
+    const before = resolveResponsiveColumnWidths(keys, weights, 800);
+
+    const resizedWeights = resizeResponsiveColumnWidths(weights, keys, 'duration', 40, 800);
+    const after = resolveResponsiveColumnWidths(keys, resizedWeights, 800);
+
+    expect(after.number).toBeCloseTo(before.number, 2);
+    expect(after.title).toBeCloseTo(before.title, 2);
+    expect(after.duration).toBeCloseTo(before.duration + 40, 2);
+    expect(after.file_path).toBeCloseTo(before.file_path - 40, 2);
+
+    const blockedWeights = resizeResponsiveColumnWidths(weights, keys, 'duration', -500, 800);
+    const blocked = resolveResponsiveColumnWidths(keys, blockedWeights, 800);
+    expect(blocked.duration).toBe(82);
+    expect(blocked.number).toBeCloseTo(before.number, 2);
+    expect(blocked.title).toBeCloseTo(before.title, 2);
+
+    const narrowMatch = resolveResponsiveColumnWidths(
+      ['title', 'match'],
+      { title: 80, match: 20 },
+      200,
+    );
+    expect(narrowMatch).toEqual({ title: 120, match: 264 });
+    expect(
+      resolveResponsiveColumnWidths(['title', 'match'], { title: 80, match: 20 }, 200, {
+        title: 120,
+        match: 260,
+      }),
+    ).toEqual({ title: 120, match: 260 });
+
+    const matchResize = resizeResponsiveColumnWidths(
+      { title: 50, match: 50 },
+      ['title', 'match'],
+      'title',
+      500,
+      600,
+    );
+    expect(resolveResponsiveColumnWidths(['title', 'match'], matchResize, 600).match).toBe(264);
   });
 
   it('expands an uncached album after its first request completes', async () => {
@@ -244,7 +308,7 @@ describe('library v2 album track table', () => {
     expect(await screen.findByText('Downloading 55%')).toBeInTheDocument();
   });
 
-  it('shows media-server recognition next to the imported track title', async () => {
+  it('shows media-server recognition in its own column', async () => {
     server.use(
       http.get('/api/library/v2/albums/42', () =>
         HttpResponse.json({
@@ -259,7 +323,10 @@ describe('library v2 album track table', () => {
         HttpResponse.json({ success: true, profiles: [] }),
       ),
       http.get('/api/library/v2/ui-preferences', () =>
-        HttpResponse.json({ success: true, preferences: { track_table: {} } }),
+        HttpResponse.json({
+          success: true,
+          preferences: { track_table: { columns: { media_server: true } } },
+        }),
       ),
       http.get('/api/library/v2/albums/42/queue-status', () =>
         HttpResponse.json({ tracks: {}, albums: {} }),
@@ -275,8 +342,55 @@ describe('library v2 album track table', () => {
     const recognition = await screen.findByLabelText('Recognised by Navidrome and Plex');
     expect(recognition).toHaveAttribute('title', 'Recognised by Navidrome and Plex');
     expect(recognition).toHaveTextContent('✓2');
+    expect(screen.getByRole('columnheader', { name: 'Media server' })).toBeInTheDocument();
+    expect(recognition.closest('td')).not.toContainElement(screen.getByText('Track Seven'));
     expect(screen.queryByText('Navidrome')).not.toBeInTheDocument();
     expect(screen.queryByText('Plex')).not.toBeInTheDocument();
+  });
+
+  it('shows the quality profile in its own column', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/42', () =>
+        HttpResponse.json({
+          success: true,
+          album: album([
+            track({
+              file_status: 'present',
+              file: trackFile(),
+              quality_profile_source: 'album',
+              meets_profile: true,
+            }),
+          ]),
+        }),
+      ),
+      http.get('/api/library/v2/albums/42/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [{ id: 1, name: 'Lossless' }] }),
+      ),
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: { track_table: { columns: { profile: true, quality: true } } },
+        }),
+      ),
+      http.get('/api/library/v2/albums/42/queue-status', () =>
+        HttpResponse.json({ tracks: {}, albums: {} }),
+      ),
+    );
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    const profile = await screen.findByText('Lossless (Album)');
+    const quality = screen.getByText('FLAC · 16bit/44.1kHz · 900 kbps');
+    expect(screen.getByRole('columnheader', { name: 'Profile' })).toBeInTheDocument();
+    expect(profile.closest('td')).not.toBe(quality.closest('td'));
+    expect(screen.queryByText('900 kbps')).not.toBeInTheDocument();
   });
 
   it('renders one Check column and no separate verification column', async () => {
@@ -503,6 +617,9 @@ describe('library v2 album track table', () => {
     expect(within(dialog).getByText('Quality & sizing')).toBeInTheDocument();
     expect(within(dialog).getByText('Match providers')).toBeInTheDocument();
     expect(within(dialog).getByText('Check')).toBeInTheDocument();
+    expect(within(dialog).getByRole('checkbox', { name: /Title/ })).toBeChecked();
+    expect(within(dialog).getByRole('checkbox', { name: /Title/ })).toBeDisabled();
+    expect(within(dialog).getByLabelText('Drag to reorder Title')).toBeInTheDocument();
   });
 
   it('keeps table preference writes and column resize fail-closed read-only', async () => {
@@ -721,26 +838,16 @@ describe('library v2 album track table', () => {
     expect(screen.getByText('5.00 MB')).toBeInTheDocument();
     expect(screen.getByText('1.00 MB')).toBeInTheDocument();
     const tableColumns = Array.from(table.querySelectorAll('col'));
-    expect(tableColumns[0].style.width).toBe('28px');
-    expect(tableColumns[1].style.width).toBe('30px');
+    expect(tableColumns[0].style.width).toBe('24px');
+    expect(tableColumns[1].style.width).toBe('28px');
+    expect(tableColumns[2].style.width).toBe('32px');
     expect(tableColumns.at(-1)?.style.width).toBe('80px');
-    expect(tableColumns.slice(2, -1).every((column) => column.style.width.endsWith('px'))).toBe(
+    expect(tableColumns.slice(3, -1).every((column) => column.style.width.endsWith('px'))).toBe(
       true,
     );
-
-    const numberColumn = tableColumns[2];
-    const initialNumberWidth = Number.parseFloat(numberColumn.style.width);
-    const numberHandle = screen.getByRole('separator', {
-      name: 'Resize number column',
-    });
-    fireEvent.pointerDown(numberHandle, {
-      button: 0,
-      pointerId: 6,
-      clientX: 100,
-    });
-    fireEvent.pointerMove(numberHandle, { pointerId: 6, clientX: 125 });
-    expect(Number.parseFloat(numberColumn.style.width)).toBeGreaterThan(initialNumberWidth);
-    fireEvent.pointerUp(numberHandle, { pointerId: 6, clientX: 125 });
+    expect(
+      screen.queryByRole('separator', { name: 'Resize number column' }),
+    ).not.toBeInTheDocument();
 
     const visibleTitles = () =>
       within(table)
@@ -784,12 +891,132 @@ describe('library v2 album track table', () => {
         track_table: {
           column_widths: expect.objectContaining({
             file_size: null,
-            number: null,
             title: null,
           }),
         },
       });
     });
     rectSpy.mockRestore();
+  });
+
+  it('empties the file columns of a track whose file is gone', async () => {
+    // The row still carries the quality and size the file HAD — that history is
+    // worth keeping in the database, but printing it in the table made a
+    // missing track indistinguishable from a present one at a glance.
+    server.use(
+      http.get('/api/library/v2/albums/42', () =>
+        HttpResponse.json({
+          success: true,
+          album: album([
+            track({
+              title: 'You See Big Girl',
+              file_status: 'missing',
+              file: {
+                file_id: 1703,
+                path: 'Sawano Hiroyuki/OST/01-03 - You See Big Girl.flac',
+                format: 'flac',
+                bitrate: 929_000,
+                sample_rate: 44_100,
+                bit_depth: 16,
+                size: 42_155_831,
+                quality_tier: 'lossless',
+                import_status: null,
+                verification_status: null,
+                source: null,
+                file_state: 'missing_confirmed',
+              },
+            }),
+          ]),
+        }),
+      ),
+      http.get('/api/library/v2/albums/42/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [] }),
+      ),
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({ success: true, preferences: { track_table: {} } }),
+      ),
+      http.get('/api/library/v2/albums/42/queue-status', () =>
+        HttpResponse.json({ tracks: {}, albums: {} }),
+      ),
+    );
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    // Neither the measured quality nor the byte size may be presented as
+    // current state; the stored path stays, because it says where it was.
+    expect(await screen.findByText('You See Big Girl')).toBeInTheDocument();
+    expect(screen.queryByText(/FLAC/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/40\.2 MB|42155831/)).not.toBeInTheDocument();
+  });
+});
+
+describe('a track whose file lives on another release', () => {
+  it('names the release the file actually sits on', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/42', () =>
+        HttpResponse.json({
+          success: true,
+          album: album([
+            track({
+              title: 'Vogel Im Kafig',
+              file_status: 'linked',
+              linked_from: {
+                track_id: 8960,
+                album_id: 4023,
+                album_title: 'Vogel Im Kafig',
+                album_type: 'single',
+                file_id: 1865,
+                path: 'Sawano Hiroyuki/Vogel Im Kafig/01-07 - Vogel Im Kafig.flac',
+              },
+              file: {
+                file_id: 1865,
+                path: 'Sawano Hiroyuki/Vogel Im Kafig/01-07 - Vogel Im Kafig.flac',
+                format: 'flac',
+                bitrate: null,
+                sample_rate: null,
+                bit_depth: null,
+                size: null,
+                quality_tier: 'lossless',
+                import_status: 'imported',
+                verification_status: null,
+                source: null,
+                file_state: 'active',
+              },
+            }),
+          ]),
+        }),
+      ),
+      http.get('/api/library/v2/albums/42/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [] }),
+      ),
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({ success: true, preferences: { track_table: {} } }),
+      ),
+      http.get('/api/library/v2/albums/42/queue-status', () =>
+        HttpResponse.json({ tracks: {}, albums: {} }),
+      ),
+    );
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    const badge = await screen.findByText('on “Vogel Im Kafig”');
+    expect(badge).toHaveAttribute(
+      'title',
+      expect.stringContaining('Sawano Hiroyuki/Vogel Im Kafig/01-07 - Vogel Im Kafig.flac'),
+    );
   });
 });

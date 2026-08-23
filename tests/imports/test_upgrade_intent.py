@@ -42,6 +42,27 @@ def test_upgrade_snapshot_cas_detects_primary_change(monkeypatch):
     assert pipeline._upgrade_snapshot_still_current(expected) is False
 
 
+def test_snapshot_rejects_cross_format_same_rank_tier_only_upgrade(monkeypatch):
+    from core.quality.model import AudioQuality
+
+    snapshot = pipeline._UpgradeSnapshot(
+        4, 10, "/old.mp3", "/old.mp3", {
+            "id": 2,
+            "ranked_targets": [{"format": "flac", "bit_depth": 24}, {}],
+            "fallback_enabled": True,
+            "upgrade_policy": "until_cutoff",
+            "upgrade_cutoff_index": 0,
+        }, "same")
+    qualities = {
+        "/old.mp3": AudioQuality("mp3", 128, None, None),
+        "/new.ogg": AudioQuality("ogg", 320, None, None),
+    }
+    monkeypatch.setattr(
+        "core.imports.file_ops.probe_audio_quality", lambda path: qualities[path])
+
+    assert pipeline._decide_snapshot_upgrade(snapshot, "/new.ogg").allowed is False
+
+
 def test_upgrade_transform_returns_exact_lossy_artifact_when_original_deleted(
     tmp_path, monkeypatch,
 ):

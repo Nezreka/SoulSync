@@ -90,6 +90,7 @@ def test_error_names_active_media_server():
     assert "navidrome" in msg.lower(), (
         f"Active server name must appear in error; got: {msg}"
     )
+    assert "Report Real Path" in msg
 
 
 def test_error_includes_sample_db_path():

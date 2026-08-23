@@ -273,6 +273,22 @@ def test_a_newer_op_supersedes_an_older_pending_one_for_the_same_entity(db):
     assert MO.drain(flaky)["done"] == 0, "nothing may remain queued"
 
 
+def test_retry_does_not_rearm_a_failed_op_superseded_by_a_later_success(db):
+    flaky, conn = db
+    track = flaky.ids["track"]
+    old = MO.enqueue_tracks(conn, [track], True, profile_id=3)[0]
+    conn.execute(
+        "UPDATE lib2_mirror_outbox SET status='failed' WHERE id=?", (old,))
+    newer = MO.enqueue_tracks(conn, [track], False, profile_id=3)[0]
+    conn.execute(
+        "UPDATE lib2_mirror_outbox SET status='done' WHERE id=?", (newer,))
+
+    assert MO.retry_failed(conn) == 0
+    assert conn.execute(
+        "SELECT status FROM lib2_mirror_outbox WHERE id=?", (old,)
+    ).fetchone()[0] == "superseded"
+
+
 def test_artist_watchlist_add_pushes_explicit_catalog_profile(db):
     """Split-doc contract: the native Watchlist add takes one explicit
     quality_profile_id (branch-split/LIBRARY_OVERHAUL.md "Library v2

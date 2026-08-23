@@ -339,9 +339,14 @@ describe('seeding — the engine must be able to FIND the playlist (2235-2240)',
     responder = (url) =>
       url === '/api/deezer/arl-playlists'
         ? [ARL_ROW]
-        : url === '/api/deezer/arl-playlist/7'
-          ? { name: 'Deep Cuts', tracks: [{ id: 'a' }, { id: 'b' }] }
-          : {};
+        : url === '/api/deezer/arl-playlist/7?async=1'
+          ? { pending: true, job_id: 'arl-job-7' }
+          : url === '/api/deezer/playlist-load/arl-job-7'
+            ? {
+                status: 'complete',
+                playlist: { name: 'Deep Cuts', tracks: [{ id: 'a' }, { id: 'b' }] },
+              }
+            : {};
     render(<DeezerArlTab />);
     await waitFor(() => expect(screen.getByText('Deep Cuts')).toBeInTheDocument());
     // Nothing is seeded just by loading — the vanilla shims at modal time.
@@ -549,7 +554,13 @@ describe('DeezerArlTab', () => {
 
   it('opens its own modal id, off the RAW-id endpoint (2557, 2576)', async () => {
     responder = (url) =>
-      url === '/api/deezer/arl-playlists' ? [ARL_ROW] : { name: 'Deep Cuts', tracks: [] };
+      url === '/api/deezer/arl-playlists'
+        ? [ARL_ROW]
+        : url === '/api/deezer/arl-playlist/7?async=1'
+          ? { pending: true, job_id: 'arl-job-7' }
+          : url === '/api/deezer/playlist-load/arl-job-7'
+            ? { status: 'complete', playlist: { name: 'Deep Cuts', tracks: [] } }
+            : {};
     render(<DeezerArlTab />);
     await waitFor(() => expect(screen.getByText('Deep Cuts')).toBeInTheDocument());
     fireEvent.click(document.querySelector('#action-btn-deezer_arl_7') as Element);
@@ -557,7 +568,7 @@ describe('DeezerArlTab', () => {
       expect(document.querySelector('#deezer-arl-playlist-details-modal')).not.toBeNull(),
     );
     // The PATH takes the raw id; the ids around it are prefixed.
-    expect(calls.some((c) => c.url === '/api/deezer/arl-playlist/7')).toBe(true);
+    expect(calls.some((c) => c.url === '/api/deezer/arl-playlist/7?async=1')).toBe(true);
   });
 
   it('narrates the resolve-albums progress and ignores a frame for another playlist', async () => {

@@ -2338,7 +2338,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     def lib2_quality_profiles():
         """List app-wide profiles with the canonical upgrade-policy contract.
 
-        ``upgrade_policy`` is one of ``acceptable``, ``until_cutoff`` or the
+        ``upgrade_policy`` is one of ``none``, ``acceptable``, ``until_cutoff`` or the
         persisted legacy alias ``until_top``. For ``until_cutoff``, clients
         use ``upgrade_cutoff_index``; ``until_top`` always means index 0.
         """
@@ -3025,9 +3025,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     def lib2_set_quality_profile(entity, eid):
         """Assign a profile without changing its upgrade-policy semantics.
 
-        Explicit ``monitor_existing`` applies to both upgrade modes:
-        ``until_cutoff`` and legacy ``until_top``. ``acceptable`` assignment
-        alone never turns existing tracks into wanted upgrades.
+        Explicit ``monitor_existing`` applies to every enabled upgrade mode;
+        ``none`` never turns existing tracks into wanted upgrades.
         """
         guard = _guard()
         if guard:
@@ -3099,6 +3098,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             updated = sum(int(item["updated"]) for item in assignments)
             auto_monitored = 0
             auto_monitor_track_ids: List[int] = []
+            if entity == "artists":
+                marks = ",".join("?" for _ in entity_ids)
+                affected_track_ids = [r["id"] for r in conn.execute(
+                    f"SELECT id FROM lib2_tracks WHERE album_id IN "
+                    f"(SELECT id FROM lib2_albums WHERE primary_artist_id IN ({marks}))",
+                    entity_ids,
+                )]
+            elif entity == "albums":
+                affected_track_ids = [r["id"] for r in conn.execute(
+                    "SELECT id FROM lib2_tracks WHERE album_id=?", (eid,))]
+            else:
+                affected_track_ids = [eid]
             from core.library2.quality_eval import is_upgrade_policy
             # Bulk auto-monitor skips consolidated-away duplicates (a track the
             # user deliberately left fileless while its canonical partner owns
@@ -3147,49 +3158,31 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         conn, "track", auto_monitor_track_ids, True,
                         PROVENANCE_USER if entity == "tracks" else PROVENANCE_CASCADE,
                         profile_id=_profile())
-                    from core.library2.wanted import recompute_wanted
-                    recompute_wanted(conn, profile_id=_profile(),
-                                     track_ids=auto_monitor_track_ids)
-            else:
-                # dd28-42: the DEFAULT UI path assigns a profile without
-                # monitor_existing, and that branch never recomputed the
-                # projection — so lib2_wanted_tracks.effective_profile_id kept
-                # the OLD profile until the next hourly full recompute, or
-                # forever if that job is disabled. Everything that reads the
-                # effective profile (cutoff-unmet, upgrade scan, search
-                # ranking) then judged by a profile the user had already
-                # replaced. Reprojecting is cheap and changes no monitoring
-                # intent: recompute_wanted derives wanted-ness from the rules,
-                # it does not create any.
-                affected_track_ids: List[int] = []
-                if entity == "artists":
-                    marks = ",".join("?" for _ in entity_ids)
-                    affected_track_ids = [r["id"] for r in conn.execute(
-                        f"SELECT id FROM lib2_tracks "
-                        f"WHERE album_id IN (SELECT id FROM lib2_albums "
-                        f"WHERE primary_artist_id IN ({marks}))",
-                        entity_ids,
-                    )]
-                elif entity == "albums":
-                    affected_track_ids = [r["id"] for r in conn.execute(
-                        "SELECT id FROM lib2_tracks WHERE album_id=?", (eid,),
-                    )]
-                elif entity == "tracks":
-                    affected_track_ids = [eid]
-                if affected_track_ids:
-                    from core.library2.wanted import recompute_wanted
-                    recompute_wanted(conn, profile_id=_profile(),
-                                     track_ids=affected_track_ids)
+            # Recompute and mirror every descendant now. Otherwise the changed
+            # projection marker is consumed here while an existing Wishlist row
+            # keeps its old profile forever.
+            if affected_track_ids:
+                from core.library2.wanted import recompute_wanted
+                recompute_wanted(conn, profile_id=_profile(),
+                                 track_ids=affected_track_ids)
             conn.commit()
             mirrored = 0
-            if auto_monitor_track_ids:
+            if affected_track_ids:
+                from core.library2.monitor_sync import _wishlisted_lib2_track_ids
+                from core.library2.wanted import track_wanted_states
                 from core.library2.wishlist_mirror import (
                     mirror_projected_tracks_wishlist,
                 )
+                states = track_wanted_states(
+                    conn, affected_track_ids, profile_id=_profile())
+                wishlisted = set(_wishlisted_lib2_track_ids(
+                    conn, profile_id=_profile()))
+                mirror_ids = [tid for tid in affected_track_ids
+                              if states.get(tid) or tid in wishlisted]
                 mirrored = mirror_projected_tracks_wishlist(
                     db,
                     conn,
-                    auto_monitor_track_ids,
+                    mirror_ids,
                     profile_id=_profile(),
                 )
         finally:
@@ -5044,9 +5037,29 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 def _progress(_stage, current, total):
                     _job_registry.update(job_id, current=current, total=total)
 
+                # manual=True: a person pressed the button. That turns an
+                # unambiguous stale index path into a repair instead of a
+                # report, and confirms a credible miss on this pass instead of
+                # asking them to press again (core/library2/scan.py).
+                presence_changed: List[int] = []
                 scan_stats = rescan_files(
-                    db, album_ids=album_ids, progress=_progress,
+                    db, album_ids=album_ids, progress=_progress, manual=True,
+                    on_presence_change=presence_changed.extend,
                 )
+                # A scan is the moment we learn a file is gone or back, and
+                # acquisition is the consumer of exactly that. Handing it over
+                # here — scoped to the tracks that actually changed — is what
+                # makes a missing track wanted NOW instead of whenever the
+                # hourly Monitoring List Reconcile next happens to look.
+                if presence_changed:
+                    from core.library2.monitor_sync import (
+                        sync_scanned_tracks_wishlist,
+                    )
+                    sync_stats = sync_scanned_tracks_wishlist(
+                        db, presence_changed, profile_id=ADMIN_PROFILE_ID,
+                    )
+                    scan_stats["acquisition_tracks"] = sync_stats["tracks"]
+                    scan_stats["acquisition_mirrored"] = sync_stats["mirrored"]
                 _job_registry.update(
                     job_id,
                     current=int(scan_stats.get("scanned", 0))

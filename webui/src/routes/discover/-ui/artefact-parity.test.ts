@@ -65,7 +65,19 @@ const KNOWN_IDS = new Set<string>([
  * domId="lastfm-radio-section"); it appears here because the scan reads
  * component SOURCE and cannot tell a prop from an attribute.
  */
-const NEW_IDS = ['build-a-playlist', 'lastfm-radio', 'listenbrainz', 'recent-releases'];
+const NEW_IDS = [
+  'build-a-playlist',
+  'lastfm-radio',
+  'listenbrainz',
+  'recent-releases',
+  // The four zone anchors upstream's Discover redesign added (3.2.5). They are
+  // scroll targets the page's own zone map jumps to, not vanilla artefacts —
+  // the vanilla had no zones at all.
+  'discover-zone-for-you',
+  'discover-zone-library',
+  'discover-zone-new-missing',
+  'discover-zone-tools',
+];
 
 /**
  * Artefacts whose ONLY vanilla home was the index.html discover markup, which
@@ -101,7 +113,13 @@ const DELETED_MARKUP_CLASSES = ['artweb-size-btn', 'watch-all-text'];
  * them KNOWN_CLASSES, which is this list's designed end state: a name may
  * only pass through here on its way to a stylesheet.
  */
-const NEW_CLASSES: string[] = [];
+const NEW_CLASSES: string[] = [
+  // Arrived with upstream's Discover redesign (3.2.5) as a modifier on the
+  // styled `.discovery-zone-section` base, and — unlike its sibling modifiers
+  // — carries no rule of its own yet. It leaves this list the moment it gets
+  // one, or the moment it turns out never to need it.
+  'discovery-zone-section--map-tools',
+];
 
 function componentFiles(): string[] {
   return readdirSync(UI)

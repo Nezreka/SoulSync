@@ -683,7 +683,9 @@ def test_get_album_preserves_unknown_present_file_quality(imported_conn):
 
     assert track["file_status"] == "present"
     assert track["meets_profile"] is None
-    assert track["upgrade_candidate"] is None
+    # Fresh installs default to upgrades disabled, so unknown quality remains
+    # visible without becoming an automatic replacement candidate.
+    assert track["upgrade_candidate"] is False
 
 
 def test_get_album_surfaces_first_missing_scan_without_marking_track_missing(imported_conn):

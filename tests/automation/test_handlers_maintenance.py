@@ -182,7 +182,15 @@ class TestDuplicateCleaner:
 
 
 class TestQualityScanner:
-    def test_triggers_native_upgrade_scan_job(self):
+    def test_triggers_the_job_that_now_owns_the_outcome(self):
+        """There is no quality-scan job left to trigger.
+
+        Queueing an upgrade candidate is what the wanted projection does
+        continuously; `monitoring_list_reconcile` mirrors the result. A saved
+        automation keeps its action name and now runs the job that actually
+        produces the outcome it was written for, instead of erroring on a job
+        that no longer exists.
+        """
         triggered = []
         deps = _build_deps(
             run_repair_job_now=lambda job_id, **kwargs: triggered.append(
@@ -191,8 +199,8 @@ class TestQualityScanner:
         )
         result = auto_start_quality_scan({}, deps)
         assert triggered == [(
-            'quality_upgrade_scan',
-            {'mode': 'review', 'compatibility_source': 'start_quality_scan'},
+            'monitoring_list_reconcile',
+            {'compatibility_source': 'start_quality_scan'},
         )]
         assert result['status'] == 'completed'
         assert result['triggered'] is True
