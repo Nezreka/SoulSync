@@ -885,7 +885,7 @@ function initializeWebSocket() {
     socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
     socket.on('enrichment:soulid', (data) => updateSoulIDStatusFromData(data));
     socket.on('enrichment:listening-stats', () => { }); // Status only, no UI update needed
-    socket.on('repair:progress', (data) => { qaSignal('tools'); updateRepairJobProgressFromData(data); });
+    socket.on('repair:progress', (data) => { qaSignal('tools'); updateRepairJobProgressFromData(data); if (typeof updateMusicRepairTask === 'function') updateMusicRepairTask(data); });
     // Server Activity live push — feed the open drawer (Tautulli replacement)
     socket.on('activity:update', (data) => {
         if (window.ServerActivity && window.ServerActivity._onSocket) window.ServerActivity._onSocket(data);
@@ -920,7 +920,12 @@ function initializeWebSocket() {
     socket.on('tool:logs', (data) => updateLogsFromData(data));
 
     // Phase 5 event listeners (sync/discovery progress + scans)
-    socket.on('sync:progress', (data) => { qaSignal('sync'); updateSyncProgressFromData(data); });
+    socket.on('sync:progress', (data) => {
+        qaSignal('sync');
+        updateSyncProgressFromData(data);
+        window.dispatchEvent(new CustomEvent('ss:sync-progress', { detail: data }));
+        if (typeof updateMusicSyncTask === 'function') updateMusicSyncTask(data);
+    });
     socket.on('discovery:progress', (data) => {
         qaSignal('sync');
         updateDiscoveryProgressFromData(data);
@@ -945,7 +950,11 @@ function initializeWebSocket() {
     // room-scoped (only playlist watchers receive it), so the dashboard
     // relies on this 1s pulse that fires while ANY pipeline work runs —
     // manual syncs, UI pipelines, and the scheduled auto-sync automation.
-    socket.on('sync:active', () => qaSignal('sync'));
+    socket.on('sync:active', (data) => {
+        qaSignal('sync');
+        window.dispatchEvent(new CustomEvent('ss:sync-progress', { detail: data }));
+        if (typeof updateMusicSyncTask === 'function') updateMusicSyncTask(data);
+    });
     socket.on('scan:watchlist', (data) => {
         const watchlistBtn = document.querySelector('.nav-button[data-page="watchlist"]');
         if (watchlistBtn) {
@@ -956,9 +965,10 @@ function initializeWebSocket() {
         // the same `ss:` window-event seam the shell bridge already uses.
         // Purely additive — the vanilla handlers above are untouched.
         window.dispatchEvent(new CustomEvent('ss:watchlist-scan', { detail: data }));
+        if (typeof updateMusicWatchlistScanTask === 'function') updateMusicWatchlistScanTask(data);
     });
-    socket.on('scan:media', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateMediaScanFromData(data); });
-    socket.on('wishlist:stats', (data) => updateWishlistStatsFromData(data));
+    socket.on('scan:media', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateMediaScanFromData(data); if (typeof updateMusicMediaScanTask === 'function') updateMusicMediaScanTask(data); });
+    socket.on('wishlist:stats', (data) => { updateWishlistStatsFromData(data); if (typeof updateMusicWishlistTask === 'function') updateMusicWishlistTask(data); });
     // Phase 6: Automation progress
     socket.on('automation:progress', (data) => {
         qaSignal('auto');
@@ -967,6 +977,7 @@ function initializeWebSocket() {
         // the progress state is module-scoped in stats-automations.js and cannot
         // be read from a module, so the vanilla side announces and React reacts.
         window.dispatchEvent(new CustomEvent('ss:automation-progress', { detail: data }));
+        if (typeof updateMusicAutomationTask === 'function') updateMusicAutomationTask(data);
     });
     socket.on('overlay:progress', (data) => { if (typeof updateOverlayTask === 'function') updateOverlayTask(data); });
     socket.on('collections:sync', (data) => { if (typeof updateCollectionSyncTask === 'function') updateCollectionSyncTask(data); });

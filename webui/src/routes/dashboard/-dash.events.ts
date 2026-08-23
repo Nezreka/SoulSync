@@ -30,6 +30,7 @@ export const DASHBOARD_WISHLIST_COUNT_EVENT = 'ss:dashboard-wishlist-count';
 export const WATCHLIST_COUNT_EVENT = 'ss:watchlist-count';
 export const SERVICE_STATUS_EVENT = 'ss:service-status';
 export const RATE_MONITOR_EVENT = 'ss:rate-monitor';
+export const SYNC_PROGRESS_EVENT = 'ss:sync-progress';
 /** settings.js syncJiosaavnEnrichmentBubble — the JioSaavn orb's live
  *  show/hide when the experimental opt-in is toggled. */
 export const JIOSAAVN_EXPERIMENTAL_EVENT = 'ss:jiosaavn-experimental';
@@ -59,6 +60,25 @@ export type EnrichEventId =
 export interface EnrichStatusFrame {
   id: EnrichEventId;
   data: ProviderStatusPayload;
+}
+
+export interface SyncProgressFrame {
+  active?: boolean;
+  syncs?: SyncProgressFrame[];
+  playlist_id?: string | number;
+  playlist_name?: string;
+  status?: string;
+  progress?: {
+    progress?: number;
+    total_tracks?: number;
+    matched_tracks?: number;
+    failed_tracks?: number;
+    current_step?: string;
+    current_track?: string;
+    playlist_name?: string;
+  } | null;
+  result?: Record<string, unknown> | null;
+  error?: string;
 }
 
 function useShellEvent<T>(name: string, onFrame: (frame: T) => void): void {
@@ -110,6 +130,10 @@ export function useServiceStatusEvent(onFrame: (frame: ServiceStatusPayload) => 
 
 export function useRateMonitorEvent(onFrame: (frame: Record<string, unknown>) => void): void {
   useShellEvent(RATE_MONITOR_EVENT, onFrame);
+}
+
+export function useSyncProgressEvent(onFrame: (frame: SyncProgressFrame) => void): void {
+  useShellEvent(SYNC_PROGRESS_EVENT, onFrame);
 }
 
 export function useJiosaavnExperimentalEvent(

@@ -4161,7 +4161,15 @@ async function _startSyncHistoryResync(entryId, entry) {
         }
 
         // Store active re-sync state
-        _activeSyncHistoryResyncs[entryId] = { syncPlaylistId, entryId };
+        _activeSyncHistoryResyncs[entryId] = { syncPlaylistId, entryId, playlistName: entry.playlist_name };
+        if (typeof updateMusicSyncTask === 'function') {
+            updateMusicSyncTask({
+                playlist_id: syncPlaylistId,
+                playlist_name: entry.playlist_name,
+                status: 'starting',
+                progress: { progress: 0, total_tracks: tracks.length, playlist_name: entry.playlist_name },
+            });
+        }
 
         // Start polling for progress
         _pollSyncHistoryProgress(entryId, syncPlaylistId);
@@ -4176,6 +4184,7 @@ async function _startSyncHistoryResync(entryId, entry) {
 function _pollSyncHistoryProgress(entryId, syncPlaylistId) {
     const pollInterval = setInterval(async () => {
         try {
+            const active = _activeSyncHistoryResyncs[entryId];
             const resp = await fetch(`/api/sync/status/${syncPlaylistId}`);
             if (!resp.ok) {
                 clearInterval(pollInterval);
@@ -4183,6 +4192,9 @@ function _pollSyncHistoryProgress(entryId, syncPlaylistId) {
                 return;
             }
             const state = await resp.json();
+            const syncFrame = { playlist_id: syncPlaylistId, playlist_name: active?.playlistName || '', ...state };
+            window.dispatchEvent(new CustomEvent('ss:sync-progress', { detail: syncFrame }));
+            if (typeof updateMusicSyncTask === 'function') updateMusicSyncTask(syncFrame);
 
             if (state.status === 'syncing' || state.status === 'starting') {
                 const progress = state.progress || {};

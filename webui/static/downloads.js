@@ -3157,6 +3157,7 @@ function processModalStatusUpdate(playlistId, data) {
     }
 
     console.debug(`📊 [Status Update] Processing update for ${playlistId}: phase=${data.phase}, tasks=${(data.tasks || []).length}`);
+    _patchOverlayActive();
 
 
     if (data.phase === 'queued') {
@@ -3726,6 +3727,7 @@ function startModalDownloadPolling(playlistId) {
 
     // Mark process as running to be picked up by global poller
     process.status = 'running';
+    updateMusicSyncTask({ active: true });
 
     // Start global polling if not already running
     startGlobalDownloadPolling();
@@ -4270,6 +4272,9 @@ function startSyncPolling(playlistId) {
             const response = await fetch(`/api/sync/status/${playlistId}`);
             const state = await response.json();
             console.log(`📊 Poll response:`, state);
+            const syncFrame = { playlist_id: playlistId, playlist_name: playlist?.name || '', ...state };
+            window.dispatchEvent(new CustomEvent('ss:sync-progress', { detail: syncFrame }));
+            updateMusicSyncTask(syncFrame);
 
             if (state.status === 'syncing') {
                 const progress = state.progress;
@@ -4730,10 +4735,387 @@ function _overlayTaskActive() {
     return !!(_overlayTask && (_overlayTask.running || _overlayTask.phase === 'starting' || _overlayTask.phase === 'running'));
 }
 
+// ── Music-side active tasks (automation, scans, repairs, sync/downloads) ─────
+// Video already pins long jobs in the bell. These mirror the same standard for
+// music jobs that already emit socket progress elsewhere in the app.
+const _musicAutomationTasks = {};
+const _musicRepairTasks = {};
+let _musicWatchlistTask = null;
+let _musicWatchlistClearTimer = null;
+let _musicMediaScanTask = null;
+let _musicMediaScanClearTimer = null;
+let _musicWishlistTask = null;
+let _musicWishlistClearTimer = null;
+let _musicSyncPulse = null;
+let _musicSyncClearTimer = null;
+
+function _taskClampPct(value, fallback = 0) {
+    let pct = Number(value);
+    if (!Number.isFinite(pct)) pct = Number(fallback);
+    if (!Number.isFinite(pct)) pct = 0;
+    if (pct > 0 && pct <= 1) pct *= 100;
+    return Math.max(0, Math.min(100, Math.round(pct)));
+}
+
+function _taskHasPct(value) {
+    return value != null && value !== '' && Number.isFinite(Number(value));
+}
+
+function _taskPct(done, total, phase) {
+    const totalNum = Number(total);
+    if (Number.isFinite(totalNum) && totalNum > 0) return _taskClampPct((Number(done) || 0) / totalNum * 100);
+    return phase === 'done' || phase === 'finished' || phase === 'complete' ? 100 : null;
+}
+
+function _taskCount(value, fallback = 0) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+function _taskCardHTML(title, pct, line, cls = '', actionHTML = '') {
+    const safePct = _taskHasPct(pct) ? _taskClampPct(pct) : 0;
+    return `
+        <div class="${_taskCardClass(cls, pct)}">
+            <div class="notif-active-head">
+                <span class="notif-active-title">${_escToast(title)}</span>
+                <span class="notif-active-pct">${_taskPctText(pct)}</span>
+            </div>
+            <div class="notif-active-bar"><div class="notif-active-fill" ${_taskFillStyle(pct, safePct)}></div></div>
+            <div class="notif-active-sub">${line}${actionHTML}</div>
+        </div>`;
+}
+
+function _taskCardClass(cls, pct) {
+    return ['notif-active', cls ? `notif-active-${cls}` : '', _taskHasPct(pct) ? '' : 'notif-active-indeterminate']
+        .filter(Boolean).join(' ');
+}
+
+function _taskPctText(pct) {
+    return _taskHasPct(pct) ? `${_taskClampPct(pct)}%` : 'Active';
+}
+
+function _taskFillStyle(pct, safePct = _taskClampPct(pct)) {
+    return _taskHasPct(pct) ? `style="width:${safePct}%"` : '';
+}
+
+function _notifActionHTML(label, page) {
+    return `<button type="button" class="notif-active-link" onclick="navigateToPage('${_escAttr(page)}')">${_escToast(label)}</button>`;
+}
+
+function updateMusicAutomationTask(data) {
+    if (!data) return;
+    if (Object.keys(data).length === 0) {
+        for (const aid of Object.keys(_musicAutomationTasks)) delete _musicAutomationTasks[aid];
+        _updateOverlayBell();
+        _patchOverlayActive();
+        return;
+    }
+    for (const [aid, state] of Object.entries(data)) {
+        if (!state) continue;
+        const status = state.status || 'running';
+        _musicAutomationTasks[aid] = { ...state, id: aid, updated_at: Date.now() };
+        if (status === 'finished' || status === 'error') {
+            const updatedAt = _musicAutomationTasks[aid].updated_at;
+            setTimeout(() => {
+                const cur = _musicAutomationTasks[aid];
+                if (cur && cur.updated_at === updatedAt && cur.status !== 'running') {
+                    delete _musicAutomationTasks[aid];
+                    _updateOverlayBell();
+                    _patchOverlayActive();
+                }
+            }, 30000);
+        }
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+function _musicAutomationActive() {
+    return Object.values(_musicAutomationTasks).some(t => t && t.status === 'running');
+}
+
+function _musicAutomationActiveHTML() {
+    return Object.values(_musicAutomationTasks).map(t => {
+        if (!t) return '';
+        const running = t.status === 'running';
+        const pct = running ? (_taskHasPct(t.progress) ? _taskClampPct(t.progress) : null) : 100;
+        const name = t.automation_name || t.name || t.action_type || 'Automation';
+        const latest = Array.isArray(t.log) && t.log.length ? t.log[t.log.length - 1].text : '';
+        const line = _escToast(t.phase || latest || (running ? 'Running' : t.status || 'Finished'));
+        const cls = t.status === 'error' ? 'error' : (!running ? 'done' : '');
+        return _taskCardHTML(`Automation: ${name}`, pct, line, cls, _notifActionHTML('Open Automations', 'automations'));
+    }).join('');
+}
+
+function updateMusicRepairTask(data) {
+    if (!data) return;
+    if (Object.keys(data).length === 0) {
+        for (const jobId of Object.keys(_musicRepairTasks)) delete _musicRepairTasks[jobId];
+        _updateOverlayBell();
+        _patchOverlayActive();
+        return;
+    }
+    for (const [jobId, state] of Object.entries(data)) {
+        if (!state) continue;
+        _musicRepairTasks[jobId] = { ...state, id: jobId, updated_at: Date.now() };
+        if (state.status === 'finished' || state.status === 'error') {
+            const updatedAt = _musicRepairTasks[jobId].updated_at;
+            setTimeout(() => {
+                const cur = _musicRepairTasks[jobId];
+                if (cur && cur.updated_at === updatedAt && cur.status !== 'running') {
+                    delete _musicRepairTasks[jobId];
+                    _updateOverlayBell();
+                    _patchOverlayActive();
+                }
+            }, 12000);
+        }
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+function _musicRepairActive() {
+    return Object.values(_musicRepairTasks).some(t => t && t.status === 'running');
+}
+
+function _musicRepairActiveHTML() {
+    return Object.values(_musicRepairTasks).map(t => {
+        if (!t) return '';
+        const total = t.total || 0;
+        const done = t.scanned || t.processed || 0;
+        const rawPct = t.percent != null ? t.percent : (t.progress != null ? t.progress : _taskPct(done, total, t.status));
+        const pct = _taskHasPct(rawPct) ? _taskClampPct(rawPct) : null;
+        const cls = t.status === 'error' ? 'error' : (t.status === 'finished' ? 'done' : '');
+        const line = `${(done || 0).toLocaleString()} / ${total ? total.toLocaleString() : '…'}` +
+            (t.current_item ? ' · ' + _escToast(t.current_item) : '');
+        return _taskCardHTML(t.name || t.job_name || 'Library maintenance', pct, line, cls, _notifActionHTML('Open Tools', 'tools'));
+    }).join('');
+}
+
+function updateMusicWatchlistScanTask(data) {
+    if (!data) return;
+    if (_musicWatchlistClearTimer) { clearTimeout(_musicWatchlistClearTimer); _musicWatchlistClearTimer = null; }
+    const active = data.status === 'scanning' || data.is_scanning || data.running;
+    if (active) {
+        _musicWatchlistTask = { ...data, updated_at: Date.now() };
+    } else if (_musicWatchlistTask && (data.status === 'complete' || data.status === 'completed' || data.status === 'error')) {
+        _musicWatchlistTask = { ...data, updated_at: Date.now() };
+        _musicWatchlistClearTimer = setTimeout(() => { _musicWatchlistTask = null; _updateOverlayBell(); _patchOverlayActive(); }, 8000);
+    } else if (!active) {
+        _musicWatchlistTask = null;
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+function _musicWatchlistActive() {
+    return !!(_musicWatchlistTask && (_musicWatchlistTask.status === 'scanning' || _musicWatchlistTask.is_scanning || _musicWatchlistTask.running));
+}
+
+function _musicWatchlistActiveHTML() {
+    const t = _musicWatchlistTask;
+    if (!t) return '';
+    const total = t.total_artists || t.total || 0;
+    const done = t.processed_artists || t.processed || 0;
+    const pct = _taskPct(done, total, t.status);
+    const cls = t.status === 'error' ? 'error' : (!_musicWatchlistActive() ? 'done' : '');
+    const line = total ? `${done} / ${total} artists` : (t.current_artist ? _escToast(t.current_artist) : 'Scanning watchlist');
+    return _taskCardHTML('Scanning watchlist', pct, line, cls, _notifActionHTML('Open Watchlist', 'watchlist'));
+}
+
+function updateMusicMediaScanTask(data) {
+    const s = data && (typeof data.status === 'object' ? data.status : data);
+    if (!s) return;
+    if (_musicMediaScanClearTimer) { clearTimeout(_musicMediaScanClearTimer); _musicMediaScanClearTimer = null; }
+    const active = s.is_scanning || s.status === 'scanning' || s.phase === 'scanning';
+    if (active) {
+        _musicMediaScanTask = { ...s, updated_at: Date.now() };
+    } else if (_musicMediaScanTask && (s.status === 'complete' || s.status === 'completed' || s.phase === 'complete')) {
+        _musicMediaScanTask = { ...s, updated_at: Date.now(), phase: 'done' };
+        _musicMediaScanClearTimer = setTimeout(() => { _musicMediaScanTask = null; _updateOverlayBell(); _patchOverlayActive(); }, 8000);
+    } else {
+        _musicMediaScanTask = null;
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+function _musicMediaScanActive() {
+    return !!(_musicMediaScanTask && (_musicMediaScanTask.is_scanning || _musicMediaScanTask.status === 'scanning' || _musicMediaScanTask.phase === 'scanning'));
+}
+
+function _musicMediaScanActiveHTML() {
+    const t = _musicMediaScanTask;
+    if (!t) return '';
+    const active = _musicMediaScanActive();
+    const rawPct = t.progress != null ? t.progress : t.percent;
+    const pct = active ? (_taskHasPct(rawPct) ? _taskClampPct(rawPct) : null) : 100;
+    const cls = t.error_message ? 'error' : (!_musicMediaScanActive() ? 'done' : '');
+    const line = _escToast(t.current_item || t.phase || t.status || 'Updating library');
+    return _taskCardHTML('Updating music library', pct, line, cls, _notifActionHTML('Open Tools', 'tools'));
+}
+
+function updateMusicWishlistTask(data) {
+    if (!data) return;
+    if (_musicWishlistClearTimer) { clearTimeout(_musicWishlistClearTimer); _musicWishlistClearTimer = null; }
+    const hasActiveBatchSignal = data.active_batches != null;
+    const activeBatches = Number(data.active_batches || 0);
+    const active = !!data.is_auto_processing && (!hasActiveBatchSignal || activeBatches > 0);
+    if (active) {
+        _musicWishlistTask = { ...data, updated_at: Date.now() };
+    } else if (_musicWishlistTask) {
+        _musicWishlistTask = { ...data, is_auto_processing: false, updated_at: Date.now() };
+        _musicWishlistClearTimer = setTimeout(() => { _musicWishlistTask = null; _updateOverlayBell(); _patchOverlayActive(); }, 8000);
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+function _musicWishlistActive() {
+    return !!(_musicWishlistTask && _musicWishlistTask.is_auto_processing);
+}
+
+function _musicWishlistActiveHTML() {
+    const t = _musicWishlistTask;
+    if (!t) return '';
+    const pct = _musicWishlistActive() ? null : 100;
+    const cls = _musicWishlistActive() ? '' : 'done';
+    const activeBatches = Number(t.active_batches || 0);
+    const line = _musicWishlistActive()
+        ? (activeBatches ? `${activeBatches} wishlist batch${activeBatches === 1 ? '' : 'es'} running` : 'Processing queued wishlist tracks')
+        : 'Wishlist processing finished';
+    return _taskCardHTML('Processing wishlist', pct, line, cls, _notifActionHTML('Open Wishlist', 'wishlist'));
+}
+
+function updateMusicSyncTask(data) {
+    if (_musicSyncClearTimer) clearTimeout(_musicSyncClearTimer);
+    const incoming = data || {};
+    if (Array.isArray(incoming.syncs) && incoming.syncs.length) {
+        _musicSyncPulse = { ...incoming, processes: incoming.syncs, updated_at: Date.now() };
+    } else {
+        const previous = _musicSyncPulse || {};
+        const previousProcesses = Array.isArray(previous.processes) ? previous.processes : [];
+        const process = incoming.playlist_id || incoming.playlist_name || incoming.progress
+            ? incoming
+            : null;
+        _musicSyncPulse = {
+            ...previous,
+            ...incoming,
+            processes: process ? [process] : previousProcesses,
+            updated_at: Date.now(),
+        };
+    }
+    const terminal = ['finished', 'error', 'cancelled', 'complete'].includes(_musicSyncPulse.status);
+    _musicSyncClearTimer = setTimeout(() => { _musicSyncPulse = null; _updateOverlayBell(); _patchOverlayActive(); }, terminal ? 12000 : 7000);
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+function _activeMusicDownloads() {
+    return Object.entries(activeDownloadProcesses || {})
+        .filter(([, p]) => p && p.status === 'running' && p.batchId)
+        .map(([playlistId, p]) => ({ playlistId, ...p }));
+}
+
+function _syncProcessName(process) {
+    const progress = process?.progress || {};
+    return process?.playlist?.name || process?.playlistName || process?.playlist_name || process?.playlist_name
+        || progress.playlist_name
+        || process?.name || process?.playlist_id || process?.playlistId || 'Playlist';
+}
+
+function _syncProcessProgress(process) {
+    const progress = process?.progress || {};
+    const pct = progress.progress != null ? progress.progress : process?.percent;
+    if (pct != null) return _taskClampPct(pct);
+    const matched = progress.matched_tracks || process?.matched_tracks || 0;
+    const failed = progress.failed_tracks || process?.failed_tracks || 0;
+    const total = progress.total_tracks || process?.total_tracks || 0;
+    if (total) return _taskClampPct(((matched + failed) / total) * 100);
+    return process?.status === 'starting' ? 0 : null;
+}
+
+function _syncProcessLine(process) {
+    const progress = process?.progress || {};
+    const matched = progress.matched_tracks || process?.matched_tracks || 0;
+    const failed = progress.failed_tracks || process?.failed_tracks || 0;
+    const total = progress.total_tracks || process?.total_tracks || 0;
+    const current = progress.current_track || process?.current_track || '';
+    const step = progress.current_step || process?.current_step || process?.status || 'Syncing';
+    const counts = total ? `${matched}/${total} matched${failed ? `, ${failed} failed` : ''}` : step;
+    return _escToast(current ? `${step} · ${current}` : counts);
+}
+
+function _musicSyncSources() {
+    const active = _activeMusicDownloads();
+    if (active.length) return active;
+    return Array.isArray(_musicSyncPulse?.processes) ? _musicSyncPulse.processes : [];
+}
+
+function _musicSyncActive() {
+    return _musicSyncSources().length > 0 || !!(_musicSyncPulse && Date.now() - _musicSyncPulse.updated_at < 8000);
+}
+
+function _musicSyncActiveHTML() {
+    const sources = _musicSyncSources();
+    if (!sources.length && !_musicSyncActive()) return '';
+    const first = sources[0];
+    const pct = sources.length ? _syncProcessProgress(first) : null;
+    const title = sources.length === 1
+        ? `Syncing ${_syncProcessName(first)}`
+        : `Syncing ${sources.length} playlists`;
+    const line = sources.length
+        ? (sources.length === 1 ? _syncProcessLine(first) : sources.map(p => _escToast(_syncProcessName(p))).slice(0, 3).join(', '))
+        : 'Playlist sync is running';
+    return _taskCardHTML(title, pct, line, '', _notifActionHTML('Open Downloads', 'active-downloads'));
+}
+
+function _musicTasksActive() {
+    return _musicAutomationActive() || _musicRepairActive() || _musicWatchlistActive()
+        || _musicMediaScanActive() || _musicWishlistActive() || _musicSyncActive();
+}
+
+function _musicActiveHTML() {
+    return _musicAutomationActiveHTML() + _musicSyncActiveHTML() + _musicWishlistActiveHTML()
+        + _musicWatchlistActiveHTML() + _musicMediaScanActiveHTML() + _musicRepairActiveHTML();
+}
+
+function _seedMusicAutomationTask() {
+    fetch('/api/automations/progress')
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s) updateMusicAutomationTask(s); })
+        .catch(() => {});
+}
+
+function _seedMusicDownloadTask() {
+    fetch('/api/active-processes')
+        .then(r => r.ok ? r.json() : null)
+        .then(s => {
+            if (!s || !Array.isArray(s.active_processes)) return;
+            const batches = s.active_processes.filter(p => p.type === 'batch');
+            if (batches.length) updateMusicSyncTask({ active: true, processes: batches });
+        })
+        .catch(() => {});
+}
+
+function _seedMusicRepairTask() {
+    fetch('/api/repair/progress')
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s) updateMusicRepairTask(s); })
+        .catch(() => {});
+}
+
+function _seedMusicMediaScanTask() {
+    fetch('/api/scan/status')
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s) updateMusicMediaScanTask(s); })
+        .catch(() => {});
+}
+
 function _updateOverlayBell() {
     const btn = document.getElementById('notif-bell-btn');
     if (btn) btn.classList.toggle('notif-bell-working',
-        _overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive() || _videoBulkTaskActive());
+        _overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive() || _videoBulkTaskActive() || _musicTasksActive());
     _ensureTaskPolling();
 }
 
@@ -4742,13 +5124,17 @@ function _updateOverlayBell() {
 // strand an Active card in its last "running" state. Stops itself when idle.
 let _taskPollTimer = null;
 function _ensureTaskPolling() {
-    const active = _overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive() || _videoBulkTaskActive();
+    const active = _overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive() || _videoBulkTaskActive() || _musicTasksActive();
     if (active && !_taskPollTimer) {
         _taskPollTimer = setInterval(() => {
             _seedOverlayTask();
             _seedCollectionSyncTask();
             _seedCollectionArtTask();
             _seedVideoBulkTask();
+            _seedMusicAutomationTask();
+            _seedMusicDownloadTask();
+            _seedMusicRepairTask();
+            _seedMusicMediaScanTask();
         }, 12000);
     } else if (!active && _taskPollTimer) {
         clearInterval(_taskPollTimer);
@@ -4790,16 +5176,16 @@ function _colArtTaskActive() {
 function _colArtActiveHTML() {
     const t = _colArtTask;
     if (!t) return '';
-    const total = t.total || 0, done = t.done || 0;
-    const pct = total ? Math.min(100, Math.round(done / total * 100)) : (t.phase === 'done' ? 100 : 4);
+    const total = _taskCount(t.total), done = _taskCount(t.done);
+    const pct = _taskPct(done, total, t.phase);
     let line, cls = '';
     if (t.phase === 'done') { line = `Done · ${t.rendered || 0} rendered` + (t.failed ? `, ${t.failed} failed` : ''); cls = 'done'; }
     else if (t.phase === 'error') { line = 'Failed: ' + _escToast(t.error || 'error'); cls = 'error'; }
     else line = `${done} / ${total || '…'}` + (t.name ? ' · ' + _escToast(t.name) : '');
     return `
-        <div class="notif-active notif-active-${cls}">
-            <div class="notif-active-head"><span class="notif-active-title">Refreshing collection artwork</span><span class="notif-active-pct">${pct}%</span></div>
-            <div class="notif-active-bar"><div class="notif-active-fill" style="width:${pct}%"></div></div>
+        <div class="${_taskCardClass(cls, pct)}">
+            <div class="notif-active-head"><span class="notif-active-title">Refreshing collection artwork</span><span class="notif-active-pct">${_taskPctText(pct)}</span></div>
+            <div class="notif-active-bar"><div class="notif-active-fill" ${_taskFillStyle(pct)}></div></div>
             <div class="notif-active-sub">${line}</div>
         </div>`;
 }
@@ -4840,17 +5226,17 @@ function _videoBulkTaskActive() {
 function _videoBulkActiveHTML() {
     const t = _videoBulkTask;
     if (!t) return '';
-    const total = t.total || 0, done = t.done || 0;
-    const pct = total ? Math.min(100, Math.round(done / total * 100)) : (t.phase === 'done' ? 100 : 4);
+    const total = _taskCount(t.total), done = _taskCount(t.done);
+    const pct = _taskPct(done, total, t.phase);
     let line, cls = '';
     if (t.phase === 'done') { line = `Done · ${t.ok || 0} updated` + (t.failed ? `, ${t.failed} failed` : ''); cls = 'done'; }
     else if (t.phase === 'error') { line = 'Failed: ' + _escToast(t.error || 'error'); cls = 'error'; }
     else line = `${done} / ${total || '…'}`;
     const title = t.label ? _escToast(t.label) : 'Bulk metadata edit';
     return `
-        <div class="notif-active notif-active-${cls}">
-            <div class="notif-active-head"><span class="notif-active-title">${title}</span><span class="notif-active-pct">${pct}%</span></div>
-            <div class="notif-active-bar"><div class="notif-active-fill" style="width:${pct}%"></div></div>
+        <div class="${_taskCardClass(cls, pct)}">
+            <div class="notif-active-head"><span class="notif-active-title">${title}</span><span class="notif-active-pct">${_taskPctText(pct)}</span></div>
+            <div class="notif-active-bar"><div class="notif-active-fill" ${_taskFillStyle(pct)}></div></div>
             <div class="notif-active-sub">${line}</div>
         </div>`;
 }
@@ -4891,8 +5277,8 @@ function _colSyncTaskActive() {
 function _colSyncActiveHTML() {
     const t = _colSyncTask;
     if (!t) return '';
-    const total = t.total || 0, done = t.done || 0;
-    const pct = total ? Math.min(100, Math.round(done / total * 100)) : (t.phase === 'done' ? 100 : 4);
+    const total = _taskCount(t.total), done = _taskCount(t.done);
+    const pct = _taskPct(done, total, t.phase);
     let line, cls = '';
     if (t.phase === 'done') {
         line = `Done · ${t.synced || 0} synced` +
@@ -4903,9 +5289,9 @@ function _colSyncActiveHTML() {
     } else if (t.phase === 'error') { line = 'Failed: ' + _escToast(t.error || 'error'); cls = 'error'; }
     else line = `${done} / ${total || '…'}` + (t.name ? ' · ' + _escToast(t.name) : '');
     return `
-        <div class="notif-active notif-active-${cls}">
-            <div class="notif-active-head"><span class="notif-active-title">Syncing collections</span><span class="notif-active-pct">${pct}%</span></div>
-            <div class="notif-active-bar"><div class="notif-active-fill" style="width:${pct}%"></div></div>
+        <div class="${_taskCardClass(cls, pct)}">
+            <div class="notif-active-head"><span class="notif-active-title">Syncing collections</span><span class="notif-active-pct">${_taskPctText(pct)}</span></div>
+            <div class="notif-active-bar"><div class="notif-active-fill" ${_taskFillStyle(pct)}></div></div>
             <div class="notif-active-sub">${line}</div>
         </div>`;
 }
@@ -4913,24 +5299,24 @@ function _colSyncActiveHTML() {
 function _overlayActiveHTML() {
     const t = _overlayTask;
     if (!t) return '';
-    const total = t.total || 0, done = t.done || 0;
-    const pct = total ? Math.min(100, Math.round(done / total * 100)) : (t.phase === 'done' ? 100 : 4);
+    const total = _taskCount(t.total), done = _taskCount(t.done);
+    const pct = _taskPct(done, total, t.phase);
     const verb = t.mode === 'remove' ? 'Removing overlays' : t.mode === 'reset' ? 'Resetting posters' : 'Applying overlays';
     let line, cls = '';
     if (t.phase === 'done') { line = `Done · ${t.applied || 0} updated, ${t.skipped || 0} unchanged` + (t.failed ? `, ${t.failed} failed` : ''); cls = 'done'; }
     else if (t.phase === 'error') { line = 'Failed: ' + _escToast(t.error || 'error'); cls = 'error'; }
     else line = `${done.toLocaleString()} / ${total ? total.toLocaleString() : '…'}` + (t.title ? ' · ' + _escToast(t.title) : '');
     return `
-        <div class="notif-active notif-active-${cls}">
-            <div class="notif-active-head"><span class="notif-active-title">${verb}</span><span class="notif-active-pct">${pct}%</span></div>
-            <div class="notif-active-bar"><div class="notif-active-fill" style="width:${pct}%"></div></div>
+        <div class="${_taskCardClass(cls, pct)}">
+            <div class="notif-active-head"><span class="notif-active-title">${verb}</span><span class="notif-active-pct">${_taskPctText(pct)}</span></div>
+            <div class="notif-active-bar"><div class="notif-active-fill" ${_taskFillStyle(pct)}></div></div>
             <div class="notif-active-sub">${line}</div>
         </div>`;
 }
 
 function _patchOverlayActive() {
     const host = document.querySelector('#notif-panel [data-notif-active-host]');
-    if (host) host.innerHTML = _overlayActiveHTML() + _colSyncActiveHTML() + _colArtActiveHTML() + _videoBulkActiveHTML();
+    if (host) host.innerHTML = _musicActiveHTML() + _overlayActiveHTML() + _colSyncActiveHTML() + _colArtActiveHTML() + _videoBulkActiveHTML();
 }
 
 function showToast(message, type = 'success', helpSection = null) {
@@ -5028,7 +5414,7 @@ function _openNotifPanel() {
             ${entries.length > 0 ? '<button class="notif-panel-clear" onclick="_clearNotifHistory()">Clear All</button>' : ''}
         </div>
         <div class="notif-filter-row">${_notifFilterChipsHTML()}</div>
-        <div class="notif-active-host" data-notif-active-host>${_overlayActiveHTML()}</div>
+        <div class="notif-active-host" data-notif-active-host>${_musicActiveHTML() + _overlayActiveHTML() + _colSyncActiveHTML() + _colArtActiveHTML() + _videoBulkActiveHTML()}</div>
         <div class="notif-panel-body">${_notifEntriesHTML()}</div>
         <div class="notif-panel-sys" data-notif-sys>${_notifSysHTML()}</div>
     `;
@@ -5039,6 +5425,10 @@ function _openNotifPanel() {
     _seedCollectionSyncTask();
     _seedCollectionArtTask();
     _seedVideoBulkTask();
+    _seedMusicAutomationTask();
+    _seedMusicDownloadTask();
+    _seedMusicRepairTask();
+    _seedMusicMediaScanTask();
 
     // Position above the bell button
     if (btn) {

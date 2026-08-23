@@ -112,6 +112,34 @@ describe('the vanilla side of the progress seam', () => {
     expect(read('core.js')).toContain('updateAutomationProgressFromData(data)');
   });
 
+  it('also forwards automation progress to the notification active-card rail', () => {
+    expect(read('core.js')).toContain('updateMusicAutomationTask(data)');
+    expect(read('downloads.js')).toContain('function updateMusicAutomationTask(data)');
+    expect(read('downloads.js')).toContain("_notifActionHTML('Open Automations', 'automations')");
+  });
+
+  it('does not keep the wishlist notification pinned on a stale processing flag', () => {
+    expect(read('downloads.js')).toContain('const hasActiveBatchSignal = data.active_batches != null');
+    expect(read('downloads.js')).toContain('const active = !!data.is_auto_processing && (!hasActiveBatchSignal || activeBatches > 0)');
+  });
+
+  it('clears map-style notification tasks when the backend reports no active jobs', () => {
+    expect(read('downloads.js')).toContain('for (const aid of Object.keys(_musicAutomationTasks)) delete _musicAutomationTasks[aid]');
+    expect(read('downloads.js')).toContain('for (const jobId of Object.keys(_musicRepairTasks)) delete _musicRepairTasks[jobId]');
+  });
+
+  it('clamps notification percentages before rendering them', () => {
+    expect(read('downloads.js')).toContain('function _taskClampPct(value, fallback = 0)');
+    expect(read('downloads.js')).toContain('const safePct = _taskHasPct(pct) ? _taskClampPct(pct) : 0');
+  });
+
+  it('renders an indeterminate notification bar when real progress is unavailable', () => {
+    expect(read('downloads.js')).toContain('function _taskHasPct(value)');
+    expect(read('downloads.js')).toContain("return process?.status === 'starting' ? 0 : null");
+    expect(read('downloads.js')).toContain('notif-active-indeterminate');
+    expect(read('style.css')).toContain('@keyframes notif-active-slide');
+  });
+
   it('loadAutomations refuses to repaint the legacy list behind React', () => {
     // Reachable via the shared builder: saveAutomation calls onSaved ->
     // loadAutomations after the React page has reclaimed the shell. Without

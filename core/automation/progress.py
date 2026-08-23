@@ -49,6 +49,7 @@ def init_progress(automation_id: int, automation_name: str, action_type: str) ->
     with progress_lock:
         progress_states[automation_id] = {
             'status': 'running',
+            'automation_name': automation_name,
             'action_type': action_type,
             'progress': 0,
             'phase': 'Starting...',

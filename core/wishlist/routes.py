@@ -175,6 +175,14 @@ def get_wishlist_stats(runtime: WishlistRouteRuntime) -> tuple[Dict[str, Any], i
         next_run_in_seconds = runtime.get_next_run_seconds("process_wishlist") if runtime.get_next_run_seconds else 0
         is_processing = runtime.is_wishlist_actually_processing()
         current_cycle = _get_wishlist_cycle(runtime.get_music_database)
+        active_batches = 0
+        with runtime.tasks_lock:
+            active_batches = sum(
+                1
+                for batch in runtime.download_batches.values()
+                if batch.get("playlist_id") == "wishlist"
+                and batch.get("phase") not in ["complete", "error", "cancelled"]
+            )
 
         payload = build_wishlist_stats_payload(
             raw_tracks,
@@ -182,6 +190,7 @@ def get_wishlist_stats(runtime: WishlistRouteRuntime) -> tuple[Dict[str, Any], i
             is_auto_processing=is_processing,
             current_cycle=current_cycle,
         )
+        payload["active_batches"] = active_batches
         return payload, 200
     except Exception as exc:
         runtime.logger.error("Error getting wishlist stats: %s", exc)

@@ -299,6 +299,16 @@ describe('the glow edge is the progress bar', () => {
     expect((document.querySelector('.auto-tile-edge') as HTMLElement).style.width).toBe('2%');
   });
 
+  it('does not leak NaN when a progress payload is non-numeric', () => {
+    render(
+      <AutomationCard
+        automation={auto({ id: 1, enabled: 1 })}
+        progress={{ status: 'running', progress: 'Scanning' as unknown as number, log: [] }}
+      />,
+    );
+    expect((document.querySelector('.auto-tile-edge') as HTMLElement).style.width).toBe('2%');
+  });
+
   it('does not repeat itself inside the progress panel', () => {
     // The panel used to carry its own bar — the same number, twice, on one card.
     render(

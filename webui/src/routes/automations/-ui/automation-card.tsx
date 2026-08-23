@@ -340,7 +340,8 @@ export function AutomationCard({
   const triggerLabel = `${automationIcon(a.trigger_type)} ${formatTrigger(a.trigger_type, a.trigger_config, blockLabel)}`;
   const actionLabel = `${automationIcon(a.action_type)} ${formatAction(a.action_type, blockLabel)}`;
   // 2% so a run that has just started still shows an edge rather than nothing.
-  const percent = running ? Math.max(2, Math.min(100, progress?.progress || 0)) : 0;
+  const rawPercent = Number(progress?.progress);
+  const percent = running ? Math.max(2, Math.min(100, Number.isFinite(rawPercent) ? rawPercent : 0)) : 0;
 
   // The facts left over once the schedule line took the countdown and the head
   // took the run count: what happened LAST time. Assembled as nodes rather

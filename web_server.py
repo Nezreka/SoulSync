@@ -27981,7 +27981,15 @@ def start_itunes_link_sync(url_hash):
         state['sync_progress'] = {}
 
         with sync_lock:
-            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
+            sync_states[sync_playlist_id] = {
+                "status": "starting",
+                "playlist_name": playlist_name,
+                "progress": {
+                    "playlist_name": playlist_name,
+                    "total_tracks": len(spotify_tracks),
+                    "progress": 0,
+                }
+            }
 
         playlist_image_url = state['playlist'].get('image_url', '')
         future = sync_executor.submit(_run_sync_task, sync_playlist_id, playlist_name, spotify_tracks, None, get_current_profile_id(), playlist_image_url)
@@ -28819,7 +28827,15 @@ def start_playlist_sync():
             return jsonify({"success": False, "error": "Sync is already in progress for this playlist."}), 409
 
         # Initial state
-        sync_states[playlist_id] = {"status": "starting", "progress": {}}
+        sync_states[playlist_id] = {
+            "status": "starting",
+            "playlist_name": playlist_name,
+            "progress": {
+                "playlist_name": playlist_name,
+                "total_tracks": len(tracks_json),
+                "progress": 0,
+            }
+        }
 
         # Submit the task to the thread pool (capture profile_id while still in request context)
         _sync_profile_id = get_current_profile_id()
@@ -36346,7 +36362,15 @@ def wing_it_sync():
         add_activity_item("", "Wing It Sync Started", f"'{playlist_name}' — {len(sync_tracks)} tracks", "Now")
 
         with sync_lock:
-            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
+            sync_states[sync_playlist_id] = {
+                "status": "starting",
+                "playlist_name": playlist_name,
+                "progress": {
+                    "playlist_name": playlist_name,
+                    "total_tracks": len(sync_tracks),
+                    "progress": 0,
+                }
+            }
 
         # Pass wing_it flag via sync state so _run_sync_task can skip wishlist
         with sync_lock:
@@ -36403,7 +36427,15 @@ def start_listenbrainz_sync(playlist_mbid):
         }
 
         with sync_lock:
-            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
+            sync_states[sync_playlist_id] = {
+                "status": "starting",
+                "playlist_name": playlist_name,
+                "progress": {
+                    "playlist_name": playlist_name,
+                    "total_tracks": len(spotify_tracks),
+                    "progress": 0,
+                }
+            }
 
         # Submit sync task
         future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id())
@@ -38346,7 +38378,15 @@ def start_beatport_sync(url_hash):
 
         # Add to sync states using existing sync system
         with sync_lock:
-            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
+            sync_states[sync_playlist_id] = {
+                "status": "starting",
+                "playlist_name": sync_data['name'],
+                "progress": {
+                    "playlist_name": sync_data['name'],
+                    "total_tracks": len(spotify_tracks),
+                    "progress": 0,
+                }
+            }
 
         # Start sync in background using existing thread pool
         future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['name'], spotify_tracks, None, get_current_profile_id())
@@ -43327,6 +43367,24 @@ def _any_playlist_sync_running() -> bool:
         )
 
 
+def _active_playlist_sync_summaries():
+    """Small unscoped payload for the bell/dashboard: no track lists, just live
+    labels and counters. The detailed sync:progress stream stays room-scoped."""
+    summaries = []
+    with sync_lock:
+        for pid, state in list(sync_states.items()):
+            if not state or state.get('status') not in _SYNC_ACTIVE_STATUSES:
+                continue
+            progress = state.get('progress') or {}
+            summaries.append({
+                'playlist_id': pid,
+                'playlist_name': state.get('playlist_name') or progress.get('playlist_name') or '',
+                'status': state.get('status'),
+                'progress': progress,
+            })
+    return summaries
+
+
 def _reconcile_discovery_sync_phases():
     """Server-side backstop for the 'syncing' -> terminal phase transition (#972).
 
@@ -43396,8 +43454,9 @@ def _emit_sync_progress_loop():
             # dashboard's Auto-Sync tile needs to light for ALL pipeline
             # work, including the scheduled auto-sync (an automation).
             # Emitted only while active; the frontend decays on silence.
-            if _any_playlist_sync_running():
-                socketio.emit('sync:active', {'active': True})
+            active_syncs = _active_playlist_sync_summaries()
+            if active_syncs or _any_playlist_sync_running():
+                socketio.emit('sync:active', {'active': True, 'syncs': active_syncs})
         except Exception as e:
             logger.debug(f"Error in sync progress loop: {e}")
 
@@ -43466,8 +43525,17 @@ def _emit_scan_status_loop():
         # Wishlist stats (auto-processing detection + countdown refresh)
         try:
             next_run = automation_engine.get_system_automation_next_run_seconds('process_wishlist') if automation_engine else 0
+            active_batches = 0
+            with tasks_lock:
+                active_batches = sum(
+                    1
+                    for batch in download_batches.values()
+                    if batch.get('playlist_id') == 'wishlist'
+                    and batch.get('phase') not in ['complete', 'error', 'cancelled']
+                )
             socketio.emit('wishlist:stats', {
                 "is_auto_processing": is_wishlist_actually_processing(),
+                "active_batches": active_batches,
                 "next_run_in_seconds": next_run,
             })
         except Exception as e:
