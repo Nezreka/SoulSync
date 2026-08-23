@@ -68405,6 +68405,86 @@ body.max-performance #page-particles-canvas {
     .watchlist-row-health {
         justify-content: flex-start;
     }
+
+    .watchlist-command-layout {
+        padding-bottom: calc(min(260px, 34vh) + env(safe-area-inset-bottom, 0px) + 24px);
+    }
+
+    .watchlist-inspector {
+        position: fixed;
+        top: auto;
+        left: 10px;
+        right: 10px;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+        z-index: 9000;
+        max-height: min(260px, 34vh);
+        overflow-y: auto;
+        padding: 12px;
+        border-radius: 16px 16px 12px 12px;
+        background: rgba(18, 18, 20, 0.96);
+        border-color: rgba(255, 255, 255, 0.14);
+        box-shadow: 0 -18px 48px rgba(0, 0, 0, 0.58);
+        backdrop-filter: blur(18px);
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .watchlist-inspector::before {
+        content: '';
+        display: block;
+        width: 44px;
+        height: 4px;
+        margin: 0 auto 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.22);
+    }
+
+    .watchlist-inspector-hero {
+        grid-template-columns: 58px minmax(0, 1fr);
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+        padding-bottom: 10px;
+    }
+
+    .watchlist-inspector-hero .watchlist-card-image-fallback,
+    .watchlist-inspector-hero img {
+        width: 58px;
+        height: 58px;
+        aspect-ratio: 1;
+        border-radius: 12px;
+        font-size: 24px;
+    }
+
+    .watchlist-inspector-hero h3 {
+        font-size: 17px;
+        line-height: 1.15;
+    }
+
+    .watchlist-inspector-actions {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 7px;
+        margin-bottom: 0;
+    }
+
+    .watchlist-inspector-actions .wl-chip--red {
+        grid-column: auto;
+    }
+
+    .watchlist-inspector-warning {
+        margin: 8px 0 0;
+    }
+
+    .watchlist-inspector-section {
+        padding: 8px 0;
+    }
+
+    .watchlist-inspector-section + .watchlist-inspector-section {
+        display: none;
+    }
+
+    .watchlist-inspector .watchlist-panel-head.compact {
+        margin-bottom: 6px;
+    }
 }
 
 /* ═══════════════════════════════════════════════════════════════════
