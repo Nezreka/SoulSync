@@ -3199,10 +3199,49 @@ function isSidebarCollapsed() {
 }
 
 function setSidebarCollapsed(collapsed) {
+    const sidebar = document.querySelector('.sidebar');
+    const canAnimate = sidebar && window.matchMedia
+        && window.matchMedia('(min-width: 769px)').matches
+        && !document.body.classList.contains('reduce-effects')
+        && !document.body.classList.contains('max-performance');
+    const fromWidth = canAnimate ? sidebar.getBoundingClientRect().width : 0;
+    const targetWidth = collapsed ? 68 : 240;
+
+    if (canAnimate) {
+        sidebar.style.transition = 'none';
+        sidebar.style.width = `${fromWidth}px`;
+        sidebar.style.minWidth = `${fromWidth}px`;
+        sidebar.style.maxWidth = `${fromWidth}px`;
+        sidebar.style.flexBasis = `${fromWidth}px`;
+        sidebar.offsetWidth; // commit the starting width before the state flips
+    }
+
     // Expanded carries no attribute so the plain :root width applies — one less
     // state for the CSS to special-case.
     if (collapsed) document.documentElement.setAttribute('data-sidebar', 'collapsed');
     else document.documentElement.removeAttribute('data-sidebar');
+
+    if (canAnimate) {
+        const transition = 'width 420ms cubic-bezier(0.22, 1, 0.36, 1), min-width 420ms cubic-bezier(0.22, 1, 0.36, 1), max-width 420ms cubic-bezier(0.22, 1, 0.36, 1), flex-basis 420ms cubic-bezier(0.22, 1, 0.36, 1)';
+        requestAnimationFrame(() => {
+            sidebar.style.transition = transition;
+            sidebar.style.width = `${targetWidth}px`;
+            sidebar.style.minWidth = `${targetWidth}px`;
+            sidebar.style.maxWidth = `${targetWidth}px`;
+            sidebar.style.flexBasis = `${targetWidth}px`;
+        });
+        const clearInlineAnimation = (event) => {
+            if (event.target !== sidebar || event.propertyName !== 'width') return;
+            sidebar.removeEventListener('transitionend', clearInlineAnimation);
+            sidebar.style.transition = '';
+            sidebar.style.width = '';
+            sidebar.style.minWidth = '';
+            sidebar.style.maxWidth = '';
+            sidebar.style.flexBasis = '';
+        };
+        sidebar.addEventListener('transitionend', clearInlineAnimation);
+    }
+
     try {
         if (collapsed) localStorage.setItem(SIDEBAR_COLLAPSE_KEY, '1');
         else localStorage.removeItem(SIDEBAR_COLLAPSE_KEY);

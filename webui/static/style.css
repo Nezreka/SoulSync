@@ -12,6 +12,7 @@
        escape the overflow clip) and the page particles canvas offsets from it.
        Hardcode the width in any of them again and they detach. */
     --sidebar-w: 240px;
+    --sidebar-collapse-transition: 420ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 /* Collapsed: icons only. */
@@ -83,6 +84,7 @@ body {
 
 .sidebar {
     width: var(--sidebar-w);
+    flex: 0 0 var(--sidebar-w);
 
     /* Opaque dark foundation (GPU-optimized: no backdrop-filter needed on solid dark body) */
     background: linear-gradient(135deg,
@@ -113,6 +115,13 @@ body {
     /* Custom scrollbar styling */
     scrollbar-width: thin;
     scrollbar-color: rgba(var(--accent-rgb), 0.4) rgba(255, 255, 255, 0.03);
+    transition:
+        width var(--sidebar-collapse-transition),
+        min-width var(--sidebar-collapse-transition),
+        max-width var(--sidebar-collapse-transition),
+        flex-basis var(--sidebar-collapse-transition),
+        border-radius var(--sidebar-collapse-transition),
+        box-shadow var(--sidebar-collapse-transition);
 }
 
 /* Sidebar ambient aura — uses transform/opacity for GPU-smooth animation */
@@ -194,7 +203,7 @@ body.max-performance .sidebar::after {
        even 5) pokes through the overlays. */
     z-index: 1;
     opacity: 0;
-    transition: opacity 0.5s ease;
+    transition: left var(--sidebar-collapse-transition), opacity 0.5s ease;
     pointer-events: none;
 }
 .sidebar-visualizer.active {
@@ -3132,6 +3141,9 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     pointer-events: none;
     z-index: 0;
     opacity: 0.55;
+    transition:
+        left var(--sidebar-collapse-transition),
+        width var(--sidebar-collapse-transition);
 }
 .page {
     position: relative;
@@ -7234,6 +7246,13 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     .sidebar {
         min-width: var(--sidebar-w);
         max-width: var(--sidebar-w);
+        transition:
+            width var(--sidebar-collapse-transition),
+            min-width var(--sidebar-collapse-transition),
+            max-width var(--sidebar-collapse-transition),
+            flex-basis var(--sidebar-collapse-transition),
+            border-radius var(--sidebar-collapse-transition),
+            box-shadow var(--sidebar-collapse-transition);
     }
 
     .main-content {
@@ -37837,7 +37856,7 @@ div.artist-hero-badge {
     min-width: 0;
 }
 .discover-command-hero .discover-hero {
-    height: clamp(318px, 32vw, 372px);
+    height: 100%;
     margin-bottom: 0;
     border-radius: 14px;
     border: 1px solid rgba(255, 255, 255, 0.09);
@@ -76031,6 +76050,36 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 html[data-sidebar] .nav-button,
 html[data-sidebar] .nav-section-label {
     width: calc(var(--sidebar-w) - 24px);
+    transition:
+        width var(--sidebar-collapse-transition),
+        padding var(--sidebar-collapse-transition),
+        margin var(--sidebar-collapse-transition),
+        gap var(--sidebar-collapse-transition),
+        background .12s ease,
+        color .12s ease;
+}
+
+.nav-text,
+.sidebar-brand-text,
+.nav-section-title,
+.side-toggle-btn span,
+.profile-indicator-name {
+    max-width: 160px;
+    opacity: 1;
+    visibility: visible;
+    overflow: hidden;
+    transition:
+        max-width var(--sidebar-collapse-transition),
+        opacity 120ms ease;
+}
+
+.nav-section-chevron {
+    transition:
+        width var(--sidebar-collapse-transition),
+        max-width var(--sidebar-collapse-transition),
+        transform .2s ease,
+        opacity .15s ease,
+        visibility 0s linear 0s;
 }
 
 /* ── Collapsed: icons only ── */
@@ -76117,14 +76166,22 @@ html[data-sidebar="collapsed"] .profile-indicator { justify-content: center; fle
     border-radius: 8px;
     color: rgba(255, 255, 255, 0.55);
     cursor: pointer;
-    transition: background .15s ease, color .15s ease, border-color .15s ease;
+    transition:
+        background .15s ease,
+        color .15s ease,
+        border-color .15s ease,
+        transform var(--sidebar-collapse-transition);
 }
 .sidebar-collapse-toggle:hover {
     background: rgba(255, 255, 255, 0.1);
     color: rgba(255, 255, 255, 0.9);
     border-color: rgba(255, 255, 255, 0.16);
 }
-.sidebar-collapse-toggle svg { width: 14px; height: 14px; }
+.sidebar-collapse-toggle svg {
+    width: 14px;
+    height: 14px;
+    transition: transform var(--sidebar-collapse-transition);
+}
 /* Chevrons point the way the click will take you: inward to shrink, outward
    to grow back. Collapsed is the only state where expanding is the only move. */
 html[data-sidebar="collapsed"] .sidebar-collapse-toggle svg { transform: rotate(180deg); }
@@ -76146,6 +76203,10 @@ html[data-sidebar="collapsed"] .sidebar-collapse-toggle svg { transform: rotate(
     html[data-sidebar="collapsed"] .version-section,
     html[data-sidebar="collapsed"] .status-section {
         display: revert;
+        max-width: revert;
+        width: revert;
+        opacity: revert;
+        visibility: revert;
     }
     html[data-sidebar="collapsed"] .nav-button {
         width: calc(var(--sidebar-w) - 24px);
@@ -76153,6 +76214,11 @@ html[data-sidebar="collapsed"] .sidebar-collapse-toggle svg { transform: rotate(
         gap: 14px;
         justify-content: flex-start;
     }
+}
+
+body.reduce-effects,
+body.max-performance {
+    --sidebar-collapse-transition: 1ms linear;
 }
 
 /* ══ Live Server Activity (app-wide Tautulli-style view) ══════════════════ */
@@ -76835,20 +76901,180 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-@media (max-width: 900px) {
-    /* stack: the guild rail + member list fold away, channels scroll horizontally */
-    .chat-shell { grid-template-columns: 1fr; height: calc(100vh - 190px); }
-    .chat-guilds { display: none; }
-    .chat-side { display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; flex-direction: row; }
-    .chat-side-head, .chat-userpanel { display: none; }
-    .chat-side-scroll { display: flex; gap: 6px; padding: 6px; overflow-x: auto; }
-    .chat-side-label { display: none; }
-    .chat-side-list { display: flex; gap: 6px; }
-    .chat-chanlist { display: flex; gap: 6px; }
-    .chat-cat { display: none; }
-    .chat-chan { width: auto; white-space: nowrap; }
-    .chat-side-item { width: auto; white-space: nowrap; }
+@media (max-width: 1280px) {
+    .chat-shell {
+        grid-template-columns: 60px 210px minmax(0, 1fr) 200px;
+        gap: 0 8px;
+    }
+    .chat-guild { width: 42px; height: 42px; border-radius: 14px; }
+    .chat-side, .chat-users { padding: 10px; }
+    .chat-head-search-in { width: 150px; }
+}
+
+@media (max-width: 1100px) {
+    /* Small laptops/tablets keep navigation, but drop the passive right rail. */
+    .chat-shell {
+        grid-template-columns: 60px 210px minmax(0, 1fr);
+        height: calc(100vh - 198px);
+    }
     .chat-rail { display: none; }
+    .chat-page-head { align-items: flex-start; }
+    .chat-jbx-headbar {
+        flex: 1 1 100%;
+        min-width: 0;
+        max-width: 620px;
+    }
+}
+
+@media (max-width: 900px) {
+    /* Phone/tablet portrait: guilds and channels become fast horizontal rails. */
+    .chat-page-container { min-height: 0; }
+    .chat-shell {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto auto minmax(0, 1fr);
+        gap: 8px;
+        height: calc(100vh - 184px);
+    }
+    .chat-guilds {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        min-height: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 8px;
+        border-radius: 12px;
+    }
+    .chat-guild { width: 40px; height: 40px; }
+    .chat-guild::before {
+        left: 50%;
+        top: auto;
+        bottom: -8px;
+        width: 0;
+        height: 3px;
+        transform: translateX(-50%);
+        border-radius: 3px 3px 0 0;
+        transition: width .16s ease;
+    }
+    .chat-guild:hover::before { width: 20px; height: 3px; }
+    .chat-guild--on::before { width: 28px; height: 3px; }
+    .chat-side {
+        display: flex;
+        flex-direction: row;
+        gap: 8px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 0;
+        border-radius: 12px;
+    }
+    .chat-side-head, .chat-userpanel { display: none; }
+    .chat-side-scroll {
+        display: flex;
+        gap: 6px;
+        padding: 6px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        min-width: 100%;
+    }
+    .chat-side-label { display: none; }
+    .chat-side-list,
+    .chat-chanlist {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .chat-cat { display: none; }
+    .chat-chan,
+    .chat-side-item {
+        width: auto;
+        min-height: 34px;
+        white-space: nowrap;
+    }
+    .chat-thread {
+        width: auto;
+        min-height: 34px;
+        padding: 6px 10px;
+        white-space: nowrap;
+    }
+    .chat-thread-branch { display: none; }
+    .chat-main { border-radius: 12px; }
+    .chat-head {
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 12px 14px;
+    }
+    .chat-head-search {
+        order: 3;
+        width: 100%;
+        margin-left: 0;
+    }
+    .chat-head-search-in {
+        width: 100%;
+        min-width: 0;
+    }
+    .chat-scroll { padding: 12px 14px; }
+    .chat-rail { display: none; }
+}
+
+@media (max-width: 640px) {
+    .chat-page-head {
+        gap: 10px;
+        align-items: stretch;
+    }
+    .chat-page-head .tools-page-header-left {
+        min-width: 0;
+    }
+    .chat-jbx-headbar {
+        width: 100%;
+        flex: 1 1 auto;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .chat-jbx-headbar .chat-jbx-form {
+        flex-basis: 100%;
+        margin-left: 0;
+        min-width: 0;
+    }
+    .chat-shell {
+        height: calc(100dvh - 206px);
+        min-height: 420px;
+    }
+    .chat-msg {
+        grid-template-columns: minmax(0, auto) 1fr;
+        gap: 4px 8px;
+    }
+    .chat-msg-time {
+        justify-self: end;
+    }
+    .chat-msg-text {
+        font-size: 13.5px;
+    }
+    .chat-composer {
+        padding: 8px 10px 10px;
+    }
+    .chat-toolbar {
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+    .chat-toolbar::-webkit-scrollbar { display: none; }
+    .chat-toolbar-hint { display: none; }
+    .chat-composer-row {
+        padding: 4px 6px 6px;
+    }
+    .chat-input--bare {
+        padding: 8px;
+    }
+    .chat-send-fab {
+        width: 32px;
+        height: 32px;
+        margin-left: 2px;
+    }
+    .chat-jump-pill {
+        bottom: 112px;
+        max-width: calc(100% - 32px);
+        white-space: nowrap;
+    }
 }
 
 /* ── The Arcade (chat P3) ────────────────────────────────────────────────
@@ -79532,4 +79758,299 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     }
     .sync-history-thumb,
     .sync-history-thumb-placeholder { width: 36px; height: 36px; }
+}
+
+/* Chat final responsive pass.
+   This lives at the end of the file on purpose: the chat composer/jukebox
+   refinements are declared after the base chat grid, so earlier media queries
+   lose the cascade for the exact controls that break on small screens. */
+@media (max-width: 1320px) {
+    #chat-page {
+        padding: 28px 28px 80px;
+    }
+
+    .chat-page-head {
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .chat-page-head .tools-page-header-left {
+        flex: 1 1 auto;
+        min-width: 220px;
+    }
+
+    .chat-jbx-headbar {
+        order: 2;
+        flex: 1 1 100%;
+        width: 100%;
+        max-width: none;
+        min-width: 0;
+        gap: 10px;
+    }
+
+    .chat-jbx-headbar .chat-jbx-form {
+        min-width: 260px;
+    }
+
+    .chat-shell {
+        grid-template-columns: 56px 220px minmax(0, 1fr);
+        gap: 0 10px;
+        height: calc(100vh - 214px);
+    }
+
+    .chat-rail {
+        display: none !important;
+    }
+
+    .chat-guilds {
+        padding: 8px 0;
+    }
+
+    .chat-guild {
+        width: 42px;
+        height: 42px;
+        border-radius: 14px;
+    }
+
+    .chat-side,
+    .chat-users {
+        padding: 10px;
+    }
+
+    .chat-head {
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px 10px;
+        padding: 12px 16px;
+    }
+
+    .chat-head-title {
+        flex: 0 1 auto;
+        min-width: 0;
+    }
+
+    .chat-head-sub {
+        flex: 1 1 180px;
+        min-width: 0;
+    }
+
+    .chat-head-search {
+        margin-left: auto;
+    }
+
+    .chat-head-search-in {
+        width: 150px;
+    }
+
+    .chat-scroll {
+        overflow-x: hidden;
+    }
+
+    .chat-msg,
+    .chat-msg-text {
+        min-width: 0;
+    }
+
+    .chat-composer {
+        padding: 10px 12px 12px;
+    }
+
+    .chat-composer-panel {
+        min-width: 0;
+        overflow: hidden;
+    }
+
+    .chat-toolbar {
+        min-width: 0;
+        overflow: hidden;
+    }
+
+    .chat-toolbar-hint {
+        display: none;
+    }
+
+    .chat-tbtn {
+        flex: 0 0 30px;
+    }
+
+    .chat-tbtn.chat-gif-btn {
+        flex-basis: auto;
+    }
+
+    .chat-composer-row,
+    .chat-input--area {
+        min-width: 0;
+    }
+}
+
+@media (max-width: 1040px) {
+    #chat-page {
+        padding: 22px 22px 76px;
+    }
+
+    .chat-shell {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto auto minmax(0, 1fr);
+        gap: 8px;
+        height: calc(100vh - 214px);
+    }
+
+    .chat-guilds {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        min-height: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 8px;
+        border-radius: 12px;
+    }
+
+    .chat-guilds::-webkit-scrollbar,
+    .chat-side-scroll::-webkit-scrollbar {
+        display: none;
+    }
+
+    .chat-guild::before {
+        left: 50%;
+        top: auto;
+        bottom: -8px;
+        width: 0;
+        height: 3px;
+        transform: translateX(-50%);
+        border-radius: 3px 3px 0 0;
+        transition: width .16s ease;
+    }
+
+    .chat-guild:hover::before { width: 20px; height: 3px; }
+    .chat-guild--on::before { width: 28px; height: 3px; }
+
+    .chat-side {
+        display: flex;
+        flex-direction: row;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 0;
+        border-radius: 12px;
+    }
+
+    .chat-side-head,
+    .chat-userpanel,
+    .chat-side-label,
+    .chat-cat {
+        display: none;
+    }
+
+    .chat-side-scroll {
+        display: flex;
+        gap: 6px;
+        min-width: 100%;
+        padding: 6px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+    }
+
+    .chat-side-list,
+    .chat-chanlist {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .chat-chan,
+    .chat-side-item,
+    .chat-thread {
+        width: auto;
+        min-height: 34px;
+        white-space: nowrap;
+    }
+
+    .chat-thread {
+        padding: 6px 10px;
+    }
+
+    .chat-thread-branch {
+        display: none;
+    }
+}
+
+@media (max-width: 640px) {
+    #chat-page {
+        padding: 70px 12px 72px;
+    }
+
+    .chat-page-head {
+        gap: 10px;
+    }
+
+    .chat-page-head .tools-page-header-left {
+        min-width: 0;
+    }
+
+    .chat-jbx-headbar {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .chat-jbx-headbar .chat-jbx-form {
+        flex: 1 1 100%;
+        min-width: 0;
+        margin-left: 0;
+    }
+
+    .chat-shell {
+        height: calc(100dvh - 220px);
+        min-height: 0;
+    }
+
+    .chat-head {
+        padding: 10px 12px;
+    }
+
+    .chat-head-search {
+        order: 3;
+        width: 100%;
+        margin-left: 0;
+    }
+
+    .chat-head-search-in {
+        width: 100%;
+    }
+
+    .chat-scroll {
+        padding: 10px 12px;
+    }
+
+    .chat-msg {
+        grid-template-columns: minmax(0, auto) 1fr;
+        gap: 4px 8px;
+    }
+
+    .chat-msg-time {
+        justify-self: end;
+    }
+
+    .chat-toolbar {
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    .chat-toolbar::-webkit-scrollbar {
+        display: none;
+    }
+
+    .chat-composer-row {
+        padding: 4px 6px 6px;
+    }
+
+    .chat-input--bare {
+        padding: 8px;
+    }
+
+    .chat-send-fab {
+        width: 32px;
+        height: 32px;
+        margin-left: 2px;
+    }
 }
