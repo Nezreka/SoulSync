@@ -75,7 +75,35 @@ def _kept_summary(candidates, expired) -> str:
     return ', '.join(parts) if parts else 'none'
 
 
-def delete_origin_download(db, entry, config_manager) -> dict:
+def _path_mapping_hint(config_manager) -> str:
+    try:
+        active = config_manager.get_active_media_server()
+    except Exception:
+        active = None
+    if str(active or '').lower() == 'navidrome':
+        return (
+            'Navidrome may be reporting virtual paths. Open Profile -> Players -> '
+            'SoulSync, enable "Report Real Path", then run a full database refresh.'
+        )
+    return (
+        'Check Settings -> Library -> Music Paths so SoulSync can map media-server '
+        'paths to the real files on disk.'
+    )
+
+
+def _should_treat_unresolved_as_mapping_error(raw_path, config_manager) -> bool:
+    if not raw_path:
+        return False
+    try:
+        active = config_manager.get_active_media_server()
+    except Exception:
+        active = None
+    if str(active or '').lower() == 'navidrome':
+        return True
+    return not os.path.isabs(raw_path)
+
+
+def delete_origin_download(db, entry, config_manager, transfer_folder=None) -> dict:
     """Delete one origin-tracked download: the file on disk (resolved through
     the shared resolver), its library track row, and the history entry. A file
     that refuses deletion keeps its history row and reports the error. Returns
@@ -84,13 +112,19 @@ def delete_origin_download(db, entry, config_manager) -> dict:
     file_deleted = False
     error = None
     if raw_path:
-        resolved = resolve_library_file_path(raw_path, config_manager=config_manager)
+        resolved = resolve_library_file_path(
+            raw_path,
+            transfer_folder=transfer_folder,
+            config_manager=config_manager,
+        )
         if resolved and os.path.isfile(resolved):
             try:
                 os.remove(resolved)
                 file_deleted = True
             except OSError as e:
                 error = str(e)
+        elif resolved is None and _should_treat_unresolved_as_mapping_error(raw_path, config_manager):
+            error = f'Could not locate file: {raw_path}. {_path_mapping_hint(config_manager)}'
         # File gone or deleted → clean up the library track row either way.
         if error is None:
             try:
@@ -348,7 +382,9 @@ class ExpiredDownloadCleanerJob(RepairJob):
                 return result
             if not dry_run:
                 try:
-                    res = delete_origin_download(context.db, entry, context.config_manager)
+                    res = delete_origin_download(
+                        context.db, entry, context.config_manager,
+                        transfer_folder=context.transfer_folder)
                     if res.get('removed') or res.get('file_deleted'):
                         result.auto_fixed += 1
                 except Exception as e:

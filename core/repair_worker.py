@@ -264,6 +264,39 @@ def _resolve_file_path(file_path, transfer_folder, download_folder=None,
     )
 
 
+def _path_mapping_hint(config_manager) -> str:
+    try:
+        active = config_manager.get_active_media_server()
+    except Exception:
+        active = None
+    if str(active or '').lower() == 'navidrome':
+        return (
+            'Navidrome may be reporting virtual paths. Enable "Report Real Path" '
+            'for the SoulSync player, then run a full database refresh.'
+        )
+    return 'Check Settings -> Library -> Music Paths so SoulSync can map this path.'
+
+
+def _delete_file_if_present(file_path, transfer_folder, config_manager=None, download_folder=None):
+    """Best-effort delete with an explicit reason when the path cannot be mapped."""
+    if not file_path:
+        return False, None
+    resolved = _resolve_file_path(
+        file_path, transfer_folder,
+        download_folder=download_folder,
+        config_manager=config_manager)
+    if resolved and os.path.exists(resolved):
+        try:
+            os.remove(resolved)
+            return True, None
+        except Exception as e:
+            logger.warning("Could not delete file %s: %s", resolved, e)
+            return False, str(e)
+    if resolved is None:
+        return False, f'file could not be located ({_path_mapping_hint(config_manager)})'
+    return False, 'file was already gone'
+
+
 class RepairWorker:
     """Multi-job background maintenance worker.
 
@@ -2016,17 +2049,14 @@ class RepairWorker:
         fix_action = details.get('_fix_action', 'redownload')
 
         if fix_action == 'delete':
+            deleted_file, delete_note = _delete_file_if_present(
+                file_path, self.transfer_folder, config_manager=self._config_manager)
             if file_path:
                 resolved = _resolve_file_path(
                     file_path, self.transfer_folder,
                     config_manager=self._config_manager)
-                if resolved and os.path.exists(resolved):
-                    try:
-                        os.remove(resolved)
-                        self._cleanup_empty_parents(resolved)
-                    except Exception as e:
-                        logger.warning("Could not delete low-quality file %s: %s",
-                                       resolved, e)
+                if deleted_file and resolved:
+                    self._cleanup_empty_parents(resolved)
             if entity_id:
                 try:
                     conn = self.db._get_connection()
@@ -2035,6 +2065,9 @@ class RepairWorker:
                     conn.close()
                 except Exception as e:
                     return {'success': False, 'error': f'DB delete failed: {e}'}
+            if not deleted_file and delete_note:
+                return {'success': True, 'action': 'deleted_file',
+                        'message': f'Removed library row, but the low-quality file was not deleted: {delete_note}'}
             return {'success': True, 'action': 'deleted_file',
                     'message': f'Deleted low-quality file: '
                                f'{os.path.basename(file_path or "")}'}
@@ -2284,19 +2317,15 @@ class RepairWorker:
                 return {'success': False, 'error': 'Failed to add to wishlist (may already exist or be blocklisted)'}
 
             # Delete the preview file (path resolved like the other delete tools).
-            deleted_file = False
             target_path = file_path or details.get('original_path')
+            deleted_file = False
+            delete_note = None
             if target_path:
                 download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
-                resolved = _resolve_file_path(target_path, self.transfer_folder,
-                                              download_folder=download_folder,
-                                              config_manager=self._config_manager)
-                if resolved and os.path.exists(resolved):
-                    try:
-                        os.remove(resolved)
-                        deleted_file = True
-                    except Exception as e:
-                        logger.warning("Could not delete preview file %s: %s", resolved, e)
+                deleted_file, delete_note = _delete_file_if_present(
+                    target_path, self.transfer_folder,
+                    config_manager=self._config_manager,
+                    download_folder=download_folder)
 
             # Drop the DB row so the track shows as missing.
             cursor.execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
@@ -2305,7 +2334,7 @@ class RepairWorker:
             return {'success': True, 'action': 'added_to_wishlist',
                     'message': (f'Deleted preview clip and re-wishlisted "{track_name}" for full download'
                                 if deleted_file else
-                                f'Re-wishlisted "{track_name}" (preview file already gone)')}
+                                f'Re-wishlisted "{track_name}" (preview file not deleted: {delete_note or "already gone"})')}
         except Exception as e:
             logger.error("Preview-clip fix failed for track %s: %s", entity_id, e)
             return {'success': False, 'error': str(e)}
@@ -2395,19 +2424,15 @@ class RepairWorker:
                 return {'success': False, 'error': 'Failed to add to wishlist (may already exist or be blocklisted)'}
 
             # Delete the corrupt file (path resolved like the other delete tools).
-            deleted_file = False
             target_path = file_path or details.get('original_path')
+            deleted_file = False
+            delete_note = None
             if target_path:
                 download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
-                resolved = _resolve_file_path(target_path, self.transfer_folder,
-                                              download_folder=download_folder,
-                                              config_manager=self._config_manager)
-                if resolved and os.path.exists(resolved):
-                    try:
-                        os.remove(resolved)
-                        deleted_file = True
-                    except Exception as e:
-                        logger.warning("Could not delete corrupt file %s: %s", resolved, e)
+                deleted_file, delete_note = _delete_file_if_present(
+                    target_path, self.transfer_folder,
+                    config_manager=self._config_manager,
+                    download_folder=download_folder)
 
             # Drop the DB row so the track shows as missing.
             cursor.execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
@@ -2416,7 +2441,7 @@ class RepairWorker:
             return {'success': True, 'action': 'added_to_wishlist',
                     'message': (f'Deleted corrupt file and re-wishlisted "{track_name}" for download'
                                 if deleted_file else
-                                f'Re-wishlisted "{track_name}" (corrupt file already gone)')}
+                                f'Re-wishlisted "{track_name}" (corrupt file not deleted: {delete_note or "already gone"})')}
         except Exception as e:
             logger.error("Corrupt-file fix failed for track %s: %s", entity_id, e)
             return {'success': False, 'error': str(e)}
@@ -3496,13 +3521,11 @@ class RepairWorker:
 
         if fix_action == 'delete':
             # Delete file + DB record
+            deleted_file, delete_note = _delete_file_if_present(
+                file_path, self.transfer_folder, config_manager=self._config_manager)
             if file_path:
-                resolved = _resolve_file_path(file_path, self.transfer_folder, config_manager=self._config_manager)
-                if resolved and os.path.exists(resolved):
-                    try:
-                        os.remove(resolved)
-                    except Exception as e:
-                        logger.warning("Could not delete file %s: %s", resolved, e)
+                logger.debug("AcoustID delete result for %s: deleted=%s note=%s",
+                             file_path, deleted_file, delete_note)
             if track_id:
                 try:
                     conn = self.db._get_connection()
@@ -3512,6 +3535,9 @@ class RepairWorker:
                     conn.close()
                 except Exception as e:
                     return {'success': False, 'error': f'DB delete failed: {e}'}
+            if not deleted_file and delete_note:
+                return {'success': True, 'action': 'deleted',
+                        'message': f'Removed library row, but the wrong file was not deleted: {delete_note}'}
             return {'success': True, 'action': 'deleted',
                     'message': f'Deleted wrong file: {os.path.basename(file_path or "")}'}
 
@@ -3538,13 +3564,11 @@ class RepairWorker:
                 except Exception as e:
                     logger.warning("Could not add to wishlist: %s", e)
             # Delete wrong file
+            deleted_file, delete_note = _delete_file_if_present(
+                file_path, self.transfer_folder, config_manager=self._config_manager)
             if file_path:
-                resolved = _resolve_file_path(file_path, self.transfer_folder, config_manager=self._config_manager)
-                if resolved and os.path.exists(resolved):
-                    try:
-                        os.remove(resolved)
-                    except Exception as e:
-                        logger.debug("Failed to remove wrong file %s: %s", resolved, e)
+                logger.debug("AcoustID redownload delete result for %s: deleted=%s note=%s",
+                             file_path, deleted_file, delete_note)
             if track_id:
                 try:
                     conn = self.db._get_connection()
@@ -3554,6 +3578,9 @@ class RepairWorker:
                     conn.close()
                 except Exception as e:
                     logger.debug("Failed to delete wrong track row from DB: %s", e)
+            if not deleted_file and delete_note:
+                return {'success': True, 'action': 'redownload',
+                        'message': f'Added "{expected_title}" to wishlist; wrong file was not deleted: {delete_note}'}
             return {'success': True, 'action': 'redownload',
                     'message': f'Added "{expected_title}" to wishlist, removed wrong file'}
 

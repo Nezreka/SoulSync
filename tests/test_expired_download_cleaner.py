@@ -56,6 +56,7 @@ def _ctx(db, settings, findings):
         check_stop=lambda: False, wait_if_paused=lambda: False,
         update_progress=lambda *a, **k: None, report_progress=lambda *a, **k: None,
         create_finding=lambda **kw: (findings.append(kw) or True),
+        transfer_folder=None,
     )
 
 
@@ -133,6 +134,21 @@ def test_delete_origin_download_missing_file(tmp_path):
     res = delete_origin_download(db, entry, cfg)
     assert res["error"] is None and res["file_deleted"] is False
     assert db.deleted_history == [9]
+
+
+def test_delete_origin_download_keeps_navidrome_virtual_path():
+    db = _DB([])
+    entry = {"id": 12, "file_path": "Muse/The Wow! Signal/01-06 - Hexagons.flac"}
+    cfg = SimpleNamespace(
+        get=lambda k, d=None: d,
+        get_active_media_server=lambda: "navidrome",
+    )
+    res = delete_origin_download(db, entry, cfg)
+    assert res["removed"] == 0
+    assert res["file_deleted"] is False
+    assert "Report Real Path" in res["error"]
+    assert db.deleted_history == []
+    assert db.deleted_paths == []
 
 
 def test_delete_origin_download_removes_real_file(tmp_path):

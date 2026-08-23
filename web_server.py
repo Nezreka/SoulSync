@@ -9533,6 +9533,10 @@ def delete_download_origins():
         rows = db.get_library_history_rows_by_ids(ids)
         files_deleted, files_missing, file_errors = 0, 0, []
         failed_ids = set()
+        try:
+            active_server = config_manager.get_active_media_server()
+        except Exception:
+            active_server = None
         for row in rows:
             raw_path = row.get('file_path') or ''
             if not delete_files or not raw_path:
@@ -9547,6 +9551,10 @@ def delete_download_origins():
                     failed_ids.add(row['id'])  # keep the row when the file refuses to go
                     continue
             else:
+                if resolved is None and str(active_server or '').lower() == 'navidrome':
+                    file_errors.append(f"{row.get('title') or raw_path}: {_get_file_not_found_error(raw_path)}")
+                    failed_ids.add(row['id'])
+                    continue
                 files_missing += 1  # already gone — still clean up the rows
             db.delete_track_by_file_path(raw_path)
         removed = db.delete_library_history_rows(
@@ -15355,6 +15363,7 @@ def library_delete_album(album_id):
         database = get_database()
         files_deleted = 0
         files_failed = 0
+        file_errors = []
 
         with database._get_connection() as conn:
             cursor = conn.cursor()
@@ -15384,8 +15393,10 @@ def library_delete_album(album_id):
                         except Exception as e:
                             logger.warning(f"Failed to delete track file: {e}")
                             files_failed += 1
+                            file_errors.append(f"{os.path.basename(fp)}: {e}")
                     else:
                         files_failed += 1
+                        file_errors.append(_get_file_not_found_error(fp))
 
                 # Try to remove the album folder if it's now empty
                 if track_rows:
@@ -15415,7 +15426,8 @@ def library_delete_album(album_id):
                 "deleted_count": 1,
                 "tracks_deleted": tracks_deleted,
                 "files_deleted": files_deleted,
-                "files_failed": files_failed
+                "files_failed": files_failed,
+                "file_errors": file_errors[:5],
             })
     except Exception as e:
         logger.error(f"Error deleting album {album_id}: {e}")
