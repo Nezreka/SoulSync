@@ -182,7 +182,6 @@ export interface StatsLibraryDiskUsagePayload {
   error?: string;
 }
 
-
 export type StatsListeningEventsFilter =
   | { type: 'date'; date: string }
   | { type: 'weekday_hour'; weekday: number; hour: number }
@@ -205,6 +204,7 @@ export interface StatsListeningEventsPayload {
   title?: string;
   total?: number;
   limit?: number;
+  has_more?: boolean;
   items?: StatsListeningEventTrack[];
   error?: string;
 }

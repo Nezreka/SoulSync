@@ -17,7 +17,7 @@ import collections
 import functools
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote, urljoin, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from core.webui.mimetypes_fix import corrected_script_content_type, ensure_web_mimetypes
@@ -41112,6 +41112,73 @@ def stats_recent():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+def _fix_stats_listening_image_url(thumb_url):
+    """Fast browser-safe image URL fixer for stats detail rows.
+
+    The normal metadata image fixer also registers remote URLs with the image
+    cache. That is useful for high-value surfaces, but expensive when a details
+    modal serializes 100 listening-history rows. This keeps local media-server
+    artwork reachable without doing cache work per row.
+    """
+    if not thumb_url:
+        return None
+    url = str(thumb_url)
+    if url.startswith('/api/image-proxy?url=') or url.startswith('/api/image-cache/'):
+        return url
+
+    try:
+        active_server = config_manager.get_active_media_server()
+        path = None
+        fixed_url = None
+
+        if url.startswith('/library/') or url.startswith('/Items/') or url.startswith('/api/') or url.startswith('/rest/'):
+            path = url
+        elif url.startswith('http://') or url.startswith('https://'):
+            parsed = urlparse(url)
+            if is_internal_image_host(url):
+                path = parsed.path
+            else:
+                return url
+
+        if path and active_server == 'plex':
+            plex_config = config_manager.get_plex_config()
+            base_url = plex_config.get('base_url', '')
+            token = plex_config.get('token', '')
+            if base_url and token:
+                fixed_url = f"{base_url.rstrip('/')}{path}?X-Plex-Token={token}"
+        elif path and active_server == 'jellyfin':
+            jellyfin_config = config_manager.get_jellyfin_config()
+            base_url = jellyfin_config.get('base_url', '')
+            token = jellyfin_config.get('api_key', '')
+            if base_url:
+                separator = '&' if '?' in path else '?'
+                suffix = f"{separator}X-Emby-Token={token}" if token else ''
+                fixed_url = f"{base_url.rstrip('/')}{path}{suffix}"
+        elif path and active_server == 'navidrome':
+            navidrome_config = config_manager.get_navidrome_config()
+            base_url = navidrome_config.get('base_url', '')
+            username = navidrome_config.get('username', '')
+            password = navidrome_config.get('password', '')
+            if base_url and username and password:
+                import hashlib
+                import secrets
+
+                salt = secrets.token_hex(6)
+                token = hashlib.md5((password + salt).encode()).hexdigest()
+                separator = '&' if '?' in path else '?'
+                auth = f"u={username}&t={token}&s={salt}&v=1.16.1&c=SoulSync&f=json"
+                fixed_url = f"{base_url.rstrip('/')}{path}{separator}{auth}"
+        elif url.startswith('http://') or url.startswith('https://'):
+            fixed_url = url
+
+        if fixed_url and is_internal_image_host(fixed_url):
+            return f"/api/image-proxy?url={quote(fixed_url, safe='')}"
+        return fixed_url or url
+    except Exception as e:
+        logger.debug("stats listening image URL normalization failed: %s", e)
+        return url
+
 @app.route('/api/stats/listening-events', methods=['GET'])
 def stats_listening_events():
     """Rows behind a clicked listening stats chart segment."""
@@ -41126,7 +41193,7 @@ def stats_listening_events():
         hour = int(hour_arg) if hour_arg is not None and hour_arg != '' else None
         data = _stats_queries.get_listening_events(
             get_database(),
-            fix_artist_image_url,
+            _fix_stats_listening_image_url,
             time_range=time_range,
             filter_type=filter_type,
             date=date,

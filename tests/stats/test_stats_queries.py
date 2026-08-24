@@ -208,6 +208,65 @@ def test_get_listening_events_month_bucket_returns_rows(db):
     assert [item['title'] for item in out['items']] == ["Aug Two", "Aug One"]
 
 
+def test_get_listening_events_weekday_hour_bucket_returns_rows(db):
+    _seed_history(db, "Match New", "Artist", "Album", "2026-08-23 16:30:00")
+    _seed_history(db, "Match Old", "Artist", "Album", "2026-08-16 16:00:00")
+    _seed_history(db, "Wrong Hour", "Artist", "Album", "2026-08-23 15:00:00")
+
+    out = queries.get_listening_events(
+        db,
+        None,
+        time_range='all',
+        filter_type='weekday_hour',
+        weekday=0,
+        hour=16,
+        limit=10,
+    )
+
+    assert out['total'] == 2
+    assert [item['title'] for item in out['items']] == ["Match New", "Match Old"]
+
+
+def test_get_listening_events_caches_repeated_image_normalization(db):
+    artist_id = _seed_artist(db, "Artist")
+    album_id = _seed_album(db, artist_id, "Album", thumb='/library/metadata/1/thumb/1')
+    track_new = _seed_track(db, album_id, artist_id, "Repeat New")
+    track_old = _seed_track(db, album_id, artist_id, "Repeat Old")
+    _seed_history(db, "Repeat New", "Artist", "Album", "2026-08-23 16:30:00", db_track_id=track_new)
+    _seed_history(db, "Repeat Old", "Artist", "Album", "2026-08-23 16:00:00", db_track_id=track_old)
+    calls = []
+
+    def fixer(url):
+        calls.append(url)
+        return f'/api/image-proxy?url={url}'
+
+    out = queries.get_listening_events(
+        db,
+        fixer,
+        time_range='all',
+        filter_type='weekday_hour',
+        weekday=0,
+        hour=16,
+        limit=10,
+    )
+
+    assert out['total'] == 2
+    assert calls == ['/library/metadata/1/thumb/1']
+    assert {item['image_url'] for item in out['items']} == {'/api/image-proxy?url=/library/metadata/1/thumb/1'}
+
+
+def test_listening_history_weekday_hour_index_exists(db):
+    conn = db._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?",
+            ('idx_listening_weekday_hour_played_at',),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row is not None
+
 def test_get_listening_events_rejects_unknown_date_bucket(db):
     with pytest.raises(ValueError, match='YYYY-MM-DD or YYYY-MM'):
         queries.get_listening_events(

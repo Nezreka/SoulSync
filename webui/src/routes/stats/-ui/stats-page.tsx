@@ -1199,7 +1199,13 @@ function StatsListeningDetailModal({
   onClose: () => void;
   onPlay: (track: { title: string; artist: string; album: string }) => Promise<void>;
   payload:
-    | { title?: string; total?: number; limit?: number; items?: StatsListeningEventTrack[] }
+    | {
+        title?: string;
+        total?: number;
+        limit?: number;
+        has_more?: boolean;
+        items?: StatsListeningEventTrack[];
+      }
     | undefined;
 }) {
   const tracks = payload?.items ?? [];
@@ -1207,9 +1213,9 @@ function StatsListeningDetailModal({
   const title = payload?.title || getListeningDetailFallbackTitle(filter);
   const summary = loading
     ? 'Finding the matching plays...'
-    : `${formatCompactNumber(total)} ${total === 1 ? 'play' : 'plays'}${
-        total > tracks.length ? `, showing latest ${tracks.length}` : ''
-      }`;
+    : payload?.has_more
+      ? `Showing latest ${formatCompactNumber(tracks.length)} plays`
+      : `${formatCompactNumber(total)} ${total === 1 ? 'play' : 'plays'}`;
   return (
     <div className={styles.statsDetailBackdrop} role="presentation" onMouseDown={onClose}>
       <div
