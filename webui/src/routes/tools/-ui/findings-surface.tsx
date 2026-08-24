@@ -63,7 +63,7 @@ import {
   cacheHealthLabel,
   cacheHealthScore,
   findingFilePath,
-  findingFixLabel,
+  findingRowFixLabel,
   findingSeverityIcon,
   findingStatusBadge,
   findingTypeLabel,
@@ -474,6 +474,20 @@ export function FindingsSurface({
         }
         // 'add_to_wishlist' falls through with no fix_action — the handler
         // already adds to the wishlist by default.
+      }
+
+      // A finding with no catalogue subject cannot be re-downloaded — the fix
+      // is a plain delete, and unlike every prompt above it has no dialog of
+      // its own to stop at. Confirm it here rather than let one click remove a
+      // file from disk.
+      if (findingRowFixLabel(finding) === 'Delete File') {
+        const confirmed = await window.showConfirmDialog?.({
+          title: 'Delete File',
+          message: `Permanently delete ${findingFilePath(finding) || 'this file'} from disk? It is not in your library, so nothing will be queued to replace it.`,
+          confirmText: 'Delete',
+          destructive: true,
+        });
+        if (!confirmed) return;
       }
 
       setBusyFix((current) => new Set(current).add(finding.id));
@@ -1265,7 +1279,7 @@ function FindingCard({
 }) {
   const details = finding.details || {};
   const filePath = findingFilePath(finding);
-  const fixLabel = findingFixLabel(finding.finding_type);
+  const fixLabel = findingRowFixLabel(finding);
   const statusBadge = findingStatusBadge(finding.status, finding.user_action);
 
   return (

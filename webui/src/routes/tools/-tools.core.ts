@@ -258,6 +258,27 @@ export function findingFixLabel(findingType: string): string | null {
   return FINDING_FIXABLE_TYPES[findingType] ?? null;
 }
 
+/** Types whose fix ends in a re-download — but only while the finding names a
+ *  catalogue track. The corruption detector also walks the library folders, so
+ *  it raises rows with `entity_type: 'file'` and no id for audio no lib2 row
+ *  points at. Nothing can be re-requested for those, so the fix is a plain
+ *  delete; saying "Re-download" was a promise the backend answered with
+ *  "No track ID associated with this finding". */
+const SUBJECTLESS_DELETE_ONLY_TYPES = new Set(['corrupt_audio', 'short_preview_track']);
+
+/** The button label for ONE finding row — `findingFixLabel` by type, unless the
+ *  row has no track behind it and the type's verb only makes sense with one. */
+export function findingRowFixLabel(finding: {
+  finding_type: string;
+  entity_type?: string | null;
+  entity_id?: string | number | null;
+}): string | null {
+  if (!finding.entity_id && SUBJECTLESS_DELETE_ONLY_TYPES.has(finding.finding_type)) {
+    return 'Delete File';
+  }
+  return findingFixLabel(finding.finding_type);
+}
+
 export const FINDING_ACTION_LABELS: Record<string, string> = {
   removed_db_entry: 'Entry Removed',
   added_to_wishlist: 'Wishlisted',

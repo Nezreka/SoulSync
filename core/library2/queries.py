@@ -13,6 +13,7 @@ import json
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from .metadata_overrides import project_metadata, project_metadata_many
+from .paths import library_relative_path
 from .status import compute_metadata_gaps, file_status, metadata_scan_status, quality_tier
 from .track_files import primary_order
 
@@ -1400,6 +1401,13 @@ def _serialize_track(
         file_info = {
             "file_id": file_row["id"],
             "path": file_row["path"],
+            # Where the file sits IN THE LIBRARY. `path` stays the authority —
+            # it is what the tooltip and the copy button hand back — but the
+            # column leading with a root the user configured themselves says
+            # nothing, and the same root reaches this table written three ways
+            # ('./Transfer', 'Transfer', '/app/Transfer'), so the noise was not
+            # even consistent between rows of one album.
+            "display_path": library_relative_path(file_row["path"]),
             "format": file_row["format"],
             "bitrate": bitrate,
             "sample_rate": sample_rate,

@@ -152,6 +152,81 @@ def _configured_library_roots(config_manager: Any = None) -> list:
     ]
 
 
+#: Memo for :func:`_display_root_prefixes`, keyed on the raw configured values
+#: and the CWD they are made absolute against. The helper runs once per TRACK
+#: in a list that is routinely thousands of rows long, and every miss costs an
+#: ``os.getcwd()`` per root; the key is what keeps a settings change visible
+#: without an invalidation hook.
+_DISPLAY_PREFIX_MEMO: dict = {}
+
+
+def _display_root_prefixes(config_manager: Any = None) -> list:
+    """Every configured library root, in the spellings a stored path can use.
+
+    The same folder reaches ``lib2_track_files.path`` written three ways: the
+    album path builder keeps the configured ``./Transfer``, the simple builder
+    loses the ``./`` to ``Path()``, and the repair filesystem scan stores the
+    ``realpath``. A display that strips only one of them shows the root on some
+    rows and hides it on others — of the same album.
+
+    Sorted longest first so a root nested inside another wins over its parent.
+    """
+    roots = []
+    try:
+        if config_manager is None:
+            from core.settings import config_manager as _cm
+            config_manager = _cm
+        transfer = config_manager.get("soulseek.transfer_path", "") or ""
+        if isinstance(transfer, str) and transfer.strip():
+            roots.append(transfer.strip())
+        declared = config_manager.get("library.music_paths", []) or []
+    except Exception:  # noqa: BLE001 - a display helper never raises
+        config_manager, declared = None, []
+    if isinstance(declared, str):
+        declared = [declared]
+    key = (tuple(roots), tuple(str(p) for p in declared), os.getcwd())
+    cached = _DISPLAY_PREFIX_MEMO.get(key)
+    if cached is not None:
+        return cached
+    roots.extend(_configured_library_roots(config_manager))
+
+    prefixes = set()
+    for root in roots:
+        normalized = str(root).replace("\\", "/").rstrip("/")
+        if not normalized:
+            continue
+        prefixes.add(normalized)
+        if normalized.startswith("./"):
+            prefixes.add(normalized[2:])
+        # abspath is pure string work against the CWD -- which is exactly how a
+        # relative root became '/app/Transfer' in the findings in the first
+        # place, so it reproduces that spelling rather than guessing at it.
+        prefixes.add(os.path.abspath(os.path.expanduser(normalized)).replace("\\", "/"))
+    result = sorted((p for p in prefixes if p), key=len, reverse=True)
+    _DISPLAY_PREFIX_MEMO[key] = result
+    return result
+
+
+def library_relative_path(file_path: Any, config_manager: Any = None) -> Any:
+    """``file_path`` with its library root removed — for DISPLAY only.
+
+    Never used to open, move or delete anything: the roots here are matched as
+    strings, not resolved, and a path under no known root is returned exactly
+    as stored. Half-stripping one would invent a location, which is worse than
+    showing a prefix the user already knows.
+    """
+    if not isinstance(file_path, str) or not file_path:
+        return file_path
+    normalized = file_path.replace("\\", "/")
+    for prefix in _display_root_prefixes(config_manager):
+        if normalized.startswith(prefix + "/"):
+            trimmed = normalized[len(prefix) + 1:].lstrip("/")
+            # The root itself, or a trailing separator, trims to nothing —
+            # an empty cell says less than the path did.
+            return trimmed or file_path
+    return file_path
+
+
 def missing_path_root_is_healthy(file_path: Any, config_manager: Any = None) -> bool:
     """Whether absence is credible enough to advance the missing lifecycle.
 
@@ -186,6 +261,7 @@ def missing_path_root_is_healthy(file_path: Any, config_manager: Any = None) -> 
 
 
 __all__ = [
+    "library_relative_path",
     "missing_path_root_is_healthy",
     "resolve_lib2_ancestor",
     "resolve_lib2_directory",

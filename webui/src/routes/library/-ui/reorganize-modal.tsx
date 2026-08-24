@@ -14,6 +14,7 @@ import {
   LIBRARY_V2_QUERY_KEY,
   previewLibraryV2AlbumReorganize,
 } from '../-library-v2.api';
+import { FilePathCellBody } from './file-path-cell';
 import styles from './library-v2-page.module.css';
 
 const TERMINAL_QUEUE_STATUSES: ReadonlySet<LibraryV2ReorganizeQueueItem['status']> = new Set([
@@ -161,7 +162,11 @@ export function AlbumReorganizeModal({
   const queryClient = useQueryClient();
   const [source, setSource] = useState<string | null>(null);
   const [mode, setMode] = useState<'api' | 'tags'>('api');
-  const [renameOnly, setRenameOnly] = useState(false);
+  // Rename-only skips the download post-processing pipeline, which is what a
+  // full reorganize otherwise puts a file the user already owns through —
+  // fingerprint check included. It is the mode that works, so it is the
+  // default; the checkbox is how you deliberately ask for the other one.
+  const [renameOnly, setRenameOnly] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notQueuedReason, setNotQueuedReason] = useState<string | null>(null);
@@ -274,10 +279,10 @@ export function AlbumReorganizeModal({
                     <td className={styles.colNum}>{t.track_number ?? '—'}</td>
                     <td>{t.title || '—'}</td>
                     <td className={styles.filePathCell} title={t.current_path ?? undefined}>
-                      {t.current_path || '—'}
+                      <FilePathCellBody path={t.current_path} />
                     </td>
                     <td className={styles.filePathCell} title={t.new_path ?? undefined}>
-                      {t.new_path || '—'}
+                      <FilePathCellBody path={t.new_path} />
                     </td>
                     <td className={styles.qualityText}>
                       {t.unchanged ? (

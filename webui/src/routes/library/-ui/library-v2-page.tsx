@@ -137,6 +137,7 @@ import {
   type DiscographyOwnership,
 } from './discography-filters';
 import { ExportArtistsModal } from './export-modal';
+import { FilePathCellBody } from './file-path-cell';
 import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
 import { QualityProfileModal, QualityProfilePicker } from './quality-profile-modal';
@@ -9506,7 +9507,7 @@ function TrackRow({
             style={widthStyle('file_path')}
             title={track.file?.path ?? undefined}
           >
-            {track.file?.path ?? <span className={styles.muted}>—</span>}
+            <FilePathCellBody path={track.file?.path} display={track.file?.display_path} />
           </td>
         );
       case 'file_size':

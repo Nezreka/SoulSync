@@ -246,6 +246,10 @@ export interface LibraryV2TrackFile {
    *  selection (B6 bulk delete from the track table). */
   file_id: number;
   path: string;
+  /** `path` with the configured library root removed — what the table shows.
+   *  `path` stays the value that is copied, opened and deleted. Absent on a
+   *  payload from an older backend, so read it with a fallback. */
+  display_path?: string | null;
   format: string | null;
   bitrate: number | null;
   sample_rate: number | null;

@@ -2903,13 +2903,70 @@ class RepairWorker:
         return {'success': True, 'deleted_file': True, 'resolved_path': resolved,
                 'delete_operation_id': outcome.get('operation_id')}
 
+    def _fix_uncatalogued_bad_file(self, file_path, details, *, reason: str,
+                                   noun: str) -> dict:
+        """Apply a delete-and-re-download finding that names a FILE, not a track.
+
+        The corruption detector walks the library folders as well as the
+        catalogue, so it raises findings with ``entity_type='file'`` and no
+        ``entity_id`` — audio sitting in the transfer tree that no ``lib2``
+        row points at. Both handlers below used to refuse those outright
+        ("No track ID associated with this finding"), which left the row
+        pending forever, retried by every "fix all", and — worse — put the
+        #1143 retire-on-vanished path out of reach, so a finding naming a file
+        that had long since moved or been quarantined could never be closed.
+
+        For a file nothing references, deleting it IS the whole fix: there is
+        no track to put back on the wishlist, so the promise is what has to
+        go, not the button.
+        """
+        target = file_path or details.get('original_path') or details.get('file_path')
+        if not target:
+            return {'success': False,
+                    'error': 'No track ID or file path associated with this finding'}
+        from core.library2.paths import (
+            missing_path_root_is_healthy, resolve_lib2_path,
+        )
+
+        resolved = target if os.path.isfile(target) else (
+            resolve_lib2_path(target, config_manager=self._config_manager) or target
+        )
+        if not os.path.exists(resolved):
+            if not missing_path_root_is_healthy(resolved, self._config_manager):
+                # A folder we cannot see is a mount we cannot see. Retiring the
+                # finding here would throw away the only record of the problem.
+                return {
+                    'success': False,
+                    'error': (
+                        'Storage for this file is not reachable right now — '
+                        'refusing to close this finding. '
+                        + _path_mapping_hint(self._config_manager)
+                    ),
+                    'retryable': True,
+                }
+            # stale=True: no retry can ever succeed, so `fix_finding` retires
+            # the row as obsolete instead of leaving it pending (#1143).
+            return {'success': False, 'stale': True,
+                    'error': f'File no longer on disk: {os.path.basename(target)}'}
+        removed = self._remove_native_repair_file(target, details, reason=reason)
+        if not removed.get('success'):
+            return removed
+        return {
+            'success': True,
+            'action': 'deleted_file',
+            'message': (f'Deleted the {noun}. It is not in your library, so '
+                        'nothing was queued to replace it.'),
+        }
+
     def _fix_short_preview_track(self, entity_type, entity_id, file_path, details):
         """Approve a preview-clip finding: delete the ~30s preview file, drop its DB row, and
         re-add the track to the wishlist (full payload) so the real version downloads. Mirrors
         the dead-file 'redownload' payload + the acoustid-mismatch file delete. (Tools #937-adj)
         """
         if not entity_id:
-            return {'success': False, 'error': 'No track ID associated with this finding'}
+            return self._fix_uncatalogued_bad_file(
+                file_path, details, reason='short_preview_track',
+                noun='preview clip')
         stale = _stale_legacy_subject(entity_id)
         if stale:
             return stale
@@ -2940,7 +2997,8 @@ class RepairWorker:
         fresh download is the only cure. Mirrors the preview-clip redownload path (#1000).
         """
         if not entity_id:
-            return {'success': False, 'error': 'No track ID associated with this finding'}
+            return self._fix_uncatalogued_bad_file(
+                file_path, details, reason='corrupt_audio', noun='corrupt file')
         stale = _stale_legacy_subject(entity_id)
         if stale:
             return stale

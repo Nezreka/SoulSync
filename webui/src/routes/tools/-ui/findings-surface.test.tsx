@@ -891,6 +891,55 @@ describe('per-finding actions', () => {
     expect(onStatusChanged).toHaveBeenCalled();
   });
 
+  it('offers a corrupt file with no track behind it a delete, not a re-download', async () => {
+    // The corruption detector walks the library folders as well as the
+    // catalogue. Those rows carry `entity_type: 'file'` and no id, had no
+    // per-row button at all, and the group button said "Re-download" over a
+    // fix that could only answer "No track ID associated with this finding".
+    routes({
+      [FINDINGS]: page([
+        finding({
+          id: 4,
+          job_id: 'audio_corruption_detector',
+          finding_type: 'corrupt_audio',
+          severity: 'error',
+          title: 'Corrupt file: Unknown - 01 - Miss YOU!',
+          entity_type: 'file',
+          entity_id: null,
+        }),
+      ]),
+      '/api/repair/findings/4/fix': { success: true, message: 'Deleted the corrupt file.' },
+    });
+    await renderList();
+    await flush();
+
+    const button = document.querySelector('.repair-finding-btn.fix') as HTMLElement;
+    expect(button?.textContent).toBe('Delete File');
+
+    fireEvent.click(button);
+    await flush();
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(String(confirmSpy.mock.calls[0]?.[0]?.message)).not.toContain('re-download');
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith('/4/fix'))).toBe(true);
+  });
+
+  it('does not delete the file when that confirm is declined', async () => {
+    confirmSpy.mockResolvedValue(false);
+    routes({
+      [FINDINGS]: page([
+        finding({ id: 4, finding_type: 'corrupt_audio', entity_type: 'file', entity_id: null }),
+      ]),
+    });
+    await renderList();
+    await flush();
+
+    fireEvent.click(document.querySelector('.repair-finding-btn.fix') as HTMLElement);
+    await flush();
+
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith('/fix'))).toBe(false);
+  });
+
   it('sends nothing when the prompt is cancelled', async () => {
     routes({ [FINDINGS]: page([finding({ id: 1 })]) });
     await renderList();

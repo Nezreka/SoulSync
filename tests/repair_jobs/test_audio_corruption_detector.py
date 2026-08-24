@@ -268,3 +268,25 @@ def test_scan_surfaces_total_resolution_failure(tmp_path, monkeypatch):
     assert result.skipped == 1 and result.findings_created == 0
     assert any(r.get("log_type") == "error" and "No library paths" in (r.get("log_line") or "")
                for r in reports)
+
+
+def test_a_file_outside_the_catalogue_is_not_promised_a_re_download(tmp_path, monkeypatch):
+    """The walk also finds audio no lib2 row points at. Those findings carry
+    `entity_type='file'` and no id, so there is no track to put back on the
+    wishlist — and the copy must not say there is. The reported symptom was a
+    row reading "approve to delete it and re-download the real version" whose
+    fix could only answer "No track ID associated with this finding"."""
+    stray = tmp_path / "EKKSTACY" / "NEGATIVE" / "01 - i walk this earth.flac"
+    stray.parent.mkdir(parents=True)
+    stray.write_bytes(b"x")
+    _prep(monkeypatch, {str(stray): (False, "LOST_SYNC after processing 6418432 samples")})
+
+    ctx, findings = _context([], tmp_path)
+    result = AudioCorruptionDetectorJob().scan(ctx)
+
+    assert result.findings_created == 1
+    f = findings[0]
+    assert f["entity_type"] == "file" and f["entity_id"] is None
+    assert "LOST_SYNC" in f["description"]
+    assert "re-download" not in f["description"].lower()
+    assert "delete" in f["description"].lower()

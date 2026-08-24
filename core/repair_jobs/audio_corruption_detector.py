@@ -287,10 +287,20 @@ class AudioCorruptionDetectorJob(RepairJob):
                         entity_id=str(row['id']) if row['id'] is not None else None,
                         file_path=row['file_path'],
                         title=f'Corrupt file: {artist} - {title}',
+                        # The walk reaches audio the catalogue does not know, and
+                        # those findings have no track to put back on the
+                        # wishlist. Promising a re-download there was a promise
+                        # the fix could not keep — it answered "No track ID
+                        # associated with this finding" instead.
                         description=(
                             f'"{title}" by {artist} failed a decode test '
                             f'({reason}). The audio is damaged and can\'t be repaired by '
-                            're-tagging — approve to delete it and re-download the real version.'),
+                            're-tagging — approve to delete it and re-download the real version.'
+                            if subject else
+                            f'This file failed a decode test ({reason}). The audio is '
+                            'damaged and can\'t be repaired by re-tagging. It is not in '
+                            'your library, so approve to delete it — nothing will be '
+                            'queued to replace it.'),
                         details=finding_details)
                     if inserted:
                         result.findings_created += 1

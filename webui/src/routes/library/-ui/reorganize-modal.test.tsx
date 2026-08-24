@@ -78,6 +78,91 @@ describe('library v2 album reorganize queue status', () => {
     expect(await screen.findByText('Reorganize finished (moved).')).toBeInTheDocument();
   });
 
+  it('opens with "Rename only" already ticked', async () => {
+    // The full mode sends the file through the download post-processing
+    // pipeline; rename-only is the mode that just moves it, and it is the one
+    // people reach for. Defaulting to it means the first click works instead
+    // of being the one that fails before the second one succeeds.
+    server.use(
+      http.get('/api/library/v2/albums/42/reorganize/sources', () =>
+        HttpResponse.json({ success: true, sources: [] }),
+      ),
+      http.post('/api/library/v2/albums/42/reorganize/preview', () =>
+        HttpResponse.json(PREVIEW_RESPONSE),
+      ),
+    );
+
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AlbumReorganizeModal albumId={42} albumTitle="Views" onClose={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByLabelText(/Rename only/)).toBeChecked();
+  });
+
+  it('sends rename_only true on the very first apply', async () => {
+    let body: Record<string, unknown> = {};
+    server.use(
+      http.get('/api/library/v2/albums/42/reorganize/sources', () =>
+        HttpResponse.json({ success: true, sources: [] }),
+      ),
+      http.post('/api/library/v2/albums/42/reorganize/preview', () =>
+        HttpResponse.json(PREVIEW_RESPONSE),
+      ),
+      http.post('/api/library/v2/albums/42/reorganize', async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ success: true, queued: false, reason: 'already_queued' });
+      }),
+    );
+
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AlbumReorganizeModal albumId={42} albumTitle="Views" onClose={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /Reorganize \(1\)/ }));
+    await screen.findByText('Not queued (already queued).');
+
+    expect(body.rename_only).toBe(true);
+  });
+
+  it('hands back the whole path from the copy button, not the shortened one', async () => {
+    // The column is 260px wide and the identifying part of a path is at its
+    // END, so what it shows is never the whole thing. Copying has to be the
+    // way out of that, and it has to copy the real stored path.
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+    Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
+
+    server.use(
+      http.get('/api/library/v2/albums/42/reorganize/sources', () =>
+        HttpResponse.json({ success: true, sources: [] }),
+      ),
+      http.post('/api/library/v2/albums/42/reorganize/preview', () =>
+        HttpResponse.json(PREVIEW_RESPONSE),
+      ),
+    );
+
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AlbumReorganizeModal albumId={42} albumTitle="Views" onClose={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    const buttons = await screen.findAllByRole('button', { name: 'Copy full path' });
+    fireEvent.click(buttons[0]);
+
+    expect(writeText).toHaveBeenCalledWith('/old/One Dance.flac');
+  });
+
   it('surfaces an already-queued response without a live-status crash', async () => {
     server.use(
       http.get('/api/library/v2/albums/42/reorganize/sources', () =>
