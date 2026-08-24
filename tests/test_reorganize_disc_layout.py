@@ -111,3 +111,57 @@ def test_non_numeric_track_numbers_never_crash(plan_with):
     plan = plan_with(user, api)          # must not raise
     assert plan["status"] == "planned"
     assert plan["total_discs"] == 2      # no numeric nums → heuristic skipped
+
+
+# ── a library already organized by disc must not be flattened ────────────────
+#
+# The cap reads the user's disc layout from their track NUMBERS, which cannot
+# tell "a single-disc edition mis-matched to a deluxe" from "a multi-disc album
+# that is still downloading". A freshly downloaded box set has only disc 1 on
+# disk, uniquely numbered and inside disc 1 — so the cap fired every time and
+# Reorganize proposed moving the album straight back OUT of the "Disc N" folders
+# the download pipeline had just created. Pressing Reorganize after a download
+# was never a no-op, and the layout flipped again once disc 2 arrived.
+#
+# The files themselves settle it: SoulSync only writes a disc folder when the
+# release IS multi-disc, so a library already sitting in one is organized, not
+# mis-matched — and the setting that gates this cap is "preserve my
+# organization".
+
+def _u_in(nums, folder):
+    return [{"id": "T%d" % i, "title": "S%d" % n, "track_number": n,
+             "file_path": "/music/X/A/%s/%02d - S%d.flac" % (folder, n, n)}
+            for i, n in enumerate(nums)]
+
+
+def test_a_part_downloaded_multi_disc_album_keeps_its_disc_structure(plan_with):
+    """Only disc 1 has landed so far — numbers are unique and fit inside disc 1,
+    which is exactly what the cap keys on."""
+    user = _u_in([1, 2, 3], "Disc 1")
+    api = _a([(n, 1) for n in range(1, 26)] + [(n, 2) for n in range(1, 21)])
+    plan = plan_with(user, api)
+    assert plan["total_discs"] == 2
+
+
+def test_a_cd_style_disc_folder_counts_too(plan_with):
+    """`$cdnum` writes "CD01"; the label setting can also be "CD"."""
+    for folder in ("CD01", "CD 1", "Disk 2", "Vol. 3"):
+        plan = plan_with(_u_in([1, 2, 3], folder),
+                         _a([(n, 1) for n in range(1, 26)] + [(n, 2) for n in range(1, 21)]))
+        assert plan["total_discs"] == 2, folder
+
+
+def test_a_flat_single_disc_album_is_still_capped(plan_with):
+    """The #1080 case is unchanged: no disc folder on disk, so the track numbers
+    remain the only evidence and they say single-disc."""
+    user = _u_in(range(1, 12), "X - A")
+    api = _a([(n, 1) for n in range(1, 14)] + [(n, 2) for n in range(1, 6)])
+    plan = plan_with(user, api)
+    assert plan["total_discs"] == 1
+
+
+def test_a_track_without_a_file_path_does_not_block_the_cap(plan_with):
+    """Missing files carry no layout evidence — they must not veto the cap."""
+    user = _u(range(1, 12))
+    api = _a([(n, 1) for n in range(1, 14)] + [(n, 2) for n in range(1, 6)])
+    assert plan_with(user, api)["total_discs"] == 1

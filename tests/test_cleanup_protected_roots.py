@@ -8,6 +8,11 @@ import feature until the folder was manually recreated.
 
 The fix: every empty-folder cleanup treats all configured roots
 (staging/download/transfer) as protected and never removes them, however nested.
+
+The key is ``import.staging_path`` — what ``core/settings.py`` defines and what
+the settings page writes. These tests used to pin ``soulseek.staging_path``,
+which nothing writes, so they agreed with a reader that always looked the folder
+up as '' and the #976 protection never actually applied in production.
 """
 import os
 
@@ -35,7 +40,7 @@ def test_nested_staging_root_is_not_deleted(tmp_path, monkeypatch):
     moved_file = str(album / "01 - song.flac")  # already moved to library (dir empty)
 
     _patch_roots(monkeypatch, {
-        'soulseek.staging_path': str(staging),
+        'import.staging_path': str(staging),
         'soulseek.download_path': str(downloads),
         'soulseek.transfer_path': str(tmp_path / "library"),
     })
@@ -55,7 +60,7 @@ def test_transient_subfolders_still_removed(tmp_path, monkeypatch):
     moved_file = str(sub / "1.flac")
 
     _patch_roots(monkeypatch, {
-        'soulseek.staging_path': str(tmp_path / "staging"),   # separate, not nested
+        'import.staging_path': str(tmp_path / "staging"),   # separate, not nested
         'soulseek.download_path': str(downloads),
         'soulseek.transfer_path': str(tmp_path / "library"),
     })
@@ -73,7 +78,7 @@ def test_ensure_staging_recreates_when_parent_exists(tmp_path, monkeypatch):
     downloads = tmp_path / "downloads"
     staging = downloads / "staging"
     downloads.mkdir()                       # parent exists, staging does not
-    _patch_roots(monkeypatch, {'soulseek.staging_path': str(staging)})
+    _patch_roots(monkeypatch, {'import.staging_path': str(staging)})
 
     assert not staging.exists()
     ensure_staging_dir()
@@ -84,7 +89,7 @@ def test_ensure_staging_skips_when_parent_missing(tmp_path, monkeypatch):
     """Mount safety: never fabricate a not-yet-mounted volume path — if the
     parent doesn't exist we leave it alone rather than mask a missing mount."""
     staging = tmp_path / "not_mounted_yet" / "staging"   # parent absent
-    _patch_roots(monkeypatch, {'soulseek.staging_path': str(staging)})
+    _patch_roots(monkeypatch, {'import.staging_path': str(staging)})
 
     ensure_staging_dir()
     assert not staging.exists()
@@ -95,7 +100,7 @@ def test_ensure_staging_noop_when_present(tmp_path, monkeypatch):
     staging = tmp_path / "staging"
     staging.mkdir()
     (staging / "keep.flac").write_text("x")
-    _patch_roots(monkeypatch, {'soulseek.staging_path': str(staging)})
+    _patch_roots(monkeypatch, {'import.staging_path': str(staging)})
 
     ensure_staging_dir()
     assert (staging / "keep.flac").is_file()   # untouched
@@ -103,7 +108,7 @@ def test_ensure_staging_noop_when_present(tmp_path, monkeypatch):
 
 def test_protected_roots_reads_all_three_configs(tmp_path, monkeypatch):
     _patch_roots(monkeypatch, {
-        'soulseek.staging_path': str(tmp_path / "s"),
+        'import.staging_path': str(tmp_path / "s"),
         'soulseek.download_path': str(tmp_path / "d"),
         'soulseek.transfer_path': str(tmp_path / "t"),
     })
@@ -111,3 +116,20 @@ def test_protected_roots_reads_all_three_configs(tmp_path, monkeypatch):
     assert os.path.normpath(str(tmp_path / "s")) in roots
     assert os.path.normpath(str(tmp_path / "d")) in roots
     assert os.path.normpath(str(tmp_path / "t")) in roots
+
+
+def test_the_import_folder_is_read_under_the_key_the_settings_page_writes(
+        tmp_path, monkeypatch):
+    """`soulseek.staging_path` is not in the config schema and nothing writes it
+    (core/settings.py defines `import.staging_path`, webui/static/settings.js
+    saves it). Reading the phantom key made protected_root_dirs() silently drop
+    the import folder — the exact thing #976 added it for."""
+    _patch_roots(monkeypatch, {
+        'soulseek.staging_path': str(tmp_path / "phantom"),
+        'import.staging_path': str(tmp_path / "real"),
+        'soulseek.download_path': str(tmp_path / "d"),
+        'soulseek.transfer_path': str(tmp_path / "t"),
+    })
+    roots = protected_root_dirs()
+    assert str(tmp_path / "real") in roots
+    assert str(tmp_path / "phantom") not in roots

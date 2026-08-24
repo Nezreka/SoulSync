@@ -720,12 +720,22 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             "_artists_list": _album_artists_for_collab if _album_artists_for_collab else _artists,
             "_itunes_artist_id": _itunes_aid,
         }
-        total_discs = _coerce_int(album_context.get("total_discs", 1) if album_context else 1, 1)
+        # "Declared" means the CALLER stated the disc count. A declared value is
+        # authoritative: re-deriving it from a live provider tracklist made the
+        # destination depend on whether that lookup happened to succeed, so a
+        # cache miss or an offline provider filed two tracks of one album in two
+        # different folders (Album/01.flac vs Album/Disc 1/01.flac). The lookup
+        # stays as the fallback for callers that genuinely do not know - a
+        # single-track download carries no album context of its own (#981).
+        _declared_total_discs = album_context.get("total_discs") if album_context else None
+        total_discs = _coerce_int(_declared_total_discs, 1)
 
         if total_discs <= 1 and album_context and album_context.get("id"):
             if disc_number > 1:
+                # A track that is itself on disc 2+ proves the release is
+                # multi-disc whatever the caller declared.
                 total_discs = disc_number
-            else:
+            elif _declared_total_discs in (None, ""):
                 try:
                     _album_tracks = _get_album_tracks_for_source(source, str(album_context["id"]))
                     if _album_tracks:

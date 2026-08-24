@@ -438,6 +438,38 @@ def _feat_in_title_enabled() -> bool:
         return False
 
 
+# A folder the organizer itself writes for one disc of a multi-disc release:
+# "Disc 1" / "CD 1" (the `file_organization.disc_label` setting) and "CD01"
+# (the `$cdnum` template variable). Anchored and numeric so a real album called
+# "Discovery" or an artist called "CD" is never mistaken for one.
+_DISC_FOLDER_RE = re.compile(r'^(disc|disk|cd|volume|vol)\s*\.?\s*\d+$', re.IGNORECASE)
+
+
+def _already_organized_by_disc(tracks) -> bool:
+    """Do the user's files already sit in per-disc folders?
+
+    The single-disc cap below reads the user's layout from their track NUMBERS,
+    which cannot distinguish "a single-disc edition mis-matched against a deluxe"
+    (#1080) from "a multi-disc album that is still downloading". A part-downloaded
+    box set has only disc 1 on disk, uniquely numbered and inside disc 1 — exactly
+    what the cap keys on — so Reorganize proposed moving the album straight back
+    out of the disc folders the download pipeline had just created, and flipped it
+    back again once disc 2 arrived.
+
+    The files settle it. SoulSync only writes a disc folder when the release IS
+    multi-disc, so an album already living in one is organized, not mis-matched,
+    and the setting gating this cap is "preserve my organization".
+    """
+    for track in tracks or []:
+        path = str(track.get('file_path') or '').replace('\\', '/')
+        if not path:
+            continue                      # a missing file carries no evidence
+        parent = os.path.basename(os.path.dirname(path))
+        if parent and _DISC_FOLDER_RE.match(parent):
+            return True
+    return False
+
+
 def _preserve_casing_enabled() -> bool:
     """Whether the reorganize leaves a title/album alone when the metadata
     source differs from the user's file only by letter-case (#1078 QT3496:
@@ -1007,7 +1039,8 @@ def plan_album_reorganize(
     #   * every user track fits within the source's disc 1  → a continuously-
     #     numbered 2-disc set (1..25) spills past disc 1 → left multi-disc.
     # Gated on the same preserve-my-organization setting as casing/year.
-    if total_discs > 1 and _preserve_casing_enabled():
+    if (total_discs > 1 and _preserve_casing_enabled()
+            and not _already_organized_by_disc(tracks)):
         try:
             user_nums = [int(t.get('track_number')) for t in tracks
                          if str(t.get('track_number') or '').strip().isdigit()]
