@@ -152,6 +152,7 @@ JOB_CATEGORIES = {
     # What is written on and about the tracks.
     'track_number_repair': 'Tags & metadata',
     'album_tag_consistency': 'Tags & metadata',
+    'library_retag': 'Tags & metadata',
     'mbid_mismatch_detector': 'Tags & metadata',
     'genre_cleanup': 'Tags & metadata',
     'genre_enrichment': 'Tags & metadata',
@@ -298,6 +299,7 @@ NATIVE_SUBJECT_FINDING_TYPES = frozenset({
     'metadata_gap',
     'missing_cover_art',
     'genre_enrichment',
+    'library_retag',
     'path_mismatch',
     'short_preview_track',
     'track_number_mismatch',
@@ -2058,6 +2060,7 @@ class RepairWorker:
             'missing_discography_release': self._fix_discography_release,
             'short_preview_track': self._fix_short_preview_track,
             'corrupt_audio': self._fix_corrupt_audio,
+            'library_retag': self._fix_library_retag,
             'canonical_version': self._fix_canonical_version,
             'genre_cleanup': self._fix_genre_cleanup,
             'genre_enrichment': self._fix_genre_enrichment,
@@ -2902,6 +2905,52 @@ class RepairWorker:
             }
         return {'success': True, 'deleted_file': True, 'resolved_path': resolved,
                 'delete_operation_id': outcome.get('operation_id')}
+
+    def _fix_library_retag(self, entity_type, entity_id, file_path, details):
+        """Write the library's metadata into one file's tags.
+
+        The engine does the work — the same one the Re-tag dialog calls, so a
+        finding and a preview can never disagree about what would be written.
+        What this handler owns is the DECISION the finding carries: a field a
+        person set by hand keeps its value unless they release it, and
+        ``fix_action='overwrite_manual'`` is how that release travels from the
+        row (or from the bulk "apply everything, including the hand-set ones"
+        choice) into the write.
+        """
+        stale = _stale_legacy_subject(entity_id)
+        if stale:
+            return stale
+        native_track_id = _lib2_id(entity_id)
+        if native_track_id is None:
+            return {'success': False,
+                    'error': 'No Library v2 track associated with this finding'}
+        release = details.get('_fix_action') == 'overwrite_manual'
+        from core.library2 import retag
+
+        try:
+            stats = retag.write_tags(
+                self.db, [native_track_id],
+                embed_cover=False, overwrite_manual=release,
+            )
+        except Exception as exc:  # noqa: BLE001 - surface as a fix failure
+            logger.error("Library re-tag apply failed for %s: %s",
+                         entity_id, exc, exc_info=True)
+            return {'success': False, 'error': str(exc)}
+        if not stats.get('written'):
+            failure = (stats.get('errors') or [{}])[0]
+            return {
+                'success': False,
+                'error': failure.get('error') or 'No tags were written',
+            }
+        kept = [] if release else (details.get('manual_fields') or [])
+        message = 'Wrote the library\'s tags to the file'
+        if kept:
+            # Say what was NOT written. A silent skip is how the user ends up
+            # believing a field was applied when their own value won.
+            message += f" (kept your {', '.join(kept)})"
+        elif release and details.get('manual_fields'):
+            message += f" (overwrote your {', '.join(details['manual_fields'])})"
+        return {'success': True, 'action': 'applied_tags', 'message': message}
 
     def _fix_uncatalogued_bad_file(self, file_path, details, *, reason: str,
                                    noun: str) -> dict:

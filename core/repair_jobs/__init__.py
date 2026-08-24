@@ -43,6 +43,9 @@ JOB_DATA_BASIS: dict[str, str] = {
     'genre_enrichment': 'lib2',
     'comma_artist_splitter': 'lib2',
     'path_drift_reconcile': 'lib2',
+    # Reborn on the lib2 retag engine — the retired legacy job read the
+    # albums/artists/tracks tables this branch removed.
+    'library_retag': 'lib2',
 }
 
 # Exhaustive Library-v2 interoperability contract.  ``JOB_DATA_BASIS`` says
@@ -105,6 +108,9 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     # Repoints a stale index row at a file that is already on disk. 'path' is
     # the stored-path change; no file is ever moved, created or deleted.
     'path_drift_reconcile': frozenset({'observe', 'path'}),
+    # Reports tag drift; applying writes the catalogue's values into the file.
+    # No row moves, nothing is created or deleted.
+    'library_retag': frozenset({'observe', 'tags'}),
 }
 
 # Jobs deliberately retired after their function moved to a native Library-v2
@@ -126,7 +132,6 @@ RETIRED_JOB_IDS = frozenset({
     'single_album_dedup',
     'unknown_artist_fixer',
     'canonical_version_resolve',
-    'library_retag',
     'lib2_mirror_reconcile',
     'lib2_wishlist_reconcile',
     # Stable P1/P2 identities renamed neutrally at the P3 boundary.

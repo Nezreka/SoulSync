@@ -111,3 +111,75 @@ def test_no_subject_and_no_path_is_still_refused(finding_type, tmp_path: Path):
 
     assert result['success'] is False
     assert result.get('stale') is not True
+
+
+# ── library_retag: applying one finding, and the hand-set field in it ────────
+#
+# The job reports; the handler writes. Everything it needs is already in the
+# engine — the point of the handler is the DECISION the finding carries: a
+# field a person set by hand keeps its value unless they release it, and
+# `fix_action` is how a release travels from the UI (per row, or per bulk
+# choice) into the write.
+
+def _retag_worker(monkeypatch, tmp_path: Path, calls: list) -> RepairWorker:
+    def _write_tags(_db, track_ids, **kwargs):
+        calls.append({"track_ids": list(track_ids), **kwargs})
+        return {"written": len(track_ids), "skipped": 0, "failed": 0, "errors": []}
+
+    monkeypatch.setattr("core.library2.retag.write_tags", _write_tags)
+    return _worker(tmp_path)
+
+
+def test_applying_a_retag_finding_writes_that_one_track(monkeypatch, tmp_path: Path):
+    calls: list = []
+    result = _retag_worker(monkeypatch, tmp_path, calls)._execute_fix(
+        'library_retag', 'track', 'lib2:42', '/music/a.flac', {})
+
+    assert result['success'] is True
+    assert calls[0]['track_ids'] == [42]
+
+
+def test_by_default_the_fix_keeps_a_hand_set_field(monkeypatch, tmp_path: Path):
+    calls: list = []
+    _retag_worker(monkeypatch, tmp_path, calls)._execute_fix(
+        'library_retag', 'track', 'lib2:42', '/music/a.flac',
+        {'has_manual_conflict': True, 'manual_fields': ['Title']})
+
+    assert not calls[0]['overwrite_manual']
+
+
+def test_the_overwrite_action_releases_the_hand_set_fields(monkeypatch, tmp_path: Path):
+    """The bulk choice is "apply everything, including the hand-set ones", and
+    it arrives as a fix_action like every other per-type decision does."""
+    calls: list = []
+    _retag_worker(monkeypatch, tmp_path, calls)._execute_fix(
+        'library_retag', 'track', 'lib2:42', '/music/a.flac',
+        {'_fix_action': 'overwrite_manual'})
+
+    assert calls[0]['overwrite_manual'] is True
+
+
+def test_a_legacy_subject_is_refused_rather_than_written(monkeypatch, tmp_path: Path):
+    """A bare integer id predates Library v2; applying it would write tags
+    computed for a different row."""
+    calls: list = []
+    result = _retag_worker(monkeypatch, tmp_path, calls)._execute_fix(
+        'library_retag', 'track', '42', '/music/a.flac', {})
+
+    assert result['success'] is False
+    assert result.get('stale_subject') is True
+    assert calls == []
+
+
+def test_a_write_that_failed_is_not_reported_as_fixed(monkeypatch, tmp_path: Path):
+    calls: list = []
+    worker = _retag_worker(monkeypatch, tmp_path, calls)
+    monkeypatch.setattr("core.library2.retag.write_tags", lambda *_a, **_k: {
+        "written": 0, "skipped": 0, "failed": 1,
+        "errors": [{"track_id": 42, "error": "File not found on disk"}]})
+
+    result = worker._execute_fix(
+        'library_retag', 'track', 'lib2:42', '/music/a.flac', {})
+
+    assert result['success'] is False
+    assert 'File not found' in result['error']

@@ -21,7 +21,10 @@ def test_representative_job_data_bases_are_deliberate():
     assert JOB_DATA_BASIS['monitoring_list_reconcile'] == 'lib2'
     assert JOB_DATA_BASIS['empty_folder_cleaner'] == 'filesystem'
     assert set(JOB_DATA_BASIS.values()) == {'lib2', 'filesystem'}
-    assert 'library_retag' not in JOB_DATA_BASIS
+    # `library_retag` used to be listed here as retired: its legacy scan read
+    # the albums/artists/tracks tables this branch removed. It is back on the
+    # lib2 retag engine, scoped, so it declares a basis like any other job.
+    assert JOB_DATA_BASIS['library_retag'] == 'lib2'
     assert 'lib2_mirror_reconcile' not in JOB_DATA_BASIS
     assert 'quality_upgrade_scan' not in JOB_DATA_BASIS
 

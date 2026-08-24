@@ -213,17 +213,22 @@ def test_global_reorganize_sources_delegates(monkeypatch):
 
 
 def test_preview_album_reorganize_resolves_and_delegates(monkeypatch, imported_legacy_db):
+    """The native album id and the path helpers reach the catalogue planner.
+    `source`/`mode` are still accepted from an older client and then ignored —
+    a destination path has no metadata source."""
     conn = imported_legacy_db._get_connection()
     lib2_album_id = conn.execute("SELECT id FROM lib2_albums WHERE legacy_album_id=10").fetchone()["id"]
     conn.close()
 
     captured = {}
 
-    def fake_preview(**kwargs):
+    def fake_plan(conn_, album_id, **kwargs):
+        captured['album_id'] = album_id
         captured.update(kwargs)
         return {"success": True, "status": "planned", "tracks": []}
 
-    monkeypatch.setattr('core.library_reorganize.preview_album_reorganize', fake_preview, raising=True)
+    monkeypatch.setattr('core.library2.reorganize_plan.plan_album_reorganize',
+                        fake_plan, raising=True)
 
     result = preview_album_reorganize(
         imported_legacy_db, config_manager=None, lib2_album_id=lib2_album_id,
@@ -231,11 +236,10 @@ def test_preview_album_reorganize_resolves_and_delegates(monkeypatch, imported_l
     )
     assert result["status"] == "planned"
     assert captured['album_id'] == lib2_album_id
-    assert captured['primary_source'] == 'spotify'
-    assert captured['strict_source'] is True
-    assert captured['metadata_source'] == 'tags'
     assert callable(captured['resolve_file_path_fn'])
     assert callable(captured['build_final_path_fn'])
+    assert 'primary_source' not in captured
+    assert 'metadata_source' not in captured
 
 
 def test_preview_album_reorganize_rejects_album_without_files(discography_only_album, imported_legacy_db):
@@ -244,19 +248,21 @@ def test_preview_album_reorganize_rejects_album_without_files(discography_only_a
     assert exc_info.value.status == 404
 
 
-def test_preview_album_reorganize_translates_no_source_id_status_through(monkeypatch, imported_legacy_db):
-    """no_source_id is a legitimate planned-but-unresolvable outcome (the UI
-    shows it inline) — NOT an error the bridge should raise."""
+def test_an_unknown_status_is_passed_through_rather_than_raised(monkeypatch, imported_legacy_db):
+    """The bridge raises for the two cases the UI cannot render and passes
+    everything else through. `no_source_id` used to be one of those pass-through
+    outcomes; the planner no longer produces it, because a path needs no source.
+    """
     conn = imported_legacy_db._get_connection()
     lib2_album_id = conn.execute("SELECT id FROM lib2_albums WHERE legacy_album_id=10").fetchone()["id"]
     conn.close()
     monkeypatch.setattr(
-        'core.library_reorganize.preview_album_reorganize',
-        lambda **kwargs: {"success": False, "status": "no_source_id", "tracks": []},
+        'core.library2.reorganize_plan.plan_album_reorganize',
+        lambda *_a, **_k: {"success": False, "status": "something_new", "tracks": []},
         raising=True,
     )
     result = preview_album_reorganize(imported_legacy_db, config_manager=None, lib2_album_id=lib2_album_id)
-    assert result["status"] == "no_source_id"
+    assert result["status"] == "something_new"
 
 
 def test_preview_album_reorganize_raises_for_no_tracks_status(monkeypatch, imported_legacy_db):
@@ -264,8 +270,8 @@ def test_preview_album_reorganize_raises_for_no_tracks_status(monkeypatch, impor
     lib2_album_id = conn.execute("SELECT id FROM lib2_albums WHERE legacy_album_id=10").fetchone()["id"]
     conn.close()
     monkeypatch.setattr(
-        'core.library_reorganize.preview_album_reorganize',
-        lambda **kwargs: {"success": False, "status": "no_tracks", "tracks": []},
+        'core.library2.reorganize_plan.plan_album_reorganize',
+        lambda *_a, **_k: {"success": False, "status": "no_tracks", "tracks": []},
         raising=True,
     )
     with pytest.raises(ReorganizeBridgeError) as exc_info:
