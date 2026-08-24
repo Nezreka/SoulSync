@@ -21,6 +21,7 @@ from core.video.extto_search import (
     DEFAULT_FLARESOLVERR_URL,
     ExtToBlocked,
     FlareSolverrClient,
+    _cell_value,
     _clean,
     _fetch,
     _int,
@@ -28,7 +29,7 @@ from core.video.extto_search import (
     _soup,
     flaresolverr_url,
 )
-from core.video.release_parse import extract_title, parse_release
+from core.video.release_parse import parse_release, search_title
 from utils.logging_config import get_logger
 
 logger = get_logger("video.extto_fresh")
@@ -74,25 +75,6 @@ class FreshRelease:
     is_series_pack: bool = False
 
 
-def _cell_value(td: Tag | None, label: str | None = None) -> str:
-    if td is None:
-        return ""
-    if label:
-        for wrapper in td.select(".add-block-wrapper"):
-            marker = _clean(wrapper.select_one(".add-block").get_text(" ") if wrapper.select_one(".add-block") else "")
-            if marker.lower().rstrip("s") == label.lower().rstrip("s"):
-                spans = wrapper.find_all("span")
-                if spans:
-                    return _clean(spans[-1].get_text(" "))
-    chunks = [_clean(s.get_text(" ")) for s in td.find_all("span")]
-    chunks = [c for c in chunks if c and c.lower() not in {"size", "files", "age", "seeds", "leechs", "leeches"}]
-    return chunks[-1] if chunks else _clean(td.get_text(" "))
-
-
-def _search_title(title: str) -> str:
-    value = extract_title(title) or title
-    value = re.sub(r"[\s(\[{._-]+$", "", value or "").strip()
-    return value or title
 
 def _magnet_url(row: Tag) -> str:
     node = row.select_one('a.torrent-dwn[href^="magnet:"]') or row.select_one('a[href^="magnet:"]')
@@ -125,7 +107,7 @@ def _parse_row(row: Tag, category: str, period: str, base_url: str) -> FreshRele
 
     magnet = _magnet_url(row)
     parsed = parse_release(title)
-    search_title = _search_title(title)
+    st = search_title(title)
     quality_label = " ".join(str(x) for x in (parsed.get("resolution"), parsed.get("source")) if x) or None
     return FreshRelease(
         title=title,
@@ -140,7 +122,7 @@ def _parse_row(row: Tag, category: str, period: str, base_url: str) -> FreshRele
         period=period,
         download_url=magnet,
         magnet_uri=magnet,
-        search_title=search_title,
+        search_title=st,
         year=parsed.get("year"),
         resolution=parsed.get("resolution"),
         quality_label=quality_label,

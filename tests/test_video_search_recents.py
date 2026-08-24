@@ -87,3 +87,224 @@ def test_fresh_releases_tab_fetches_extto_homepage_board_in_app():
     assert "search_ctx: isMovie ? { scope: 'movie'" in _JS
     assert "scope: freshIdentify.mode === 'episode' ? 'episode' : 'season'" in _JS
     assert ".vsr-fi-modal" in _CSS and ".vsr-fresh-pick" in _CSS
+
+
+def test_basic_search_hits_can_be_identified_and_grabbed():
+    """Every Basic Search hit gets the Fresh Releases treatment: identify it as a
+    movie / episode / season pack, then grab it from whichever source it came from.
+    The behaviour of the per-source descriptor is executed in
+    webui/src/test/video-basic-search-grab.test.ts; this pins the WIRING, which
+    that test cannot see because it lifts the functions out of the file."""
+    assert "data-vsr-basic-grab" in _JS and "function basicOpenIdentify" in _JS
+    assert "basicRowsBySource[sourceId] = shown" in _JS, "the Identify buttons index into nothing"
+    assert "basicOpenIdentify(bits[0], parseInt(bits[1], 10))" in _JS, "the click handler is not wired"
+    # all three scopes offered, because a release-title search is not told what it found
+    assert "modes: ['movie', 'episode', 'season']" in _JS
+    assert "var modes = freshIdentify.modes ||" in _JS, "the modal still hard-codes the fresh-tab modes"
+    # the payload takes its carriers from the source, not from a hard-coded EXT.to shape
+    assert "function identifyGrabDescriptor" in _JS
+    assert "source: 'extto'," not in _JS.split("function freshGrabPayload")[1].split("function freshGrabIdentifiedRelease")[0]
+    # a Soulseek season pack fans out at grab time; a torrent cannot (its files
+    # do not exist yet) and goes in as one season-scoped row
+    assert "'/api/video/downloads/grab-pack'" in _JS
+    assert "(grab.files || []).length > 1" in _JS
+    assert ".vsr-basic-hit-grab" in _CSS
+
+
+def test_search_results_carry_the_identity_the_release_name_already_states():
+    """The identify modal prefills from the hit. _evaluate_hits parses every release
+    anyway, then used to throw the identity away — so Basic Search could show you
+    'Silo S03E08' and still make you retype the season and episode."""
+    from api.video.downloads import _evaluate_hits
+
+    hits = [{"title": "Silo S03E08 1080p WEB h264-SKYFiRE", "size_bytes": 517_000_000,
+             "protocol": "torrent", "seeders": 40, "download_url": "magnet:?x"},
+            {"title": "Interstellar 2014 1080p BluRay x264-YIFY", "size_bytes": 2_100_000_000,
+             "protocol": "torrent", "seeders": 900, "download_url": "magnet:?z"}]
+    out = {r["title"].split()[0]: r for r in
+           _evaluate_hits(hits, None, "movie", None, None, blocked=frozenset(), blocked_users=frozenset())}
+
+    ep = out["Silo"]
+    assert ep["search_title"] == "Silo", "the modal's title box would prefill with the raw release name"
+    assert ep["season"] == 3 and ep["episode"] == 8
+    assert ep["is_season_pack"] is False
+
+    movie = out["Interstellar"]
+    assert movie["year"] == 2014 and movie["season"] is None and movie["episode"] is None
+    # `source` stays the RELEASE source (BluRay/WEB) — the download source comes
+    # from the tab, and renaming this field would silently change every chip row
+    assert movie["source"] == "bluray"
+
+
+# The four payload shapes webui/src/test/video-basic-search-grab.test.ts builds by
+# EXECUTING freshGrabPayload. Replayed here against the real endpoint so both sides
+# of the JS/Python boundary are checked against the same bodies.
+_SHOW_CTX = {"title": "Silo", "year": 2023}
+_BASIC_PAYLOADS = {
+    "episode/torrent": {
+        "kind": "show", "source": "torrent", "title": "Silo",
+        "release_title": "Silo S03E08 1080p WEB", "filename": "Silo S03E08 1080p WEB",
+        "username": "The Pirate Bay", "indexer_id": 42, "protocol": "torrent",
+        "download_url": "https://prowlarr/dl.torrent", "magnet_uri": "magnet:?xt=1",
+        "candidates": [], "size_bytes": 517_000_000, "quality_label": "1080p web",
+        "media_id": 125988, "media_source": "tmdb", "year": 2023, "poster_url": "/p.jpg",
+        "search_ctx": {"scope": "episode", "season": 3, "episode": 8, **_SHOW_CTX}},
+    "season/torrent": {
+        "kind": "show", "source": "torrent", "title": "Silo",
+        "release_title": "Silo S03 COMPLETE 1080p WEB", "filename": "Silo S03 COMPLETE 1080p WEB",
+        "username": "1337x", "indexer_id": "1337x", "protocol": "torrent",
+        "download_url": "https://prowlarr/pack.torrent", "magnet_uri": "magnet:?xt=2",
+        "candidates": [], "size_bytes": 5_000_000_000, "quality_label": "1080p web",
+        "media_id": 125988, "media_source": "tmdb", "year": 2023, "poster_url": "/p.jpg",
+        "search_ctx": {"scope": "season", "season": 3, "episode": None, **_SHOW_CTX}},
+    "movie/extto": {
+        "kind": "movie", "source": "extto", "title": "Interstellar",
+        "release_title": "Interstellar 2014 1080p BluRay", "filename": "Interstellar 2014 1080p BluRay",
+        "username": "EXT.to", "indexer_id": "extto", "protocol": "torrent",
+        "download_url": "magnet:?xt=3", "magnet_uri": "magnet:?xt=3",
+        "candidates": [], "size_bytes": 2_100_000_000, "quality_label": "1080p bluray",
+        "media_id": 157336, "media_source": "tmdb", "year": 2014, "poster_url": "/i.jpg",
+        "search_ctx": {"scope": "movie", "title": "Interstellar", "year": 2014}},
+    "episode/soulseek": {
+        "kind": "show", "source": "soulseek", "title": "Silo",
+        "release_title": "Silo S03E09 1080p WEB", "filename": "@@silo/Silo.S03E09.mkv",
+        "username": "peer1", "candidates": [{"username": "peer2", "filename": "other.mkv",
+                                             "size_bytes": 9, "quality_label": None, "title": None}],
+        "size_bytes": 517_000_000, "quality_label": "1080p web",
+        "media_id": 125988, "media_source": "tmdb", "year": 2023, "poster_url": "/p.jpg",
+        "search_ctx": {"scope": "episode", "season": 3, "episode": 9, **_SHOW_CTX}},
+}
+
+
+def test_every_basic_search_source_grabs_into_a_row_the_pipeline_understands(tmp_path, monkeypatch):
+    """Basic Search hands four differently-shaped payloads to one endpoint. Each has
+    to land as a row the monitor can poll and the importer can file — which is a
+    different set of columns per source, and (for TV) the search_ctx scope that
+    decides single-file import vs pack fan-out."""
+    import api.video as videoapi
+    from flask import Flask
+    from database.video_database import VideoDatabase
+    from core.video.season_pack import is_pack_download, want_season_of
+    import core.video.client_grab as cg
+    import core.video.slskd_download as sd
+
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    db.set_setting("movies_path", str(tmp_path / "Movies"))
+    db.set_setting("tv_path", str(tmp_path / "TV"))
+    videoapi._video_db = db
+    try:
+        monkeypatch.setattr(cg, "grab", lambda *a, **k: {"ok": True, "ref": "hash123"})
+        monkeypatch.setattr(sd, "start_download", lambda *a, **k: {"ok": True})
+        app = Flask(__name__)
+        app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+        client = app.test_client()
+
+        rows = {}
+        for label, payload in _BASIC_PAYLOADS.items():
+            r = client.post("/api/video/downloads/grab", json=payload)
+            assert r.status_code == 200 and r.get_json().get("ok"), (label, r.get_json())
+            rows[label] = db.get_video_download(r.get_json()["id"])
+
+        # every torrent-side source is polled by the client watcher, keyed on client_ref
+        for label in ("episode/torrent", "season/torrent", "movie/extto"):
+            assert rows[label]["source"] == "torrent", label
+            assert rows[label]["client_ref"] == "hash123", label
+        # ...and Soulseek keeps its peer + its retry pool
+        ss = rows["episode/soulseek"]
+        assert ss["source"] == "soulseek" and ss["username"] == "peer1"
+        assert "peer2" in (ss["candidates"] or ""), "the retry pool was dropped"
+
+        # TV scope decides single-file import vs pack fan-out
+        assert is_pack_download(rows["episode/torrent"]) is False
+        assert is_pack_download(rows["episode/soulseek"]) is False
+        assert is_pack_download(rows["season/torrent"]) is True
+        assert want_season_of(rows["season/torrent"]) == 3
+        # a movie is never a pack, and carries no season to filter by
+        assert is_pack_download(rows["movie/extto"]) is False
+        assert want_season_of(rows["movie/extto"]) is None
+
+        # each row lands in the right library root
+        assert rows["movie/extto"]["target_dir"] == str(tmp_path / "Movies")
+        assert rows["season/torrent"]["target_dir"] == str(tmp_path / "TV")
+
+        # Basic Search shows the same episode from five sources at once, so the
+        # in-flight dedup is what stops "try another source" becoming two copies of
+        # S03E08 downloading side by side. It answers ok+already, NOT a second row.
+        before = len(db.list_video_downloads())
+        dupe = client.post("/api/video/downloads/grab",
+                           json={**_BASIC_PAYLOADS["episode/torrent"], "source": "extto",
+                                 "username": "EXT.to", "download_url": "magnet:?other"})
+        assert dupe.get_json() == {"ok": True, "already": True}, dupe.get_json()
+        assert len(db.list_video_downloads()) == before, "the same episode queued twice"
+    finally:
+        videoapi._video_db = None
+
+
+def test_an_extto_basic_search_grab_resolves_its_magnet_at_grab_time(tmp_path, monkeypatch):
+    """EXT.to lists releases WITHOUT magnets: the search page carries a per-row torrent
+    id but not the tokens the magnet endpoint is signed with, so each magnet costs its
+    own Cloudflare-challenged detail fetch. Resolving 25 to draw a result list would
+    take minutes — so the list ships link-less and the ONE release you pick is resolved
+    here. Without this every EXT.to hit in Basic Search read 'No link'."""
+    import api.video as videoapi
+    from flask import Flask
+    from database.video_database import VideoDatabase
+    import core.video.client_grab as cg
+    import core.video.extto_search as ex
+
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    db.set_setting("movies_path", str(tmp_path / "Movies"))
+    videoapi._video_db = db
+    try:
+        seen = {}
+        monkeypatch.setattr(cg, "grab", lambda src, url, **k: seen.update(source=src, url=url)
+                            or {"ok": True, "ref": "hash123"})
+        monkeypatch.setattr(ex, "resolve_magnet",
+                            lambda info_url, **kw: seen.update(resolved=info_url, id=kw.get("magnet_id"))
+                            or {"ok": True, "magnet": "magnet:?xt=urn:btih:abc&dn=Interstellar&tr=udp://t:1337"})
+        app = Flask(__name__)
+        app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+        payload = {"kind": "movie", "title": "Interstellar", "source": "extto",
+                   "release_title": "Interstellar 2014 1080p BluRay", "username": "EXT.to",
+                   "indexer_id": "extto", "protocol": "torrent",
+                   "download_url": "", "magnet_uri": "",          # the list has no magnet
+                   "info_url": "https://ext.to/interstellar-2014-1014669/", "magnet_id": "1014669",
+                   "size_bytes": 2_100_000_000, "media_id": 157336, "media_source": "tmdb",
+                   "year": 2014, "search_ctx": {"scope": "movie", "title": "Interstellar", "year": 2014}}
+        r = app.test_client().post("/api/video/downloads/grab", json=payload)
+        assert r.status_code == 200 and r.get_json().get("ok"), r.get_json()
+        assert seen["resolved"] == "https://ext.to/interstellar-2014-1014669/"
+        assert seen["id"] == "1014669", "the row's torrent id was not carried to the resolver"
+        # the resolved magnet is what reaches the client, and the row is a torrent row
+        assert seen["source"] == "torrent"
+        assert seen["url"].startswith("magnet:?xt=urn:btih:abc")
+        assert db.list_video_downloads()[0]["source"] == "torrent"
+    finally:
+        videoapi._video_db = None
+
+
+def test_a_release_that_will_not_resolve_fails_the_grab_instead_of_queueing_a_dead_row(tmp_path, monkeypatch):
+    import api.video as videoapi
+    from flask import Flask
+    from database.video_database import VideoDatabase
+    import core.video.client_grab as cg
+    import core.video.extto_search as ex
+
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    db.set_setting("movies_path", str(tmp_path / "Movies"))
+    videoapi._video_db = db
+    try:
+        monkeypatch.setattr(cg, "grab", lambda *a, **k: {"ok": True, "ref": "nope"})
+        monkeypatch.setattr(ex, "resolve_magnet",
+                            lambda *a, **k: {"ok": False, "error": "EXT.to: Cloudflare challenge"})
+        app = Flask(__name__)
+        app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+        r = app.test_client().post("/api/video/downloads/grab", json={
+            "kind": "movie", "title": "Interstellar", "source": "extto",
+            "release_title": "x", "download_url": "", "magnet_uri": "",
+            "info_url": "https://ext.to/x-1/", "media_id": 1, "media_source": "tmdb"})
+        assert r.status_code == 502
+        assert "Cloudflare" in r.get_json()["error"], "the real reason was swallowed"
+        assert db.list_video_downloads() == [], "a row was queued for a magnet we never got"
+    finally:
+        videoapi._video_db = None

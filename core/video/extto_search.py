@@ -22,7 +22,7 @@ from typing import Any, Iterable, Optional
 from urllib.parse import quote_plus, urlencode, urljoin, urlparse
 
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 from utils.logging_config import get_logger
 
@@ -52,6 +52,8 @@ class ExtToHit:
     size_text: str | None = None
     seeders: int | None = None
     leechers: int | None = None
+    files: int | None = None
+    age: str = ""
     magnet_id: str | None = None
     magnet: str | None = None
 
@@ -82,10 +84,19 @@ class FlareSolverrClient:
         if method.upper() == "POST":
             payload["postData"] = urlencode(data or {})
         r = requests.post(self.base_url + "/v1", json=payload, timeout=self.timeout + 10)
-        r.raise_for_status()
-        body = r.json()
+        # FlareSolverr answers a failed solve with HTTP 500 AND a JSON body naming the
+        # cause ("Error solving the challenge. Timeout after 20.0 seconds."). This used
+        # to raise_for_status() first, which threw that body away and surfaced
+        # "500 Server Error: Internal Server Error for url: http://localhost:8191/v1" —
+        # a message that names the proxy instead of the problem and reads like
+        # FlareSolverr is broken when it is really just out of time.
+        try:
+            body = r.json()
+        except ValueError:
+            body = {}
         if body.get("status") != "ok":
-            raise RuntimeError(body.get("message") or "FlareSolverr request failed")
+            raise RuntimeError(body.get("message")
+                               or "FlareSolverr returned HTTP %s" % r.status_code)
         sol = body.get("solution") or {}
         return int(sol.get("status") or 0), str(sol.get("response") or ""), str(sol.get("url") or url)
 
@@ -132,6 +143,27 @@ def _soup(html: str) -> BeautifulSoup:
         return BeautifulSoup(html or "", "html.parser")
 
 
+def _cell_value(td: "Tag | None", label: str | None = None) -> str:
+    """One stat out of an ext.to results-table cell.
+
+    The cells are ``<span class="add-block">Size</span><span>2.26 GB</span>`` pairs,
+    so the LABEL is what identifies the value - column order differs between the
+    homepage and the search page. Falls back to the cell's last non-label span.
+    """
+    if td is None:
+        return ""
+    if label:
+        for wrapper in td.select(".add-block-wrapper"):
+            marker = _clean(wrapper.select_one(".add-block").get_text(" ") if wrapper.select_one(".add-block") else "")
+            if marker.lower().rstrip("s") == label.lower().rstrip("s"):
+                spans = wrapper.find_all("span")
+                if spans:
+                    return _clean(spans[-1].get_text(" "))
+    chunks = [_clean(s.get_text(" ")) for s in td.find_all("span")]
+    chunks = [c for c in chunks if c and c.lower() not in {"size", "files", "age", "seeds", "leechs", "leeches"}]
+    return chunks[-1] if chunks else _clean(td.get_text(" "))
+
+
 def _clean(value: str | None) -> str:
     return re.sub(r"\s+", " ", unescape(value or "")).strip()
 
@@ -164,14 +196,46 @@ def parse_results(html: str, base_url: str, limit: int = 20) -> list[ExtToHit]:
         if url in seen:
             continue
         title = _clean(a.get_text(" ")) or path.strip("/").rsplit("-", 1)[0].replace("-", " ").title()
-        row_text = _clean(a.find_parent().get_text(" ") if a.find_parent() else "")
-        lower = row_text.lower()
-        seeds = re.search(r"(?:seeders?|seeds?)\D+(\d[\d,]*)", lower)
-        peers = re.search(r"(?:leechers?|peers?)\D+(\d[\d,]*)", lower)
-        size = re.search(r"\b\d+(?:\.\d+)?\s*(?:kb|mb|gb|tb)\b", row_text, re.I)
-        out.append(ExtToHit(title=title, url=url, size_text=size.group(0) if size else None,
-                            seeders=_int(seeds.group(1) if seeds else None),
-                            leechers=_int(peers.group(1) if peers else None)))
+        # Size/seeds/leechs live in the ROW's stat cells, not next to the link. This
+        # used to read a.find_parent(), which is the title div ('<div class="float-left
+        # has-movie">' — title, IMDb badge, uploader) and never contains a single stat,
+        # so every search hit came back with no size and no swarm: shown as "Size
+        # unknown / Health unknown", ranked at availability 0, and rejected by any
+        # profile with a seeder floor. The search table is the SAME markup as the
+        # homepage, so it reads through the same labelled-cell reader.
+        row = a.find_parent("tr")
+        cells = row.find_all("td", recursive=False) if row else []
+        size_text = _cell_value(cells[1] if len(cells) > 1 else None, "Size")
+        seeds_text = _cell_value(cells[4] if len(cells) > 4 else None, "Seeds")
+        leech_text = _cell_value(cells[5] if len(cells) > 5 else None, "Leechs")
+        files_text = _cell_value(cells[2] if len(cells) > 2 else None, "Files")
+        age = _cell_value(cells[3] if len(cells) > 3 else None, "Age")
+        if cells and not size_text:
+            # a row that lays its columns out differently still labels them
+            size_text = _cell_value(cells[0], "Size")
+        if cells and not seeds_text:
+            seeds_text = _cell_value(cells[0], "Seeds")
+        if not size_text and not seeds_text:
+            # No results TABLE (a mirror rendering cards, say) — scrape the widest
+            # container we have. This is the original behaviour, kept as the fallback
+            # rather than the primary: on ext.to itself it reads the title div, which
+            # holds no stats at all.
+            container = row or a.find_parent()
+            row_text = _clean(container.get_text(" ")) if container else ""
+            lower = row_text.lower()
+            seeds = re.search(r"(?:seeders?|seeds?)\D+(\d[\d,]*)", lower)
+            peers = re.search(r"(?:leechers?|peers?)\D+(\d[\d,]*)", lower)
+            size = re.search(r"\b\d+(?:\.\d+)?\s*(?:kb|mb|gb|tb)\b", row_text, re.I)
+            size_text = size.group(0) if size else ""
+            seeds_text = seeds.group(1) if seeds else ""
+            leech_text = peers.group(1) if peers else ""
+        # The magnet button's data-id is the torrent id, carried so a grab can resolve
+        # the magnet later without re-finding the row.
+        btn = row.select_one("[data-id]") if row else None
+        out.append(ExtToHit(title=title, url=url, size_text=size_text or None,
+                            seeders=_int(seeds_text), leechers=_int(leech_text),
+                            files=_int(files_text), age=age or "",
+                            magnet_id=str(btn.get("data-id")) if btn and btn.get("data-id") else None))
         seen.add(url)
         if len(out) >= limit:
             break
@@ -196,6 +260,41 @@ def extract_page_tokens(html: str) -> tuple[str | None, str | None]:
 
 def compute_hmac(torrent_id: str, timestamp: int, page_token: str) -> str:
     return hashlib.sha256(("%d|%d|%s" % (int(torrent_id), int(timestamp), page_token)).encode("utf-8")).hexdigest()
+
+
+def _json_body(resp: str) -> Any:
+    """The JSON out of a FlareSolverr response, or the raw text if there is none.
+
+    getTorrentMagnet.php answers with plain JSON, but FlareSolverr hands back the
+    RENDERED DOM — so what arrives is Chrome's JSON viewer wrapping the payload in
+    ``<html>...<pre>{...}</pre>...</html>``. json.loads fails on that, and the old
+    fallback regex-scraped the magnet straight out of the markup: it stopped at the
+    first space (magnets carry a `dn=` display name full of them) and left `\u0026`
+    undecoded, yielding `magnet:?xt=urn:btih:<hash>\u0026dn=Interstellar` — the
+    infohash intact but the name mangled and EVERY TRACKER DROPPED, which is a
+    torrent that has to find its swarm on DHT alone.
+
+    Unwrapping the <pre> and letting the JSON decoder do the unescaping gives the
+    magnet exactly as ext.to's own page script uses it.
+    """
+    text = str(resp or "")
+    try:
+        return json.loads(text)
+    except ValueError:
+        pass
+    m = re.search(r"<pre[^>]*>(.*?)</pre>", text, re.S | re.I)
+    if m:
+        try:
+            return json.loads(unescape(m.group(1)).strip())
+        except ValueError:
+            pass
+    start, end = text.find("{"), text.rfind("}")
+    if 0 <= start < end:
+        try:
+            return json.loads(unescape(text[start:end + 1]))
+        except ValueError:
+            pass
+    return text
 
 
 def _direct_magnet(html: str) -> str | None:
@@ -244,11 +343,7 @@ def fetch_magnet(client: FlareSolverrClient, detail_url: str, html: str, torrent
     parsed = urlparse(detail_url)
     endpoint = "%s://%s/ajax/getTorrentMagnet.php" % (parsed.scheme, parsed.netloc)
     resp = _fetch(client, endpoint, "POST", body)
-    try:
-        payload: Any = json.loads(resp)
-    except ValueError:
-        payload = resp
-    return _magnet_from_payload(payload)
+    return _magnet_from_payload(_json_body(resp))
 
 
 def _project(hit: ExtToHit) -> dict:
@@ -266,15 +361,63 @@ def _project(hit: ExtToHit) -> dict:
         "filename": hit.title,
         "availability": hit.seeders if hit.seeders is not None else 0,
         "files": [],
-        "file_count": 0,
+        "file_count": hit.files or 0,
+        "age": hit.age or "",
         "folder_size_bytes": _size_bytes(hit.size_text),
         "download_url": magnet,
         "magnet_uri": magnet,
         "protocol": "torrent",
         "info_url": hit.url,
+        "magnet_id": hit.magnet_id,
         "indexer_id": "extto",
         "guid": guid or ("extto:" + str(hit.magnet_id or hit.url)),
     }
+
+
+def resolve_magnet(info_url: Any, *, magnet_id: Any = None, timeout: int = 40,
+                   flaresolverr: Optional[str] = None) -> dict:
+    """Resolve ONE ext.to release's magnet from its detail page.
+
+    Basic Search lists releases without magnets on purpose: the search page carries
+    a per-row torrent id but NOT the window.pageToken / window.csrfToken the magnet
+    endpoint is signed with, so every magnet costs its own detail-page fetch through
+    Cloudflare. Resolving 25 of them to render a result list would take minutes, so
+    the list stays link-less and the ONE release you actually pick is resolved here,
+    at grab time.
+
+    Returns ``{ok, magnet}`` or ``{ok: False, error}``. Never raises.
+    """
+    url = str(info_url or "").strip()
+    solver = str(flaresolverr if flaresolverr is not None else flaresolverr_url()).rstrip("/")
+    if not url:
+        return {"ok": False, "error": "This release has no EXT.to page to resolve a magnet from."}
+    if not solver:
+        return {"ok": False, "error": "EXT.to requires FlareSolverr — set flaresolverr.url."}
+    # Two passes. Every EXT.to call shares one FlareSolverr session id, and the magnet
+    # endpoint answers {"success":false,"error":"Invalid session"} once that session's
+    # cookies go stale — after which EVERY resolve fails until something re-establishes
+    # it. A grab is a single deliberate click, so it must not lose to a stale cookie:
+    # the second pass destroys the session and starts a clean browser.
+    last = "EXT.to did not hand over a magnet for this release."
+    for attempt in (1, 2):
+        client = FlareSolverrClient(solver, timeout=timeout)
+        try:
+            if attempt == 2:
+                client.close()          # drop the poisoned session, then solve fresh
+            html = _fetch(client, url)
+            ids = extract_magnet_ids(html)
+            torrent_id = str(magnet_id) if magnet_id else (ids[0] if ids else None)
+            magnet = fetch_magnet(client, url, html, torrent_id) if torrent_id else _direct_magnet(html)
+            if magnet:
+                return {"ok": True, "magnet": magnet}
+            logger.info("EXT.to magnet resolve attempt %d gave nothing for %s", attempt, url)
+        except ExtToBlocked as exc:
+            logger.warning("EXT.to magnet resolve blocked: %s", exc)
+            return {"ok": False, "error": str(exc)}      # a challenge won't fix itself on a retry
+        except Exception as exc:   # noqa: BLE001 - network boundary; the grab reports it
+            logger.warning("EXT.to magnet resolve attempt %d failed for %s: %s", attempt, url, exc)
+            last = "EXT.to: " + str(exc)
+    return {"ok": False, "error": last}
 
 
 def extto_search(query: Any, *, limit: int = 20, timeout: int = 30,
@@ -328,4 +471,5 @@ def extto_search(query: Any, *, limit: int = 20, timeout: int = 30,
 __all__ = [
     "ExtToHit", "FlareSolverrClient", "compute_hmac", "extract_magnet_ids",
     "extract_page_tokens", "extto_search", "fetch_magnet", "parse_results",
+    "resolve_magnet",
 ]

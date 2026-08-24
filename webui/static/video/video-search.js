@@ -45,6 +45,7 @@
     var basicConfiguredSources = null;
     var basicConfigLoading = false;
     var basicActiveSource = null;
+    var basicRowsBySource = {};   // source id -> the rows currently rendered for it
     var freshSeq = 0;
     var freshCache = null;
     var freshLoading = false;
@@ -191,7 +192,28 @@
         return 'Health unknown';
     }
 
-    function basicResultHTML(r) {
+    // Whether a release can actually be fetched, by DOWNLOAD SOURCE. Soulseek needs
+    // the peer + file; most sources need a magnet/.torrent/NZB link; EXT.to lists
+    // releases without magnets (each costs its own Cloudflare-challenged detail
+    // fetch) so its detail page IS the link — the server resolves the one you pick
+    // at grab time.
+    //
+    // ONE rule, because this is asked in two places — on the result card, to decide
+    // whether to offer Identify, and in the modal, to enable Start download. When
+    // they were two functions they disagreed: EXT.to hits got an Identify button
+    // that opened a modal whose Start download could never enable.
+    function canFetchRelease(src, o) {
+        if (!o) return false;
+        if (src === 'soulseek') return !!(o.username && o.filename);
+        if (src === 'extto') return !!(o.download_url || o.magnet_uri || o.info_url);
+        return !!(o.download_url || o.magnet_uri);
+    }
+
+    function basicHitGrabbable(r, sourceId) {
+        return canFetchRelease((BASIC_SEARCH_SOURCES[sourceId] || {}).source || 'torrent', r);
+    }
+
+    function basicResultHTML(r, sourceId, index) {
         r = r || {};
         var bits = [r.quality_label || r.resolution, r.source, r.codec, r.audio, r.hdr, r.group].filter(Boolean);
         var provider = r.username || (r.indexer_id ? String(r.indexer_id).toUpperCase() : 'Source');
@@ -200,6 +222,7 @@
         var accepted = r.accepted === false ? 'Review' : 'Candidate';
         var analysis = r.rejected ? '<details class="vsr-basic-hit-analysis"><summary>Why review?</summary><p>' + esc(r.rejected) + '</p></details>' : '';
         var chipHtml = bits.length ? bits.slice(0, 7).map(function (b) { return '<span>' + esc(b) + '</span>'; }).join('') : '<span>Release</span>';
+        var grabbable = basicHitGrabbable(r, sourceId);
         return '<article class="vsr-basic-hit ' + (r.accepted === false ? 'vsr-basic-hit--review' : '') + '">' +
             '<div class="vsr-basic-hit-main">' +
                 '<div class="vsr-basic-hit-kicker"><span>' + esc(provider) + '</span><em>' + esc(protocol) + '</em></div>' +
@@ -212,6 +235,8 @@
                 '<span class="vsr-basic-hit-health">' + esc(basicHealthLabel(r)) + '</span>' +
                 '<span class="vsr-basic-hit-linkstate">' + esc(locator) + '</span>' +
                 '<span class="vsr-basic-hit-verdict">' + esc(accepted) + '</span>' +
+                '<button class="vsr-basic-hit-grab" type="button" data-vsr-basic-grab="' + esc(sourceId) + ':' + index + '"' +
+                    (grabbable ? '' : ' disabled') + '>' + (grabbable ? 'Identify' : 'No link') + '</button>' +
             '</div>' +
         '</article>';
     }
@@ -256,7 +281,10 @@
                 : '<span class="vsr-basic-loader" aria-hidden="true"><i></i><i></i><i></i></span><span>Searching this source...</span>') + '</div>';
             return;
         }
-        hits.innerHTML = rows.slice(0, 12).map(basicResultHTML).join('') +
+        var sourceId = card.getAttribute('data-vsr-basic-card');
+        var shown = rows.slice(0, 12);
+        basicRowsBySource[sourceId] = shown;   // what the Identify buttons index into
+        hits.innerHTML = shown.map(function (r, i) { return basicResultHTML(r, sourceId, i); }).join('') +
             (rows.length > 12 ? '<div class="vsr-basic-source-note">+' + (rows.length - 12) + ' more results in this source</div>' : '');
     }
 
@@ -430,6 +458,56 @@
         return row && row.episode != null ? 'episode' : 'season';
     }
 
+    // Basic Search hits arrive unlabelled - the tab searches release titles, not a
+    // category - so the release name decides what the modal opens as: no season
+    // token is a movie, a season with no episode is a pack. The Category select is
+    // only a tiebreaker for names that parse to nothing either way.
+    function basicDefaultIdentifyMode(row, category) {
+        if (row && row.season != null) return row.episode != null ? 'episode' : 'season';
+        if (category === 'tv' || category === 'anime') return 'episode';
+        return 'movie';
+    }
+
+    // How to actually FETCH the release, per download source. Mirrors
+    // video-download-view.js buildGrabPayload so the same release grabbed from
+    // Basic Search and from a title's download modal is grabbed the same way:
+    // Soulseek needs the peer + file (and gets the other accepted hits as its
+    // retry pool), everything else hands the magnet/NZB carriers to the client.
+    function identifyGrabDescriptor(row, sourceId, siblings) {
+        var cfg = BASIC_SEARCH_SOURCES[sourceId] || {};
+        var src = cfg.source || 'torrent';
+        if (src === 'soulseek') {
+            return {
+                source: 'soulseek', username: row.username, filename: row.filename,
+                files: row.files || [],
+                candidates: (siblings || []).filter(function (x) {
+                    return x && x.accepted && x.username && x.filename !== row.filename;
+                }).map(function (x) {
+                    return { username: x.username, filename: x.filename, size_bytes: x.size_bytes,
+                        quality_label: x.quality_label, title: x.title };
+                })
+            };
+        }
+        return {
+            source: src,
+            username: row.username || cfg.label,        // indexer name (display only)
+            filename: row.filename || row.title,
+            indexer_id: row.indexer_id || cfg.indexer || sourceId,
+            protocol: row.protocol || 'torrent',
+            download_url: row.download_url || row.magnet_uri,
+            magnet_uri: row.magnet_uri || row.download_url,
+            info_url: row.info_url,       // EXT.to resolves its magnet from this at grab time
+            magnet_id: row.magnet_id,
+            guid: row.guid,
+            candidates: []
+        };
+    }
+
+    function identifyCanGrab() {
+        var g = (freshIdentify && freshIdentify.grab) || {};
+        return canFetchRelease(g.source, g);
+    }
+
     function freshSearchKind() {
         return freshIdentify && freshIdentify.mode === 'movie' ? 'movie' : 'show';
     }
@@ -494,7 +572,39 @@
         freshIdentify = {
             row: row,
             category: category,
+            modes: category === 'movies' ? ['movie'] : ['episode', 'season'],
             mode: freshDefaultIdentifyMode(row, category),
+            grab: identifyGrabDescriptor(row, 'extto', null),
+            selected: null,
+            results: [],
+            grabbing: false
+        };
+        var modal = freshEnsureIdentifyModal();
+        var seasonInput = modal.querySelector('[data-vsr-fi-season]');
+        var episodeInput = modal.querySelector('[data-vsr-fi-episode]');
+        if (seasonInput) seasonInput.value = row.season != null ? row.season : '';
+        if (episodeInput) episodeInput.value = row.episode != null ? row.episode : '';
+        modal.classList.remove('hidden');
+        freshRenderIdentifyModal();
+        var input = modal.querySelector('[data-vsr-fi-search]');
+        if (input) { input.value = freshIdentifyQuery(row); try { input.focus(); input.select(); } catch (err) { /* ignore */ } }
+        freshRunIdentifySearch();
+    }
+
+    // Basic Search's Identify: the same modal, opened over a hit from any source.
+    // Every mode is offered because a release-title search can turn up a movie, an
+    // episode or a pack in the same result list.
+    function basicOpenIdentify(sourceId, index) {
+        var rows = basicRowsBySource[sourceId] || [];
+        var row = rows[index];
+        if (!row || !basicHitGrabbable(row, sourceId)) return;
+        var category = (($('[data-vsr-basic-category]') || {}).value || 'all');
+        freshIdentify = {
+            row: row,
+            category: category,
+            modes: ['movie', 'episode', 'season'],
+            mode: basicDefaultIdentifyMode(row, category),
+            grab: identifyGrabDescriptor(row, sourceId, rows),
             selected: null,
             results: [],
             grabbing: false
@@ -523,9 +633,14 @@
         var row = freshIdentify && freshIdentify.row || {};
         var kind = freshSearchKind();
         modal.querySelector('[data-vsr-fi-title]').textContent = freshIdentify.mode === 'movie' ? 'Identify movie' : (freshIdentify.mode === 'episode' ? 'Identify episode' : 'Identify season pack');
+        // Fresh rows carry the homepage's own size + age strings; a Basic Search hit
+        // carries neither, so fall back to the same size/health labels its result card
+        // showed rather than printing 'Size unknown - Age unknown' over a real release.
+        var sizeText = row.size_text || basicSizeLabel(row);
+        var ageText = row.age || basicHealthLabel(row);
         modal.querySelector('[data-vsr-fi-release]').innerHTML = '<strong>' + esc(row.title || 'Untitled release') + '</strong>' +
-            '<div><span>' + esc(row.size_text || 'Size unknown') + '</span><span>' + esc(row.age || 'Age unknown') + '</span><span>' + esc(row.quality_label || row.resolution || 'Release') + '</span></div>';
-        var modes = freshIdentify.category === 'movies' ? ['movie'] : ['episode', 'season'];
+            '<div><span>' + esc(sizeText) + '</span><span>' + esc(ageText) + '</span><span>' + esc(row.quality_label || row.resolution || 'Release') + '</span></div>';
+        var modes = freshIdentify.modes || (freshIdentify.category === 'movies' ? ['movie'] : ['episode', 'season']);
         modal.querySelector('[data-vsr-fi-modes]').innerHTML = modes.map(function (m) {
             var label = m === 'movie' ? 'Movie' : (m === 'episode' ? 'Episode' : 'Season pack');
             return '<button type="button" class="' + (freshIdentify.mode === m ? 'active' : '') + '" data-vsr-fi-mode="' + m + '">' + label + '</button>';
@@ -587,7 +702,7 @@
     function freshUpdateGrabButton() {
         var modal = $('[data-vsr-fresh-ident]');
         if (!modal || !freshIdentify) return;
-        var ok = !!freshIdentify.selected && !!(freshIdentify.row.download_url || freshIdentify.row.magnet_uri);
+        var ok = !!freshIdentify.selected && identifyCanGrab();
         if (freshIdentify.mode === 'episode') ok = ok && freshNumInput('[data-vsr-fi-season]') != null && freshNumInput('[data-vsr-fi-episode]') != null;
         if (freshIdentify.mode === 'season') ok = ok && freshNumInput('[data-vsr-fi-season]') != null;
         var btn = modal.querySelector('[data-vsr-fi-grab]');
@@ -601,27 +716,25 @@
         var season = freshNumInput('[data-vsr-fi-season]');
         var episode = freshNumInput('[data-vsr-fi-episode]');
         var title = item.title || row.search_title || row.title;
-        return {
+        var year = item.year || row.year;
+        var payload = {
             kind: isMovie ? 'movie' : 'show',
             title: title,
             release_title: row.title,
-            source: 'extto',
-            username: row.username || 'EXT.to',
-            filename: row.title,
-            indexer_id: row.indexer_id || 'extto',
-            protocol: row.protocol || 'torrent',
-            download_url: row.download_url || row.magnet_uri,
-            magnet_uri: row.magnet_uri || row.download_url,
             size_bytes: row.size_bytes || 0,
             quality_label: row.quality_label || row.resolution,
             media_id: item.tmdb_id,
             media_source: 'tmdb',
-            year: item.year || row.year,
+            year: year,
             poster_url: item.poster || item.poster_url,
-            search_ctx: isMovie ? { scope: 'movie', title: title, year: item.year || row.year } :
-                { scope: freshIdentify.mode === 'episode' ? 'episode' : 'season', title: title, year: item.year || row.year,
+            search_ctx: isMovie ? { scope: 'movie', title: title, year: year } :
+                { scope: freshIdentify.mode === 'episode' ? 'episode' : 'season', title: title, year: year,
                     season: season, episode: freshIdentify.mode === 'episode' ? episode : null }
         };
+        // 'files' is the pack fan-out list, not a grab field - it never goes on the wire.
+        var grab = freshIdentify.grab || {};
+        Object.keys(grab).forEach(function (k) { if (k !== 'files') payload[k] = grab[k]; });
+        return payload;
     }
 
     function freshGrabIdentifiedRelease() {
@@ -632,8 +745,22 @@
         freshIdentify.grabbing = true;
         freshUpdateGrabButton();
         if (note) note.textContent = '';
-        fetch('/api/video/downloads/grab', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify(freshGrabPayload()) }).then(_json).then(function (res) {
+        var payload = freshGrabPayload();
+        var grab = freshIdentify.grab || {};
+        // Soulseek lists a pack's files BEFORE you download it, so a season grab fans
+        // out into one row per episode right now; a torrent's files don't exist until
+        // it finishes, so it goes in as ONE season-scoped row and the monitor maps the
+        // finished folder. Same split as video-download-view.js _grabPack.
+        var url = '/api/video/downloads/grab';
+        if (freshIdentify.mode === 'season' && grab.source === 'soulseek'
+                && grab.username && (grab.files || []).length > 1) {
+            url = '/api/video/downloads/grab-pack';
+            payload = { username: grab.username, files: grab.files, title: payload.title,
+                quality_label: payload.quality_label, media_id: payload.media_id,
+                media_source: payload.media_source, year: payload.year, poster_url: payload.poster_url };
+        }
+        fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify(payload) }).then(_json).then(function (res) {
             if (!freshIdentify) return;
             freshIdentify.grabbing = false;
             if (res && res.ok) {
@@ -1058,7 +1185,15 @@
                     var parts = String(freshPick.getAttribute('data-vsr-fresh-pick') || '').split(':');
                     freshOpenIdentify(parts[0], parseInt(parts[1], 10));
                     return;
-                }                var fp = e.target.closest('[data-vsr-fresh-period]');
+                }
+                var basicPick = e.target.closest('[data-vsr-basic-grab]');
+                if (basicPick && results.contains(basicPick)) {
+                    e.preventDefault();
+                    var bits = String(basicPick.getAttribute('data-vsr-basic-grab') || '').split(':');
+                    basicOpenIdentify(bits[0], parseInt(bits[1], 10));
+                    return;
+                }
+                var fp = e.target.closest('[data-vsr-fresh-period]');
                 if (fp && results.contains(fp)) {
                     e.preventDefault();
                     freshPeriod = fp.getAttribute('data-vsr-fresh-period') || 'day';

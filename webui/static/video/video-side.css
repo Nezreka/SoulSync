@@ -1511,6 +1511,12 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vsr-basic-hit-verdict { color: rgba(255,255,255,0.78) !important; }
 .vsr-basic-hit--review .vsr-basic-hit-verdict { color: #fbcd7a !important; border-color: rgba(251,205,122,0.18) !important; }
 .vsr-basic-hit-analysis summary { border-radius: 6px; color: rgba(255,255,255,0.52); }
+.vsr-basic-hit-grab { grid-column: 1 / -1; min-height: 30px; border-radius: 7px; cursor: pointer;
+    border: 1px solid rgba(var(--vd-accent-rgb), 0.48); color: #fff; background: rgba(var(--vd-accent-rgb), 0.74);
+    font-size: 11px; font-weight: 900; box-shadow: 0 8px 18px rgba(var(--vd-accent-rgb), 0.2); }
+.vsr-basic-hit-grab:hover:not(:disabled) { background: rgba(var(--vd-accent-rgb), 0.92); transform: translateY(-1px); }
+.vsr-basic-hit-grab:disabled { cursor: default; color: rgba(255,255,255,0.38); background: rgba(255,255,255,0.04);
+    border-color: rgba(255,255,255,0.08); box-shadow: none; }
 @keyframes vsrBasicScan { 0% { transform: translateX(-15%); } 50%, 100% { transform: translateX(180%); } }
 @keyframes vsrBasicPulse { 0%, 100% { opacity: 0.42; transform: scale(0.82); } 50% { opacity: 1; transform: scale(1); } }
 @keyframes vsrBasicDots { 0%, 80%, 100% { opacity: 0.36; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-4px); } }

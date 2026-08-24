@@ -32,6 +32,14 @@ from utils.logging_config import get_logger
 # up. Long enough to ride out a couple of background searches, short enough that
 # nobody thinks the page hung.
 MANUAL_SEARCH_MAX_WAIT_SECONDS = 12.0
+# What one EXT.to page is allowed to cost, end to end. It is a FlareSolverr budget, not
+# a network timeout: the Cloudflare challenge on ext.to's search page is the wait, and
+# it was measured at 4.5s / 12.6s / 15.3s / 17.6s on consecutive runs. The old 20s
+# ceiling sat inside that spread, so the same search failed or succeeded at random with
+# a bare "500 Server Error" (FlareSolverr's way of saying "challenge timed out"). The
+# homepage that Fresh Releases loads is challenged less and had 25s, which is why only
+# Basic Search looked broken.
+EXTTO_PAGE_TIMEOUT_SECONDS = 40
 
 logger = get_logger("video_api.downloads")
 
@@ -111,7 +119,7 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
     grab of one is a deliberate user override."""
     from core.video.custom_formats import format_score, load_formats
     from core.video.quality_eval import evaluate_release
-    from core.video.release_parse import parse_release
+    from core.video.release_parse import parse_release, search_title
     # Custom formats (P3): loaded once per evaluation batch; scored per hit
     # under THIS profile's overrides. Failure = no formats, never a 500.
     try:
@@ -201,6 +209,22 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
             "download_url": hit.get("download_url"), "magnet_uri": hit.get("magnet_uri"),
             "protocol": hit.get("protocol"),
             "indexer_id": hit.get("indexer_id"), "guid": hit.get("guid"),
+            # Where the release LIVES, for sources whose magnet costs an extra fetch
+            # (EXT.to). Without it every EXT.to hit rendered as "Result only" and had
+            # nothing a grab could resolve from.
+            "info_url": hit.get("info_url"), "magnet_id": hit.get("magnet_id"),
+            # Parsed IDENTITY, carried so a manual grab can prefill the identify
+            # modal (Basic Search) instead of making you retype what the release
+            # name already says. `source` above is the release source (WEB/BluRay),
+            # so the release year lives under `year` and the show name under
+            # `search_title` — same field names the Fresh Releases rows use, so one
+            # modal reads both.
+            "search_title": search_title(_parse_text(hit)),
+            "year": parsed.get("year"), "air_date": parsed.get("air_date"),
+            "season": parsed.get("season"), "episode": parsed.get("episode"),
+            "episode_end": parsed.get("episode_end"),
+            "is_season_pack": bool(parsed.get("is_season_pack")),
+            "is_series_pack": bool(parsed.get("is_series_pack")),
         })
     # accepted first, then quality-profile score, then availability, then bigger file.
     results.sort(key=lambda r: (r["accepted"], r["score"], r["_avail"], r["size_bytes"]), reverse=True)
@@ -701,7 +725,8 @@ def register_routes(bp):
             raw, live = sres["hits"], True
         elif source == "extto":
             from core.video.extto_search import extto_search
-            eres = extto_search(title, limit=25, timeout=20, resolve_magnets=False, max_candidates=1)
+            eres = extto_search(title, limit=25, timeout=EXTTO_PAGE_TIMEOUT_SECONDS,
+                                 resolve_magnets=False, max_candidates=1)
             if not eres.get("configured"):
                 return jsonify({"scope": scope, "results": [], "error": "EXT.to requires FlareSolverr — set flaresolverr.url."})
             if eres.get("error"):
@@ -760,7 +785,8 @@ def register_routes(bp):
         profile, _pid = _profile_for_request(get_video_db(), body)
         if source == "extto":
             from core.video.extto_search import extto_search
-            eres = extto_search(title, limit=25, timeout=20, resolve_magnets=False, max_candidates=1)
+            eres = extto_search(title, limit=25, timeout=EXTTO_PAGE_TIMEOUT_SECONDS,
+                                 resolve_magnets=False, max_candidates=1)
             if not eres.get("configured"):
                 return jsonify({"error": "EXT.to requires FlareSolverr — set flaresolverr.url."})
             if eres.get("error"):
@@ -835,6 +861,18 @@ def register_routes(bp):
             source = "torrent"
             body["username"] = body.get("username") or "EXT.to"
             body["indexer_id"] = body.get("indexer_id") or "extto"
+            # Basic Search lists EXT.to releases WITHOUT magnets on purpose: the search
+            # page carries a per-row torrent id but not the tokens the magnet endpoint
+            # is signed with, so every magnet costs its own Cloudflare-challenged detail
+            # fetch. Resolving 25 to draw a result list would take minutes; the one
+            # release you actually picked is resolved here, once, at grab time.
+            if not body.get("download_url") and body.get("info_url"):
+                from core.video.extto_search import resolve_magnet
+                _res = resolve_magnet(body.get("info_url"), magnet_id=body.get("magnet_id"))
+                if not _res.get("ok"):
+                    return jsonify({"ok": False, "error": _res.get("error")
+                                    or "EXT.to would not hand over a magnet for this release."}), 502
+                body["download_url"] = body["magnet_uri"] = _res["magnet"]
         username, filename = body.get("username"), body.get("filename")
         if source == "soulseek" and (not username or not filename):
             return jsonify({"ok": False, "error": "Missing the release's source info."}), 400
