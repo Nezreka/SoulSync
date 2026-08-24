@@ -37,7 +37,8 @@ function stubDetail(
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       requested.push(url);
-      const extraResult = extra?.(url, init?.body ? JSON.parse(String(init.body)) : null);
+      const requestBody = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+      const extraResult = extra?.(url, requestBody);
       if (extraResult) {
         return new Response(JSON.stringify(extraResult), {
           status: 200,
@@ -396,7 +397,9 @@ describe('the Enhanced view', () => {
   it('fetches nothing until the user actually switches', async () => {
     renderPage();
     await screen.findByText('Aphex Twin');
-    expect(requested.some((u) => u.includes('/enhanced'))).toBe(false);
+    expect(
+      requested.some((u) => u.includes('/api/library/artist/') && u.includes('/enhanced')),
+    ).toBe(false);
   });
 
   it('swaps the discography for the Enhanced container', async () => {
@@ -444,7 +447,9 @@ describe('the Enhanced view', () => {
     toggle('standard');
     toggle('enhanced');
     await screen.findByText('SAW');
-    expect(requested.filter((u) => u.includes('/enhanced'))).toHaveLength(1);
+    expect(
+      requested.filter((u) => u.includes('/api/library/artist/') && u.includes('/enhanced')),
+    ).toHaveLength(1);
   });
 
   it('opens straight into Enhanced when the profile saved that choice', async () => {

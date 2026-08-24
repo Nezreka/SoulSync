@@ -42223,6 +42223,575 @@ div.artist-hero-badge {
     }
 }
 
+
+/* Artist Detail Music Videos */
+.artist-videos-section {
+    position: relative;
+    isolation: isolate;
+    padding: 2px 0 0;
+}
+
+.artist-videos-topline {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.artist-videos-topline h3 {
+    margin: 3px 0 0;
+    color: #fff;
+    font-size: 24px;
+    font-weight: 780;
+    line-height: 1.05;
+}
+
+.artist-videos-kicker {
+    color: rgba(var(--accent-rgb), 0.95);
+    font-size: 11px;
+    font-weight: 780;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+}
+
+.artist-videos-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.artist-videos-count {
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0 12px;
+    background: rgba(255, 255, 255, 0.055);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.artist-videos-refresh {
+    width: 32px;
+    height: 32px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.045);
+    color: rgba(255, 255, 255, 0.78);
+    border-radius: 999px;
+    font-size: 15px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.artist-videos-refresh:hover:not(:disabled) {
+    transform: rotate(18deg);
+    background: rgba(255, 255, 255, 0.09);
+    border-color: rgba(255, 255, 255, 0.22);
+    color: #fff;
+}
+
+.artist-videos-refresh:disabled {
+    cursor: wait;
+    opacity: 0.55;
+}
+
+.artist-videos-stage {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(330px, 0.72fr);
+    gap: 18px;
+    align-items: stretch;
+}
+
+.artist-video-card {
+    min-width: 0;
+}
+
+.artist-video-spotlight {
+    position: relative;
+    display: grid;
+    min-height: 430px;
+    overflow: hidden;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.105);
+    background: #090909;
+    box-shadow: 0 22px 60px rgba(0, 0, 0, 0.34);
+}
+
+.artist-video-spotlight::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.25), transparent 38%, rgba(255, 255, 255, 0.05));
+    opacity: 0.72;
+    z-index: 2;
+}
+
+.artist-video-spotlight-media {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    background: #060606;
+    cursor: pointer;
+    overflow: hidden;
+}
+
+.artist-video-spotlight-media img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0.78;
+    transform: scale(1.01);
+    transition: transform 0.28s ease, opacity 0.28s ease;
+}
+
+.artist-video-spotlight:hover .artist-video-spotlight-media img {
+    transform: scale(1.035);
+    opacity: 0.88;
+}
+
+.artist-video-spotlight-sheen {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, rgba(0, 0, 0, 0.78), rgba(0, 0, 0, 0.22) 48%, rgba(0, 0, 0, 0.62)),
+                linear-gradient(0deg, rgba(0, 0, 0, 0.82), transparent 62%);
+}
+
+.artist-video-spotlight-copy {
+    position: relative;
+    z-index: 3;
+    align-self: end;
+    width: min(680px, 76%);
+    padding: 28px;
+}
+
+.artist-video-eyebrow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.artist-video-eyebrow span {
+    min-height: 24px;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0 10px;
+    background: rgba(0, 0, 0, 0.42);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 11px;
+    font-weight: 760;
+    backdrop-filter: blur(12px);
+}
+
+.artist-video-title {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.94);
+    line-height: 1.18;
+    overflow: hidden;
+}
+
+.artist-video-spotlight .artist-video-title {
+    max-width: 620px;
+    font-size: clamp(24px, 3.2vw, 42px);
+    font-weight: 820;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.artist-video-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    margin-top: 10px;
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 13px;
+    font-weight: 590;
+    line-height: 1.4;
+}
+
+.artist-video-meta span {
+    min-width: 0;
+}
+
+.artist-video-meta span + span::before {
+    content: '•';
+    margin: 0 8px;
+    color: rgba(255, 255, 255, 0.34);
+}
+
+.artist-video-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.artist-video-primary,
+.artist-video-secondary {
+    min-height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border-radius: 999px;
+    padding: 0 16px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    font-size: 13px;
+    font-weight: 780;
+    cursor: pointer;
+    transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+
+.artist-video-primary {
+    background: #fff;
+    color: #050505;
+    border-color: rgba(255, 255, 255, 0.86);
+}
+
+.artist-video-secondary {
+    background: rgba(255, 255, 255, 0.11);
+    color: #fff;
+    backdrop-filter: blur(12px);
+}
+
+.artist-video-primary:hover,
+.artist-video-secondary:hover:not(:disabled) {
+    transform: translateY(-1px);
+}
+
+.artist-video-secondary:disabled {
+    cursor: default;
+    opacity: 0.66;
+}
+
+.artist-video-play {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.66);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: #fff;
+    pointer-events: none;
+    backdrop-filter: blur(10px);
+}
+
+.artist-video-play-large {
+    z-index: 3;
+    width: 68px;
+    height: 68px;
+    font-size: 24px;
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.36);
+}
+
+.artist-video-duration {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    z-index: 4;
+    border-radius: 5px;
+    padding: 3px 7px;
+    background: rgba(0, 0, 0, 0.78);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0;
+}
+
+.artist-video-duration.mini {
+    right: 6px;
+    bottom: 6px;
+    padding: 2px 5px;
+    font-size: 10px;
+}
+
+.artist-video-rail {
+    min-width: 0;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.075);
+    background: rgba(255, 255, 255, 0.026);
+    overflow: hidden;
+}
+
+.artist-video-rail-header {
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 14px;
+    color: rgba(255, 255, 255, 0.76);
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.artist-video-rail-list {
+    display: grid;
+}
+
+.artist-video-rail-item {
+    position: relative;
+    display: grid;
+    grid-template-columns: 30px 112px minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    padding: 12px 12px 12px 10px;
+    min-height: 92px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+    background: transparent;
+    transition: background 0.18s ease;
+}
+
+.artist-video-rail-item:last-child {
+    border-bottom: 0;
+}
+
+.artist-video-rail-item:hover {
+    background: rgba(255, 255, 255, 0.045);
+}
+
+.artist-video-index {
+    justify-self: center;
+    color: rgba(255, 255, 255, 0.34);
+    font-size: 12px;
+    font-weight: 760;
+}
+
+.artist-video-rail-thumb {
+    position: relative;
+    width: 112px;
+    aspect-ratio: 16 / 9;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(0, 0, 0, 0.34);
+    cursor: pointer;
+}
+
+.artist-video-rail-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.22s ease, opacity 0.22s ease;
+}
+
+.artist-video-rail-item:hover .artist-video-rail-thumb img {
+    transform: scale(1.04);
+    opacity: 0.9;
+}
+
+.artist-video-mini-play {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 30px;
+    height: 30px;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.64);
+    color: #fff;
+    font-size: 12px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease;
+}
+
+.artist-video-rail-item:hover .artist-video-mini-play {
+    opacity: 1;
+}
+
+.artist-video-rail-copy {
+    min-width: 0;
+}
+
+.artist-video-rail-copy .artist-video-title {
+    font-size: 13px;
+    font-weight: 760;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.artist-video-rail-copy .artist-video-meta {
+    margin-top: 6px;
+    color: rgba(255, 255, 255, 0.46);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+}
+
+.artist-video-rail-copy .artist-video-meta span + span::before {
+    margin: 0 6px;
+}
+
+.artist-video-rail-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.artist-video-icon-btn {
+    width: 30px;
+    height: 30px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.artist-video-icon-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+.artist-video-icon-btn:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+.artist-video-card.downloading .artist-video-spotlight-media::after,
+.artist-video-card.completed .artist-video-spotlight-media::after,
+.artist-video-card.errored .artist-video-spotlight-media::after,
+.artist-video-card.downloading .artist-video-rail-thumb::after,
+.artist-video-card.completed .artist-video-rail-thumb::after,
+.artist-video-card.errored .artist-video-rail-thumb::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.48);
+    z-index: 3;
+}
+
+.artist-video-card.errored .artist-video-spotlight-media::after,
+.artist-video-card.errored .artist-video-rail-thumb::after {
+    background: rgba(170, 32, 32, 0.36);
+}
+
+.artist-video-card .enh-video-progress-ring,
+.artist-video-card .enh-video-done,
+.artist-video-card .enh-video-error {
+    z-index: 5;
+}
+
+.artist-videos-loading {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) repeat(2, minmax(190px, 0.36fr));
+    gap: 14px;
+}
+
+.artist-videos-loading > div {
+    min-height: 210px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.035));
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.artist-videos-loading > div:first-child {
+    min-height: 340px;
+}
+
+.artist-videos-empty {
+    padding: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    color: rgba(255, 255, 255, 0.55);
+    background: rgba(255, 255, 255, 0.035);
+}
+
+@media (max-width: 1180px) {
+    .artist-videos-stage {
+        grid-template-columns: 1fr;
+    }
+
+    .artist-video-rail-list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .artist-video-rail-item {
+        border-bottom: 0;
+        border-right: 1px solid rgba(255, 255, 255, 0.055);
+    }
+}
+
+@media (max-width: 760px) {
+    .artist-videos-topline {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .artist-videos-actions {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .artist-video-spotlight {
+        min-height: 390px;
+    }
+
+    .artist-video-spotlight-copy {
+        width: 100%;
+        padding: 20px;
+    }
+
+    .artist-video-play-large {
+        width: 56px;
+        height: 56px;
+    }
+
+    .artist-video-rail-list,
+    .artist-videos-loading {
+        grid-template-columns: 1fr;
+    }
+
+    .artist-video-rail-item {
+        grid-template-columns: 86px minmax(0, 1fr) auto;
+        border-right: 0;
+    }
+
+    .artist-video-index {
+        display: none;
+    }
+
+    .artist-video-rail-thumb {
+        width: 86px;
+    }
+
+    .artist-video-rail-actions {
+        flex-direction: column;
+    }
+}
+
 .enh-dropdown-section {
     margin-bottom: 24px;
     background: transparent;
