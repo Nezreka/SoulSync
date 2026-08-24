@@ -364,6 +364,45 @@ def apply_path_template(template: str, context: dict) -> str:
     return _replace_template_variables(template, context)
 
 
+# A folder segment that carried nothing but a disc label ("Disc $discnum") has
+# to disappear on a single-disc album — leaving a literal "Disc" folder behind
+# would silently collapse every disc of a release into one directory.
+_DANGLING_DISC_LABEL_RE = re.compile(
+    r"^(disc|disk|cd|volume|vol)\s*[.\-\u2013\u2014:]?\s*$", re.IGNORECASE)
+
+
+def _clean_folder_segment(part: str, disc_value: str, disc_value_raw: str) -> str:
+    """Resolve one FOLDER segment of a rendered path template.
+
+    ``$quality`` is the one variable the settings page documents as
+    filename-only, and it is stripped here. ``$disc`` and ``$discnum`` used to
+    be stripped alongside it, undocumented — so a user asking for a disc folder
+    got the folder silently deleted from their path, while ``$cdnum`` and the
+    ``${...}`` bracket forms (substituted globally, before the path is split)
+    worked. Same family of variables, three different behaviours. They now
+    substitute here exactly as they do in the filename, and resolve to the empty
+    string on a single-disc album — the ``$cdnum`` rule all along (#981).
+
+    ``$cdnum`` is already gone by this point; the replace is kept as a no-op
+    guard so a future change to the global pass cannot leak a raw token into a
+    directory name.
+    """
+    had_disc_var = "$discnum" in part or "$disc" in part
+    part = part.replace("$quality", "")
+    part = part.replace("$discnum", disc_value_raw)
+    part = part.replace("$disc", disc_value)
+    part = part.replace("$cdnum", "")
+    part = re.sub(r"\s*\[\s*\]", "", part)
+    part = re.sub(r"\s*\(\s*\)", "", part)
+    part = re.sub(r"\s*\{\s*\}", "", part)
+    part = re.sub(r"\s*-\s*$", "", part)
+    part = re.sub(r"^\s*-\s*", "", part)
+    part = re.sub(r"\s+", " ", part).strip()
+    if had_disc_var and not disc_value_raw and _DANGLING_DISC_LABEL_RE.match(part):
+        return ""
+    return part
+
+
 def get_file_path_from_template_raw(template: str, context: dict) -> tuple[str, str]:
     """Build file path using a user-provided template string directly."""
     full_path = apply_path_template(template, context)
@@ -382,16 +421,7 @@ def get_file_path_from_template_raw(template: str, context: dict) -> tuple[str, 
 
         cleaned_folders = []
         for part in folder_parts:
-            part = part.replace("$quality", "")
-            part = part.replace("$discnum", "")
-            part = part.replace("$disc", "")
-            part = part.replace("$cdnum", "")
-            part = re.sub(r"\s*\[\s*\]", "", part)
-            part = re.sub(r"\s*\(\s*\)", "", part)
-            part = re.sub(r"\s*\{\s*\}", "", part)
-            part = re.sub(r"\s*-\s*$", "", part)
-            part = re.sub(r"^\s*-\s*", "", part)
-            part = re.sub(r"\s+", " ", part).strip()
+            part = _clean_folder_segment(part, disc_value, disc_value_raw)
             if part:
                 cleaned_folders.append(part)
 
@@ -470,16 +500,7 @@ def get_file_path_from_template(context: dict, template_type: str = "album_path"
 
         cleaned_folders = []
         for part in folder_parts:
-            part = part.replace("$quality", "")
-            part = part.replace("$discnum", "")
-            part = part.replace("$disc", "")
-            part = part.replace("$cdnum", "")
-            part = re.sub(r"\s*\[\s*\]", "", part)
-            part = re.sub(r"\s*\(\s*\)", "", part)
-            part = re.sub(r"\s*\{\s*\}", "", part)
-            part = re.sub(r"\s*-\s*$", "", part)
-            part = re.sub(r"^\s*-\s*", "", part)
-            part = re.sub(r"\s+", " ", part).strip()
+            part = _clean_folder_segment(part, disc_value, disc_value_raw)
             if part:
                 cleaned_folders.append(part)
 
