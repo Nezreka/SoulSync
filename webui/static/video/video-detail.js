@@ -532,7 +532,7 @@
                 ? '<span class="vd-play-ic">▶</span><span>' + verb + ' on</span>' +
                   '<img class="vd-play-logo" src="' + esc(slogo) + '" alt="' + sv + '">' + epTag
                 : '<span class="vd-play-ic">▶</span><span>' + verb + ' on ' + sv + '</span>' + epTag;
-            html += '<a class="vd-play-btn" href="' + esc(href) +
+            html += '<a class="vd-play-btn vd-action-main" href="' + esc(href) +
                 '" target="_blank" rel="noopener" title="' + tip + '">' + inner + '</a>';
         }
         if (d.trailer && d.trailer.key) {
@@ -548,7 +548,7 @@
         var _canDl = (typeof canDownload !== 'function') || canDownload();
         if (!_canDl && (d.kind === 'movie' || d.kind === 'show') && d.tmdb_id) {
             html +=
-                '<button class="library-artist-watchlist-btn" type="button" data-vd-act="request">' +
+                '<button class="library-artist-watchlist-btn vd-action-main" type="button" data-vd-act="request">' +
                 '<span class="watchlist-icon">🙋</span>' +
                 '<span class="watchlist-text">Request</span></button>';
         }
@@ -570,7 +570,7 @@
             // The old single button wore three states, so a wishlisted movie
             // showed only 'In Wishlist' and the whole download path vanished.
             html +=
-                '<button class="library-artist-watchlist-btn" type="button" data-vd-act="get">' +
+                '<button class="library-artist-watchlist-btn vd-action-main" type="button" data-vd-act="get">' +
                 '<span class="watchlist-icon">⬇</span>' +
                 '<span class="watchlist-text">Get</span></button>';
             html +=
@@ -598,7 +598,7 @@
         if (d.kind === 'show' && window.VideoGet && _canDl) {
             var haveShow = (d.source !== 'tmdb') || !!d.owned;
             var showGetLabel = haveShow ? 'Get Missing' : 'Get Show';
-            html += '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-act="missing">' +
+            html += '<button class="discog-download-btn discog-btn-compact vd-action-main" type="button" data-vd-act="missing">' +
                 '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">' + showGetLabel + '</span>' +
                 '<span class="discog-btn-shimmer"></span></button>';
         }
@@ -606,7 +606,7 @@
         // one click (the season bar only covers the selected season). YouTube
         // channels have their own wishlist system (yt wish buttons), so skip them.
         if (d.kind === 'show' && d.source !== 'youtube' && window.VideoGrab) {
-            html += '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-act="wishlist-missing" ' +
+            html += '<button class="discog-download-btn discog-btn-compact vd-action-secondary" type="button" data-vd-act="wishlist-missing" ' +
                 'title="Add every missing aired episode across all seasons to the wishlist">' +
                 '<span class="discog-btn-icon">＋</span><span class="discog-btn-text">Wishlist Missing</span>' +
                 '<span class="discog-btn-shimmer"></span></button>';
@@ -615,7 +615,7 @@
         // new poster to) and a tmdb id (to fetch the alternates). Opens VideoPoster.
         var ownLibItem = (d.source !== 'tmdb') || d.owned;
         if (ownLibItem && d.tmdb_id && window.VideoPoster) {
-            html += '<button class="vd-trailer-btn" type="button" data-vd-act="poster" title="Change poster">' +
+            html += '<button class="vd-manage-btn" type="button" data-vd-act="poster" title="Change poster">' +
                 '<span class="vd-trailer-ic">🖼</span> Manage Poster</button>';
         }
         // Manage — the per-item metadata editor (library items only: edits write
@@ -634,7 +634,7 @@
         if (libShowId != null) {
             html += '<button class="vd-manage-btn" type="button" data-vd-act="sync-show" data-vd-sync-id="' + esc(libShowId) +
                 '" title="Re-read this show from your server — picks up new or removed episodes">' +
-                '<span class="vd-manage-ic">⟳</span> Synchronize</button>';
+                '<span class="vd-manage-ic">⟳</span> Sync</button>';
         }
         // Watched toggle (the /watched API finally gets a UI): local state +
         // markPlayed/markUnplayed pushed to the server. Library rows only.

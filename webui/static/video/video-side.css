@@ -665,7 +665,44 @@ body[data-side="video"] .dashboard-header-sweep {
 /* Action buttons + source links reuse the music artist-detail classes verbatim
    (.library-artist-watchlist-btn / .discog-download-btn / .artist-hero-badge);
    only the billboard-specific bits live here. */
-.vd-actions { margin-bottom: 16px; }
+.vd-actions {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+    margin-bottom: 16px; max-width: 780px;
+}
+.vd-actions > * { flex: 0 1 auto; }
+.vd-actions .vd-action-main,
+.vd-actions .discog-download-btn[data-vd-act="missing"],
+.vd-actions .library-artist-watchlist-btn[data-vd-act="get"],
+.vd-actions .library-artist-watchlist-btn[data-vd-act="request"] {
+    min-height: 42px; padding-left: 20px; padding-right: 20px;
+    font-size: 13px; border-radius: 10px;
+}
+.vd-actions .library-artist-watchlist-btn:not(.vd-action-main),
+.vd-actions .discog-download-btn[data-vd-act="wishlist-missing"],
+.vd-actions .vd-trailer-btn,
+.vd-actions .vd-manage-btn {
+    min-height: 36px;
+}
+.vd-actions .vd-manage-btn {
+    padding-left: 14px; padding-right: 14px; border-radius: 9px;
+    background:
+        linear-gradient(rgba(10, 12, 17, 0.68), rgba(10, 12, 17, 0.68)) padding-box,
+        linear-gradient(120deg, rgba(255,255,255,0.28), rgba(var(--vd-accent-rgb), 0.52)) border-box;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.32);
+}
+.vd-actions .vd-manage-btn:hover { box-shadow: 0 9px 24px rgba(0,0,0,0.42), 0 0 18px rgba(var(--vd-accent-rgb), 0.28); }
+@media (max-width: 620px) {
+    .vd-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; max-width: none; }
+    .vd-actions .vd-action-main,
+    .vd-actions .discog-download-btn[data-vd-act="missing"],
+    .vd-actions .library-artist-watchlist-btn[data-vd-act="get"],
+    .vd-actions .library-artist-watchlist-btn[data-vd-act="request"] { grid-column: 1 / -1; justify-content: center; width: 100%; }
+    .vd-actions .library-artist-watchlist-btn,
+    .vd-actions .discog-download-btn,
+    .vd-actions .vd-trailer-btn,
+    .vd-actions .vd-manage-btn,
+    .vd-actions .vd-yt-link { justify-content: center; width: 100%; min-width: 0; }
+}
 /* live download status chip — sits above the action buttons when a movie on this
    page is downloading; the bar fills with progress and it jumps to Downloads. */
 .vd-dlchip { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 0;
