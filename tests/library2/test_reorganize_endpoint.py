@@ -140,14 +140,19 @@ def test_album_sources_are_empty_for_discography_only(api):
 
 
 def test_preview_delegates_with_native_id(monkeypatch, api):
+    """The native album id reaches the catalogue planner. A source and a mode
+    in the body are accepted for an older client and then ignored — reorganize
+    computes a path, and a path has no metadata source."""
     client, _db, ids = api
     captured = {}
 
-    def fake_preview(**kwargs):
+    def fake_plan(conn, album_id, **kwargs):
+        captured["album_id"] = album_id
         captured.update(kwargs)
         return {"success": True, "status": "planned", "tracks": [{"title": "One Dance"}]}
 
-    monkeypatch.setattr("core.library_reorganize.preview_album_reorganize", fake_preview, raising=True)
+    monkeypatch.setattr(
+        "core.library2.reorganize_plan.plan_album_reorganize", fake_plan, raising=True)
 
     resp = client.post(
         f"/api/library/v2/albums/{ids['album']}/reorganize/preview",
@@ -157,8 +162,9 @@ def test_preview_delegates_with_native_id(monkeypatch, api):
     body = resp.get_json()
     assert body["status"] == "planned"
     assert captured["album_id"] == ids["album"]
-    assert captured["primary_source"] == "spotify"
-    assert captured["metadata_source"] == "tags"
+    assert callable(captured["build_final_path_fn"])
+    assert "primary_source" not in captured
+    assert "metadata_source" not in captured
 
 
 def test_preview_404_for_discography_only(api):
@@ -167,20 +173,24 @@ def test_preview_404_for_discography_only(api):
     assert resp.status_code == 404
 
 
-def test_preview_defaults_to_api_mode_with_empty_body(monkeypatch, api):
+def test_preview_needs_nothing_in_the_body(monkeypatch, api):
+    """An empty body is the normal request now: nothing about a destination
+    path varies per call, so two previews of one album cannot disagree."""
     client, _db, ids = api
     captured = {}
 
-    def fake_preview(**kwargs):
+    def fake_plan(conn, album_id, **kwargs):
+        captured["album_id"] = album_id
         captured.update(kwargs)
         return {"success": True, "status": "planned", "tracks": []}
 
-    monkeypatch.setattr("core.library_reorganize.preview_album_reorganize", fake_preview, raising=True)
+    monkeypatch.setattr(
+        "core.library2.reorganize_plan.plan_album_reorganize", fake_plan, raising=True)
     resp = client.post(f"/api/library/v2/albums/{ids['album']}/reorganize/preview")
     assert resp.status_code == 200
-    assert captured["metadata_source"] == "api"
-    assert captured["primary_source"] is None
-    assert captured["strict_source"] is False
+    assert captured["album_id"] == ids["album"]
+    assert set(captured) == {"album_id", "build_final_path_fn",
+                             "transfer_dir", "resolve_file_path_fn"}
 
 
 # -- apply (single album) ----------------------------------------------------

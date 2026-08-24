@@ -91,7 +91,8 @@ def test_native_path_update_changes_only_primary_lib2_file(
                 'skipped': 0, 'failed': 0, 'errors': []}
 
     monkeypatch.setattr(
-        'core.library_reorganize.reorganize_album', fake_reorganize_album, raising=True,
+        'core.library_reorganize.reorganize_album_rename_only',
+        fake_reorganize_album, raising=True,
     )
 
     runner = build_runner(
@@ -103,6 +104,7 @@ def test_native_path_update_changes_only_primary_lib2_file(
         get_download_path=lambda: str(tmp_path),
         get_transfer_path=lambda: str(tmp_path / 'transfer'),
         get_config_manager=lambda: _EnabledConfig(),
+        build_final_path_fn=lambda *a, **k: (None, True),
     )
     summary = runner(_make_item())
     assert summary['status'] == 'completed'
@@ -148,7 +150,8 @@ def test_update_track_path_without_lib2_schema_fails_closed(monkeypatch, tmp_pat
                 'skipped': 0, 'failed': 0, 'errors': []}
 
     monkeypatch.setattr(
-        'core.library_reorganize.reorganize_album', fake_reorganize_album, raising=True,
+        'core.library_reorganize.reorganize_album_rename_only',
+        fake_reorganize_album, raising=True,
     )
 
     runner = build_runner(
@@ -159,6 +162,7 @@ def test_update_track_path_without_lib2_schema_fails_closed(monkeypatch, tmp_pat
         is_shutting_down_fn=lambda: False,
         get_download_path=lambda: str(tmp_path),
         get_transfer_path=lambda: str(tmp_path / 'transfer'),
+        build_final_path_fn=lambda *a, **k: (None, True),
     )
     with pytest.raises(RuntimeError, match="no unambiguous file row"):
         runner(_make_item())

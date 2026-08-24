@@ -78,11 +78,12 @@ describe('library v2 album reorganize queue status', () => {
     expect(await screen.findByText('Reorganize finished (moved).')).toBeInTheDocument();
   });
 
-  it('opens with "Rename only" already ticked', async () => {
-    // The full mode sends the file through the download post-processing
-    // pipeline; rename-only is the mode that just moves it, and it is the one
-    // people reach for. Defaulting to it means the first click works instead
-    // of being the one that fails before the second one succeeds.
+  it('offers no mode switch, because there is only one thing it does', async () => {
+    // The full mode copied the file into staging and ran it back through the
+    // download post-processing pipeline — an admission check for a file the
+    // user already owns. It fingerprinted a library file and quarantined it
+    // over its own audio. Re-tagging is its own job now, so a reorganize
+    // reorganizes and there is nothing left to choose between.
     server.use(
       http.get('/api/library/v2/albums/42/reorganize/sources', () =>
         HttpResponse.json({ success: true, sources: [] }),
@@ -98,22 +99,25 @@ describe('library v2 album reorganize queue status', () => {
         <AlbumReorganizeModal albumId={42} albumTitle="Views" onClose={vi.fn()} />
       </QueryClientProvider>,
     );
+    await screen.findByRole('button', { name: /Reorganize \(1\)/ });
 
-    expect(await screen.findByLabelText(/Rename only/)).toBeChecked();
+    expect(screen.queryByLabelText(/Rename only/)).toBeNull();
+    expect(screen.queryByLabelText(/Metadata source/)).toBeNull();
+    expect(screen.getByText(/Tags are left alone/)).toBeInTheDocument();
   });
 
-  it('sends rename_only true on the very first apply', async () => {
-    let body: Record<string, unknown> = {};
+  it('asks the backend for a plan without naming a metadata source', async () => {
+    // No source, no api-vs-tags mode: the destination comes from the catalogue,
+    // so the request carries nothing that could make two previews of the same
+    // album disagree.
+    let body: Record<string, unknown> = { sentinel: true };
     server.use(
       http.get('/api/library/v2/albums/42/reorganize/sources', () =>
         HttpResponse.json({ success: true, sources: [] }),
       ),
-      http.post('/api/library/v2/albums/42/reorganize/preview', () =>
-        HttpResponse.json(PREVIEW_RESPONSE),
-      ),
-      http.post('/api/library/v2/albums/42/reorganize', async ({ request }) => {
+      http.post('/api/library/v2/albums/42/reorganize/preview', async ({ request }) => {
         body = (await request.json()) as Record<string, unknown>;
-        return HttpResponse.json({ success: true, queued: false, reason: 'already_queued' });
+        return HttpResponse.json(PREVIEW_RESPONSE);
       }),
     );
 
@@ -123,11 +127,10 @@ describe('library v2 album reorganize queue status', () => {
         <AlbumReorganizeModal albumId={42} albumTitle="Views" onClose={vi.fn()} />
       </QueryClientProvider>,
     );
+    await screen.findByRole('button', { name: /Reorganize \(1\)/ });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Reorganize \(1\)/ }));
-    await screen.findByText('Not queued (already queued).');
-
-    expect(body.rename_only).toBe(true);
+    expect(body.source ?? null).toBeNull();
+    expect(body.mode ?? null).toBeNull();
   });
 
   it('hands back the whole path from the copy button, not the shortened one', async () => {

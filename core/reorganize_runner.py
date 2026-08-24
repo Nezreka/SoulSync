@@ -227,56 +227,44 @@ def build_runner(
                 # Progress fan-out failures must never break a run.
                 logger.debug("reorganize progress fan-out: %s", e)
 
-        # Rename-only mode (#875): just move files to the current scheme — no staging,
-        # no copy, no post-processing. Falls through to the full pipeline otherwise.
-        if getattr(item, 'rename_only', False):
-            if build_final_path_fn is None:
-                return {
-                    'status': 'setup_failed', 'source': None,
-                    'total': 0, 'moved': 0, 'skipped': 0, 'failed': 0,
-                    'errors': [{'error': 'Rename-only mode unavailable (no path builder)'}],
-                }
-            return reorganize_album_rename_only(
-                album_id=item.album_id,
-                db=get_database(),
-                transfer_dir=transfer_dir,
-                resolve_file_path_fn=resolve_file_path_fn,
-                build_final_path_fn=build_final_path_fn,
-                update_track_path_fn=_update_track_path,
-                cleanup_empty_dir_fn=_cleanup_empty,
-                on_progress=_on_progress,
-                primary_source=item.source,
-                strict_source=bool(item.source),
-                metadata_source=getattr(item, 'metadata_source', 'api') or 'api',
-                stop_check=is_shutting_down_fn,
-            )
-
-        staging_root = os.path.join(download_dir, 'ssync_staging')
-        try:
-            os.makedirs(staging_root, exist_ok=True)
-        except OSError as mk_err:
-            logger.error(f"[Reorganize] Cannot create staging dir {staging_root}: {mk_err}")
+        # A reorganize moves files. It used to have a second mode that copied
+        # each one into staging and sent it back through the download
+        # post-processing pipeline -- an ADMISSION check, run against a file
+        # the user already owns. That mode fingerprinted a library file and
+        # quarantined it over its own audio (Kanji artist vs the Romaji the
+        # catalogue held), and it collected four opt-outs, one per bug report,
+        # each disabling a gate that had no business running here.
+        #
+        # Re-tagging did not live in there alone: it is a job of its own, with
+        # a preview, findings and a rule about hand-set fields. So nothing is
+        # left for the staging path to contribute, and every item takes the
+        # mover -- `rename_only` included, which is why the flag is no longer
+        # read.
+        if build_final_path_fn is None:
             return {
-                'status': 'setup_failed',
-                'source': None,
+                'status': 'setup_failed', 'source': None,
                 'total': 0, 'moved': 0, 'skipped': 0, 'failed': 0,
-                'errors': [{'error': f'Could not create staging dir: {mk_err}'}],
+                'errors': [{'error': 'Reorganize unavailable (no path builder)'}],
             }
+        from core.library2.reorganize_bridge import catalogue_preview_fn
 
-        return reorganize_album(
+        return reorganize_album_rename_only(
             album_id=item.album_id,
             db=get_database(),
-            staging_root=staging_root,
+            transfer_dir=transfer_dir,
             resolve_file_path_fn=resolve_file_path_fn,
-            post_process_fn=post_process_fn,
+            build_final_path_fn=build_final_path_fn,
             update_track_path_fn=_update_track_path,
             cleanup_empty_dir_fn=_cleanup_empty,
-            transfer_dir=transfer_dir,
             on_progress=_on_progress,
             primary_source=item.source,
             strict_source=bool(item.source),
-            stop_check=is_shutting_down_fn,
             metadata_source=getattr(item, 'metadata_source', 'api') or 'api',
+            stop_check=is_shutting_down_fn,
+            # The catalogue is the source for a destination path -- no provider
+            # call, no source-id requirement, and the filename matches what the
+            # Library page shows because both read the same override layer.
+            preview_fn=catalogue_preview_fn,
         )
 
     return runner

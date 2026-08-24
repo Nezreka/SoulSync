@@ -80,24 +80,52 @@ def global_reorganize_sources() -> List[Dict[str, str]]:
     return authed_sources()
 
 
+def catalogue_preview_fn(
+    *, album_id: Any, db: Any, transfer_dir: str,
+    resolve_file_path_fn: Any, build_final_path_fn: Any,
+    primary_source: Any = None, strict_source: bool = False,
+    metadata_source: str = "api",
+) -> Dict[str, Any]:
+    """``preview_fn`` adapter over the catalogue planner.
+
+    Carries the signature the rename executor calls with, and accepts the
+    provider arguments only to ignore them: reorganize computes a PATH, and a
+    path needs no metadata source. Keeping the shape means the executor keeps
+    acting on exactly what the preview showed, which is the property that made
+    the preview trustworthy in the first place (#875).
+    """
+    from core.library2.reorganize_plan import plan_album_reorganize
+
+    conn = db._get_connection()
+    try:
+        return plan_album_reorganize(
+            conn, album_id,
+            build_final_path_fn=build_final_path_fn,
+            transfer_dir=transfer_dir,
+            resolve_file_path_fn=resolve_file_path_fn,
+        )
+    finally:
+        conn.close()
+
+
 def preview_album_reorganize(
     db: Any, config_manager: Any, lib2_album_id: int,
     *, source: Optional[str] = None, mode: str = "api",
 ) -> Dict[str, Any]:
-    """Preview the reorganize plan for one lib2 album (docs §50)."""
-    from core.imports.paths import build_final_path_for_track
-    from core.library_reorganize import preview_album_reorganize as _preview
+    """Preview the reorganize plan for one lib2 album (docs §50).
 
-    metadata_source = mode if mode in ("api", "tags") else "api"
-    result = _preview(
+    ``source``/``mode`` are inert since reorganize stopped consulting a
+    provider; they stay in the signature so an older client's request body is
+    accepted rather than rejected.
+    """
+    from core.imports.paths import build_final_path_for_track
+
+    result = catalogue_preview_fn(
         album_id=lib2_album_id,
         db=db,
         transfer_dir=_transfer_dir(config_manager),
         resolve_file_path_fn=_resolve_file_path_fn(config_manager),
         build_final_path_fn=build_final_path_for_track,
-        primary_source=source or None,
-        strict_source=bool(source),
-        metadata_source=metadata_source,
     )
     if result.get("status") == "no_album":
         raise ReorganizeBridgeError("Album not found", status=404)
@@ -173,6 +201,7 @@ __all__ = [
     "resolve_legacy_artist_id",
     "album_reorganize_sources",
     "global_reorganize_sources",
+    "catalogue_preview_fn",
     "preview_album_reorganize",
     "enqueue_album_reorganize",
     "enqueue_artist_reorganize_all",

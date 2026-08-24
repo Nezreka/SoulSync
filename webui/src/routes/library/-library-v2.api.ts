@@ -1491,14 +1491,14 @@ export async function fetchLibraryV2AlbumReorganizeSources(
  *  anything (docs §50). */
 export async function previewLibraryV2AlbumReorganize(
   albumId: number,
-  options: { source?: string | null; mode?: 'api' | 'tags' } = {},
+  _options: Record<string, never> = {},
 ): Promise<LibraryV2ReorganizePreview> {
   const payload = await readJson<LibraryV2ReorganizePreview & { error?: string }>(
     apiClient.post(`library/v2/albums/${albumId}/reorganize/preview`, {
-      json: { source: options.source ?? null, mode: options.mode ?? 'api' },
-      // A cold provider lookup regularly exceeds ky's 10-second default. The
-      // server still completes and warms its cache after the browser aborts,
-      // which made the same preview mysteriously work on the second attempt.
+      // The plan comes from the catalogue, so the body names no source and no
+      // mode. The long timeout stays: it was needed for a cold provider lookup
+      // that no longer happens, and a big album is still a lot of path work.
+      json: {},
       timeout: 120_000,
     }),
   );
@@ -1510,7 +1510,9 @@ export async function previewLibraryV2AlbumReorganize(
  *  worker processes items FIFO (docs §50). */
 export async function applyLibraryV2AlbumReorganize(
   albumId: number,
-  options: { source?: string | null; mode?: 'api' | 'tags'; renameOnly?: boolean } = {},
+  // `options` is kept as an empty-object parameter rather than dropped: the
+  // artist-wide variant still takes one, and the two call sites read alike.
+  _options: Record<string, never> = {},
 ): Promise<{ queued: boolean; queueId?: string; reason?: string }> {
   const payload = await readJson<{
     success: boolean;
@@ -1518,15 +1520,7 @@ export async function applyLibraryV2AlbumReorganize(
     queue_id?: string;
     reason?: string;
     error?: string;
-  }>(
-    apiClient.post(`library/v2/albums/${albumId}/reorganize`, {
-      json: {
-        source: options.source ?? null,
-        mode: options.mode ?? 'api',
-        rename_only: Boolean(options.renameOnly),
-      },
-    }),
-  );
+  }>(apiClient.post(`library/v2/albums/${albumId}/reorganize`, { json: {} }));
   if (!payload.success) throw new Error(payload.error || 'Reorganize failed');
   return { queued: Boolean(payload.queued), queueId: payload.queue_id, reason: payload.reason };
 }

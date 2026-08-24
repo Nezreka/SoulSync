@@ -8,7 +8,6 @@ import type { LibraryV2ReorganizeQueueItem } from '../-library-v2.types';
 import {
   applyLibraryV2AlbumReorganize,
   applyLibraryV2ArtistReorganizeAll,
-  fetchLibraryV2AlbumReorganizeSources,
   fetchLibraryV2ReorganizeQueueSnapshot,
   fetchLibraryV2ReorganizeSourcesGlobal,
   LIBRARY_V2_QUERY_KEY,
@@ -160,33 +159,24 @@ export function AlbumReorganizeModal({
 }) {
   const a11yRef = useModalA11y<HTMLDivElement>(onClose);
   const queryClient = useQueryClient();
-  const [source, setSource] = useState<string | null>(null);
-  const [mode, setMode] = useState<'api' | 'tags'>('api');
-  // Rename-only skips the download post-processing pipeline, which is what a
-  // full reorganize otherwise puts a file the user already owns through —
-  // fingerprint check included. It is the mode that works, so it is the
-  // default; the checkbox is how you deliberately ask for the other one.
-  const [renameOnly, setRenameOnly] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notQueuedReason, setNotQueuedReason] = useState<string | null>(null);
   const [queueId, setQueueId] = useState<string | null>(null);
   const queueItem = useReorganizeQueueItem(queueId);
 
-  const sourcesQuery = useQuery({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'reorganize-sources', albumId],
-    queryFn: () => fetchLibraryV2AlbumReorganizeSources(albumId),
-  });
+  // The plan is computed from the catalogue, so it does not vary by source or
+  // mode and the query key has nothing else to depend on.
   const previewQuery = useQuery({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'reorganize-preview', albumId, source, mode],
-    queryFn: () => previewLibraryV2AlbumReorganize(albumId, { source, mode }),
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'reorganize-preview', albumId],
+    queryFn: () => previewLibraryV2AlbumReorganize(albumId, {}),
   });
 
   async function apply() {
     setBusy(true);
     setError(null);
     try {
-      const result = await applyLibraryV2AlbumReorganize(albumId, { source, mode, renameOnly });
+      const result = await applyLibraryV2AlbumReorganize(albumId, {});
       if (result.queueId) {
         setQueueId(result.queueId);
       } else {
@@ -225,27 +215,13 @@ export function AlbumReorganizeModal({
           </button>
         </div>
 
-        <SourceModeFields
-          idPrefix="lib2-reorganize"
-          source={source}
-          mode={mode}
-          sources={sourcesQuery.data ?? []}
-          busy={busy}
-          onSourceChange={setSource}
-          onModeChange={setMode}
-        />
-        <div className={styles.editRow}>
-          <label htmlFor="lib2-reorganize-rename-only">
-            <input
-              id="lib2-reorganize-rename-only"
-              type="checkbox"
-              checked={renameOnly}
-              disabled={busy}
-              onChange={(e) => setRenameOnly(e.target.checked)}
-            />{' '}
-            Rename only (skip re-tag/quality checks)
-          </label>
-        </div>
+        {/* No metadata-source picker and no mode switch: a reorganize computes
+            a PATH from the catalogue, and a path needs no provider. Re-tagging
+            moved out to its own job, which is where a source belongs. */}
+        <p className={styles.modalActionsText}>
+          Files move to match your organization template. Tags are left alone — use Re-tag for
+          those.
+        </p>
 
         {notQueuedReason ? (
           <div className={styles.searchError}>Not queued ({notQueuedReason}).</div>

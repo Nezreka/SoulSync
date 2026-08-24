@@ -2072,6 +2072,22 @@ def _rename_track_in_place(current_abs: str, new_abs: str) -> Tuple[bool, Option
         # mirrors _finalize_track so lossy-copy pairs don't get orphaned.
         for sibling_src in siblings:
             _move_sibling_to_destination(sibling_src, new_abs)
+        # And the track's own sidecars. A .lrc is part of the track — SoulSync
+        # writes it itself — and the import path has carried it since
+        # lilbob5769's report. Reorganize looked for sibling AUDIO only and
+        # stranded the lyrics in the old folder. Same helper as the import, so
+        # a reorganized album and a freshly downloaded one end up with the same
+        # files beside each other.
+        #
+        # Best-effort by design: the audio is already at its destination here.
+        # Failing the move over a sidecar would report a track that did not
+        # move, and leave the catalogue pointing at a path nothing is at.
+        try:
+            from core.imports.file_ops import move_companion_sidecars
+            move_companion_sidecars(current_abs, new_abs)
+        except Exception as sidecar_err:  # noqa: BLE001
+            logger.warning("[Reorganize/rename] sidecar move failed for %s: %s",
+                           os.path.basename(new_abs), sidecar_err)
         return True, None
     except Exception as e:
         return False, str(e)

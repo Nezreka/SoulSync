@@ -765,15 +765,17 @@ describe('library v2 reorganize api', () => {
     ]);
   });
 
-  it('previews a reorganize with the chosen source/mode', async () => {
+  it('previews a reorganize without naming a metadata source', async () => {
+    // The destination is computed from the catalogue, so the request body has
+    // nothing in it that could make two previews of one album disagree.
     const postSpy = vi.spyOn(apiClient, 'post');
     server.use(
       http.post('/api/library/v2/albums/42/reorganize/preview', async ({ request }) => {
-        expect(await request.json()).toEqual({ source: 'spotify', mode: 'tags' });
+        expect(await request.json()).toEqual({});
         return HttpResponse.json({
           success: true,
           status: 'planned',
-          source: 'spotify',
+          source: null,
           album: 'Views',
           artist: 'Drake',
           transfer_dir: '/Transfer',
@@ -781,9 +783,10 @@ describe('library v2 reorganize api', () => {
         });
       }),
     );
-    await expect(
-      previewLibraryV2AlbumReorganize(42, { source: 'spotify', mode: 'tags' }),
-    ).resolves.toMatchObject({ status: 'planned', album: 'Views' });
+    await expect(previewLibraryV2AlbumReorganize(42)).resolves.toMatchObject({
+      status: 'planned',
+      album: 'Views',
+    });
     expect(postSpy).toHaveBeenCalledWith(
       'library/v2/albums/42/reorganize/preview',
       expect.objectContaining({ timeout: 120_000 }),
@@ -806,7 +809,9 @@ describe('library v2 reorganize api', () => {
   it('enqueues an album reorganize', async () => {
     server.use(
       http.post('/api/library/v2/albums/42/reorganize', async ({ request }) => {
-        expect(await request.json()).toEqual({ source: null, mode: 'api', rename_only: false });
+        // Empty on purpose: there is one kind of reorganize now, and it reads
+        // the catalogue. No source to pick, no mode, no rename-only flag.
+        expect(await request.json()).toEqual({});
         return HttpResponse.json({ success: true, queued: true, queue_id: 'q-1' });
       }),
     );

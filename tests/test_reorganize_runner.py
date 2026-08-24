@@ -81,12 +81,10 @@ def _make_item(*, queue_id='qid-1', album_id='alb-1', source=None):
 
 def _build(monkeypatch, *, download_path_fn, transfer_path_fn,
            reorganize_album_fn, get_database=lambda: object()):
-    """Helper: stub out the heavy reorganize_album call so we can test
-    the wiring without a real DB / post-process pipeline."""
-    # Patch the import inside reorganize_runner.build_runner.
-    import core.reorganize_runner as mod
+    """Helper: stub out the mover so the wiring can be tested without a real
+    DB. The mover is the only executor now — the staging pipeline is gone."""
     monkeypatch.setattr(
-        'core.library_reorganize.reorganize_album',
+        'core.library_reorganize.reorganize_album_rename_only',
         reorganize_album_fn,
         raising=True,
     )
@@ -99,6 +97,7 @@ def _build(monkeypatch, *, download_path_fn, transfer_path_fn,
         is_shutting_down_fn=lambda: False,
         get_download_path=download_path_fn,
         get_transfer_path=transfer_path_fn,
+        build_final_path_fn=lambda *a, **k: (None, True),
     )
 
 
@@ -123,12 +122,14 @@ def test_runner_invokes_reorganize_album_with_injected_deps(monkeypatch, tmp_pat
 
     assert summary['status'] == 'completed'
     assert captured['album_id'] == 'alb-X'
-    assert captured['primary_source'] == 'deezer'
-    assert captured['strict_source'] is True
-    # staging_root is download_path / ssync_staging
-    assert captured['staging_root'].endswith('ssync_staging')
+    assert captured['transfer_dir'].endswith('transfer')
+    assert callable(captured['build_final_path_fn'])
     assert callable(captured['on_progress'])
     assert callable(captured['stop_check'])
+    # No staging root anywhere: a reorganize does not copy a file the user
+    # already owns into a folder for incoming downloads.
+    assert 'staging_root' not in captured
+    assert not (tmp_path / 'ssync_staging').exists()
 
 
 def test_runner_reads_config_per_call(monkeypatch, tmp_path):
@@ -136,10 +137,10 @@ def test_runner_reads_config_per_call(monkeypatch, tmp_path):
     the path-resolver lambda AT call time — not at build_runner time.
     This is the explicit fix for kettui-style "config change requires
     server restart" feedback."""
-    seen_staging_roots = []
+    seen_transfer_dirs = []
 
     def fake_reorganize_album(**kwargs):
-        seen_staging_roots.append(kwargs['staging_root'])
+        seen_transfer_dirs.append(kwargs['transfer_dir'])
         return {
             'status': 'completed', 'source': None,
             'total': 0, 'moved': 0, 'skipped': 0, 'failed': 0, 'errors': [],
@@ -148,8 +149,8 @@ def test_runner_reads_config_per_call(monkeypatch, tmp_path):
     current_path = {'value': str(tmp_path / 'first')}
     runner = _build(
         monkeypatch,
-        download_path_fn=lambda: current_path['value'],
-        transfer_path_fn=lambda: '/tmp/transfer',
+        download_path_fn=lambda: str(tmp_path),
+        transfer_path_fn=lambda: current_path['value'],
         reorganize_album_fn=fake_reorganize_album,
     )
 
@@ -157,27 +158,30 @@ def test_runner_reads_config_per_call(monkeypatch, tmp_path):
     current_path['value'] = str(tmp_path / 'second')
     runner(_make_item())
 
-    assert len(seen_staging_roots) == 2
-    assert 'first' in seen_staging_roots[0]
-    assert 'second' in seen_staging_roots[1]
+    assert len(seen_transfer_dirs) == 2
+    assert 'first' in seen_transfer_dirs[0]
+    assert 'second' in seen_transfer_dirs[1]
 
 
-def test_runner_returns_setup_failed_on_unwritable_path(monkeypatch, tmp_path):
-    """If the staging dir can't be created (permission denied, etc.),
-    the runner returns a clean ``setup_failed`` summary so the queue
-    marks the item failed without an unhandled exception."""
+def test_runner_returns_setup_failed_without_a_path_builder(monkeypatch, tmp_path):
+    """Nothing can be planned without the path builder, so the queue gets a
+    clean ``setup_failed`` summary rather than an unhandled exception.
+
+    This replaces the old unwritable-staging-dir case: there is no staging dir
+    to create any more."""
     def fake_reorganize_album(**kwargs):
-        pytest.fail("reorganize_album should not run when setup fails")
+        pytest.fail("the mover should not run when setup fails")
 
-    # Point at a child of an existing FILE — makedirs will raise OSError.
-    blocking_file = tmp_path / 'blocker'
-    blocking_file.write_text('x')
-
-    runner = _build(
-        monkeypatch,
-        download_path_fn=lambda: str(blocking_file),  # makedirs fails here
-        transfer_path_fn=lambda: '/tmp/transfer',
-        reorganize_album_fn=fake_reorganize_album,
+    monkeypatch.setattr('core.library_reorganize.reorganize_album_rename_only',
+                        fake_reorganize_album, raising=True)
+    runner = build_runner(
+        get_database=lambda: object(),
+        resolve_file_path_fn=lambda p: p,
+        post_process_fn=lambda *a, **k: None,
+        cleanup_empty_directories_fn=lambda *a, **k: None,
+        is_shutting_down_fn=lambda: False,
+        get_download_path=lambda: str(tmp_path),
+        get_transfer_path=lambda: str(tmp_path / 'transfer'),
     )
     summary = runner(_make_item())
     assert summary['status'] == 'setup_failed'
@@ -273,6 +277,82 @@ def test_rename_only_item_routes_to_rename_executor(monkeypatch, tmp_path):
     assert captured['album_id'] == 'alb-R'
     assert callable(captured['build_final_path_fn'])
     assert not (tmp_path / 'ssync_staging').exists()   # no staging for rename-only
+
+
+def test_an_item_without_the_flag_also_only_moves_files(monkeypatch, tmp_path):
+    """Reorganize reorganizes. The "full" mode copied the file into staging and
+    put it back through the download post-processing pipeline — an ADMISSION
+    check for a file the user already owns. It fingerprinted a library file and
+    quarantined it over its own audio (a Kanji artist name vs the Romaji the
+    catalogue held), and it accumulated four opt-outs, one per bug report,
+    each turning off a gate that should never have run here.
+
+    Re-tagging still exists — it is a separate job with its own preview, its
+    own findings and its own respect for hand-set fields. So there is nothing
+    left for the staging path to contribute, and every item takes the mover.
+    """
+    captured = {}
+
+    def fake_rename_only(**kwargs):
+        captured.update(kwargs)
+        return {'status': 'completed', 'source': None,
+                'total': 1, 'moved': 1, 'skipped': 0, 'failed': 0, 'errors': []}
+
+    def fail_full(**kwargs):
+        raise AssertionError("the staging pipeline must not run for a reorganize")
+
+    monkeypatch.setattr('core.library_reorganize.reorganize_album', fail_full, raising=True)
+    monkeypatch.setattr('core.library_reorganize.reorganize_album_rename_only',
+                        fake_rename_only, raising=True)
+
+    runner = build_runner(
+        get_database=lambda: object(),
+        resolve_file_path_fn=lambda p: p,
+        post_process_fn=lambda *a, **k: None,
+        cleanup_empty_directories_fn=lambda *a, **k: None,
+        is_shutting_down_fn=lambda: False,
+        get_download_path=lambda: str(tmp_path),
+        get_transfer_path=lambda: str(tmp_path / 'transfer'),
+        build_final_path_fn=lambda *a, **k: (None, True),
+    )
+    item = _make_item(album_id='alb-Q', source='deezer')
+    item.rename_only = False          # the old "full mode" request
+
+    summary = runner(item)
+
+    assert summary['moved'] == 1
+    assert not (tmp_path / 'ssync_staging').exists()
+
+
+def test_the_plan_comes_from_the_catalogue_not_a_provider(monkeypatch, tmp_path):
+    """The executor acts on what a `preview_fn` computed. Injecting the
+    catalogue planner is what takes the provider out of the path: no source-id
+    requirement, no live tracklist, no 400s for candidate ids that were never
+    Spotify's."""
+    captured = {}
+
+    def fake_rename_only(**kwargs):
+        captured.update(kwargs)
+        return {'status': 'completed', 'source': None,
+                'total': 0, 'moved': 0, 'skipped': 0, 'failed': 0, 'errors': []}
+
+    monkeypatch.setattr('core.library_reorganize.reorganize_album_rename_only',
+                        fake_rename_only, raising=True)
+
+    runner = build_runner(
+        get_database=lambda: object(),
+        resolve_file_path_fn=lambda p: p,
+        post_process_fn=lambda *a, **k: None,
+        cleanup_empty_directories_fn=lambda *a, **k: None,
+        is_shutting_down_fn=lambda: False,
+        get_download_path=lambda: str(tmp_path),
+        get_transfer_path=lambda: str(tmp_path / 'transfer'),
+        build_final_path_fn=lambda *a, **k: (None, True),
+    )
+    runner(_make_item())
+
+    from core.library2.reorganize_bridge import catalogue_preview_fn
+    assert captured['preview_fn'] is catalogue_preview_fn
 
 
 def test_rename_only_without_path_builder_fails_cleanly(monkeypatch, tmp_path):
