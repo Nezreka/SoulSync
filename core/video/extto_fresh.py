@@ -25,6 +25,7 @@ from core.video.extto_search import (
     _fetch,
     _int,
     _size_bytes,
+    _soup,
     flaresolverr_url,
 )
 from core.video.release_parse import extract_title, parse_release
@@ -167,7 +168,7 @@ def _section_card(soup: BeautifulSoup, heading: str) -> Tag | None:
 
 
 def parse_fresh_releases(html: str, base_url: str = BASES[0]) -> dict[str, dict[str, list[dict[str, Any]]]]:
-    soup = BeautifulSoup(html or "", "lxml")
+    soup = _soup(html)
     sections: dict[str, dict[str, list[dict[str, Any]]]] = {}
     for section_id, meta in SECTIONS.items():
         card = _section_card(soup, meta["heading"])

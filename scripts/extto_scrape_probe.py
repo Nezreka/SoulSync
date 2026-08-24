@@ -183,8 +183,17 @@ def parse_int(text: str | None) -> int | None:
     return int(m.group(0).replace(",", "")) if m else None
 
 
+def _soup(html: str) -> BeautifulSoup:
+    """lxml when it's installed, stdlib parser when it isn't - this script is a
+    standalone probe and must run on a bare requirements.txt install."""
+    try:
+        return BeautifulSoup(html or "", "lxml")
+    except Exception:   # noqa: BLE001 - bs4 raises FeatureNotFound when lxml is absent
+        return BeautifulSoup(html or "", "html.parser")
+
+
 def parse_result_links(html: str, base_url: str, limit: int) -> list[SearchHit]:
-    soup = BeautifulSoup(html, "lxml")
+    soup = _soup(html)
     seen: set[str] = set()
     hits: list[SearchHit] = []
     for a in soup.select("a[href]"):
@@ -220,7 +229,7 @@ def parse_result_links(html: str, base_url: str, limit: int) -> list[SearchHit]:
 
 
 def extract_direct_magnet(html: str) -> str | None:
-    soup = BeautifulSoup(html, "lxml")
+    soup = _soup(html)
     for a in soup.select('a[href^="magnet:"]'):
         href = a.get("href")
         if href:
@@ -234,13 +243,13 @@ def extract_direct_magnet(html: str) -> str | None:
 
 
 def extract_info_hash(html: str) -> str | None:
-    text = BeautifulSoup(html, "lxml").get_text(" ")
+    text = _soup(html).get_text(" ")
     m = INFO_HASH_RE.search(text) or INFO_HASH_RE.search(html)
     return m.group(1).lower() if m else None
 
 
 def extract_magnet_ids(html: str) -> list[str]:
-    soup = BeautifulSoup(html, "lxml")
+    soup = _soup(html)
     ids: list[str] = []
     selectors = (
         ".download-btn-magnet[data-id]",

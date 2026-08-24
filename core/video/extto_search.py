@@ -121,6 +121,17 @@ def _candidate_urls(query: str, bases: Iterable[str] = BASES) -> list[str]:
     return [base.rstrip("/") + path.format(q=q) for base in bases for path in SEARCH_PATHS]
 
 
+def _soup(html: str) -> BeautifulSoup:
+    """Parse ext.to markup. lxml is faster and more forgiving, but it is a compiled
+    wheel we never declared, so on a plain `pip install -r requirements.txt` box
+    BeautifulSoup raises FeatureNotFound and every EXT.to feature dies at the parse
+    step. Fall back to the stdlib parser instead of taking the site down."""
+    try:
+        return BeautifulSoup(html or "", "lxml")
+    except Exception:   # noqa: BLE001 - bs4 raises FeatureNotFound when lxml is absent
+        return BeautifulSoup(html or "", "html.parser")
+
+
 def _clean(value: str | None) -> str:
     return re.sub(r"\s+", " ", unescape(value or "")).strip()
 
@@ -141,7 +152,7 @@ def _size_bytes(text: str | None) -> int:
 
 
 def parse_results(html: str, base_url: str, limit: int = 20) -> list[ExtToHit]:
-    soup = BeautifulSoup(html, "lxml")
+    soup = _soup(html)
     seen: set[str] = set()
     out: list[ExtToHit] = []
     for a in soup.select("a[href]"):
@@ -168,7 +179,7 @@ def parse_results(html: str, base_url: str, limit: int = 20) -> list[ExtToHit]:
 
 
 def extract_magnet_ids(html: str) -> list[str]:
-    soup = BeautifulSoup(html, "lxml")
+    soup = _soup(html)
     ids: list[str] = []
     for node in soup.select(".download-btn-magnet[data-id],.detail-magnet-link[data-id],[title*='magnet' i][data-id]"):
         value = str(node.get("data-id") or "").strip()
