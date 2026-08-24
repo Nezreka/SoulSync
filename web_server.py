@@ -20835,36 +20835,62 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
     )
 
 
-# ── Staging folder match cache (per-batch, avoids re-scanning for every track) ──
-_staging_cache = {}  # batch_id -> list of {full_path, title, artist, album, extension}
+# ── Staging folder scan cache ──
+#
+# Every download task walks the staging tree before searching, to see whether
+# the track is already sitting there. Walking + stat-ing that tree is cheap
+# (~0.1s for ~3.6k files); READING THE TAGS is not (~60ms/file cold — ~3.6
+# MINUTES for the same tree). So cache the expensive half, the parsed tags,
+# and rebuild the cheap half on every call.
+#
+# This used to be keyed by batch_id, which meant it never hit for wishlist
+# work: the wishlist dispatches ONE BATCH PER TRACK, so every track re-read
+# every tag in staging. That stalled each download for minutes before its
+# first search — longer than the 30-45s search timeout — which is how
+# available tracks ended up marked "Download failed" and retried forever.
+# The old dict also leaked: entries were added per batch_id and never freed.
+#
+# mtime is the load-bearing part of the key. Writing a tag with mutagen bumps
+# mtime but can leave the size byte-identical (FLAC padding absorbs it), so a
+# (path, size) key would keep serving stale tags after every library_retag.
+_staging_tag_cache = {}  # full_path -> (mtime, size, meta)
 _staging_cache_lock = threading.Lock()
 
 STAGING_AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
 
 
 def _get_staging_file_cache(batch_id):
-    """Scan staging folder once per batch and cache the results."""
-    with _staging_cache_lock:
-        if batch_id in _staging_cache:
-            cached = _staging_cache[batch_id]
-            return [f for f in cached if os.path.exists(f.get('full_path', ''))]
-
+    """List staging audio files with their tags, re-reading only what changed."""
     staging_path = _get_album_bundle_staging_path(batch_id) or get_staging_path()
     if not os.path.isdir(staging_path):
-        with _staging_cache_lock:
-            _staging_cache[batch_id] = []
         return []
 
     files = []
+    fresh = {}
+    reused = 0
     for root, _dirs, filenames in os.walk(staging_path):
         for fname in filenames:
             ext = os.path.splitext(fname)[1].lower()
             if ext not in STAGING_AUDIO_EXTENSIONS:
                 continue
             full_path = os.path.join(root, fname)
-            rel_path = os.path.relpath(full_path, staging_path)
+            try:
+                st = os.stat(full_path)
+            except OSError:
+                # Vanished mid-walk (import moved it out) — same outcome as
+                # the old cache-hit path, which filtered on os.path.exists.
+                continue
+            key = (st.st_mtime, st.st_size)
 
-            meta = _read_staging_file_metadata(full_path, rel_path)
+            with _staging_cache_lock:
+                hit = _staging_tag_cache.get(full_path)
+            if hit is not None and hit[:2] == key:
+                meta = hit[2]
+                reused += 1
+            else:
+                rel_path = os.path.relpath(full_path, staging_path)
+                meta = _read_staging_file_metadata(full_path, rel_path)
+            fresh[full_path] = (key[0], key[1], meta)
 
             files.append({
                 'full_path': full_path,
@@ -20876,9 +20902,20 @@ def _get_staging_file_cache(batch_id):
                 'extension': ext,
             })
 
-    logger.info(f"[Staging] Scanned {len(files)} audio files in staging folder")
+    prefix = os.path.join(staging_path, '')
     with _staging_cache_lock:
-        _staging_cache[batch_id] = files
+        # Bound the cache: drop anything under the root we just walked that is
+        # no longer there, and anything from another root (album-bundle private
+        # staging) whose file is gone. Only out-of-root entries need a stat.
+        for path in [p for p in _staging_tag_cache
+                     if p not in fresh and (p.startswith(prefix) or not os.path.exists(p))]:
+            del _staging_tag_cache[path]
+        _staging_tag_cache.update(fresh)
+
+    logger.info(
+        f"[Staging] Scanned {len(files)} audio files in staging folder "
+        f"({reused} tags reused from cache)"
+    )
     return files
 
 
