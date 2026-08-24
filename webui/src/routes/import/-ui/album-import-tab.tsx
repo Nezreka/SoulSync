@@ -4,6 +4,7 @@ import { type DragEvent, type KeyboardEvent, useState } from 'react';
 
 import { Button, Select, TextInput } from '@/components/form/form';
 import { Notice } from '@/components/primitives';
+import { browserSafeImageUrl } from '@/platform/artwork-thumb';
 
 import type { ImportAlbumResult } from '../-import.types';
 
@@ -438,7 +439,7 @@ function AlbumCard({
   return (
     <button type="button" className={styles.importPageAlbumCard} onClick={() => onSelect(album)}>
       <img
-        src={album.image_url || IMPORT_PLACEHOLDER_IMAGE}
+        src={album.image_url ? browserSafeImageUrl(album.image_url) : IMPORT_PLACEHOLDER_IMAGE}
         alt={album.name}
         loading="lazy"
         onError={fallbackImage}
@@ -501,7 +502,11 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
     <>
       <div className={styles.importPageAlbumHero} id="import-page-album-hero">
         <img
-          src={albumMatch.album.image_url || IMPORT_PLACEHOLDER_IMAGE}
+          src={
+            albumMatch.album.image_url
+              ? browserSafeImageUrl(albumMatch.album.image_url)
+              : IMPORT_PLACEHOLDER_IMAGE
+          }
           alt={albumMatch.album.name}
           loading="lazy"
           onError={fallbackImage}

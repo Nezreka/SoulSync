@@ -61,7 +61,7 @@ describe('clicking a sync-band row', () => {
     const openPlaylist = vi.fn();
     window.openMirroredPlaylistModal = openPlaylist;
 
-    const { container } = render(<Row row={row()} busy={false} fading={false} onRun={vi.fn()}
+    const { container } = render(<Row row={row()} busy={false} fading={false} live={null} onRun={vi.fn()}
         onSyncAgain={vi.fn()} onListen={vi.fn()} onRemove={vi.fn()} />);
     const el = container.querySelector('.syncband-row')!;
     expect(el.getAttribute('role')).toBe('button');
@@ -78,7 +78,7 @@ describe('clicking a sync-band row', () => {
 
     const { container } = render(
       <Row row={row({ last: { id: 65 } as SyncBandRow['last'] })} busy={false} fading={false}
-        onRun={vi.fn()} onSyncAgain={vi.fn()} onListen={vi.fn()} onRemove={vi.fn()} />,
+        live={null} onRun={vi.fn()} onSyncAgain={vi.fn()} onListen={vi.fn()} onRemove={vi.fn()} />,
     );
     fireEvent.click(container.querySelector('.syncband-row')!);
 
@@ -89,8 +89,32 @@ describe('clicking a sync-band row', () => {
   it('is inert for a manual row with neither a run nor a playlist', () => {
     const { container } = render(
       <Row row={row({ kind: 'manual', schedule: null })} busy={false} fading={false}
-        onRun={vi.fn()} onSyncAgain={vi.fn()} onListen={vi.fn()} onRemove={vi.fn()} />,
+        live={null} onRun={vi.fn()} onSyncAgain={vi.fn()} onListen={vi.fn()} onRemove={vi.fn()} />,
     );
     expect(container.querySelector('.syncband-row')!.getAttribute('role')).toBeNull();
+  });
+
+  it('uses live sync progress for manual/history rows', () => {
+    const { container, getByText } = render(
+      <Row
+        row={row({ kind: 'manual', schedule: null, last: { id: 77 } as SyncBandRow['last'] })}
+        busy={false}
+        fading={false}
+        live={{
+          playlistId: 'history_77',
+          playlistName: 'Discover Weekly',
+          phase: 'Matching · Track 4',
+          progress: 42,
+          updatedAt: Date.now(),
+        }}
+        onRun={vi.fn()}
+        onSyncAgain={vi.fn()}
+        onListen={vi.fn()}
+        onRemove={vi.fn()}
+      />,
+    );
+    expect(container.querySelector('.syncband-row--live')).not.toBeNull();
+    expect(getByText('Matching · Track 4')).toBeTruthy();
+    expect(getByText('42%')).toBeTruthy();
   });
 });

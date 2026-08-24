@@ -91,3 +91,49 @@ def test_worker_classifies_404_as_not_found():
     status, count, _detail = w.process_artist("sp1", "Pharooo", fake_fetch, fake_store)
     assert status == "not_found"
     assert count == 0
+
+
+def test_musicmap_comma_joined_artist_uses_first_clean_name(monkeypatch):
+    _force_reach_fetch(monkeypatch)
+    requested_urls = []
+
+    class _Response:
+        text = '<html><div id="gnodMap"><a>Artist One</a><a>Artist Two</a></div></html>'
+
+        def raise_for_status(self):
+            return None
+
+    def fake_get(url, **_kwargs):
+        requested_urls.append(url)
+        return _Response()
+
+    monkeypatch.setattr(sa.requests, "get", fake_get)
+    monkeypatch.setattr(sa, "_resolve_musicmap_artist_source_ids", lambda *_args, **_kwargs: {"spotify": "seed"})
+    monkeypatch.setattr(sa, "_match_musicmap_similar_artist", lambda *_args, **_kwargs: (None, None))
+
+    result = sa.get_musicmap_similar_artists("The Sickest Squad, Frazzbass")
+
+    assert result["success"] is True
+    assert requested_urls == ["https://www.music-map.com/The+Sickest+Squad"]
+    assert "%2C" not in requested_urls[0]
+
+
+def test_musicmap_placeholder_artist_skips_fetch(monkeypatch):
+    _force_reach_fetch(monkeypatch)
+
+    def fail_get(*_args, **_kwargs):
+        raise AssertionError("placeholder artist should not hit MusicMap")
+
+    monkeypatch.setattr(sa.requests, "get", fail_get)
+
+    result = sa.get_musicmap_similar_artists("[Unknown Artist]")
+
+    assert result["success"] is False
+    assert result["status_code"] == 400
+    assert "not suitable" in result["error"]
+
+
+def test_musicmap_cleaner_splits_feat_markers_and_rejects_brackets():
+    assert sa.clean_musicmap_artist_name("Autechre feat. Someone") == "Autechre"
+    assert sa.clean_musicmap_artist_name("The Sickest Squad; Frazzbass") == "The Sickest Squad"
+    assert sa.clean_musicmap_artist_name("[Unknown Artist]") is None

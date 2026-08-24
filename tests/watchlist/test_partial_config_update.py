@@ -205,6 +205,44 @@ def test_the_config_reports_the_preference_and_which_way_the_global_points(clien
     assert "global_auto_download" in body["config"]
 
 
+def test_config_get_uses_spotify_metadata_wrapper_not_direct_spotipy(client, monkeypatch):
+    test_client, _ = client
+
+    class _DirectSpotipy:
+        def artist(self, artist_id):
+            raise AssertionError("watchlist config must not bypass SpotifyClient.get_artist")
+
+    class _SpotifyClient:
+        sp = _DirectSpotipy()
+
+        def __init__(self):
+            self.calls = []
+
+        def is_spotify_metadata_available(self):
+            return True
+
+        def get_artist(self, artist_id):
+            self.calls.append(artist_id)
+            return {
+                "id": artist_id,
+                "name": "Free Metadata Artist",
+                "images": [{"url": "https://img.example/artist.jpg"}],
+                "followers": {"total": 1234},
+                "popularity": 42,
+                "genres": ["dream pop"],
+            }
+
+    spotify = _SpotifyClient()
+    monkeypatch.setattr(web_server, "spotify_client", spotify)
+
+    body = test_client.get("/api/watchlist/artist/sp-1/config").get_json()
+
+    assert body["artist"]["name"] == "Free Metadata Artist"
+    assert body["artist"]["image_url"] == "https://img.example/artist.jpg"
+    assert body["artist"]["followers"] == 1234
+    assert spotify.calls == ["sp-1"]
+
+
 def test_the_preference_is_stored_verbatim(client):
     test_client, db = client
 

@@ -59,7 +59,22 @@ export interface SyncStartResponse {
 }
 
 async function readJson<T>(response: Response): Promise<T> {
-  return (await response.json()) as T;
+  const text = await response.text();
+  if (!text.trim()) return {} as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const plain = text
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const snippet = plain.slice(0, 160);
+    throw new Error(
+      response.ok
+        ? `Server returned a non-JSON response${snippet ? `: ${snippet}` : ''}`
+        : `Server returned ${response.status || 'an error'} instead of JSON${snippet ? `: ${snippet}` : ''}`,
+    );
+  }
 }
 
 /* ── Config-driven vertical calls ─────────────────────────────────────────── */
@@ -202,7 +217,40 @@ export async function fetchSpotifyPlaylistTracks(
 export async function fetchDeezerArlPlaylistTracks(
   playlistId: string,
 ): Promise<AccountPlaylistTracks> {
-  return readJson(await fetch(`/api/deezer/arl-playlist/${playlistId}`));
+  const response = await fetch(`/api/deezer/arl-playlist/${playlistId}?async=1`);
+  if (!response.ok) {
+    const error = await readJson<{ error?: string }>(response);
+    return { error: error.error || 'Failed to fetch Deezer playlist' };
+  }
+  const initial = await readJson<{
+    pending?: boolean;
+    job_id?: string;
+    playlist?: AccountPlaylistTracks;
+    error?: string;
+  }>(response);
+  if (!initial.pending) return initial.playlist ?? (initial as AccountPlaylistTracks);
+  if (!initial.job_id) return { error: 'Deezer playlist load did not return a job id' };
+  return pollDeezerPlaylistLoad<AccountPlaylistTracks>(initial.job_id);
+}
+
+async function pollDeezerPlaylistLoad<T>(jobId: string): Promise<T> {
+  const deadline = Date.now() + 20 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const statusResponse = await fetch(`/api/deezer/playlist-load/${jobId}`);
+    if (!statusResponse.ok) {
+      const error = await readJson<{ error?: string }>(statusResponse);
+      throw new Error(error.error || 'Failed to check Deezer playlist load');
+    }
+    const status = await readJson<{
+      status?: string;
+      playlist?: T;
+      error?: string;
+    }>(statusResponse);
+    if (status.status === 'complete' && status.playlist) return status.playlist;
+    if (status.status === 'error') throw new Error(status.error || 'Deezer playlist load failed');
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+  throw new Error('Deezer playlist load timed out');
 }
 
 /** GET /api/sync/status/<id> — the ACCOUNT sync engine's status, not a vertical's. */
@@ -320,12 +368,23 @@ export async function parseITunesLinkUrl(
  * lands in the tab's catch toast.
  */
 export async function fetchDeezerLinkPlaylist(id: string): Promise<Record<string, unknown>> {
-  const response = await fetch(`/api/deezer/playlist/${id}`);
+  const response = await fetch(`/api/deezer/playlist/${id}?async=1`);
   if (!response.ok) {
     const error = await readJson<{ error?: string }>(response);
     throw new Error(error.error || 'Failed to fetch Deezer playlist');
   }
-  return readJson(response);
+  const initial = await readJson<{
+    pending?: boolean;
+    job_id?: string;
+    playlist?: Record<string, unknown>;
+    error?: string;
+  }>(response);
+  if (!initial.pending) {
+    if (initial.error) throw new Error(initial.error);
+    return (initial.playlist ?? initial) as Record<string, unknown>;
+  }
+  if (!initial.job_id) throw new Error('Deezer playlist load did not return a job id');
+  return pollDeezerPlaylistLoad<Record<string, unknown>>(initial.job_id);
 }
 
 /** GET /api/youtube/playlists (loadYouTubePlaylistsFromBackend, sync-spotify.js 695). */

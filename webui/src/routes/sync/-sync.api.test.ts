@@ -263,15 +263,48 @@ describe('parse + delete endpoints', () => {
   });
 
   it('deezer link fetch + the two deletes', async () => {
-    stubFetch({});
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({
+          url,
+          method: init?.method ?? 'GET',
+          body: init?.body ? JSON.parse(init.body as string) : undefined,
+          headers: init?.headers as Record<string, string> | undefined,
+        });
+        if (url === '/api/deezer/playlist/908622995?async=1') {
+          return new Response(JSON.stringify({ pending: true, job_id: 'job-1' }), { status: 202 });
+        }
+        if (url === '/api/deezer/playlist-load/job-1') {
+          return new Response(JSON.stringify({ status: 'complete', playlist: { id: 908622995 } }));
+        }
+        return new Response(JSON.stringify({}));
+      }),
+    );
     await fetchDeezerLinkPlaylist('908622995');
     await deleteYouTubePlaylist('h4sh');
     await deleteBeatportChart('ch4rt');
     expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
-      'GET /api/deezer/playlist/908622995',
+      'GET /api/deezer/playlist/908622995?async=1',
+      'GET /api/deezer/playlist-load/job-1',
       'DELETE /api/youtube/delete/h4sh',
       'DELETE /api/beatport/charts/delete/ch4rt',
     ]);
+  });
+
+  it('deezer link fetch reports proxy html as a readable error', async () => {
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        calls.push({ url, method: 'GET', body: undefined, headers: undefined });
+        return new Response('<html><h1>504 Gateway Timeout</h1></html>', { status: 504 });
+      }),
+    );
+    await expect(fetchDeezerLinkPlaylist('908622995')).rejects.toThrow(
+      'Server returned 504 instead of JSON',
+    );
   });
 });
 
@@ -574,12 +607,35 @@ describe('resetSourceDiscovery (10793 / 10851)', () => {
 
 describe("the account tabs' track endpoints (1861, 2557)", () => {
   it('spotify takes its own id; ARL takes the RAW deezer id, not the prefixed one', async () => {
-    stubFetch();
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({
+          url,
+          method: init?.method ?? 'GET',
+          body: init?.body ? JSON.parse(init.body as string) : undefined,
+          headers: init?.headers as Record<string, string> | undefined,
+        });
+        if (url === '/api/deezer/arl-playlist/7?async=1') {
+          return new Response(JSON.stringify({ pending: true, job_id: 'arl-job-7' }), {
+            status: 202,
+          });
+        }
+        if (url === '/api/deezer/playlist-load/arl-job-7') {
+          return new Response(
+            JSON.stringify({ status: 'complete', playlist: { name: 'Deep Cuts' } }),
+          );
+        }
+        return new Response(JSON.stringify({}));
+      }),
+    );
     await fetchSpotifyPlaylistTracks('p1');
     await fetchDeezerArlPlaylistTracks('7');
     expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
       'GET /api/spotify/playlist/p1',
-      'GET /api/deezer/arl-playlist/7',
+      'GET /api/deezer/arl-playlist/7?async=1',
+      'GET /api/deezer/playlist-load/arl-job-7',
     ]);
   });
 

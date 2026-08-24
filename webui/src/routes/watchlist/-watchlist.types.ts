@@ -256,6 +256,24 @@ export interface WatchlistRecentRelease {
   track_count: number | null;
 }
 
+export interface WatchlistRecentReleaseRow extends WatchlistRecentRelease {
+  artist_name: string | null;
+  source: string | null;
+  album_spotify_id?: string | null;
+  album_itunes_id?: string | null;
+  album_deezer_id?: string | null;
+  spotify_artist_id?: string | null;
+  itunes_artist_id?: string | null;
+  deezer_artist_id?: string | null;
+  owned?: boolean;
+}
+
+export interface WatchlistRecentReleasesResponse {
+  success: boolean;
+  releases?: WatchlistRecentReleaseRow[];
+  error?: string;
+}
+
 export interface QualityProfileSummary {
   id: number;
   name?: string;

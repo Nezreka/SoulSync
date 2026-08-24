@@ -247,6 +247,7 @@ export const SYNC_SOURCE_LABELS: Record<string, string> = {
 
 export interface SyncCardView {
   id: number | string | undefined;
+  playlistId: string | null;
   healthClass: 'health-good' | 'health-warn' | 'health-bad';
   sourceLabel: string;
   timeStr: string;
@@ -301,6 +302,7 @@ export function syncCardView(entry: SyncHistoryEntry, nowMs: number): SyncCardVi
 
   return {
     id: entry.id,
+    playlistId: entry.playlist_id != null ? String(entry.playlist_id) : null,
     healthClass,
     sourceLabel,
     timeStr,

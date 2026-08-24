@@ -475,6 +475,39 @@ def test_authed_official_nonempty_never_touches_free(monkeypatch):
     c._fallback.search_tracks.assert_not_called()
 
 
+def test_authed_premium_required_artist_lookup_falls_back_to_free(monkeypatch):
+    class PremiumRequired(Exception):
+        http_status = 403
+
+        def __str__(self):
+            return "Active premium subscription required for the owner of the app"
+
+    c = SpotifyClient.__new__(SpotifyClient)
+    c.sp = MagicMock()
+    c.sp.artist.side_effect = PremiumRequired()
+    c._free_meta_client = MagicMock()
+    c._free_meta_client.get_artist.return_value = {
+        'id': 'sp-artist',
+        'name': 'Free Artist',
+        'images': [{'url': 'https://img.example/free.jpg'}],
+        'followers': {'total': 99},
+        'genres': [],
+    }
+    cache = MagicMock()
+    cache.get_entity.return_value = None
+    monkeypatch.setattr(SpotifyClient, '_fallback_source', 'itunes')
+    monkeypatch.setattr(SpotifyClient, 'is_spotify_authenticated', lambda self: True)
+    monkeypatch.setattr(SpotifyClient, '_free_active', lambda self: False)
+    monkeypatch.setattr(SpotifyClient, '_free_available', lambda self: True)
+    monkeypatch.setattr(_sc, '_is_globally_rate_limited', lambda: True)
+    monkeypatch.setattr(_sc, 'get_metadata_cache', lambda: cache)
+
+    artist = c.get_artist('sp-artist')
+
+    assert artist['name'] == 'Free Artist'
+    c._free_meta_client.get_artist.assert_called_once_with('sp-artist')
+
+
 def test_prefer_free_serves_when_not_authed_and_not_opted_in(monkeypatch):
     # Boulder's case: no auth, and 'Spotify Free' isn't the chosen metadata source
     # (free_available=False), so the normal gates are all shut. An explicit Spotify

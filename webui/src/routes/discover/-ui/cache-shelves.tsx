@@ -77,6 +77,7 @@ export function CacheShelf({ def, items, expanded, onToggleExpand, onOpenItem }:
 export interface GenreExplorerSectionProps {
   genres: { genre?: string; explored?: boolean; artist_count?: number }[];
   onOpenGenre: (genre: string) => void;
+  limit?: number;
 }
 
 /**
@@ -84,8 +85,10 @@ export interface GenreExplorerSectionProps {
  * `.discover-grid` wrapper and no clamp. Its top-of-page position is the
  * page's ordering concern, not this component's.
  */
-export function GenreExplorerSection({ genres, onOpenGenre }: GenreExplorerSectionProps) {
+export function GenreExplorerSection({ genres, onOpenGenre, limit }: GenreExplorerSectionProps) {
   if (genres.length === 0) return null;
+  const visibleGenres = typeof limit === 'number' ? genres.slice(0, limit) : genres;
+  const hiddenCount = Math.max(0, genres.length - visibleGenres.length);
 
   return (
     <div className="discover-section" id={GENRE_EXPLORER_SECTION.id}>
@@ -96,7 +99,7 @@ export function GenreExplorerSection({ genres, onOpenGenre }: GenreExplorerSecti
         </div>
       </div>
       <div className="genre-explorer-grid">
-        {genres.map((g) => {
+        {visibleGenres.map((g) => {
           const pill = genrePill(g);
           return (
             <div
@@ -111,6 +114,7 @@ export function GenreExplorerSection({ genres, onOpenGenre }: GenreExplorerSecti
             </div>
           );
         })}
+        {hiddenCount > 0 && <div className="genre-explorer-pill more">+{hiddenCount} more</div>}
       </div>
     </div>
   );

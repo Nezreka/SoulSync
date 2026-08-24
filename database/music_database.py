@@ -5332,6 +5332,14 @@ class MusicDatabase:
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_listening_played_at ON listening_history (played_at)")
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_listening_weekday_hour_played_at
+                ON listening_history (
+                    CAST(strftime('%w', played_at) AS INTEGER),
+                    CAST(strftime('%H', played_at) AS INTEGER),
+                    played_at DESC
+                )
+            """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_listening_artist ON listening_history (artist)")
             cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_listening_dedup ON listening_history (track_id, played_at, server_source)")
 
@@ -20524,3 +20532,4 @@ def close_database():
                 # Ignore threading errors during shutdown
                 logger.debug("db instance close: %s", e)
         _database_instances.clear()
+

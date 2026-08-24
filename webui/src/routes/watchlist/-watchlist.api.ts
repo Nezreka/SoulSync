@@ -12,6 +12,8 @@ import type {
   WatchlistGlobalConfigResponse,
   WatchlistLabel,
   WatchlistLabelsResponse,
+  WatchlistRecentReleaseRow,
+  WatchlistRecentReleasesResponse,
   WatchlistScanStatusResponse,
 } from './-watchlist.types';
 
@@ -64,6 +66,13 @@ export function watchlistLabelsQueryOptions(profileId: number) {
   return queryOptions({
     queryKey: [...WATCHLIST_QUERY_KEY, 'labels', profileId] as const,
     queryFn: () => fetchWatchlistLabels(),
+  });
+}
+
+export function watchlistRecentReleasesQueryOptions(profileId: number, limit = 12) {
+  return queryOptions({
+    queryKey: [...WATCHLIST_QUERY_KEY, 'recent-releases', profileId, limit] as const,
+    queryFn: () => fetchWatchlistRecentReleases(limit),
   });
 }
 
@@ -125,6 +134,18 @@ export async function fetchWatchlistLabels(): Promise<WatchlistLabel[]> {
   return payload.labels ?? [];
 }
 
+export async function fetchWatchlistRecentReleases(
+  limit = 12,
+): Promise<WatchlistRecentReleaseRow[]> {
+  const payload = await readJson<WatchlistRecentReleasesResponse>(
+    apiClient.get(`watchlist/recent-releases?limit=${encodeURIComponent(String(limit))}`),
+  );
+  if (!payload.success) {
+    throw new Error(payload.error || 'Failed to load recent watchlist releases');
+  }
+  return payload.releases ?? [];
+}
+
 // ---------------------------------------------------------------------------
 // Writes
 // ---------------------------------------------------------------------------
@@ -152,6 +173,23 @@ export async function removeWatchlistArtistsBatch(artistIds: string[]): Promise<
     apiClient.post('watchlist/remove-batch', { json: { artist_ids: artistIds } }),
   );
   assertSuccess(payload, 'Failed to remove artists from watchlist');
+}
+
+export async function addWatchlistArtist(input: {
+  artistId: string;
+  artistName: string;
+  source?: string;
+}): Promise<void> {
+  const payload = await readJson<SuccessResponse>(
+    apiClient.post('watchlist/add', {
+      json: {
+        artist_id: input.artistId,
+        artist_name: input.artistName,
+        ...(input.source ? { source: input.source } : {}),
+      },
+    }),
+  );
+  assertSuccess(payload, 'Failed to add artist to watchlist');
 }
 
 export async function startWatchlistScan(): Promise<void> {

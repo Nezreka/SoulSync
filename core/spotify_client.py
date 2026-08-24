@@ -361,6 +361,15 @@ def _detect_and_set_rate_limit(exception, endpoint_name="unknown"):
     return False
 
 
+def _is_premium_required_error(exception) -> bool:
+    """Spotify 403 returned when the app owner has no active Premium subscription."""
+    msg = str(exception).lower()
+    return (
+        getattr(exception, 'http_status', None) == 403
+        and "active premium subscription required" in msg
+    )
+
+
 def rate_limited(func):
     """Decorator to enforce rate limiting on Spotify API calls with retry and exponential backoff"""
     @wraps(func)
@@ -2262,15 +2271,22 @@ class SpotifyClient:
                 return result
             except Exception as e:
                 _detect_and_set_rate_limit(e, 'get_artist')
-                logger.error(f"Error fetching artist via Spotify: {e}")
-                # Fall through to iTunes fallback
+                if _is_premium_required_error(e):
+                    logger.debug("Spotify official artist lookup requires Premium; trying free metadata for %s", artist_id)
+                else:
+                    logger.error(f"Error fetching artist via Spotify: {e}")
+                # Fall through to Spotify Free / configured fallback
 
         # No-creds Spotify (SpotipyFree) for a real Spotify artist id when
-        # official Spotify is unavailable (no auth / rate-limited).
-        if self._free_active() and not self._is_itunes_id(artist_id):  # not allow_fallback-gated: free IS Spotify (see get_track_details)
-            free = self._free_meta.get_artist(artist_id)
-            if free:
-                return free
+        # official Spotify is unavailable (no auth / rate-limited / Premium gate)
+        # or when Free is explicitly configured and official returned nothing.
+        if not self._is_itunes_id(artist_id) and (self._free_active() or self._free_available()):
+            try:
+                free = self._free_meta.get_artist(artist_id)
+                if free:
+                    return free
+            except Exception as e:
+                logger.debug("SpotipyFree get_artist(%s) failed: %s", artist_id, e)
 
         # Fallback - only if ID is numeric (non-Spotify format)
         if allow_fallback and self._is_itunes_id(artist_id):

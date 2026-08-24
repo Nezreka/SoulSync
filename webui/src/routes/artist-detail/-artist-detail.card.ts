@@ -1,3 +1,5 @@
+import { browserSafeImageUrl } from '@/platform/artwork-thumb';
+
 import type { DiscographyRelease } from './-artist-detail.types';
 
 /**
@@ -106,7 +108,7 @@ export function releaseYearText(release: DiscographyRelease, now: Date = new Dat
  *  swap it in. Empty/whitespace urls are skipped so no observer work is queued. */
 export function releaseBackgroundSrc(release: DiscographyRelease): string | null {
   const url = release.image_url;
-  return typeof url === 'string' && url.trim() !== '' ? url : null;
+  return typeof url === 'string' && url.trim() !== '' ? browserSafeImageUrl(url) : null;
 }
 
 /** Only `true` shows the badge — not any truthy value. */
@@ -116,5 +118,6 @@ export function isExplicit(release: DiscographyRelease): boolean {
 
 export function musicbrainzReleaseUrl(release: DiscographyRelease): string | null {
   const id = release.musicbrainz_release_id;
+  if (typeof id !== 'string' && typeof id !== 'number') return null;
   return id ? `https://musicbrainz.org/release/${id}` : null;
 }

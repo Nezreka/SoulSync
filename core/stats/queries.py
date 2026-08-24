@@ -325,6 +325,130 @@ def get_recent_tracks(database, limit: int, image_url_fixer: Optional[ImageUrlFi
     ]
 
 
+def get_listening_events(
+    database,
+    image_url_fixer: Optional[ImageUrlFixer],
+    *,
+    time_range: str,
+    filter_type: str,
+    date: Optional[str] = None,
+    weekday: Optional[int] = None,
+    hour: Optional[int] = None,
+    limit: int = 100,
+) -> dict:
+    """Listening-history rows behind a clicked stats chart segment."""
+    limit = max(1, min(int(limit or 100), 250))
+    where = database._listening_time_filter(time_range, alias='lh')
+    clauses: list[str] = []
+    params: list[Any] = []
+    title = 'Listening details'
+
+    if filter_type == 'date':
+        if not date:
+            raise ValueError('date is required')
+        if _is_month_bucket(date):
+            clauses.append("lh.played_at >= date(? || '-01')")
+            clauses.append("lh.played_at < date(? || '-01', '+1 month')")
+            params.extend([date, date])
+            title = date
+        elif _is_day_bucket(date):
+            clauses.append('lh.played_at >= date(?)')
+            clauses.append("lh.played_at < date(?, '+1 day')")
+            params.extend([date, date])
+            title = date
+        else:
+            raise ValueError('date must be YYYY-MM-DD or YYYY-MM')
+    elif filter_type == 'weekday_hour':
+        if weekday is None or hour is None:
+            raise ValueError('weekday and hour are required')
+        weekday_i = int(weekday)
+        hour_i = int(hour)
+        if not (0 <= weekday_i <= 6 and 0 <= hour_i <= 23):
+            raise ValueError('weekday/hour out of range')
+        clauses.append("CAST(strftime('%w', lh.played_at) AS INTEGER) = ?")
+        clauses.append("CAST(strftime('%H', lh.played_at) AS INTEGER) = ?")
+        params.extend([weekday_i, hour_i])
+        title = f"{['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][weekday_i]} {hour_i:02d}:00"
+    elif filter_type == 'hour':
+        if hour is None:
+            raise ValueError('hour is required')
+        hour_i = int(hour)
+        if not (0 <= hour_i <= 23):
+            raise ValueError('hour out of range')
+        clauses.append("CAST(strftime('%H', lh.played_at) AS INTEGER) = ?")
+        params.append(hour_i)
+        title = f"{hour_i:02d}:00"
+    else:
+        raise ValueError('unsupported filter type')
+
+    if clauses:
+        where = f"{where} AND {' AND '.join(clauses)}"
+
+    conn = database._get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            WITH picked AS (
+                SELECT lh.id
+                FROM listening_history lh
+                {where}
+                ORDER BY lh.played_at DESC
+                LIMIT ?
+            )
+            SELECT lh.title, lh.artist, lh.album, lh.played_at, lh.duration_ms,
+                   lh.server_source, al.thumb_url, t.artist_id, t.id AS db_track_id
+            FROM picked
+            JOIN listening_history lh ON lh.id = picked.id
+            LEFT JOIN tracks t ON t.id = CAST(lh.db_track_id AS TEXT)
+            LEFT JOIN albums al ON al.id = t.album_id
+            ORDER BY lh.played_at DESC
+            """,
+            params + [limit + 1],
+        )
+        rows = cursor.fetchall()
+        has_more = len(rows) > limit
+        if has_more:
+            rows = rows[:limit]
+        total = len(rows)
+    finally:
+        conn.close()
+
+    image_url_cache: dict[str, Optional[str]] = {}
+
+    def _normalize_event_image(url: str | None) -> str | None:
+        if not url:
+            return None
+        if not image_url_fixer:
+            return url
+        if url not in image_url_cache:
+            image_url_cache[url] = image_url_fixer(url)
+        return image_url_cache[url]
+
+    items = [
+        {
+            'title': row[0],
+            'artist': row[1],
+            'album': row[2],
+            'played_at': row[3],
+            'duration_ms': row[4],
+            'server_source': row[5],
+            'image_url': _normalize_event_image(row[6]),
+            'artist_db_id': row[7],
+            'db_track_id': row[8],
+        }
+        for row in rows
+    ]
+    return {'title': title, 'total': total, 'limit': limit, 'has_more': has_more, 'items': items}
+
+
+def _is_day_bucket(value: str) -> bool:
+    return len(value) == 10 and value[4] == '-' and value[7] == '-'
+
+
+def _is_month_bucket(value: str) -> bool:
+    return len(value) == 7 and value[4] == '-'
+
 def resolve_track(database, image_url_fixer: ImageUrlFixer, title: str, artist: str) -> Optional[dict]:
     """Resolve a track by title+artist to its file_path / metadata. Returns None if not found."""
     conn = database._get_connection()
@@ -397,3 +521,4 @@ def get_listening_status(worker) -> dict:
             'stats': {},
         }
     return worker.get_stats()
+

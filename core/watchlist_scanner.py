@@ -2505,8 +2505,14 @@ class WatchlistScanner:
 
             # Construct MusicMap URL
             from urllib.parse import quote_plus
+            from core.metadata.similar_artists import clean_musicmap_artist_name
 
-            url_artist = quote_plus(artist_name.strip())
+            lookup_artist_name = clean_musicmap_artist_name(artist_name)
+            if not lookup_artist_name:
+                logger.info(f"Skipping MusicMap lookup for unsuitable artist name: {artist_name}")
+                return []
+
+            url_artist = quote_plus(lookup_artist_name)
             musicmap_url = f'https://www.music-map.com/{url_artist}'
 
             # Set headers to mimic a browser
@@ -2530,7 +2536,7 @@ class WatchlistScanner:
 
             # Extract similar artist names
             all_anchors = gnod_map.find_all('a')
-            searched_artist_lower = artist_name.lower().strip()
+            searched_artist_lower = lookup_artist_name.lower().strip()
 
             similar_artist_names = []
             for anchor in all_anchors:
@@ -2555,7 +2561,7 @@ class WatchlistScanner:
             available_sources = []
 
             for source in source_priority:
-                search_results = self._search_artists_for_source(source, artist_name, limit=1)
+                search_results = self._search_artists_for_source(source, lookup_artist_name, limit=1)
                 if search_results:
                     searched_source_ids[source] = self._extract_entity_id(search_results[0])
                     available_sources.append(source)

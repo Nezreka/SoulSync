@@ -18,6 +18,7 @@ import {
   JIOSAAVN_EXPERIMENTAL_EVENT,
   RATE_MONITOR_EVENT,
   SERVICE_STATUS_EVENT,
+  SYNC_PROGRESS_EVENT,
   WATCHLIST_COUNT_EVENT,
   useDashboardActivityEvent,
   useDashboardDbStatsEvent,
@@ -29,6 +30,7 @@ import {
   useJiosaavnExperimentalEvent,
   useRateMonitorEvent,
   useServiceStatusEvent,
+  useSyncProgressEvent,
   useWatchlistCountEvent,
 } from './-dash.events';
 
@@ -45,6 +47,7 @@ describe('event names', () => {
     expect(WATCHLIST_COUNT_EVENT).toBe('ss:watchlist-count');
     expect(SERVICE_STATUS_EVENT).toBe('ss:service-status');
     expect(RATE_MONITOR_EVENT).toBe('ss:rate-monitor');
+    expect(SYNC_PROGRESS_EVENT).toBe('ss:sync-progress');
     expect(JIOSAAVN_EXPERIMENTAL_EVENT).toBe('ss:jiosaavn-experimental');
     expect(DEV_MODE_EVENT).toBe('ss:dev-mode');
   });
@@ -82,6 +85,7 @@ describe('the subscription hooks', () => {
     ['useWatchlistCountEvent', useWatchlistCountEvent, WATCHLIST_COUNT_EVENT],
     ['useServiceStatusEvent', useServiceStatusEvent, SERVICE_STATUS_EVENT],
     ['useRateMonitorEvent', useRateMonitorEvent, RATE_MONITOR_EVENT],
+    ['useSyncProgressEvent', useSyncProgressEvent, SYNC_PROGRESS_EVENT],
     ['useJiosaavnExperimentalEvent', useJiosaavnExperimentalEvent, JIOSAAVN_EXPERIMENTAL_EVENT],
     ['useDevModeEvent', useDevModeEvent, DEV_MODE_EVENT],
   ])('%s delivers while mounted and detaches on unmount', (_name, hook, event) => {

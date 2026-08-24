@@ -425,6 +425,7 @@ def run_sync_task(
             with sync_lock:
                 sync_states[playlist_id] = {
                     "status": "syncing",
+                    "playlist_name": playlist_name,
                     "progress": progress.__dict__ # Convert dataclass to dict
                 }
                 logger.info(f"   Updated sync_states for {playlist_id}")
@@ -453,6 +454,7 @@ def run_sync_task(
         with sync_lock:
             sync_states[playlist_id] = {
                 "status": "error",
+                "playlist_name": playlist_name,
                 "error": f"Setup error: {str(setup_error)}"
             }
         if automation_id:
@@ -587,6 +589,7 @@ def run_sync_task(
         with sync_lock:
             sync_states[playlist_id] = {
                 "status": "finished",
+                "playlist_name": playlist_name,
                 "progress": result_dict,
                 "result": result_dict
             }
@@ -751,6 +754,7 @@ def run_sync_task(
         with sync_lock:
             sync_states[playlist_id] = {
                 "status": "error",
+                "playlist_name": playlist_name,
                 "error": str(e)
             }
         if automation_id:

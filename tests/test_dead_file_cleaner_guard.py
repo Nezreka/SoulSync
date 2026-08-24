@@ -51,11 +51,15 @@ class _Db:
 
 
 class _Cfg:
-    def __init__(self, overrides=None):
+    def __init__(self, overrides=None, active_server="plex"):
         self._o = overrides or {}
+        self._active_server = active_server
 
     def get(self, key, default=None):
         return self._o.get(key, default)
+
+    def get_active_media_server(self):
+        return self._active_server
 
 
 def _row(i, path):
@@ -63,24 +67,26 @@ def _row(i, path):
     return (i, f"Track {i}", "Yellowcard", "Ocean Avenue", path, None, None, 42)
 
 
-def _run(rows, transfer_folder, cfg_overrides=None):
+def _run(rows, transfer_folder, cfg_overrides=None, active_server="plex"):
     findings = []
-    cfg = _Cfg({'soulseek.download_path': '', **(cfg_overrides or {})})
+    progress = []
+    cfg = _Cfg({'soulseek.download_path': '', **(cfg_overrides or {})}, active_server=active_server)
     ctx = JobContext(
         db=_Db(rows),
         transfer_folder=str(transfer_folder),
         config_manager=cfg,
         create_finding=lambda **kw: (findings.append(kw) or True),
+        report_progress=lambda **kw: progress.append(kw),
     )
     res = DeadFileCleanerJob().scan(ctx)
-    return res, findings
+    return res, findings, progress
 
 
 def test_mass_unresolvable_aborts_without_findings(tmp_path):
     # 30 tracks all pointing to a /Volumes path that doesn't exist in this env
     # -> systemic path problem -> abort, zero findings, one error.
     rows = [_row(i, f"/Volumes/Core/Music/Plex/Yellowcard/{i}.mp3") for i in range(30)]
-    res, findings = _run(rows, tmp_path)
+    res, findings, _ = _run(rows, tmp_path)
     assert findings == []
     assert res.findings_created == 0
     assert res.errors >= 1
@@ -96,8 +102,8 @@ def test_few_unresolvable_creates_findings(tmp_path):
         f.write_text("x")
         rows.append(_row(i, str(f)))
     rows.append(_row(99, "/no/such/path/dead.mp3"))
-    res, findings = _run(rows, tmp_path,
-                         {'repair.jobs.dead_file_cleaner.min_tracks_for_guard': 4})
+    res, findings, _ = _run(rows, tmp_path,
+                            {'repair.jobs.dead_file_cleaner.min_tracks_for_guard': 4})
     assert res.findings_created == 1
     assert len(findings) == 1
     assert findings[0]['entity_id'] == '99'
@@ -108,15 +114,15 @@ def test_small_library_all_dead_still_reports(tmp_path):
     # 3 dead tracks, below the default min_tracks_for_guard (25) -> guard doesn't
     # apply -> all 3 reported (a tiny library can legitimately be all-dead).
     rows = [_row(i, f"/no/such/{i}.mp3") for i in range(3)]
-    res, findings = _run(rows, tmp_path)
+    res, findings, _ = _run(rows, tmp_path)
     assert res.findings_created == 3
 
 
 def test_guard_thresholds_configurable(tmp_path):
     # Lower min to 4; all 4 dead -> fraction 1.0 >= 0.5 -> abort.
     rows = [_row(i, f"/no/such/{i}.mp3") for i in range(4)]
-    res, findings = _run(rows, tmp_path,
-                         {'repair.jobs.dead_file_cleaner.min_tracks_for_guard': 4})
+    res, findings, _ = _run(rows, tmp_path,
+                            {'repair.jobs.dead_file_cleaner.min_tracks_for_guard': 4})
     assert res.findings_created == 0
     assert res.errors >= 1
 
@@ -128,8 +134,23 @@ def test_healthy_library_no_abort_no_findings(tmp_path):
         f = tmp_path / f"ok_{i}.mp3"
         f.write_text("x")
         rows.append(_row(i, str(f)))
-    res, findings = _run(rows, tmp_path)
+    res, findings, _ = _run(rows, tmp_path)
     assert res.findings_created == 0
     assert res.errors == 0
     assert res.scanned == 30
     assert findings == []
+
+
+def test_mass_unresolvable_navidrome_reports_real_path_hint(tmp_path, caplog):
+    rows = [_row(i, f"Muse/The Wow! Signal/01-{i:02d} - Hexagons.flac") for i in range(30)]
+    with caplog.at_level("ERROR"):
+        res, findings, progress = _run(rows, tmp_path, active_server="navidrome")
+
+    assert findings == []
+    assert res.errors >= 1
+    progress_text = " ".join(str(p.get("log_line", "")) for p in progress)
+    assert "Report Real Path" in progress_text
+    assert "Muse/The Wow! Signal" in progress_text
+    log_text = " ".join(r.message for r in caplog.records)
+    assert "Report Real Path" in log_text
+    assert "Muse/The Wow! Signal" in log_text

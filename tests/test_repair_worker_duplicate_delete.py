@@ -57,6 +57,14 @@ def _track_ids(db):
         return [r[0] for r in conn.execute("SELECT id FROM tracks ORDER BY id").fetchall()]
 
 
+class _Cfg:
+    def get(self, key, default=None):
+        return default
+
+    def get_active_media_server(self):
+        return "navidrome"
+
+
 def test_removes_real_duplicate_file_and_db_row(tmp_path):
     db, w = _worker(tmp_path)
     keep = tmp_path / "keep.flac"; keep.write_text("k")
@@ -84,10 +92,12 @@ def test_removes_real_duplicate_file_and_db_row(tmp_path):
     assert 'moved 1 file(s) to the deleted folder' in res['message']
 
 
-def test_unresolvable_path_logs_and_counts_failure_but_still_cleans_db(tmp_path, caplog):
+def test_unresolvable_path_fails_and_keeps_db_row(tmp_path, caplog):
     """The reported Docker bug: the file can't be located, so previously nothing
-    was logged and the file was silently left. Now it's counted + logged."""
+    was logged and the file was silently left while the DB row was deleted.
+    Now it is counted, logged, and left in the DB so the UI reports failure."""
     db, w = _worker(tmp_path)
+    w._config_manager = _Cfg()
     keep = tmp_path / "keep.flac"; keep.write_text("k")
     missing = "/nonexistent/docker/path/dupe.flac"
     _insert_track(db, 1, "Song", str(keep))
@@ -101,11 +111,11 @@ def test_unresolvable_path_logs_and_counts_failure_but_still_cleans_db(tmp_path,
     with caplog.at_level(logging.WARNING):
         res = w._fix_duplicates('track', '1', str(keep), details)
 
-    assert res['success'] is True          # DB cleanup still succeeds
+    assert res['success'] is False
     assert res['files_deleted'] == 0
     assert res['files_failed'] == 1
-    assert 'could NOT be removed' in res['message']
-    assert _track_ids(db) == ['1']           # DB row removed regardless
+    assert 'Report Real Path' in res['error']
+    assert _track_ids(db) == ['1', '2']       # DB row kept because file stayed on disk
     # The previously-silent skip now emits a diagnostic (was the "no logs" complaint).
     assert any('could not locate file to remove' in r.message.lower() for r in caplog.records)
 
@@ -137,7 +147,7 @@ def test_permission_error_logs_puid_hint_and_counts_failure(tmp_path, caplog, mo
     assert res['files_deleted'] == 0
     assert res['files_failed'] == 1
     assert dupe.exists()                   # mock raised — file not moved
-    assert _track_ids(db) == ['1']
+    assert _track_ids(db) == ['1', '2']    # row kept because the file was not moved
     joined = " ".join(r.message for r in caplog.records).lower()
     assert 'failed to move' in joined and ('puid' in joined or 'permission' in joined)
 

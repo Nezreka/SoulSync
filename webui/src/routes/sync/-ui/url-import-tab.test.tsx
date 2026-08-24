@@ -84,17 +84,23 @@ describe('DeezerLinkTab', () => {
     const toast = vi.fn();
     window.showToast = toast as typeof window.showToast;
     responder = (url) => {
-      if (url === '/api/deezer/playlist/123') {
+      if (url === '/api/deezer/playlist/123?async=1') {
+        return { pending: true, job_id: 'job-123' };
+      }
+      if (url === '/api/deezer/playlist-load/job-123') {
         return {
-          id: 123,
-          name: 'Dz Mix',
-          track_count: 2,
-          owner: 'DzOwner',
-          image_url: 'http://img',
-          tracks: [
-            { name: 'T1', artists: ['A1'], album: 'Al1', duration_ms: 10, id: 1 },
-            { name: 'T2', artists: ['A2'], album: 'Al2', duration_ms: 20, id: 2 },
-          ],
+          status: 'complete',
+          playlist: {
+            id: 123,
+            name: 'Dz Mix',
+            track_count: 2,
+            owner: 'DzOwner',
+            image_url: 'http://img',
+            tracks: [
+              { name: 'T1', artists: ['A1'], album: 'Al1', duration_ms: 10, id: 1 },
+              { name: 'T2', artists: ['A2'], album: 'Al2', duration_ms: 20, id: 2 },
+            ],
+          },
         };
       }
       if (url === '/api/deezer/playlists/states') {
@@ -169,8 +175,14 @@ describe('DeezerLinkTab', () => {
     const toast = vi.fn();
     window.showToast = toast as typeof window.showToast;
     responder = (url) => {
-      if (url === '/api/deezer/playlist/77') {
-        return { id: 77, name: 'Once', track_count: 1, tracks: [{ name: 'T' }] };
+      if (url === '/api/deezer/playlist/77?async=1') {
+        return { pending: true, job_id: 'job-77' };
+      }
+      if (url === '/api/deezer/playlist-load/job-77') {
+        return {
+          status: 'complete',
+          playlist: { id: 77, name: 'Once', track_count: 1, tracks: [{ name: 'T' }] },
+        };
       }
       if (url === '/api/deezer/playlists/states') return { states: [] };
       return { success: true };
@@ -201,8 +213,14 @@ describe('DeezerLinkTab', () => {
     stubFetch();
     window.showToast = vi.fn() as typeof window.showToast;
     responder = (url) => {
-      if (url === '/api/deezer/playlist/5') {
-        return { id: 5, name: 'Mid', track_count: 1, tracks: [{ name: 'T' }] };
+      if (url === '/api/deezer/playlist/5?async=1') {
+        return { pending: true, job_id: 'job-5' };
+      }
+      if (url === '/api/deezer/playlist-load/job-5') {
+        return {
+          status: 'complete',
+          playlist: { id: 5, name: 'Mid', track_count: 1, tracks: [{ name: 'T' }] },
+        };
       }
       if (url === '/api/deezer/playlists/states') {
         return { states: [{ playlist_id: '5', phase: 'discovering', discovery_progress: 40 }] };

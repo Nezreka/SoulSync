@@ -17,7 +17,7 @@ import collections
 import functools
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote, urljoin, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from core.webui.mimetypes_fix import corrected_script_content_type, ensure_web_mimetypes
@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.2.4"
+_SOULSYNC_BASE_VERSION = "3.3.0"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -1517,6 +1517,7 @@ def _register_automation_handlers():
         init_automation_progress=_init_automation_progress,
         record_progress_history=_auto_progress.record_history,
         build_personalized_manager=_build_personalized_manager,
+        lastfm_import_worker=lastfm_import_worker,
     )
     _register_extracted_handlers(_automation_deps)
 
@@ -1621,7 +1622,7 @@ def _soulseek_is_active_download_source():
     Soulseek is the source that punishes parallel searching — too many at once
     and the server rate-limits or bans you. Other sources do not need the same
     gate, so the global cap is scoped to when Soulseek is actually in play:
-    directly, or first in the hybrid order.
+    directly, or anywhere in the hybrid order.
     """
     mode = config_manager.get('download_source.mode', 'soulseek')
     if mode == 'soulseek':
@@ -1630,8 +1631,7 @@ def _soulseek_is_active_download_source():
         hybrid_order = config_manager.get('download_source.hybrid_order', []) or []
         if isinstance(hybrid_order, str):
             hybrid_order = [hybrid_order]
-        first_source = next((str(x).strip().lower() for x in hybrid_order if str(x).strip()), '')
-        return first_source == 'soulseek'
+        return any(str(x).strip().lower() == 'soulseek' for x in hybrid_order)
     return False
 
 
@@ -9534,6 +9534,10 @@ def delete_download_origins():
         rows = db.get_library_history_rows_by_ids(ids)
         files_deleted, files_missing, file_errors = 0, 0, []
         failed_ids = set()
+        try:
+            active_server = config_manager.get_active_media_server()
+        except Exception:
+            active_server = None
         for row in rows:
             raw_path = row.get('file_path') or ''
             if not delete_files or not raw_path:
@@ -9548,6 +9552,10 @@ def delete_download_origins():
                     failed_ids.add(row['id'])  # keep the row when the file refuses to go
                     continue
             else:
+                if resolved is None and str(active_server or '').lower() == 'navidrome':
+                    file_errors.append(f"{row.get('title') or raw_path}: {_get_file_not_found_error(raw_path)}")
+                    failed_ids.add(row['id'])
+                    continue
                 files_missing += 1  # already gone — still clean up the rows
             db.delete_track_by_file_path(raw_path)
         removed = db.delete_library_history_rows(
@@ -15356,6 +15364,7 @@ def library_delete_album(album_id):
         database = get_database()
         files_deleted = 0
         files_failed = 0
+        file_errors = []
 
         with database._get_connection() as conn:
             cursor = conn.cursor()
@@ -15385,8 +15394,10 @@ def library_delete_album(album_id):
                         except Exception as e:
                             logger.warning(f"Failed to delete track file: {e}")
                             files_failed += 1
+                            file_errors.append(f"{os.path.basename(fp)}: {e}")
                     else:
                         files_failed += 1
+                        file_errors.append(_get_file_not_found_error(fp))
 
                 # Try to remove the album folder if it's now empty
                 if track_rows:
@@ -15416,7 +15427,8 @@ def library_delete_album(album_id):
                 "deleted_count": 1,
                 "tracks_deleted": tracks_deleted,
                 "files_deleted": files_deleted,
-                "files_failed": files_failed
+                "files_failed": files_failed,
+                "file_errors": file_errors[:5],
             })
     except Exception as e:
         logger.error(f"Error deleting album {album_id}: {e}")
@@ -26122,6 +26134,120 @@ def cancel_tidal_sync(playlist_id):
 # Global state for Deezer playlist discovery management
 deezer_discovery_states = {}  # Key: playlist_id, Value: discovery state
 deezer_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="deezer_discovery")
+deezer_playlist_load_jobs = {}
+deezer_playlist_load_lock = threading.Lock()
+
+
+def _run_deezer_playlist_load_job(job_id, playlist_id):
+    with deezer_playlist_load_lock:
+        state = deezer_playlist_load_jobs.get(job_id)
+        if state:
+            state['status'] = 'running'
+            state['started_at'] = time.time()
+
+    def _emit_progress(done, total, phase):
+        frame = {
+            'playlist_id': str(playlist_id),
+            'done': done,
+            'total': total,
+            'phase': phase,
+        }
+        with deezer_playlist_load_lock:
+            state = deezer_playlist_load_jobs.get(job_id)
+            if state:
+                state['progress'] = frame
+                state['updated_at'] = time.time()
+        try:
+            socketio.emit('deezer:playlist_progress', frame)
+        except Exception as emit_err:   # noqa: BLE001 - narration must never break the fetch
+            logger.debug("deezer playlist progress emit failed: %s", emit_err)
+
+    try:
+        logger.info("Started async Deezer playlist load for %s (job=%s)", playlist_id, job_id)
+        playlist = _get_deezer_client().get_playlist(playlist_id, progress_cb=_emit_progress)
+        if not playlist:
+            raise ValueError("Deezer playlist not found")
+        with deezer_playlist_load_lock:
+            state = deezer_playlist_load_jobs.get(job_id)
+            if state:
+                state.update({
+                    'status': 'complete',
+                    'playlist': playlist,
+                    'track_count': len(playlist.get('tracks', [])),
+                    'updated_at': time.time(),
+                })
+        logger.info("Loaded %d tracks from Deezer playlist: %s (job=%s)",
+                    len(playlist.get('tracks', [])), playlist.get('name'), job_id)
+    except Exception as e:
+        logger.error("Async Deezer playlist load failed for %s (job=%s): %s",
+                     playlist_id, job_id, e, exc_info=True)
+        with deezer_playlist_load_lock:
+            state = deezer_playlist_load_jobs.get(job_id)
+            if state:
+                state.update({'status': 'error', 'error': str(e), 'updated_at': time.time()})
+
+
+def _run_deezer_arl_playlist_load_job(job_id, playlist_id):
+    with deezer_playlist_load_lock:
+        state = deezer_playlist_load_jobs.get(job_id)
+        if state:
+            state['status'] = 'running'
+            state['started_at'] = time.time()
+
+    def _emit_progress(done, total, phase):
+        frame = {
+            'playlist_id': str(playlist_id),
+            'done': done,
+            'total': total,
+            'phase': phase,
+        }
+        with deezer_playlist_load_lock:
+            state = deezer_playlist_load_jobs.get(job_id)
+            if state:
+                state['progress'] = frame
+                state['updated_at'] = time.time()
+        try:
+            socketio.emit('deezer:playlist_progress', frame)
+        except Exception as emit_err:   # noqa: BLE001 - narration must never break the fetch
+            logger.debug("deezer ARL playlist progress emit failed: %s", emit_err)
+
+    try:
+        deezer_dl = download_orchestrator.client("deezer_dl") if download_orchestrator and hasattr(download_orchestrator, 'client') else None
+        if not deezer_dl or not deezer_dl.is_authenticated():
+            raise PermissionError("Deezer ARL not authenticated.")
+        logger.info("Started async Deezer ARL playlist load for %s (job=%s)", playlist_id, job_id)
+        playlist = deezer_dl.get_playlist_tracks(playlist_id, progress_cb=_emit_progress)
+        if not playlist:
+            raise ValueError("Playlist not found or unable to access.")
+        with deezer_playlist_load_lock:
+            state = deezer_playlist_load_jobs.get(job_id)
+            if state:
+                state.update({
+                    'status': 'complete',
+                    'playlist': playlist,
+                    'track_count': len(playlist.get('tracks', [])),
+                    'updated_at': time.time(),
+                })
+        logger.info("Loaded %d tracks from Deezer ARL playlist: %s (job=%s)",
+                    len(playlist.get('tracks', [])), playlist.get('name'), job_id)
+    except Exception as e:
+        logger.error("Async Deezer ARL playlist load failed for %s (job=%s): %s",
+                     playlist_id, job_id, e, exc_info=True)
+        with deezer_playlist_load_lock:
+            state = deezer_playlist_load_jobs.get(job_id)
+            if state:
+                state.update({'status': 'error', 'error': str(e), 'updated_at': time.time()})
+
+
+def _prune_deezer_playlist_load_jobs(max_age_seconds=3600):
+    cutoff = time.time() - max_age_seconds
+    with deezer_playlist_load_lock:
+        stale = [
+            job_id for job_id, state in deezer_playlist_load_jobs.items()
+            if state.get('status') in ('complete', 'error') and state.get('updated_at', 0) < cutoff
+        ]
+        for job_id in stale:
+            deezer_playlist_load_jobs.pop(job_id, None)
 
 def _get_deezer_client():
     """Get cached Deezer client."""
@@ -26249,6 +26375,39 @@ def get_deezer_arl_playlist_tracks(playlist_id):
         if not deezer_dl or not deezer_dl.is_authenticated():
             return jsonify({'error': 'Deezer ARL not authenticated.'}), 401
 
+        if request.args.get('async') in ('1', 'true', 'yes'):
+            _prune_deezer_playlist_load_jobs()
+            with deezer_playlist_load_lock:
+                for existing_id, existing in deezer_playlist_load_jobs.items():
+                    if (existing.get('kind') == 'arl'
+                            and existing.get('playlist_id') == str(playlist_id)
+                            and existing.get('status') in ('queued', 'running')):
+                        return jsonify({
+                            "pending": True,
+                            "job_id": existing_id,
+                            "playlist_id": str(playlist_id),
+                            "status": existing.get('status'),
+                            "progress": existing.get('progress') or {},
+                        }), 202
+
+                job_id = f"deezer_arl_playlist_{uuid.uuid4().hex[:12]}"
+                deezer_playlist_load_jobs[job_id] = {
+                    'job_id': job_id,
+                    'kind': 'arl',
+                    'playlist_id': str(playlist_id),
+                    'status': 'queued',
+                    'progress': {'playlist_id': str(playlist_id), 'done': 0, 'total': 0, 'phase': 'queued'},
+                    'created_at': time.time(),
+                    'updated_at': time.time(),
+                }
+            deezer_discovery_executor.submit(_run_deezer_arl_playlist_load_job, job_id, str(playlist_id))
+            return jsonify({
+                "pending": True,
+                "job_id": job_id,
+                "playlist_id": str(playlist_id),
+                "status": "queued",
+            }), 202
+
         # Narrate the wait. Resolving a 1200-track playlist means ~1,750
         # rate-limited requests, so this GET legitimately runs for minutes and a
         # bare spinner cannot tell working from hung — which is how it was
@@ -26296,6 +26455,39 @@ def get_deezer_playlist(playlist_id):
                                 "address instead."}), 400
             return jsonify({"error": "Invalid Deezer playlist ID or URL"}), 400
 
+        if request.args.get('async') in ('1', 'true', 'yes'):
+            _prune_deezer_playlist_load_jobs()
+            with deezer_playlist_load_lock:
+                for existing_id, existing in deezer_playlist_load_jobs.items():
+                    if (existing.get('kind') == 'link'
+                            and existing.get('playlist_id') == str(parsed_id)
+                            and existing.get('status') in ('queued', 'running')):
+                        return jsonify({
+                            "pending": True,
+                            "job_id": existing_id,
+                            "playlist_id": str(parsed_id),
+                            "status": existing.get('status'),
+                            "progress": existing.get('progress') or {},
+                        }), 202
+
+                job_id = f"deezer_playlist_{uuid.uuid4().hex[:12]}"
+                deezer_playlist_load_jobs[job_id] = {
+                    'job_id': job_id,
+                    'kind': 'link',
+                    'playlist_id': str(parsed_id),
+                    'status': 'queued',
+                    'progress': {'playlist_id': str(parsed_id), 'done': 0, 'total': 0, 'phase': 'queued'},
+                    'created_at': time.time(),
+                    'updated_at': time.time(),
+                }
+            deezer_discovery_executor.submit(_run_deezer_playlist_load_job, job_id, str(parsed_id))
+            return jsonify({
+                "pending": True,
+                "job_id": job_id,
+                "playlist_id": str(parsed_id),
+                "status": "queued",
+            }), 202
+
         # Narrate the wait, exactly as the ARL playlist endpoint does. A
         # 1500-track playlist resolves ~1,000 unique albums for real track
         # numbers, which is minutes — and this path emitted nothing at all, so
@@ -26327,6 +26519,26 @@ def get_deezer_playlist(playlist_id):
     except Exception as e:
         logger.error(f"Error fetching Deezer playlist: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/deezer/playlist-load/<job_id>', methods=['GET'])
+def get_deezer_playlist_load_status(job_id):
+    with deezer_playlist_load_lock:
+        state = deezer_playlist_load_jobs.get(job_id)
+        if not state:
+            return jsonify({"error": "Deezer playlist load not found"}), 404
+        status = state.get('status')
+        payload = {
+            "job_id": job_id,
+            "playlist_id": state.get('playlist_id'),
+            "status": status,
+            "progress": state.get('progress') or {},
+        }
+        if status == 'complete':
+            payload["playlist"] = state.get('playlist')
+        elif status == 'error':
+            payload["error"] = state.get('error') or 'Deezer playlist load failed'
+        return jsonify(payload)
 
 @app.route('/api/deezer/discovery/start/<playlist_id>', methods=['POST'])
 def start_deezer_discovery(playlist_id):
@@ -27770,7 +27982,15 @@ def start_itunes_link_sync(url_hash):
         state['sync_progress'] = {}
 
         with sync_lock:
-            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
+            sync_states[sync_playlist_id] = {
+                "status": "starting",
+                "playlist_name": playlist_name,
+                "progress": {
+                    "playlist_name": playlist_name,
+                    "total_tracks": len(spotify_tracks),
+                    "progress": 0,
+                }
+            }
 
         playlist_image_url = state['playlist'].get('image_url', '')
         future = sync_executor.submit(_run_sync_task, sync_playlist_id, playlist_name, spotify_tracks, None, get_current_profile_id(), playlist_image_url)
@@ -28608,7 +28828,15 @@ def start_playlist_sync():
             return jsonify({"success": False, "error": "Sync is already in progress for this playlist."}), 409
 
         # Initial state
-        sync_states[playlist_id] = {"status": "starting", "progress": {}}
+        sync_states[playlist_id] = {
+            "status": "starting",
+            "playlist_name": playlist_name,
+            "progress": {
+                "playlist_name": playlist_name,
+                "total_tracks": len(tracks_json),
+                "progress": 0,
+            }
+        }
 
         # Submit the task to the thread pool (capture profile_id while still in request context)
         _sync_profile_id = get_current_profile_id()
@@ -31728,6 +31956,40 @@ def get_similar_artists_update_status():
         logger.error(f"Error getting similar artists status: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+
+def _watchlist_spotify_artist_info(artist_data, fallback_id):
+    """Normalize official or Spotify-Free artist metadata for the watchlist UI."""
+    if not artist_data:
+        return None
+
+    images = artist_data.get('images') or []
+    image_url = None
+    if images:
+        first_image = images[0]
+        if isinstance(first_image, dict):
+            image_url = first_image.get('url')
+        elif isinstance(first_image, str):
+            image_url = first_image
+    image_url = image_url or artist_data.get('image_url')
+
+    followers = artist_data.get('followers', 0)
+    if isinstance(followers, dict):
+        followers = followers.get('total', 0)
+    try:
+        followers = int(followers or 0)
+    except (TypeError, ValueError):
+        followers = 0
+
+    return {
+        'id': artist_data.get('id') or fallback_id,
+        'name': artist_data.get('name') or '',
+        'image_url': image_url,
+        'followers': followers,
+        'popularity': artist_data.get('popularity') or 0,
+        'genres': artist_data.get('genres') or []
+    }
+
+
 @app.route('/api/watchlist/artist/<artist_id>/config', methods=['GET', 'POST'])
 def watchlist_artist_config(artist_id):
     """Get or update watchlist artist configuration"""
@@ -31771,24 +32033,27 @@ def watchlist_artist_config(artist_id):
             amazon_id = result[18] if len(result) > 18 else None  # amazon_artist_id from query
             musicbrainz_id = result[19] if len(result) > 19 else None  # musicbrainz_artist_id from query
 
-            # Get artist info from Spotify (only for Spotify artists)
+            # Get artist info from the Spotify wrapper so Premium-gated official
+            # calls can fall through to the no-creds Spotify metadata source.
             artist_info = None
-            if not is_itunes_artist and spotify_client and spotify_client.is_authenticated() and spotify_id and not _spotify_rate_limited():
+            spotify_metadata_available = False
+            if spotify_client:
                 try:
-                    from core.api_call_tracker import api_call_tracker
-                    api_call_tracker.record_call('spotify', endpoint='artist')
-                    artist_data = spotify_client.sp.artist(spotify_id)
-                    if artist_data:
-                        artist_info = {
-                            'id': artist_data['id'],
-                            'name': artist_data['name'],
-                            'image_url': artist_data['images'][0]['url'] if artist_data.get('images') else None,
-                            'followers': artist_data.get('followers', {}).get('total', 0),
-                            'popularity': artist_data.get('popularity', 0),
-                            'genres': artist_data.get('genres', [])
-                        }
+                    if hasattr(spotify_client, 'is_spotify_metadata_available'):
+                        spotify_metadata_available = spotify_client.is_spotify_metadata_available()
+                    else:
+                        spotify_metadata_available = spotify_client.is_authenticated()
+                except Exception:
+                    spotify_metadata_available = False
+
+            if not is_itunes_artist and spotify_client and spotify_id and spotify_metadata_available:
+                try:
+                    artist_info = _watchlist_spotify_artist_info(
+                        spotify_client.get_artist(spotify_id),
+                        spotify_id,
+                    )
                 except Exception as e:
-                    logger.error(f"Could not fetch artist info from Spotify: {e}")
+                    logger.warning(f"Could not fetch watchlist artist info from Spotify metadata: {e}")
 
             # Fallback to database info if Spotify fetch failed
             if not artist_info:
@@ -36098,7 +36363,15 @@ def wing_it_sync():
         add_activity_item("", "Wing It Sync Started", f"'{playlist_name}' — {len(sync_tracks)} tracks", "Now")
 
         with sync_lock:
-            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
+            sync_states[sync_playlist_id] = {
+                "status": "starting",
+                "playlist_name": playlist_name,
+                "progress": {
+                    "playlist_name": playlist_name,
+                    "total_tracks": len(sync_tracks),
+                    "progress": 0,
+                }
+            }
 
         # Pass wing_it flag via sync state so _run_sync_task can skip wishlist
         with sync_lock:
@@ -36155,7 +36428,15 @@ def start_listenbrainz_sync(playlist_mbid):
         }
 
         with sync_lock:
-            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
+            sync_states[sync_playlist_id] = {
+                "status": "starting",
+                "playlist_name": playlist_name,
+                "progress": {
+                    "playlist_name": playlist_name,
+                    "total_tracks": len(spotify_tracks),
+                    "progress": 0,
+                }
+            }
 
         # Submit sync task
         future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id())
@@ -38098,7 +38379,15 @@ def start_beatport_sync(url_hash):
 
         # Add to sync states using existing sync system
         with sync_lock:
-            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
+            sync_states[sync_playlist_id] = {
+                "status": "starting",
+                "playlist_name": sync_data['name'],
+                "progress": {
+                    "playlist_name": sync_data['name'],
+                    "total_tracks": len(spotify_tracks),
+                    "progress": 0,
+                }
+            }
 
         # Start sync in background using existing thread pool
         future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['name'], spotify_tracks, None, get_current_profile_id())
@@ -40649,6 +40938,28 @@ except Exception as e:
     logger.error(f"Listening stats worker initialization failed: {e}")
     listening_stats_worker = None
 
+lastfm_import_worker = None
+try:
+    from core.listening_import.lastfm import LastFMListeningImportWorker
+
+    def _emit_lastfm_import_progress(state):
+        try:
+            socketio.emit('lastfm:import-progress', state or {})
+        except Exception as e:
+            logger.debug("lastfm import progress emit failed: %s", e)
+
+    lastfm_import_db = MusicDatabase()
+    lastfm_import_worker = LastFMListeningImportWorker(
+        database=lastfm_import_db,
+        config_manager=config_manager,
+        cache_builder=(listening_stats_worker._build_stats_cache if listening_stats_worker else None),
+        progress_callback=_emit_lastfm_import_progress,
+    )
+    logger.info("Last.fm listening import worker initialized")
+except Exception as e:
+    logger.error(f"Last.fm listening import worker initialization failed: {e}")
+    lastfm_import_worker = None
+
 # --- Stats API Endpoints ---
 # Logic lives in core/stats/queries.py — these routes are thin handlers.
 
@@ -40801,6 +41112,101 @@ def stats_recent():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+def _fix_stats_listening_image_url(thumb_url):
+    """Fast browser-safe image URL fixer for stats detail rows.
+
+    The normal metadata image fixer also registers remote URLs with the image
+    cache. That is useful for high-value surfaces, but expensive when a details
+    modal serializes 100 listening-history rows. This keeps local media-server
+    artwork reachable without doing cache work per row.
+    """
+    if not thumb_url:
+        return None
+    url = str(thumb_url)
+    if url.startswith('/api/image-proxy?url=') or url.startswith('/api/image-cache/'):
+        return url
+
+    try:
+        active_server = config_manager.get_active_media_server()
+        path = None
+        fixed_url = None
+
+        if url.startswith('/library/') or url.startswith('/Items/') or url.startswith('/api/') or url.startswith('/rest/'):
+            path = url
+        elif url.startswith('http://') or url.startswith('https://'):
+            parsed = urlparse(url)
+            if is_internal_image_host(url):
+                path = parsed.path
+            else:
+                return url
+
+        if path and active_server == 'plex':
+            plex_config = config_manager.get_plex_config()
+            base_url = plex_config.get('base_url', '')
+            token = plex_config.get('token', '')
+            if base_url and token:
+                fixed_url = f"{base_url.rstrip('/')}{path}?X-Plex-Token={token}"
+        elif path and active_server == 'jellyfin':
+            jellyfin_config = config_manager.get_jellyfin_config()
+            base_url = jellyfin_config.get('base_url', '')
+            token = jellyfin_config.get('api_key', '')
+            if base_url:
+                separator = '&' if '?' in path else '?'
+                suffix = f"{separator}X-Emby-Token={token}" if token else ''
+                fixed_url = f"{base_url.rstrip('/')}{path}{suffix}"
+        elif path and active_server == 'navidrome':
+            navidrome_config = config_manager.get_navidrome_config()
+            base_url = navidrome_config.get('base_url', '')
+            username = navidrome_config.get('username', '')
+            password = navidrome_config.get('password', '')
+            if base_url and username and password:
+                import hashlib
+                import secrets
+
+                salt = secrets.token_hex(6)
+                token = hashlib.md5((password + salt).encode()).hexdigest()
+                separator = '&' if '?' in path else '?'
+                auth = f"u={username}&t={token}&s={salt}&v=1.16.1&c=SoulSync&f=json"
+                fixed_url = f"{base_url.rstrip('/')}{path}{separator}{auth}"
+        elif url.startswith('http://') or url.startswith('https://'):
+            fixed_url = url
+
+        if fixed_url and is_internal_image_host(fixed_url):
+            return f"/api/image-proxy?url={quote(fixed_url, safe='')}"
+        return fixed_url or url
+    except Exception as e:
+        logger.debug("stats listening image URL normalization failed: %s", e)
+        return url
+
+@app.route('/api/stats/listening-events', methods=['GET'])
+def stats_listening_events():
+    """Rows behind a clicked listening stats chart segment."""
+    try:
+        time_range = request.args.get('range', '7d')
+        filter_type = request.args.get('type', '')
+        date = request.args.get('date') or None
+        limit = int(request.args.get('limit', 100))
+        weekday_arg = request.args.get('weekday')
+        hour_arg = request.args.get('hour')
+        weekday = int(weekday_arg) if weekday_arg is not None and weekday_arg != '' else None
+        hour = int(hour_arg) if hour_arg is not None and hour_arg != '' else None
+        data = _stats_queries.get_listening_events(
+            get_database(),
+            _fix_stats_listening_image_url,
+            time_range=time_range,
+            filter_type=filter_type,
+            date=date,
+            weekday=weekday,
+            hour=hour,
+            limit=limit,
+        )
+        return jsonify({'success': True, **data})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/lyrics/fetch', methods=['POST'])
 def fetch_lyrics_endpoint():
     """Fetch lyrics for the now-playing media player.
@@ -40931,6 +41337,61 @@ def listening_stats_status():
         return jsonify(_stats_queries.get_listening_status(listening_stats_worker))
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/lastfm/listening-import/status', methods=['GET'])
+def lastfm_listening_import_status():
+    """Get Last.fm listening-history import status."""
+    try:
+        if not lastfm_import_worker:
+            return jsonify({'success': False, 'enabled': False, 'error': 'Last.fm importer unavailable'})
+        status = lastfm_import_worker.status()
+        next_run = automation_engine.get_system_automation_next_run_seconds('import_lastfm_listening') if automation_engine else 0
+        username = config_manager.get('lastfm.username', '') or status.get('username') or ''
+        can_use_auth_user = bool(
+            config_manager.get('lastfm.api_key', '')
+            and config_manager.get('lastfm.api_secret', '')
+            and config_manager.get('lastfm.session_key', '')
+        )
+        return jsonify({
+            'success': True,
+            'enabled': bool(config_manager.get('lastfm.listening_sync_enabled', False)),
+            'api_key_configured': bool(config_manager.get('lastfm.api_key', '')),
+            'authenticated_user_available': can_use_auth_user,
+            'username': username,
+            'next_run_in_seconds': next_run,
+            **status,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/lastfm/listening-import/run', methods=['POST'])
+def lastfm_listening_import_run():
+    """Start or update the Last.fm listening-history import."""
+    try:
+        if not lastfm_import_worker:
+            return jsonify({'success': False, 'error': 'Last.fm importer unavailable'}), 400
+        body = request.get_json(silent=True) or {}
+        username = str(body.get('username') or config_manager.get('lastfm.username', '') or '').strip()
+        if username:
+            config_manager.set('lastfm.username', username)
+        if 'enabled' in body:
+            config_manager.set('lastfm.listening_sync_enabled', bool(body.get('enabled')))
+        result = lastfm_import_worker.start_import(username=username or None, full=bool(body.get('full')))
+        ok = result.get('status') not in ('error',)
+        return jsonify({'success': ok, **result}), 200 if ok else 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/lastfm/listening-import/cancel', methods=['POST'])
+def lastfm_listening_import_cancel():
+    """Cancel the active Last.fm listening-history import."""
+    try:
+        if not lastfm_import_worker:
+            return jsonify({'success': False, 'error': 'Last.fm importer unavailable'}), 400
+        lastfm_import_worker.cancel()
+        return jsonify({'success': True, **lastfm_import_worker.status()})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # ===================================================================
 # Repair Worker — Library maintenance and repair jobs
@@ -43079,6 +43540,24 @@ def _any_playlist_sync_running() -> bool:
         )
 
 
+def _active_playlist_sync_summaries():
+    """Small unscoped payload for the bell/dashboard: no track lists, just live
+    labels and counters. The detailed sync:progress stream stays room-scoped."""
+    summaries = []
+    with sync_lock:
+        for pid, state in list(sync_states.items()):
+            if not state or state.get('status') not in _SYNC_ACTIVE_STATUSES:
+                continue
+            progress = state.get('progress') or {}
+            summaries.append({
+                'playlist_id': pid,
+                'playlist_name': state.get('playlist_name') or progress.get('playlist_name') or '',
+                'status': state.get('status'),
+                'progress': progress,
+            })
+    return summaries
+
+
 def _reconcile_discovery_sync_phases():
     """Server-side backstop for the 'syncing' -> terminal phase transition (#972).
 
@@ -43148,8 +43627,9 @@ def _emit_sync_progress_loop():
             # dashboard's Auto-Sync tile needs to light for ALL pipeline
             # work, including the scheduled auto-sync (an automation).
             # Emitted only while active; the frontend decays on silence.
-            if _any_playlist_sync_running():
-                socketio.emit('sync:active', {'active': True})
+            active_syncs = _active_playlist_sync_summaries()
+            if active_syncs or _any_playlist_sync_running():
+                socketio.emit('sync:active', {'active': True, 'syncs': active_syncs})
         except Exception as e:
             logger.debug(f"Error in sync progress loop: {e}")
 
@@ -43218,8 +43698,17 @@ def _emit_scan_status_loop():
         # Wishlist stats (auto-processing detection + countdown refresh)
         try:
             next_run = automation_engine.get_system_automation_next_run_seconds('process_wishlist') if automation_engine else 0
+            active_batches = 0
+            with tasks_lock:
+                active_batches = sum(
+                    1
+                    for batch in download_batches.values()
+                    if batch.get('playlist_id') == 'wishlist'
+                    and batch.get('phase') not in ['complete', 'error', 'cancelled']
+                )
             socketio.emit('wishlist:stats', {
                 "is_auto_processing": is_wishlist_actually_processing(),
+                "active_batches": active_batches,
                 "next_run_in_seconds": next_run,
             })
         except Exception as e:

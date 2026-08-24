@@ -155,6 +155,9 @@ class AutomationDeps:
     # no caching needed yet).
     build_personalized_manager: Callable[[], Any]
 
+    # --- Listening-history importers ---
+    lastfm_import_worker: Optional[Any] = None
+
     # --- Unified PlaylistSource registry ---
     # Optional so test fixtures that don't exercise refresh_mirrored
     # can keep their existing scaffolding. Production wiring in

@@ -804,7 +804,15 @@ def start_sync(
         state['sync_progress'] = {}
 
         with sync_lock:
-            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
+            sync_states[sync_playlist_id] = {
+                "status": "starting",
+                "playlist_name": playlist_name,
+                "progress": {
+                    "playlist_name": playlist_name,
+                    "total_tracks": len(spotify_tracks),
+                    "progress": 0,
+                }
+            }
 
         playlist_image_url = playlist_image_getter(state)
         future = submit_sync_task(sync_playlist_id, playlist_name, spotify_tracks, playlist_image_url)

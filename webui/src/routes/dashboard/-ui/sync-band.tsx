@@ -24,14 +24,48 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { AutoSyncSeamState } from '../-dash.autosync';
 import type { SyncBandRow } from '../-dash.syncband';
+import type { SyncProgressFrame } from '../-dash.events';
 
 import { fetchDashboardSyncHistory } from '../-dash.api';
 import { autoSyncCardRows } from '../-dash.autosync';
-import { useDashboardStatsEvent } from '../-dash.events';
+import { useDashboardStatsEvent, useSyncProgressEvent } from '../-dash.events';
 import { syncCardView } from '../-dash.library';
 import { syncBandRows } from '../-dash.syncband';
 
 type SeamPhase = 'loading' | 'ready' | 'error';
+type LiveSync = {
+  phase: string;
+  progress: number;
+  playlistId: string;
+  playlistName: string;
+  updatedAt: number;
+};
+
+function normName(value: string | null | undefined): string {
+  return (value || '').trim().toLowerCase();
+}
+
+function liveSyncFromFrame(frame: SyncProgressFrame): LiveSync | null {
+  const progress = frame.progress || {};
+  const playlistId = frame.playlist_id != null ? String(frame.playlist_id) : '';
+  const playlistName = frame.playlist_name || progress.playlist_name || '';
+  const rawPct = progress.progress;
+  const matched = progress.matched_tracks || 0;
+  const failed = progress.failed_tracks || 0;
+  const total = progress.total_tracks || 0;
+  const computed = total > 0 ? Math.round(((matched + failed) / total) * 100) : 0;
+  const pct = rawPct != null ? Math.round(rawPct) : computed;
+  const step = progress.current_step || frame.status || 'Syncing';
+  const track = progress.current_track || '';
+  if (!playlistId && !playlistName) return null;
+  return {
+    playlistId,
+    playlistName,
+    progress: Math.min(100, Math.max(0, pct)),
+    phase: track ? `${step} · ${track}` : step,
+    updatedAt: Date.now(),
+  };
+}
 
 function useSyncBand() {
   const [seam, setSeam] = useState<AutoSyncSeamState | null>(null);
@@ -40,6 +74,7 @@ function useSyncBand() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [busyId, setBusyId] = useState<number | string | null>(null);
   const [fadingIds, setFadingIds] = useState<Set<number | string>>(new Set());
+  const [liveSyncs, setLiveSyncs] = useState<Record<string, LiveSync>>({});
   const mountedRef = useRef(true);
 
   const loadSchedule = useCallback(async () => {
@@ -109,9 +144,79 @@ function useSyncBand() {
   const scheduleRows = useMemo(() => (seam ? autoSyncCardRows(seam, nowMs) : []), [seam, nowMs]);
   const rows = useMemo(() => syncBandRows(scheduleRows, entries ?? []), [scheduleRows, entries]);
 
+  const liveForRow = useCallback(
+    (row: SyncBandRow): LiveSync | null => {
+      const ids = [
+        row.last?.playlistId,
+        row.last?.id != null ? `history_${row.last.id}` : null,
+        row.last?.id != null ? `resync_${row.last.id}` : null,
+        row.schedule ? `auto_mirror_${row.schedule.key}` : null,
+      ].filter(Boolean) as string[];
+      for (const id of ids) {
+        const live = liveSyncs[id];
+        if (live) return live;
+      }
+      const rowName = normName(row.name);
+      return Object.values(liveSyncs).find((live) => normName(live.playlistName) === rowName) || null;
+    },
+    [liveSyncs],
+  );
+
+  useSyncProgressEvent(
+    useCallback(
+      (frame) => {
+        const frames = Array.isArray(frame.syncs) ? frame.syncs : [frame];
+        const terminals = frames.some((item) =>
+          ['finished', 'complete', 'error', 'cancelled'].includes(item.status || ''),
+        );
+        setLiveSyncs((prev) => {
+          const next = { ...prev };
+          for (const item of frames) {
+            const live = liveSyncFromFrame(item);
+            if (!live) continue;
+            const status = item.status || '';
+            const key = live.playlistId || normName(live.playlistName);
+            if (['finished', 'complete', 'error', 'cancelled'].includes(status)) {
+              delete next[key];
+            } else {
+              next[key] = live;
+            }
+          }
+          return next;
+        });
+        if (terminals) {
+          setTimeout(() => {
+            if (mountedRef.current) loadAll();
+          }, 800);
+        }
+      },
+      [loadAll],
+    ),
+  );
+
+  useEffect(() => {
+    if (!Object.keys(liveSyncs).length) return;
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      let removed = false;
+      setLiveSyncs((prev) => {
+        const next = { ...prev };
+        for (const [key, live] of Object.entries(next)) {
+          if (now - live.updatedAt > 8000) {
+            delete next[key];
+            removed = true;
+          }
+        }
+        return removed ? next : prev;
+      });
+      if (removed && mountedRef.current) loadAll();
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [liveSyncs, loadAll]);
+
   // While a pipeline runs its phase/progress must move — a short loop that
   // exists ONLY while a running row is present.
-  const anyRunning = scheduleRows.some((r) => r.running);
+  const anyRunning = scheduleRows.some((r) => r.running) || Object.keys(liveSyncs).length > 0;
   useEffect(() => {
     if (!anyRunning) return;
     const h = window.setInterval(() => loadAll(), 4000);
@@ -267,6 +372,7 @@ function useSyncBand() {
     listen,
     removeEntry,
     loadAll,
+    liveForRow,
   };
 }
 
@@ -309,6 +415,7 @@ export function Row({
   row,
   busy,
   fading,
+  live,
   onRun,
   onSyncAgain,
   onListen,
@@ -317,13 +424,14 @@ export function Row({
   row: SyncBandRow;
   busy: boolean;
   fading: boolean;
+  live: LiveSync | null;
   onRun: (row: SyncBandRow) => void;
   onSyncAgain: (row: SyncBandRow) => void;
   onListen: (id: number | string, name: string) => void;
   onRemove: (id: number | string) => void;
 }) {
   const sched = row.schedule;
-  const running = sched?.running ?? null;
+  const running = sched?.running ?? live;
   const classes = ['syncband-row'];
   if (running) classes.push('syncband-row--live');
   if (sched && !sched.enabled) classes.push('syncband-row--off');
@@ -496,6 +604,7 @@ export function SyncBand() {
     listen,
     removeEntry,
     loadAll,
+    liveForRow,
   } = useSyncBand();
 
   const scheduled = rows.filter((r) => r.schedule?.enabled).length;
@@ -555,6 +664,7 @@ export function SyncBand() {
                     (row.last?.id !== undefined && busyId === `resync-${row.last.id}`))
                 }
                 fading={row.last?.id !== undefined && fadingIds.has(row.last.id)}
+                live={liveForRow(row)}
                 onRun={(r) => void runNow(r)}
                 onSyncAgain={(r) => void syncAgain(r)}
                 onListen={(id, name) => void listen(id, name)}
