@@ -23,6 +23,7 @@
     var trendingCache = null;  // null = not fetched; [] = fetched/empty
     var lastChannel = null;    // resolved YouTube channel awaiting a Follow
     var lastPlaylist = null;   // resolved YouTube playlist awaiting Add-to-watchlist
+    var mode = 'enhanced';
 
     function $(sel) { return document.querySelector(sel); }
     function esc(s) {
@@ -31,6 +32,64 @@
             .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
     function show(sel, on) { var n = $(sel); if (n) n.classList.toggle('hidden', !on); }
+    function basicSources() {
+        var nodes = document.querySelectorAll('[data-vsr-basic-source]:checked');
+        var out = [];
+        for (var i = 0; i < nodes.length; i++) out.push(nodes[i].value);
+        return out;
+    }
+
+    function sourceLabel(s) {
+        return s === 'api' ? 'Indexer APIs' : s === 'rss' ? 'RSS feeds' :
+            s === 'magnet' ? 'Magnet links' : 'Torrent sites';
+    }
+
+    function renderBasicPreview() {
+        var host = $('[data-video-search-results]'); if (!host) return;
+        var q = (($('[data-vsr-basic-query]') || {}).value || '').trim();
+        var cat = (($('[data-vsr-basic-category]') || {}).value || 'all');
+        var sort = (($('[data-vsr-basic-sort]') || {}).value || 'seeders');
+        var sources = basicSources();
+        show('[data-video-search-loading]', false);
+        show('[data-video-search-hint]', false);
+        show('[data-video-search-empty]', false);
+        host.innerHTML = '<section class="vsr-basic-results">' +
+            '<div class="vsr-basic-results-head"><div><span>Basic Search</span>' +
+            '<h2>' + esc(q || 'Ready when you are') + '</h2></div>' +
+            '<button class="vsr-basic-ghost" type="button" data-vsr-basic-focus>Refine</button></div>' +
+            '<div class="vsr-basic-summary">' +
+                '<span>' + esc(cat === 'all' ? 'All video' : cat) + '</span>' +
+                '<span>Sort: ' + esc(sort) + '</span>' +
+                '<span>' + (sources.length ? sources.map(sourceLabel).map(esc).join(' + ') : 'No sources selected') + '</span>' +
+            '</div>' +
+            '<div class="vsr-basic-empty">' +
+                '<div class="vsr-basic-empty-mark">⌕</div>' +
+                '<div><strong>No release rows yet</strong>' +
+                '<p>Connect torrent, API, or RSS adapters to populate this table.</p></div>' +
+            '</div>' +
+            '<div class="vsr-basic-table" aria-hidden="true">' +
+                ['Seeders', 'Source', 'Release', 'Size', 'Age'].map(function (h) { return '<span>' + h + '</span>'; }).join('') +
+            '</div>' +
+        '</section>';
+    }
+
+    function setMode(next) {
+        mode = next === 'basic' ? 'basic' : 'enhanced';
+        document.querySelectorAll('[data-vsr-tab]').forEach(function (b) {
+            var on = b.getAttribute('data-vsr-tab') === mode;
+            b.classList.toggle('active', on);
+            b.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        document.querySelectorAll('[data-vsr-panel]').forEach(function (p) {
+            var on = p.getAttribute('data-vsr-panel') === mode;
+            p.classList.toggle('active', on);
+            p.hidden = !on;
+        });
+        reqSeq++;
+        if (mode === 'basic') renderBasicPreview();
+        else if (!lastQuery) showIdle();
+        else runSearch(lastQuery);
+    }
 
     // Netflix-style poster card with owned/preview ribbon + hover affordance.
     function titleCard(it) {
@@ -374,6 +433,14 @@
     function wire() {
         if (wired) return;
         wired = true;
+        document.querySelectorAll('[data-vsr-tab]').forEach(function (tab) {
+            tab.addEventListener('click', function () { setMode(tab.getAttribute('data-vsr-tab')); });
+        });
+        var basicForm = $('[data-vsr-basic-form]');
+        if (basicForm) {
+            basicForm.addEventListener('submit', function (e) { e.preventDefault(); setMode('basic'); });
+            basicForm.addEventListener('change', function () { if (mode === 'basic') renderBasicPreview(); });
+        }
         var input = $('[data-video-search-input]');
         if (input) {
             input.addEventListener('input', function () { onInput(input.value); });
@@ -394,6 +461,13 @@
         if (results) {
             results.addEventListener('click', function (e) {
                 if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                var bf = e.target.closest('[data-vsr-basic-focus]');
+                if (bf && results.contains(bf)) {
+                    e.preventDefault();
+                    var bq = $('[data-vsr-basic-query]');
+                    if (bq) { try { bq.focus(); } catch (err) { /* ignore */ } }
+                    return;
+                }
                 var rc = e.target.closest('[data-vsr-recent]');
                 if (rc && results.contains(rc)) {
                     e.preventDefault();
@@ -457,6 +531,7 @@
     document.addEventListener('soulsync:video-search-query', function (e) {
         var qv = e && e.detail && (e.detail.q || e.detail);
         if (typeof qv !== 'string' || !qv.trim()) return;
+        setMode('enhanced');
         _pendingQuery = qv.trim();
         if (document.body.getAttribute('data-video-page') === PAGE_ID) {
             var input = $('[data-video-search-input]');

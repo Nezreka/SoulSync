@@ -48,3 +48,11 @@ def test_keyboard_enter_opens_top_result_escape_clears():
 
 def test_css_exists_for_chips():
     assert ".vsr-recent-chip" in _CSS and ".vsr-recent-clear" in _CSS
+
+def test_basic_search_is_local_only_tab_shell():
+    assert "function setMode" in _JS and "function renderBasicPreview" in _JS
+    assert "[data-vsr-basic-form]" in _JS
+    assert "data-vsr-basic-focus" in _JS
+    basic_fn = _JS.split("function renderBasicPreview")[1].split("function setMode")[0]
+    assert "fetch(" not in basic_fn
+    assert ".vsr-tabs" in _CSS and ".vsr-basic" in _CSS and ".vsr-basic-results" in _CSS

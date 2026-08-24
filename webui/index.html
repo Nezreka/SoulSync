@@ -1223,10 +1223,55 @@
                             <div class="vsr-hero-glow" aria-hidden="true"></div>
                             <h1 class="vsr-hero-title">Search</h1>
                             <p class="vsr-hero-sub">Movies, TV shows &amp; people &mdash; everything stays in-app</p>
-                            <div class="vsr-searchbar">
-                                <span class="vsr-search-ic" aria-hidden="true">&#128269;</span>
-                                <input type="text" class="vsr-input" data-video-search-input
-                                       placeholder="Search movies, shows, people&hellip;" autocomplete="off" spellcheck="false">
+                            <div class="vsr-tabs" role="tablist" aria-label="Search mode">
+                                <button class="vsr-tab active" type="button" role="tab" aria-selected="true"
+                                        data-vsr-tab="enhanced" aria-controls="vsr-enhanced-panel">Enhanced</button>
+                                <button class="vsr-tab" type="button" role="tab" aria-selected="false"
+                                        data-vsr-tab="basic" aria-controls="vsr-basic-panel">Basic</button>
+                            </div>
+                            <div class="vsr-panel active" data-vsr-panel="enhanced" id="vsr-enhanced-panel" role="tabpanel">
+                                <div class="vsr-searchbar">
+                                    <span class="vsr-search-ic" aria-hidden="true">&#128269;</span>
+                                    <input type="text" class="vsr-input" data-video-search-input
+                                           placeholder="Search movies, shows, people&hellip;" autocomplete="off" spellcheck="false">
+                                </div>
+                            </div>
+                            <div class="vsr-panel" data-vsr-panel="basic" id="vsr-basic-panel" role="tabpanel" hidden>
+                                <form class="vsr-basic" data-vsr-basic-form>
+                                    <div class="vsr-basic-main">
+                                        <span class="vsr-search-ic" aria-hidden="true">&#128269;</span>
+                                        <input type="text" class="vsr-basic-input" data-vsr-basic-query
+                                               placeholder="Search release titles, hashes, trackers, RSS feeds&hellip;" autocomplete="off" spellcheck="false">
+                                    </div>
+                                    <div class="vsr-basic-row">
+                                        <label class="vsr-basic-field">
+                                            <span>Category</span>
+                                            <select data-vsr-basic-category>
+                                                <option value="all">All video</option>
+                                                <option value="movie">Movies</option>
+                                                <option value="tv">TV episodes</option>
+                                                <option value="anime">Anime</option>
+                                                <option value="doc">Documentaries</option>
+                                            </select>
+                                        </label>
+                                        <label class="vsr-basic-field">
+                                            <span>Sort</span>
+                                            <select data-vsr-basic-sort>
+                                                <option value="seeders">Seeders</option>
+                                                <option value="recent">Newest</option>
+                                                <option value="size">Size</option>
+                                                <option value="relevance">Relevance</option>
+                                            </select>
+                                        </label>
+                                        <button class="vsr-basic-submit" type="submit">Search</button>
+                                    </div>
+                                    <div class="vsr-basic-sources" aria-label="Sources">
+                                        <label><input type="checkbox" value="torrent" checked data-vsr-basic-source><span>Torrent sites</span></label>
+                                        <label><input type="checkbox" value="api" checked data-vsr-basic-source><span>Indexer APIs</span></label>
+                                        <label><input type="checkbox" value="rss" checked data-vsr-basic-source><span>RSS feeds</span></label>
+                                        <label><input type="checkbox" value="magnet" data-vsr-basic-source><span>Magnet links</span></label>
+                                    </div>
+                                </form>
                             </div>
                         </div>
                         <div class="vsr-body">
