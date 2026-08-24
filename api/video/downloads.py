@@ -87,6 +87,20 @@ def _external_ids(body) -> dict:
     return {k: v for k, v in ids.items() if v}
 
 
+def _basic_indexer_names(body) -> list:
+    """Optional Basic Search provider filter for Prowlarr-backed torrent sources."""
+    body = body if isinstance(body, dict) else {}
+    key = str(body.get("indexer") or body.get("provider") or "").strip().lower()
+    aliases = {
+        "thepiratebay": ["the pirate bay", "pirate bay", "tpb"],
+        "tpb": ["the pirate bay", "pirate bay", "tpb"],
+        "extto": ["ext.to", "ext torrents", "ext"],
+        "ext.to": ["ext.to", "ext torrents", "ext"],
+        "1337x": ["1337x"],
+    }
+    return aliases.get(key, [])
+
+
 def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None, want_year=None,
                    want_title=None, blocked_users=None, want_date=None, want_absolute=None) -> list:
     """Parse → evaluate → rank a list of raw indexer hits against the quality profile.
@@ -678,6 +692,7 @@ def register_routes(bp):
             pres = prowlarr_search(scope, title, year=body.get("year"),
                                    season=want_season, episode=want_episode, source=source,
                                    max_wait_seconds=MANUAL_SEARCH_MAX_WAIT_SECONDS,
+                                   indexer_names=_basic_indexer_names(body),
                                    **_external_ids(body))
             if not pres.get("configured"):
                 return jsonify({"scope": scope, "results": [],
@@ -730,6 +745,7 @@ def register_routes(bp):
             pres = prowlarr_search(scope, title, year=body.get("year"),
                                    season=want_season, episode=want_episode, source=source,
                                    max_wait_seconds=MANUAL_SEARCH_MAX_WAIT_SECONDS,
+                                   indexer_names=_basic_indexer_names(body),
                                    **_external_ids(body))
             if not pres.get("configured"):
                 return jsonify({"error": "Prowlarr isn't configured — set its URL + key on Settings → Downloads."})

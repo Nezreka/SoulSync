@@ -60,6 +60,41 @@ def _indexer_ids() -> List[int]:
     return [int(p) for p in (x.strip() for x in raw.split(",")) if p.isdigit()]
 
 
+def _norm_indexer_name(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def _indexer_ids_matching(names: Any, protocol: str) -> Optional[List[int]]:
+    """Resolve a Basic Search provider label (e.g. 1337x) to Prowlarr indexer ids.
+
+    ``None`` means no provider filter was requested. ``[]`` means a filter was
+    requested but no enabled matching indexer exists, so callers should show a
+    clear configured-but-missing message rather than widening the search.
+    """
+    if not names:
+        return None
+    wanted_raw = names if isinstance(names, (list, tuple, set)) else [names]
+    wanted = [_norm_indexer_name(n) for n in wanted_raw if _norm_indexer_name(n)]
+    if not wanted:
+        return None
+    try:
+        known = _client()._get_indexers_sync()
+    except Exception as exc:  # noqa: BLE001 - surface as no concrete source match
+        logger.warning("Prowlarr indexer lookup failed for Basic Search provider %s: %s", wanted, exc)
+        return []
+    protocol = str(protocol or "torrent").lower()
+    matched = []
+    for indexer in known or []:
+        if not getattr(indexer, "enable", False):
+            continue
+        if str(getattr(indexer, "protocol", "") or "").lower() != protocol:
+            continue
+        name = _norm_indexer_name(getattr(indexer, "name", ""))
+        if any(w in name or name in w for w in wanted):
+            matched.append(int(indexer.id))
+    return matched
+
+
 def _imdb_num(imdb_id: Any) -> Optional[str]:
     """Newznab wants the imdb id as digits, no ``tt`` prefix ('tt0111161' → '0111161')."""
     s = str(imdb_id or "").strip()
@@ -185,7 +220,7 @@ def prowlarr_search(scope: str, title: Any, *, year: Any = None, season: Any = N
                     episode: Any = None, source: str = "torrent", imdb_id: Any = None,
                     tmdb_id: Any = None, tvdb_id: Any = None, air_date: Any = None,
                     absolute: Any = None, series_type: Any = None,
-                    max_wait_seconds: Any = None) -> dict:
+                    max_wait_seconds: Any = None, indexer_names: Any = None) -> dict:
     """Search Prowlarr for a video release with the multi-strategy (structured + text)
     approach. ``source`` picks the protocol to keep (``torrent`` | ``usenet``). Returns
     ``{configured, error?, hits:[...]}`` — the hit shape ``_evaluate_hits`` consumes.
@@ -199,7 +234,11 @@ def prowlarr_search(scope: str, title: Any, *, year: Any = None, season: Any = N
         return {"configured": False, "hits": []}
     want_proto = "usenet" if str(source or "").lower() == "usenet" else "torrent"
     cats = _categories(scope)
-    ids = _indexer_ids()
+    target_ids = _indexer_ids_matching(indexer_names, want_proto)
+    if target_ids == []:
+        label = ", ".join(str(n) for n in (indexer_names if isinstance(indexer_names, (list, tuple, set)) else [indexer_names]))
+        return {"configured": True, "error": "No enabled Prowlarr indexer matches " + label, "hits": []}
+    ids = target_ids if target_ids is not None else _indexer_ids()
     strategies = build_strategies(scope, title, year=year, season=season, episode=episode,
                                   imdb_id=imdb_id, tmdb_id=tmdb_id, tvdb_id=tvdb_id,
                                   air_date=air_date, absolute=absolute, series_type=series_type)

@@ -33,22 +33,12 @@
     }
     function show(sel, on) { var n = $(sel); if (n) n.classList.toggle('hidden', !on); }
     var BASIC_SEARCH_SOURCES = {
-        thepiratebay: {
-            label: 'The Pirate Bay',
-            kind: 'Torrent search',
-            url: function (q) { return 'https://thepiratebay.org/search.php?q=' + encodeURIComponent(q); }
-        },
-        extto: {
-            label: 'EXT.to',
-            kind: 'Torrent search',
-            url: function (q) { return 'https://ext.to/browse/?q=' + encodeURIComponent(q); }
-        },
-        '1337x': {
-            label: '1337x',
-            kind: 'Torrent search',
-            url: function (q) { return 'https://1337x.to/search/' + encodeURIComponent(q).replace(/%20/g, '+') + '/1/'; }
-        }
+        soulseek: { label: 'slskd', kind: 'Soulseek', source: 'soulseek' },
+        thepiratebay: { label: 'The Pirate Bay', kind: 'Prowlarr torrent indexer', source: 'torrent', indexer: 'thepiratebay' },
+        extto: { label: 'EXT.to', kind: 'Prowlarr torrent indexer', source: 'torrent', indexer: 'extto' },
+        '1337x': { label: '1337x', kind: 'Prowlarr torrent indexer', source: 'torrent', indexer: '1337x' }
     };
+    var basicSeq = 0;
 
     function basicSources() {
         var nodes = document.querySelectorAll('[data-vsr-basic-source]:checked');
@@ -65,27 +55,109 @@
         if (!q) {
             return '<div class="vsr-basic-empty">' +
                 '<div class="vsr-basic-empty-mark">⌕</div>' +
-                '<div><strong>Enter a query to build source searches</strong>' +
-                '<p>Pick the sites you want, search once, then open the exact source that looks right.</p></div>' +
+                '<div><strong>Enter a query to search inside SoulSync</strong>' +
+                '<p>Pick slskd or a configured Prowlarr indexer, then SoulSync will render results here.</p></div>' +
             '</div>';
         }
         if (!sources.length) {
             return '<div class="vsr-basic-empty">' +
                 '<div class="vsr-basic-empty-mark">!</div>' +
                 '<div><strong>No sources selected</strong>' +
-                '<p>Choose at least one source so SoulSync can build a search target.</p></div>' +
+                '<p>Choose at least one source so SoulSync can search it.</p></div>' +
             '</div>';
         }
         return '<div class="vsr-basic-source-list">' + sources.map(function (id) {
             var source = BASIC_SEARCH_SOURCES[id];
-            var href = source.url(q);
-            return '<a class="vsr-basic-source-row" href="' + esc(href) + '" target="_blank" rel="noopener noreferrer" data-vsr-basic-outbound>' +
-                '<span class="vsr-basic-source-main"><strong>' + esc(source.label) + '</strong>' +
-                '<em>' + esc(source.kind) + ' - opens in a new tab</em></span>' +
-                '<span class="vsr-basic-source-query">' + esc(q) + '</span>' +
-                '<span class="vsr-basic-source-action">Open search</span>' +
-            '</a>';
+            return '<section class="vsr-basic-source-row" data-vsr-basic-card="' + esc(id) + '">' +
+                '<div class="vsr-basic-source-main"><strong>' + esc(source.label) + '</strong>' +
+                '<em>' + esc(source.kind) + '</em></div>' +
+                '<div class="vsr-basic-source-query">' + esc(q) + '</div>' +
+                '<div class="vsr-basic-source-action" data-vsr-basic-state>Queued</div>' +
+                '<div class="vsr-basic-hits" data-vsr-basic-hits></div>' +
+            '</section>';
         }).join('') + '</div>';
+    }
+
+    function basicSearchBody(q, sourceId) {
+        var source = BASIC_SEARCH_SOURCES[sourceId] || {};
+        return {
+            scope: 'movie', title: q, source: source.source || 'torrent', indexer: source.indexer || null,
+            year: null, season: null, episode: null
+        };
+    }
+
+    function basicResultHTML(r) {
+        var ok = !!r.accepted;
+        var bits = [r.quality_label || r.resolution, r.source, r.codec, r.audio, r.hdr].filter(Boolean);
+        var swarm = r.username ? r.username + (r.peers > 1 ? ' · ' + r.peers + ' peers' : '') : ((r.seeders || 0) + ' seeders');
+        return '<article class="vsr-basic-hit ' + (ok ? 'vsr-basic-hit--ok' : 'vsr-basic-hit--no') + '">' +
+            '<div><strong title="' + esc(r.title || '') + '">' + esc(r.title || 'Untitled release') + '</strong>' +
+            '<p>' + esc(bits.join(' · ') || 'Release') + '</p>' +
+            (r.rejected ? '<p class="vsr-basic-hit-reason">' + esc(r.rejected) + '</p>' : '') + '</div>' +
+            '<span>' + esc(swarm) + '</span>' +
+        '</article>';
+    }
+
+    function renderBasicHits(card, rows, done, error, totalFiles) {
+        var state = card.querySelector('[data-vsr-basic-state]');
+        var hits = card.querySelector('[data-vsr-basic-hits]');
+        if (!hits) return;
+        if (error) {
+            if (state) state.textContent = 'Needs setup';
+            hits.innerHTML = '<div class="vsr-basic-source-note">' + esc(error) + '</div>';
+            return;
+        }
+        rows = rows || [];
+        if (state) state.textContent = done ? (rows.length ? rows.length + ' found' : 'No matches') : 'Searching';
+        if (!rows.length) {
+            hits.innerHTML = '<div class="vsr-basic-source-note">' + (done
+                ? (totalFiles ? 'Files were found, but none matched as video releases.' : 'No matching releases found.')
+                : '<span class="vdl-res-spin vdl-res-spin--sm"></span> Searching...') + '</div>';
+            return;
+        }
+        hits.innerHTML = rows.slice(0, 8).map(basicResultHTML).join('') +
+            (rows.length > 8 ? '<div class="vsr-basic-source-note">+' + (rows.length - 8) + ' more</div>' : '');
+    }
+
+    function runBasicSearch(q, sources) {
+        var token = ++basicSeq;
+        sources.forEach(function (id) {
+            var card = document.querySelector('[data-vsr-basic-card="' + id + '"]');
+            if (!card) return;
+            var body = basicSearchBody(q, id);
+            renderBasicHits(card, [], false);
+            fetch('/api/video/downloads/search/start', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify(body) }).then(_json).then(function (d) {
+                if (token !== basicSeq || !card.isConnected) return;
+                if (d && d.error) { renderBasicHits(card, [], true, d.error); return; }
+                if (!d || !d.id) { renderBasicHits(card, d ? d.results : [], true); return; }
+                pollBasicSearch(token, card, body, d.id, d.poll_ms);
+            }).catch(function () {
+                if (token === basicSeq && card.isConnected) renderBasicHits(card, [], true, 'Search failed.');
+            });
+        });
+    }
+
+    function pollBasicSearch(token, card, body, id, pollMs) {
+        var started = Date.now(), lastN = -1, stable = 0, total = 0;
+        var maxMs = Math.min(80000, pollMs || 60000);
+        function tick() {
+            if (token !== basicSeq || !card.isConnected) return;
+            var qs = '?id=' + encodeURIComponent(id) + '&scope=' + encodeURIComponent(body.scope || 'movie') + '&title=' + encodeURIComponent(body.title || '');
+            fetch('/api/video/downloads/search/poll' + qs, { headers: { 'Accept': 'application/json' } }).then(_json).then(function (d) {
+                if (token !== basicSeq || !card.isConnected) return;
+                var rows = (d && d.results) || [];
+                total = (d && d.total_files) || total;
+                if (rows.length === lastN) stable++; else { stable = 0; lastN = rows.length; }
+                var elapsed = Date.now() - started;
+                var done = elapsed >= maxMs || rows.length >= 25 || (rows.length > 0 && elapsed > 20000 && stable >= 6);
+                renderBasicHits(card, rows, done, null, total);
+                if (!done) setTimeout(tick, 1500);
+            }).catch(function () {
+                if (token === basicSeq && card.isConnected) renderBasicHits(card, [], true, 'Search polling failed.');
+            });
+        }
+        tick();
     }
 
     function renderBasicPreview() {
@@ -108,6 +180,7 @@
             '</div>' +
             basicSourceRows(q, sources) +
         '</section>';
+        if (q && sources.length) runBasicSearch(q, sources);
     }
     function setMode(next) {
         mode = next === 'basic' ? 'basic' : 'enhanced';
