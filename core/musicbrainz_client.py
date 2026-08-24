@@ -1,3 +1,4 @@
+import os
 import requests
 import time
 import threading
@@ -23,37 +24,78 @@ def _escape_lucene(text: str) -> str:
 # Global rate limiting variables
 _last_api_call_time = 0
 _api_call_lock = threading.Lock()
-MIN_API_INTERVAL = 1.0  # 1 second between API calls (MusicBrainz requirement)
+MIN_API_INTERVAL = 1.05  # MusicBrainz allows about 1 req/sec per egress IP.
+DEFAULT_READ_TIMEOUT = 30.0
+DEFAULT_CONNECT_TIMEOUT = 5.0
+DEFAULT_MAX_RETRIES = 2
+TRANSIENT_STATUS_CODES = {429, 503, 504}
+
+
+def _config_setting(env_name: str, config_key: str) -> Any:
+    value = os.environ.get(env_name)
+    if value is not None:
+        return value
+    try:
+        from core.settings import config_manager
+        return config_manager.get(config_key, None)
+    except Exception:
+        return None
+
+
+def _float_setting(env_name: str, config_key: str, default: float) -> float:
+    value = _config_setting(env_name, config_key)
+    try:
+        if value is None or value == '':
+            return default
+        return max(0.1, float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _int_setting(env_name: str, config_key: str, default: int) -> int:
+    value = _config_setting(env_name, config_key)
+    try:
+        if value is None or value == '':
+            return default
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _is_transient_musicbrainz_error(exc: Exception) -> bool:
+    if isinstance(exc, (requests.exceptions.ReadTimeout, requests.exceptions.Timeout, requests.exceptions.ConnectionError)):
+        return True
+    response = getattr(exc, 'response', None)
+    status_code = getattr(response, 'status_code', None)
+    if status_code in TRANSIENT_STATUS_CODES:
+        return True
+    message = str(exc).lower()
+    return 'rate limit' in message or 'read timed out' in message or '503' in message or '429' in message
 
 def rate_limited(func):
-    """Decorator to enforce rate limiting on MusicBrainz API calls"""
+    """Decorator to enforce process-wide MusicBrainz request pacing."""
     @wraps(func)
     def wrapper(*args, **kwargs):
-        global _last_api_call_time
-        
-        with _api_call_lock:
-            current_time = time.time()
-            time_since_last_call = current_time - _last_api_call_time
-            
-            if time_since_last_call < MIN_API_INTERVAL:
-                sleep_time = MIN_API_INTERVAL - time_since_last_call
-                time.sleep(sleep_time)
-            
-            _last_api_call_time = time.time()
-
-        from core.api_call_tracker import api_call_tracker
-        api_call_tracker.record_call('musicbrainz')
-
-        try:
-            result = func(*args, **kwargs)
-            return result
-        except Exception as e:
-            # Implement exponential backoff for API errors
-            if "rate limit" in str(e).lower() or "503" in str(e):
-                logger.warning(f"MusicBrainz rate limit hit, implementing backoff: {e}")
-                time.sleep(2.0)  # Wait 2 seconds before retrying
-            raise e
+        _wait_for_musicbrainz_slot()
+        return func(*args, **kwargs)
     return wrapper
+
+
+def _wait_for_musicbrainz_slot() -> None:
+    global _last_api_call_time
+
+    with _api_call_lock:
+        current_time = time.monotonic()
+        time_since_last_call = current_time - _last_api_call_time
+
+        if time_since_last_call < MIN_API_INTERVAL:
+            sleep_time = MIN_API_INTERVAL - time_since_last_call
+            time.sleep(sleep_time)
+
+        _last_api_call_time = time.monotonic()
+
+    from core.api_call_tracker import api_call_tracker
+    api_call_tracker.record_call('musicbrainz')
 
 class MusicBrainzClient:
     """Client for interacting with MusicBrainz API"""
@@ -82,7 +124,44 @@ class MusicBrainzClient:
             'Accept': 'application/json'
         })
 
+        self.read_timeout = _float_setting('SOULSYNC_MUSICBRAINZ_READ_TIMEOUT', 'musicbrainz.read_timeout', DEFAULT_READ_TIMEOUT)
+        self.connect_timeout = _float_setting('SOULSYNC_MUSICBRAINZ_CONNECT_TIMEOUT', 'musicbrainz.connect_timeout', DEFAULT_CONNECT_TIMEOUT)
+        self.max_retries = _int_setting('SOULSYNC_MUSICBRAINZ_MAX_RETRIES', 'musicbrainz.max_retries', DEFAULT_MAX_RETRIES)
+
         logger.info(f"MusicBrainz client initialized with user agent: {self.user_agent}")
+
+    def _get(self, path: str, *, params: Optional[Dict[str, Any]] = None) -> requests.Response:
+        """GET a MusicBrainz endpoint with shared pacing and transient retries."""
+        url = f"{self.BASE_URL}{path}"
+        attempts = self.max_retries + 1
+        last_exc: Exception | None = None
+
+        for attempt in range(attempts):
+            if attempt:
+                _wait_for_musicbrainz_slot()
+            try:
+                response = self.session.get(
+                    url,
+                    params=params,
+                    timeout=(self.connect_timeout, self.read_timeout),
+                )
+                response.raise_for_status()
+                return response
+            except Exception as exc:
+                last_exc = exc
+                if attempt >= self.max_retries or not _is_transient_musicbrainz_error(exc):
+                    raise
+                backoff = min(8.0, 2.0 * (2 ** attempt))
+                logger.warning(
+                    "MusicBrainz transient request failure; retrying in %.1fs (%s/%s): %s",
+                    backoff,
+                    attempt + 1,
+                    attempts,
+                    exc,
+                )
+                time.sleep(backoff)
+
+        raise last_exc or RuntimeError('MusicBrainz request failed')
     
     @rate_limited
     def search_artist(self, artist_name: str, limit: int = 10, strict: bool = True) -> List[Dict[str, Any]]:
@@ -123,11 +202,7 @@ class MusicBrainzClient:
                 'limit': limit
             }
 
-            response = self.session.get(
-                f"{self.BASE_URL}/artist",
-                params=params,
-                timeout=10
-            )
+            response = self._get("/artist", params=params)
             response.raise_for_status()
 
             data = response.json()
@@ -186,11 +261,7 @@ class MusicBrainzClient:
                 'limit': limit
             }
             
-            response = self.session.get(
-                f"{self.BASE_URL}/release",
-                params=params,
-                timeout=10
-            )
+            response = self._get("/release", params=params)
             response.raise_for_status()
             
             data = response.json()
@@ -254,11 +325,7 @@ class MusicBrainzClient:
                 'limit': limit
             }
 
-            response = self.session.get(
-                f"{self.BASE_URL}/recording",
-                params=params,
-                timeout=10
-            )
+            response = self._get("/recording", params=params)
             response.raise_for_status()
             
             data = response.json()
@@ -302,11 +369,7 @@ class MusicBrainzClient:
             if release_types:
                 params['type'] = '|'.join(release_types)
 
-            response = self.session.get(
-                f"{self.BASE_URL}/release-group",
-                params=params,
-                timeout=10
-            )
+            response = self._get("/release-group", params=params)
             response.raise_for_status()
 
             data = response.json()
@@ -337,11 +400,7 @@ class MusicBrainzClient:
                 'inc': 'artist-credits+media+labels+release-groups',
             }
 
-            response = self.session.get(
-                f"{self.BASE_URL}/release",
-                params=params,
-                timeout=10
-            )
+            response = self._get("/release", params=params)
             response.raise_for_status()
 
             data = response.json()
@@ -361,11 +420,8 @@ class MusicBrainzClient:
         if not name:
             return []
         try:
-            response = self.session.get(
-                f"{self.BASE_URL}/label",
-                params={'query': f'label:"{_escape_lucene(name)}"', 'fmt': 'json',
-                        'limit': min(limit, 25)},
-                timeout=10)
+            response = self._get("/label", params={'query': f'label:"{_escape_lucene(name)}"', 'fmt': 'json',
+                        'limit': min(limit, 25)})
             response.raise_for_status()
             return response.json().get('labels', [])
         except Exception as e:
@@ -383,11 +439,8 @@ class MusicBrainzClient:
         if not mbid:
             return []
         try:
-            response = self.session.get(
-                f"{self.BASE_URL}/release",
-                params={'label': mbid, 'fmt': 'json', 'limit': min(limit, 100),
-                        'offset': offset, 'inc': 'artist-credits+release-groups'},
-                timeout=10)
+            response = self._get("/release", params={'label': mbid, 'fmt': 'json', 'limit': min(limit, 100),
+                        'offset': offset, 'inc': 'artist-credits+release-groups'})
             response.raise_for_status()
             return response.json().get('releases', [])
         except Exception as e:
@@ -425,11 +478,7 @@ class MusicBrainzClient:
                 'limit': min(limit, 100),
             }
 
-            response = self.session.get(
-                f"{self.BASE_URL}/recording",
-                params=params,
-                timeout=10
-            )
+            response = self._get("/recording", params=params)
             response.raise_for_status()
 
             data = response.json()
@@ -457,11 +506,7 @@ class MusicBrainzClient:
             if includes:
                 params['inc'] = '+'.join(includes)
             
-            response = self.session.get(
-                f"{self.BASE_URL}/artist/{mbid}",
-                params=params,
-                timeout=10
-            )
+            response = self._get(f"/artist/{mbid}", params=params)
             response.raise_for_status()
             
             return response.json()
@@ -487,11 +532,7 @@ class MusicBrainzClient:
             if includes:
                 params['inc'] = '+'.join(includes)
             
-            response = self.session.get(
-                f"{self.BASE_URL}/release/{mbid}",
-                params=params,
-                timeout=10
-            )
+            response = self._get(f"/release/{mbid}", params=params)
             response.raise_for_status()
             
             return response.json()
@@ -521,11 +562,7 @@ class MusicBrainzClient:
             params = {'fmt': 'json'}
             if includes:
                 params['inc'] = '+'.join(includes)
-            response = self.session.get(
-                f"{self.BASE_URL}/release-group/{mbid}",
-                params=params,
-                timeout=10
-            )
+            response = self._get(f"/release-group/{mbid}", params=params)
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -549,11 +586,7 @@ class MusicBrainzClient:
             if includes:
                 params['inc'] = '+'.join(includes)
             
-            response = self.session.get(
-                f"{self.BASE_URL}/recording/{mbid}",
-                params=params,
-                timeout=10
-            )
+            response = self._get(f"/recording/{mbid}", params=params)
             response.raise_for_status()
             
             return response.json()
