@@ -52,6 +52,15 @@ def test_modal_exposes_close():
 
 # --- movie detail page: live download chip --------------------------------
 
+
+def test_get_modal_surfaces_acquisition_plan():
+    assert 'data-vgm-plan' in _GETMODAL
+    assert 'function renderPlan(' in _GETMODAL
+    assert 'data-vgm-plan-selected' in _GETMODAL
+    assert '(modalState && modalState.sel) ? modalState.sel.size : 0' in _GETMODAL
+    assert 'Acquisition plan' in _GETMODAL
+    assert '.vgm-plan' in _CSS
+    assert '.vgm-plan-metric' in _CSS
 def test_detail_page_watches_movie_download():
     assert 'function watchMovieDownload(' in _DETAIL
     assert '/api/video/downloads/status?media_id=' in _DETAIL
