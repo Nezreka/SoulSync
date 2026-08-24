@@ -89,3 +89,39 @@ def test_config_root_path_is_stable_across_spellings(monkeypatch, tmp_path):
 def test_config_root_path_leaves_an_empty_value_empty():
     assert import_paths.config_root_path("") == ""
     assert import_paths.config_root_path(None) == ""
+
+
+# ── the canonical form has to reach EVERY reader, not just the builders ──────
+#
+# Half-applying it is worse than not applying it. The path builder wrote
+# /app/Transfer/... into the catalogue while SoulSync Deep Scan still walked
+# ./Transfer/... and compared the two as strings, so on a relative root every
+# tracked file suddenly read as untracked ("your library isn't in the database").
+# docker_resolve_path is the single funnel all of those go through.
+
+def test_docker_resolve_path_returns_an_absolute_root(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    assert import_paths.docker_resolve_path("./Transfer") == str(tmp_path / "Transfer")
+    assert import_paths.docker_resolve_path("Transfer") == str(tmp_path / "Transfer")
+
+
+def test_docker_resolve_path_leaves_an_absolute_root_alone(tmp_path):
+    assert import_paths.docker_resolve_path(str(tmp_path / "T")) == str(tmp_path / "T")
+
+
+def test_docker_resolve_path_keeps_an_empty_value_empty():
+    """os.path.abspath('') is the CWD. An unconfigured folder must stay
+    unconfigured, not silently become the application directory."""
+    assert import_paths.docker_resolve_path("") == ""
+    assert import_paths.docker_resolve_path(None) is None
+
+
+def test_the_web_server_copy_agrees_with_the_shared_one(monkeypatch, tmp_path):
+    """web_server keeps its own docker_resolve_path and hands it to the download
+    and automation handlers as a dependency, so a divergence there re-opens the
+    same split."""
+    import web_server
+
+    monkeypatch.chdir(tmp_path)
+    for value in ("./Transfer", "Transfer", str(tmp_path / "T"), ""):
+        assert web_server.docker_resolve_path(value) == import_paths.docker_resolve_path(value)

@@ -191,6 +191,7 @@ from core.imports.routes import staging_scan_status as _import_staging_scan_stat
 from core.imports.routes import staging_suggestions as _import_staging_suggestions
 from core.imports.paths import build_final_path_for_track as _build_final_path_for_track
 from core.imports.paths import config_root_path
+from core.imports.paths import docker_resolve_path as _shared_docker_resolve_path
 from core.imports.pipeline import build_import_pipeline_runtime as _build_import_pipeline_runtime
 from core.metadata.common import get_file_lock
 from core.metadata.enrichment import build_metadata_enrichment_runtime as _build_metadata_enrichment_runtime
@@ -949,16 +950,14 @@ def check_download_permission():
 
 # --- Docker Helper Functions ---
 def docker_resolve_path(path_str):
+    """Canonical absolute form of a configured folder.
+
+    Delegates to the shared implementation. This module keeps the name because it
+    is handed to the download and automation handlers as a dependency
+    (``docker_resolve_path=docker_resolve_path``); a second implementation here
+    is exactly how the roots drifted apart in the first place.
     """
-    Resolve absolute paths for Docker container access
-    In Docker, Windows drive paths (E:/) need to be mapped to WSL mount points (/mnt/e/)
-    """
-    if os.path.exists('/.dockerenv') and len(path_str) >= 3 and path_str[1] == ':' and path_str[0].isalpha():
-        # Convert Windows path (E:/path) to WSL mount path (/mnt/e/path)
-        drive_letter = path_str[0].lower()
-        rest_of_path = path_str[2:].replace('\\', '/')  # Remove E: and convert backslashes
-        return f"/host/mnt/{drive_letter}{rest_of_path}"
-    return path_str
+    return _shared_docker_resolve_path(path_str)
 
 def extract_filename(full_path):
     """

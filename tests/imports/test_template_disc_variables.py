@@ -89,3 +89,40 @@ def test_quality_stays_filename_only():
         == "Sawano Hiroyuki/AoT OST"
     assert _filename("$albumartist/$album/$track - $title [$quality]") \
         == "03 - Apetitan [FLAC]"
+
+
+# ── every spelling of a disc variable, not just the bare ones ────────────────
+#
+# `${disc}`, `${discnum}` and `$cdnum` are substituted globally, before the path
+# is split into segments, so by the time the segment cleanup looked for "$disc"
+# they were already gone and the dangling-label drop never fired. A label next
+# to one of those on a single-disc album was left standing:
+#
+#     $artist/$album/Disc ${discnum}/...  ->  A/B/Disc
+#     $artist/$album/CD $cdnum/...        ->  A/B/CD
+#
+# which is the same collapse-every-disc-into-one-folder problem the bare form
+# had, and the settings page now tells users all three forms work in a folder.
+
+def test_a_bracket_form_label_is_dropped_on_a_single_disc_album():
+    assert _folder("$albumartist/$album/Disc ${discnum}/$track - $title",
+                   disc_number=1, total_discs=1) == "Sawano Hiroyuki/AoT OST"
+
+
+def test_a_cdnum_label_is_dropped_on_a_single_disc_album():
+    assert _folder("$albumartist/$album/CD $cdnum/$track - $title",
+                   disc_number=1, total_discs=1) == "Sawano Hiroyuki/AoT OST"
+
+
+def test_those_forms_still_render_on_a_multi_disc_album():
+    assert _folder("$albumartist/$album/Disc ${discnum}/$track - $title") \
+        == "Sawano Hiroyuki/AoT OST/Disc 2"
+    assert _folder("$albumartist/$album/CD $cdnum/$track - $title") \
+        == "Sawano Hiroyuki/AoT OST/CD CD02"
+
+
+def test_a_template_without_any_disc_variable_keeps_a_literal_label():
+    """The drop is scoped to templates that actually use a disc variable, so a
+    folder someone deliberately called "CD" is never swallowed."""
+    assert _folder("$albumartist/CD/$album/$track - $title",
+                   disc_number=1, total_discs=1) == "Sawano Hiroyuki/CD/AoT OST"

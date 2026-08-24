@@ -145,19 +145,25 @@ def test_the_destination_is_absolute_so_the_catalogue_can_store_it(cfg):
 
 
 def test_the_destination_does_not_depend_on_a_provider_lookup(cfg, monkeypatch):
-    """`total_discs` explicitly supplied by the caller must be trusted.
+    """A caller that KNOWS the disc count must be trusted.
 
-    The builder re-derived the disc count from a live provider tracklist
-    whenever the supplied value was <= 1 — so the same track landed in
-    `Album/01 - x.flac` or `Album/Disc 1/01 - x.flac` depending on whether that
-    lookup happened to succeed. A cache miss or an offline provider was enough
-    to file two tracks of one album in two different folders.
+    The builder re-derived the count from a live provider tracklist whenever the
+    supplied value was <= 1, so the same track landed in `Album/01 - x.flac` or
+    `Album/Disc 1/01 - x.flac` depending on whether that lookup happened to
+    succeed. A cache miss or an offline provider was enough to file two tracks
+    of one album in two different folders.
+
+    "Knows" has to be explicit. Almost every context builder writes
+    `.get('total_discs', 1)`, where the 1 means "nobody told me" — reading that
+    as a declaration would silence the #981 lookup for playlist and wishlist
+    downloads and file disc-1 tracks of a real 2-disc release flat.
     """
     def _ctx(total_discs):
         return {
             "artist": {"name": ARTIST},
             "album": {"name": ALBUM, "id": "sp1", "release_date": "2017-06-28",
                       "total_tracks": len(API_TRACKS), "total_discs": total_discs,
+                      "total_discs_declared": True,
                       "album_type": "album", "artists": [{"name": ARTIST}]},
             "track_info": {"name": "D1-01", "id": "t", "track_number": 1,
                            "disc_number": 1, "artists": [{"name": ARTIST}]},
@@ -205,3 +211,39 @@ def test_an_absent_total_discs_still_asks_the_provider(cfg, monkeypatch):
         {"is_album": True, "album_name": ALBUM, "track_number": 1, "disc_number": 1},
         ".flac", create_dirs=False)
     assert os.sep + "Disc 1" + os.sep in path
+
+
+def test_a_defaulted_total_discs_still_asks_the_provider(cfg, monkeypatch):
+    """The regression guard for the above: `total_discs: 1` written by a caller
+    that merely defaulted it (core/downloads/candidates.py, staging.py,
+    master.py all do `.get('total_discs', 1)`) is NOT a declaration. Spotify
+    album objects carry no disc count at all, so 1 there means unknown."""
+    ctx = {
+        "artist": {"name": ARTIST},
+        "album": {"name": ALBUM, "id": "sp1", "release_date": "2017-06-28",
+                  "total_tracks": len(API_TRACKS), "total_discs": 1,
+                  "album_type": "album", "artists": [{"name": ARTIST}]},
+        "track_info": {"name": "D1-01", "id": "t", "track_number": 1,
+                       "disc_number": 1, "artists": [{"name": ARTIST}]},
+        "original_search_result": {"title": "D1-01", "clean_title": "D1-01",
+                                   "clean_album": ALBUM, "clean_artist": ARTIST,
+                                   "artists": [{"name": ARTIST}]},
+        "source": "spotify", "is_album_download": True,
+    }
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: API_TRACKS)
+    path, _ = build_final_path_for_track(
+        ctx, {"name": ARTIST},
+        {"is_album": True, "album_name": ALBUM, "track_number": 1, "disc_number": 1},
+        ".flac", create_dirs=False)
+    assert os.sep + "Disc 1" + os.sep in path, (
+        "a defaulted 1 was read as a declaration, so the #981 lookup never ran"
+    )
+
+
+def test_the_reorganize_context_declares_its_disc_count():
+    """Reorganize is the caller that really knows: it counted the discs off the
+    source tracklist it just resolved."""
+    ctx = lr._build_post_process_context(
+        API_ALBUM, API_TRACKS[0], ARTIST, ALBUM, 2, local_title="D1-01")
+    assert ctx["spotify_album"]["total_discs"] == 2
+    assert ctx["spotify_album"]["total_discs_declared"] is True

@@ -44,6 +44,16 @@ RESOLVED_RECURRENCE_GRACE_DAYS = 7
 # bulk run takes when nobody chose anything — not by its worst-case action.
 # The UI never one-clicks these: they go through the preview + confirm path,
 # and "Fix all safe" skips them entirely.
+# Finding types whose subject IS a path that is not there. The sweep below runs
+# right after the scan that raised them, scoped to that same job, so without this
+# exclusion both would be retired the instant they were created and their jobs
+# would report "N findings created" over an empty list.
+#
+#   dead_file    names the missing file of a track that still has a catalogue row
+#   empty_folder names a directory that is empty by definition
+_ABSENCE_IS_THE_FINDING = frozenset({'dead_file', 'empty_folder'})
+
+
 DESTRUCTIVE_FINDING_TYPES = frozenset({
     'orphan_file',            # default 'staging' MOVES the file; 'delete' removes it
     'dead_file',              # 'remove' drops the library row + file
@@ -1437,11 +1447,13 @@ class RepairWorker:
         retired = 0
         try:
             conn = self.db._get_connection()
+            marks = ','.join('?' for _ in _ABSENCE_IS_THE_FINDING)
             rows = conn.execute(
                 "SELECT id, file_path FROM repair_findings "
                 "WHERE job_id = ? AND status = 'pending' "
-                "AND file_path IS NOT NULL AND file_path <> ''",
-                (job_id,),
+                "AND file_path IS NOT NULL AND file_path <> '' "
+                f"AND finding_type NOT IN ({marks})",
+                (job_id, *sorted(_ABSENCE_IS_THE_FINDING)),
             ).fetchall()
             download_folder = None
             if self._config_manager:
@@ -1453,7 +1465,9 @@ class RepairWorker:
                 resolved = _resolve_file_path(
                     raw, self.transfer_folder, download_folder,
                     config_manager=self._config_manager) or raw
-                if os.path.isfile(resolved):
+                if os.path.exists(resolved):
+                    # exists(), not isfile(): a finding may legitimately name a
+                    # DIRECTORY, and isfile() of one is False.
                     continue
                 parent = os.path.dirname(resolved)
                 if not parent or not os.path.isdir(parent):

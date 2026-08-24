@@ -1143,6 +1143,11 @@ def _build_post_process_context(
             'release_date': api_album_release,
             'total_tracks': api_album_total_tracks,
             'total_discs': total_discs,
+            # Reorganize is the caller that really knows: it counted the discs
+            # off the source tracklist it just resolved, so the path builder must
+            # not go and ask a provider again (that lookup's success or failure
+            # would decide the destination).
+            'total_discs_declared': True,
             'image_url': api_album_image,
         },
         'track_info': {
