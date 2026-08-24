@@ -53,6 +53,12 @@ def test_modal_exposes_close():
 # --- movie detail page: live download chip --------------------------------
 
 
+
+def test_get_modal_footer_keeps_decision_actions_visible():
+    assert 'Choose release' in _GETMODAL
+    assert '>Details &rarr;</button>' in _GETMODAL
+    assert 'position: sticky; bottom: 0;' in _CSS
+    assert '.vgm-sel-count' in _CSS
 def test_get_modal_surfaces_acquisition_plan():
     assert 'data-vgm-plan' in _GETMODAL
     assert 'function renderPlan(' in _GETMODAL

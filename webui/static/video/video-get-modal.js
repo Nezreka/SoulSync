@@ -212,9 +212,9 @@
                 '</div>' +
                 '<div class="vgm-actions">' +
                     '<span class="vgm-sel-count" data-vgm-count></span>' +
-                    '<button class="discog-cancel-btn" type="button" data-vgm-open>Full page &rarr;</button>' +
+                    '<button class="discog-cancel-btn" type="button" data-vgm-open>Details &rarr;</button>' +
                     '<button class="discog-cancel-btn vgm-download-btn" type="button" data-vgm-download>' +
-                        '<span class="vgm-download-ic">⤓</span> Download</button>' +
+                        '<span class="vgm-download-ic">⤓</span> Choose release</button>' +
                     '<button class="discog-submit-btn" type="button" data-vgm-wishlist>' +
                         '<span class="discog-submit-icon">⬇</span>' +
                         '<span class="discog-submit-text" data-vgm-add-label>+ Add to Wishlist</span>' +
