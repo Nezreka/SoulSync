@@ -97,6 +97,29 @@ def test_extto_is_wired_as_native_video_basic_search_source():
     ui = (root / "webui" / "static" / "video" / "video-search.js").read_text(encoding="utf-8")
 
     assert 'source == "extto"' in api
+    assert "resolve_magnets=False, max_candidates=1" in api
     assert 'client_source = "torrent" if source == "extto" else source' in api
     assert '"extto": ["ext.to", "ext torrents", "ext"]' not in api
     assert "kind: 'FlareSolverr torrent scraper', source: 'extto'" in ui
+
+
+def test_extto_search_can_skip_magnet_resolution_for_fast_listing(monkeypatch):
+    class _ListingOnlyClient(_FakeClient):
+        def request(self, method, url, data=None):
+            if method == "GET" and "/browse/" in url:
+                return super().request(method, url, data)
+            raise AssertionError("detail pages should not be fetched in fast listing mode")
+
+    monkeypatch.setattr(extto, "FlareSolverrClient", _ListingOnlyClient)
+
+    out = extto.extto_search(
+        "interstellar", limit=1, timeout=5, flaresolverr="http://solver:8191", resolve_magnets=False
+    )
+
+    assert len(out["hits"]) == 1
+    hit = out["hits"][0]
+    assert hit["title"] == "Interstellar (2014) 1080p BrRip x264 - YIFY"
+    assert hit["protocol"] == "torrent"
+    assert hit["info_url"] == "https://ext.to/interstellar-2014-1080p-yify-1014669/"
+    assert hit["download_url"] == ""
+    assert hit["magnet_uri"] == ""

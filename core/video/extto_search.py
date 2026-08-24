@@ -260,13 +260,15 @@ def _project(hit: ExtToHit) -> dict:
         "download_url": magnet,
         "magnet_uri": magnet,
         "protocol": "torrent",
+        "info_url": hit.url,
         "indexer_id": "extto",
         "guid": guid or ("extto:" + str(hit.magnet_id or hit.url)),
     }
 
 
 def extto_search(query: Any, *, limit: int = 20, timeout: int = 30,
-                 flaresolverr: Optional[str] = None) -> dict:
+                 flaresolverr: Optional[str] = None, resolve_magnets: bool = True,
+                 max_candidates: int | None = None) -> dict:
     q = str(query or "").strip()
     url = str(flaresolverr if flaresolverr is not None else flaresolverr_url()).rstrip("/")
     if not url:
@@ -277,7 +279,10 @@ def extto_search(query: Any, *, limit: int = 20, timeout: int = 30,
     try:
         search_html, search_url = None, None
         errors = []
-        for candidate in _candidate_urls(q):
+        candidates = _candidate_urls(q)
+        if max_candidates is not None:
+            candidates = candidates[:max(1, int(max_candidates))]
+        for candidate in candidates:
             try:
                 search_html = _fetch(client, candidate)
                 search_url = candidate
@@ -289,6 +294,9 @@ def extto_search(query: Any, *, limit: int = 20, timeout: int = 30,
         hits = parse_results(search_html, search_url, limit=limit)
         out: list[dict] = []
         for hit in hits:
+            if not resolve_magnets:
+                out.append(_project(hit))
+                continue
             try:
                 detail_html = _fetch(client, hit.url)
                 ids = extract_magnet_ids(detail_html)

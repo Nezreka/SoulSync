@@ -682,7 +682,7 @@ def register_routes(bp):
             raw, live = sres["hits"], True
         elif source == "extto":
             from core.video.extto_search import extto_search
-            eres = extto_search(title, limit=25, timeout=int(MANUAL_SEARCH_MAX_WAIT_SECONDS))
+            eres = extto_search(title, limit=25, timeout=20, resolve_magnets=False, max_candidates=1)
             if not eres.get("configured"):
                 return jsonify({"scope": scope, "results": [], "error": "EXT.to requires FlareSolverr — set flaresolverr.url."})
             if eres.get("error"):
@@ -741,7 +741,7 @@ def register_routes(bp):
         profile, _pid = _profile_for_request(get_video_db(), body)
         if source == "extto":
             from core.video.extto_search import extto_search
-            eres = extto_search(title, limit=25, timeout=int(MANUAL_SEARCH_MAX_WAIT_SECONDS))
+            eres = extto_search(title, limit=25, timeout=20, resolve_magnets=False, max_candidates=1)
             if not eres.get("configured"):
                 return jsonify({"error": "EXT.to requires FlareSolverr — set flaresolverr.url."})
             if eres.get("error"):

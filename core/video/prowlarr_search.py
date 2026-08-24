@@ -233,7 +233,11 @@ def prowlarr_search(scope: str, title: Any, *, year: Any = None, season: Any = N
     if not client.is_configured():
         return {"configured": False, "hits": []}
     want_proto = "usenet" if str(source or "").lower() == "usenet" else "torrent"
-    cats = _categories(scope)
+    # Basic Search is intentionally old-school: when the UI targets a named public
+    # tracker, do not send Radarr/Sonarr category filters. Some Jackett/Prowlarr
+    # public tracker adapters either ignore or reject those categories, which made
+    # obvious searches like "interstellar" return zero on The Pirate Bay.
+    cats = [] if indexer_names else _categories(scope)
     target_ids = _indexer_ids_matching(indexer_names, want_proto)
     if target_ids == []:
         label = ", ".join(str(n) for n in (indexer_names if isinstance(indexer_names, (list, tuple, set)) else [indexer_names]))
