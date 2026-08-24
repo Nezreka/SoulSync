@@ -2,12 +2,14 @@
 
 The homepage renders the Movies and TV torrent sections for Day, Week, and
 Month in one document. This module parses those tables into a small read-only
-shape for SoulSync's Search page; download/grab behavior intentionally stays out
-of scope until the UI flow is designed.
+shape for SoulSync's Search page. Rows also carry the homepage magnet URL and
+release parser hints so the UI can identify the title before handing the exact
+release to the normal download pipeline.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass
 from typing import Any
 from urllib.parse import urljoin
@@ -25,6 +27,7 @@ from core.video.extto_search import (
     _size_bytes,
     flaresolverr_url,
 )
+from core.video.release_parse import extract_title, parse_release
 from utils.logging_config import get_logger
 
 logger = get_logger("video.extto_fresh")
@@ -49,6 +52,25 @@ class FreshRelease:
     category: str = ""
     period: str = ""
     source: str = "EXT.to"
+    download_url: str = ""
+    magnet_uri: str = ""
+    protocol: str = "torrent"
+    indexer_id: str = "extto"
+    username: str = "EXT.to"
+    search_title: str = ""
+    year: int | None = None
+    resolution: str | None = None
+    quality_label: str | None = None
+    release_source: str | None = None
+    codec: str | None = None
+    audio: str | None = None
+    hdr: str | None = None
+    group: str | None = None
+    season: int | None = None
+    episode: int | None = None
+    episode_end: int | None = None
+    is_season_pack: bool = False
+    is_series_pack: bool = False
 
 
 def _cell_value(td: Tag | None, label: str | None = None) -> str:
@@ -65,6 +87,15 @@ def _cell_value(td: Tag | None, label: str | None = None) -> str:
     chunks = [c for c in chunks if c and c.lower() not in {"size", "files", "age", "seeds", "leechs", "leeches"}]
     return chunks[-1] if chunks else _clean(td.get_text(" "))
 
+
+def _search_title(title: str) -> str:
+    value = extract_title(title) or title
+    value = re.sub(r"[\s(\[{._-]+$", "", value or "").strip()
+    return value or title
+
+def _magnet_url(row: Tag) -> str:
+    node = row.select_one('a.torrent-dwn[href^="magnet:"]') or row.select_one('a[href^="magnet:"]')
+    return str(node.get("href") or "").strip() if node else ""
 
 def _parse_row(row: Tag, category: str, period: str, base_url: str) -> FreshRelease | None:
     cells = row.find_all("td", recursive=False)
@@ -91,6 +122,10 @@ def _parse_row(row: Tag, category: str, period: str, base_url: str) -> FreshRele
         seeds_node = cells[0].select_one(".mobile-info .text-success")
         seeds_text = _clean(seeds_node.get_text(" ") if seeds_node else "")
 
+    magnet = _magnet_url(row)
+    parsed = parse_release(title)
+    search_title = _search_title(title)
+    quality_label = " ".join(str(x) for x in (parsed.get("resolution"), parsed.get("source")) if x) or None
     return FreshRelease(
         title=title,
         url=detail_url,
@@ -102,6 +137,22 @@ def _parse_row(row: Tag, category: str, period: str, base_url: str) -> FreshRele
         leechers=_int(leech_text),
         category=category,
         period=period,
+        download_url=magnet,
+        magnet_uri=magnet,
+        search_title=search_title,
+        year=parsed.get("year"),
+        resolution=parsed.get("resolution"),
+        quality_label=quality_label,
+        release_source=parsed.get("source"),
+        codec=parsed.get("codec"),
+        audio=parsed.get("audio"),
+        hdr=parsed.get("hdr"),
+        group=parsed.get("group"),
+        season=parsed.get("season"),
+        episode=parsed.get("episode"),
+        episode_end=parsed.get("episode_end"),
+        is_season_pack=bool(parsed.get("is_season_pack")),
+        is_series_pack=bool(parsed.get("is_series_pack")),
     )
 
 

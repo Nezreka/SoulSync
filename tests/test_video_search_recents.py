@@ -81,3 +81,9 @@ def test_fresh_releases_tab_fetches_extto_homepage_board_in_app():
     assert "<a " not in fresh_fn and "href=" not in fresh_fn
     assert ".vsr-fresh-results" in _CSS and ".vsr-fresh-row" in _CSS and ".vsr-fresh-loader" in _CSS
     assert "repeat(3, minmax" in _CSS
+    assert "data-vsr-fresh-pick" in _JS and "freshOpenIdentify" in _JS
+    assert "data-vsr-fi-search" in _JS and "data-vsr-fi-result" in _JS
+    assert "source: 'extto'" in _JS and "'/api/video/downloads/grab'" in _JS
+    assert "search_ctx: isMovie ? { scope: 'movie'" in _JS
+    assert "scope: freshIdentify.mode === 'episode' ? 'episode' : 'season'" in _JS
+    assert ".vsr-fi-modal" in _CSS and ".vsr-fresh-pick" in _CSS

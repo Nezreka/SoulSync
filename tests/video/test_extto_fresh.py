@@ -9,7 +9,7 @@ HOME_HTML = """
   <div class="tab-content">
     <div class="tab-pane" id="torrents-day-1"><table><tbody>
       <tr>
-        <td class="text-left"><div class="float-left"><a href="/interstellar-2014-1080p-123/"><b>Interstellar 2014 1080p BluRay</b></a></div></td>
+        <td class="text-left"><div class="float-left"><a href="/interstellar-2014-1080p-123/"><b>Interstellar 2014 1080p BluRay</b></a></div><a class="dwn-btn torrent-dwn" href="magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"></a></td>
         <td><div class="add-block-wrapper"><span class="add-block">Size</span><span>2.1 GB</span></div></td>
         <td><div class="add-block-wrapper"><span class="add-block">Files</span><span>3</span></div></td>
         <td><div class="add-block-wrapper"><span class="add-block">Age</span><span>8 hours ago</span></div></td>
@@ -28,7 +28,7 @@ HOME_HTML = """
   <div class="tab-content">
     <div class="tab-pane" id="torrents-day-2"><table><tbody>
       <tr>
-        <td><div class="float-left"><a href="/silo-s03e08-789/"><b>Silo S03E08 1080p WEB</b></a></div></td>
+        <td><div class="float-left"><a href="/silo-s03e08-789/"><b>Silo S03E08 1080p WEB</b></a></div><a class="torrent-dwn" href="magnet:?xt=urn:btih:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"></a></td>
         <td><div class="add-block-wrapper"><span class="add-block">Size</span><span>517.38 MB</span></div></td>
         <td><div class="add-block-wrapper"><span class="add-block">Files</span><span>1</span></div></td>
         <td><div class="add-block-wrapper"><span class="add-block">Age</span><span>3 days ago</span></div></td>
@@ -57,8 +57,19 @@ def test_parse_fresh_releases_extracts_movies_and_tv_periods():
     assert movie["leechers"] == 147
     assert movie["category"] == "movies"
     assert movie["period"] == "day"
+    assert movie["download_url"].startswith("magnet:?xt=urn:btih:aaaaaaaa")
+    assert movie["magnet_uri"] == movie["download_url"]
+    assert movie["protocol"] == "torrent"
+    assert movie["indexer_id"] == "extto"
+    assert movie["username"] == "EXT.to"
+    assert movie["search_title"] == "Interstellar"
+    assert movie["year"] == 2014
+    assert movie["quality_label"] == "1080p bluray"
 
     assert out["movies"]["week"][0]["title"] == "Arrival 2016 2160p"
     assert out["tv"]["day"][0]["title"] == "Silo S03E08 1080p WEB"
     assert out["tv"]["day"][0]["seeders"] == 4923
+    assert out["tv"]["day"][0]["season"] == 3
+    assert out["tv"]["day"][0]["episode"] == 8
+    assert out["tv"]["day"][0]["download_url"].startswith("magnet:?xt=urn:btih:bbbbbbbb")
     assert out["movies"]["month"] == []

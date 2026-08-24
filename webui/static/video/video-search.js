@@ -49,6 +49,9 @@
     var freshCache = null;
     var freshLoading = false;
     var freshPeriod = 'day';
+    var freshIdentify = null;
+    var freshIdentifyTimer = null;
+    var freshIdentifySeq = 0;
 
     function basicSources() {
         var nodes = document.querySelectorAll('[data-vsr-basic-source]:checked');
@@ -350,30 +353,33 @@
             '<div class="vsr-fresh-table">' + rows + '</div></section>';
     }
 
-    function freshRowHTML(r) {
+    function freshRowHTML(r, category, index) {
         r = r || {};
         var files = r.files == null ? '-' : freshNum(r.files);
         var seeds = r.seeders == null ? '-' : freshNum(r.seeders);
         var leech = r.leechers == null ? '-' : freshNum(r.leechers);
-        return '<article class="vsr-fresh-row">' +
+        var ready = !!(r.download_url || r.magnet_uri);
+        var hint = category === 'movies' ? 'Movie' : (r.episode != null ? 'Episode' : 'Season pack');
+        return '<article class="vsr-fresh-row ' + (ready ? 'vsr-fresh-row--ready' : 'vsr-fresh-row--blocked') + '">' +
             '<div class="vsr-fresh-release"><strong title="' + esc(r.title || '') + '">' + esc(r.title || 'Untitled release') + '</strong>' +
-                '<span>' + esc(r.age || 'Age unknown') + ' - ' + esc(r.source || 'EXT.to') + '</span></div>' +
+                '<span>' + esc(r.age || 'Age unknown') + ' - ' + esc(r.source || 'EXT.to') + ' - ' + esc(hint) + '</span></div>' +
             freshStat('Size', r.size_text || 'Unknown') +
             freshStat('Files', files) +
             freshStat('Seed', seeds, 'vsr-fresh-seed') +
             freshStat('Leech', leech, 'vsr-fresh-leech') +
+            '<button class="vsr-fresh-pick" type="button" data-vsr-fresh-pick="' + esc(category) + ':' + index + '" ' + (ready ? '' : 'disabled ') + '>' + (ready ? 'Identify' : 'No magnet') + '</button>' +
         '</article>';
     }
 
     function freshSectionHTML(category, label) {
         var rows = freshRows(category);
         var totalSeeds = rows.reduce(function (sum, r) { var n = Number(r.seeders); return sum + (isFinite(n) ? n : 0); }, 0);
-        var body = rows.length ? rows.slice(0, 18).map(freshRowHTML).join('') :
+        var body = rows.length ? rows.slice(0, 18).map(function (r, i) { return freshRowHTML(r, category, i); }).join('') :
             '<div class="vsr-basic-empty"><div class="vsr-basic-empty-mark">⌕</div><div><strong>No ' + esc(label.toLowerCase()) + ' releases found</strong><p>EXT.to did not publish rows for this period in the current homepage snapshot.</p></div></div>';
         return '<section class="vsr-fresh-board" data-vsr-fresh-section="' + esc(category) + '">' +
             '<div class="vsr-fresh-board-head"><div><span>' + esc(label) + '</span><h2>' + esc(freshPeriodLabel(freshPeriod)) + ' releases</h2></div>' +
             '<div class="vsr-fresh-board-stats">' + freshStat('Rows', freshNum(rows.length)) + freshStat('Seeds', freshNum(totalSeeds), 'vsr-fresh-seed') + '</div></div>' +
-            '<div class="vsr-fresh-table-head"><span>Release</span><span>Size</span><span>Files</span><span>Seed</span><span>Leech</span></div>' +
+            '<div class="vsr-fresh-table-head"><span>Release</span><span>Size</span><span>Files</span><span>Seed</span><span>Leech</span><span></span></div>' +
             '<div class="vsr-fresh-table">' + body + '</div>' +
         '</section>';
     }
@@ -418,7 +424,233 @@
         });
     }
 
-    function setMode(next) {
+
+    function freshDefaultIdentifyMode(row, category) {
+        if (category === 'movies') return 'movie';
+        return row && row.episode != null ? 'episode' : 'season';
+    }
+
+    function freshSearchKind() {
+        return freshIdentify && freshIdentify.mode === 'movie' ? 'movie' : 'show';
+    }
+
+    function freshIdentifyQuery(row) {
+        return (row && (row.search_title || row.parsed_title || row.title) || '').replace(/\b(S\d{1,3}E\d{1,3}|S\d{1,3}|Season\s*\d{1,3})\b/ig, '').trim();
+    }
+
+    function freshEnsureIdentifyModal() {
+        var modal = $('[data-vsr-fresh-ident]');
+        if (modal) return modal;
+        document.body.insertAdjacentHTML('beforeend', '<div class="vsr-fi-backdrop hidden" data-vsr-fresh-ident>' +
+            '<div class="vsr-fi-modal" role="dialog" aria-modal="true" aria-label="Identify release">' +
+                '<div class="vsr-fi-head"><div><span>Fresh Release</span><h2 data-vsr-fi-title>Identify release</h2></div><button type="button" class="vsr-fi-close" data-vsr-fi-close>&times;</button></div>' +
+                '<div class="vsr-fi-body">' +
+                    '<div class="vsr-fi-release" data-vsr-fi-release></div>' +
+                    '<div class="vsr-fi-modes" data-vsr-fi-modes></div>' +
+                    '<div class="vsr-fi-fields" data-vsr-fi-fields>' +
+                        '<label><span>Season</span><input type="number" min="0" max="999" data-vsr-fi-season></label>' +
+                        '<label data-vsr-fi-episode-wrap><span>Episode</span><input type="number" min="1" max="999" data-vsr-fi-episode></label>' +
+                    '</div>' +
+                    '<label class="vsr-fi-search"><span data-vsr-fi-search-label>Search title</span><input type="text" data-vsr-fi-search autocomplete="off" spellcheck="false"></label>' +
+                    '<div class="vsr-fi-results" data-vsr-fi-results></div>' +
+                    '<div class="vsr-fi-note" data-vsr-fi-note></div>' +
+                '</div>' +
+                '<div class="vsr-fi-foot"><button type="button" class="vsr-fi-secondary" data-vsr-fi-close>Cancel</button><button type="button" class="vsr-fi-primary" data-vsr-fi-grab disabled>Start download</button></div>' +
+            '</div></div>');
+        modal = $('[data-vsr-fresh-ident]');
+        modal.addEventListener('click', function (e) {
+            if (e.target === modal || e.target.closest('[data-vsr-fi-close]')) { freshCloseIdentify(); return; }
+            var modeBtn = e.target.closest('[data-vsr-fi-mode]');
+            if (modeBtn && modal.contains(modeBtn)) {
+                freshIdentify.mode = modeBtn.getAttribute('data-vsr-fi-mode') || freshIdentify.mode;
+                freshIdentify.selected = null;
+                freshRenderIdentifyModal();
+                freshRunIdentifySearch();
+                return;
+            }
+            var pick = e.target.closest('[data-vsr-fi-result]');
+            if (pick && modal.contains(pick)) {
+                var i = parseInt(pick.getAttribute('data-vsr-fi-result'), 10);
+                freshIdentify.selected = freshIdentify.results && freshIdentify.results[i] || null;
+                freshRenderIdentifyResults();
+                freshUpdateGrabButton();
+                return;
+            }
+            if (e.target.closest('[data-vsr-fi-grab]')) freshGrabIdentifiedRelease();
+        });
+        modal.querySelector('[data-vsr-fi-search]').addEventListener('input', function () {
+            if (freshIdentifyTimer) clearTimeout(freshIdentifyTimer);
+            freshIdentifyTimer = setTimeout(freshRunIdentifySearch, 260);
+        });
+        modal.querySelector('[data-vsr-fi-season]').addEventListener('input', freshUpdateGrabButton);
+        modal.querySelector('[data-vsr-fi-episode]').addEventListener('input', freshUpdateGrabButton);
+        return modal;
+    }
+
+    function freshOpenIdentify(category, index) {
+        var rows = freshRows(category);
+        var row = rows[index];
+        if (!row || !(row.download_url || row.magnet_uri)) return;
+        freshIdentify = {
+            row: row,
+            category: category,
+            mode: freshDefaultIdentifyMode(row, category),
+            selected: null,
+            results: [],
+            grabbing: false
+        };
+        var modal = freshEnsureIdentifyModal();
+        var seasonInput = modal.querySelector('[data-vsr-fi-season]');
+        var episodeInput = modal.querySelector('[data-vsr-fi-episode]');
+        if (seasonInput) seasonInput.value = row.season != null ? row.season : '';
+        if (episodeInput) episodeInput.value = row.episode != null ? row.episode : '';
+        modal.classList.remove('hidden');
+        freshRenderIdentifyModal();
+        var input = modal.querySelector('[data-vsr-fi-search]');
+        if (input) { input.value = freshIdentifyQuery(row); try { input.focus(); input.select(); } catch (err) { /* ignore */ } }
+        freshRunIdentifySearch();
+    }
+
+    function freshCloseIdentify() {
+        var modal = $('[data-vsr-fresh-ident]');
+        if (modal) modal.classList.add('hidden');
+        freshIdentify = null;
+        if (freshIdentifyTimer) clearTimeout(freshIdentifyTimer);
+    }
+
+    function freshRenderIdentifyModal() {
+        var modal = freshEnsureIdentifyModal();
+        var row = freshIdentify && freshIdentify.row || {};
+        var kind = freshSearchKind();
+        modal.querySelector('[data-vsr-fi-title]').textContent = freshIdentify.mode === 'movie' ? 'Identify movie' : (freshIdentify.mode === 'episode' ? 'Identify episode' : 'Identify season pack');
+        modal.querySelector('[data-vsr-fi-release]').innerHTML = '<strong>' + esc(row.title || 'Untitled release') + '</strong>' +
+            '<div><span>' + esc(row.size_text || 'Size unknown') + '</span><span>' + esc(row.age || 'Age unknown') + '</span><span>' + esc(row.quality_label || row.resolution || 'Release') + '</span></div>';
+        var modes = freshIdentify.category === 'movies' ? ['movie'] : ['episode', 'season'];
+        modal.querySelector('[data-vsr-fi-modes]').innerHTML = modes.map(function (m) {
+            var label = m === 'movie' ? 'Movie' : (m === 'episode' ? 'Episode' : 'Season pack');
+            return '<button type="button" class="' + (freshIdentify.mode === m ? 'active' : '') + '" data-vsr-fi-mode="' + m + '">' + label + '</button>';
+        }).join('');
+        modal.querySelector('[data-vsr-fi-fields]').hidden = freshIdentify.mode === 'movie';
+        modal.querySelector('[data-vsr-fi-episode-wrap]').hidden = freshIdentify.mode !== 'episode';
+        var season = modal.querySelector('[data-vsr-fi-season]');
+        var episode = modal.querySelector('[data-vsr-fi-episode]');
+        if (season && season.value === '') season.value = row.season != null ? row.season : '';
+        if (episode && episode.value === '') episode.value = row.episode != null ? row.episode : '';
+        modal.querySelector('[data-vsr-fi-search-label]').textContent = kind === 'movie' ? 'Search movies' : 'Search TV shows';
+        freshRenderIdentifyResults();
+        freshUpdateGrabButton();
+    }
+
+    function freshRunIdentifySearch() {
+        if (!freshIdentify) return;
+        var modal = freshEnsureIdentifyModal();
+        var q = (modal.querySelector('[data-vsr-fi-search]').value || '').trim();
+        var results = modal.querySelector('[data-vsr-fi-results]');
+        freshIdentify.selected = null;
+        freshUpdateGrabButton();
+        if (!q) { freshIdentify.results = []; results.innerHTML = '<div class="vsr-fi-empty">Search for the real title to attach this release.</div>'; return; }
+        var seq = ++freshIdentifySeq;
+        results.innerHTML = '<div class="vsr-fi-empty"><span class="vsr-basic-loader" aria-hidden="true"><i></i><i></i><i></i></span><span>Searching...</span></div>';
+        fetch(SEARCH_URL + '?q=' + encodeURIComponent(q), { headers: { 'Accept': 'application/json' } }).then(_json).then(function (d) {
+            if (!freshIdentify || seq !== freshIdentifySeq) return;
+            var want = freshSearchKind();
+            freshIdentify.results = ((d && d.results) || []).filter(function (it) { return it && it.kind === want; }).slice(0, 8);
+            freshRenderIdentifyResults();
+        }).catch(function () {
+            if (!freshIdentify || seq !== freshIdentifySeq) return;
+            freshIdentify.results = [];
+            results.innerHTML = '<div class="vsr-fi-empty">Search failed. Try again.</div>';
+        });
+    }
+
+    function freshRenderIdentifyResults() {
+        if (!freshIdentify) return;
+        var modal = freshEnsureIdentifyModal();
+        var rows = freshIdentify.results || [];
+        var host = modal.querySelector('[data-vsr-fi-results]');
+        if (!rows.length) { host.innerHTML = '<div class="vsr-fi-empty">No matching ' + (freshSearchKind() === 'movie' ? 'movies' : 'shows') + ' yet.</div>'; return; }
+        host.innerHTML = rows.map(function (it, i) {
+            var on = freshIdentify.selected && freshIdentify.selected.tmdb_id === it.tmdb_id;
+            var poster = it.poster || it.poster_url || '';
+            return '<button type="button" class="vsr-fi-result ' + (on ? 'active' : '') + '" data-vsr-fi-result="' + i + '">' +
+                (poster ? '<img src="' + esc(poster) + '" alt="" loading="lazy">' : '<span class="vsr-fi-poster">' + (it.kind === 'movie' ? 'M' : 'TV') + '</span>') +
+                '<span><strong>' + esc(it.title || 'Untitled') + '</strong><em>' + esc([it.year, it.kind === 'movie' ? 'Movie' : 'TV Show'].filter(Boolean).join(' - ')) + '</em></span>' +
+            '</button>';
+        }).join('');
+    }
+
+    function freshNumInput(sel) {
+        var n = parseInt((freshEnsureIdentifyModal().querySelector(sel) || {}).value, 10);
+        return isFinite(n) ? n : null;
+    }
+
+    function freshUpdateGrabButton() {
+        var modal = $('[data-vsr-fresh-ident]');
+        if (!modal || !freshIdentify) return;
+        var ok = !!freshIdentify.selected && !!(freshIdentify.row.download_url || freshIdentify.row.magnet_uri);
+        if (freshIdentify.mode === 'episode') ok = ok && freshNumInput('[data-vsr-fi-season]') != null && freshNumInput('[data-vsr-fi-episode]') != null;
+        if (freshIdentify.mode === 'season') ok = ok && freshNumInput('[data-vsr-fi-season]') != null;
+        var btn = modal.querySelector('[data-vsr-fi-grab]');
+        if (btn) { btn.disabled = !ok || freshIdentify.grabbing; btn.textContent = freshIdentify.grabbing ? 'Starting...' : 'Start download'; }
+    }
+
+    function freshGrabPayload() {
+        var row = freshIdentify.row;
+        var item = freshIdentify.selected;
+        var isMovie = freshIdentify.mode === 'movie';
+        var season = freshNumInput('[data-vsr-fi-season]');
+        var episode = freshNumInput('[data-vsr-fi-episode]');
+        var title = item.title || row.search_title || row.title;
+        return {
+            kind: isMovie ? 'movie' : 'show',
+            title: title,
+            release_title: row.title,
+            source: 'extto',
+            username: row.username || 'EXT.to',
+            filename: row.title,
+            indexer_id: row.indexer_id || 'extto',
+            protocol: row.protocol || 'torrent',
+            download_url: row.download_url || row.magnet_uri,
+            magnet_uri: row.magnet_uri || row.download_url,
+            size_bytes: row.size_bytes || 0,
+            quality_label: row.quality_label || row.resolution,
+            media_id: item.tmdb_id,
+            media_source: 'tmdb',
+            year: item.year || row.year,
+            poster_url: item.poster || item.poster_url,
+            search_ctx: isMovie ? { scope: 'movie', title: title, year: item.year || row.year } :
+                { scope: freshIdentify.mode === 'episode' ? 'episode' : 'season', title: title, year: item.year || row.year,
+                    season: season, episode: freshIdentify.mode === 'episode' ? episode : null }
+        };
+    }
+
+    function freshGrabIdentifiedRelease() {
+        if (!freshIdentify || freshIdentify.grabbing) return;
+        freshUpdateGrabButton();
+        var modal = freshEnsureIdentifyModal();
+        var note = modal.querySelector('[data-vsr-fi-note]');
+        freshIdentify.grabbing = true;
+        freshUpdateGrabButton();
+        if (note) note.textContent = '';
+        fetch('/api/video/downloads/grab', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify(freshGrabPayload()) }).then(_json).then(function (res) {
+            if (!freshIdentify) return;
+            freshIdentify.grabbing = false;
+            if (res && res.ok) {
+                if (typeof showToast === 'function') showToast('Download started', 'success');
+                document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
+                freshCloseIdentify();
+                return;
+            }
+            if (note) note.textContent = (res && res.error) || 'The download could not be started.';
+            freshUpdateGrabButton();
+        }).catch(function () {
+            if (!freshIdentify) return;
+            freshIdentify.grabbing = false;
+            if (note) note.textContent = 'The download request failed.';
+            freshUpdateGrabButton();
+        });
+    }    function setMode(next) {
         mode = next === 'basic' ? 'basic' : (next === 'fresh' ? 'fresh' : 'enhanced');
         document.querySelectorAll('[data-vsr-tab]').forEach(function (b) {
             var on = b.getAttribute('data-vsr-tab') === mode;
@@ -820,7 +1052,13 @@
                     setBasicSourceTab(st.getAttribute('data-vsr-basic-source-tab'));
                     return;
                 }
-                var fp = e.target.closest('[data-vsr-fresh-period]');
+                var freshPick = e.target.closest('[data-vsr-fresh-pick]');
+                if (freshPick && results.contains(freshPick)) {
+                    e.preventDefault();
+                    var parts = String(freshPick.getAttribute('data-vsr-fresh-pick') || '').split(':');
+                    freshOpenIdentify(parts[0], parseInt(parts[1], 10));
+                    return;
+                }                var fp = e.target.closest('[data-vsr-fresh-period]');
                 if (fp && results.contains(fp)) {
                     e.preventDefault();
                     freshPeriod = fp.getAttribute('data-vsr-fresh-period') || 'day';
