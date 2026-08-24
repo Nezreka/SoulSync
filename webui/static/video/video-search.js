@@ -134,7 +134,7 @@
             var active = id === basicActiveSource;
             return '<button class="vsr-basic-source-tab ' + (active ? 'active' : '') + '" type="button" role="tab" ' +
                 'aria-selected="' + (active ? 'true' : 'false') + '" data-vsr-basic-source-tab="' + esc(id) + '">' +
-                '<span>' + esc(source.label) + '</span><em data-vsr-basic-tab-count>Queued</em></button>';
+                '<span>' + esc(source.label) + '</span><em data-vsr-basic-tab-count>Queued</em><i class="vsr-basic-tab-loader" aria-hidden="true"></i></button>';
         }).join('');
         var panels = sources.map(function (id) {
             var source = BASIC_SEARCH_SOURCES[id];
@@ -160,15 +160,51 @@
         };
     }
 
+    function basicSizeLabel(r) {
+        var gb = Number(r && r.size_gb);
+        if (isFinite(gb) && gb > 0) return gb.toFixed(gb >= 10 ? 0 : 1) + ' GB';
+        var bytes = Number(r && (r.size_bytes || r.folder_size_bytes));
+        if (!isFinite(bytes) || bytes <= 0) return 'Size unknown';
+        var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        var i = 0;
+        while (bytes >= 1024 && i < units.length - 1) { bytes = bytes / 1024; i++; }
+        return (bytes >= 10 || i < 2 ? Math.round(bytes) : bytes.toFixed(1)) + ' ' + units[i];
+    }
+
+    function basicHealthLabel(r) {
+        var seeds = Number(r && r.seeders);
+        var peers = Number(r && r.peers);
+        var parts = [];
+        if (isFinite(seeds) && seeds > 0) parts.push(seeds + ' seed' + (seeds === 1 ? '' : 's'));
+        if (isFinite(peers) && peers > 0) parts.push(peers + ' peer' + (peers === 1 ? '' : 's'));
+        if (parts.length) return parts.join(' / ');
+        var avail = Number(r && r.availability);
+        if (isFinite(avail) && avail > 0) return 'Availability ' + avail;
+        return 'Health unknown';
+    }
+
     function basicResultHTML(r) {
-        var bits = [r.quality_label || r.resolution, r.source, r.codec, r.audio, r.hdr].filter(Boolean);
-        var swarm = r.username ? r.username + (r.peers > 1 ? ' · ' + r.peers + ' peers' : '') : ((r.seeders || 0) + ' seeders');
-        var analysis = r.rejected ? '<details class="vsr-basic-hit-analysis"><summary>Analysis</summary><p>' + esc(r.rejected) + '</p></details>' : '';
-        return '<article class="vsr-basic-hit">' +
-            '<div class="vsr-basic-hit-main"><strong title="' + esc(r.title || '') + '">' + esc(r.title || 'Untitled release') + '</strong>' +
-            '<div class="vsr-basic-hit-tags">' + (bits.length ? bits.map(function (b) { return '<span>' + esc(b) + '</span>'; }).join('') : '<span>Release</span>') + '</div>' +
-            analysis + '</div>' +
-            '<span class="vsr-basic-hit-swarm">' + esc(swarm) + '</span>' +
+        r = r || {};
+        var bits = [r.quality_label || r.resolution, r.source, r.codec, r.audio, r.hdr, r.group].filter(Boolean);
+        var provider = r.username || (r.indexer_id ? String(r.indexer_id).toUpperCase() : 'Source');
+        var protocol = (r.protocol || '').toString().toUpperCase() || 'SEARCH';
+        var locator = r.download_url || r.magnet_uri ? 'Ready link' : (r.info_url ? 'Detail page' : 'Result only');
+        var accepted = r.accepted === false ? 'Review' : 'Candidate';
+        var analysis = r.rejected ? '<details class="vsr-basic-hit-analysis"><summary>Why review?</summary><p>' + esc(r.rejected) + '</p></details>' : '';
+        var chipHtml = bits.length ? bits.slice(0, 7).map(function (b) { return '<span>' + esc(b) + '</span>'; }).join('') : '<span>Release</span>';
+        return '<article class="vsr-basic-hit ' + (r.accepted === false ? 'vsr-basic-hit--review' : '') + '">' +
+            '<div class="vsr-basic-hit-main">' +
+                '<div class="vsr-basic-hit-kicker"><span>' + esc(provider) + '</span><em>' + esc(protocol) + '</em></div>' +
+                '<strong title="' + esc(r.title || '') + '">' + esc(r.title || 'Untitled release') + '</strong>' +
+                '<div class="vsr-basic-hit-tags">' + chipHtml + '</div>' +
+                analysis +
+            '</div>' +
+            '<div class="vsr-basic-hit-side">' +
+                '<span class="vsr-basic-hit-size">' + esc(basicSizeLabel(r)) + '</span>' +
+                '<span class="vsr-basic-hit-health">' + esc(basicHealthLabel(r)) + '</span>' +
+                '<span class="vsr-basic-hit-linkstate">' + esc(locator) + '</span>' +
+                '<span class="vsr-basic-hit-verdict">' + esc(accepted) + '</span>' +
+            '</div>' +
         '</article>';
     }
 
@@ -200,17 +236,20 @@
         }
         rows = rows || [];
         var label = done ? (rows.length ? rows.length + ' found' : 'No matches') : 'Searching';
-        if (state) state.textContent = label;
-        var tab = document.querySelector('[data-vsr-basic-source-tab="' + card.getAttribute('data-vsr-basic-card') + '"] [data-vsr-basic-tab-count]');
+        card.classList.toggle('is-searching', !done);
+        if (state) state.innerHTML = done ? esc(label) : '<span class="vsr-basic-loader-dot" aria-hidden="true"></span>' + esc(label);
+        var tabBtn = document.querySelector('[data-vsr-basic-source-tab="' + card.getAttribute('data-vsr-basic-card') + '"]');
+        var tab = tabBtn && tabBtn.querySelector('[data-vsr-basic-tab-count]');
+        if (tabBtn) tabBtn.classList.toggle('is-searching', !done);
         if (tab) tab.textContent = label;
         if (!rows.length) {
-            hits.innerHTML = '<div class="vsr-basic-source-note">' + (done
+            hits.innerHTML = '<div class="vsr-basic-source-note ' + (!done ? 'vsr-basic-source-note--loading' : '') + '">' + (done
                 ? (totalFiles ? 'Files were found, but none matched as video releases.' : 'No matching releases found.')
-                : '<span class="vdl-res-spin vdl-res-spin--sm"></span> Searching...') + '</div>';
+                : '<span class="vsr-basic-loader" aria-hidden="true"><i></i><i></i><i></i></span><span>Searching this source...</span>') + '</div>';
             return;
         }
-        hits.innerHTML = rows.slice(0, 8).map(basicResultHTML).join('') +
-            (rows.length > 8 ? '<div class="vsr-basic-source-note">+' + (rows.length - 8) + ' more</div>' : '');
+        hits.innerHTML = rows.slice(0, 12).map(basicResultHTML).join('') +
+            (rows.length > 12 ? '<div class="vsr-basic-source-note">+' + (rows.length - 12) + ' more results in this source</div>' : '');
     }
 
     function runBasicSearch(q, sources) {
