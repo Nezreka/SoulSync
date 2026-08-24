@@ -32,16 +32,60 @@
             .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
     function show(sel, on) { var n = $(sel); if (n) n.classList.toggle('hidden', !on); }
+    var BASIC_SEARCH_SOURCES = {
+        thepiratebay: {
+            label: 'The Pirate Bay',
+            kind: 'Torrent search',
+            url: function (q) { return 'https://thepiratebay.org/search.php?q=' + encodeURIComponent(q); }
+        },
+        extto: {
+            label: 'EXT.to',
+            kind: 'Torrent search',
+            url: function (q) { return 'https://ext.to/browse/?q=' + encodeURIComponent(q); }
+        },
+        '1337x': {
+            label: '1337x',
+            kind: 'Torrent search',
+            url: function (q) { return 'https://1337x.to/search/' + encodeURIComponent(q).replace(/%20/g, '+') + '/1/'; }
+        }
+    };
+
     function basicSources() {
         var nodes = document.querySelectorAll('[data-vsr-basic-source]:checked');
         var out = [];
-        for (var i = 0; i < nodes.length; i++) out.push(nodes[i].value);
+        for (var i = 0; i < nodes.length; i++) if (BASIC_SEARCH_SOURCES[nodes[i].value]) out.push(nodes[i].value);
         return out;
     }
 
     function sourceLabel(s) {
-        return s === 'api' ? 'Indexer APIs' : s === 'rss' ? 'RSS feeds' :
-            s === 'magnet' ? 'Magnet links' : 'Torrent sites';
+        return BASIC_SEARCH_SOURCES[s] ? BASIC_SEARCH_SOURCES[s].label : s;
+    }
+
+    function basicSourceRows(q, sources) {
+        if (!q) {
+            return '<div class="vsr-basic-empty">' +
+                '<div class="vsr-basic-empty-mark">⌕</div>' +
+                '<div><strong>Enter a query to build source searches</strong>' +
+                '<p>Pick the sites you want, search once, then open the exact source that looks right.</p></div>' +
+            '</div>';
+        }
+        if (!sources.length) {
+            return '<div class="vsr-basic-empty">' +
+                '<div class="vsr-basic-empty-mark">!</div>' +
+                '<div><strong>No sources selected</strong>' +
+                '<p>Choose at least one source so SoulSync can build a search target.</p></div>' +
+            '</div>';
+        }
+        return '<div class="vsr-basic-source-list">' + sources.map(function (id) {
+            var source = BASIC_SEARCH_SOURCES[id];
+            var href = source.url(q);
+            return '<a class="vsr-basic-source-row" href="' + esc(href) + '" target="_blank" rel="noopener noreferrer" data-vsr-basic-outbound>' +
+                '<span class="vsr-basic-source-main"><strong>' + esc(source.label) + '</strong>' +
+                '<em>' + esc(source.kind) + ' - opens in a new tab</em></span>' +
+                '<span class="vsr-basic-source-query">' + esc(q) + '</span>' +
+                '<span class="vsr-basic-source-action">Open search</span>' +
+            '</a>';
+        }).join('') + '</div>';
     }
 
     function renderBasicPreview() {
@@ -62,17 +106,9 @@
                 '<span>Sort: ' + esc(sort) + '</span>' +
                 '<span>' + (sources.length ? sources.map(sourceLabel).map(esc).join(' + ') : 'No sources selected') + '</span>' +
             '</div>' +
-            '<div class="vsr-basic-empty">' +
-                '<div class="vsr-basic-empty-mark">⌕</div>' +
-                '<div><strong>No release rows yet</strong>' +
-                '<p>Connect torrent, API, or RSS adapters to populate this table.</p></div>' +
-            '</div>' +
-            '<div class="vsr-basic-table" aria-hidden="true">' +
-                ['Seeders', 'Source', 'Release', 'Size', 'Age'].map(function (h) { return '<span>' + h + '</span>'; }).join('') +
-            '</div>' +
+            basicSourceRows(q, sources) +
         '</section>';
     }
-
     function setMode(next) {
         mode = next === 'basic' ? 'basic' : 'enhanced';
         document.querySelectorAll('[data-vsr-tab]').forEach(function (b) {
