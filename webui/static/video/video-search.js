@@ -35,7 +35,7 @@
     var BASIC_SEARCH_SOURCES = {
         soulseek: { label: 'slskd', kind: 'Soulseek', source: 'soulseek' },
         thepiratebay: { label: 'The Pirate Bay', kind: 'Prowlarr torrent indexer', source: 'torrent', indexer: 'thepiratebay' },
-        extto: { label: 'EXT.to', kind: 'Prowlarr torrent indexer', source: 'torrent', indexer: 'extto' },
+        extto: { label: 'EXT.to', kind: 'FlareSolverr torrent scraper', source: 'extto' },
         '1337x': { label: '1337x', kind: 'Prowlarr torrent indexer', source: 'torrent', indexer: '1337x' },
         usenet: { label: 'Usenet', kind: 'Prowlarr usenet indexers', source: 'usenet' }
     };

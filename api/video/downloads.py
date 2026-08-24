@@ -94,8 +94,6 @@ def _basic_indexer_names(body) -> list:
     aliases = {
         "thepiratebay": ["the pirate bay", "pirate bay", "tpb"],
         "tpb": ["the pirate bay", "pirate bay", "tpb"],
-        "extto": ["ext.to", "ext torrents", "ext"],
-        "ext.to": ["ext.to", "ext torrents", "ext"],
         "1337x": ["1337x"],
     }
     return aliases.get(key, [])
@@ -682,6 +680,14 @@ def register_routes(bp):
             if sres.get("error"):
                 return jsonify({"scope": scope, "results": [], "error": "slskd: " + str(sres["error"])})
             raw, live = sres["hits"], True
+        elif source == "extto":
+            from core.video.extto_search import extto_search
+            eres = extto_search(title, limit=25, timeout=int(MANUAL_SEARCH_MAX_WAIT_SECONDS))
+            if not eres.get("configured"):
+                return jsonify({"scope": scope, "results": [], "error": "EXT.to requires FlareSolverr — set flaresolverr.url."})
+            if eres.get("error"):
+                return jsonify({"scope": scope, "results": [], "error": "EXT.to: " + str(eres["error"])})
+            raw, live = eres["hits"], True
         elif source in ("torrent", "usenet"):
             from core.video.prowlarr_search import prowlarr_search
             # A person is waiting on this response, so bound the time it will
@@ -733,6 +739,15 @@ def register_routes(bp):
             return jsonify({"id": res["id"], "live": True, "complete": False,
                             "poll_ms": search_timeout_ms() + 8000})
         profile, _pid = _profile_for_request(get_video_db(), body)
+        if source == "extto":
+            from core.video.extto_search import extto_search
+            eres = extto_search(title, limit=25, timeout=int(MANUAL_SEARCH_MAX_WAIT_SECONDS))
+            if not eres.get("configured"):
+                return jsonify({"error": "EXT.to requires FlareSolverr — set flaresolverr.url."})
+            if eres.get("error"):
+                return jsonify({"error": "EXT.to: " + str(eres["error"])})
+            return jsonify({"id": None, "live": True, "complete": True,
+                            "results": _evaluate_hits(eres["hits"], profile, scope, want_season, want_episode, want_year=body.get("year"), want_title=body.get("title"))})
         if source in ("torrent", "usenet"):
             # Prowlarr is synchronous — like the old mock, results come back in one shot
             # (no polling id), so the client renders immediately.
@@ -788,12 +803,12 @@ def register_routes(bp):
 
         body = request.get_json(silent=True) or {}
         source = str(body.get("source") or "soulseek").lower()
-        if source not in ("soulseek", "torrent", "usenet"):
+        if source not in ("soulseek", "torrent", "usenet", "extto"):
             return jsonify({"ok": False, "error": "Unsupported download source."}), 400
         username, filename = body.get("username"), body.get("filename")
         if source == "soulseek" and (not username or not filename):
             return jsonify({"ok": False, "error": "Missing the release's source info."}), 400
-        if source in ("torrent", "usenet") and not body.get("download_url"):
+        if source in ("torrent", "usenet", "extto") and not body.get("download_url"):
             return jsonify({"ok": False, "error": "Missing the release's download URL."}), 400
 
         db = get_video_db()
@@ -848,7 +863,8 @@ def register_routes(bp):
             # torrent / usenet — hand the magnet/NZB to the SHARED download client; the monitor
             # tracks progress + completion by client_ref. No Soulseek-style alternate requery.
             from core.video.client_grab import grab
-            res = grab(source, body.get("download_url"),
+            client_source = "torrent" if source == "extto" else source
+            res = grab(client_source, body.get("download_url"),
                        fallback_magnet=body.get("magnet_uri"))
             if not res.get("ok"):
                 return jsonify({"ok": False, "error": res.get("error") or "The download client refused it."}), 502

@@ -56,6 +56,7 @@ def test_basic_search_runs_in_app_provider_searches():
     assert "/api/video/downloads/search/start" in _JS and "/api/video/downloads/search/poll" in _JS
     assert "/api/video/downloads/config" in _JS and "basicIdsFromDownloadConfig" in _JS
     assert "source: 'soulseek'" in _JS and "indexer: 'thepiratebay'" in _JS and "source: 'usenet'" in _JS
+    assert "kind: 'FlareSolverr torrent scraper', source: 'extto'" in _JS
     assert "thepiratebay.org" not in _JS and "1337x.to" not in _JS and 'target="_blank"' not in _JS
     basic_fn = _JS.split("function renderBasicPreview")[1].split("function setMode")[0]
     assert "fetch(" not in basic_fn
