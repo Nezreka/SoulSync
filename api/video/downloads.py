@@ -824,10 +824,21 @@ def register_routes(bp):
         source = str(body.get("source") or "soulseek").lower()
         if source not in ("soulseek", "torrent", "usenet", "extto"):
             return jsonify({"ok": False, "error": "Unsupported download source."}), 400
+        # EXT.to is a place we FIND releases, not a way we download them - its hits are
+        # magnets that go to the torrent client like any prowlarr hit. The row has to say
+        # 'torrent' or everything downstream keys off source and misses it: the monitor
+        # polls slskd instead of the client (0% forever, then "Trying another release"),
+        # the importer deletes the file out from under the seeding torrent, and the
+        # seeding sweep's source='torrent' query never sees the row. EXT.to keeps its
+        # identity in username/indexer_id, same as thepiratebay and 1337x already do.
+        if source == "extto":
+            source = "torrent"
+            body["username"] = body.get("username") or "EXT.to"
+            body["indexer_id"] = body.get("indexer_id") or "extto"
         username, filename = body.get("username"), body.get("filename")
         if source == "soulseek" and (not username or not filename):
             return jsonify({"ok": False, "error": "Missing the release's source info."}), 400
-        if source in ("torrent", "usenet", "extto") and not body.get("download_url"):
+        if source in ("torrent", "usenet") and not body.get("download_url"):
             return jsonify({"ok": False, "error": "Missing the release's download URL."}), 400
 
         db = get_video_db()
@@ -882,8 +893,7 @@ def register_routes(bp):
             # torrent / usenet — hand the magnet/NZB to the SHARED download client; the monitor
             # tracks progress + completion by client_ref. No Soulseek-style alternate requery.
             from core.video.client_grab import grab
-            client_source = "torrent" if source == "extto" else source
-            res = grab(client_source, body.get("download_url"),
+            res = grab(source, body.get("download_url"),
                        fallback_magnet=body.get("magnet_uri"))
             if not res.get("ok"):
                 return jsonify({"ok": False, "error": res.get("error") or "The download client refused it."}), 502

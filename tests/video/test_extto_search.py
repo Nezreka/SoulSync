@@ -98,7 +98,9 @@ def test_extto_is_wired_as_native_video_basic_search_source():
 
     assert 'source == "extto"' in api
     assert "resolve_magnets=False, max_candidates=1" in api
-    assert 'client_source = "torrent" if source == "extto" else source' in api
+    # an EXT.to grab must be STORED as a torrent: the row's source is what the monitor,
+    # the importer's seed guard and the seeding sweep all dispatch on
+    assert 'if source == "extto":\n            source = "torrent"' in api
     assert '"extto": ["ext.to", "ext torrents", "ext"]' not in api
     assert "kind: 'FlareSolverr torrent scraper', source: 'extto'" in ui
 

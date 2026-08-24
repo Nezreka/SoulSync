@@ -73,3 +73,73 @@ def test_parse_fresh_releases_extracts_movies_and_tv_periods():
     assert out["tv"]["day"][0]["episode"] == 8
     assert out["tv"]["day"][0]["download_url"].startswith("magnet:?xt=urn:btih:bbbbbbbb")
     assert out["movies"]["month"] == []
+
+
+# ── the grab path ─────────────────────────────────────────────────────────────
+# EXT.to is a discovery provider, not a transport. Its grabs were stored with
+# source='extto', which nothing downstream knows: the monitor sent the row to the
+# slskd watcher, found no transfer, and after eight polls flipped it to
+# "Trying another release" while the torrent was downloading fine in the client.
+def test_an_extto_grab_is_stored_as_a_torrent_row(tmp_path, monkeypatch):
+    import api.video as videoapi
+    from flask import Flask
+    from database.video_database import VideoDatabase
+
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    db.set_setting("movies_path", str(tmp_path / "Movies"))
+    videoapi._video_db = db
+    try:
+        import core.video.client_grab as cg
+        seen = {}
+
+        def _grab(source, url, **kw):
+            seen["source"], seen["url"] = source, url
+            return {"ok": True, "ref": "hash123"}
+
+        monkeypatch.setattr(cg, "grab", _grab)
+        app = Flask(__name__)
+        app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+        r = app.test_client().post("/api/video/downloads/grab", json={
+            "source": "extto", "kind": "movie", "title": "Interstellar", "year": 2014,
+            "release_title": "Interstellar 2014 1080p BluRay",
+            "download_url": "magnet:?xt=urn:btih:aaaa", "magnet_uri": "magnet:?xt=urn:btih:aaaa",
+            "username": "EXT.to", "indexer_id": "extto",
+            "media_id": "157336", "media_source": "tmdb", "size_bytes": 2_100_000_000})
+        assert r.status_code == 200 and r.get_json().get("ok"), r.get_json()
+        # it went to the TORRENT client...
+        assert seen["source"] == "torrent"
+        row = db.list_video_downloads()[0]
+        # ...so the row must say torrent too, or the monitor/importer/seed sweep miss it
+        assert row["source"] == "torrent", "an EXT.to grab was stored under a source nothing polls"
+        assert row["client_ref"] == "hash123"
+        # EXT.to keeps its identity where indexers keep theirs
+        assert row["username"] == "EXT.to" and row["indexer_id"] == "extto"
+    finally:
+        videoapi._video_db = None
+
+
+def test_the_monitor_polls_the_download_client_for_an_extto_grab(tmp_path, monkeypatch):
+    """The fracture point: _tick's source dispatch. A row born from EXT.to has to
+    land on the client poller, never the slskd one."""
+    from core.video import client_download, download_monitor
+
+    row = {"id": 1, "source": "torrent", "status": "downloading", "client_ref": "hash123",
+           "username": "EXT.to", "indexer_id": "extto", "filename": "Interstellar 2014 1080p",
+           "progress": 0, "progress_at": None}
+
+    class _DB:
+        def get_active_video_downloads(self):
+            return [row]
+
+        def update_video_download(self, *a, **kw):
+            pass
+
+    routed = []
+    monkeypatch.setattr(download_monitor, "list_downloads", lambda: [])
+    monkeypatch.setattr(client_download, "process_active_client_download",
+                        lambda dl, **kw: routed.append("client") or {})
+    monkeypatch.setattr(download_monitor, "process_download",
+                        lambda dl, *a, **kw: routed.append("slskd") or {})
+
+    download_monitor._tick(_DB())
+    assert routed == ["client"], "the EXT.to grab was handed to the wrong watcher"
