@@ -150,8 +150,15 @@ def register_routes(bp):
     @bp.route("/img", methods=["GET"])
     def video_img_proxy():
         """Same-origin image proxy (SSRF-safe allowlist). TMDB for accent-sampling,
-        and YouTube CDN (avatars/banners/thumbnails) so channel art loads reliably
-        regardless of hotlink/CORS policy."""
+        YouTube CDN (avatars/banners/thumbnails) so channel art loads reliably
+        regardless of hotlink/CORS policy, and EXT.to release posters for the Fresh
+        Releases board.
+
+        EXT.to is not optional here: it serves its poster art with a
+        Cross-Origin-Resource-Policy header, so the browser refuses to render it in
+        an <img> on our origin at all - 'ERR_BLOCKED_BY_RESPONSE.NotSameOrigin',
+        with a URL that is perfectly correct. Same-origin is the only way those
+        posters can load."""
         from flask import request
         from urllib.parse import urlparse
         url = request.args.get("u", "")
@@ -160,7 +167,10 @@ def register_routes(bp):
         host = (urlparse(url).hostname or "").lower()
         # image.tmdb.org + any YouTube image host (yt3/yt4.ggpht, googleusercontent, *.ytimg)
         ok = host == "image.tmdb.org" or any(
-            host == s or host.endswith("." + s) for s in ("ytimg.com", "ggpht.com", "googleusercontent.com"))
+            host == s or host.endswith("." + s)
+            # exact-or-subdomain, never a bare endswith: that would let
+            # 'ext.to.evil.com' through the allowlist
+            for s in ("ytimg.com", "ggpht.com", "googleusercontent.com", "ext.to", "extto.com"))
         if not ok:
             abort(404)
         cached = _cached_file(url)
@@ -174,11 +184,24 @@ def register_routes(bp):
             import requests
             # A browser UA — Google's image CDN (yt3/googleusercontent) 403s some
             # avatars when fetched with no User-Agent, which blanked search results.
-            upstream = requests.get(url, timeout=15, stream=True, headers={
+            headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                               "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
                 "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-            })
+            }
+            cookies = None
+            if host == "ext.to" or host.endswith(".ext.to") or host.endswith("extto.com"):
+                # ext.to's art sits behind the same Cloudflare challenge as its
+                # pages: a plain GET is answered 403. Reuse the clearance
+                # FlareSolverr already solved — and its UA, which the cookie is
+                # bound to, so a mismatched agent invalidates it.
+                from core.video.extto_search import clearance
+                cookies, ua = clearance()
+                if ua:
+                    headers["User-Agent"] = ua
+                headers["Referer"] = "https://ext.to/"
+            upstream = requests.get(url, timeout=15, stream=True, headers=headers,
+                                    cookies=cookies or None)
             if upstream.status_code != 200:
                 # An expected miss (e.g. a video with no maxresdefault.jpg — the UI
                 # falls back) — a quiet 404, never an ERROR traceback in the log.

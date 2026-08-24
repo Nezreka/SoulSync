@@ -680,23 +680,64 @@ def register_routes(bp):
 
     @bp.route("/downloads/fresh-releases", methods=["GET"])
     def video_downloads_fresh_releases():
-        """Read EXT.to homepage release lists for Search -> Fresh Releases.
+        """The stored Fresh Releases board for Search -> Fresh Releases.
 
-        This is intentionally browse-only: it returns title/size/age/swarm data
-        for Movies and TV across day/week/month, but it does not expose a grab
-        action or mark rows as download-ready.
+        Reads the LAST SNAPSHOT rather than the network, so opening the tab is
+        instant. The board (and each release's matched detail facts) is produced
+        by the ``video_extto_fresh_refresh`` automation or the tab's Refresh
+        button — both call core.video.extto_board.refresh_board.
+
+        This used to pull the homepage inline on every open, which meant sitting
+        through a Cloudflare challenge to look at a list, and made per-release
+        matching impossible: each release's detail page is its own challenge, and
+        a bad minute on ext.to costs 40 seconds a page.
+
+        Still browse-only. Grabbing goes through the identify modal, which is
+        where the user says what a release actually is.
         """
-        from core.video.extto_fresh import extto_fresh_releases
+        from . import get_video_db
+        from core.video.extto_board import load_board
 
-        out = extto_fresh_releases(timeout=25)
-        if not out.get("configured"):
+        board = load_board(get_video_db())
+        if not board.get("fetched_at"):
+            from core.video.extto_search import is_configured
             return jsonify({
-                "success": False,
-                "source": "EXT.to",
-                "sections": {},
-                "error": "Fresh Releases requires FlareSolverr — set flaresolverr.url.",
+                "success": False, "source": "EXT.to", "sections": {}, "fetched_at": None,
+                "error": ("Fresh Releases requires FlareSolverr — set flaresolverr.url."
+                          if not is_configured() else
+                          "No board yet — hit Refresh, or schedule the "
+                          "'Refresh Fresh Releases' automation."),
             })
-        return jsonify({"success": not bool(out.get("error")), **out})
+        return jsonify({"success": True, "source": board.get("source") or "EXT.to",
+                        "sections": board.get("sections") or {},
+                        "total": board.get("total") or 0,
+                        "fetched_at": board.get("fetched_at")})
+
+    @bp.route("/downloads/fresh-releases/refresh", methods=["POST"])
+    def video_downloads_fresh_releases_refresh():
+        """Refresh the board NOW — the tab's Refresh button.
+
+        Identical work to the hourly automation (same function), so a manual and
+        a scheduled refresh leave identical state. Matched releases are cached by
+        release, so this is only slow when there is genuinely new material.
+        """
+        from . import get_video_db
+        from core.video.extto_board import load_board, refresh_board
+
+        res = refresh_board(get_video_db())
+        if res.get("status") == "skipped" and res.get("reason") == "already_running":
+            return jsonify({"success": False, "running": True,
+                            "error": "A refresh is already running."}), 409
+        if not res.get("ok"):
+            return jsonify({"success": False,
+                            "error": res.get("error") or "The board could not be refreshed."}), 502
+        board = load_board(get_video_db())
+        return jsonify({"success": True, "source": board.get("source") or "EXT.to",
+                        "sections": board.get("sections") or {},
+                        "total": board.get("total") or 0,
+                        "fetched_at": board.get("fetched_at"),
+                        "stats": {k: res.get(k, 0) for k in
+                                  ("rows", "cached", "fetched", "failed", "skipped")}})
     @bp.route("/downloads/search", methods=["POST"])
     def video_downloads_search():
         """Search a scope (movie / episode / season / series) and return candidates

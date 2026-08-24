@@ -2568,6 +2568,7 @@ const _autoIcons = {
     // Arr-parity acquisition automations (P1/P5/P6)
     video_rss_sync: '\uD83D\uDCE1', video_seeding_sweep: '\uD83C\uDF31',
     video_import_lists: '\uD83D\uDCE5',
+    video_extto_fresh_refresh: '\u2728',
     // Video event triggers + maintenance action
     monthly_time: '\uD83D\uDCC5',
     video_batch_complete: '\u2705', video_library_scan_completed: '\uD83D\uDCE1',
@@ -4226,6 +4227,7 @@ function _autoFormatAction(type) {
         video_rss_sync: 'RSS Release Sync',
         video_seeding_sweep: 'Seeding Goal Sweep',
         video_import_lists: 'Sync Import Lists',
+        video_extto_fresh_refresh: 'Refresh Fresh Releases',
         search_and_download: 'Search & Download',
         seeding_sweep: 'Seeding Sweep',
         deep_scan_library: 'Deep Scan Library',

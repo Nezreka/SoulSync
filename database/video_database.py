@@ -43,7 +43,7 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 46   # v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 47   # v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -2212,6 +2212,62 @@ class VideoDatabase:
             conn.execute("UPDATE video_downloads SET " + sets + " WHERE id = ?",
                          tuple(fields[k] for k in keys) + (int(dl_id),))
             conn.commit()
+        finally:
+            conn.close()
+
+    # ── Fresh Releases match cache ───────────────────────────────────────────
+    def extto_detail_cached(self, url):
+        """A previously-matched EXT.to release's detail facts, or None.
+
+        This is the whole reason the hourly refresh is cheap: the board mostly
+        repeats itself hour to hour, and a release's detail page never
+        meaningfully changes, so a returning release costs no network at all.
+        """
+        if not url:
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT payload FROM video_extto_cache WHERE url = ?",
+                               (str(url),)).fetchone()
+            return json.loads(row["payload"]) if row else None
+        except (sqlite3.Error, ValueError, TypeError):
+            logger.exception("extto_detail_cached failed for %s", url)
+            return None
+        finally:
+            conn.close()
+
+    def extto_detail_store(self, url, detail) -> None:
+        """Remember one release's detail facts. Best-effort — failing to cache
+        costs a refetch next run, never the run itself."""
+        if not url:
+            return
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO video_extto_cache (url, payload, fetched_at) "
+                "VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(url) DO UPDATE SET "
+                "payload = excluded.payload, fetched_at = CURRENT_TIMESTAMP",
+                (str(url), json.dumps(detail or {})))
+            conn.commit()
+        except (sqlite3.Error, ValueError, TypeError):
+            logger.exception("extto_detail_store failed for %s", url)
+        finally:
+            conn.close()
+
+    def extto_cache_prune(self, keep: int = 4000) -> int:
+        """Drop the oldest cached matches beyond ``keep``. The board is finite but
+        its churn is not, so without this the table grows forever."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM video_extto_cache WHERE url IN ("
+                "  SELECT url FROM video_extto_cache ORDER BY fetched_at DESC LIMIT -1 OFFSET ?)",
+                (max(0, int(keep)),))
+            conn.commit()
+            return cur.rowcount or 0
+        except sqlite3.Error:
+            logger.exception("extto_cache_prune failed")
+            return 0
         finally:
             conn.close()
 

@@ -412,6 +412,11 @@ ACTIONS: list[dict] = [
      ]},
     {"type": "video_rss_sync", "label": "RSS Sync (Instant Grabs)", "icon": "download", "scope": "video",
      "description": "Sonarr-speed acquisition: every few minutes, pull your indexers' newest releases from Prowlarr (one aggregate call, no searching) and instantly grab any that match your wishlist — a wanted episode lands minutes after it's posted instead of at the next hourly drain. Respects your quality profile, upgrade cutoff, blocklist and download mode (needs torrent/usenet enabled + Prowlarr). Pair with a 15-minute schedule.", "available": True},
+    {"type": "video_extto_fresh_refresh", "label": "Refresh Fresh Releases", "icon": "download", "scope": "video",
+     "description": "Keep Search \u2192 Fresh Releases warm: pull the EXT.to board, match every release against its own detail page (poster, IMDb id + rating, genres, runtime), and store the result so the tab opens instantly instead of waiting on Cloudflare. Matched releases are cached by release, so an hourly run only pays for what is genuinely new \u2014 the first run is the slow one. The Refresh button on the tab does exactly this on demand. Needs FlareSolverr. Pair with an hourly schedule.", "available": True,
+     "config_fields": [
+         {"key": "max_new_details", "type": "number", "label": "Max new releases to match per run", "default": 40, "min": 1}
+     ]},
     {"type": "video_import_lists", "label": "Sync Import Lists", "icon": "list", "scope": "video",
      "description": "Radarr/Sonarr Import Lists: everything on your configured external lists (TMDB lists, TMDB/IMDb charts, IMDb user lists, your Plex account watchlist) enters acquisition automatically — movies wishlist, shows follow with the list's monitor policy. Only NEW list members are added, so removing something you didn't want never boomerangs back. Configure lists on Settings → Downloads. Pair with a 6-hourly schedule.", "available": True},
     {"type": "video_seeding_sweep", "label": "Seeding Sweep", "icon": "download", "scope": "video",

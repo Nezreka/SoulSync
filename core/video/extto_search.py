@@ -67,6 +67,10 @@ class FlareSolverrClient:
         self.base_url = str(base_url or "").rstrip("/")
         self.timeout = timeout
         self.session_id = "soulsync-extto"
+        # The clearance FlareSolverr solved, kept so a DIRECT fetch (image bytes,
+        # which FlareSolverr cannot stream) can reuse it. See `clearance()`.
+        self.last_cookies: dict[str, str] = {}
+        self.last_user_agent: str = ""
 
     def close(self) -> None:
         try:
@@ -98,6 +102,12 @@ class FlareSolverrClient:
             raise RuntimeError(body.get("message")
                                or "FlareSolverr returned HTTP %s" % r.status_code)
         sol = body.get("solution") or {}
+        try:
+            self.last_cookies = {str(c.get("name")): str(c.get("value"))
+                                 for c in (sol.get("cookies") or []) if c.get("name")}
+            self.last_user_agent = str(sol.get("userAgent") or "")
+        except Exception:   # noqa: BLE001 - clearance is a bonus, never the request
+            pass
         return int(sol.get("status") or 0), str(sol.get("response") or ""), str(sol.get("url") or url)
 
 
@@ -374,6 +384,45 @@ def _project(hit: ExtToHit) -> dict:
     }
 
 
+_clearance: dict = {"at": 0.0, "cookies": {}, "ua": ""}
+CLEARANCE_TTL = 900          # seconds; a cf_clearance lasts far longer, this just re-solves lazily
+
+
+def clearance(*, timeout: int = 45, flaresolverr: Optional[str] = None,
+              max_age: int = CLEARANCE_TTL) -> tuple:
+    """Cloudflare clearance cookies + the matching User-Agent for a DIRECT fetch.
+
+    Needed for ext.to's poster art, which cannot be reached any other way:
+
+      * the browser cannot load it, because ext.to sends
+        ``Cross-Origin-Resource-Policy: same-origin`` (the console reports
+        ERR_BLOCKED_BY_RESPONSE.NotSameOrigin on a perfectly valid URL), and
+      * a plain server-side GET is refused 403 by Cloudflare, and
+      * FlareSolverr returns a rendered DOM, so it cannot hand back image bytes.
+
+    Reusing the clearance it already solved bridges that: same cookies, same UA,
+    ordinary streaming GET. Cached in-process so viewing a board of posters costs
+    one solve, not one per image. Returns ``({}, "")`` if it cannot be obtained -
+    the caller then just fails to show a picture.
+    """
+    import time as _time
+    now = _time.time()
+    if _clearance["cookies"] and (now - _clearance["at"]) < max_age:
+        return _clearance["cookies"], _clearance["ua"]
+    solver = str(flaresolverr if flaresolverr is not None else flaresolverr_url()).rstrip("/")
+    if not solver:
+        return {}, ""
+    try:
+        client = FlareSolverrClient(solver, timeout=timeout)
+        _fetch(client, BASES[0] + "/")
+        if client.last_cookies:
+            _clearance.update({"at": now, "cookies": client.last_cookies,
+                               "ua": client.last_user_agent})
+    except Exception:   # noqa: BLE001 - no clearance just means no picture
+        logger.debug("EXT.to clearance solve failed", exc_info=True)
+    return _clearance["cookies"], _clearance["ua"]
+
+
 def resolve_magnet(info_url: Any, *, magnet_id: Any = None, timeout: int = 40,
                    flaresolverr: Optional[str] = None) -> dict:
     """Resolve ONE ext.to release's magnet from its detail page.
@@ -471,5 +520,5 @@ def extto_search(query: Any, *, limit: int = 20, timeout: int = 30,
 __all__ = [
     "ExtToHit", "FlareSolverrClient", "compute_hmac", "extract_magnet_ids",
     "extract_page_tokens", "extto_search", "fetch_magnet", "parse_results",
-    "resolve_magnet",
+    "resolve_magnet", "clearance",
 ]

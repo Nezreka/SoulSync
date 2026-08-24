@@ -48,6 +48,8 @@
     var basicRowsBySource = {};   // source id -> the rows currently rendered for it
     var freshSeq = 0;
     var freshCache = null;
+    var freshRefreshing = false;   // a manual Refresh is in flight
+    var freshExpanded = {};        // detail url -> open, so a re-render keeps it open
     var freshLoading = false;
     var freshPeriod = 'day';
     var freshIdentify = null;
@@ -381,6 +383,50 @@
             '<div class="vsr-fresh-table">' + rows + '</div></section>';
     }
 
+    // The facts EXT.to already stated on the release's own detail page, matched in
+    // by the board refresh. Purely presentational — the user still identifies the
+    // title in the modal; this is here so that call is an informed one.
+    function freshMetaHTML(d) {
+        if (!d) return '';
+        var bits = [];
+        if (d.imdb_rating != null) bits.push('<b class="vsr-fresh-rating">&#9733; ' + esc(d.imdb_rating) +
+            (d.imdb_votes ? ' <i>(' + esc(freshNum(d.imdb_votes)) + ')</i>' : '') + '</b>');
+        if (d.year) bits.push('<span>' + esc(d.year) + '</span>');
+        if (d.runtime_minutes) bits.push('<span>' + esc(d.runtime_minutes) + ' min</span>');
+        if (d.quality) bits.push('<span>' + esc(d.quality) + '</span>');
+        if (d.genres && d.genres.length) bits.push('<span>' + esc(d.genres.slice(0, 3).join(' \u00b7 ')) + '</span>');
+        if (!bits.length) return '';
+        return '<div class="vsr-fresh-meta">' + bits.join('') + '</div>';
+    }
+
+    function freshArtHTML(d, title) {
+        // EXT.to serves a grey 'no artwork' placeholder for a lot of TV; the parser
+        // reports that as no poster, so we draw our own initial instead of a broken tile.
+        if (d && d.poster_url) {
+            // Through OUR origin, not ext.to directly: ext.to sends a
+            // Cross-Origin-Resource-Policy header on its posters, so a direct <img>
+            // is refused by the browser as ERR_BLOCKED_BY_RESPONSE.NotSameOrigin
+            // even though the URL is right. /api/video/img also disk-caches it.
+            var src = '/api/video/img?u=' + encodeURIComponent(d.poster_url);
+            return '<img class="vsr-fresh-art" src="' + esc(src) + '" alt="" loading="lazy" decoding="async">';
+        }
+        return '<span class="vsr-fresh-art vsr-fresh-art--none" aria-hidden="true">' +
+            esc((String(title || '?').trim()[0] || '?').toUpperCase()) + '</span>';
+    }
+
+    // Everything EXT.to stated about the title, in the order it stated it. Rendering
+    // the LIST rather than named fields is deliberate: movie and TV pages carry
+    // almost disjoint labels, and a category we have never seen still renders.
+    function freshFactsHTML(d) {
+        var facts = (d && d.facts) || [];
+        if (!facts.length) return '';
+        return '<div class="vsr-fresh-facts">' + facts.map(function (f) {
+            return '<div class="vsr-fresh-fact"><span>' + esc(f.label) + '</span><em>' + esc(f.value) + '</em></div>';
+        }).join('') +
+        (d.imdb_id ? '<div class="vsr-fresh-fact"><span>IMDb</span><em>' + esc(d.imdb_id) + '</em></div>' : '') +
+        '</div>';
+    }
+
     function freshRowHTML(r, category, index) {
         r = r || {};
         var files = r.files == null ? '-' : freshNum(r.files);
@@ -388,14 +434,27 @@
         var leech = r.leechers == null ? '-' : freshNum(r.leechers);
         var ready = !!(r.download_url || r.magnet_uri);
         var hint = category === 'movies' ? 'Movie' : (r.episode != null ? 'Episode' : 'Season pack');
-        return '<article class="vsr-fresh-row ' + (ready ? 'vsr-fresh-row--ready' : 'vsr-fresh-row--blocked') + '">' +
+        var d = r.detail || null;
+        var named = d && d.title ? '<b>' + esc(d.title) + '</b> - ' : '';
+        // Only a matched release has anything to expand into.
+        var can = !!(d && (d.facts || []).length);
+        var open = can && !!freshExpanded[r.url];
+        return '<article class="vsr-fresh-row ' + (ready ? 'vsr-fresh-row--ready' : 'vsr-fresh-row--blocked') +
+                (d ? ' vsr-fresh-row--rich' : '') + (can ? ' vsr-fresh-row--can-open' : '') +
+                (open ? ' vsr-fresh-row--open' : '') + '"' +
+                (can ? ' data-vsr-fresh-toggle="' + esc(category) + ':' + index + '" role="button" tabindex="0"' +
+                       ' aria-expanded="' + (open ? 'true' : 'false') + '"' : '') + '>' +
+            freshArtHTML(d, (d && d.title) || r.search_title || r.title) +
             '<div class="vsr-fresh-release"><strong title="' + esc(r.title || '') + '">' + esc(r.title || 'Untitled release') + '</strong>' +
-                '<span>' + esc(r.age || 'Age unknown') + ' - ' + esc(r.source || 'EXT.to') + ' - ' + esc(hint) + '</span></div>' +
+                '<span>' + named + esc(r.age || 'Age unknown') + ' - ' + esc(r.source || 'EXT.to') + ' - ' + esc(hint) + '</span>' +
+                freshMetaHTML(d) + '</div>' +
             freshStat('Size', r.size_text || 'Unknown') +
             freshStat('Files', files) +
             freshStat('Seed', seeds, 'vsr-fresh-seed') +
             freshStat('Leech', leech, 'vsr-fresh-leech') +
             '<button class="vsr-fresh-pick" type="button" data-vsr-fresh-pick="' + esc(category) + ':' + index + '" ' + (ready ? '' : 'disabled ') + '>' + (ready ? 'Identify' : 'No magnet') + '</button>' +
+            (can ? '<span class="vsr-fresh-chev" aria-hidden="true"></span>' : '') +
+            (open ? freshFactsHTML(d) : '') +
         '</article>';
     }
 
@@ -423,16 +482,68 @@
             return '<button class="vsr-fresh-period ' + (on ? 'active' : '') + '" type="button" data-vsr-fresh-period="' + p + '" aria-pressed="' + (on ? 'true' : 'false') + '">' + freshPeriodLabel(p) + '</button>';
         }).join('');
         if (freshLoading && !freshCache) {
-            host.innerHTML = '<section class="vsr-fresh-results"><div class="vsr-fresh-head"><div><span>Fresh Releases</span><h2>Loading the latest board</h2><p>Sourced from EXT.to</p></div><div class="vsr-fresh-periods">' + tabs + '</div></div>' + freshLoadingHTML() + '</section>';
+            host.innerHTML = '<section class="vsr-fresh-results"><div class="vsr-fresh-head"><div><span>Fresh Releases</span><h2>Loading the latest board</h2><p>Sourced from EXT.to</p></div><div class="vsr-fresh-actions"><div class="vsr-fresh-periods">' + tabs + '</div>' + freshRefreshHTML() + '</div></div>' + freshLoadingHTML() + '</section>';
             return;
         }
         if (freshCache && freshCache.error) {
-            host.innerHTML = '<section class="vsr-fresh-results"><div class="vsr-fresh-head"><div><span>Fresh Releases</span><h2>Sourced from EXT.to</h2><p>Fresh Releases needs the EXT.to homepage through FlareSolverr.</p></div><div class="vsr-fresh-periods">' + tabs + '</div></div>' +
+            host.innerHTML = '<section class="vsr-fresh-results"><div class="vsr-fresh-head"><div><span>Fresh Releases</span><h2>Sourced from EXT.to</h2><p>Fresh Releases needs the EXT.to homepage through FlareSolverr.</p></div><div class="vsr-fresh-actions"><div class="vsr-fresh-periods">' + tabs + '</div>' + freshRefreshHTML() + '</div></div>' +
                 '<div class="vsr-basic-empty"><div class="vsr-basic-empty-mark">!</div><div><strong>Could not load Fresh Releases</strong><p>' + esc(freshCache.error) + '</p></div></div></section>';
             return;
         }
-        host.innerHTML = '<section class="vsr-fresh-results"><div class="vsr-fresh-head"><div><span>Fresh Releases</span><h2>Sourced from EXT.to</h2><p>Movies and TV releases from the EXT.to homepage, presented in SoulSync.</p></div><div class="vsr-fresh-periods">' + tabs + '</div></div>' +
+        host.innerHTML = '<section class="vsr-fresh-results"><div class="vsr-fresh-head"><div><span>Fresh Releases</span><h2>Sourced from EXT.to</h2><p>' +
+                freshStampHTML() + '</p></div><div class="vsr-fresh-actions"><div class="vsr-fresh-periods">' + tabs + '</div>' + freshRefreshHTML() + '</div></div>' +
             '<div class="vsr-fresh-grid">' + freshSectionHTML('movies', 'Movies') + freshSectionHTML('tv', 'TV Series') + '</div></section>';
+    }
+
+    function freshToggleRow(category, index) {
+        var row = freshRows(category)[index];
+        if (!row || !row.url) return;
+        if (freshExpanded[row.url]) delete freshExpanded[row.url];
+        else freshExpanded[row.url] = true;
+        renderFreshReleases();
+    }
+
+    function freshRefreshHTML() {
+        return '<button class="vsr-fresh-refresh" type="button" data-vsr-fresh-refresh' +
+            (freshRefreshing ? ' disabled' : '') + '>' +
+            (freshRefreshing ? '<span class="vsr-fresh-refresh-spin" aria-hidden="true"></span>Matching\u2026' : 'Refresh') +
+        '</button>';
+    }
+
+    // The board is a STORED snapshot, so say how old it is — otherwise there is no
+    // way to tell a quiet hour from a refresh that has not run.
+    function freshStampHTML() {
+        var at = freshCache && freshCache.fetched_at;
+        if (freshRefreshing) return 'Pulling the board and matching each release against EXT.to\u2026';
+        if (!at) return 'Movies and TV releases from the EXT.to homepage, presented in SoulSync.';
+        return 'Updated ' + esc(at) + ' \u00b7 refreshed hourly by the \u2018Refresh Fresh Releases\u2019 automation, or on demand.';
+    }
+
+    function refreshFreshReleases() {
+        if (freshRefreshing) return;
+        freshRefreshing = true;
+        var token = ++freshSeq;
+        renderFreshReleases();
+        fetch(FRESH_URL + '/refresh', { method: 'POST', headers: { 'Accept': 'application/json' } })
+            .then(_json).then(function (d) {
+                if (token !== freshSeq) return;
+                freshRefreshing = false;
+                if (d && d.success) {
+                    freshCache = d;
+                    if (typeof showToast === 'function' && d.stats) {
+                        showToast('Fresh Releases updated - ' + (d.stats.fetched || 0) + ' newly matched, ' +
+                            (d.stats.cached || 0) + ' from cache', 'success');
+                    }
+                } else if (d && d.error && typeof showToast === 'function') {
+                    showToast(d.error, 'error');
+                }
+                if (mode === 'fresh') renderFreshReleases();
+            }).catch(function () {
+                if (token !== freshSeq) return;
+                freshRefreshing = false;
+                if (typeof showToast === 'function') showToast('The refresh could not be started.', 'error');
+                if (mode === 'fresh') renderFreshReleases();
+            });
     }
 
     function loadFreshReleases(force) {
@@ -1191,6 +1302,19 @@
                     e.preventDefault();
                     var bits = String(basicPick.getAttribute('data-vsr-basic-grab') || '').split(':');
                     basicOpenIdentify(bits[0], parseInt(bits[1], 10));
+                    return;
+                }
+                var fr = e.target.closest('[data-vsr-fresh-refresh]');
+                if (fr && results.contains(fr)) {
+                    e.preventDefault();
+                    refreshFreshReleases();
+                    return;
+                }
+                var ft = e.target.closest('[data-vsr-fresh-toggle]');
+                if (ft && results.contains(ft)) {
+                    e.preventDefault();
+                    var tb = String(ft.getAttribute('data-vsr-fresh-toggle') || '').split(':');
+                    freshToggleRow(tb[0], parseInt(tb[1], 10));
                     return;
                 }
                 var fp = e.target.closest('[data-vsr-fresh-period]');

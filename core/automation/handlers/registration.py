@@ -49,6 +49,7 @@ from core.automation.handlers.video_process_youtube_wishlist import auto_video_p
 from core.automation.handlers.video_scan_watchlist_playlists import auto_video_scan_watchlist_playlists
 from core.automation.handlers.video_process_wishlist import auto_video_process_wishlist, is_running
 from core.automation.handlers.video_rss_sync import auto_video_rss_sync
+from core.automation.handlers.video_extto_fresh import auto_video_extto_fresh_refresh
 from core.automation.handlers.video_import_lists import auto_video_import_lists
 from core.automation.handlers.video_seeding_sweep import auto_video_seeding_sweep
 from core.automation.handlers.seeding_sweep import auto_seeding_sweep
@@ -346,6 +347,14 @@ def register_all(deps: AutomationDeps) -> None:
         'video_rss_sync',
         lambda config: auto_video_rss_sync(config, deps),
         lambda: __import__('core.video.rss_sync', fromlist=['is_running']).is_running(),
+    )
+    # Fresh Releases: pull the EXT.to board + match each release against its
+    # detail page, cached by release so an hourly run mostly costs nothing. The
+    # tab's Refresh button runs the identical code.
+    engine.register_action_handler(
+        'video_extto_fresh_refresh',
+        lambda config: auto_video_extto_fresh_refresh(config, deps),
+        lambda: __import__('core.video.extto_board', fromlist=['is_running']).is_running(),
     )
     # Seeding lifecycle: release completed torrent grabs once ratio/time goals
     # are met (off until goals are set on Settings → Downloads).
