@@ -39,6 +39,10 @@ def _run(config=None, deps=None, **overrides):
         season_meta=lambda *a: None,
         get_bookmark=lambda: None,
         set_bookmark=lambda d: None,
+        # unowned-follow pass: hermetic by default, the production seams reach
+        # the real video DB + TMDB
+        unowned_follows=lambda: [],
+        tmdb_airings=lambda tid, s, e: {'poster_url': None, 'episodes': []},
     )
     kw.update(overrides)
     return auto_video_add_airing_episodes(
@@ -267,3 +271,161 @@ def test_airing_handler_can_disable_the_prune():
     called = {"n": 0}
     _run(prune_follows=lambda: called.update(n=called["n"] + 1) or [])
     assert called["n"] == 0                          # prune skipped entirely
+
+
+# ── follows you don't own yet ────────────────────────────────────────────────
+# The calendar is built off the episodes table, which only holds LIBRARY shows.
+# So a show you follow from a TMDB page never produced a single wishlist row:
+# you followed it, it aired, nothing happened. Boulder's live install had three
+# (Elle, The Polygamist, The Smurfs). Sonarr monitors a series whether or not
+# you have files yet, so we ask TMDB directly for those.
+def test_a_followed_show_you_dont_own_still_gets_its_airings():
+    added = []
+
+    def add(tid, title, eps, library_id=None, poster_url=None):
+        added.append((tid, title, len(eps), library_id, poster_url))
+        return len(eps)
+
+    res = _run(
+        fetch_airing=lambda s, e: [],                       # calendar knows nothing about it
+        unowned_follows=lambda: [{"tmdb_id": 42, "title": "Elle", "library_id": None}],
+        tmdb_airings=lambda tid, s, e: {
+            "poster_url": "https://image.tmdb.org/p/w500/elle.jpg",
+            "episodes": [{"season_number": 1, "episode_number": 4, "title": "Ep 4",
+                          "air_date": "2026-06-21"}]},
+        add_episodes=add)
+
+    assert res["episodes_added"] == 1 and res["shows"] == 1
+    # No library_id (not owned) so no poster proxy — but TMDB's own poster MUST
+    # come through. A null poster_url renders the wishlist row as an initials
+    # orb that reads as "not matched" (the 94e06f2d symptom).
+    assert added == [(42, "Elle", 1, None, "https://image.tmdb.org/p/w500/elle.jpg")]
+
+
+def test_the_tmdb_pass_uses_the_same_catchup_window():
+    seen = []
+    _run(fetch_airing=lambda s, e: [],
+         today_fn=lambda: "2026-06-21",
+         get_bookmark=lambda: "2026-06-18",
+         unowned_follows=lambda: [{"tmdb_id": 42, "title": "Elle"}],
+         tmdb_airings=lambda tid, s, e: seen.append((s, e)) or {"episodes": []})
+    assert seen == [("2026-06-19", "2026-06-21")]
+
+
+def test_the_calendar_pass_wins_for_a_show_in_both():
+    """A show can be owned AND explicitly followed. Don't look it up twice or
+    overwrite the library_id the calendar gave us."""
+    calls = []
+    added = []
+    _run(fetch_airing=lambda s, e: [_row(1, "Widows Bay", 1, 1)],
+         unowned_follows=lambda: [{"tmdb_id": 1, "title": "Widows Bay"}],
+         tmdb_airings=lambda tid, s, e: calls.append(tid) or {"episodes": []},
+         add_episodes=lambda tid, t, eps, lib=None, p=None: added.append((tid, lib)) or len(eps))
+    assert calls == []                       # never re-queried
+    assert added == [(1, 100)]               # kept the library id
+
+
+def test_one_bad_tmdb_lookup_does_not_sink_the_run():
+    def boom(tid, s, e):
+        if tid == 1:
+            raise RuntimeError("tmdb down")
+        return {"poster_url": None,
+                "episodes": [{"season_number": 1, "episode_number": 1, "air_date": "2026-06-21"}]}
+
+    res = _run(fetch_airing=lambda s, e: [],
+               unowned_follows=lambda: [{"tmdb_id": 1, "title": "Bad"},
+                                        {"tmdb_id": 2, "title": "Good"}],
+               tmdb_airings=boom,
+               add_episodes=lambda *a, **k: 1)
+    assert res["status"] == "completed" and res["episodes_added"] == 1
+
+
+def test_a_broken_follow_list_still_lets_the_calendar_pass_land():
+    def boom():
+        raise RuntimeError("db gone")
+
+    res = _run(fetch_airing=lambda s, e: [_row(1, "Widows Bay", 1, 1)],
+               unowned_follows=boom,
+               add_episodes=lambda *a, **k: 1)
+    assert res["status"] == "completed" and res["episodes_added"] == 1
+
+
+# ── the TMDB window lookup itself ───────────────────────────────────────────
+class _Engine:
+    def __init__(self, seasons, episodes):
+        self._seasons = seasons
+        self._episodes = episodes
+        self.season_calls = []
+
+    def tmdb_detail(self, kind, tid):
+        return {"poster_url": "show.jpg",
+                "seasons": [{"season_number": n} for n in self._seasons]}
+
+    def tmdb_season(self, tid, sn):
+        self.season_calls.append(sn)
+        return {"poster_url": "p%d" % sn, "episodes": self._episodes.get(sn, [])}
+
+
+def test_airing_lookup_only_pulls_the_newest_seasons():
+    """A show airing now is airing its newest season. Pulling ten seasons of
+    history every night would be a TMDB call per season per show."""
+    from core.video.monitor_policy import episodes_airing_between
+    eng = _Engine([0, 1, 2, 3, 4], {})
+    episodes_airing_between(eng, 5, "2026-06-19", "2026-06-21")
+    assert eng.season_calls == [3, 4]          # specials excluded, newest two only
+
+
+def test_airing_lookup_filters_to_the_window():
+    from core.video.monitor_policy import episodes_airing_between
+    eng = _Engine([1], {1: [
+        {"episode_number": 1, "air_date": "2026-06-18"},      # before
+        {"episode_number": 2, "air_date": "2026-06-20"},      # in
+        {"episode_number": 3, "air_date": "2026-06-25"},      # after (unaired)
+        {"episode_number": 4, "air_date": None},              # undated
+        {"episode_number": None, "air_date": "2026-06-20"},   # junk
+    ]})
+    out = episodes_airing_between(eng, 5, "2026-06-19", "2026-06-21")["episodes"]
+    assert [e["episode_number"] for e in out] == [2]
+    assert out[0]["season_poster_url"] == "p1"
+
+
+def test_airing_lookup_degrades_when_tmdb_is_down():
+    from core.video.monitor_policy import episodes_airing_between
+
+    class _Dead:
+        def tmdb_detail(self, *a):
+            raise RuntimeError("down")
+
+    assert episodes_airing_between(_Dead(), 5, "2026-06-19", "2026-06-21") == {
+        "poster_url": None, "episodes": []}
+
+
+def test_a_specials_only_show_still_gets_looked_up():
+    """Season 0 is excluded from "newest seasons" — but a show whose episodes
+    are ALL specials (Critical Role) would then never be looked up at all. The
+    engine's _latest_seasons falls back for exactly this; so must we."""
+    from core.video.monitor_policy import episodes_airing_between, latest_season_numbers
+    assert latest_season_numbers({"seasons": [{"season_number": 0}]}) == [0]
+    eng = _Engine([0], {0: [{"episode_number": 221, "air_date": "2026-06-20"}]})
+    out = episodes_airing_between(eng, 5, "2026-06-19", "2026-06-21")
+    assert [e["episode_number"] for e in out["episodes"]] == [221]
+
+
+def test_the_show_poster_comes_back_for_filing():
+    from core.video.monitor_policy import episodes_airing_between
+    eng = _Engine([1], {1: [{"episode_number": 1, "air_date": "2026-06-20"}]})
+    assert episodes_airing_between(eng, 5, "2026-06-19", "2026-06-21")["poster_url"] == "show.jpg"
+
+
+def test_dedup_survives_a_renamed_show():
+    """The calendar keys off shows.title, this pass off video_watchlist.title.
+    Rename a show in the Manage panel and those drift — keying the dedup on the
+    title would look it up twice and add it twice."""
+    calls = []
+    added = []
+    _run(fetch_airing=lambda s, e: [_row(1, "Widow's Bay", 1, 1)],
+         unowned_follows=lambda: [{"tmdb_id": 1, "title": "Widows Bay (2026)"}],   # drifted
+         tmdb_airings=lambda tid, s, e: calls.append(tid) or {"episodes": []},
+         add_episodes=lambda tid, t, eps, lib=None, p=None: added.append((tid, lib)) or len(eps))
+    assert calls == []                       # not re-queried despite the different title
+    assert added == [(1, 100)]               # one add, keeping the library id

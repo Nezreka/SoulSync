@@ -5,6 +5,10 @@ from __future__ import annotations
 
 import json
 
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[1]
+
 from core.video.download_config import (
     MODES,
     SOURCES,
@@ -50,7 +54,9 @@ class _FakeDB:
 
 # seeding lifecycle keys (arr-parity P5) ride the same config payload
 _SEED_DEFAULTS = {"seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True,
-                  "seed_mode": "soulsync"}
+                  "seed_mode": "soulsync",
+                  # per indexer rules, empty until someone sets one
+                  "seed_overrides": {}}
 
 
 def test_load_defaults():
@@ -73,3 +79,18 @@ def test_save_ignores_absent_keys():
     save(db, {"hybrid_order": ["soulseek", "torrent"]})     # mode key absent → unchanged
     assert load(db)["download_mode"] == "usenet"
     assert load(db)["hybrid_order"] == ["soulseek", "torrent"]
+
+
+def test_the_config_module_stays_cheap_to_import():
+    """It is read on the sidebar service-status path. An earlier version pulled
+    seed_rules from core.torrent_clients, whose __init__ imports every client
+    adapter + the config manager — 479 modules to normalise a dict."""
+    import subprocess
+    import sys
+    code = ("import sys; before=len(sys.modules);"
+            "import core.video.download_config;"
+            "print(len(sys.modules)-before)")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         cwd=str(_ROOT))
+    pulled = int((out.stdout or "0").strip().splitlines()[-1])
+    assert pulled < 120, "download_config now drags in %d modules" % pulled

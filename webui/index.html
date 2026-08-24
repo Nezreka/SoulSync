@@ -3582,6 +3582,19 @@
                                         </select>
                                     </div>
                                     <small class="settings-hint">Both at 0 = never remove (the old behavior). <strong>SoulSync</strong>: SS polls the client and removes when a goal is hit (your imported library copy is separate and never touched). <strong>Torrent client</strong>: SS writes the ratio/time limit into the client (arr-style) and lets it enforce — it shows in the client's share-limit dialog and works even when SS is off.</small>
+                                    <div id="video-seed-per-indexer" style="margin-top:12px;">
+                                        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                                            <span class="settings-hint">Per-indexer overrides</span>
+                                            <button class="test-button" type="button" id="video-seed-idx-refresh">Load indexers</button>
+                                        </div>
+                                        <small class="settings-hint" style="display:block; margin:6px 0 8px;">
+                                            Sonarr/Radarr put seed rules on the indexer, not globally &mdash; a private tracker needs a ratio or a week of seeding, a public one needs nothing.
+                                            Leave a box <strong>blank</strong> to inherit the goal above; type <strong>0</strong> to exempt that tracker from it. <strong>Pack hrs</strong> is the longer window season packs get (blank = same as Hours).
+                                        </small>
+                                        <div id="video-seed-idx-rows" class="ind-indexer-list">
+                                            <em class="settings-hint">Click Load indexers to list the torrent indexers from Prowlarr.</em>
+                                        </div>
+                                    </div>
                                 </div>
                                 <!-- Import lists (arr-parity P6) -->
                                 <div class="form-group" id="video-import-lists">

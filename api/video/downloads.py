@@ -838,6 +838,9 @@ def register_routes(bp):
                 return jsonify({"ok": False, "error": res.get("error") or "The download client refused it."}), 502
             dl_id = db.add_video_download({**common, "source": source,
                                            "username": body.get("username"),   # indexer name (display only)
+                                           # the id is the stable key, that's what the seeding
+                                           # sweep looks this tracker's seed goal up by
+                                           "indexer_id": body.get("indexer_id"),
                                            "filename": body.get("release_title") or body.get("title"),
                                            "client_ref": res["ref"],
                                            "candidates": _json.dumps([]), "tried_queries": _json.dumps([]),

@@ -41,6 +41,7 @@ from core.automation.handlers.video_auto_wishlist_airing import auto_video_add_a
 from core.automation.handlers.video_refresh_airing_schedules import auto_video_refresh_airing_schedules
 from core.automation.handlers.video_reenrich_stale import auto_video_reenrich_stale
 from core.automation.handlers.video_clean_youtube import auto_video_clean_youtube_episodes
+from core.automation.handlers.video_purge_recycle import auto_video_purge_recycle_bin
 from core.automation.handlers.video_scan_watchlist_people import auto_video_scan_watchlist_people
 from core.automation.handlers.video_scan_watchlist_studios import auto_video_scan_watchlist_studios
 from core.automation.handlers.video_scan_watchlist_channels import auto_video_scan_watchlist_channels
@@ -293,6 +294,12 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'video_clean_youtube_episodes',
         lambda config: auto_video_clean_youtube_episodes(config, deps),
+    )
+    # recycle bin retention. used to only run as a side effect of the next
+    # delete, so keep-days did nothing on a quiet library.
+    engine.register_action_handler(
+        'video_purge_recycle_bin',
+        lambda config: auto_video_purge_recycle_bin(config, deps),
     )
     # ── Watchlist → Wishlist pipeline ─────────────────────────────────────────
     # Stage 1 — SCANS that fill the wishlist from what you follow.

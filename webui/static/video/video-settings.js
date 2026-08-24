@@ -277,6 +277,88 @@
     var SRC_DL_EMOJI = { soulseek: '🎵', torrent: '🧲', usenet: '📰' };
     var _videoMode = 'soulseek';
     var _videoHybrid = ['soulseek'];
+    // per indexer seed rules, keyed by prowlarr indexer id. blank field = inherit
+    // the global goal, 0 = exempt this tracker from it. keep those different.
+    var _videoSeedRules = {};
+    var _videoSeedIndexers = null;      // null = not loaded yet
+
+    function _seedRuleVal(id, field) {
+        var r = _videoSeedRules[String(id)] || {};
+        return (r[field] === undefined || r[field] === null) ? '' : r[field];
+    }
+
+    function seedIndexerRow(idx) {
+        var e = function (v) {
+            return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        };
+        var num = function (field, ph, step) {
+            return '<input type="number" min="0" step="' + step + '" placeholder="' + ph + '" ' +
+                'data-vseed-idx="' + e(idx.id) + '" data-vseed-field="' + field + '" ' +
+                'value="' + e(_seedRuleVal(idx.id, field)) + '" style="max-width:78px;">';
+        };
+        return '<div class="ind-indexer-card" style="gap:8px; flex-wrap:wrap;">' +
+            '<span class="ind-indexer-card-id">#' + e(idx.id) + '</span>' +
+            '<span class="ind-indexer-card-name">' + e(idx.name) + '</span>' +
+            (idx.privacy ? '<span class="ind-indexer-card-privacy">' + e(idx.privacy) + '</span>' : '') +
+            '<span style="margin-left:auto; display:flex; gap:6px; align-items:center;">' +
+            '<span class="settings-hint">Ratio</span>' + num('ratio', 'inherit', '0.1') +
+            '<span class="settings-hint">Hours</span>' + num('hours', 'inherit', '1') +
+            '<span class="settings-hint">Pack hrs</span>' + num('pack_hours', 'same', '1') +
+            '</span></div>';
+    }
+
+    function renderSeedIndexers() {
+        var host = document.getElementById('video-seed-idx-rows');
+        if (!host) return;
+        if (_videoSeedIndexers === null) return;
+        if (!_videoSeedIndexers.length) {
+            host.innerHTML = '<em class="settings-hint">No torrent indexers in Prowlarr. ' +
+                'Usenet never seeds, so only torrent indexers show here.</em>';
+            return;
+        }
+        host.innerHTML = _videoSeedIndexers.map(seedIndexerRow).join('');
+    }
+
+    function loadSeedIndexers() {
+        var host = document.getElementById('video-seed-idx-rows');
+        if (host) host.innerHTML = '<em class="settings-hint">Loading…</em>';
+        fetch('/api/prowlarr/indexers', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d || !d.success) {
+                    if (host) host.innerHTML = '<em class="settings-hint">Prowlarr isn\'t configured yet ' +
+                        '(Settings → Indexers &amp; Downloaders).</em>';
+                    return;
+                }
+                // usenet has no seeding, so don't offer rules that can never fire
+                _videoSeedIndexers = (d.indexers || []).filter(function (i) { return i.protocol !== 'usenet'; });
+                renderSeedIndexers();
+            })
+            .catch(function () {
+                if (host) host.innerHTML = '<em class="settings-hint">Couldn\'t reach Prowlarr.</em>';
+            });
+    }
+
+    function wireSeedIndexers() {
+        var host = document.getElementById('video-seed-idx-rows');
+        if (!host || host._vseedWired) return;
+        host._vseedWired = true;
+        host.addEventListener('change', function (e) {
+            var id = e.target && e.target.getAttribute('data-vseed-idx');
+            if (!id) return;
+            var field = e.target.getAttribute('data-vseed-field');
+            var raw = String(e.target.value || '').trim();
+            var rule = _videoSeedRules[id] || (_videoSeedRules[id] = {});
+            if (raw === '') { delete rule[field]; }          // blank = inherit
+            else { rule[field] = field === 'ratio' ? parseFloat(raw) : parseInt(raw, 10); }
+            if (!Object.keys(rule).length) delete _videoSeedRules[id];
+            saveDownloads(true);
+        });
+        var btn = document.getElementById('video-seed-idx-refresh');
+        if (btn && !btn._vseedWired) { btn._vseedWired = true; btn.addEventListener('click', loadSeedIndexers); }
+    }
 
     function loadDownloads() {
         fetch(DOWNLOADS_URL, { headers: { 'Accept': 'application/json' } })
@@ -298,6 +380,9 @@
                 if (srd) srd.checked = d.seed_remove_data !== false;
                 var smd = document.getElementById('video-seed-mode');
                 if (smd) smd.value = d.seed_mode || 'soulsync';
+                _videoSeedRules = d.seed_overrides || {};
+                renderSeedIndexers();
+                wireSeedIndexers();
                 renderVideoHybrid();
                 updateVideoSourceUI();
             })
@@ -319,6 +404,7 @@
                 seed_time_goal_hours: parseInt(val('video-seed-hours'), 10) || 0,
                 seed_remove_data: !!(document.getElementById('video-seed-remove-data') || {}).checked,
                 seed_mode: val('video-seed-mode') || 'soulsync',
+                seed_overrides: _videoSeedRules,
             })
         }).then(function () { if (!silent) toast('Download folders saved', 'success'); })
           .catch(function () { /* ignore */ });

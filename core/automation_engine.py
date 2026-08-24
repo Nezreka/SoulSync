@@ -437,6 +437,16 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'video_clean_youtube_episodes',
         'owned_by': 'video',
     },
+    # Recycle bin retention: delete recycled files past recycle_keep_days. Runs after the
+    # YouTube clean so the files that job just recycled are already in the bin. Safe to
+    # seed, it only ever touches entries the recycle bin itself wrote.
+    {
+        'name': 'Empty Recycle Bin',
+        'trigger_type': 'daily_time',
+        'trigger_config': {'time': '04:30'},
+        'action_type': 'video_purge_recycle_bin',
+        'owned_by': 'video',
+    },
 ]
 
 

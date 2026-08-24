@@ -82,6 +82,7 @@ export const AUTOMATION_ICONS: Record<string, string> = {
   video_sync_collections: '🗂️',
   video_rss_sync: '📡',
   video_seeding_sweep: '🌱',
+  video_purge_recycle_bin: '🗑️',
   video_import_lists: '📥',
   monthly_time: '📅',
   video_batch_complete: '✅',

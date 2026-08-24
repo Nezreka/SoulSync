@@ -77,6 +77,7 @@ EXPECTED_ACTION_NAMES = frozenset({
     'video_seeding_sweep',
     'video_import_lists',
     'video_clean_youtube_episodes',
+    'video_purge_recycle_bin',
     'video_clean_search_history',
     'video_clean_completed_downloads',
     'video_full_cleanup',

@@ -252,6 +252,10 @@ _COLUMN_MIGRATIONS = [
     # seeding lifecycle (P5): 1 = the sweep finished with this torrent (goals
     # met + removed from the client, or the client no longer knows it)
     ("video_downloads", "seed_released", "INTEGER"),
+    # which prowlarr indexer served this grab. needed for per indexer seed
+    # goals, the indexer NAME is already in username but names are not stable
+    # keys and two trackers can share one.
+    ("video_downloads", "indexer_id", "INTEGER"),
     ("video_watchlist", "lookback_years", "INTEGER"),   # per-person back-catalog window: NULL/0=forward-only, N=years, -1=everything
     # series type (P8, Sonarr parity): standard | daily | anime — drives how the
     # drain QUERIES for episodes (SxxExx vs air date vs absolute number).
@@ -1947,6 +1951,7 @@ class VideoDatabase:
                   "media_id", "media_source", "year", "poster_url",
                   "candidates", "search_ctx", "tried_queries", "tried_files", "attempts",
                   "client_ref",   # torrent/usenet client tracking id
+                  "indexer_id",   # prowlarr indexer that served it (per indexer seed goals)
                   "quality_profile_id")   # the profile the grab was judged under (P2)
 
     def add_video_download(self, rec: dict) -> int:
@@ -5457,8 +5462,30 @@ class VideoDatabase:
     _ACTIVE_SHOW_SQL = ("status IS NOT NULL AND TRIM(status) <> '' "
                         "AND LOWER(status) NOT IN ('ended', 'canceled', 'cancelled', 'completed')")
 
+    @staticmethod
+    def _resolve_show_library_id_on(conn, tmdb_id: int, server_source=None):
+        sql = "SELECT id FROM shows WHERE tmdb_id=?"
+        args: list = [int(tmdb_id)]
+        if server_source:
+            sql += " AND server_source=?"
+            args.append(server_source)
+        sql += " ORDER BY (server_source IS NULL), id LIMIT 1"
+        row = conn.execute(sql, args).fetchone()
+        return row[0] if row else None
+
+    def resolve_show_library_id(self, tmdb_id: int, server_source=None):
+        """Library show id for a TMDB show, or None when this server does not own it."""
+        if not tmdb_id:
+            return None
+        conn = self._get_connection()
+        try:
+            return self._resolve_show_library_id_on(conn, int(tmdb_id), server_source)
+        finally:
+            conn.close()
+
     def add_to_watchlist(self, kind: str, tmdb_id: int, title: str,
-                         poster_url: str | None = None, library_id: int | None = None) -> bool:
+                         poster_url: str | None = None, library_id: int | None = None,
+                         server_source=None) -> bool:
         """Explicitly follow a show/person/studio (state='follow'). Idempotent upsert on
         (kind, tmdb_id) — re-adding refreshes title/poster/library_id and clears
         any 'mute' tombstone. Returns True on success."""
@@ -5466,6 +5493,11 @@ class VideoDatabase:
             return False
         conn = self._get_connection()
         try:
+            if library_id is None and kind == "show":
+                # a follow from a TMDB page passes no library_id even when the show
+                # is sitting right there in the library. without it the wishlist
+                # writes get no poster and the watchlist card shows no counts.
+                library_id = self._resolve_show_library_id_on(conn, int(tmdb_id), server_source)
             was = conn.execute("SELECT state FROM video_watchlist WHERE kind=? AND tmdb_id=?",
                                (kind, int(tmdb_id))).fetchone()
             conn.execute(
@@ -5493,10 +5525,11 @@ class VideoDatabase:
         shows that have since ended/been canceled."""
         conn = self._get_connection()
         try:
+            resolved = self._wl_show_id()
             return [dict(r) for r in conn.execute(
-                "SELECT w.tmdb_id, w.title, w.library_id, s.status "
-                "FROM video_watchlist w LEFT JOIN shows s ON s.id = w.library_id "
-                "WHERE w.kind='show' AND w.state='follow'")]
+                "SELECT w.tmdb_id, w.title, " + resolved + " AS library_id, s.status "
+                "FROM video_watchlist w LEFT JOIN shows s ON s.id = " + resolved +
+                " WHERE w.kind='show' AND w.state='follow'")]
         finally:
             conn.close()
 
@@ -5549,6 +5582,20 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # A follow made from a TMDB page stores no library_id even when the show IS
+    # owned. Resolving it by tmdb_id in an OR-join needed a GROUP BY, and with a
+    # bare column SQLite then picks an ARBITRARY shows row — the wrong server's
+    # counts when a title exists on two. A scalar subquery picks one row, always
+    # the same one, and can be scoped to the active server.
+    _WL_SHOW_ID = ("COALESCE(w.library_id, (SELECT s2.id FROM shows s2 "
+                   "WHERE s2.tmdb_id = w.tmdb_id{srv} "
+                   "ORDER BY (s2.server_source IS NULL), s2.id LIMIT 1))")
+
+    @classmethod
+    def _wl_show_id(cls, server_source=None) -> str:
+        return cls._WL_SHOW_ID.format(
+            srv=" AND s2.server_source = ?" if server_source else "")
+
     # owned/total episode counts — joined off s.id in both queries below.
     _EPS_COLS = ("(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id) AS episode_count, "
                  "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id AND e.has_file=1) AS owned_count")
@@ -5557,11 +5604,18 @@ class VideoDatabase:
         """Explicit show follows ∪ actively-airing library shows (not muted),
         each carrying status + owned/total episode counts for the card chrome."""
         out, seen = [], set()
+        # add_to_watchlist resolves library_id at write time; this resolves it at
+        # READ time too, so the rows already written without one still show their
+        # status pill and episode counts.
+        resolved = self._wl_show_id(server_source)
         for r in conn.execute(
-                "SELECT w.tmdb_id, w.title, w.poster_url, w.library_id, w.date_added, s.status, "
+                "SELECT w.tmdb_id, w.title, w.poster_url, " + resolved + " AS library_id, "
+                "w.date_added, s.status, "
                 + self._EPS_COLS +
-                " FROM video_watchlist w LEFT JOIN shows s ON s.id = w.library_id "
-                "WHERE w.kind='show' AND w.state='follow' ORDER BY w.date_added DESC, w.id DESC"):
+                " FROM video_watchlist w LEFT JOIN shows s ON s.id = " + resolved +
+                " WHERE w.kind='show' AND w.state='follow' "
+                "ORDER BY w.date_added DESC, w.id DESC",
+                ([server_source] * 2 if server_source else [])):
             d = dict(r); d["kind"] = "show"; out.append(d); seen.add(r["tmdb_id"])
         muted = {r["tmdb_id"] for r in conn.execute(
             "SELECT tmdb_id FROM video_watchlist WHERE kind='show' AND state='mute'")}

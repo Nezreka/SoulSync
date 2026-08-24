@@ -82,10 +82,13 @@ def register_routes(bp):
             return jsonify({"success": False, "error": "kind, tmdb_id and title are required"}), 400
         try:
             db = get_video_db()
+            server = _server()
+            library_id = body.get("library_id") or None
             ok = db.add_to_watchlist(
                 kind, int(tmdb_id), title,
                 poster_url=body.get("poster_url") or None,
-                library_id=body.get("library_id") or None)
+                library_id=library_id,
+                server_source=server)
             if not ok:
                 return jsonify({"success": False, "error": "Could not add to watchlist"}), 400
             wished = 0
@@ -99,10 +102,11 @@ def register_routes(bp):
                     eps = episodes_for_policy(get_video_enrichment_engine(), int(tmdb_id),
                                               monitor, date.today().isoformat())
                     if eps:
+                        library_id = library_id or db.resolve_show_library_id(int(tmdb_id), server_source=server)
                         wished = db.add_episodes_to_wishlist(
                             int(tmdb_id), title, eps,
                             poster_url=body.get("poster_url") or None,
-                            library_id=body.get("library_id") or None)
+                            library_id=library_id)
                 except Exception:   # noqa: BLE001 - policy expansion must never sink the follow
                     logger.exception("monitor policy expansion failed for %s", tmdb_id)
             return jsonify({"success": True, "watched": True, "wished": wished})
