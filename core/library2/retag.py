@@ -119,6 +119,57 @@ def _album_cover_source(
     return str(image_url).strip() or None if image_url else None
 
 
+#: ``db_data`` key -> (override entity, override field). lib2 keeps a per-field
+#: user override layer and EVERY read path projects it — the Library page shows
+#: ``effective["title"]``, not ``lib2_tracks.title``. Re-tag read the base row
+#: instead, so a title someone had corrected by hand was overwritten in the file
+#: with the value the page no longer showed. Hand beats provider, here too.
+_OVERRIDE_FIELDS = {
+    "title": ("track", "title"),
+    "track_number": ("track", "track_number"),
+    "disc_number": ("track", "disc_number"),
+    "album_title": ("release_group", "title"),
+    "year": ("release_group", "year"),
+    "release_date": ("release_group", "release_date"),
+    "genres": ("release_group", "genres"),
+}
+
+
+def _apply_overrides(conn, row: Any, data: Dict[str, Any]) -> Dict[str, str]:
+    """Overlay this track's and album's hand-set values onto ``data``.
+
+    Returns ``{db_data_key: the value the catalogue would have written}`` for
+    every field a person overrode — the diff CARRIES the provider's suggestion
+    rather than dropping it, because "keep mine" and "take the new one" is the
+    user's call to make per field, not ours to make once for everyone.
+    """
+    from core.library2.metadata_overrides import get_field_overrides
+
+    manual: Dict[str, str] = {}
+    by_entity = {}
+    for entity_type, entity_id in (("track", row["id"]),
+                                   ("release_group", row["album_id"])):
+        if entity_id:
+            try:
+                by_entity[entity_type] = get_field_overrides(
+                    conn, entity_type=entity_type, entity_id=int(entity_id))
+            except Exception:  # noqa: BLE001 - a missing override table is not an error
+                by_entity[entity_type] = {}
+    for data_key, (entity_type, field_name) in _OVERRIDE_FIELDS.items():
+        override = (by_entity.get(entity_type) or {}).get(field_name)
+        if override is None:
+            continue
+        catalogue_value = data.get(data_key)
+        value = override.value
+        if data_key == "genres":
+            value = _genres_list(value)
+        if value == catalogue_value:
+            continue
+        manual[data_key] = "" if catalogue_value is None else str(catalogue_value)
+        data[data_key] = value
+    return manual
+
+
 def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
     """Shape a lib2 track row into the ``db_data`` dict core/tag_writer reads."""
     artists = _credited_artists(conn, row["id"])
@@ -135,6 +186,7 @@ def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
         "disc_number": row["disc_number"],
         "track_count": row["expected_track_count"] or row["track_count"],
     }
+    data["_manual_fields"] = _apply_overrides(conn, row, data)
     # ``build_tag_diff`` renders its Cover Art row from ``thumb_url``. Without
     # it the preview claimed "Cover Art: None → None, unchanged" for every lib2
     # track, so a file with no embedded art still reported "Tags match" while
@@ -174,6 +226,43 @@ def track_contexts(conn, track_ids: List[int]) -> List[Dict[str, Any]]:
     return contexts
 
 
+#: ``db_data`` key -> the ``file_key`` ``build_tag_diff`` labels it with, for
+#: the fields a person can override. Only these can carry a conflict.
+_MANUAL_DIFF_KEYS = {
+    "title": "title",
+    "album_title": "album",
+    "year": "year",
+    "genres": "genre",
+    "track_number": "track_number",
+    "disc_number": "disc_number",
+}
+
+
+def _annotate_manual(diff: List[Dict[str, Any]],
+                     manual_fields: Dict[str, str]) -> List[Dict[str, Any]]:
+    """Mark the rows a user override is driving, and carry what it displaced.
+
+    Deliberately here and not in ``core/tag_writer.build_tag_diff``: that
+    function is shared with the legacy import path, and the override layer is a
+    Library-v2 concern. ``manual`` is always present — the UI branches on it,
+    and an absent key reads as undefined, which would render the conflict
+    control on every row.
+    """
+    by_file_key = {
+        _MANUAL_DIFF_KEYS[data_key]: displaced
+        for data_key, displaced in manual_fields.items()
+        if data_key in _MANUAL_DIFF_KEYS
+    }
+    for row in diff:
+        displaced = by_file_key.get(row.get("file_key"))
+        row["manual"] = displaced is not None
+        if displaced is not None:
+            # What the catalogue would have written. The user settles it per
+            # field; without this value there is nothing to settle it against.
+            row["provider_value"] = displaced
+    return diff
+
+
 def tag_preview(contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Per-track diff of file tags vs a materialized lib2 snapshot. Never raises."""
     from core.library2.paths import resolve_lib2_path
@@ -207,10 +296,17 @@ def tag_preview(contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 entry.update(error=file_tags["error"], has_changes=False, diff=[])
                 out.append(entry)
                 continue
-            diff = build_tag_diff(file_tags, row["db_data"])
+            diff = _annotate_manual(
+                build_tag_diff(file_tags, row["db_data"]),
+                row["db_data"].get("_manual_fields") or {},
+            )
+            changed = [d for d in diff if d.get("changed")]
             entry.update(
-                diff=[d for d in diff if d.get("changed")],
-                has_changes=any(d.get("changed") for d in diff),
+                diff=changed,
+                has_changes=bool(changed),
+                # Counted here so the bulk prompt can say "23 findings, 4 of
+                # them hand-set" without the caller walking every diff row.
+                has_manual_conflict=any(d.get("manual") for d in changed),
             )
         except Exception as e:  # noqa: BLE001
             entry.update(error=str(e), has_changes=False, diff=[])

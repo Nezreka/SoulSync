@@ -390,3 +390,133 @@ def test_cover_build_is_not_attempted_for_an_album_without_any_source(
 
     monkeypatch.setattr(retag_artwork, "build_artwork", _must_not_run)
     assert retag._album_cover_data(legacy_db, album_id) is None
+
+
+# ── user overrides beat the provider, everywhere ─────────────────────────────
+#
+# lib2 keeps a per-field override layer (`lib2_metadata_overrides`) and every
+# read path projects it: `queries._serialize_track` hands the UI
+# `effective["title"]`, so a title someone corrected by hand IS the library's
+# title. Re-tag never learned that -- `_track_rows` selected `t.title` straight
+# off the base row -- so running it wrote the OLD title into the file while the
+# page kept showing the corrected one. Two truths again, this time with the
+# file on the losing side.
+#
+# The rule, in all three places: hand beats provider. What the user may still
+# do is override the override, per field, deliberately -- which is why the diff
+# has to CARRY the provider's suggestion rather than silently drop it.
+
+def _override(conn, *, entity_type, entity_id, field_name, value):
+    from core.library2.metadata_overrides import set_field_override
+    set_field_override(conn, entity_type=entity_type, entity_id=entity_id,
+                       field_name=field_name, value=value)
+    conn.commit()
+
+
+def test_a_hand_set_title_is_what_gets_written(imported_conn):
+    conn = imported_conn
+    _, _, track_id = _seed_album_with_files(conn)
+    _override(conn, entity_type='track', entity_id=track_id,
+              field_name='title', value='One Dance (Radio Edit)')
+
+    row = retag._track_rows(conn, [track_id])[0]
+    data = retag._db_data_for_row(conn, row)
+
+    assert data['title'] == 'One Dance (Radio Edit)'
+
+
+def test_a_hand_set_album_title_is_what_gets_written(imported_conn):
+    conn = imported_conn
+    _, album_id, track_id = _seed_album_with_files(conn)
+    _override(conn, entity_type='release_group', entity_id=album_id,
+              field_name='title', value='Views (Deluxe)')
+
+    row = retag._track_rows(conn, [track_id])[0]
+    data = retag._db_data_for_row(conn, row)
+
+    assert data['album_title'] == 'Views (Deluxe)'
+
+
+def test_the_diff_shows_what_the_provider_wanted_instead(imported_conn):
+    """Not a silent skip: the row has to say the field is hand-set AND what the
+    catalogue would otherwise have written, or the user cannot choose."""
+    conn = imported_conn
+    _, _, track_id = _seed_album_with_files(conn)
+    _override(conn, entity_type='track', entity_id=track_id,
+              field_name='title', value='One Dance (Radio Edit)')
+
+    row = retag._track_rows(conn, [track_id])[0]
+    data = retag._db_data_for_row(conn, row)
+
+    assert data['_manual_fields'] == {'title': 'One Dance'}
+
+
+def test_a_field_nobody_touched_is_not_marked_manual(imported_conn):
+    conn = imported_conn
+    _, _, track_id = _seed_album_with_files(conn)
+
+    row = retag._track_rows(conn, [track_id])[0]
+    data = retag._db_data_for_row(conn, row)
+
+    assert data['_manual_fields'] == {}
+
+
+def _readable_file(monkeypatch, tmp_path, file_tags):
+    """Point the resolver at a real path and hand the reader fixed tags — the
+    same shape the other write tests use, so no audio fixture is needed."""
+    path = tmp_path / "track.flac"
+    path.write_bytes(b"fake")
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path",
+                        lambda _path: str(path))
+    monkeypatch.setattr("core.tag_writer.read_file_tags",
+                        lambda _path: {"error": None, **file_tags})
+    return path
+
+
+def test_the_preview_row_carries_the_conflict_for_the_user_to_settle(
+        imported_conn, tmp_path, monkeypatch):
+    """A hand-set field must arrive at the UI as a CHOICE: what is in the file,
+    what will be written, and what the catalogue wanted instead. Dropping the
+    third value silently decides for the user."""
+    conn = imported_conn
+    _, _, track_id = _seed_album_with_files(conn)
+    _readable_file(monkeypatch, tmp_path, {"title": "One Dance"})
+    _override(conn, entity_type='track', entity_id=track_id,
+              field_name='title', value='One Dance (Radio Edit)')
+
+    entry = retag.tag_preview(retag.track_contexts(conn, [track_id]))[0]
+    row = next(d for d in entry['diff'] if d['file_key'] == 'title')
+
+    assert row['manual'] is True
+    assert row['db_value'] == 'One Dance (Radio Edit)'
+    assert row['provider_value'] == 'One Dance'
+
+
+def test_a_row_without_an_override_says_so_rather_than_omitting_the_flag(
+        imported_conn, tmp_path, monkeypatch):
+    """The UI branches on `manual`; an absent key would read as undefined and
+    render the conflict control for every row."""
+    conn = imported_conn
+    _, _, track_id = _seed_album_with_files(conn)
+    _readable_file(monkeypatch, tmp_path, {"title": "Something Else"})
+
+    entry = retag.tag_preview(retag.track_contexts(conn, [track_id]))[0]
+    row = next(d for d in entry['diff'] if d['file_key'] == 'title')
+
+    assert row['manual'] is False
+    assert 'provider_value' not in row
+
+
+def test_a_track_with_a_conflict_is_countable_without_walking_the_diff(
+        imported_conn, tmp_path, monkeypatch):
+    """The bulk prompt has to say "23 findings, 4 of them hand-set" before the
+    user picks an action, so the count cannot require a nested scan."""
+    conn = imported_conn
+    _, _, track_id = _seed_album_with_files(conn)
+    _readable_file(monkeypatch, tmp_path, {"title": "One Dance"})
+    _override(conn, entity_type='track', entity_id=track_id,
+              field_name='title', value='One Dance (Radio Edit)')
+
+    entry = retag.tag_preview(retag.track_contexts(conn, [track_id]))[0]
+
+    assert entry['has_manual_conflict'] is True
