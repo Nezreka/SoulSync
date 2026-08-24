@@ -5,9 +5,12 @@ scan → deduped findings (supersede on change), approve == fix with the
 from __future__ import annotations
 
 import pytest
+from pathlib import Path
 
 from core.video.repair.worker import VideoRepairWorker
 from database.video_database import VideoDatabase
+
+_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 @pytest.fixture()
@@ -127,6 +130,50 @@ def test_quality_upgrade_no_cutoff_means_no_noise(db, worker, monkeypatch):
 
 
 # ── Broken Files ─────────────────────────────────────────────────────────────
+
+
+def test_quality_upgrade_scan_includes_owned_episodes(db, worker, monkeypatch):
+    conn = db._get_connection()
+    cur = conn.execute(
+        "INSERT INTO shows(server_source, server_id, title, tmdb_id) "
+        "VALUES ('plex', 's1', 'Low Show', 9001)")
+    show_id = cur.lastrowid
+    cur = conn.execute(
+        "INSERT INTO seasons(show_id, season_number, title) VALUES (?, 1, 'Season 1')",
+        (show_id,))
+    season_id = cur.lastrowid
+    cur = conn.execute(
+        "INSERT INTO episodes(show_id, season_id, season_number, episode_number, title, has_file) "
+        "VALUES (?, ?, 1, 2, 'Second', 1)", (show_id, season_id))
+    ep_id = cur.lastrowid
+    conn.execute(
+        "INSERT INTO media_files(episode_id, relative_path, size_bytes, resolution, video_codec, quality) "
+        "VALUES (?, '/low-show-s01e02.mkv', ?, '720p', 'hevc', '720p')",
+        (ep_id, 1024**3))
+    conn.commit(); conn.close()
+    monkeypatch.setattr("core.video.quality_profile.load",
+                        lambda _db: {"cutoff_resolution": "1080p"})
+
+    worker._run_job("quality_upgrade", forced=True)
+
+    pend = _pending(db)
+    assert len(pend) == 1
+    f = pend[0]
+    assert f["entity_type"] == "episode"
+    assert "Low Show S01E02" in f["title"]
+    assert f["details"]["kind"] == "episode"
+    assert f["details"]["show_tmdb_id"] == 9001
+    assert f["details"]["season_number"] == 1
+    assert f["details"]["episode_number"] == 2
+
+
+def test_repair_ui_renders_episode_quality_upgrade_details():
+    src = (_ROOT / "webui" / "static" / "video" / "video-repair.js").read_text(
+        encoding="utf-8", errors="replace")
+    assert "episodeQualityPanelHTML" in src
+    assert "d.kind === 'episode'" in src
+
+
 def test_broken_files_truncated_and_stub(db, worker):
     ok = _seed_movie(db, sid="m1", tmdb=1, title="Fine", file={"path": "/f.mkv"})
     cut = _seed_movie(db, sid="m2", tmdb=2, title="Cut Short", file={"path": "/c.mkv"})

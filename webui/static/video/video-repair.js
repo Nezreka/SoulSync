@@ -665,7 +665,14 @@
         // quality_upgrade / broken_file / metadata_gap — one shared movie panel.
         var fallback = '<pre class="repair-finding-json">' +
             esc(JSON.stringify(d, null, 2)) + '</pre>';
-        if (d.movie_id == null) { host.innerHTML = fallback; return; }
+        if (d.movie_id == null) {
+            if (f.finding_type === 'quality_upgrade' && d.kind === 'episode') {
+                host.innerHTML = episodeQualityPanelHTML(f, d);
+                return;
+            }
+            host.innerHTML = fallback;
+            return;
+        }
         jget('/api/video/detail/movie/' + d.movie_id)
             .then(function (movie) {
                 host.innerHTML = movie ? moviePanelHTML(f, d, movie) : fallback;
