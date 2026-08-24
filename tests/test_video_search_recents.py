@@ -60,3 +60,5 @@ def test_basic_search_runs_in_app_provider_searches():
     basic_fn = _JS.split("function renderBasicPreview")[1].split("function setMode")[0]
     assert "fetch(" not in basic_fn
     assert ".vsr-tabs" in _CSS and ".vsr-basic" in _CSS and ".vsr-basic-hit" in _CSS
+    assert "data-vsr-basic-source-tab" in _JS and ".vsr-basic-source-tabs" in _CSS
+    assert "vsr-basic-hit-analysis" in _JS and "vsr-basic-hit-reason" not in _JS

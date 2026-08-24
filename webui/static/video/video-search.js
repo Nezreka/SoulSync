@@ -43,6 +43,7 @@
     var basicSeq = 0;
     var basicConfiguredSources = null;
     var basicConfigLoading = false;
+    var basicActiveSource = null;
 
     function basicSources() {
         var nodes = document.querySelectorAll('[data-vsr-basic-source]:checked');
@@ -127,16 +128,28 @@
                 '<p>Choose at least one source so SoulSync can search it.</p></div>' +
             '</div>';
         }
-        return '<div class="vsr-basic-source-list">' + sources.map(function (id) {
+        if (!basicActiveSource || sources.indexOf(basicActiveSource) === -1) basicActiveSource = sources[0];
+        var tabs = sources.map(function (id) {
             var source = BASIC_SEARCH_SOURCES[id];
-            return '<section class="vsr-basic-source-row" data-vsr-basic-card="' + esc(id) + '">' +
-                '<div class="vsr-basic-source-main"><strong>' + esc(source.label) + '</strong>' +
+            var active = id === basicActiveSource;
+            return '<button class="vsr-basic-source-tab ' + (active ? 'active' : '') + '" type="button" role="tab" ' +
+                'aria-selected="' + (active ? 'true' : 'false') + '" data-vsr-basic-source-tab="' + esc(id) + '">' +
+                '<span>' + esc(source.label) + '</span><em data-vsr-basic-tab-count>Queued</em></button>';
+        }).join('');
+        var panels = sources.map(function (id) {
+            var source = BASIC_SEARCH_SOURCES[id];
+            var active = id === basicActiveSource;
+            return '<section class="vsr-basic-source-row ' + (active ? 'active' : '') + '" data-vsr-basic-card="' + esc(id) + '" ' +
+                (active ? '' : 'hidden ') + 'role="tabpanel">' +
+                '<div class="vsr-basic-source-top"><div class="vsr-basic-source-main"><strong>' + esc(source.label) + '</strong>' +
                 '<em>' + esc(source.kind) + '</em></div>' +
-                '<div class="vsr-basic-source-query">' + esc(q) + '</div>' +
-                '<div class="vsr-basic-source-action" data-vsr-basic-state>Queued</div>' +
+                '<div class="vsr-basic-source-meta"><span class="vsr-basic-source-query">' + esc(q) + '</span>' +
+                '<span class="vsr-basic-source-action" data-vsr-basic-state>Queued</span></div></div>' +
                 '<div class="vsr-basic-hits" data-vsr-basic-hits></div>' +
             '</section>';
-        }).join('') + '</div>';
+        }).join('');
+        return '<div class="vsr-basic-source-list"><div class="vsr-basic-source-tabs" role="tablist" aria-label="Basic search result sources">' +
+            tabs + '</div>' + panels + '</div>';
     }
 
     function basicSearchBody(q, sourceId) {
@@ -148,15 +161,30 @@
     }
 
     function basicResultHTML(r) {
-        var ok = !!r.accepted;
         var bits = [r.quality_label || r.resolution, r.source, r.codec, r.audio, r.hdr].filter(Boolean);
         var swarm = r.username ? r.username + (r.peers > 1 ? ' · ' + r.peers + ' peers' : '') : ((r.seeders || 0) + ' seeders');
-        return '<article class="vsr-basic-hit ' + (ok ? 'vsr-basic-hit--ok' : 'vsr-basic-hit--no') + '">' +
-            '<div><strong title="' + esc(r.title || '') + '">' + esc(r.title || 'Untitled release') + '</strong>' +
-            '<p>' + esc(bits.join(' · ') || 'Release') + '</p>' +
-            (r.rejected ? '<p class="vsr-basic-hit-reason">' + esc(r.rejected) + '</p>' : '') + '</div>' +
-            '<span>' + esc(swarm) + '</span>' +
+        var analysis = r.rejected ? '<details class="vsr-basic-hit-analysis"><summary>Analysis</summary><p>' + esc(r.rejected) + '</p></details>' : '';
+        return '<article class="vsr-basic-hit">' +
+            '<div class="vsr-basic-hit-main"><strong title="' + esc(r.title || '') + '">' + esc(r.title || 'Untitled release') + '</strong>' +
+            '<div class="vsr-basic-hit-tags">' + (bits.length ? bits.map(function (b) { return '<span>' + esc(b) + '</span>'; }).join('') : '<span>Release</span>') + '</div>' +
+            analysis + '</div>' +
+            '<span class="vsr-basic-hit-swarm">' + esc(swarm) + '</span>' +
         '</article>';
+    }
+
+    function setBasicSourceTab(id) {
+        if (!BASIC_SEARCH_SOURCES[id]) return;
+        basicActiveSource = id;
+        document.querySelectorAll('[data-vsr-basic-source-tab]').forEach(function (tab) {
+            var on = tab.getAttribute('data-vsr-basic-source-tab') === id;
+            tab.classList.toggle('active', on);
+            tab.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        document.querySelectorAll('[data-vsr-basic-card]').forEach(function (card) {
+            var on = card.getAttribute('data-vsr-basic-card') === id;
+            card.classList.toggle('active', on);
+            card.hidden = !on;
+        });
     }
 
     function renderBasicHits(card, rows, done, error, totalFiles) {
@@ -165,11 +193,16 @@
         if (!hits) return;
         if (error) {
             if (state) state.textContent = 'Needs setup';
+            var errTab = document.querySelector('[data-vsr-basic-source-tab="' + card.getAttribute('data-vsr-basic-card') + '"] [data-vsr-basic-tab-count]');
+            if (errTab) errTab.textContent = 'Needs setup';
             hits.innerHTML = '<div class="vsr-basic-source-note">' + esc(error) + '</div>';
             return;
         }
         rows = rows || [];
-        if (state) state.textContent = done ? (rows.length ? rows.length + ' found' : 'No matches') : 'Searching';
+        var label = done ? (rows.length ? rows.length + ' found' : 'No matches') : 'Searching';
+        if (state) state.textContent = label;
+        var tab = document.querySelector('[data-vsr-basic-source-tab="' + card.getAttribute('data-vsr-basic-card') + '"] [data-vsr-basic-tab-count]');
+        if (tab) tab.textContent = label;
         if (!rows.length) {
             hits.innerHTML = '<div class="vsr-basic-source-note">' + (done
                 ? (totalFiles ? 'Files were found, but none matched as video releases.' : 'No matching releases found.')
@@ -638,6 +671,12 @@
                     e.preventDefault();
                     var bq = $('[data-vsr-basic-query]');
                     if (bq) { try { bq.focus(); } catch (err) { /* ignore */ } }
+                    return;
+                }
+                var st = e.target.closest('[data-vsr-basic-source-tab]');
+                if (st && results.contains(st)) {
+                    e.preventDefault();
+                    setBasicSourceTab(st.getAttribute('data-vsr-basic-source-tab'));
                     return;
                 }
                 var rc = e.target.closest('[data-vsr-recent]');
