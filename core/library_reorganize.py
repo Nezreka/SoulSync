@@ -2087,8 +2087,14 @@ def reorganize_album_rename_only(
 
         # Skip anything that isn't a real, changing move. `unchanged` is the key one —
         # it's why a rename no longer rewrites files whose name didn't change.
+        # `current_path_abs` is the other one: the preview leaves it empty when the
+        # stored path resolves to nothing on disk (`file_exists` False). Passing that
+        # to the mover fails on os.rename — but only AFTER os.makedirs has built the
+        # destination tree, so an unresolvable track used to litter the library with
+        # empty folders, which is exactly what the preview avoids with create_dirs=False.
         if (not t.get('matched') or t.get('unchanged')
-                or t.get('collision') or not t.get('new_path_abs')):
+                or t.get('collision') or not t.get('new_path_abs')
+                or not t.get('current_path_abs')):
             summary['skipped'] += 1
             _emit(skipped=summary['skipped'])
             continue
@@ -2106,17 +2112,41 @@ def reorganize_album_rename_only(
             continue
 
         # File is at its new home — update the DB directly (authoritative; no need to
-        # round-trip through a server scan to learn what we just did). On DB failure the
-        # file still moved; a library scan reconciles it, so we don't fail the track.
+        # round-trip through a server scan to learn what we just did).
+        #
+        # A rename MOVES the only copy, so a failed catalogue update is NOT
+        # recoverable by "a scan will reconcile": the file sits at a path nothing
+        # points at, the track reads as MISSING, and the wishlist re-downloads
+        # something the user already owns. Reported against a fresh library — songs
+        # downloaded, Reorganize run while the import still held the write lock.
+        # Put the file back and fail the track loudly instead.
         if update_track_path_fn:
             try:
                 update_track_path_fn(t.get('track_id'), new_abs)
             except Exception as db_err:
-                logger.warning(
-                    "[Reorganize/rename] DB path update failed for %s: %s "
-                    "(file moved to %s; a scan will reconcile)",
-                    t.get('track_id'), db_err, new_abs,
-                )
+                undone, undo_err = _rename_track_in_place(new_abs, current_abs)
+                if undone:
+                    detail = f'{db_err} (move undone)'
+                    logger.warning(
+                        "[Reorganize/rename] catalogue update failed for %s: %s "
+                        "— moved %s back to %s",
+                        t.get('track_id'), db_err, new_abs, current_abs,
+                    )
+                else:
+                    detail = (f'{db_err} — and the file could not be moved back '
+                              f'to {current_abs}: {undo_err}')
+                    logger.error(
+                        "[Reorganize/rename] catalogue update failed for %s (%s) AND "
+                        "the rollback failed (%s): the file is at %s while the "
+                        "catalogue still names %s",
+                        t.get('track_id'), db_err, undo_err, new_abs, current_abs,
+                    )
+                summary['failed'] += 1
+                summary['errors'].append({
+                    'track_id': t.get('track_id'), 'title': title, 'error': detail,
+                })
+                _emit(failed=summary['failed'], errors=list(summary['errors']))
+                continue
         if current_abs:
             src_dirs_touched.add(os.path.dirname(current_abs))
         summary['moved'] += 1
