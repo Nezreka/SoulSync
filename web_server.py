@@ -190,6 +190,7 @@ from core.imports.routes import staging_hints as _import_staging_hints
 from core.imports.routes import staging_scan_status as _import_staging_scan_status
 from core.imports.routes import staging_suggestions as _import_staging_suggestions
 from core.imports.paths import build_final_path_for_track as _build_final_path_for_track
+from core.imports.paths import config_root_path
 from core.imports.pipeline import build_import_pipeline_runtime as _build_import_pipeline_runtime
 from core.metadata.common import get_file_lock
 from core.metadata.enrichment import build_metadata_enrichment_runtime as _build_metadata_enrichment_runtime
@@ -7214,7 +7215,7 @@ def download_music_video():
     music_videos_path = config_manager.get('library.music_videos_path', '') or ''
     if not music_videos_path.strip():
         return jsonify({"error": "Music Videos directory not configured. Set it in Settings > Downloads."}), 400
-    music_videos_path = docker_resolve_path(music_videos_path)
+    music_videos_path = config_root_path(music_videos_path)
     try:
         os.makedirs(music_videos_path, exist_ok=True)
         # Quick write test
@@ -13444,7 +13445,8 @@ def reorganize_album_preview(album_id):
         ) or 'api'
         if metadata_source not in ('api', 'tags'):
             metadata_source = 'api'
-        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+        transfer_dir = config_root_path(
+            config_manager.get('soulseek.transfer_path', './Transfer'), './Transfer')
         result = preview_album_reorganize(
             album_id=album_id,
             db=get_database(),
@@ -13618,11 +13620,15 @@ try:
         post_process_fn=lambda *a, **kw: _post_process_matched_download(*a, **kw),
         cleanup_empty_directories_fn=lambda *a, **kw: _cleanup_empty_directories(*a, **kw),
         is_shutting_down_fn=lambda: bool(IS_SHUTTING_DOWN),
-        get_download_path=lambda: docker_resolve_path(
-            config_manager.get('soulseek.download_path', './downloads')
+        # Canonical absolute roots: the reorganize destination is written into
+        # the catalogue, so a relative './Transfer' would store a path whose
+        # meaning depends on the process CWD (and never matches the realpath'd
+        # form the repair scanners see for the same file).
+        get_download_path=lambda: config_root_path(
+            config_manager.get('soulseek.download_path', './downloads'), './downloads'
         ),
-        get_transfer_path=lambda: docker_resolve_path(
-            config_manager.get('soulseek.transfer_path', './Transfer')
+        get_transfer_path=lambda: config_root_path(
+            config_manager.get('soulseek.transfer_path', './Transfer'), './Transfer'
         ),
         # Rename-only mode (#875) computes destinations via the same path builder the
         # preview uses, so apply matches exactly what the user saw.

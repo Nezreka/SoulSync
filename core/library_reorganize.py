@@ -1320,11 +1320,7 @@ def preview_album_reorganize(
                 context, spotify_artist, album_info, file_ext, create_dirs=False
             )
             item['new_path_abs'] = new_full or ''
-            item['new_path'] = (
-                os.path.relpath(new_full, transfer_dir)
-                if transfer_dir and new_full and new_full.startswith(transfer_dir)
-                else new_full or ''
-            )
+            item['new_path'] = _display_relative_to_root(new_full, transfer_dir)
             if resolved and new_full and os.path.normpath(resolved) == os.path.normpath(new_full):
                 item['unchanged'] = True
         except Exception as e:
@@ -1388,11 +1384,35 @@ def _is_in_deleted_quarantine(resolved_path, transfer_dir) -> bool:
     return 'deleted' in norm.split('/')
 
 
+def _display_relative_to_root(path, root):
+    """``path`` shown relative to ``root`` when it lives inside it, else whole.
+
+    A raw ``startswith`` was wrong twice over. It matched a SIBLING root
+    (``/music/Transfer2`` starts with ``/music/Transfer``), and it compared two
+    strings that different code paths had spelled differently — the proposed
+    path came from the path builder rooted at the config value, the current
+    path from the resolver (absolute, symlinks resolved). With a relative root
+    configured the two never shared a prefix, so the preview trimmed one column
+    and printed the raw stored value in the other, for the very same file.
+    """
+    if not path or not root:
+        return path or ''
+    p = os.path.normpath(str(path))
+    r = os.path.normpath(str(root))
+    if p == r:
+        return ''
+    if p.startswith(r + os.sep) or (os.altsep and p.startswith(r + os.altsep)):
+        return p[len(r):].lstrip(os.sep).lstrip('/')
+    return path
+
+
 def _trim_to_transfer(db_path, resolved, transfer_dir):
     """Compose the user-facing 'current path' string — relative to the
     transfer dir if the file lives there, else the raw DB value."""
-    if resolved and transfer_dir and resolved.startswith(transfer_dir):
-        return resolved[len(transfer_dir):].lstrip(os.sep).lstrip('/')
+    if resolved and transfer_dir:
+        trimmed = _display_relative_to_root(resolved, transfer_dir)
+        if trimmed != resolved:
+            return trimmed
     return db_path or 'No file'
 
 

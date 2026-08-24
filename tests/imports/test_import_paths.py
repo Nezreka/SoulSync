@@ -1000,3 +1000,71 @@ def test_enhance_preview_still_creates_nothing(monkeypatch, tmp_path):
 
     assert final_path == str(album_dir / "01 - The Show.flac")
     assert not (tmp_path / "Transfer").exists()
+
+
+# ── a relative library root must still produce an absolute destination ───────
+#
+# "./Transfer" is the shipped default and what the settings page shows. It was
+# passed through docker_resolve_path (which only maps Windows drive letters) and
+# used verbatim, so the destination the builder returned — and therefore the path
+# written into the catalogue — was RELATIVE. Every consumer that realpath()s a
+# path (the repair filesystem scan) then saw "/app/Transfer/…" for the very same
+# file, and every consumer that compared roots with startswith() silently missed.
+# Same file, three spellings, no two of them equal.
+
+def _relative_root_config():
+    return _Config({
+        "soulseek.transfer_path": "./Transfer",
+        "file_organization.enabled": True,
+        "file_organization.templates": {
+            "album_path": "$albumartist/$album/$track - $title",
+            "single_path": "$albumartist/$albumartist - $title/$title",
+        },
+        "file_organization.collab_artist_mode": "first",
+        "file_organization.disc_label": "Disc",
+    })
+
+
+def test_relative_transfer_root_yields_an_absolute_album_destination(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(import_paths, "_get_config_manager", _relative_root_config)
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+
+    final_path, _ = import_paths.build_final_path_for_track(
+        _album_context(), {"name": "Lenka"},
+        {"is_album": True, "album_name": "Lenka", "track_number": 1, "disc_number": 1},
+        ".flac", create_dirs=False,
+    )
+
+    assert os.path.isabs(final_path), f"catalogue would store a relative path: {final_path}"
+    assert final_path == str(tmp_path / "Transfer" / "Lenka" / "Lenka" / "01 - The Show.flac")
+
+
+def test_relative_transfer_root_yields_an_absolute_single_destination(monkeypatch, tmp_path):
+    """The single/simple builder took the same raw value through pathlib.Path,
+    which additionally ate the leading './' — a THIRD spelling of one root."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(import_paths, "_get_config_manager", _relative_root_config)
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+
+    final_path, _ = import_paths.build_final_path_for_track(
+        _album_context(), {"name": "Lenka"}, None, ".flac", create_dirs=False,
+    )
+
+    assert os.path.isabs(final_path), f"catalogue would store a relative path: {final_path}"
+    assert final_path.startswith(str(tmp_path / "Transfer") + os.sep)
+
+
+def test_an_absolute_root_is_left_exactly_as_configured(monkeypatch, tmp_path):
+    """Canonicalising must not rewrite a root the user already gave in full."""
+    monkeypatch.setattr(import_paths, "_get_config_manager",
+                        lambda: _album_path_config(tmp_path))
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+
+    final_path, _ = import_paths.build_final_path_for_track(
+        _album_context(), {"name": "Lenka"},
+        {"is_album": True, "album_name": "Lenka", "track_number": 1, "disc_number": 1},
+        ".flac", create_dirs=False,
+    )
+
+    assert final_path == str(tmp_path / "Transfer" / "Lenka" / "Lenka - Lenka" / "01 - The Show.flac")

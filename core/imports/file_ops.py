@@ -251,11 +251,18 @@ def protected_root_dirs():
     """
     roots = set()
     try:
-        from core.imports.paths import docker_resolve_path
-        for key in ('soulseek.staging_path', 'soulseek.download_path', 'soulseek.transfer_path'):
-            raw = config_manager.get(key, '') or ''
-            if raw:
-                roots.add(os.path.normpath(docker_resolve_path(raw)))
+        from core.imports.paths import config_root_path
+        # `import.staging_path` is the key the settings page writes (see
+        # webui/static/settings.js) and the key every other reader uses. This
+        # read used to name `soulseek.staging_path`, which nothing writes: the
+        # lookup returned '', the import folder never made it into the protected
+        # set, and #976's whole point — the cleanup must not rmdir the staging
+        # root when it sits under the download folder — silently did not apply.
+        for key in ('import.staging_path', 'soulseek.download_path',
+                    'soulseek.transfer_path'):
+            resolved = config_root_path(config_manager.get(key, '') or '')
+            if resolved:
+                roots.add(resolved)
     except Exception as e:
         logger.debug(f"protected_root_dirs: could not resolve configured roots: {e}")
     return roots
@@ -275,11 +282,14 @@ def ensure_staging_dir():
     not-yet-mounted volume path (which would mask the real mount).
     """
     try:
-        from core.imports.paths import docker_resolve_path
-        raw = config_manager.get('soulseek.staging_path', './Staging') or ''
-        if not raw:
+        from core.imports.paths import config_root_path
+        # Same key correction as protected_root_dirs(): reading the key nothing
+        # writes made this recreate a literal ./Staging next to the app instead
+        # of the import folder the user configured.
+        staging = config_root_path(
+            config_manager.get('import.staging_path', './Staging') or '')
+        if not staging:
             return
-        staging = os.path.normpath(docker_resolve_path(raw))
         if os.path.isdir(staging):
             return
         parent = os.path.dirname(staging)

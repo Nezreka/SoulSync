@@ -118,6 +118,33 @@ def docker_resolve_path(path_str: str) -> str:
     return path_str
 
 
+def config_root_path(path_str: Any, default: str = "") -> str:
+    """Canonical absolute form of a CONFIGURED root folder.
+
+    Every root in Settings (music library, downloads, import, music videos,
+    playlists) may be written relative — ``./Transfer`` is the shipped default
+    and what the settings page shows. :func:`docker_resolve_path` only maps
+    Windows drive letters, so that value used to reach the filesystem verbatim
+    and one folder ended up with three spellings that never compared equal:
+
+      * ``./Transfer/Artist/…``   — the album path builder (raw string)
+      * ``Transfer/Artist/…``     — the single/simple builder (``Path()`` eats
+        the leading ``./``)
+      * ``/app/Transfer/Artist/…``— anything that realpath()s, e.g. the repair
+        filesystem scan
+
+    The first two were written into the catalogue, so a stored path depended on
+    the process CWD, and every ``startswith(root)`` check silently missed.
+    Resolving once, here, is what makes "the path in the catalogue", "the path
+    on disk" and "the path in a root comparison" the same string. A root the
+    user already gave in full comes back unchanged apart from normalisation.
+    """
+    raw = str(path_str if path_str not in (None, "") else (default or "")).strip()
+    if not raw:
+        return ""
+    return os.path.abspath(docker_resolve_path(os.path.expanduser(raw)))
+
+
 def build_simple_download_destination(context, file_path: str):
     """Build the destination path for a simple download into Transfer."""
     context = normalize_import_context(context)
@@ -125,7 +152,8 @@ def build_simple_download_destination(context, file_path: str):
     if not isinstance(search_result, dict):
         search_result = {}
 
-    transfer_dir = Path(docker_resolve_path(_get_config_manager().get("soulseek.transfer_path", "./Transfer")))
+    transfer_dir = Path(config_root_path(
+        _get_config_manager().get("soulseek.transfer_path", "./Transfer"), "./Transfer"))
     album_name = None
     original_filename = search_result.get("filename", "")
     if "/" in original_filename or "\\" in original_filename:
@@ -568,7 +596,7 @@ def _configured_root_dirs() -> set[str]:
         raw.extend(music_paths)
         for value in raw:
             if isinstance(value, str) and value.strip():
-                roots.add(os.path.normpath(docker_resolve_path(value)))
+                roots.add(config_root_path(value))
     except Exception as exc:  # noqa: BLE001 - a missing config must not block the upgrade
         logger.debug("[Enhance] could not read the configured roots: %s", exc)
     return roots
@@ -588,7 +616,8 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         if create_dirs:
             _real_makedirs(path, exist_ok=True)
 
-    transfer_dir = docker_resolve_path(_get_config_manager().get("soulseek.transfer_path", "./Transfer"))
+    transfer_dir = config_root_path(
+        _get_config_manager().get("soulseek.transfer_path", "./Transfer"), "./Transfer")
     context = normalize_import_context(context)
     track_info = get_import_track_info(context)
     original_search = get_import_original_search(context)

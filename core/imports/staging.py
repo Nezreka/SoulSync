@@ -40,9 +40,12 @@ def _get_config_manager():
 
 
 def get_staging_path() -> str:
-    """Resolve the configured staging folder path."""
-    raw = _get_config_manager().get("import.staging_path", "./Staging")
-    return docker_resolve_path(raw)
+    """Resolve the configured import/staging folder to one canonical absolute
+    path, so the value stored, compared and walked is always the same string."""
+    from core.imports.paths import config_root_path
+
+    return config_root_path(
+        _get_config_manager().get("import.staging_path", "./Staging"), "./Staging")
 
 
 def get_import_suggestions_cache() -> Dict[str, Any]:

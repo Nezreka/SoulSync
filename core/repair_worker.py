@@ -5597,12 +5597,16 @@ class RepairWorker:
     # ------------------------------------------------------------------
     @staticmethod
     def _resolve_path(path_str: str) -> str:
-        """Resolve Docker path mapping if running in a container."""
-        if os.path.exists('/.dockerenv') and len(path_str) >= 3 and path_str[1] == ':' and path_str[0].isalpha():
-            drive_letter = path_str[0].lower()
-            rest_of_path = path_str[2:].replace('\\', '/')
-            return f"/host/mnt/{drive_letter}{rest_of_path}"
-        return path_str
+        """Canonical absolute form of a configured folder (Docker mapping included).
+
+        Roots are routinely configured relative ("./Transfer" is the shipped
+        default). Returning them verbatim made every root comparison in the
+        repair jobs a string compare between "./Transfer/…" and the realpath'd
+        "/app/Transfer/…" of the very same file — which never matched.
+        """
+        from core.imports.paths import config_root_path
+
+        return config_root_path(path_str) or path_str
 
     def _get_transfer_path_from_db(self) -> str:
         """Read transfer path directly from the database app_config."""
