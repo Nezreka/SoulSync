@@ -36,9 +36,13 @@
         soulseek: { label: 'slskd', kind: 'Soulseek', source: 'soulseek' },
         thepiratebay: { label: 'The Pirate Bay', kind: 'Prowlarr torrent indexer', source: 'torrent', indexer: 'thepiratebay' },
         extto: { label: 'EXT.to', kind: 'Prowlarr torrent indexer', source: 'torrent', indexer: 'extto' },
-        '1337x': { label: '1337x', kind: 'Prowlarr torrent indexer', source: 'torrent', indexer: '1337x' }
+        '1337x': { label: '1337x', kind: 'Prowlarr torrent indexer', source: 'torrent', indexer: '1337x' },
+        usenet: { label: 'Usenet', kind: 'Prowlarr usenet indexers', source: 'usenet' }
     };
+    var BASIC_TORRENT_SOURCES = ['thepiratebay', 'extto', '1337x'];
     var basicSeq = 0;
+    var basicConfiguredSources = null;
+    var basicConfigLoading = false;
 
     function basicSources() {
         var nodes = document.querySelectorAll('[data-vsr-basic-source]:checked');
@@ -50,13 +54,70 @@
     function sourceLabel(s) {
         return BASIC_SEARCH_SOURCES[s] ? BASIC_SEARCH_SOURCES[s].label : s;
     }
+    function basicIdsFromDownloadConfig(c) {
+        c = c || {};
+        var modes = (c.download_mode === 'hybrid' && Array.isArray(c.hybrid_order) && c.hybrid_order.length)
+            ? c.hybrid_order : [c.download_mode || 'soulseek'];
+        var out = [];
+        modes.forEach(function (m) {
+            if (m === 'soulseek') out.push('soulseek');
+            else if (m === 'torrent') out = out.concat(BASIC_TORRENT_SOURCES);
+            else if (m === 'usenet') out.push('usenet');
+        });
+        return out.filter(function (id, i) { return BASIC_SEARCH_SOURCES[id] && out.indexOf(id) === i; });
+    }
+
+    function renderBasicSourceControls(ids) {
+        var host = $('[data-vsr-basic-sources]'); if (!host) return;
+        if (ids === null) {
+            host.innerHTML = '<span class="vsr-basic-source-note">Loading configured sources...</span>';
+            return;
+        }
+        if (!ids.length) {
+            host.innerHTML = '<span class="vsr-basic-source-note">No video download source is configured.</span>';
+            return;
+        }
+        var checked = {};
+        document.querySelectorAll('[data-vsr-basic-source]:checked').forEach(function (n) { checked[n.value] = true; });
+        var hadChecks = Object.keys(checked).length > 0;
+        host.innerHTML = ids.map(function (id) {
+            var src = BASIC_SEARCH_SOURCES[id];
+            var on = hadChecks ? !!checked[id] : true;
+            return '<label><input type="checkbox" value="' + esc(id) + '" ' + (on ? 'checked ' : '') +
+                'data-vsr-basic-source><span>' + esc(src.label) + '</span></label>';
+        }).join('');
+    }
+
+    function ensureBasicSourceConfig() {
+        if (basicConfiguredSources !== null || basicConfigLoading) return;
+        basicConfigLoading = true;
+        renderBasicSourceControls(null);
+        fetch('/api/video/downloads/config', { headers: { 'Accept': 'application/json' } }).then(_json).then(function (c) {
+            basicConfigLoading = false;
+            basicConfiguredSources = basicIdsFromDownloadConfig(c);
+            renderBasicSourceControls(basicConfiguredSources);
+            if (mode === 'basic') { ensureBasicSourceConfig(); renderBasicPreview(); }
+        }).catch(function () {
+            basicConfigLoading = false;
+            basicConfiguredSources = ['soulseek'];
+            renderBasicSourceControls(basicConfiguredSources);
+            if (mode === 'basic') { ensureBasicSourceConfig(); renderBasicPreview(); }
+        });
+    }
 
     function basicSourceRows(q, sources) {
+        if (sources === null) {
+            return '<div class="vsr-basic-empty">' +
+                '<div class="vsr-basic-empty-mark">⌕</div>' +
+                '<div><strong>Loading configured sources</strong>' +
+                '<p>SoulSync is checking your Video Downloads configuration.</p></div>' +
+            '</div>';
+        }
         if (!q) {
             return '<div class="vsr-basic-empty">' +
                 '<div class="vsr-basic-empty-mark">⌕</div>' +
                 '<div><strong>Enter a query to search inside SoulSync</strong>' +
-                '<p>Pick slskd or a configured Prowlarr indexer, then SoulSync will render results here.</p></div>' +
+                '<p>The available sources follow your Video Downloads configuration.</p></div>' +
             '</div>';
         }
         if (!sources.length) {
@@ -165,7 +226,9 @@
         var q = (($('[data-vsr-basic-query]') || {}).value || '').trim();
         var cat = (($('[data-vsr-basic-category]') || {}).value || 'all');
         var sort = (($('[data-vsr-basic-sort]') || {}).value || 'seeders');
-        var sources = basicSources();
+        ensureBasicSourceConfig();
+        var sources = basicConfiguredSources === null ? [] : basicSources();
+        var rowSources = basicConfiguredSources === null ? null : sources;
         show('[data-video-search-loading]', false);
         show('[data-video-search-hint]', false);
         show('[data-video-search-empty]', false);
@@ -176,9 +239,9 @@
             '<div class="vsr-basic-summary">' +
                 '<span>' + esc(cat === 'all' ? 'All video' : cat) + '</span>' +
                 '<span>Sort: ' + esc(sort) + '</span>' +
-                '<span>' + (sources.length ? sources.map(sourceLabel).map(esc).join(' + ') : 'No sources selected') + '</span>' +
+                '<span>' + (basicConfiguredSources === null ? 'Loading sources' : (sources.length ? sources.map(sourceLabel).map(esc).join(' + ') : 'No sources selected')) + '</span>' +
             '</div>' +
-            basicSourceRows(q, sources) +
+            basicSourceRows(q, rowSources) +
         '</section>';
         if (q && sources.length) runBasicSearch(q, sources);
     }
@@ -195,7 +258,7 @@
             p.hidden = !on;
         });
         reqSeq++;
-        if (mode === 'basic') renderBasicPreview();
+        if (mode === 'basic') { ensureBasicSourceConfig(); renderBasicPreview(); }
         else if (!lastQuery) showIdle();
         else runSearch(lastQuery);
     }
