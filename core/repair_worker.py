@@ -948,6 +948,12 @@ class RepairWorker:
         if run_status == 'completed' and self._cancel_current_job.is_set():
             run_status = 'cancelled'
 
+        # A completed sweep is the moment we know the library's real state, so
+        # it is also the moment to close findings whose file has since gone.
+        # Skipped after a failure or a user stop: a partial view is not evidence.
+        if run_status == 'completed':
+            self.retire_vanished_findings(job_id)
+
         duration = time.time() - start_time
 
         # Update aggregate stats
@@ -1406,6 +1412,71 @@ class RepairWorker:
         finally:
             if conn:
                 conn.close()
+
+    def retire_vanished_findings(self, job_id: str) -> int:
+        """Close this job's pending findings whose file is no longer on disk.
+
+        A finding carries its own snapshot of a path, and nothing ever closed one
+        after the file moved, was replaced or was deleted. The stale snapshot
+        stayed in the list with a Fix button that could only fail — reported as
+        Corrupt Audio findings naming files that no longer existed by the time
+        the user looked.
+
+        The trap a sweep like this has to avoid is retiring findings because THIS
+        process cannot see the library. A Docker install whose catalogue holds
+        the media server's paths ("/music/…") resolves nothing locally, and a
+        naive "the file is not there" test would wipe every finding it has. So a
+        finding is retired only when its CONTAINING FOLDER is right there and the
+        file is not: the folder is the proof that we are looking at the real
+        library and the file really did go away.
+
+        Returns the number retired. Best-effort — a maintenance sweep must never
+        be the reason a scan reports failure.
+        """
+        conn = None
+        retired = 0
+        try:
+            conn = self.db._get_connection()
+            rows = conn.execute(
+                "SELECT id, file_path FROM repair_findings "
+                "WHERE job_id = ? AND status = 'pending' "
+                "AND file_path IS NOT NULL AND file_path <> ''",
+                (job_id,),
+            ).fetchall()
+            download_folder = None
+            if self._config_manager:
+                download_folder = self._config_manager.get('soulseek.download_path', '')
+            gone = []
+            for row in rows:
+                raw = row['file_path'] if not isinstance(row, tuple) else row[1]
+                finding_id = row['id'] if not isinstance(row, tuple) else row[0]
+                resolved = _resolve_file_path(
+                    raw, self.transfer_folder, download_folder,
+                    config_manager=self._config_manager) or raw
+                if os.path.isfile(resolved):
+                    continue
+                parent = os.path.dirname(resolved)
+                if not parent or not os.path.isdir(parent):
+                    continue      # the library itself is out of reach from here
+                gone.append(finding_id)
+            for finding_id in gone:
+                conn.execute(
+                    "UPDATE repair_findings SET status = 'resolved', "
+                    "user_action = 'obsolete', resolved_at = CURRENT_TIMESTAMP, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (finding_id,),
+                )
+                retired += 1
+            if retired:
+                conn.commit()
+                logger.info("[%s] Retired %d finding(s) whose file is gone",
+                            job_id, retired)
+        except Exception as e:
+            logger.debug("Vanished-findings sweep skipped for %s: %s", job_id, e)
+        finally:
+            if conn:
+                conn.close()
+        return retired
 
     def resolve_finding(self, finding_id: int, action: str = None) -> bool:
         """Resolve a finding with an optional action."""
