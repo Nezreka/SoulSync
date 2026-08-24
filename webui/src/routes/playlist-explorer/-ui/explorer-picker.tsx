@@ -7,6 +7,8 @@
  * `explorerCardView` / `groupPlaylistsBySource`, and every action is a prop.
  */
 
+import { useMemo } from 'react';
+
 import type { ExplorerMode, MirroredPlaylist } from '../-explorer.types';
 
 import { explorerCardView, groupPlaylistsBySource, type ExplorerCardView } from '../-explorer.core';
@@ -41,6 +43,8 @@ function PickerCard({
   onDiscover,
 }: PickerCardProps) {
   const image = playlist.image_url || '';
+  const progress = livePercent !== null ? Math.round(livePercent) : view.pct;
+  const source = playlist.source || 'playlist';
   const classes = [
     'explorer-picker-card',
     active ? 'active' : '',
@@ -60,6 +64,8 @@ function PickerCard({
         ) : (
           <div className="explorer-picker-card-art-placeholder">♫</div>
         )}
+        <div className="explorer-picker-card-art-shade" />
+        <span className="explorer-picker-card-source">{source}</span>
       </div>
       <div className="explorer-picker-card-info">
         <div className="explorer-picker-card-name-row">
@@ -100,8 +106,12 @@ function PickerCard({
             </>
           )}
         </div>
-        {view.showDiscoverButton ? (
-          <div className="explorer-picker-card-actions">
+        <div className="explorer-picker-card-progress" aria-hidden="true">
+          <span style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
+        </div>
+        <div className="explorer-picker-card-footer">
+          <span>{view.discovered.toLocaleString()} discovered</span>
+          {view.showDiscoverButton ? (
             <button
               type="button"
               className="explorer-picker-discover-btn"
@@ -114,8 +124,10 @@ function PickerCard({
             >
               {DISCOVER_LABEL[discoverState]}
             </button>
-          </div>
-        ) : null}
+          ) : (
+            <span className="explorer-picker-card-ready">Ready</span>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -161,9 +173,36 @@ export function ExplorerPicker({
   } = groupPlaylistsBySource(playlists, activeSource);
   const visible = groups.find((group) => group.source === resolvedSource)?.playlists ?? [];
   const selected = playlists.find((playlist) => playlist.id === selectedPlaylistId);
+  const stats = useMemo(() => {
+    const views = playlists.map(explorerCardView);
+    const ready = views.filter((view) => view.isReady).length;
+    const explored = views.filter((view) => view.wasExplored).length;
+    const totalTracks = views.reduce((sum, view) => sum + view.total, 0);
+    return { ready, explored, totalTracks };
+  }, [playlists]);
 
   return (
     <div className="explorer-playlist-picker" id="explorer-playlist-picker">
+      <div className="explorer-picker-command">
+        <div className="explorer-picker-command-copy">
+          <span className="explorer-kicker">Discovery map</span>
+          <h3>Turn a synced playlist into a release graph.</h3>
+        </div>
+        <div className="explorer-picker-stats" aria-label="Explorer playlist summary">
+          <span>
+            <strong>{playlists.length.toLocaleString()}</strong> playlists
+          </span>
+          <span>
+            <strong>{stats.ready.toLocaleString()}</strong> ready
+          </span>
+          <span>
+            <strong>{stats.explored.toLocaleString()}</strong> explored
+          </span>
+          <span>
+            <strong>{stats.totalTracks.toLocaleString()}</strong> tracks
+          </span>
+        </div>
+      </div>
       <div className="explorer-picker-top">
         <div
           className="explorer-picker-tabs"
