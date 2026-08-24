@@ -1,3 +1,5 @@
+import { browserSafeImageUrl } from '@/platform/artwork-thumb';
+
 /**
  * Seasonal Discovery — the season's albums and its playlist.
  *
@@ -77,7 +79,9 @@ export function seasonalMixTitles(data: SeasonData): { title: string; subtitle: 
 }
 
 export function seasonalAlbumCover(album: SeasonalAlbum): string {
-  return album.album_cover_url || SEASONAL_ALBUM_PLACEHOLDER;
+  return album.album_cover_url
+    ? browserSafeImageUrl(album.album_cover_url)
+    : SEASONAL_ALBUM_PLACEHOLDER;
 }
 
 /**

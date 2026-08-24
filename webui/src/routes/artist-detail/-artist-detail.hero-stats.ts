@@ -1,3 +1,5 @@
+import { browserSafeImageUrl } from '@/platform/artwork-thumb';
+
 import type { ArtistInfo, Discography, DiscographyBucket } from './-artist-detail.types';
 
 /**
@@ -18,7 +20,7 @@ export function isUsableHeroImageUrl(url: unknown): url is string {
 export function heroReleaseImage(discography: Discography | undefined): string {
   for (const bucket of ['albums', 'eps', 'singles'] as const) {
     for (const release of discography?.[bucket] ?? []) {
-      if (isUsableHeroImageUrl(release?.image_url)) return release.image_url as string;
+      if (isUsableHeroImageUrl(release?.image_url)) return browserSafeImageUrl(release.image_url);
     }
   }
   return '';
@@ -38,7 +40,9 @@ export interface HeroImage {
  * the blurred hero background uses whichever won.
  */
 export function heroImage(artist: ArtistInfo, discography: Discography | undefined): HeroImage {
-  const artistImage = isUsableHeroImageUrl(artist.image_url) ? artist.image_url : '';
+  const artistImage = isUsableHeroImageUrl(artist.image_url)
+    ? browserSafeImageUrl(artist.image_url)
+    : '';
   const releaseImage = heroReleaseImage(discography);
   return { primary: artistImage || releaseImage, artistImage, releaseImage };
 }
@@ -67,7 +71,9 @@ export function nextHeroImageStage(
 }
 
 export function heroImageSrc(stage: HeroImageStage, artist: ArtistInfo, image: HeroImage): string {
-  if (stage === 'deezer') return `https://api.deezer.com/artist/${artist.deezer_id}/image?size=big`;
+  if (stage === 'deezer') {
+    return `https://api.deezer.com/artist/${String(artist.deezer_id)}/image?size=big`;
+  }
   if (stage === 'release') return image.releaseImage;
   return image.primary;
 }
