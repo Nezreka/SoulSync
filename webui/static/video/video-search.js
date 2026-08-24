@@ -15,6 +15,7 @@
     var PAGE_ID = 'video-search';
     var SEARCH_URL = '/api/video/search';
     var STUDIO_URL = '/api/video/search/studios';
+    var FRESH_URL = '/api/video/downloads/fresh-releases';
 
     var lastQuery = '';
     var reqSeq = 0;            // guards against out-of-order responses
@@ -44,6 +45,10 @@
     var basicConfiguredSources = null;
     var basicConfigLoading = false;
     var basicActiveSource = null;
+    var freshSeq = 0;
+    var freshCache = null;
+    var freshLoading = false;
+    var freshPeriod = 'day';
 
     function basicSources() {
         var nodes = document.querySelectorAll('[data-vsr-basic-source]:checked');
@@ -317,8 +322,104 @@
         '</section>';
         if (q && sources.length) runBasicSearch(q, sources);
     }
+
+    function freshPeriodLabel(p) {
+        return p === 'month' ? 'Month' : (p === 'week' ? 'Week' : 'Day');
+    }
+
+    function freshNum(n) {
+        n = Number(n);
+        return isFinite(n) ? n.toLocaleString() : '0';
+    }
+
+    function freshRows(category) {
+        var sections = (freshCache && freshCache.sections) || {};
+        var section = sections[category] || {};
+        return section[freshPeriod] || [];
+    }
+
+    function freshStat(label, value, cls) {
+        return '<span class="vsr-fresh-stat ' + (cls || '') + '"><em>' + esc(label) + '</em><strong>' + esc(value) + '</strong></span>';
+    }
+
+    function freshLoadingHTML() {
+        var rows = '';
+        for (var i = 0; i < 8; i++) rows += '<div class="vsr-fresh-row vsr-fresh-row--skel"><span></span><span></span><span></span><span></span></div>';
+        return '<section class="vsr-fresh-board is-loading"><div class="vsr-fresh-board-head"><div><span>Fresh Releases</span><h2>Sourced from EXT.to</h2></div>' +
+            '<div class="vsr-fresh-loader" aria-hidden="true"><i></i><i></i><i></i></div></div>' +
+            '<div class="vsr-fresh-table">' + rows + '</div></section>';
+    }
+
+    function freshRowHTML(r) {
+        r = r || {};
+        var files = r.files == null ? '-' : freshNum(r.files);
+        var seeds = r.seeders == null ? '-' : freshNum(r.seeders);
+        var leech = r.leechers == null ? '-' : freshNum(r.leechers);
+        return '<article class="vsr-fresh-row">' +
+            '<div class="vsr-fresh-release"><strong title="' + esc(r.title || '') + '">' + esc(r.title || 'Untitled release') + '</strong>' +
+                '<span>' + esc(r.age || 'Age unknown') + ' - ' + esc(r.source || 'EXT.to') + '</span></div>' +
+            freshStat('Size', r.size_text || 'Unknown') +
+            freshStat('Files', files) +
+            freshStat('Seed', seeds, 'vsr-fresh-seed') +
+            freshStat('Leech', leech, 'vsr-fresh-leech') +
+        '</article>';
+    }
+
+    function freshSectionHTML(category, label) {
+        var rows = freshRows(category);
+        var totalSeeds = rows.reduce(function (sum, r) { var n = Number(r.seeders); return sum + (isFinite(n) ? n : 0); }, 0);
+        var body = rows.length ? rows.slice(0, 18).map(freshRowHTML).join('') :
+            '<div class="vsr-basic-empty"><div class="vsr-basic-empty-mark">⌕</div><div><strong>No ' + esc(label.toLowerCase()) + ' releases found</strong><p>EXT.to did not publish rows for this period in the current homepage snapshot.</p></div></div>';
+        return '<section class="vsr-fresh-board" data-vsr-fresh-section="' + esc(category) + '">' +
+            '<div class="vsr-fresh-board-head"><div><span>' + esc(label) + '</span><h2>' + esc(freshPeriodLabel(freshPeriod)) + ' releases</h2></div>' +
+            '<div class="vsr-fresh-board-stats">' + freshStat('Rows', freshNum(rows.length)) + freshStat('Seeds', freshNum(totalSeeds), 'vsr-fresh-seed') + '</div></div>' +
+            '<div class="vsr-fresh-table-head"><span>Release</span><span>Size</span><span>Files</span><span>Seed</span><span>Leech</span></div>' +
+            '<div class="vsr-fresh-table">' + body + '</div>' +
+        '</section>';
+    }
+
+    function renderFreshReleases() {
+        var host = $('[data-video-search-results]'); if (!host) return;
+        show('[data-video-search-loading]', false);
+        show('[data-video-search-hint]', false);
+        show('[data-video-search-empty]', false);
+        if (!freshCache && !freshLoading) loadFreshReleases();
+        var tabs = ['day', 'week', 'month'].map(function (p) {
+            var on = p === freshPeriod;
+            return '<button class="vsr-fresh-period ' + (on ? 'active' : '') + '" type="button" data-vsr-fresh-period="' + p + '" aria-pressed="' + (on ? 'true' : 'false') + '">' + freshPeriodLabel(p) + '</button>';
+        }).join('');
+        if (freshLoading && !freshCache) {
+            host.innerHTML = '<section class="vsr-fresh-results"><div class="vsr-fresh-head"><div><span>Fresh Releases</span><h2>Loading the latest board</h2><p>Sourced from EXT.to</p></div><div class="vsr-fresh-periods">' + tabs + '</div></div>' + freshLoadingHTML() + '</section>';
+            return;
+        }
+        if (freshCache && freshCache.error) {
+            host.innerHTML = '<section class="vsr-fresh-results"><div class="vsr-fresh-head"><div><span>Fresh Releases</span><h2>Sourced from EXT.to</h2><p>Fresh Releases needs the EXT.to homepage through FlareSolverr.</p></div><div class="vsr-fresh-periods">' + tabs + '</div></div>' +
+                '<div class="vsr-basic-empty"><div class="vsr-basic-empty-mark">!</div><div><strong>Could not load Fresh Releases</strong><p>' + esc(freshCache.error) + '</p></div></div></section>';
+            return;
+        }
+        host.innerHTML = '<section class="vsr-fresh-results"><div class="vsr-fresh-head"><div><span>Fresh Releases</span><h2>Sourced from EXT.to</h2><p>Movies and TV releases from the EXT.to homepage, presented in SoulSync.</p></div><div class="vsr-fresh-periods">' + tabs + '</div></div>' +
+            '<div class="vsr-fresh-grid">' + freshSectionHTML('movies', 'Movies') + freshSectionHTML('tv', 'TV Series') + '</div></section>';
+    }
+
+    function loadFreshReleases(force) {
+        if (freshLoading || (freshCache && !force)) return;
+        var token = ++freshSeq;
+        freshLoading = true;
+        fetch(FRESH_URL, { headers: { 'Accept': 'application/json' } }).then(_json).then(function (d) {
+            if (token !== freshSeq) return;
+            freshLoading = false;
+            freshCache = d || { error: 'Fresh Releases returned no data.' };
+            if (mode === 'fresh') renderFreshReleases();
+        }).catch(function () {
+            if (token !== freshSeq) return;
+            freshLoading = false;
+            freshCache = { error: 'Fresh Releases failed to load.' };
+            if (mode === 'fresh') renderFreshReleases();
+        });
+    }
+
     function setMode(next) {
-        mode = next === 'basic' ? 'basic' : 'enhanced';
+        mode = next === 'basic' ? 'basic' : (next === 'fresh' ? 'fresh' : 'enhanced');
         document.querySelectorAll('[data-vsr-tab]').forEach(function (b) {
             var on = b.getAttribute('data-vsr-tab') === mode;
             b.classList.toggle('active', on);
@@ -331,6 +432,7 @@
         });
         reqSeq++;
         if (mode === 'basic') { ensureBasicSourceConfig(); renderBasicPreview(); }
+        else if (mode === 'fresh') renderFreshReleases();
         else if (!lastQuery) showIdle();
         else runSearch(lastQuery);
     }
@@ -716,6 +818,13 @@
                 if (st && results.contains(st)) {
                     e.preventDefault();
                     setBasicSourceTab(st.getAttribute('data-vsr-basic-source-tab'));
+                    return;
+                }
+                var fp = e.target.closest('[data-vsr-fresh-period]');
+                if (fp && results.contains(fp)) {
+                    e.preventDefault();
+                    freshPeriod = fp.getAttribute('data-vsr-fresh-period') || 'day';
+                    renderFreshReleases();
                     return;
                 }
                 var rc = e.target.closest('[data-vsr-recent]');

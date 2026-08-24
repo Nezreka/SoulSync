@@ -58,7 +58,7 @@ def test_basic_search_runs_in_app_provider_searches():
     assert "source: 'soulseek'" in _JS and "indexer: 'thepiratebay'" in _JS and "source: 'usenet'" in _JS
     assert "kind: 'FlareSolverr torrent scraper', source: 'extto'" in _JS
     assert "thepiratebay.org" not in _JS and "1337x.to" not in _JS and 'target="_blank"' not in _JS
-    basic_fn = _JS.split("function renderBasicPreview")[1].split("function setMode")[0]
+    basic_fn = _JS.split("function renderBasicPreview")[1].split("function freshPeriodLabel")[0]
     assert "fetch(" not in basic_fn
     assert ".vsr-tabs" in _CSS and ".vsr-basic" in _CSS and ".vsr-basic-hit" in _CSS
     assert "data-vsr-basic-source-tab" in _JS and ".vsr-basic-source-tabs" in _CSS
@@ -67,3 +67,17 @@ def test_basic_search_runs_in_app_provider_searches():
     assert "vsr-basic-hit-side" in _JS and "vsr-basic-hit-linkstate" in _JS
     assert "vsr-basic-loader" in _JS and "vsr-basic-tab-loader" in _JS
     assert ".vsr-basic-hit-side" in _CSS and "vsrBasicScan" in _CSS and "vsrBasicDots" in _CSS
+
+
+def test_fresh_releases_tab_fetches_extto_homepage_board_in_app():
+    index = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
+    assert 'data-vsr-tab="fresh"' in index and 'data-vsr-panel="fresh"' in index
+    assert "Sourced from EXT.to" in index
+    assert "FRESH_URL = '/api/video/downloads/fresh-releases'" in _JS
+    assert "function renderFreshReleases" in _JS and "function loadFreshReleases" in _JS
+    assert "data-vsr-fresh-period" in _JS and "freshSectionHTML('movies', 'Movies')" in _JS
+    assert "freshSectionHTML('tv', 'TV Series')" in _JS
+    fresh_fn = _JS.split("function freshRowHTML")[1].split("function freshSectionHTML")[0]
+    assert "<a " not in fresh_fn and "href=" not in fresh_fn
+    assert ".vsr-fresh-results" in _CSS and ".vsr-fresh-row" in _CSS and ".vsr-fresh-loader" in _CSS
+    assert "repeat(3, minmax" in _CSS

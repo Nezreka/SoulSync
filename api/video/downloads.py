@@ -654,6 +654,25 @@ def register_routes(bp):
                     pid = None
         return profile_by_id(db, pid), pid
 
+    @bp.route("/downloads/fresh-releases", methods=["GET"])
+    def video_downloads_fresh_releases():
+        """Read EXT.to homepage release lists for Search -> Fresh Releases.
+
+        This is intentionally browse-only: it returns title/size/age/swarm data
+        for Movies and TV across day/week/month, but it does not expose a grab
+        action or mark rows as download-ready.
+        """
+        from core.video.extto_fresh import extto_fresh_releases
+
+        out = extto_fresh_releases(timeout=25)
+        if not out.get("configured"):
+            return jsonify({
+                "success": False,
+                "source": "EXT.to",
+                "sections": {},
+                "error": "Fresh Releases requires FlareSolverr — set flaresolverr.url.",
+            })
+        return jsonify({"success": not bool(out.get("error")), **out})
     @bp.route("/downloads/search", methods=["POST"])
     def video_downloads_search():
         """Search a scope (movie / episode / season / series) and return candidates
