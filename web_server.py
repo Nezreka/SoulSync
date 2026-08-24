@@ -20863,6 +20863,13 @@ def _get_staging_file_cache(batch_id):
     """List staging audio files with their tags, re-reading only what changed."""
     staging_path = _get_album_bundle_staging_path(batch_id) or get_staging_path()
     if not os.path.isdir(staging_path):
+        # A per-batch album-bundle staging root can be cleaned up out from
+        # under us once its batch finishes — evict its cache entries here too,
+        # or they'd never hit the pruning below (which only runs on a walk).
+        prefix = os.path.join(staging_path, '')
+        with _staging_cache_lock:
+            for path in [p for p in _staging_tag_cache if p.startswith(prefix)]:
+                del _staging_tag_cache[path]
         return []
 
     files = []

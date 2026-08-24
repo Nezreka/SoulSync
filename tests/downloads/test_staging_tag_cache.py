@@ -127,3 +127,40 @@ def test_vanished_files_are_dropped_from_cache(monkeypatch, tmp_path):
     # Pre-fix the per-batch lists were never freed, so batch-1's entry for the
     # deleted file stayed resident (and grew again with every new batch_id).
     assert gone not in _cached_paths(web_server), 'stale entry must be pruned'
+
+
+def test_removed_private_staging_root_is_pruned(monkeypatch, tmp_path):
+    """An album-bundle batch's private staging dir can be cleaned up whole
+    once the batch finishes. That must not orphan its cache entries forever —
+    the early-return for a missing directory has to prune too, not just the
+    walk path (CodeRabbit #18, review 844c9c72)."""
+    import web_server
+
+    root = tmp_path / 'private-staging'
+    for name in ('one.flac', 'two.flac'):
+        _write_audio(str(root / name))
+
+    monkeypatch.setattr(web_server, '_get_album_bundle_staging_path',
+                         lambda batch_id: str(root))
+    monkeypatch.setattr(web_server, '_read_staging_file_metadata',
+                         lambda full_path, rel_path: {
+                             'title': os.path.basename(full_path), 'artist': 'A',
+                             'albumartist': 'A', 'album': 'Alb',
+                             'track_number': 1, 'disc_number': 1})
+    for cache in _caches(web_server):
+        cache.clear()
+
+    found = web_server._get_staging_file_cache('bundle-batch')
+    assert len(found) == 2
+    assert _cached_paths(web_server) == {str(root / 'one.flac'), str(root / 'two.flac')}
+
+    # The whole batch-private root disappears (batch finished, cleaned up) —
+    # not just one file within it.
+    import shutil
+    shutil.rmtree(root)
+
+    empty = web_server._get_staging_file_cache('bundle-batch')
+
+    assert empty == []
+    assert _cached_paths(web_server) == set(), \
+        'cache entries under a removed staging root must be evicted, not orphaned'
