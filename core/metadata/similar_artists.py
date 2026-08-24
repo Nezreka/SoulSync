@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -22,7 +23,41 @@ logger = get_logger("metadata.similar_artists")
 __all__ = [
     "get_musicmap_similar_artists",
     "iter_musicmap_similar_artist_events",
+    "clean_musicmap_artist_name",
 ]
+
+
+_MULTI_ARTIST_SPLIT_RE = re.compile(r"\s*(?:,|;|\||\bfeat\.?\b|\bft\.?\b|\bfeaturing\b)\s*", re.IGNORECASE)
+_PLACEHOLDER_ARTIST_NAMES = {
+    'unknown',
+    'unknown artist',
+    'unknown artists',
+    'various artists',
+    'no artist',
+    'none',
+    'n/a',
+}
+
+
+def clean_musicmap_artist_name(artist_name: str) -> Optional[str]:
+    """Return a single safe artist name for MusicMap, or None to skip lookup."""
+    name = ' '.join(str(artist_name or '').strip().split())
+    if not name:
+        return None
+
+    if (name.startswith('[') and name.endswith(']')) or (name.startswith('(') and name.endswith(')')):
+        return None
+
+    parts = [part.strip() for part in _MULTI_ARTIST_SPLIT_RE.split(name) if part.strip()]
+    name = parts[0] if parts else name
+    normalized = _normalize_artist_name(name)
+    if not normalized or normalized in _PLACEHOLDER_ARTIST_NAMES:
+        return None
+    if len(name) > 120:
+        return None
+    if any(ch in name for ch in '<>{}'):
+        return None
+    return name
 
 
 def _get_source_chain_for_lookup(options: MetadataLookupOptions) -> List[str]:
@@ -41,13 +76,14 @@ def _get_source_chain_for_lookup(options: MetadataLookupOptions) -> List[str]:
 
 def _fetch_musicmap_similar_artist_names(artist_name: str) -> List[str]:
     """Fetch similar artist names from MusicMap."""
-    if not (artist_name or '').strip():
-        raise ValueError('Artist name is required')
+    lookup_artist_name = clean_musicmap_artist_name(artist_name)
+    if not lookup_artist_name:
+        raise ValueError('Artist name is not suitable for MusicMap lookup')
 
     from bs4 import BeautifulSoup
     from urllib.parse import quote_plus
 
-    url_artist = quote_plus(artist_name.strip())
+    url_artist = quote_plus(lookup_artist_name)
     musicmap_url = f'https://www.music-map.com/{url_artist}'
 
     headers = {
@@ -65,7 +101,7 @@ def _fetch_musicmap_similar_artist_names(artist_name: str) -> List[str]:
     if not gnod_map:
         raise ValueError('Could not find artist map on MusicMap')
 
-    searched_artist_lower = _normalize_artist_name(artist_name)
+    searched_artist_lower = _normalize_artist_name(lookup_artist_name)
     similar_artist_names: List[str] = []
     seen_names = set()
 
@@ -203,6 +239,15 @@ def iter_musicmap_similar_artist_events(
     source_override: Optional[str] = None,
 ):
     """Yield MusicMap similar-artist events using source priority."""
+    lookup_artist_name = clean_musicmap_artist_name(artist_name)
+    if not lookup_artist_name:
+        yield {
+            'type': 'error',
+            'error': 'Artist name is not suitable for MusicMap lookup',
+            'status_code': 400,
+        }
+        return
+
     try:
         source_chain = _get_source_chain_for_lookup(
             MetadataLookupOptions(source_override=source_override, allow_fallback=True)
@@ -216,12 +261,12 @@ def iter_musicmap_similar_artist_events(
             }
             return
 
-        similar_artist_names = _fetch_musicmap_similar_artist_names(artist_name)
-        searched_source_ids = _resolve_musicmap_artist_source_ids(artist_name, source_chain)
+        similar_artist_names = _fetch_musicmap_similar_artist_names(lookup_artist_name)
+        searched_source_ids = _resolve_musicmap_artist_source_ids(lookup_artist_name, source_chain)
 
         yield {
             'type': 'start',
-            'artist_name': artist_name,
+            'artist_name': lookup_artist_name,
             'total_found': len(similar_artist_names),
             'source_priority': source_chain,
         }
@@ -238,7 +283,7 @@ def iter_musicmap_similar_artist_events(
             source, payload = _match_musicmap_similar_artist(
                 candidate_name,
                 source_chain,
-                artist_name,
+                lookup_artist_name,
                 searched_source_ids,
             )
             if not payload:
@@ -263,7 +308,7 @@ def iter_musicmap_similar_artist_events(
             'complete': True,
             'total': matched_count,
             'total_found': len(similar_artist_names),
-            'artist_name': artist_name,
+            'artist_name': lookup_artist_name,
             'source_priority': source_chain,
         }
 
