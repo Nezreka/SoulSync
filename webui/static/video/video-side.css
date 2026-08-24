@@ -4622,6 +4622,14 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vdl-r-verdict--ok { color: #6cd391; }
 .vdl-r-verdict--no { color: #e8a23a; }
+.vdl-res--best { border-color: rgba(var(--accent-rgb), 0.72); background: rgba(var(--accent-rgb), 0.055); }
+.vdl-res--best::before { content: ''; position: absolute; inset: -1px auto -1px -1px; width: 3px; background: rgb(var(--accent-rgb)); }
+.vdl-r-best { flex-shrink: 0; font-size: 9.5px; font-weight: 900; letter-spacing: 0.04em; text-transform: uppercase;
+    color: #08111f; background: rgb(var(--accent-rgb)); padding: 2px 7px; border-radius: 0; }
+.vdl-r-note { margin-top: -1px; font-size: 10.5px; font-weight: 650; line-height: 1.35;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vdl-r-note--best { color: rgba(var(--accent-light-rgb, 148 158 255), 0.9); }
+.vdl-r-note--warn { color: rgba(251, 205, 122, 0.86); }
 /* GET — the one filled action: flat solid accent, inverts on hover */
 .vdl-res-grab { flex-shrink: 0; padding: 6px 16px; border-radius: 0; cursor: pointer;
     font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;

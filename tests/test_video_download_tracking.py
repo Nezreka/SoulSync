@@ -80,8 +80,11 @@ def test_detail_watch_started_for_library_movies():
 def test_result_cards_are_flat_brutalist_three_line():
     # 3 hard lines: [QUALITY] + title, an UPPERCASE spec line, then verdict + GET.
     assert 'vdl-r-l1' in _VIEW and 'vdl-r-q' in _VIEW and 'vdl-r-title' in _VIEW
+    assert 'vdl-res--best' in _VIEW and 'vdl-r-best' in _VIEW
+    assert 'vdl-r-note--warn' in _VIEW
     assert 'vdl-r-l2' in _VIEW and 'vdl-r-l3' in _VIEW and 'vdl-r-verdict' in _VIEW
     assert '.vdl-r-q' in _CSS and '.vdl-r-l2' in _CSS and '.vdl-r-verdict' in _CSS
+    assert '.vdl-res--best' in _CSS and '.vdl-r-note' in _CSS
     # the cinematic pill/badge language was redesigned out
     assert 'vdl-info-tags' not in _VIEW and 'vdl-tag' not in _VIEW
     assert 'vdl-q-res' not in _VIEW and 'vdl-flag' not in _VIEW
