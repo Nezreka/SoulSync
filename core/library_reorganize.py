@@ -1175,6 +1175,19 @@ def _build_post_process_context(
         # that stayed happily in the library (TheHomeGuy: 'Through Glass'
         # 283s vs Discogs' 241s). Size + parse corruption legs still run.
         'is_local_import': True,
+        # ...and for the same reason, the AcoustID identity leg does not get to
+        # quarantine this file. A reorganize stages a COPY of a track the user
+        # ALREADY OWNS and runs it through the download post-process; when the
+        # fingerprint disagreed, that leg moved the copy into ss_quarantine and
+        # the whole run reported `failed`, so a rename that should have been a
+        # no-op only worked on a second attempt with "Rename only" ticked. The
+        # disagreement is routinely legitimate — a different master, a regional
+        # release, or an artist credited in another script (Sawano Hiroyuki
+        # fingerprints as 澤野弘之). Identity of files already in the library is
+        # the AcoustID Scanner's job, and that one raises a finding instead of
+        # moving anyone's audio. The size and parse-corruption legs still run:
+        # skipping identity is not skipping safety.
+        '_skip_quarantine_check': 'acoustid',
         # Reorganize destinations must come from the CURRENT template alone.
         # The #829 existing-folder reuse would resolve to the folder the album
         # already lives in — the very folder reorganize is trying to move it
