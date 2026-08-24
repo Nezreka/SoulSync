@@ -155,6 +155,10 @@ export type DeadFileFixAction = 'redownload' | 'remove';
 export type AcoustidFixAction = 'retag' | 'relocate' | 'redownload' | 'delete';
 export type QualityFixAction = 'redownload' | 'delete' | 'ignore';
 export type BackfillFixAction = 'add_to_wishlist' | 'dismiss';
+/** `safe` keeps a field the user set by hand, which is the default everywhere
+ *  in Library v2; `overwrite_manual` deliberately hands it back to the
+ *  catalogue. Sent as the finding's `fix_action`, per row or per group. */
+export type RetagFixAction = 'safe' | 'overwrite_manual';
 
 // ── Cache health ─────────────────────────────────────────────────────────────
 

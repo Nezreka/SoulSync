@@ -1720,6 +1720,23 @@ class RepairWorker:
             jobs_by_type: Dict[str, set] = {}
             for finding_type, job_id in cursor.fetchall():
                 jobs_by_type.setdefault(finding_type, set()).add(job_id)
+
+            # How many PENDING rows would overwrite a value someone set by
+            # hand. "Apply everything" and "apply everything except my own
+            # edits" are two different requests, and the bulk prompt has to
+            # let the user tell them apart BEFORE clicking — which it cannot
+            # do if the client has to walk every finding's diff to find out.
+            # Restricted to pending because that is all a bulk apply touches.
+            manual_by_type: Dict[str, int] = {}
+            try:
+                cursor.execute(
+                    "SELECT finding_type, COUNT(*) FROM repair_findings "
+                    "WHERE status = 'pending' "
+                    "AND json_extract(details_json, '$.has_manual_conflict') = 1 "
+                    "GROUP BY finding_type")
+                manual_by_type = {row[0]: row[1] for row in cursor.fetchall()}
+            except Exception as e:  # noqa: BLE001 - a count is not worth a 500
+                logger.debug("manual-conflict count unavailable: %s", e)
         except Exception as e:
             logger.error("Error grouping findings: %s", e, exc_info=True)
             return []
@@ -1733,7 +1750,7 @@ class RepairWorker:
             group = groups.setdefault(finding_type, {
                 'finding_type': finding_type,
                 'pending': 0, 'resolved': 0, 'dismissed': 0, 'auto_fixed': 0,
-                'total': 0,
+                'total': 0, 'manual_conflicts': 0,
                 'severity_max': 'info', 'last_seen': None, 'job_ids': [],
             })
             # auto_fixed is its own STATUS, not a flavour of resolved — leaving
@@ -1751,6 +1768,7 @@ class RepairWorker:
 
         for finding_type, group in groups.items():
             group['job_ids'] = sorted(jobs_by_type.get(finding_type, ()))
+            group['manual_conflicts'] = manual_by_type.get(finding_type, 0)
 
         # Worst first, then biggest — the order you would actually work in.
         return sorted(

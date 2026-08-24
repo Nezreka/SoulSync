@@ -103,6 +103,7 @@ function readStoredPageSize(): number {
 const TYPE_ORPHAN = 'orphan_file';
 const TYPE_DEAD = 'dead_file';
 const TYPE_ACOUSTID = 'acoustid_mismatch';
+const TYPE_RETAG = 'library_retag';
 const TYPE_BACKFILL = 'missing_discography_track';
 const TYPE_QUALITY = 'quality_upgrade';
 
@@ -465,6 +466,13 @@ export function FindingsSurface({
           return;
         }
       }
+      if (type === TYPE_RETAG && !finding.details?.has_manual_conflict) {
+        // Nothing to settle on this row — the plain apply is the whole action.
+      } else if (type === TYPE_RETAG) {
+        fixAction = await prompts.promptRetag(1, 1);
+        if (!fixAction) return;
+        if (fixAction === 'safe') fixAction = null;
+      }
       if (type === TYPE_BACKFILL) {
         const choice = await prompts.promptBackfill(1);
         if (!choice) return;
@@ -728,6 +736,15 @@ export function FindingsSurface({
           return;
         }
         // 'add_to_wishlist' falls through with no fix_action.
+      } else if (group.finding_type === TYPE_RETAG) {
+        // Two requests wear one button: write the library's values, and write
+        // them even over the fields this user edited by hand. The count comes
+        // with the group so the choice is informed rather than a coin toss.
+        fixAction = await prompts.promptRetag(count, group.manual_conflicts || 0);
+        if (!fixAction) return;
+        // 'safe' IS the default the handler takes with no action at all;
+        // sending it would only add a string nothing reads.
+        if (fixAction === 'safe') fixAction = null;
       } else if (group.finding_type === TYPE_DEAD) {
         fixAction = await prompts.promptDeadFile();
         if (!fixAction) return;
