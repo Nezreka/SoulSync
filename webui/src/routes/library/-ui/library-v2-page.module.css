@@ -4349,6 +4349,70 @@ textarea.searchInput {
   word-break: break-word;
 }
 
+/* A field the user set by hand, offered as the choice it is. Neither side is
+   preselected away: the hand-set value wins unless they say otherwise, and
+   both values stay readable so "otherwise" is an informed answer. */
+.retagManualRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 5px 7px;
+  border: 1px solid rgba(250, 204, 21, 0.25);
+  border-radius: 5px;
+  background: rgba(250, 204, 21, 0.06);
+}
+
+.retagManualField {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.retagManualNote {
+  color: rgba(250, 204, 21, 0.85);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.retagChoice,
+.retagChoiceActive {
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.retagChoice {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.retagChoice:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.35);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* The side that is currently winning — stated, not implied by absence. */
+.retagChoiceActive {
+  border: 1px solid rgba(99, 102, 241, 0.75);
+  background: rgba(99, 102, 241, 0.22);
+  color: #fff;
+  font-weight: 600;
+  cursor: default;
+}
+
+.retagChoice:disabled,
+.retagChoiceActive:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .submenuContainer {
   position: relative;
   width: 100%;

@@ -23,8 +23,60 @@ function fieldValue(v: unknown): string {
 
 function diffSummary(t: LibraryV2TagPreviewTrack): string {
   return t.diff
+    .filter((d) => !d.manual)
     .map((d) => `${d.field}: ${fieldValue(d.file_value)} → ${fieldValue(d.db_value)}`)
     .join('  ·  ');
+}
+
+/** One key per released field. A blanket "overwrite everything" flag would let
+ *  settling a track title hand the album title over with it. */
+function releaseKey(trackId: number, field: string): string {
+  return `${trackId}:${field}`;
+}
+
+/**
+ * A field the user set by hand, shown as the choice it is.
+ *
+ * lib2 keeps a per-field override layer and every read path projects it, so a
+ * corrected title IS the library's title and a re-tag keeps it. That is the
+ * right default and the wrong thing to decide silently — someone who fixed a
+ * title months ago and has since fixed the catalogue needs a way to say the
+ * catalogue wins now. Both values are on screen; neither is preselected away.
+ */
+function ManualFieldChoice({
+  row,
+  released,
+  onToggle,
+  disabled,
+}: {
+  row: LibraryV2TagPreviewTrack['diff'][number];
+  released: boolean;
+  onToggle: () => void;
+  disabled: boolean;
+}) {
+  const provider = fieldValue(row.provider_value);
+  return (
+    <div className={styles.retagManualRow}>
+      <span className={styles.retagManualField}>{row.field}</span>
+      <span className={styles.retagManualNote}>set by hand</span>
+      <button
+        type="button"
+        className={released ? styles.retagChoice : styles.retagChoiceActive}
+        disabled={disabled}
+        onClick={() => released && onToggle()}
+      >
+        Keep mine ({fieldValue(row.db_value)})
+      </button>
+      <button
+        type="button"
+        className={released ? styles.retagChoiceActive : styles.retagChoice}
+        disabled={disabled}
+        onClick={() => !released && onToggle()}
+      >
+        Use "{provider}"
+      </button>
+    </div>
+  );
 }
 
 function releaseTypeLabel(albumType: string | null | undefined): string {
@@ -92,6 +144,9 @@ export function RetagModal({
   }, [tracks]);
 
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // Hand-set fields the user handed back to the catalogue, as `trackId:key`.
+  // Empty is the default and the safe answer: keep every one of them.
+  const [released, setReleased] = useState<Set<string>>(new Set());
   const [phase, setPhase] = useState<'idle' | 'writing' | 'done' | 'error'>('idle');
   const [message, setMessage] = useState<string | null>(null);
 
@@ -99,6 +154,16 @@ export function RetagModal({
   useEffect(() => {
     setSelected(new Set(changed.map((t) => t.track_id)));
   }, [changed]);
+
+  function toggleRelease(trackId: number, field: string) {
+    setReleased((s) => {
+      const next = new Set(s);
+      const key = releaseKey(trackId, field);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   function toggle(trackId: number) {
     setSelected((s) => {
@@ -115,7 +180,16 @@ export function RetagModal({
     setPhase('writing');
     setMessage(`Writing tags to ${ids.length} file(s)…`);
     try {
-      const jobId = await writeLibraryV2Tags(ids);
+      const chosen = new Set(ids);
+      const overwrite: [number, string][] = [];
+      for (const key of released) {
+        const [rawId, field] = key.split(':');
+        const trackId = Number(rawId);
+        // Only for tracks that are actually being written — a release on a
+        // track the user then deselected is not a request to write it.
+        if (field && chosen.has(trackId)) overwrite.push([trackId, field]);
+      }
+      const jobId = await writeLibraryV2Tags(ids, true, overwrite);
       // Poll this write only; other background jobs have independent ids.
       for (let i = 0; i < 600; i += 1) {
         const state = await fetchLibraryV2JobStatus(jobId);
@@ -222,7 +296,24 @@ export function RetagModal({
                           {t.error ? (
                             <span className={styles.statusWarn}>{t.error}</span>
                           ) : t.has_changes ? (
-                            diffSummary(t)
+                            <>
+                              {diffSummary(t)}
+                              {t.diff
+                                .filter((d) => d.manual && d.manual_key)
+                                .map((d) => (
+                                  <ManualFieldChoice
+                                    key={d.manual_key}
+                                    row={d}
+                                    released={released.has(
+                                      releaseKey(t.track_id, d.manual_key as string),
+                                    )}
+                                    onToggle={() =>
+                                      toggleRelease(t.track_id, d.manual_key as string)
+                                    }
+                                    disabled={phase === 'writing'}
+                                  />
+                                ))}
+                            </>
                           ) : (
                             <span className={styles.statusOk}>tags match</span>
                           )}

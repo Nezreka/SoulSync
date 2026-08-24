@@ -1190,6 +1190,16 @@ export interface LibraryV2TagDiffField {
   file_value: unknown;
   db_value: unknown;
   changed: boolean;
+  /** True when `db_value` is a value someone set by hand. It wins by default;
+   *  the preview offers it as a choice rather than deciding for them. */
+  manual?: boolean;
+  /** What the catalogue would have written instead. Present only alongside
+   *  `manual` — there is nothing to choose between otherwise. */
+  provider_value?: string;
+  /** The key `overwrite_manual` looks up. Neither `field` (a display label)
+   *  nor the tag name is that key, so the row carries it rather than making
+   *  the client keep its own copy of the mapping. */
+  manual_key?: string;
 }
 
 export interface LibraryV2TagPreviewTrack {
@@ -1202,6 +1212,8 @@ export interface LibraryV2TagPreviewTrack {
   file_path: string | null;
   diff: LibraryV2TagDiffField[];
   has_changes: boolean;
+  /** Whether any changing field on this track is hand-set. */
+  has_manual_conflict?: boolean;
   error?: string;
 }
 
@@ -1224,10 +1236,21 @@ export async function fetchLibraryV2TagPreview(
   };
 }
 
-export async function writeLibraryV2Tags(trackIds: number[], embedCover = true): Promise<string> {
+export async function writeLibraryV2Tags(
+  trackIds: number[],
+  embedCover = true,
+  /** The hand-set fields the user released back to the catalogue, as
+   *  [track_id, field] pairs. Omitted, every hand-set value is kept — which is
+   *  the rule everywhere else in Library v2. */
+  overwriteManual: [number, string][] = [],
+): Promise<string> {
   const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
     apiClient.post('library/v2/tags/write', {
-      json: { track_ids: trackIds, embed_cover: embedCover },
+      json: {
+        track_ids: trackIds,
+        embed_cover: embedCover,
+        ...(overwriteManual.length ? { overwrite_manual: overwriteManual } : {}),
+      },
     }),
   );
   if (!payload.success) throw new Error(payload.error || 'Write tags failed');

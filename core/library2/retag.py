@@ -253,16 +253,21 @@ def _annotate_manual(diff: List[Dict[str, Any]],
     control on every row.
     """
     by_file_key = {
-        _MANUAL_DIFF_KEYS[data_key]: displaced
+        _MANUAL_DIFF_KEYS[data_key]: (data_key, displaced)
         for data_key, displaced in manual_fields.items()
         if data_key in _MANUAL_DIFF_KEYS
     }
     for row in diff:
         row["manual"] = row.get("file_key") in by_file_key
         if row["manual"]:
+            data_key, displaced = by_file_key[row["file_key"]]
+            # `field` is a display label and `file_key` is the tag name;
+            # `overwrite_manual` looks up neither. Carrying the db_data key
+            # means the UI does not need its own copy of that mapping — one
+            # that could drift and make a release silently miss.
+            row["manual_key"] = data_key
             # What the catalogue would have written. The user settles it per
             # field; without this value there is nothing to settle it against.
-            displaced = by_file_key[row["file_key"]]
             row["provider_value"] = (
                 ", ".join(str(v) for v in displaced)
                 if isinstance(displaced, list)

@@ -493,6 +493,24 @@ def test_the_preview_row_carries_the_conflict_for_the_user_to_settle(
     assert row['provider_value'] == 'One Dance'
 
 
+def test_the_conflict_row_names_the_key_a_release_has_to_use(
+        imported_conn, tmp_path, monkeypatch):
+    """`field` is a display label ("Album") and `file_key` is the tag name
+    ("album"); neither is what `overwrite_manual` looks up, which is the
+    db_data key ("album_title"). Without it on the row the UI has to keep its
+    own copy of that mapping, and a release would silently miss."""
+    conn = imported_conn
+    _, album_id, track_id = _seed_album_with_files(conn)
+    _readable_file(monkeypatch, tmp_path, {"album": "Views"})
+    _override(conn, entity_type='release_group', entity_id=album_id,
+              field_name='title', value='Views (Deluxe)')
+
+    entry = retag.tag_preview(retag.track_contexts(conn, [track_id]))[0]
+    row = next(d for d in entry['diff'] if d['file_key'] == 'album')
+
+    assert row['manual_key'] == 'album_title'
+
+
 def test_a_row_without_an_override_says_so_rather_than_omitting_the_flag(
         imported_conn, tmp_path, monkeypatch):
     """The UI branches on `manual`; an absent key would read as undefined and
