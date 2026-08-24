@@ -91,6 +91,8 @@ def test_result_cards_are_flat_brutalist_three_line():
     assert 'vdl-r-l2' in _VIEW and 'vdl-r-l3' in _VIEW and 'vdl-r-verdict' in _VIEW
     assert '.vdl-r-q' in _CSS and '.vdl-r-l2' in _CSS and '.vdl-r-verdict' in _CSS
     assert '.vdl-res--best' in _CSS and '.vdl-r-note' in _CSS
+    assert 'vdl-r-formats' in _VIEW and 'format_score' in _VIEW and 'r.formats' in _VIEW
+    assert '.vdl-r-formats' in _CSS
     # the cinematic pill/badge language was redesigned out
     assert 'vdl-info-tags' not in _VIEW and 'vdl-tag' not in _VIEW
     assert 'vdl-q-res' not in _VIEW and 'vdl-flag' not in _VIEW

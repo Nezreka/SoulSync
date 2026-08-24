@@ -602,6 +602,14 @@
         meta.push(r.username ? r.username + (r.peers > 1 ? ' (' + r.peers + ')' : '') : (r.seeders || 0) + ' SEED');
         if (r.group) meta.push(r.group);
         meta.push(r.size_gb + ' GB');
+        var formatNames = Array.isArray(r.formats) ? r.formats.filter(Boolean) : [];
+        var formatNote = formatNames.length
+            ? '<div class="vdl-r-formats" title="' + esc(formatNames.join(', ')) + '">' +
+                '<span>Formats</span> ' + esc(formatNames.join(' · ')) +
+                (r.format_score ? ' <b>' + (r.format_score > 0 ? '+' : '') + esc(r.format_score) + '</b>' : '') +
+              '</div>'
+            : (r.format_score ? '<div class="vdl-r-formats"><span>Format score</span> ' +
+                (r.format_score > 0 ? '+' : '') + esc(r.format_score) + '</div>' : '');
         var isBest = i === 0 && r.accepted;
         var verdict = r.accepted
             ? '<span class="vdl-r-verdict vdl-r-verdict--ok">&#10003; MEETS PROFILE</span>'
@@ -623,6 +631,7 @@
                     (isBest ? '<span class="vdl-r-best">Best match</span>' : '') +
                 '</div>' +
                 '<div class="vdl-r-l2">' + esc(meta.filter(Boolean).join('  ·  ')) + '</div>' +
+                formatNote +
                 '<div class="vdl-r-l3">' + verdict + grab + '</div>' +
                 note +
             '</div>' +

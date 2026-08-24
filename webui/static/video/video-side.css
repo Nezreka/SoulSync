@@ -691,6 +691,10 @@ body[data-side="video"] .dashboard-header-sweep {
     box-shadow: 0 6px 18px rgba(0,0,0,0.32);
 }
 .vd-actions .vd-manage-btn:hover { box-shadow: 0 9px 24px rgba(0,0,0,0.42), 0 0 18px rgba(var(--vd-accent-rgb), 0.28); }
+.vd-actions .vwl-btn.vd-vwl-action {
+    position: static; inset: auto; z-index: auto; width: auto; height: auto;
+    opacity: 1; transform: none; backdrop-filter: none;
+}
 @media (max-width: 620px) {
     .vd-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; max-width: none; }
     .vd-actions .vd-action-main,
@@ -4624,6 +4628,11 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vdl-r-l2 { font-size: 10.5px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase;
     color: rgba(255, 255, 255, 0.5); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* line 3 — verdict (left) + GET (right) */
+.vdl-r-formats { margin-top: -2px; font-size: 10.5px; font-weight: 650; line-height: 1.35;
+    color: rgba(255, 255, 255, 0.68); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vdl-r-formats span { color: rgba(var(--accent-light-rgb, 148 158 255), 0.92);
+    text-transform: uppercase; letter-spacing: 0.04em; font-size: 9.5px; font-weight: 900; }
+.vdl-r-formats b { color: #6cd391; font-weight: 900; }
 .vdl-r-l3 { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .vdl-r-verdict { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; min-width: 0;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

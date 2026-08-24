@@ -553,9 +553,16 @@
                 '<span class="watchlist-text">Request</span></button>';
         }
         if (isAiringShow && _canDl) {
+            var showPoster = d.source !== 'tmdb' ? ('/api/video/poster/show/' + d.id) : proxied(d.poster_url);
             html +=
-                '<button class="library-artist-watchlist-btn' + (watching ? ' watching' : '') +
-                '" type="button" data-vd-act="watchlist">' +
+                '<button class="library-artist-watchlist-btn vwl-btn vd-vwl-action' +
+                (watching ? ' watching active' : '') + '" type="button"' +
+                ' data-vwl-kind="show" data-vwl-id="' + esc(d.tmdb_id) + '"' +
+                ' data-vwl-title="' + esc(d.title || '') + '"' +
+                ' data-vwl-poster="' + esc(showPoster || '') + '"' +
+                (d.source !== 'tmdb' && d.id ? ' data-vwl-libid="' + esc(d.id) + '"' : '') +
+                ' title="' + (watching ? 'On watchlist' : 'Add to watchlist') + '"' +
+                ' aria-label="' + (watching ? 'On watchlist' : 'Add to watchlist') + '">' +
                 '<span class="watchlist-icon">' + (watching ? '✓' : '＋') + '</span>' +
                 '<span class="watchlist-text">' + (watching ? 'In Watchlist' : 'Watchlist') + '</span></button>';
         }

@@ -113,6 +113,18 @@ class TestUiPins:
         assert 'vd-manage-btn" type="button" data-vd-act="poster"' in js
         assert '.vd-actions {\n    display: flex;' in css
         assert '@media (max-width: 620px)' in css
+
+    def test_show_detail_watchlist_uses_monitor_policy_button(self):
+        js = (_ROOT / "webui" / "static" / "video" / "video-detail.js").read_text(
+            encoding="utf-8", errors="replace")
+        css = (_ROOT / "webui" / "static" / "video" / "video-side.css").read_text(
+            encoding="utf-8", errors="replace")
+        assert 'vwl-btn vd-vwl-action' in js
+        assert 'data-vwl-kind="show"' in js
+        assert 'data-vwl-libid' in js
+        assert 'data-vd-act="watchlist"' not in js
+        assert '.vd-actions .vwl-btn.vd-vwl-action' in css
+
     def test_hero_html_has_awards_anchor_in_both_blocks(self):
         html = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8", errors="replace")
         assert html.count('data-vd-awards') == 2        # show + movie heroes

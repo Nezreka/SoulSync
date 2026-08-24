@@ -23,10 +23,12 @@
     var _videoYtQuality = null;
     // Pretty labels for the source×resolution quality ladder (keys come from the backend).
     var TIER_LABEL = {
-        'remux-2160p': 'Remux · 4K', 'bluray-2160p': 'BluRay · 4K', 'web-2160p': 'WEB · 4K',
+        'remux-2160p': 'Remux · 4K', 'bluray-2160p': 'BluRay · 4K', 'web-2160p': 'WEB-DL · 4K',
+        'webrip-2160p': 'WEBRip · 4K', 'hdtv-2160p': 'HDTV · 4K',
         'remux-1080p': 'Remux · 1080p', 'bluray-1080p': 'BluRay · 1080p', 'web-1080p': 'WEB-DL · 1080p',
         'webrip-1080p': 'WEBRip · 1080p', 'hdtv-1080p': 'HDTV · 1080p',
-        'bluray-720p': 'BluRay · 720p', 'web-720p': 'WEB-DL · 720p', 'hdtv-720p': 'HDTV · 720p',
+        'bluray-720p': 'BluRay · 720p', 'web-720p': 'WEB-DL · 720p', 'webrip-720p': 'WEBRip · 720p',
+        'hdtv-720p': 'HDTV · 720p',
         'dvd': 'DVD', 'sdtv': 'SDTV'
     };
     var REJECT_LABEL = {
