@@ -308,3 +308,111 @@ def test_a_release_that_will_not_resolve_fails_the_grab_instead_of_queueing_a_de
         assert db.list_video_downloads() == [], "a row was queued for a magnet we never got"
     finally:
         videoapi._video_db = None
+
+
+def test_the_search_surfaces_use_the_accent_token_not_a_lookalike_palette():
+    """Basic Search and Fresh Releases were built with a hardcoded mint/blue palette
+    (#9fe7c6 -> #87b7ff) that only RESEMBLES the accent. On a green accent install the
+    two sat side by side and read as a different product; on any other accent the page
+    was simply the wrong colour. Every one of them is now the token, so a user's accent
+    drives these surfaces like it drives the rest of the app."""
+    for literal in ("#9fe7c6", "#87b7ff", "159,231,198", "135,183,255", "#06130f", "#071018"):
+        assert literal not in _CSS, "a hardcoded stand-in for the accent came back: " + literal
+
+
+def test_the_identify_modal_defines_the_accent_token_it_uses():
+    """The modal is appended to document.body, so it renders OUTSIDE .vsr-page — the
+    element that defines --vd-accent-rgb. Without its own declaration every accent rule
+    in it is invalid-at-computed-value-time and SILENTLY resets: the focused search box
+    drew a white border (border-color falling back to currentColor) and the primary
+    button lost its fill. Nothing errors, it just quietly looks broken."""
+    assert ".vsr-fi-backdrop { --vd-accent-rgb:" in _CSS, \
+        "the detached modal lost its accent token — its accent rules are now inert"
+    # ...and the rules that depend on it, so a failure here names something visible
+    # rsplit, not split: a selector list ('.vsr-fi-secondary, .vsr-fi-primary {') contains
+    # the same needle, and the LAST rule is the one that wins the cascade anyway.
+    primary = _CSS.rsplit(".vsr-fi-primary {", 1)[1][:300]
+    assert "--vd-accent-rgb" in primary, "the modal's primary button stopped using the accent"
+    focus = _CSS.rsplit(".vsr-fi-search input:focus {", 1)[1][:300]
+    assert "--vd-accent-rgb" in focus, "the modal's focus ring stopped using the accent"
+
+
+def test_the_release_rows_are_cards_not_a_tracker_table():
+    """Fresh Releases rendered as a spreadsheet — a column header row and fixed grid
+    columns — which is the one layout the rest of SoulSync never uses. Both release
+    lists are now cards carrying the accent edge every other card in the app has."""
+    assert ".vsr-fresh-table-head { display: none; }" in _CSS, "the column header row is back"
+    for card in (".vsr-basic-hit::before", ".vsr-fresh-row::before"):
+        # the rule's OWN braces — a fixed character window spills into the rules
+        # after it, which happen to use the token, so the guard could not fail
+        at = _CSS.index(card + " {")
+        block = _CSS[at:_CSS.index("}", at)]
+        assert "--vd-accent-rgb" in block, card + " lost its accent edge"
+
+
+def test_fresh_releases_is_a_stored_board_with_a_refresh_control():
+    """The tab reads a SNAPSHOT now — the pull and the per-release matching happen
+    in the 'Refresh Fresh Releases' automation or behind the Refresh button, both
+    calling core.video.extto_board.refresh_board. Rendering used to wait on a
+    Cloudflare challenge just to show a list."""
+    assert "data-vsr-fresh-refresh" in _JS and "function refreshFreshReleases" in _JS
+    assert "'/refresh'" in _JS, "the button does not call the refresh endpoint"
+    assert "refreshFreshReleases()" in _JS, "the Refresh click is not wired"
+    # the board's age is stated: there is otherwise no way to tell a quiet hour
+    # from a refresh that never ran
+    assert "function freshStampHTML" in _JS and "fetched_at" in _JS
+    # ...and Refresh is reachable when there is NO board, which is when it matters
+    head = _JS.split("function renderFreshReleases")[1].split("function loadFreshReleases")[0]
+    assert head.count("freshRefreshHTML()") >= 3, \
+        "Refresh is missing from the loading/error/board headers"
+    assert ".vsr-fresh-refresh" in _CSS
+
+
+def test_a_matched_release_shows_what_extto_already_stated():
+    """Each row carries the facts from its own EXT.to detail page. This is
+    presentational only — the user still identifies the title in the modal, so
+    nothing here may feed the grab payload."""
+    assert "function freshMetaHTML" in _JS and "function freshArtHTML" in _JS
+    meta = _JS.split("function freshMetaHTML")[1].split("function freshArtHTML")[0]
+    for field in ("imdb_rating", "year", "runtime_minutes", "quality", "genres"):
+        assert field in meta, "the card stopped showing " + field
+    # a release with no artwork draws an initial, never ext.to's grey placeholder
+    art = _JS.split("function freshArtHTML")[1].split("function freshRowHTML")[0]
+    assert "vsr-fresh-art--none" in art
+    for cls in (".vsr-fresh-art", ".vsr-fresh-meta", ".vsr-fresh-rating"):
+        assert cls in _CSS, cls + " lost its styling"
+    # the matched facts must NOT leak into the grab payload — identifying stays manual
+    payload = _JS.split("function freshGrabPayload")[1].split("function freshGrabIdentifiedRelease")[0]
+    assert "detail" not in payload, "detail facts leaked into the grab payload"
+
+
+def test_a_matched_release_card_expands_to_everything_extto_stated():
+    """The detail page states far more than a card can show, and it is already
+    stored — so the card opens in place rather than throwing the rest away."""
+    assert "function freshFactsHTML" in _JS and "function freshToggleRow" in _JS
+    assert "data-vsr-fresh-toggle" in _JS and "freshToggleRow(tb[0]" in _JS
+    # the FULL list in page order, not a hand-picked set of fields: movie and TV
+    # pages carry almost disjoint labels, so naming fields would blank one of them
+    facts = _JS.split("function freshFactsHTML")[1].split("function freshRowHTML")[0]
+    assert "d.facts" in facts and "f.label" in facts and "f.value" in facts
+
+    row = _JS.split("function freshRowHTML")[1].split("function freshSectionHTML")[0]
+    # only a matched release opens — an unmatched one would offer a control that
+    # reveals nothing
+    assert "var can = !!(d && (d.facts || []).length)" in row
+    assert "aria-expanded" in row and 'role="button"' in row and "tabindex" in row
+    # open state survives a re-render (period switch, refresh)
+    assert "freshExpanded[r.url]" in row
+    for cls in (".vsr-fresh-facts", ".vsr-fresh-fact", ".vsr-fresh-chev",
+                ".vsr-fresh-row--can-open", ".vsr-fresh-row--open"):
+        assert cls in _CSS, cls + " lost its styling"
+
+
+def test_identifying_a_release_does_not_toggle_its_card():
+    """The Identify button sits inside the clickable card. Its handler must run
+    first and return, or grabbing would also expand the row underneath the modal."""
+    handler = _JS.split("var freshPick = e.target.closest('[data-vsr-fresh-pick]')")[1]
+    pick_at = handler.find("freshOpenIdentify(")
+    toggle_at = handler.find("freshToggleRow(")
+    assert pick_at != -1 and toggle_at != -1
+    assert pick_at < toggle_at, "the toggle is checked before Identify — a grab would expand the card"

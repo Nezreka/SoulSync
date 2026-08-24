@@ -1366,7 +1366,7 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vsr-tab { min-height: 34px; border: 0; border-radius: 9px; cursor: pointer; color: rgba(255,255,255,0.68);
     background: transparent; font-size: 12px; font-weight: 850; letter-spacing: 0; }
 .vsr-tab:hover { color: #fff; background: rgba(255,255,255,0.06); }
-.vsr-tab.active { color: #071018; background: linear-gradient(135deg, #9fe7c6, #87b7ff); box-shadow: 0 8px 24px rgba(57, 153, 187, 0.22); }
+.vsr-tab.active { color: #fff; background: linear-gradient(135deg, rgb(var(--vd-accent-rgb)), rgba(var(--vd-accent-rgb), 0.62)); box-shadow: 0 8px 24px rgba(var(--vd-accent-rgb), 0.22); }
 .vsr-panel { position: relative; z-index: 1; }
 .vsr-panel:not(.active) { display: none; }
 .vsr-basic { max-width: 840px; margin: 0 auto; padding: 12px; border-radius: 16px;
@@ -1382,22 +1382,22 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vsr-basic-field span { flex-shrink: 0; color: rgba(255,255,255,0.58); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
 .vsr-basic-field select { min-width: 0; width: 100%; border: 0; outline: 0; color: #fff; background: transparent; font-weight: 750; }
 .vsr-basic-field option { color: #10131a; }
-.vsr-basic-submit, .vsr-basic-ghost { border: 1px solid rgba(159,231,198,0.55); color: #06130f;
-    background: #9fe7c6; border-radius: 10px; font-weight: 900; cursor: pointer; padding: 0 20px; }
+.vsr-basic-submit, .vsr-basic-ghost { border: 1px solid rgba(var(--vd-accent-rgb), 0.55); color: #fff;
+    background: rgb(var(--vd-accent-rgb)); border-radius: 10px; font-weight: 900; cursor: pointer; padding: 0 20px; }
 .vsr-basic-ghost { min-height: 34px; padding: 0 14px; color: rgba(255,255,255,0.86); background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.16); }
 .vsr-basic-sources { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .vsr-basic-sources label { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 0 11px;
     border-radius: 999px; color: rgba(255,255,255,0.72); background: rgba(255,255,255,0.055); border: 1px solid rgba(255,255,255,0.1); cursor: pointer; }
-.vsr-basic-sources input { accent-color: #9fe7c6; }
+.vsr-basic-sources input { accent-color: rgb(var(--vd-accent-rgb)); }
 .vsr-basic-results { max-width: 980px; margin: 0 auto; animation: vsr-fade 0.25s ease both; }
 .vsr-basic-results-head { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
-.vsr-basic-results-head span { color: rgba(159,231,198,0.86); font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.08em; }
+.vsr-basic-results-head span { color: rgba(var(--vd-accent-rgb), 0.86); font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.08em; }
 .vsr-basic-results-head h2 { margin: 3px 0 0; color: #fff; font-size: 24px; line-height: 1.15; letter-spacing: 0; }
 .vsr-basic-summary { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .vsr-basic-summary span { padding: 6px 10px; border-radius: 999px; color: rgba(255,255,255,0.72); background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); font-size: 12px; font-weight: 750; }
 .vsr-basic-empty { display: grid; grid-template-columns: 46px 1fr; gap: 14px; align-items: center; padding: 18px;
-    border-radius: 14px; background: linear-gradient(135deg, rgba(159,231,198,0.1), rgba(135,183,255,0.08)); border: 1px solid rgba(255,255,255,0.12); text-align: left; }
-.vsr-basic-empty-mark { width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; color: #06130f; background: #9fe7c6; font-size: 24px; font-weight: 900; }
+    border-radius: 14px; background: linear-gradient(135deg, rgba(var(--vd-accent-rgb), 0.1), rgba(var(--vd-accent-rgb), 0.08)); border: 1px solid rgba(255,255,255,0.12); text-align: left; }
+.vsr-basic-empty-mark { width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; color: #fff; background: rgb(var(--vd-accent-rgb)); font-size: 24px; font-weight: 900; }
 .vsr-basic-empty strong { color: #fff; font-size: 15px; }
 .vsr-basic-empty p { margin: 4px 0 0; color: rgba(255,255,255,0.58); line-height: 1.45; font-size: 13px; }
 .vsr-basic-source-list { display: grid; gap: 12px; }
@@ -1406,10 +1406,10 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     border-radius: 12px; color: rgba(255,255,255,0.72); background: rgba(255,255,255,0.055); border: 1px solid rgba(255,255,255,0.1);
     cursor: pointer; transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease; }
 .vsr-basic-source-tab:hover { color: #fff; background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.18); }
-.vsr-basic-source-tab.active { color: #fff; background: rgba(159,231,198,0.12); border-color: rgba(159,231,198,0.46); box-shadow: inset 0 1px 0 rgba(255,255,255,0.08); }
+.vsr-basic-source-tab.active { color: #fff; background: rgba(var(--vd-accent-rgb), 0.12); border-color: rgba(var(--vd-accent-rgb), 0.46); box-shadow: inset 0 1px 0 rgba(255,255,255,0.08); }
 .vsr-basic-source-tab span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 900; }
 .vsr-basic-source-tab em { color: rgba(255,255,255,0.52); font-size: 11px; font-style: normal; font-weight: 800; }
-.vsr-basic-source-tab.active em { color: rgba(159,231,198,0.86); }
+.vsr-basic-source-tab.active em { color: rgba(var(--vd-accent-rgb), 0.86); }
 .vsr-basic-source-row { display: grid; gap: 12px; min-height: 68px; padding: 14px; border-radius: 14px; text-decoration: none; color: inherit;
     background: rgba(255,255,255,0.055); border: 1px solid rgba(255,255,255,0.1); }
 .vsr-basic-source-row.active { animation: vsr-fade 0.2s ease both; }
@@ -1420,7 +1420,7 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vsr-basic-source-meta { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
 .vsr-basic-source-query { max-width: 220px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     padding: 7px 10px; border-radius: 999px; color: rgba(255,255,255,0.74); background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.08); font-size: 12px; font-weight: 800; }
-.vsr-basic-source-action { flex: 0 0 auto; padding: 7px 10px; border-radius: 999px; color: #06130f; background: #9fe7c6; font-size: 12px; font-weight: 900; }
+.vsr-basic-source-action { flex: 0 0 auto; padding: 7px 10px; border-radius: 999px; color: #fff; background: rgb(var(--vd-accent-rgb)); font-size: 12px; font-weight: 900; }
 .vsr-basic-hits { display: grid; gap: 8px; }
 .vsr-basic-source-note { padding: 10px 11px; border-radius: 10px; color: rgba(255,255,255,0.62); background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.08); font-size: 12px; font-weight: 750; }
 .vsr-basic-hit { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: start; padding: 12px;
@@ -1430,10 +1430,10 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vsr-basic-hit strong { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fff; font-size: 13px; line-height: 1.35; }
 .vsr-basic-hit-tags { display: flex; flex-wrap: wrap; gap: 5px; }
 .vsr-basic-hit-tags span { padding: 4px 7px; border-radius: 999px; color: rgba(255,255,255,0.68); background: rgba(255,255,255,0.065); border: 1px solid rgba(255,255,255,0.08); font-size: 10.5px; font-weight: 850; text-transform: uppercase; }
-.vsr-basic-hit-swarm { color: rgba(159,231,198,0.86); font-size: 11px; font-weight: 900; white-space: nowrap; }
+.vsr-basic-hit-swarm { color: rgba(var(--vd-accent-rgb), 0.86); font-size: 11px; font-weight: 900; white-space: nowrap; }
 .vsr-basic-hit-analysis { margin-top: 1px; color: rgba(255,255,255,0.56); font-size: 11px; font-weight: 750; }
 .vsr-basic-hit-analysis summary { width: max-content; cursor: pointer; color: rgba(255,255,255,0.56); }
-.vsr-basic-hit-analysis summary:hover { color: rgba(159,231,198,0.9); }
+.vsr-basic-hit-analysis summary:hover { color: rgba(var(--vd-accent-rgb), 0.9); }
 .vsr-basic-hit-analysis p { margin: 6px 0 0; color: rgba(255,189,122,0.76); line-height: 1.4; }
 
 /* Basic Search visual pass — SoulSync native release browser */
@@ -6063,7 +6063,7 @@ body[data-side="video"] #gsearch-aura {
     background: rgba(8,10,16,0.58); border: 1px solid rgba(255,255,255,0.09); }
 .vsr-fresh-period { min-height: 34px; border: 0; border-radius: 8px; cursor: pointer; color: rgba(255,255,255,0.62); background: transparent; font-size: 12px; font-weight: 900; }
 .vsr-fresh-period:hover { color: #fff; background: rgba(255,255,255,0.06); }
-.vsr-fresh-period.active { color: #06130f; background: #9fe7c6; box-shadow: 0 8px 20px rgba(159,231,198,0.22); }
+.vsr-fresh-period.active { color: #fff; background: rgb(var(--vd-accent-rgb)); box-shadow: 0 8px 20px rgba(var(--vd-accent-rgb), 0.22); }
 .vsr-fresh-grid { display: grid; gap: 16px; }
 .vsr-fresh-board { border-radius: 16px; overflow: hidden; background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.08);
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); }
@@ -6135,7 +6135,7 @@ body[data-side="video"] #gsearch-aura {
 .vsr-fi-release span { padding: 4px 8px; border-radius: 999px; color: rgba(255,255,255,0.66); background: rgba(255,255,255,0.055); font-size: 11px; font-weight: 850; }
 .vsr-fi-modes { display: inline-grid; grid-auto-flow: column; grid-auto-columns: minmax(110px, 1fr); gap: 4px; justify-self: start; padding: 4px; border-radius: 12px; background: rgba(8,10,16,0.58); border: 1px solid rgba(255,255,255,0.09); }
 .vsr-fi-modes button { min-height: 34px; border: 0; border-radius: 8px; color: rgba(255,255,255,0.64); background: transparent; cursor: pointer; font-size: 12px; font-weight: 900; }
-.vsr-fi-modes button.active { color: #06130f; background: #9fe7c6; }
+.vsr-fi-modes button.active { color: #fff; background: rgb(var(--vd-accent-rgb)); }
 .vsr-fi-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 140px)); gap: 10px; }
 .vsr-fi-fields[hidden] { display: none; }
 .vsr-fi-fields label, .vsr-fi-search { display: grid; gap: 6px; }
@@ -6155,7 +6155,7 @@ body[data-side="video"] #gsearch-aura {
 .vsr-fi-foot { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.08); }
 .vsr-fi-secondary, .vsr-fi-primary { min-height: 38px; border-radius: 10px; padding: 0 15px; cursor: pointer; font-size: 13px; font-weight: 900; }
 .vsr-fi-secondary { color: rgba(255,255,255,0.78); background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); }
-.vsr-fi-primary { color: #06130f; background: #9fe7c6; border: 1px solid rgba(159,231,198,0.65); }
+.vsr-fi-primary { color: #fff; background: rgb(var(--vd-accent-rgb)); border: 1px solid rgba(var(--vd-accent-rgb), 0.65); }
 .vsr-fi-primary:disabled { opacity: 0.52; cursor: default; }
 @media (max-width: 820px) {
     .vsr-fresh-table-head, .vsr-fresh-row { grid-template-columns: 1fr 1fr; }
@@ -6167,4 +6167,396 @@ body[data-side="video"] #gsearch-aura {
     .vsr-fresh-table-head, .vsr-fresh-row { grid-template-columns: 1fr; }
     .vsr-fi-fields { grid-template-columns: 1fr 1fr; }
     .vsr-fi-foot { flex-direction: column-reverse; align-items: stretch; }
+}
+
+/* =====================================================================
+ * Search — Basic / Basic results / Fresh Releases visual makeover.
+ *
+ * These three surfaces were built before the video side settled on a house
+ * style, and they drifted: a hardcoded mint/blue palette (rgb(var(--vd-accent-rgb)) -> rgba(var(--vd-accent-rgb), 0.62))
+ * that only RESEMBLES the accent, boxed stat pills that read as form fields,
+ * and a Fresh Releases board laid out as a tracker spreadsheet. Everything
+ * below re-homes them onto the same language the rest of SoulSync uses -
+ * accent-tokened, glass cards with an accent edge, one primary action - taking
+ * its cues from the music Basic Search (static/basic-search-v2.css) and the
+ * Discover shelves.
+ *
+ * Behaviour is untouched: this changes no markup contract, only how it looks.
+ * Every colour goes through --vd-accent-rgb so a user's accent drives it.
+ * ===================================================================== */
+
+/* — Mode tabs: accent segment, not a mint-to-blue gradient. */
+.vsr-tab.active {
+    color: #fff;
+    background: linear-gradient(135deg,
+        rgba(var(--vd-accent-rgb), 0.95), rgba(var(--vd-accent-rgb), 0.66));
+    box-shadow: 0 8px 22px rgba(var(--vd-accent-rgb), 0.3),
+        inset 0 1px 0 rgba(255,255,255,0.18);
+}
+
+/* — The form: one pill search field, glass selects, accent submit. */
+.vsr-basic { padding: 14px; }
+.vsr-basic-main {
+    min-height: 52px; padding: 0 20px; border-radius: 999px;
+    background: rgba(6, 8, 13, 0.72);
+    border: 1px solid rgba(255,255,255,0.09);
+    box-shadow: 0 6px 24px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05);
+    transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+.vsr-basic-main:focus-within {
+    border-color: rgba(var(--vd-accent-rgb), 0.55);
+    background: rgba(10, 13, 20, 0.85);
+    box-shadow: 0 6px 28px rgba(0,0,0,0.4), 0 0 0 3px rgba(var(--vd-accent-rgb), 0.14);
+}
+.vsr-basic-input { height: 50px; font-size: 14.5px; font-weight: 600; }
+.vsr-basic-row { gap: 10px; margin-top: 12px; }
+.vsr-basic-field {
+    min-height: 42px; border-radius: 999px; padding: 0 16px;
+    background: rgba(255,255,255,0.045);
+    border: 1px solid rgba(255,255,255,0.08);
+    transition: border-color 0.2s, background 0.2s;
+}
+.vsr-basic-field:focus-within {
+    border-color: rgba(var(--vd-accent-rgb), 0.5);
+    background: rgba(255,255,255,0.06);
+}
+.vsr-basic-field span {
+    color: rgba(255,255,255,0.5); font-size: 10px; letter-spacing: 0.07em;
+}
+.vsr-basic-submit, .vsr-basic-ghost {
+    min-height: 42px; padding: 0 26px; border-radius: 999px;
+    color: #fff; border: 1px solid rgba(var(--vd-accent-rgb), 0.55);
+    background: linear-gradient(135deg,
+        rgba(var(--vd-accent-rgb), 0.98), rgba(var(--vd-accent-rgb), 0.72));
+    font-size: 12px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+    box-shadow: 0 4px 14px rgba(var(--vd-accent-rgb), 0.28), inset 0 1px 0 rgba(255,255,255,0.2);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+.vsr-basic-submit:hover, .vsr-basic-ghost:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(var(--vd-accent-rgb), 0.4), inset 0 1px 0 rgba(255,255,255,0.25);
+}
+.vsr-basic-ghost {
+    min-height: 34px; padding: 0 16px; color: rgba(255,255,255,0.82);
+    background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.14);
+    box-shadow: none; letter-spacing: 0.06em;
+}
+.vsr-basic-ghost:hover {
+    color: #fff; background: rgba(var(--vd-accent-rgb), 0.16);
+    border-color: rgba(var(--vd-accent-rgb), 0.42); box-shadow: none;
+}
+
+/* — Source toggles as chips, the shape the rest of the app uses for a
+ *   multi-select. The native checkbox stays for a11y, just accent-tinted. */
+.vsr-basic-sources { gap: 7px; margin-top: 12px; }
+.vsr-basic-sources label {
+    min-height: 34px; padding: 0 14px; border-radius: 999px;
+    color: rgba(255,255,255,0.6);
+    background: linear-gradient(160deg, rgba(255,255,255,0.035), rgba(0,0,0,0.2));
+    border: 1px solid rgba(255,255,255,0.07);
+    font-size: 11.5px; font-weight: 750; letter-spacing: 0.03em;
+    transition: color 0.2s, border-color 0.2s, background 0.2s, transform 0.2s;
+}
+.vsr-basic-sources label:hover {
+    color: #fff; transform: translateY(-1px);
+    border-color: rgba(var(--vd-accent-rgb), 0.35);
+    background: linear-gradient(160deg, rgba(var(--vd-accent-rgb), 0.1), rgba(0,0,0,0.2));
+}
+.vsr-basic-sources label:has(input:checked) {
+    color: #fff; border-color: rgba(var(--vd-accent-rgb), 0.5);
+    background: linear-gradient(160deg, rgba(var(--vd-accent-rgb), 0.2), rgba(0,0,0,0.18));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.1);
+}
+.vsr-basic-sources input { accent-color: rgb(var(--vd-accent-rgb)); }
+
+/* — Results header + summary chips. */
+.vsr-basic-results-head h2 { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; }
+.vsr-basic-summary span {
+    border-radius: 999px; padding: 5px 12px; font-size: 11.5px; font-weight: 700;
+    color: rgba(255,255,255,0.6);
+    background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.07);
+}
+.vsr-basic-empty {
+    background: linear-gradient(135deg, rgba(var(--vd-accent-rgb), 0.12), rgba(255,255,255,0.03));
+    border-color: rgba(var(--vd-accent-rgb), 0.16);
+}
+.vsr-basic-empty-mark {
+    color: #fff;
+    background: linear-gradient(135deg,
+        rgba(var(--vd-accent-rgb), 0.9), rgba(var(--vd-accent-rgb), 0.5));
+    box-shadow: 0 8px 20px rgba(var(--vd-accent-rgb), 0.25);
+}
+.vsr-basic-source-tab.active em { color: rgba(var(--vd-accent-rgb), 0.95); }
+.vsr-basic-source-action {
+    padding: 6px 12px; color: #fff;
+    background: rgba(var(--vd-accent-rgb), 0.18);
+    border: 1px solid rgba(var(--vd-accent-rgb), 0.4);
+    font-size: 11px; font-weight: 800; letter-spacing: 0.04em;
+}
+
+/* — The release card. A glass panel with an accent edge and ONE primary
+ *   action, replacing a 2x2 grid of boxed pills that read as form fields.
+ *   The edge is the signal: accent = a candidate, amber = needs review. */
+.vsr-basic-hits { gap: 10px; }
+.vsr-basic-hit {
+    position: relative; overflow: hidden;
+    grid-template-columns: minmax(0, 1fr) 200px;
+    gap: 18px; padding: 16px 18px 16px 22px; border-radius: 14px;
+    background: linear-gradient(160deg, rgba(255,255,255,0.04), rgba(0,0,0,0.2));
+    border: 1px solid rgba(255,255,255,0.06);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 2px 10px rgba(0,0,0,0.2);
+    transition: border-color 0.2s, background 0.2s, transform 0.2s, box-shadow 0.2s;
+}
+.vsr-basic-hit::before {
+    content: ''; position: absolute; top: 14px; bottom: 14px; left: 0; width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: linear-gradient(180deg,
+        rgba(var(--vd-accent-rgb), 1), rgba(var(--vd-accent-rgb), 0.45));
+    box-shadow: 0 0 12px rgba(var(--vd-accent-rgb), 0.5);
+}
+.vsr-basic-hit:hover {
+    border-color: rgba(var(--vd-accent-rgb), 0.35); transform: translateY(-1px);
+    background: linear-gradient(160deg, rgba(var(--vd-accent-rgb), 0.07), rgba(0,0,0,0.2));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 6px 20px rgba(0,0,0,0.3);
+}
+.vsr-basic-hit--review::before {
+    background: linear-gradient(180deg, rgba(251,205,122,0.95), rgba(251,205,122,0.4));
+    box-shadow: 0 0 12px rgba(251,205,122,0.35);
+}
+.vsr-basic-hit--review:hover { border-color: rgba(251,205,122,0.32); }
+.vsr-basic-hit-main { gap: 9px; }
+.vsr-basic-hit strong { font-size: 14.5px; font-weight: 700; letter-spacing: -0.005em; }
+.vsr-basic-hit-tags span {
+    padding: 3px 9px; border-radius: 999px; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.05em; color: rgba(255,255,255,0.55);
+    background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.06);
+}
+
+/* — Stat rail: typography, not boxes. Size leads, swarm supports, the
+ *   verdict is a quiet caption, and the only framed thing is the action. */
+.vsr-basic-hit-side {
+    display: flex; flex-wrap: wrap; align-items: baseline;
+    justify-content: flex-end; align-content: start; gap: 1px 9px;
+}
+.vsr-basic-hit-size, .vsr-basic-hit-health { flex: 1 1 100%; }
+.vsr-basic-hit-side span {
+    min-height: 0; padding: 0; border: 0; background: none; text-align: right;
+    justify-content: flex-end;
+}
+.vsr-basic-hit-size {
+    background: none !important; color: #fff !important;
+    font-size: 16px !important; font-weight: 800; letter-spacing: -0.01em;
+}
+.vsr-basic-hit-health {
+    color: rgba(var(--vd-accent-rgb), 0.92) !important;
+    border: 0 !important; font-size: 11.5px; font-weight: 700;
+}
+.vsr-basic-hit-linkstate, .vsr-basic-hit-verdict {
+    color: rgba(255,255,255,0.4) !important; border: 0 !important;
+    font-size: 10px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.vsr-basic-hit--review .vsr-basic-hit-verdict { color: #fbcd7a !important; }
+.vsr-basic-hit-grab {
+    width: 100%; margin-top: 10px; min-height: 34px; border-radius: 999px;
+    border: 1px solid rgba(var(--vd-accent-rgb), 0.5); color: #fff;
+    background: linear-gradient(135deg,
+        rgba(var(--vd-accent-rgb), 0.95), rgba(var(--vd-accent-rgb), 0.68));
+    font-size: 11px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase;
+    box-shadow: 0 4px 14px rgba(var(--vd-accent-rgb), 0.24), inset 0 1px 0 rgba(255,255,255,0.18);
+}
+.vsr-basic-hit-grab:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(var(--vd-accent-rgb), 0.36), inset 0 1px 0 rgba(255,255,255,0.22);
+}
+.vsr-basic-hit-analysis summary:hover { color: rgba(var(--vd-accent-rgb), 0.9); }
+
+/* — Fresh Releases: cards, not a tracker's results table. The column head
+ *   goes away with the grid; each release becomes a titled row whose stats
+ *   read as a caption line and whose action sits where every other card
+ *   in the app puts it. */
+.vsr-fresh-period.active {
+    color: #fff;
+    background: linear-gradient(135deg,
+        rgba(var(--vd-accent-rgb), 0.95), rgba(var(--vd-accent-rgb), 0.66));
+    box-shadow: 0 6px 18px rgba(var(--vd-accent-rgb), 0.28), inset 0 1px 0 rgba(255,255,255,0.16);
+}
+.vsr-fresh-head h2 { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; }
+.vsr-fresh-board { background: none; border: 0; box-shadow: none; overflow: visible; }
+.vsr-fresh-board-head {
+    padding: 0 2px 12px; border-bottom: 0; background: none; align-items: flex-end;
+}
+.vsr-fresh-board-head h2 { font-size: 20px; font-weight: 800; letter-spacing: -0.015em; }
+.vsr-fresh-table-head { display: none; }
+.vsr-fresh-table { gap: 10px; }
+.vsr-fresh-row {
+    position: relative; overflow: hidden;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px;
+    min-height: 0; padding: 15px 18px 15px 22px; border-top: 0; border-radius: 14px;
+    background: linear-gradient(160deg, rgba(255,255,255,0.04), rgba(0,0,0,0.2));
+    border: 1px solid rgba(255,255,255,0.06);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 2px 10px rgba(0,0,0,0.2);
+    transition: border-color 0.2s, background 0.2s, transform 0.2s, box-shadow 0.2s;
+}
+.vsr-fresh-row::before {
+    content: ''; position: absolute; top: 14px; bottom: 14px; left: 0; width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: linear-gradient(180deg,
+        rgba(var(--vd-accent-rgb), 1), rgba(var(--vd-accent-rgb), 0.45));
+    box-shadow: 0 0 12px rgba(var(--vd-accent-rgb), 0.5);
+}
+.vsr-fresh-row--blocked::before {
+    background: rgba(255,255,255,0.1); box-shadow: none;
+}
+.vsr-fresh-row:hover {
+    border-color: rgba(var(--vd-accent-rgb), 0.35); transform: translateY(-1px);
+    background: linear-gradient(160deg, rgba(var(--vd-accent-rgb), 0.07), rgba(0,0,0,0.2));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 6px 20px rgba(0,0,0,0.3);
+}
+/* grow, but do NOT claim a whole line: every row carries a poster tile now, and
+ * a 100% basis pushed that tile onto its own line and doubled the row height. */
+.vsr-fresh-release { flex: 1 1 280px; gap: 5px; min-width: 0; }
+.vsr-fresh-release strong { font-size: 14.5px; font-weight: 700; letter-spacing: -0.005em; }
+.vsr-fresh-release span { color: rgba(255,255,255,0.42); font-size: 11.5px; font-weight: 700; }
+.vsr-fresh-stat {
+    flex: 0 0 auto; min-height: 0; display: inline-flex; align-items: baseline; gap: 5px;
+    padding: 0; border: 0; background: none; color: rgba(255,255,255,0.62);
+}
+.vsr-fresh-stat em {
+    display: block; color: rgba(255,255,255,0.32); font-size: 9.5px; font-weight: 800;
+    letter-spacing: 0.07em; text-transform: uppercase;
+}
+.vsr-fresh-stat strong { font-size: 12.5px; font-weight: 800; }
+.vsr-fresh-seed { color: rgba(var(--vd-accent-rgb), 0.92) !important; border: 0 !important; }
+.vsr-fresh-leech { color: rgba(255,255,255,0.42) !important; border: 0 !important; }
+.vsr-fresh-pick {
+    margin-left: auto; min-height: 34px; padding: 0 20px; border-radius: 999px;
+    font-size: 11px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase;
+    background: linear-gradient(135deg,
+        rgba(var(--vd-accent-rgb), 0.95), rgba(var(--vd-accent-rgb), 0.68));
+    border-color: rgba(var(--vd-accent-rgb), 0.5);
+    box-shadow: 0 4px 14px rgba(var(--vd-accent-rgb), 0.24), inset 0 1px 0 rgba(255,255,255,0.18);
+}
+.vsr-fresh-row--skel { grid-template-columns: none; }
+
+/* — Identify modal. It is appended to document.body, so it renders OUTSIDE
+ *   .vsr-page and never inherited --vd-accent-rgb: every accent rule in here
+ *   was invalid-at-computed-value-time and silently reset. That is why the
+ *   focused search box drew a WHITE border (border-color falling back to
+ *   currentColor) and the primary button lost its fill. Same fix the other
+ *   detached overlays already use (.vd-lightbox, .vd-cast-modal). */
+.vsr-fi-backdrop { --vd-accent-rgb: var(--accent-rgb, 88, 101, 242); }
+
+.vsr-fi-modes button.active {
+    color: #fff;
+    background: linear-gradient(135deg,
+        rgba(var(--vd-accent-rgb), 0.95), rgba(var(--vd-accent-rgb), 0.66));
+    box-shadow: 0 4px 14px rgba(var(--vd-accent-rgb), 0.26);
+}
+.vsr-fi-primary {
+    color: #fff; border: 1px solid rgba(var(--vd-accent-rgb), 0.55);
+    background: linear-gradient(135deg,
+        rgba(var(--vd-accent-rgb), 0.98), rgba(var(--vd-accent-rgb), 0.72));
+    box-shadow: 0 4px 14px rgba(var(--vd-accent-rgb), 0.28), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+.vsr-fi-primary:disabled { opacity: 0.45; box-shadow: none; }
+
+@media (max-width: 820px) {
+    .vsr-basic-hit { grid-template-columns: minmax(0, 1fr); }
+    .vsr-basic-hit-side { justify-items: start; }
+    .vsr-basic-hit-side span { text-align: left; justify-content: flex-start; }
+    .vsr-fresh-row { grid-template-columns: none; }
+    .vsr-fresh-pick { flex: 1 1 100%; margin-left: 0; }
+}
+
+/* — Fresh Releases: matched cards. The board is a stored snapshot now (refreshed
+ *   by the hourly automation or the tab's Refresh button), so each row can carry
+ *   what EXT.to's own detail page states about the title: poster, IMDb rating,
+ *   year, runtime, genres. Presentational only — identifying the release is
+ *   still the user's call in the modal. */
+.vsr-fresh-actions { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px; }
+.vsr-fresh-refresh {
+    min-height: 42px; padding: 0 20px; border-radius: 999px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px; color: #fff;
+    border: 1px solid rgba(var(--vd-accent-rgb), 0.5);
+    background: linear-gradient(135deg,
+        rgba(var(--vd-accent-rgb), 0.95), rgba(var(--vd-accent-rgb), 0.68));
+    font-size: 11px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase;
+    box-shadow: 0 4px 14px rgba(var(--vd-accent-rgb), 0.24), inset 0 1px 0 rgba(255,255,255,0.18);
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.vsr-fresh-refresh:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(var(--vd-accent-rgb), 0.36), inset 0 1px 0 rgba(255,255,255,0.22);
+}
+.vsr-fresh-refresh:disabled { cursor: default; opacity: 0.7; transform: none; }
+.vsr-fresh-refresh-spin {
+    width: 12px; height: 12px; border-radius: 50%; flex: 0 0 auto;
+    border: 2px solid rgba(255,255,255,0.35); border-top-color: #fff;
+    animation: vsrFreshSpin 0.8s linear infinite;
+}
+@keyframes vsrFreshSpin { to { transform: rotate(360deg); } }
+
+/* Poster tile. Fixed box so a missing/odd-ratio image never reflows the row. */
+.vsr-fresh-art {
+    flex: 0 0 auto; width: 44px; height: 62px; border-radius: 8px; object-fit: cover;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+    align-self: flex-start;
+}
+.vsr-fresh-art--none {
+    display: grid; place-items: center; color: rgba(var(--vd-accent-rgb), 0.7);
+    font-size: 20px; font-weight: 900;
+    background: linear-gradient(135deg, rgba(var(--vd-accent-rgb), 0.16), rgba(0,0,0,0.35));
+}
+.vsr-fresh-row--rich { padding-left: 18px; }
+.vsr-fresh-meta {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-top: 3px;
+    color: rgba(255,255,255,0.5); font-size: 11.5px; font-weight: 700;
+}
+.vsr-fresh-meta b { color: rgba(255,255,255,0.72); font-weight: 800; }
+.vsr-fresh-meta i { font-style: normal; color: rgba(255,255,255,0.35); font-weight: 700; }
+.vsr-fresh-rating { color: rgba(var(--vd-accent-rgb), 0.95) !important; }
+.vsr-fresh-release span b { color: rgba(255,255,255,0.8); font-weight: 800; }
+
+@media (max-width: 820px) {
+    .vsr-fresh-actions { flex-wrap: wrap; }
+    .vsr-fresh-refresh { flex: 1 1 100%; justify-content: center; }
+}
+
+/* — Expandable release card. Everything EXT.to stated about the title, in the
+ *   order it stated it, revealed in place. Only a MATCHED release opens — an
+ *   unmatched one has nothing to show, so it stays a plain row rather than
+ *   offering a control that does nothing. */
+.vsr-fresh-row--can-open { cursor: pointer; }
+.vsr-fresh-row--can-open:focus-visible {
+    outline: 2px solid rgba(var(--vd-accent-rgb), 0.7); outline-offset: 2px;
+}
+.vsr-fresh-chev {
+    flex: 0 0 auto; width: 9px; height: 9px; margin-left: 2px; align-self: center;
+    border-right: 2px solid rgba(255,255,255,0.35);
+    border-bottom: 2px solid rgba(255,255,255,0.35);
+    transform: rotate(45deg); transition: transform 0.22s ease, border-color 0.2s;
+}
+.vsr-fresh-row--can-open:hover .vsr-fresh-chev {
+    border-color: rgba(var(--vd-accent-rgb), 0.85);
+}
+.vsr-fresh-row--open .vsr-fresh-chev {
+    transform: rotate(-135deg); border-color: rgba(var(--vd-accent-rgb), 0.9);
+}
+.vsr-fresh-facts {
+    flex: 1 1 100%; display: grid; gap: 8px 22px; margin-top: 4px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    padding-top: 13px; border-top: 1px solid rgba(255,255,255,0.07);
+    animation: vsr-fade 0.2s ease both;
+}
+.vsr-fresh-fact { display: grid; grid-template-columns: 116px minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.vsr-fresh-fact span {
+    color: rgba(255,255,255,0.38); font-size: 10px; font-weight: 800;
+    letter-spacing: 0.06em; text-transform: uppercase;
+}
+.vsr-fresh-fact em {
+    color: rgba(255,255,255,0.76); font-size: 12.5px; font-weight: 650;
+    font-style: normal; line-height: 1.45; overflow-wrap: anywhere;
+}
+@media (max-width: 620px) {
+    .vsr-fresh-fact { grid-template-columns: 1fr; gap: 2px; }
 }
