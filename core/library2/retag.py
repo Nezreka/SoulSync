@@ -165,7 +165,11 @@ def _apply_overrides(conn, row: Any, data: Dict[str, Any]) -> Dict[str, str]:
             value = _genres_list(value)
         if value == catalogue_value:
             continue
-        manual[data_key] = "" if catalogue_value is None else str(catalogue_value)
+        # Stored RAW, not str(): `track_number` reaches the tag writer as an
+        # int, and round-tripping the displaced value through str() would hand
+        # it '1' if the user later releases the field. `_annotate_manual`
+        # stringifies for display, which is the only place a string is wanted.
+        manual[data_key] = catalogue_value
         data[data_key] = value
     return manual
 
@@ -254,12 +258,16 @@ def _annotate_manual(diff: List[Dict[str, Any]],
         if data_key in _MANUAL_DIFF_KEYS
     }
     for row in diff:
-        displaced = by_file_key.get(row.get("file_key"))
-        row["manual"] = displaced is not None
-        if displaced is not None:
+        row["manual"] = row.get("file_key") in by_file_key
+        if row["manual"]:
             # What the catalogue would have written. The user settles it per
             # field; without this value there is nothing to settle it against.
-            row["provider_value"] = displaced
+            displaced = by_file_key[row["file_key"]]
+            row["provider_value"] = (
+                ", ".join(str(v) for v in displaced)
+                if isinstance(displaced, list)
+                else ("" if displaced is None else str(displaced))
+            )
     return diff
 
 
@@ -423,9 +431,38 @@ def _write_sibling_files(database, row: Dict[str, Any], db_data: Dict[str, Any],
             stats["errors"].append({"track_id": row["id"], "error": str(e)})
 
 
+def _release_manual_fields(db_data: Dict[str, Any], track_id: Any,
+                           released: Any) -> None:
+    """Hand back the catalogue value for the fields the user released.
+
+    ``released`` is either ``True`` (the bulk "apply everything, including the
+    hand-set ones" choice) or an iterable of ``(track_id, db_data_key)`` pairs.
+    Per-pair on purpose: settling the track title must not silently hand the
+    album title over with it.
+    """
+    manual = db_data.get("_manual_fields") or {}
+    if not manual or not released:
+        return
+    if released is True:
+        keys = set(manual)
+    else:
+        keys = {
+            field for tid, field in released
+            if str(tid) == str(track_id) and field in manual
+        }
+    for key in keys:
+        db_data[key] = manual[key]
+
+
 def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
-               force_cover: bool = False, progress=None) -> Dict[str, Any]:
+               force_cover: bool = False, overwrite_manual: Any = None,
+               progress=None) -> Dict[str, Any]:
     """Write lib2 DB metadata into the files' tags.
+
+    ``overwrite_manual`` releases fields a person set by hand back to the
+    catalogue value — ``True`` for all of them, or an iterable of
+    ``(track_id, field)`` pairs for an explicit per-field choice. Omitted, the
+    hand-set value wins, which is the rule everywhere else in Library v2.
 
     Returns ``{written, skipped, failed, errors: [...]}``. Cover art comes from
     the lib2 artwork cache (fetched once per album). Files that already match
@@ -465,6 +502,7 @@ def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
         try:
             file_tags = read_file_tags(abs_path)
             db_data = row["db_data"]
+            _release_manual_fields(db_data, row["id"], overwrite_manual)
 
             album_id = row["album_id"]
 

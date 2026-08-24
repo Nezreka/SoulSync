@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from typing import Any, Dict, List
 
 from core.library2 import retag
 
@@ -520,3 +521,102 @@ def test_a_track_with_a_conflict_is_countable_without_walking_the_diff(
     entry = retag.tag_preview(retag.track_contexts(conn, [track_id]))[0]
 
     assert entry['has_manual_conflict'] is True
+
+
+def _capture_write(monkeypatch, tmp_path, file_tags=None):
+    """Run write_tags against a stubbed writer and hand back what it was told
+    to write."""
+    written: List[Dict[str, Any]] = []
+    path = tmp_path / "track.flac"
+    path.write_bytes(b"fake")
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path",
+                        lambda _p: str(path))
+    monkeypatch.setattr("core.tag_writer.read_file_tags",
+                        lambda _p: {"error": None, **(file_tags or {})})
+    monkeypatch.setattr("core.tag_writer.build_tag_diff",
+                        lambda *_a: [{"changed": True}])
+    monkeypatch.setattr(
+        "core.tag_writer.write_tags_to_file",
+        lambda _p, db_data, **_kw: (written.append(dict(db_data)),
+                                    {"success": True})[1])
+    return written
+
+
+def test_by_default_the_write_keeps_the_hand_set_value(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    conn = imported_conn
+    _, _, track_id = _seed_album_with_files(conn)
+    _override(conn, entity_type='track', entity_id=track_id,
+              field_name='title', value='One Dance (Radio Edit)')
+    written = _capture_write(monkeypatch, tmp_path)
+
+    retag.write_tags(legacy_db, [track_id], embed_cover=False)
+
+    assert written[0]['title'] == 'One Dance (Radio Edit)'
+
+
+def test_releasing_one_field_takes_the_catalogue_value_for_that_field_only(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    """The release list is per (track, field) on purpose: settling the title
+    must not silently hand the album title over too."""
+    conn = imported_conn
+    _, album_id, track_id = _seed_album_with_files(conn)
+    _override(conn, entity_type='track', entity_id=track_id,
+              field_name='title', value='One Dance (Radio Edit)')
+    _override(conn, entity_type='release_group', entity_id=album_id,
+              field_name='title', value='Views (Deluxe)')
+    written = _capture_write(monkeypatch, tmp_path)
+
+    retag.write_tags(legacy_db, [track_id], embed_cover=False,
+                     overwrite_manual=[(track_id, 'title')])
+
+    assert written[0]['title'] == 'One Dance'
+    assert written[0]['album_title'] == 'Views (Deluxe)'
+
+
+def test_release_everything_is_available_for_the_bulk_choice(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    conn = imported_conn
+    _, album_id, track_id = _seed_album_with_files(conn)
+    _override(conn, entity_type='track', entity_id=track_id,
+              field_name='title', value='One Dance (Radio Edit)')
+    _override(conn, entity_type='release_group', entity_id=album_id,
+              field_name='title', value='Views (Deluxe)')
+    written = _capture_write(monkeypatch, tmp_path)
+
+    retag.write_tags(legacy_db, [track_id], embed_cover=False,
+                     overwrite_manual=True)
+
+    assert written[0]['title'] == 'One Dance'
+    assert written[0]['album_title'] == 'Views'
+
+
+def test_a_release_for_another_track_does_not_leak(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    conn = imported_conn
+    _, _, track_id = _seed_album_with_files(conn)
+    _override(conn, entity_type='track', entity_id=track_id,
+              field_name='title', value='One Dance (Radio Edit)')
+    written = _capture_write(monkeypatch, tmp_path)
+
+    retag.write_tags(legacy_db, [track_id], embed_cover=False,
+                     overwrite_manual=[(track_id + 999, 'title')])
+
+    assert written[0]['title'] == 'One Dance (Radio Edit)'
+
+
+def test_a_released_numeric_field_keeps_its_type(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    """`track_number` reaches the tag writer as an int. Round-tripping the
+    displaced value through str() would hand it '1' and quietly change what
+    lands in the file."""
+    conn = imported_conn
+    _, _, track_id = _seed_album_with_files(conn)
+    _override(conn, entity_type='track', entity_id=track_id,
+              field_name='track_number', value=7)
+    written = _capture_write(monkeypatch, tmp_path)
+
+    retag.write_tags(legacy_db, [track_id], embed_cover=False,
+                     overwrite_manual=[(track_id, 'track_number')])
+
+    assert written[0]['track_number'] == 1

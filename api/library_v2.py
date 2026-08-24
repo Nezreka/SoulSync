@@ -4850,6 +4850,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             }), 400
         track_ids = list(dict.fromkeys(raw_track_ids))
         embed_cover = bool(body.get("embed_cover", True))
+        # Fields a person set by hand win by default. `overwrite_manual` is how
+        # the user hands one back to the catalogue: `true` for the bulk "apply
+        # everything" choice, or [[track_id, field], ...] for the per-field
+        # decision the preview offers. Anything else is ignored rather than
+        # guessed at — releasing a field the user did not release is the one
+        # mistake this endpoint must not make.
+        raw_release = body.get("overwrite_manual")
+        if raw_release is True:
+            overwrite_manual = True
+        elif isinstance(raw_release, list):
+            overwrite_manual = [
+                (pair[0], str(pair[1])) for pair in raw_release
+                if isinstance(pair, (list, tuple)) and len(pair) == 2
+            ]
+        else:
+            overwrite_manual = None
         try:
             job = _job_registry.start("retag", total=len(track_ids))
         except JobAlreadyRunning as exc:
@@ -4889,6 +4905,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     _job_registry.update(job_id, current=current, total=total)
                 stats = retag.write_tags(db, track_ids,
                                          embed_cover=embed_cover,
+                                         overwrite_manual=overwrite_manual,
                                          progress=_progress)
                 _job_registry.update(job_id, result=stats)
             except Exception as e:  # noqa: BLE001
