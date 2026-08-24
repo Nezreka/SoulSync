@@ -17,8 +17,8 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 from utils.logging_config import get_logger
 
 
-DISCOGRAPHY_PARSER_VERSION = "library2-discography/1"
-TRACKLIST_PARSER_VERSION = "library2-tracklist/2"
+DISCOGRAPHY_PARSER_VERSION = "library2-discography/2"
+TRACKLIST_PARSER_VERSION = "library2-tracklist/3"
 ARTWORK_PARSER_VERSION = "library2-artwork/1"
 logger = get_logger("library2.provider_adapters")
 
@@ -38,10 +38,56 @@ def _optional_nonnegative_int(value: Any) -> Optional[int]:
     return parsed if parsed >= 0 else None
 
 
+def _artist_names(value: Any) -> Tuple[str, ...]:
+    """Normalize provider artist lists while preserving credited order."""
+    if not value:
+        return ()
+    if isinstance(value, (str, bytes, Mapping)):
+        value = [value]
+    try:
+        entries = list(value)
+    except TypeError:
+        entries = [value]
+
+    names = []
+    seen = set()
+    for entry in entries:
+        if isinstance(entry, Mapping):
+            nested = entry.get("artist")
+            if isinstance(nested, Mapping):
+                entry = nested
+            name = (
+                entry.get("name")
+                or entry.get("artist_name")
+                or entry.get("artistName")
+            )
+        else:
+            name = entry
+        text = str(name or "").strip()
+        key = text.casefold()
+        if text and key != "unknown artist" and key not in seen:
+            seen.add(key)
+            names.append(text)
+    return tuple(names)
+
+
+def _item_artist_names(item: Mapping[str, Any]) -> Tuple[str, ...]:
+    for key in ("artists", "contributors", "artist-credit"):
+        names = _artist_names(item.get(key))
+        if names:
+            return names
+    for key in ("artist", "artist_name", "artistName"):
+        names = _artist_names(item.get(key))
+        if names:
+            return names
+    return ()
+
+
 @dataclass(frozen=True)
 class DiscographyRelease:
     provider_id: str
     title: str
+    artists: Tuple[str, ...]
     album_type: str
     release_date: Optional[str]
     year: Optional[int]
@@ -75,6 +121,7 @@ class DiscographyRelease:
         return cls(
             provider_id=provider_id,
             title=title,
+            artists=_item_artist_names(card),
             album_type=album_type,
             release_date=release_date,
             year=year,
@@ -88,6 +135,7 @@ class DiscographyRelease:
         return {
             "id": self.provider_id,
             "title": self.title,
+            "artists": list(self.artists),
             "album_type": self.album_type,
             "release_date": self.release_date,
             "year": self.year,
@@ -124,6 +172,7 @@ class TracklistTrack:
     provider_id: Optional[str]
     isrc: Optional[str] = None
     musicbrainz_id: Optional[str] = None
+    artists: Tuple[str, ...] = ()
 
     @classmethod
     def from_item(cls, item: Mapping[str, Any], *, provider: str) -> Optional["TracklistTrack"]:
@@ -160,6 +209,7 @@ class TracklistTrack:
             provider_id=provider_id,
             isrc=isrc,
             musicbrainz_id=musicbrainz_id,
+            artists=_item_artist_names(item),
         )
 
     def to_payload(self) -> Dict[str, Any]:
@@ -168,6 +218,8 @@ class TracklistTrack:
             "disc_number": self.disc_number,
             "title": self.title,
         }
+        if self.artists:
+            payload["artists"] = list(self.artists)
         if self.duration_ms is not None:
             payload["duration_ms"] = self.duration_ms
         if self.provider_id:

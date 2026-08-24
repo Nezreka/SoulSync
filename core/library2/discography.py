@@ -101,6 +101,49 @@ def _external_ids(raw: Any) -> Dict[str, str]:
     }
 
 
+def _link_release_artists(
+    conn, album_id: int, primary_artist_id: int, primary_artist_name: str,
+    credited_names: Any,
+) -> None:
+    """Link a provider release to every explicit album artist credit.
+
+    The artist whose discography was requested remains the stable primary
+    owner of the row.  Additional provider credits make the same album
+    reachable from their Library pages without duplicating the release.
+    """
+    from core.library2.autolink import find_or_create_artist
+
+    names = []
+    seen = set()
+    for raw_name in credited_names or ():
+        name = str(raw_name or "").strip()
+        key = normalize_name(name)
+        if not key or key == normalize_name("Unknown Artist") or key in seen:
+            continue
+        seen.add(key)
+        names.append((name, key))
+
+    primary_key = normalize_name(primary_artist_name)
+    conn.execute(
+        "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
+        "VALUES(?,?, 'primary')",
+        (album_id, primary_artist_id),
+    )
+    for name, key in names:
+        credited_id = (
+            primary_artist_id
+            if key == primary_key
+            else find_or_create_artist(conn, name)
+        )
+        if credited_id is None or int(credited_id) == int(primary_artist_id):
+            continue
+        conn.execute(
+            "INSERT INTO lib2_album_artists(album_id, artist_id, role) "
+            "VALUES(?,?, 'featured') ON CONFLICT(album_id, artist_id) DO NOTHING",
+            (album_id, credited_id),
+        )
+
+
 def _merge_external_id_details(raw: Any, source: Optional[str],
                                provider_id: str) -> tuple[str, bool]:
     """Add/refresh one source's id — but never silently clobber an existing,
@@ -576,6 +619,13 @@ def _expand_artist_discography(
                         cursor, existing["id"], source=source,
                         provider_id=provider_id, title=title,
                         release_date=release_date, track_count=track_count)
+                _link_release_artists(
+                    conn,
+                    existing["id"],
+                    artist_id,
+                    artist["name"],
+                    release.artists,
+                )
                 stats["enriched"] += 1
                 continue
 
@@ -603,9 +653,12 @@ def _expand_artist_discography(
                         PROVENANCE_NEW_RELEASE, record_rule)
                     record_rule(conn, "album", new_id, True, PROVENANCE_NEW_RELEASE)
                 stats["auto_monitor_album_ids"].append(new_id)
-            cursor.execute(
-                "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
-                "VALUES(?,?, 'primary')", (new_id, artist_id),
+            _link_release_artists(
+                conn,
+                new_id,
+                artist_id,
+                artist["name"],
+                release.artists,
             )
             index.setdefault(release_title_key(title), []).append({
                 "id": new_id, "title": title, "album_type": album_type,

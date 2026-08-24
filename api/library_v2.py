@@ -1814,6 +1814,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # discography-only release (no track rows yet) shows its real
             # tracklist when the user expands it — Lidarr-style.
             if request.args.get("resolve") == "1" and not _tracklist_resolve_pending(album_id):
+                from core.library2.provider_adapters import TRACKLIST_PARSER_VERSION
                 # Not "has ANY track": bookmarking one top track materializes
                 # exactly that recording, which left the release looking like a
                 # one-track album forever — the guard saw a track row and
@@ -1826,7 +1827,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 counts = conn.execute(
                     "SELECT (SELECT COUNT(*) FROM lib2_tracks WHERE album_id=a.id) AS have, "
                     "       COALESCE(a.expected_track_count, 0) AS expected, "
-                    "       COALESCE(a.tracklist_status, 'idle') AS status "
+                    "       COALESCE(a.tracklist_status, 'idle') AS status, "
+                    "       (SELECT ps.parser_version "
+                    "          FROM library_provider_snapshots ps "
+                    "         WHERE ps.entity_type='album' AND ps.entity_id=a.id "
+                    "           AND ps.scope='tracklist' "
+                    "         ORDER BY ps.fetched_at DESC, ps.id DESC LIMIT 1) "
+                    "         AS tracklist_parser_version "
                     "  FROM lib2_albums a WHERE a.id=?", (album_id,)
                 ).fetchone()
                 # `tracklist_status` is the honest signal: a release whose
@@ -1836,7 +1843,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 # exactly one recording — both have have=1 and expected=0.
                 if counts is not None and (
                         counts["status"] != "ready"
-                        or counts["have"] < counts["expected"]):
+                        or counts["have"] < counts["expected"]
+                        or (
+                            counts["tracklist_parser_version"] is not None
+                            and counts["tracklist_parser_version"]
+                            != TRACKLIST_PARSER_VERSION
+                        )):
                     # Off the request thread. Resolving means a chain of
                     # blocking provider calls; doing it inline made opening a
                     # release hang the page, and — because the walk also writes

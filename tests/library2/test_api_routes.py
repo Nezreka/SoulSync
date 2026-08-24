@@ -3324,6 +3324,37 @@ def test_album_resolve_leaves_a_complete_tracklist_alone(api, monkeypatch):
     assert _drain(resolved, expect=0) == []
 
 
+def test_album_resolve_refreshes_complete_tracklist_after_parser_upgrade(
+        api, monkeypatch):
+    """A ready pre-multi-artist snapshot still lacks the credits added by the
+    current parser, so opening the album must schedule one healing refresh."""
+    client, db, ids = api
+    conn = _conn(db)
+    conn.execute(
+        "UPDATE lib2_albums SET expected_track_count=1, tracklist_status='ready' "
+        "WHERE id=?",
+        (ids["views"],),
+    )
+    from core.library2.provider_snapshots import record_provider_snapshot
+    record_provider_snapshot(
+        conn,
+        provider="spotify",
+        entity_type="album",
+        entity_id=ids["views"],
+        scope="tracklist",
+        parser_version="library2-tracklist/2",
+        payload={"tracks": [{"title": "One Dance", "track_number": 1}]},
+        is_complete=True,
+    )
+    conn.commit()
+    conn.close()
+    resolved = _record_tracklist_resolves(monkeypatch)
+
+    client.get(f"/api/library/v2/albums/{ids['views']}?resolve=1")
+
+    assert _drain(resolved) == [ids["views"]]
+
+
 def test_discovery_track_never_monitors_the_whole_album(api, monkeypatch):
     """`find_or_create_*` defaults new rows to monitored — right for the
     post-download autolink it was written for, badly wrong here: bookmarking

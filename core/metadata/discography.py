@@ -160,11 +160,17 @@ def _build_discography_release_dict(release: Any, artist_id: str,
     if typed_album is not None:
         if not typed_album.id:
             return None
-        artist_name = typed_album.artists[0] if typed_album.artists else ''
+        artist_names = _clean_artist_names(typed_album.artists)
+        artist_name = artist_names[0] if artist_names else ''
         return {
             'id': typed_album.id,
             'name': typed_album.name or typed_album.id,
             'artist_name': artist_name,
+            # Keep the complete album credit.  Library v2 uses this to link a
+            # collaborative release to every credited artist; reducing the
+            # typed Album to artists[0] made the remaining credits impossible
+            # to recover downstream.
+            'artists': artist_names,
             'release_date': typed_album.release_date or None,
             'album_type': typed_album.album_type or 'album',
             'image_url': typed_album.image_url,
@@ -181,10 +187,12 @@ def _build_discography_release_dict(release: Any, artist_id: str,
     album_type = _extract_lookup_value(release, 'album_type', default='album') or 'album'
     release_date = _extract_lookup_value(release, 'release_date')
 
+    artist_names = _extract_release_artist_names(release)
     return {
         'id': release_id,
         'name': _extract_lookup_value(release, 'name', 'title', default=release_id),
-        'artist_name': _extract_release_artist_name(release),
+        'artist_name': artist_names[0] if artist_names else '',
+        'artists': artist_names,
         'release_date': release_date,
         'album_type': album_type,
         'image_url': _extract_lookup_value(release, 'image_url', 'thumb_url', 'cover_image'),
@@ -197,32 +205,62 @@ def _build_discography_release_dict(release: Any, artist_id: str,
     }
 
 
-def _extract_release_artist_name(release: Any) -> str:
+def _clean_artist_names(values: Any) -> List[str]:
+    """Normalize a provider artist collection without splitting band names."""
+    if not values:
+        return []
+    if isinstance(values, (str, bytes, dict)):
+        values = [values]
+    try:
+        entries = list(values)
+    except TypeError:
+        entries = [values]
+
+    names: List[str] = []
+    seen = set()
+    for entry in entries:
+        if isinstance(entry, dict):
+            nested = entry.get('artist')
+            if isinstance(nested, dict):
+                entry = nested
+            name = _extract_lookup_value(
+                entry, 'name', 'artist_name', 'title', default=''
+            )
+        else:
+            name = entry
+        text = str(name or '').strip()
+        key = text.casefold()
+        if text and key not in seen:
+            seen.add(key)
+            names.append(text)
+    return names
+
+
+def _extract_release_artist_names(release: Any) -> List[str]:
+    """Return every explicit album artist carried by a provider release."""
     artist_name = _extract_lookup_value(release, 'artist_name', 'artist', default='') or ''
-    artist_name = str(artist_name).strip()
-    if artist_name:
-        return artist_name
+    if isinstance(artist_name, dict):
+        names = _clean_artist_names([artist_name])
+    else:
+        text = str(artist_name).strip()
+        names = [text] if text else []
 
     artists = _extract_lookup_value(release, 'artists', default=[]) or []
-    if isinstance(artists, (str, bytes)):
-        return str(artists).strip()
-    if isinstance(artists, dict):
-        return str(_extract_lookup_value(artists, 'name', 'artist_name', 'title', default='') or '').strip()
+    explicit = _clean_artist_names(artists)
+    if not explicit:
+        explicit = _clean_artist_names(
+            _extract_lookup_value(release, 'artist-credit', default=[])
+        )
+    for name in explicit:
+        if name.casefold() not in {item.casefold() for item in names}:
+            names.append(name)
+    return names
 
-    try:
-        artists = list(artists)
-    except TypeError:
-        artists = [artists]
 
-    if not artists:
-        return ''
-
-    first_artist = artists[0]
-    inferred_name = _extract_lookup_value(first_artist, 'name', 'artist_name', 'title')
-    if not inferred_name and isinstance(first_artist, str):
-        inferred_name = first_artist
-
-    return str(inferred_name).strip() if inferred_name else ''
+def _extract_release_artist_name(release: Any) -> str:
+    """Backward-compatible primary artist projection."""
+    names = _extract_release_artist_names(release)
+    return names[0] if names else ''
 
 
 def _sort_discography_releases(releases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -456,6 +494,7 @@ def _build_artist_detail_release_card(release: Dict[str, Any],
             'id': typed_album.id,
             'name': typed_album.name or typed_album.id,
             'title': typed_album.name or typed_album.id,
+            'artists': _clean_artist_names(typed_album.artists),
             'album_type': (typed_album.album_type or 'album').lower(),
             'image_url': typed_album.image_url,
             'year': release_year,
@@ -488,10 +527,12 @@ def _build_artist_detail_release_card(release: Dict[str, Any],
         if release_year is not None:
             release_year = str(release_year)
 
+    artist_names = _extract_release_artist_names(release)
     card = {
         'id': release_id,
         'name': _extract_lookup_value(release, 'name', 'title', default=release_id),
         'title': _extract_lookup_value(release, 'name', 'title', default=release_id),
+        'artists': artist_names,
         'album_type': album_type,
         'image_url': _extract_lookup_value(release, 'image_url', 'thumb_url', 'cover_image'),
         'year': release_year,

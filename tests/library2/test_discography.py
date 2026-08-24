@@ -9,6 +9,7 @@ import pytest
 
 from core.library2 import discography as D
 from core.library2.importer import import_legacy_library
+from core.library2.provider_adapters import DISCOGRAPHY_PARSER_VERSION
 
 
 @pytest.fixture(autouse=True)
@@ -86,6 +87,55 @@ def test_expand_adds_new_and_matches_existing(legacy_db, imported_conn, fake_dis
     assert by_title["Views"]["expected_track_count"] == 20
 
 
+def test_collaborative_release_is_linked_to_every_album_artist(
+        legacy_db, imported_conn, monkeypatch):
+    payload = _cards(("albums", {
+        "id": "sp-collab",
+        "title": "Shared Score",
+        "album_type": "album",
+        # The artist whose page is refreshed is deliberately second, matching
+        # soundtrack releases whose displayed primary credit is the co-composer.
+        "artists": ["Other Composer", "Drake"],
+        "track_count": 12,
+    }))
+    monkeypatch.setattr(
+        "core.metadata.discography.get_artist_detail_discography",
+        lambda *_args, **_kwargs: payload,
+    )
+    monkeypatch.setattr(
+        "core.library2.provider_adapters.fetch_album_tracklist",
+        lambda *_args, **_kwargs: None,
+    )
+
+    drake_id = _artist_id(imported_conn)
+    D.expand_artist_discography(legacy_db, drake_id)
+    # A repeat refresh must enrich the same row and keep the credit set stable.
+    D.expand_artist_discography(legacy_db, drake_id)
+
+    album = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Shared Score'"
+    ).fetchone()
+    credits = imported_conn.execute(
+        """SELECT ar.name, aa.role
+             FROM lib2_album_artists aa
+             JOIN lib2_artists ar ON ar.id=aa.artist_id
+            WHERE aa.album_id=?
+            ORDER BY CASE aa.role WHEN 'primary' THEN 0 ELSE 1 END, ar.name""",
+        (album["id"],),
+    ).fetchall()
+    assert [(row["name"], row["role"]) for row in credits] == [
+        ("Drake", "primary"),
+        ("Other Composer", "featured"),
+    ]
+
+    other_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Other Composer'"
+    ).fetchone()["id"]
+    from core.library2 import queries as Q
+    other_view = Q.get_artist(imported_conn, other_id)
+    assert [release["title"] for release in other_view["albums"]] == ["Shared Score"]
+
+
 def test_expand_is_idempotent(legacy_db, imported_conn, fake_discography):
     aid = _artist_id(imported_conn)
     D.expand_artist_discography(legacy_db, aid)
@@ -114,7 +164,7 @@ def test_expand_records_normalized_provider_snapshot(
     assert stats["is_complete"] is True
     assert snapshot["provider"] == "spotify"
     assert snapshot["is_complete"] == 1
-    assert snapshot["parser_version"] == "library2-discography/1"
+    assert snapshot["parser_version"] == DISCOGRAPHY_PARSER_VERSION
     assert {release["title"] for release in payload["releases"]} == {
         "Views", "Scorpion", "One Dance",
     }

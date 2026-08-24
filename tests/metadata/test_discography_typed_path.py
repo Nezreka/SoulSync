@@ -53,6 +53,23 @@ def test_typed_path_used_for_known_source():
     assert out['external_urls'] == {'spotify': 'https://open.spotify.com/album/sp123'}
 
 
+def test_typed_path_keeps_every_collaborative_album_artist():
+    raw = dict(SAMPLE_SPOTIFY_RELEASE)
+    raw['artists'] = [
+        {'id': 'kdot', 'name': 'Kendrick Lamar'},
+        {'id': 'sza', 'name': 'SZA'},
+    ]
+
+    normalized = discography._build_discography_release_dict(
+        raw, artist_id='kdot', source='spotify',
+    )
+    card = discography._build_artist_detail_release_card(normalized)
+
+    assert normalized['artist_name'] == 'Kendrick Lamar'
+    assert normalized['artists'] == ['Kendrick Lamar', 'SZA']
+    assert card['artists'] == ['Kendrick Lamar', 'SZA']
+
+
 def test_legacy_path_used_when_no_source():
     out = discography._build_discography_release_dict(
         SAMPLE_SPOTIFY_RELEASE, artist_id='kdot',

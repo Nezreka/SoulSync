@@ -81,6 +81,45 @@ def test_persist_tracklist_tracks_keeps_non_spotify_provider_ids(imported_conn):
     }
 
 
+def test_persist_tracklist_tracks_heals_and_keeps_multi_artist_credits(imported_conn):
+    views_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'"
+    ).fetchone()[0]
+
+    # Parser v2 created provider-only rows with the album artist fallback.
+    _persist_tracklist_tracks(imported_conn, views_id, [{
+        "track_number": 9,
+        "title": "Provider Collab",
+    }])
+    # Parser v3 receives the real ordered track credit and must replace that
+    # fallback because this fileless row has no local tag credit to preserve.
+    _persist_tracklist_tracks(imported_conn, views_id, [{
+        "track_number": 9,
+        "title": "Provider Collab",
+        "artists": ["Guest Artist", "Drake"],
+    }])
+
+    rows = imported_conn.execute(
+        """SELECT ar.name, ta.role, ta.position
+             FROM lib2_tracks t
+             JOIN lib2_track_artists ta ON ta.track_id=t.id
+             JOIN lib2_artists ar ON ar.id=ta.artist_id
+            WHERE t.album_id=? AND t.track_number=9
+            ORDER BY ta.position""",
+        (views_id,),
+    ).fetchall()
+    assert [(row["name"], row["role"], row["position"]) for row in rows] == [
+        ("Guest Artist", "primary", 0),
+        ("Drake", "featured", 1),
+    ]
+    assert imported_conn.execute(
+        """SELECT 1 FROM lib2_album_artists aa
+             JOIN lib2_artists ar ON ar.id=aa.artist_id
+            WHERE aa.album_id=? AND ar.name='Guest Artist'""",
+        (views_id,),
+    ).fetchone() is not None
+
+
 def test_precache_materializes_cached_tracklists_before_provider_lookup(legacy_db):
     from core.library2.importer import import_legacy_library
 

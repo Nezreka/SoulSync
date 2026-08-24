@@ -37,6 +37,83 @@ def _json_object(raw: Any) -> Dict[str, str]:
     }
 
 
+def _track_artist_names(raw: Any) -> List[str]:
+    """Normalize the explicit artist list retained by the provider adapter."""
+    if not raw:
+        return []
+    if isinstance(raw, (str, bytes, Mapping)):
+        raw = [raw]
+    try:
+        entries = list(raw)
+    except TypeError:
+        entries = [raw]
+
+    names = []
+    seen = set()
+    for entry in entries:
+        if isinstance(entry, Mapping):
+            nested = entry.get("artist")
+            if isinstance(nested, Mapping):
+                entry = nested
+            name = entry.get("name") or entry.get("artist_name")
+        else:
+            name = entry
+        text = str(name or "").strip()
+        key = text.casefold()
+        if text and key != "unknown artist" and key not in seen:
+            seen.add(key)
+            names.append(text)
+    return names
+
+
+def _persist_track_artist_credits(
+    conn, track_id: int, album_id: int, album_primary_artist_id: int,
+    raw_artists: Any,
+) -> None:
+    """Persist per-track credits and make their album appearance reachable."""
+    names = _track_artist_names(raw_artists)
+    if not names:
+        conn.execute(
+            "INSERT OR IGNORE INTO lib2_track_artists"
+            "(track_id, artist_id, role, position) VALUES(?,?, 'primary', 0)",
+            (track_id, album_primary_artist_id),
+        )
+        return
+
+    # Provider-only positions have no more authoritative local tag credit to
+    # preserve. Replace the old album-primary fallback so a refreshed cache
+    # heals rows created by earlier parser versions. Owned files remain
+    # additive: their imported/tag-derived credit must not be discarded.
+    owns_file = conn.execute(
+        "SELECT 1 FROM lib2_track_files WHERE track_id=? "
+        "AND COALESCE(file_state, 'active')<>'deleted' LIMIT 1",
+        (track_id,),
+    ).fetchone()
+    if owns_file is None:
+        conn.execute("DELETE FROM lib2_track_artists WHERE track_id=?", (track_id,))
+
+    from core.library2.autolink import find_or_create_artist
+    for position, name in enumerate(names):
+        artist_id = find_or_create_artist(conn, name)
+        if artist_id is None:
+            continue
+        conn.execute(
+            "INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+            "VALUES(?,?,?,?) ON CONFLICT(track_id, artist_id) DO UPDATE SET "
+            "role=excluded.role, position=excluded.position",
+            (track_id, artist_id, "primary" if position == 0 else "featured", position),
+        )
+        conn.execute(
+            "INSERT INTO lib2_album_artists(album_id, artist_id, role) "
+            "VALUES(?,?,?) ON CONFLICT(album_id, artist_id) DO NOTHING",
+            (
+                album_id,
+                artist_id,
+                "primary" if int(artist_id) == int(album_primary_artist_id) else "featured",
+            ),
+        )
+
+
 def _album_tracklist_context(
     conn: Any, album_id: int,
 ) -> Optional[Tuple[Any, Dict[str, Any], Dict[str, str]]]:
@@ -429,10 +506,12 @@ def _persist_tracklist_tracks(
                 ),
             )
 
-        conn.execute(
-            """INSERT OR IGNORE INTO lib2_track_artists(track_id, artist_id, role, position)
-               VALUES(?,?, 'primary', 0)""",
-            (track_id, al["primary_artist_id"]),
+        _persist_track_artist_credits(
+            conn,
+            track_id,
+            album_id,
+            al["primary_artist_id"],
+            entry.get("artists"),
         )
     changed = created + _trim_excess_fileless_tracks(
         conn, album_id, expected, protect_ids=touched_ids

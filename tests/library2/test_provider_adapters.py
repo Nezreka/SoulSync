@@ -233,6 +233,33 @@ def test_direct_itunes_tracklist_keeps_itunes_track_identity(monkeypatch):
     assert "spotify_id" not in result.track_payloads()[0]
 
 
+def test_tracklist_keeps_all_track_artist_credits(monkeypatch):
+    class Spotify:
+        def get_album_tracks(self, album_id, allow_fallback=False):
+            assert album_id == "sp-collab"
+            return {"items": [{
+                "id": "sp-track",
+                "name": "Collab Track",
+                "track_number": 1,
+                "artists": [
+                    {"id": "artist-a", "name": "Artist A"},
+                    {"id": "artist-b", "name": "Artist B"},
+                ],
+            }]}
+
+    monkeypatch.setattr(
+        "core.metadata.registry.get_client_for_source",
+        lambda source: Spotify() if source == "spotify" else None,
+    )
+
+    result = fetch_album_tracklist(
+        "Collab Album", "Artist A", source_album_ids={"spotify": "sp-collab"},
+    )
+
+    assert result is not None
+    assert result.track_payloads()[0]["artists"] == ["Artist A", "Artist B"]
+
+
 def test_matched_tracklists_fetch_every_exact_provider_without_name_search(monkeypatch):
     calls = []
 
