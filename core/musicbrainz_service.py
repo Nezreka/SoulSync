@@ -6,7 +6,11 @@ from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from utils.logging_config import get_logger
 from core.musicbrainz_client import MusicBrainzClient
-from core.worker_utils import catalog_overlap_score, pick_artist_by_catalog
+from core.worker_utils import (
+    catalog_overlap_score,
+    pick_artist_by_catalog,
+    source_id_conflict,
+)
 from database.music_database import MusicDatabase
 
 logger = get_logger("musicbrainz_service")
@@ -509,8 +513,42 @@ class MusicBrainzService:
         if library:
             return library
 
-        # Tier 2: cached live lookup (re-uses musicbrainz_cache table)
+        # Tier 1b: the artist's own MusicBrainz identity, when the catalogue
+        # already knows it. Everything below this line GUESSES from the name,
+        # and for a cross-script artist that guess is exactly what fails: the
+        # trust gate's own comment names `Sawano Hiroyuki` as the case where a
+        # decoy entity outscores the real `澤野弘之`, and MusicBrainz's
+        # relevance scores are not stable enough for the escape hatch to be
+        # relied on. That is why the bridge could work one day and not the
+        # next. There is nothing to guess once the row carries the MBID.
         cached = self._check_cache('artist_aliases', artist_name)
+        row_mbid = self._artist_row_mbid(artist_name)
+        if row_mbid:
+            # A cache row resolved against THIS identity says exactly what a
+            # fresh fetch would say, and every fetch spends a second of the
+            # process-wide MusicBrainz budget — one per scanned file for an
+            # artist MusicBrainz lists no alias for, all of it contending with
+            # the enrichment worker on the same limiter.
+            known = self._cached_aliases(cached, for_mbid=row_mbid)
+            if known is not None:
+                return known
+            aliases = self.resolve_artist_aliases(row_mbid)
+            if aliases is not None:
+                self._save_to_cache(
+                    'artist_aliases', artist_name, None, row_mbid,
+                    {'aliases': aliases, 'resolved': True}, 100,
+                )
+                if aliases:
+                    try:
+                        self._persist_artist_identity(artist_name, row_mbid, aliases)
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("alias write-back for %r failed: %s",
+                                     artist_name, e)
+                return aliases
+            # The fetch did not come back. That settles nothing, so carry on
+            # rather than reporting "no aliases" off the back of it.
+
+        # Tier 2: cached live lookup (re-uses musicbrainz_cache table)
         answered = self._cached_aliases(cached)
         if answered is not None:
             return answered
@@ -620,7 +658,118 @@ class MusicBrainzService:
             'artist_aliases', artist_name, None, chosen_mbid,
             {'aliases': aliases, 'resolved': True}, int(chosen_conf * 100),
         )
+        # Keep what we just learned on the ARTIST, not only in a cache keyed by
+        # the spelling this caller happened to pass. Without this the knowledge
+        # that let a download pass expires with the cache row and is invisible
+        # to any later lookup that spells the name differently — which is how a
+        # library scan came to disagree with the download about the same file.
+        # Best-effort by design: the caller asked for aliases and has them.
+        try:
+            self._persist_artist_identity(artist_name, chosen_mbid, aliases)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("alias write-back for %r failed: %s", artist_name, e)
         return aliases
+
+    def _artist_row_mbid(self, artist_name: str) -> Optional[str]:
+        """The MusicBrainz id the catalogue already holds for this artist name.
+
+        Best-effort: any failure (no catalogue, no row, no id) returns None and
+        the caller falls back to resolving by name, which is what it did before
+        this existed.
+        """
+        if not artist_name:
+            return None
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            row = conn.execute(
+                "SELECT musicbrainz_id FROM artists "
+                "WHERE name = ? COLLATE NOCASE "
+                "AND COALESCE(musicbrainz_id,'') <> '' LIMIT 1",
+                (artist_name,),
+            ).fetchone()
+            return str(row[0]) if row and row[0] else None
+        except Exception as e:  # noqa: BLE001
+            logger.debug("artist mbid lookup failed for %r: %s", artist_name, e)
+            return None
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:  # noqa: BLE001, S110 — best effort
+                    pass
+
+    def _persist_artist_identity(self, artist_name: str, mbid: Optional[str],
+                                 aliases: Optional[list]) -> None:
+        """Store a live-resolved MBID + alias list on the library artist row.
+
+        Matched by name because that is all the verifier ever has — it compares
+        against a metadata-source string, not a library id. A differently-named
+        artist already holding this MBID means the name search landed on the
+        wrong entity, so the same gate every enrichment worker passes through
+        applies here too: better no id than one smeared across two artists.
+        """
+        if not artist_name or not mbid:
+            return
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            row = conn.execute(
+                "SELECT id, musicbrainz_id FROM artists "
+                "WHERE name = ? COLLATE NOCASE LIMIT 1",
+                (artist_name,),
+            ).fetchone()
+        finally:
+            if conn:
+                conn.close()
+        if not row:
+            return
+        artist_id, stored_mbid = int(row[0]), row[1]
+        write_mbid = False
+        if stored_mbid:
+            # The aliases were fetched FROM this MBID, so they are only this
+            # artist's aliases if this MBID is. Writing them without that is
+            # how one artist's alternate spellings end up on another's row.
+            if str(stored_mbid) != str(mbid):
+                logger.debug(
+                    "alias write-back skipped for %r: row holds MBID %s, "
+                    "the name search resolved %s", artist_name, stored_mbid, mbid)
+                return
+        else:
+            # Checked before the write connection is opened — the guard reads
+            # through its own connection, and nesting one inside an open write
+            # is how a SQLite writer deadlocks itself.
+            conflict = source_id_conflict(
+                self.db, 'musicbrainz_id', mbid, artist_id, artist_name)
+            if conflict:
+                logger.debug(
+                    "alias write-back skipped for %r: MBID %s already held "
+                    "by %r", artist_name, mbid, conflict)
+                return
+            write_mbid = True
+
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            if write_mbid:
+                conn.execute(
+                    "UPDATE artists SET musicbrainz_id = ?, "
+                    "musicbrainz_last_attempted = ?, "
+                    "musicbrainz_match_status = 'matched' WHERE id = ?",
+                    (mbid, datetime.now(), artist_id))
+            if aliases:
+                conn.execute(
+                    "UPDATE artists SET aliases = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (json.dumps(aliases), artist_id))
+            conn.commit()
+        finally:
+            if conn:
+                conn.close()
+        logger.info(
+            "Stored MusicBrainz identity for artist %r (mbid=%s, %d aliases)",
+            artist_name, mbid, len(aliases or []),
+        )
 
     def _search_and_score_artists(self, artist_name: str, strict: bool):
         """Search MB for an artist and score each result.
