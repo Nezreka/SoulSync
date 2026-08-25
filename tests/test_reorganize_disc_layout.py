@@ -33,7 +33,11 @@ def plan_with(monkeypatch):
                      "total_tracks": len(api_tracks), "images": [{"url": ""}]}
         monkeypatch.setattr(lr, "_resolve_source",
                             lambda ad, ps, strict_source=False, **kw: ("spotify", api_album, api_tracks))
-        return lr.plan_album_reorganize(album_data, user_tracks, "spotify")
+        # The single-disc cap is a correction to a PROVIDER tracklist, so this
+        # file asks for that planner explicitly; the default is the catalogue,
+        # where the disc layout is the user's own and needs no correcting.
+        return lr.plan_album_reorganize(album_data, user_tracks, "spotify",
+                                        metadata_source="api")
     return _run
 
 

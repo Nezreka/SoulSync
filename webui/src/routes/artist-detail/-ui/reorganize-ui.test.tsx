@@ -45,28 +45,17 @@ afterEach(() => {
 });
 
 describe('ReorganizeModal', () => {
-  it('loads the album sources, keeps the auto default, persists the mode pick', async () => {
-    const calls = stubApi((url) =>
-      url.endsWith('/reorganize/sources')
-        ? { sources: [{ source: 'spotify', label: 'Spotify' }] }
-        : {},
-    );
+  it('opens with nothing to configure and fetches nothing', async () => {
+    const calls = stubApi(() => ({}));
     render(<ReorganizeModal album={ALBUM} onClose={vi.fn()} />);
     expect(document.getElementById('reorganize-modal-title')?.textContent).toBe(
       'Reorganize: SAW 85-92',
     );
-    expect(calls[0].url).toBe('/api/library/album/7/reorganize/sources');
-    await screen.findByText('Spotify');
-
-    const select = document.getElementById('reorganize-mode-select') as HTMLSelectElement;
-    expect(select.value).toBe('api');
-    fireEvent.change(select, { target: { value: 'tags' } });
-    expect(localStorage.getItem('soulsync-reorganize-mode')).toBe('tags');
-    // Tag mode reads straight off the files — the source picker hides.
-    expect(
-      (document.getElementById('reorganize-source-section') as HTMLElement).style.display,
-    ).toBe('none');
-    localStorage.removeItem('soulsync-reorganize-mode');
+    // No source list to load: the plan comes from the library's own rows.
+    expect(calls).toEqual([]);
+    expect(document.getElementById('reorganize-mode-select')).toBeNull();
+    expect(document.getElementById('reorganize-source-select')).toBeNull();
+    expect(document.getElementById('reorganize-action-select')).toBeNull();
   });
 
   it('preview gates Apply: enabled for movable tracks, vetoed by a collision', async () => {
@@ -125,16 +114,14 @@ describe('ReorganizeModal', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(window.showToast).toHaveBeenCalledWith('Queued: SAW 85-92 (#2 in queue)', 'info');
     const queue = calls.find((c) => c.url === '/api/library/album/7/reorganize');
-    expect(queue?.body).toEqual({ source: '', mode: 'api', rename_only: false });
+    expect(queue?.body).toBeNull(); // nothing to send
   });
 });
 
 describe('ReorganizeAllModal', () => {
   it('lists the albums, confirms, queues them all and toasts the combo', async () => {
     const calls = stubApi((url) =>
-      url.endsWith('/reorganize-all')
-        ? { success: true, enqueued: 2 }
-        : { sources: [{ source: 'deezer', label: 'Deezer' }] },
+      url.endsWith('/reorganize-all') ? { success: true, enqueued: 2 } : {},
     );
     window.showToast = vi.fn() as never;
     window.showConfirmDialog = vi.fn(async () => true) as never;
@@ -151,7 +138,6 @@ describe('ReorganizeAllModal', () => {
       'Reorganize All Albums — Aphex Twin',
     );
     expect(screen.getByText('2 albums will be reorganized:')).toBeTruthy();
-    await screen.findByText('Deezer');
 
     fireEvent.click(screen.getByText('Reorganize All'));
     await waitFor(() => expect(window.showToast).toHaveBeenCalled());

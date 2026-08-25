@@ -99,7 +99,8 @@ def _reorganize_destination(user_tracks, monkeypatch):
     monkeypatch.setattr(
         lr, "_resolve_source",
         lambda ad, ps, strict_source=False, **kw: ("spotify", API_ALBUM, API_TRACKS))
-    plan = lr.plan_album_reorganize(album_data, user_tracks, "spotify")
+    plan = lr.plan_album_reorganize(album_data, user_tracks, "spotify",
+                                    metadata_source="api")
 
     out = []
     for item in plan["items"]:

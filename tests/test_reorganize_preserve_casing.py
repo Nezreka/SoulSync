@@ -172,8 +172,12 @@ def test_preview_leaves_already_organized_file_unchanged(monkeypatch, tmp_path):
 
     assert _preview()["unchanged"] is True            # preserve on → no rename
 
+    # And with the setting OFF it is STILL unchanged. That used to churn the
+    # file to the source's casing ("Sikdope remix"), which is what the setting
+    # existed to prevent. The plan reads the catalogue now, so the user's own
+    # casing is not a value being defended against a provider — it is the value.
     monkeypatch.setattr(lr, "_preserve_casing_enabled", lambda: False)
-    assert _preview()["unchanged"] is False           # off → would churn to the source
+    assert _preview()["unchanged"] is True
 
 
 class _TemplateCM:

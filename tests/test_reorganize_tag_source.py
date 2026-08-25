@@ -584,11 +584,10 @@ class TestPlannerTagModeIntegration:
         assert plan['items'][0]['matched'] is False
         assert 'requires the file path resolver' in plan['items'][0]['reason']
 
-    def test_api_mode_unchanged_default(self, monkeypatch):
-        # Regression guard: omitting metadata_source preserves the API
-        # path — calls _resolve_source which calls our stubbed
-        # metadata_service. Should land in 'no_source_id' since stubs
-        # return empty.
+    def test_the_default_is_the_catalogue_not_a_provider(self, monkeypatch):
+        # The default used to be 'api', so a plan for an album with no source id
+        # came back 'no_source_id' — a provider requirement imposed on an
+        # operation that moves files. The catalogue plans it.
         _stub_metadata_service(monkeypatch)
         from core import library_reorganize as lr
 
@@ -596,7 +595,18 @@ class TestPlannerTagModeIntegration:
             album_data={'artist_name': 'Foo', 'title': 'Bar'},
             tracks=[{'id': 't1', 'title': 'Song', 'track_number': 1, 'file_path': '/a.flac'}],
         )
-        # No metadata_source param → defaults to 'api' → empty stubs
-        # produce no_source_id.
+        assert plan['status'] == 'planned'
+        assert plan['source'] == 'catalogue'   # neither the api nor the tags branch
+
+    def test_api_mode_is_still_reachable_when_asked_for(self, monkeypatch):
+        _stub_metadata_service(monkeypatch)
+        from core import library_reorganize as lr
+
+        plan = lr.plan_album_reorganize(
+            album_data={'artist_name': 'Foo', 'title': 'Bar'},
+            tracks=[{'id': 't1', 'title': 'Song', 'track_number': 1, 'file_path': '/a.flac'}],
+            metadata_source='api',
+        )
+        # Empty stubs → nothing to resolve.
         assert plan['status'] == 'no_source_id'
-        assert plan['source'] is None  # never reached the tags branch
+        assert plan['source'] is None

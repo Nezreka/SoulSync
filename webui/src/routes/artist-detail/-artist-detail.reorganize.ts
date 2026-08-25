@@ -57,7 +57,7 @@ export function classifyPreviewTrack(t: ReorganizePreviewTrack): PreviewRowView 
   const newCell: PreviewRowView['newCell'] = noFile
     ? { kind: 'none', text: '', collision: false }
     : unmatched
-      ? { kind: 'reason', text: t.reason || "Not in selected source's tracklist", collision: false }
+      ? { kind: 'reason', text: t.reason || 'The library cannot name this track', collision: false }
       : missingPath
         ? {
             kind: 'reason',
@@ -94,7 +94,7 @@ export function summarizeReorganizePreview(tracks: ReorganizePreviewTrack[]): Pr
   if (unmatched > 0) {
     chips.push({
       className: 'missing',
-      text: `${unmatched} not in source — try a different source`,
+      text: `${unmatched} the library cannot name`,
     });
   }
   if (noPath > 0)
@@ -136,12 +136,9 @@ export function formatReorganizeResultMessage(state: {
   errors?: { error?: string }[];
 }): string {
   const status = state.result_status;
-  if (status === 'no_source_id') {
-    return 'Reorganize skipped — album has no metadata source ID. Run enrichment first.';
-  }
   if (status === 'no_album') return 'Reorganize skipped — album not found in DB.';
   if (status === 'no_tracks') return 'Reorganize skipped — album has no tracks.';
-  if (status === 'setup_failed') return "Reorganize failed — couldn't create staging directory.";
+  if (status === 'setup_failed') return "Reorganize failed — couldn't compute destinations.";
   if (status === 'error') return 'Reorganize failed — see server logs for details.';
   let msg = `Reorganized: ${state.moved || 0} moved`;
   if ((state.skipped || 0) > 0) msg += `, ${state.skipped} skipped`;
@@ -152,56 +149,19 @@ export function formatReorganizeResultMessage(state: {
   return msg;
 }
 
-// ---- Mode persistence (#592) ----
-
-const MODE_KEY = 'soulsync-reorganize-mode';
-
-export function readReorganizeMode(): string {
-  try {
-    return localStorage.getItem(MODE_KEY) || 'api';
-  } catch {
-    return 'api';
-  }
-}
-
-export function writeReorganizeMode(mode: string): void {
-  try {
-    localStorage.setItem(MODE_KEY, mode);
-  } catch {
-    /* localStorage unavailable, ignore */
-  }
-}
-
 // ---- Requests ----
-
-export interface ReorganizeSource {
-  source: string;
-  label?: string;
-}
-
-export async function fetchAlbumReorganizeSources(albumId: unknown): Promise<ReorganizeSource[]> {
-  const response = await fetch(`/api/library/album/${albumId}/reorganize/sources`);
-  if (!response.ok) return [];
-  const data = await response.json();
-  return data.sources || [];
-}
-
-export async function fetchGlobalReorganizeSources(): Promise<ReorganizeSource[]> {
-  const response = await fetch('/api/library/reorganize/sources');
-  if (!response.ok) return [];
-  const data = await response.json();
-  return data.sources || [];
-}
+//
+// No source and no mode. The plan is computed from the library's own rows, so
+// there is nothing to pick: the preview is offline, an album with no stored
+// source id previews like any other, and #592's "read the file tags instead"
+// and #875's "rename only" both describe what a reorganize now always does.
 
 export async function fetchReorganizePreview(
   albumId: unknown,
-  source: string,
-  mode: string,
 ): Promise<{ tracks: ReorganizePreviewTrack[]; error?: string }> {
   const response = await fetch(`/api/library/album/${albumId}/reorganize/preview`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source, mode }),
   });
   const result = await response.json();
   if (!result.success) return { tracks: [], error: result.error || 'Preview failed' };
@@ -212,16 +172,10 @@ export async function fetchReorganizePreview(
 export async function queueReorganizeRequest(
   albumId: unknown,
   albumTitle: string,
-  options: { source: string; mode: string; renameOnly: boolean },
 ): Promise<string> {
   const response = await fetch(`/api/library/album/${albumId}/reorganize`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      source: options.source,
-      mode: options.mode,
-      rename_only: options.renameOnly,
-    }),
   });
   const result = await response.json();
   if (!result.success) throw new Error(result.error);
@@ -238,12 +192,10 @@ export async function queueReorganizeRequest(
 export async function queueReorganizeAllRequest(
   artistId: unknown,
   artistName: string,
-  options: { source: string; mode: string },
 ): Promise<{ message: string; tone: 'info' | 'warning' }> {
   const response = await fetch(`/api/library/artist/${artistId}/reorganize-all`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source: options.source, mode: options.mode }),
   });
   const result = await response.json();
   if (!result.success) throw new Error(result.error || 'Queue request failed');

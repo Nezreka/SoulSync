@@ -162,16 +162,12 @@ class LibraryReorganizeJob(RepairJob):
             album_id = album_row['id']
             album_title = album_row['title'] or 'Unknown Album'
 
-            # Default to the API planner (authoritative metadata via source IDs).
-            # But media-server libraries usually have NO source IDs, so that path
-            # dead-ends at 'no_source_id' and the job only ever reports "needs
-            # enrichment" without moving anything (#862). Reorganizing to match
-            # the template only needs the metadata already on the files — so when
-            # the API planner can't resolve a source, fall back to TAG mode, which
-            # reads each file's embedded title/artist/album/year (the year is what
-            # the user's "($year) $album" template needs). Only genuinely tag-poor
-            # albums then fall through to a finding.
-            reorg_metadata_source = 'api'
+            # #862: the API planner dead-ended at 'no_source_id' for media-server
+            # libraries, which usually carry no source IDs, so this job only ever
+            # reported "needs enrichment" without moving anything — and the answer
+            # then was a fallback to reading each file's embedded tags. The plan
+            # comes from the library's own rows now, so there is no source to
+            # resolve and no fallback to arrange.
             try:
                 preview = preview_album_reorganize(
                     album_id=str(album_id),
@@ -180,18 +176,6 @@ class LibraryReorganizeJob(RepairJob):
                     resolve_file_path_fn=_resolve,
                     build_final_path_fn=build_final_path_for_track,
                 )
-                if preview.get('status') == 'no_source_id':
-                    tags_preview = preview_album_reorganize(
-                        album_id=str(album_id),
-                        db=context.db,
-                        transfer_dir=transfer_dir,
-                        resolve_file_path_fn=_resolve,
-                        build_final_path_fn=build_final_path_for_track,
-                        metadata_source='tags',
-                    )
-                    if tags_preview.get('status') == 'planned':
-                        preview = tags_preview
-                        reorg_metadata_source = 'tags'
             except Exception as exc:
                 logger.warning(
                     "Reorganize preview failed for album %s ('%s'): %s",
@@ -212,7 +196,11 @@ class LibraryReorganizeJob(RepairJob):
                 continue
 
             if status == 'no_source_id':
-                # Reached only when BOTH the API planner (no source ID) AND the
+                # Defensive. The catalogue planner this job asks for never
+                # returns it — the status belongs to the provider planner, which
+                # needed an album id to fetch a tracklist with. Kept so a caller
+                # that does ask for that planner still gets a readable finding.
+                # Was reached when BOTH the API planner (no source ID) AND the
                 # tag-mode fallback (files missing essential title/artist/album
                 # tags, or not on disk) failed — so no destination can be computed.
                 # One album-level finding rather than N per-track ones (UI clutter).
@@ -310,10 +298,6 @@ class LibraryReorganizeJob(RepairJob):
                     'artist_id': str(album_row.get('artist_id') or ''),
                     'artist_name': preview.get('artist') or album_row.get('artist_name') or 'Unknown Artist',
                     'source': preview.get('source'),
-                    # Carry the mode the preview actually used so the live move
-                    # matches it — otherwise the queue runner defaults to 'api'
-                    # and a tag-mode-only album would fail at apply time (#862).
-                    'metadata_source': reorg_metadata_source,
                 })
 
             if context.update_progress and (i + 1) % 25 == 0:

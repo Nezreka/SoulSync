@@ -1,65 +1,46 @@
-"""Re-route a library album's existing files through the same
-post-processing pipeline that handles fresh downloads.
+"""Where a library album's files belong, and moving them there.
 
-The old reorganize endpoint reinvented several wheels — its own template
-engine, its own disc-number resolution from file tags, its own sidecar
-sweep, its own collision detection. Each of those drifted from the
-canonical post-processing path over time, producing reorganize-only
-bugs (multi-disc deluxe collapsing to single-disc when even one file's
-tag was missing; tracks silently skipped when their file paths didn't
-resolve on disk; etc.).
+A reorganize applies the current file-organization template to files the user
+ALREADY OWNS. That is the whole job: compute a destination, move the file,
+update the catalogue row.
 
-The new design follows the import page's pattern: copy each file to a
-staging folder, build the same context dict the download workers
-build, then call ``_post_process_matched_download`` for each one.
-Post-processing already knows how to pick the right destination, write
-the right tags, handle multi-disc subfolders, recreate sidecars (cover
-art, lyrics), and run AcoustID verification — there's nothing for
-reorganize to add on top.
+It used to be something else. Each file was copied into a staging folder and
+pushed through ``_post_process_matched_download`` — the DOWNLOAD pipeline, an
+ACCEPTANCE check for files of unknown origin. Post-processing does know how to
+pick a destination and write tags, so the reuse looked free. It was not:
 
-Hard requirement: the album must have at least one stored
-metadata-source ID (spotify_album_id / itunes_album_id / deezer_id /
-discogs_id / soul_id). With no source ID we have nothing authoritative
-to ask for the canonical tracklist, and silently degrading to file
-tags is exactly the failure mode the old code path produced. Albums
-without a source ID are reported back to the caller and skipped
-entirely.
+* the acceptance check kept rejecting the library. Four opt-outs accumulated in
+  the context builder, one per report — ``is_local_import`` (#804) for the
+  integrity leg's duration disagreement, ``_skip_quarantine_check: 'acoustid'``
+  (#1182) for a file quarantined over its OWN fingerprint (Sawano Hiroyuki
+  fingerprints as 澤野弘之), ``_no_album_folder_reuse`` (#829) because reuse
+  resolved to the folder the album was being moved OUT of.
+* it re-tagged. That is the Library Re-tag job's work, from a source it can
+  show you first.
+* it copied. ~800MB of I/O for a 20-track FLAC album, and a failure left ~40MB
+  a track in quarantine.
+
+And the tracklist came from a live provider call, which is why an album with no
+stored source id could not be reorganized at all, why a preview took seconds,
+and why the library's own values had to be pulled back in one exception at a
+time (``_keep_user_casing`` twice, ``_keep_user_year``).
+
+So: the plan comes from the catalogue (:func:`_plan_from_catalogue`) and the
+executor moves (:func:`reorganize_album_rename_only`). Identity is the AcoustID
+Scanner's question and tags are the re-tag job's; neither of them moves anyone's
+audio to answer.
+
+The destination is still built by ``core.imports.paths.build_final_path_for_track``
+through the same context shape post-processing uses, so a reorganize destination
+and a fresh download's destination cannot drift apart.
 """
 
 import errno
 import os
 import re
 import shutil
-import threading
-import time
-import uuid
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-# Per-album track concurrency. Matches the download workers' per-batch
-# concurrency (3) so reorganize feels comparable to a fresh download.
-#
-# Operational note: post-processing can spawn an ffmpeg subprocess per
-# track if `lossy_copy.downsample_hires` is enabled. With 3 workers
-# that's up to 3 concurrent ffmpeg processes. Acceptable for typical
-# album sizes (10-20 tracks); on a giant single-album reorganize
-# (50+ tracks) ffmpeg's transient memory could be noticeable but each
-# subprocess is short-lived so total RAM doesn't pile up. If we ever
-# see resource issues from this, drop to 2 here rather than disabling
-# concurrency entirely.
-_REORGANIZE_MAX_WORKERS = 3
-
-# Watchdog interval — how often the orchestrator checks the worker
-# pool while waiting for tasks to finish. Setting this to 30s means
-# we log a warning naming any track that's been in flight longer than
-# `_HUNG_WORKER_THRESHOLD` (so an operator can investigate) without
-# burning CPU on a tight poll. Doesn't kill stuck threads (Python
-# can't), just surfaces them.
-_WATCHDOG_INTERVAL_SECONDS = 30
-_HUNG_WORKER_THRESHOLD_SECONDS = 300  # 5 min — generous; real worst-case
-                                       # is ffmpeg downsampling a long
-                                       # hi-res FLAC, ~30-60s typically.
 
 from core.metadata_service import (
     ALBUM_SOURCE_ID_COLUMNS,
@@ -926,12 +907,91 @@ def _plan_from_tags(
     }
 
 
+def _plan_from_catalogue(album_data: dict, tracks: List[dict]) -> dict:
+    """Catalogue planner: the album's own library rows ARE the tracklist.
+
+    Reorganize moves files the user already owns. Where they belong is a
+    question about the album in the library, so the names come from the library
+    — the same values the Library page shows, hand-corrected titles included.
+
+    The old planner asked a provider and then pulled the library's values back
+    in one exception at a time: ``_keep_user_casing`` for the album name
+    (#1078), again for the track title (#1078), ``_keep_user_year`` for the year
+    (#1080). Three patches, each added after a report, each saying the same
+    thing. Reading the catalogue makes all three true by construction.
+
+    Consequences, all intended:
+
+    * An album with no stored source id is reorganizable. Refusing it
+      (``status: 'no_source_id'``) was a provider requirement imposed on an
+      operation that needs no provider.
+    * The plan is offline — no per-preview API call, and no ``Invalid base62
+      id`` 400s from candidate ids that were never Spotify's to begin with.
+    * ``total_discs`` is the layout the catalogue knows, not one a live
+      tracklist decides differently on each call.
+
+    A track the library cannot name comes back ``matched=False`` with a reason
+    rather than being dropped, so the preview can say which one and why.
+    """
+    artist_name = album_data.get('artist_name') or ''
+    api_album = {
+        'id': '',
+        'name': album_data.get('title') or '',
+        'release_date': album_data.get('release_date') or album_data.get('year') or '',
+        'total_tracks': album_data.get('track_count') or len(tracks),
+        'image_url': album_data.get('image_url') or '',
+    }
+
+    items: List[dict] = []
+    max_disc = 1
+    for track in tracks:
+        title = (track.get('title') or '').strip()
+        if not title:
+            items.append({
+                'track': track, 'api_track': None, 'matched': False,
+                'reason': 'The library has no title for this track — there is '
+                          'nothing to name the file after.',
+            })
+            continue
+        try:
+            disc = int(track.get('disc_number') or 1)
+        except (TypeError, ValueError):
+            disc = 1
+        if disc > max_disc:
+            max_disc = disc
+        try:
+            number = int(track.get('track_number') or 0)
+        except (TypeError, ValueError):
+            number = 0
+        items.append({
+            'track': track,
+            'api_track': {
+                'id': '',
+                'name': title,
+                'track_number': number or 1,
+                'disc_number': disc,
+                'duration_ms': track.get('duration') or 0,
+                'artists': [{'name': track.get('artist_name') or artist_name}],
+            },
+            'matched': True,
+            'reason': None,
+        })
+
+    return {
+        'status': 'planned',
+        'source': 'catalogue',
+        'api_album': api_album,
+        'total_discs': max_disc,
+        'items': items,
+    }
+
+
 def plan_album_reorganize(
     album_data: dict,
     tracks: List[dict],
     primary_source: Optional[str] = None,
     strict_source: bool = False,
-    metadata_source: str = 'api',
+    metadata_source: str = 'catalogue',
     resolve_file_path_fn: Optional[Callable[[Optional[str]], Optional[str]]] = None,
     on_better_edition: Optional[Callable[[str, str, float], None]] = None,
 ) -> dict:
@@ -973,6 +1033,9 @@ def plan_album_reorganize(
             'status': 'no_tracks', 'source': None, 'api_album': None,
             'total_discs': 1, 'items': [],
         }
+
+    if metadata_source in (None, '', 'catalogue'):
+        return _plan_from_catalogue(album_data, tracks)
 
     if metadata_source == 'tags':
         return _plan_from_tags(album_data, tracks, resolve_file_path_fn)
@@ -1168,27 +1231,19 @@ def _build_post_process_context(
         'is_album_download': True,
         'has_clean_spotify_data': True,
         'has_full_spotify_metadata': True,
-        # A reorganize processes the user's OWN library files, not slskd
-        # transfers — same as the Import page (#804). Skips the integrity
-        # check's duration-agreement leg: the re-resolved API tracklist can
-        # legitimately disagree with the user's copy (a different master /
-        # long version), and that mismatch was QUARANTINING a copy of a file
-        # that stayed happily in the library (TheHomeGuy: 'Through Glass'
-        # 283s vs Discogs' 241s). Size + parse corruption legs still run.
-        'is_local_import': True,
-        # ...and for the same reason, the AcoustID identity leg does not get to
-        # quarantine this file. A reorganize stages a COPY of a track the user
-        # ALREADY OWNS and runs it through the download post-process; when the
-        # fingerprint disagreed, that leg moved the copy into ss_quarantine and
-        # the whole run reported `failed`, so a rename that should have been a
-        # no-op only worked on a second attempt with "Rename only" ticked. The
-        # disagreement is routinely legitimate — a different master, a regional
-        # release, or an artist credited in another script (Sawano Hiroyuki
-        # fingerprints as 澤野弘之). Identity of files already in the library is
-        # the AcoustID Scanner's job, and that one raises a finding instead of
-        # moving anyone's audio. The size and parse-corruption legs still run:
-        # skipping identity is not skipping safety.
-        '_skip_quarantine_check': 'acoustid',
+        # `is_local_import` (#804) and `_skip_quarantine_check: 'acoustid'`
+        # (#1182) used to sit here. Both were opt-outs FROM the download
+        # post-process: a reorganize staged a copy of a file the user already
+        # owns and pushed it through an acceptance check for files of unknown
+        # origin, where the integrity leg quarantined it over a duration the
+        # provider disagreed with and the AcoustID leg quarantined it over its
+        # own fingerprint (Sawano Hiroyuki fingerprints as 澤野弘之).
+        #
+        # A reorganize does not post-process any more, so there is nothing left
+        # to opt out of. This context now exists for ONE purpose: handing the
+        # shared path builder the same shape a download hands it, so the two
+        # cannot drift apart.
+        #
         # Reorganize destinations must come from the CURRENT template alone.
         # The #829 existing-folder reuse would resolve to the folder the album
         # already lives in — the very folder reorganize is trying to move it
@@ -1208,7 +1263,7 @@ def preview_album_reorganize(
     build_final_path_fn: Callable,
     primary_source: Optional[str] = None,
     strict_source: bool = False,
-    metadata_source: str = 'api',
+    metadata_source: str = 'catalogue',
 ) -> dict:
     """Compute the planned destination paths for a reorganize WITHOUT
     moving any files. The preview UI uses this to show users what the
@@ -1488,578 +1543,6 @@ def _build_album_info(context: dict) -> dict:
     }
 
 
-@dataclass
-class _RunContext:
-    """Bundles all state + injected dependencies a single
-    ``_process_one_track`` call needs.
-
-    Hoisted out of orchestrator-local closures so the per-track
-    helpers can be unit-tested directly with a fake ctx, and so a
-    stack trace into a failing helper is intelligible (closures
-    captured 16+ values, none of which were visible in tracebacks).
-
-    Thread-safety contract — read this before adding new fields:
-
-    - ``state_lock`` MUST be held when mutating any of the
-      lock-protected fields below. The provided ``record_error``
-      method already takes the lock; direct mutation outside that
-      method is the only place where future contributors might
-      forget. Add new mutable shared state with the same discipline.
-
-    Lock-protected fields (mutate only inside ``state_lock``):
-
-        summary              dict — counts and errors list
-        src_dirs_touched     set — populated by `_finalize_track`
-        dst_dirs_touched     set — populated by `_finalize_track`
-
-    Read-only after construction (safe to read without locking):
-
-        album_id, api_album, artist_name, album_title, total_discs,
-        staging_album_dir, resolve_file_path_fn, post_process_fn,
-        update_track_path_fn, on_progress, stop_check, state_lock
-
-    Side-effecting methods that take the lock internally:
-
-        record_error()       — records a per-track failure
-        emit()               — fires on_progress callback (no lock;
-                               assumes caller holds it when also
-                               passing summary fields, which the
-                               record_error and orchestrator-success
-                               paths both do)
-    """
-    album_id: str
-    api_album: dict
-    artist_name: str
-    album_title: str
-    total_discs: int
-    local_year: Optional[str]               # the user's stored album year (#1080)
-    staging_album_dir: str
-    state_lock: threading.Lock              # required to mutate lock-protected fields
-    summary: dict                           # LOCK-PROTECTED
-    src_dirs_touched: Set[str]              # LOCK-PROTECTED
-    dst_dirs_touched: Set[str]              # LOCK-PROTECTED
-    resolve_file_path_fn: Callable[[Optional[str]], Optional[str]]
-    post_process_fn: Callable[[str, dict, str], None]
-    update_track_path_fn: Optional[Callable[[Any, str], None]] = None
-    on_progress: Optional[Callable[[dict], None]] = None
-    stop_check: Optional[Callable[[], bool]] = None
-    transfer_dir: Optional[str] = None      # anchors the #746 /deleted-quarantine skip
-
-    def emit(self, **updates) -> None:
-        """Fire the progress callback. Caller is responsible for
-        holding ``state_lock`` when the updates payload includes
-        snapshots of lock-protected fields (so the snapshot is
-        coherent). Currently always called from inside the lock by
-        ``record_error`` and the orchestrator's success path."""
-        if self.on_progress is None:
-            return
-        try:
-            self.on_progress(updates)
-        except Exception as e:
-            logger.debug("progress emit failed: %s", e)
-
-    def record_error(self, track_id, title, message, kind: str = 'skipped') -> None:
-        with self.state_lock:
-            self.summary['errors'].append({
-                'track_id': track_id,
-                'title': title,
-                'error': message,
-            })
-            self.summary[kind] += 1
-            self.emit(**{
-                kind: self.summary[kind],
-                'errors': list(self.summary['errors']),
-                'processed': (
-                    self.summary['moved']
-                    + self.summary['skipped']
-                    + self.summary['failed']
-                ),
-            })
-
-
-def _stage_track(ctx: _RunContext, track_id, title, resolved_src) -> Optional[str]:
-    """Stage a copy of ``resolved_src`` into a per-track UUID
-    subdirectory under ``ctx.staging_album_dir``.
-
-    Per-track subdirs are required for concurrent safety: post-process
-    calls ``_cleanup_empty_directories`` after each move, which walks
-    UP from the source file removing empty dirs. With a shared
-    ``staging_album_dir`` that walk would race with other workers'
-    in-flight ``makedirs``/``copy2`` calls — worker A finishing could
-    nuke the dir between worker B's ``makedirs`` and ``copy2``,
-    causing intermittent ``[WinError 3]`` / ``ENOENT`` failures.
-
-    With per-track subdirs:
-
-    - Worker A's cleanup walks: per-track subdir (empty after move →
-      removed) → ``staging_album_dir`` (still has other workers'
-      subdirs → not empty → walk stops). ✓
-    - Worker B's stage-in: makedirs its OWN subdir, copies into
-      it. No interference from worker A. ✓
-    """
-    worker_dir = os.path.join(ctx.staging_album_dir, uuid.uuid4().hex[:8])
-    try:
-        os.makedirs(worker_dir, exist_ok=True)
-    except OSError as mk_err:
-        ctx.record_error(track_id, title,
-                         f"Couldn't create staging subdirectory: {mk_err}",
-                         kind='failed')
-        return None
-    staging_file = os.path.join(worker_dir, os.path.basename(resolved_src))
-    try:
-        shutil.copy2(resolved_src, staging_file)
-    except OSError as copy_err:
-        ctx.record_error(track_id, title,
-                         f"Couldn't copy to staging: {copy_err}",
-                         kind='failed')
-        return None
-    return staging_file
-
-
-def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, staging_file, *, per_item_api_album=None) -> Optional[str]:
-    """Build the per-track context, hand it to post-processing, and
-    return the final on-disk path it produced. Returns None on any
-    failure (exception, AcoustID rejection, internal skip); the caller
-    leaves the original file alone.
-
-    ``per_item_api_album`` overrides ``ctx.api_album`` for this track —
-    used in tag-mode reorganize where each file may carry its own
-    embedded album metadata."""
-    api_album = per_item_api_album if per_item_api_album else ctx.api_album
-    context = _build_post_process_context(
-        api_album, api_track, ctx.artist_name, ctx.album_title, ctx.total_discs,
-        local_title=title, local_year=ctx.local_year,
-    )
-    context_key = f"reorganize_{ctx.album_id}_{track_id}_{uuid.uuid4().hex[:8]}"
-    try:
-        ctx.post_process_fn(context_key, context, staging_file)
-    except Exception as pp_err:
-        ctx.record_error(track_id, title,
-                         f"Post-processing failed: {pp_err}",
-                         kind='failed')
-        return None
-    new_path = context.get('_final_processed_path')
-    if not new_path or not os.path.exists(new_path):
-        ctx.record_error(track_id, title,
-                         'Post-processing did not produce a final file '
-                         '(AcoustID rejection, quarantine, or skip).',
-                         kind='failed')
-        return None
-    return new_path
-
-
-def _finalize_track(ctx: _RunContext, track_id, resolved_src, new_path) -> bool:
-    """Update the DB row, then remove the original (in that order — DB
-    failure leaves the file at both locations, recoverable by library
-    scan; the reverse would orphan the row). Records src/dst dirs for
-    end-of-run cleanup, deletes per-track sidecars.
-
-    Returns ``True`` if the track is fully landed (DB row points to
-    ``new_path`` AND the original is dealt with), ``False`` if DB
-    update failed. Caller MUST treat False as a failure for counting
-    purposes — the file is at both locations, the DB still points to
-    the old path, and counting it as "moved" overstates how many
-    tracks the user can actually find via the UI."""
-    if ctx.update_track_path_fn:
-        try:
-            ctx.update_track_path_fn(track_id, new_path)
-        except Exception as db_err:
-            logger.warning(
-                f"[Reorganize] DB path update failed for {track_id}: {db_err} "
-                f"— leaving original at {resolved_src} so the library scan can recover."
-            )
-            return False
-    if os.path.normpath(resolved_src) == os.path.normpath(new_path):
-        return True  # in-place edit; DB already correct, nothing to remove
-    with ctx.state_lock:
-        ctx.src_dirs_touched.add(os.path.dirname(resolved_src))
-        ctx.dst_dirs_touched.add(os.path.dirname(new_path))
-
-    # Discord report (Foxxify): users with lossy-copy enabled have
-    # `track.flac` AND `track.opus` side-by-side. The DB tracks ONE
-    # (the lossy copy). Reorganize used to move only the canonical
-    # and leave the orphan behind, blocking empty-folder cleanup.
-    # Move sibling-format audio to the same destination dir BEFORE
-    # removing the canonical source, preserving both formats with
-    # the canonical's renamed stem.
-    siblings = _find_sibling_audio_files(resolved_src)
-    for sibling_src in siblings:
-        moved_to = _move_sibling_to_destination(sibling_src, new_path)
-        if moved_to:
-            logger.debug(
-                "[Reorganize] Moved sibling-format file alongside canonical: %s",
-                moved_to,
-            )
-
-    try:
-        os.remove(resolved_src)
-    except OSError as rm_err:
-        logger.warning(f"[Reorganize] Couldn't remove original {resolved_src}: {rm_err}")
-    _delete_track_sidecars(resolved_src)
-    return True
-
-
-def _process_one_track(ctx: _RunContext, plan_item: dict) -> None:
-    """Process a single plan item end-to-end. Safe to call concurrently
-    from multiple workers — all shared-state mutations go through
-    ``ctx.state_lock`` (via ``record_error`` and ``_finalize_track``)."""
-    if ctx.stop_check and ctx.stop_check():
-        return
-    track = plan_item['track']
-    title = track.get('title', 'Unknown')
-    track_id = track.get('id')
-    ctx.emit(current_track=title)
-
-    if not plan_item['matched']:
-        ctx.record_error(track_id, title,
-                         plan_item.get('reason') or 'No matching API track')
-        return
-
-    db_path = track.get('file_path')
-    resolved_src = ctx.resolve_file_path_fn(db_path) if db_path else None
-    if not resolved_src:
-        ctx.record_error(track_id, title,
-                         f"File not found on disk — DB path: {db_path or '(empty)'}")
-        return
-
-    # #746: leave duplicate-cleaner quarantine files (<transfer>/deleted)
-    # where they are. Matches the preview's skip so apply never yanks a file
-    # back out of /deleted. (Mirrors the preview guard in
-    # preview_album_reorganize.)
-    if _is_in_deleted_quarantine(resolved_src, ctx.transfer_dir):
-        ctx.record_error(track_id, title,
-                         'In deleted/quarantine folder — skipped')
-        return
-
-    staging_file = _stage_track(ctx, track_id, title, resolved_src)
-    if staging_file is None:
-        return
-
-    new_path = _run_post_process_for_track(
-        ctx, track_id, title, plan_item['api_track'], staging_file,
-        per_item_api_album=plan_item.get('api_album'),
-    )
-    if new_path is None:
-        return
-
-    finalized = _finalize_track(ctx, track_id, resolved_src, new_path)
-    if not finalized:
-        # File landed at new_path but DB row + original-removal didn't.
-        # User can still find the track (library scan will re-index from
-        # new_path), but we can't honestly count it as "moved" — that
-        # would overstate how many tracks the UI knows are at their new
-        # locations. Surfacing as failed lets the user see something
-        # needs attention (per kettui's PR #377 review).
-        ctx.record_error(
-            track_id, title,
-            'Track landed at new location but DB update failed — '
-            'file is at both old and new paths until library scan re-indexes.',
-            kind='failed',
-        )
-        return
-
-    with ctx.state_lock:
-        ctx.summary['moved'] += 1
-        ctx.emit(
-            moved=ctx.summary['moved'],
-            processed=ctx.summary['moved'] + ctx.summary['skipped'] + ctx.summary['failed'],
-        )
-
-
-def reorganize_album(
-    *,
-    album_id: str,
-    db,
-    staging_root: str,
-    resolve_file_path_fn: Callable[[Optional[str]], Optional[str]],
-    post_process_fn: Callable[[str, dict, str], None],
-    update_track_path_fn: Optional[Callable[[object, str], None]] = None,
-    cleanup_empty_dir_fn: Optional[Callable[[str], None]] = None,
-    transfer_dir: Optional[str] = None,
-    on_progress: Optional[Callable[[dict], None]] = None,
-    primary_source: Optional[str] = None,
-    strict_source: bool = False,
-    stop_check: Optional[Callable[[], bool]] = None,
-    metadata_source: str = 'api',
-) -> dict:
-    """Run a single album through the post-processing pipeline.
-
-    See module docstring for the rationale. Dependencies (file
-    resolution, post-processing, DB-path update, empty-dir cleanup)
-    are injected so the orchestrator stays in ``core/`` and is unit
-    testable without spinning up the Flask app.
-
-    Args:
-        album_id: Library album ID.
-        db: Database object exposing ``_get_connection()``.
-        staging_root: Root staging directory under the user's download
-            path. A per-album subfolder is created beneath it; the
-            whole subfolder is removed at the end of the run.
-        resolve_file_path_fn: Resolves a DB-stored file path to the
-            actual on-disk path (or ``None`` if missing). Injected
-            because the resolution logic lives in ``web_server``.
-        post_process_fn: ``_post_process_matched_download``. Must set
-            ``context['_final_processed_path']`` on success.
-        update_track_path_fn: Called as
-            ``update_track_path_fn(track_id, new_path)`` after each
-            successful post-process to update the DB row. ``None`` to
-            skip (e.g. in tests).
-        cleanup_empty_dir_fn: Called with each source directory we
-            emptied so the caller can prune empty parents. ``None`` to
-            skip.
-        on_progress: Optional callback for live status updates.
-            Receives a dict with any subset of the standard reorganize
-            state keys (``current_track``, ``processed``, ``moved``,
-            ``skipped``, ``failed``, ``errors``).
-        primary_source: Override for the configured primary source.
-            Defaults to ``get_primary_source()``.
-        stop_check: Returns True when the caller wants the reorganize
-            to abort early (e.g. server shutdown).
-
-    Returns:
-        Status summary dict with ``status`` ∈ ``{'completed',
-        'no_album', 'no_tracks', 'no_source_id'}`` plus per-track
-        counters.
-    """
-    summary = {
-        'status': 'completed',
-        'source': None,
-        'total': 0,
-        'moved': 0,
-        'skipped': 0,
-        'failed': 0,
-        'errors': [],
-    }
-
-    state_lock = threading.Lock()
-
-    def _emit(**updates):
-        if on_progress is None:
-            return
-        try:
-            on_progress(updates)
-        except Exception as e:
-            logger.debug("reorganize progress callback failed: %s", e)
-
-    # Load album + tracks
-    album_data, tracks = load_album_and_tracks(db, album_id)
-    if album_data is None:
-        summary['status'] = 'no_album'
-        return summary
-
-    if not tracks:
-        summary['status'] = 'no_tracks'
-        return summary
-
-    summary['total'] = len(tracks)
-    _emit(total=len(tracks))
-
-    # #767-2: persist the canonical pin when the resolver lands on a better-fit
-    # edition than the linked one, so Track Number Repair + future runs agree and
-    # we don't re-resolve every time. Never overrides a manually-locked pin (the
-    # set_album_canonical SQL guard from #758 enforces that).
-    def _persist_canonical(source, alt_album_id, score):
-        try:
-            db.set_album_canonical(album_id, source, alt_album_id, score)
-        except Exception as e:
-            logger.warning("[Reorganize] set_album_canonical failed: %s", e)
-
-    # Build the per-track plan (same logic the preview uses).
-    plan = plan_album_reorganize(
-        album_data, tracks,
-        primary_source=primary_source, strict_source=strict_source,
-        metadata_source=metadata_source,
-        resolve_file_path_fn=resolve_file_path_fn,
-        on_better_edition=_persist_canonical,
-    )
-    if plan['status'] == 'no_source_id':
-        summary['status'] = 'no_source_id'
-        summary['source'] = plan.get('source')  # 'tags' or None
-        if plan.get('source') == 'tags':
-            err_text = (
-                f"No tracks of '{album_data.get('title', '?')}' have readable "
-                "embedded tags (missing title / artist / album, or file unreadable). "
-                "Switch back to API mode or fix the embedded tags first."
-            )
-        elif _is_unknown_artist(album_data.get('artist_name')) or _looks_like_album_id_title(album_data.get('title')):
-            err_text = (
-                f"Album '{album_data.get('title', '?')}' has placeholder metadata "
-                "(Unknown Artist or numeric title) — run the 'Fix Unknown Artists' "
-                "repair job to recover real artist/album from file tags first."
-            )
-        else:
-            err_text = (
-                f"No reachable metadata source ID for '{album_data.get('title', '?')}' — "
-                "run enrichment first to populate at least one of "
-                "spotify_album_id / itunes_album_id / deezer_id / discogs_id / soul_id."
-            )
-        summary['errors'].append({'error': err_text})
-        return summary
-
-    source = plan['source']
-    api_album = plan['api_album']
-    total_discs = plan['total_discs']
-    summary['source'] = source
-    logger.info(
-        f"[Reorganize] Album '{album_data.get('title')}' resolved via {source}: "
-        f"{len(plan['items'])} item(s) planned"
-    )
-
-    # Per-album staging dir under the configured download path. Cleaned
-    # up (best-effort) at the end of the run regardless of outcome.
-    artist_name = album_data.get('artist_name') or 'Unknown Artist'
-    album_title = album_data.get('title') or 'Unknown Album'
-    staging_album_dir = os.path.join(
-        staging_root,
-        f"{_safe_filename(artist_name)} - {_safe_filename(album_title)}_{uuid.uuid4().hex[:8]}",
-    )
-    try:
-        os.makedirs(staging_album_dir, exist_ok=True)
-    except OSError as e:
-        summary['status'] = 'setup_failed'
-        summary['errors'].append({
-            'error': f"Couldn't create staging directory '{staging_album_dir}': {e}",
-        })
-        return summary
-
-    src_dirs_touched: Set[str] = set()
-    dst_dirs_touched: Set[str] = set()
-
-    ctx = _RunContext(
-        album_id=str(album_id),
-        api_album=api_album or {},
-        artist_name=artist_name,
-        album_title=album_title,
-        total_discs=total_discs,
-        local_year=(str(album_data.get('year')) if album_data.get('year') else None),
-        staging_album_dir=staging_album_dir,
-        state_lock=state_lock,
-        summary=summary,
-        src_dirs_touched=src_dirs_touched,
-        dst_dirs_touched=dst_dirs_touched,
-        resolve_file_path_fn=resolve_file_path_fn,
-        post_process_fn=post_process_fn,
-        update_track_path_fn=update_track_path_fn,
-        on_progress=on_progress,
-        stop_check=stop_check,
-        transfer_dir=transfer_dir,
-    )
-
-    try:
-        # 3 concurrent workers per album — matches the download-side
-        # batch worker count. Post-process has its own per-context-key
-        # lock so concurrent calls don't race on the same file, and
-        # all shared-state mutations here are inside `state_lock`.
-        #
-        # Wait loop with a periodic watchdog: instead of blocking
-        # indefinitely on `as_completed`, we wake every
-        # `_WATCHDOG_INTERVAL_SECONDS` so we can react to stop_check
-        # promptly AND log a warning if any track has been processing
-        # for longer than `_HUNG_WORKER_THRESHOLD_SECONDS`. We can't
-        # kill the thread (Python doesn't allow that cleanly), but
-        # surfacing it lets operators investigate.
-        with ThreadPoolExecutor(
-            max_workers=_REORGANIZE_MAX_WORKERS,
-            thread_name_prefix='Reorganize',
-        ) as executor:
-            future_to_item = {
-                executor.submit(_process_one_track, ctx, item): item
-                for item in plan['items']
-            }
-            future_started_at = {f: time.monotonic() for f in future_to_item}
-            pending = set(future_to_item.keys())
-            warned_about: Set[Any] = set()
-
-            while pending:
-                if stop_check and stop_check():
-                    for f in pending:
-                        f.cancel()
-                    break
-
-                done, pending = wait(
-                    pending,
-                    timeout=_WATCHDOG_INTERVAL_SECONDS,
-                    return_when=FIRST_COMPLETED,
-                )
-                for finished in done:
-                    try:
-                        finished.result()
-                    except Exception as worker_err:
-                        logger.error(
-                            f"[Reorganize] Worker raised: {worker_err}",
-                            exc_info=True,
-                        )
-
-                # Watchdog pass — log once per stuck future.
-                now = time.monotonic()
-                for f in pending:
-                    if f in warned_about:
-                        continue
-                    elapsed = now - future_started_at[f]
-                    if elapsed >= _HUNG_WORKER_THRESHOLD_SECONDS:
-                        item = future_to_item.get(f, {})
-                        track_title = (item.get('track') or {}).get('title', 'Unknown')
-                        logger.warning(
-                            f"[Reorganize] Worker stuck for {elapsed:.0f}s on track "
-                            f"'{track_title}' — leaving it running, other workers continuing."
-                        )
-                        warned_about.add(f)
-
-    finally:
-        # Best-effort cleanup of the staging dir.
-        try:
-            if os.path.isdir(staging_album_dir):
-                shutil.rmtree(staging_album_dir, ignore_errors=True)
-        except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
-            pass
-
-        # Best-effort cleanup of source directories. For each touched dir
-        # that has no audio files left (i.e. every track in this dir was
-        # successfully moved), delete album-level sidecars (cover.jpg,
-        # folder.jpg, etc.) so the dir is empty enough for the empty-dir
-        # pruner to take it. If audio remains (a track failed to move),
-        # leave everything alone so the user can see what's still there.
-        for src_dir in src_dirs_touched:
-            try:
-                if _has_remaining_audio(src_dir):
-                    continue
-                _delete_album_sidecars(src_dir)
-            except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
-                pass
-
-        for src_dir in src_dirs_touched:
-            # Injected pruner (transfer-dir-bounded — works when the library lives
-            # under the transfer folder) PLUS the library-safe upward prune (#985)
-            # for libraries that don't.
-            if cleanup_empty_dir_fn:
-                try:
-                    cleanup_empty_dir_fn(src_dir)
-                except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
-                    pass
-            try:
-                _prune_empty_source_dirs(src_dir)
-            except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
-                pass
-
-        # Prune empty *destination* siblings — e.g. when a previous
-        # failed reorganize attempt left ``Artist/Album-Sibling/`` dirs
-        # behind that we never end up using, OR when a current-run
-        # post-process created a destination dir then failed AcoustID
-        # before landing the file. Walk up from any successful
-        # destination to the artist folder, then prune one level of
-        # empty children. Bounded depth = safer than recursive sweep.
-        if transfer_dir and dst_dirs_touched:
-            artist_dirs = set()
-            for dst in dst_dirs_touched:
-                artist = _find_artist_dir(dst, transfer_dir)
-                if artist:
-                    artist_dirs.add(artist)
-            for artist_dir in artist_dirs:
-                _prune_empty_album_dirs(artist_dir)
-
-    return summary
-
-
 def _rename_track_in_place(current_abs: str, new_abs: str) -> Tuple[bool, Optional[str]]:
     """Move ONE file from ``current_abs`` to ``new_abs`` in place — no copy, no re-tag,
     no post-processing. Creates the destination folder, carries sibling-format files
@@ -2087,9 +1570,45 @@ def _rename_track_in_place(current_abs: str, new_abs: str) -> Tuple[bool, Option
                 shutil.move(current_abs, new_abs)  # crosses a filesystem boundary
             else:
                 raise
+        # Only once the audio has landed: a failed move must leave the whole
+        # track — sidecars included — where it was.
+        _move_track_sidecars(current_abs, new_abs)
         return True, None
     except Exception as e:
         return False, str(e)
+
+
+def _move_track_sidecars(current_abs: str, new_abs: str) -> None:
+    """Carry a track's own sidecars (.lrc/.nfo/.txt/.cue/.json) to the new stem.
+
+    The full-mode reorganize could DELETE these at the source, because
+    post-processing re-created them at the destination from the provider. A move
+    has no such second half — leaving them behind loses hand-written lyrics.
+
+    Best-effort and never destructive: a sidecar already at the destination is
+    left exactly as it is.
+    """
+    src_dir = os.path.dirname(current_abs)
+    dst_dir = os.path.dirname(new_abs)
+    src_stem = os.path.splitext(os.path.basename(current_abs))[0]
+    dst_stem = os.path.splitext(os.path.basename(new_abs))[0]
+    for ext in _TRACK_SIDECAR_EXTS:
+        src_side = os.path.join(src_dir, src_stem + ext)
+        if not os.path.isfile(src_side):
+            continue
+        dst_side = os.path.join(dst_dir, dst_stem + ext)
+        if os.path.exists(dst_side):
+            continue
+        try:
+            os.rename(src_side, dst_side)
+        except OSError as e:
+            if getattr(e, 'errno', None) == errno.EXDEV:
+                try:
+                    shutil.move(src_side, dst_side)
+                except Exception as move_err:
+                    logger.debug("[Reorganize] sidecar %s not moved: %s", src_side, move_err)
+            else:
+                logger.debug("[Reorganize] sidecar %s not moved: %s", src_side, e)
 
 
 def reorganize_album_rename_only(
@@ -2104,7 +1623,7 @@ def reorganize_album_rename_only(
     on_progress: Optional[Callable[[dict], None]] = None,
     primary_source: Optional[str] = None,
     strict_source: bool = False,
-    metadata_source: str = 'api',
+    metadata_source: str = 'catalogue',
     stop_check: Optional[Callable[[], bool]] = None,
     preview_fn: Optional[Callable] = None,
 ) -> dict:
@@ -2238,63 +1757,6 @@ def reorganize_album_rename_only(
     return summary
 
 
-def _find_artist_dir(dest_path: str, transfer_dir: str) -> Optional[str]:
-    """Walk up from ``dest_path`` until the parent equals ``transfer_dir``;
-    the directory at that point is the artist folder. Returns None if
-    ``dest_path`` isn't inside ``transfer_dir`` at all."""
-    if not transfer_dir:
-        return None
-    transfer_norm = os.path.normpath(transfer_dir)
-    cur = os.path.normpath(dest_path)
-    while True:
-        parent = os.path.dirname(cur)
-        if parent == cur:
-            return None  # filesystem root
-        if os.path.normpath(parent) == transfer_norm:
-            return cur
-        cur = parent
-
-
-def _prune_empty_album_dirs(artist_dir: str) -> None:
-    """Remove direct subdirectories of ``artist_dir`` that are empty.
-    Single-level prune: deliberately doesn't recurse — we want to
-    catch leftover album-sibling folders without aggressively touching
-    the user's nested directory tree.
-
-    Also walks one level deeper into each album dir to remove empty
-    Disc-N subfolders that previous runs may have created."""
-    if not os.path.isdir(artist_dir):
-        return
-    try:
-        children = list(os.listdir(artist_dir))
-    except OSError:
-        return
-    for entry in children:
-        album_path = os.path.join(artist_dir, entry)
-        if not os.path.isdir(album_path):
-            continue
-        # First pass: prune empty Disc-N subfolders inside this album.
-        try:
-            for sub in list(os.listdir(album_path)):
-                disc_path = os.path.join(album_path, sub)
-                if os.path.isdir(disc_path):
-                    try:
-                        if not os.listdir(disc_path):
-                            os.rmdir(disc_path)
-                    except OSError:
-                        pass
-        except OSError:
-            pass
-        # Then: if the whole album dir is now empty, prune it.
-        try:
-            if not os.listdir(album_path):
-                os.rmdir(album_path)
-                logger.info(f"[Reorganize] Pruned empty album dir: {album_path}")
-        except OSError:
-            pass
-
-
-# A disc subfolder inside an album: "Disc 1", "CD 2", "Disk 01", "Vol. 3", etc.
 _DISC_DIR_RE = re.compile(r'^(disc|disk|cd|vol|volume)\s*\.?\s*\d+$', re.IGNORECASE)
 
 
@@ -2440,61 +1902,3 @@ def _move_sibling_to_destination(sibling_src: str, canonical_dst: str) -> Option
         return None
 
 
-def _delete_track_sidecars(audio_path: str) -> None:
-    """Delete per-track sidecars (.lrc / .nfo / .txt / .cue / .json) that
-    sit alongside `audio_path` and share its filename stem. Best-effort —
-    individual failures are logged at debug and never raised."""
-    src_dir = os.path.dirname(audio_path)
-    stem = os.path.splitext(os.path.basename(audio_path))[0]
-    for ext in _TRACK_SIDECAR_EXTS:
-        sidecar = os.path.join(src_dir, stem + ext)
-        if os.path.isfile(sidecar):
-            try:
-                os.remove(sidecar)
-            except OSError as e:
-                logger.debug(f"[Reorganize] Couldn't remove sidecar {sidecar}: {e}")
-
-
-def _delete_album_sidecars(src_dir: str) -> None:
-    """Delete album-level *residual* files from ``src_dir`` — any cover/scan image,
-    lyric/metadata sidecar (.lrc/.nfo/.cue/.m3u), or OS junk. Called during
-    end-of-run cleanup ONLY when no audio remains in the directory, so everything
-    here is leftover from the album that just moved (#891 — previously this only
-    removed a fixed list of cover names, so ``back.jpg`` / ``disc.jpg`` / ``.webp``
-    survived and kept the folder un-prunable).
-
-    Uses the shared ``is_disposable`` predicate so it agrees with the Empty Folder
-    Cleaner on what's a dead leftover; anything unrecognized (a booklet ``.pdf``, a
-    video) is deliberately LEFT. Best-effort — individual failures are debug-logged."""
-    from core.library.residual_files import is_disposable
-    try:
-        entries = os.listdir(src_dir)
-    except OSError:
-        return
-    for name in entries:
-        if not is_disposable(name):
-            continue
-        full = os.path.join(src_dir, name)
-        if os.path.isfile(full):
-            try:
-                os.remove(full)
-            except OSError as e:
-                logger.debug(f"[Reorganize] Couldn't remove residual file {full}: {e}")
-
-
-def _has_remaining_audio(directory: str) -> bool:
-    """Return True if `directory` contains any audio files. Used as the
-    safety check before stripping album-level sidecars: if a track
-    failed to move, leave its cover art and friends in place."""
-    if not os.path.isdir(directory):
-        return False
-    try:
-        for name in os.listdir(directory):
-            full = os.path.join(directory, name)
-            if not os.path.isfile(full):
-                continue
-            if os.path.splitext(name)[1].lower() in _AUDIO_EXTS:
-                return True
-    except OSError:
-        return True  # Safer to assume "yes, leave it" if we can't check
-    return False
