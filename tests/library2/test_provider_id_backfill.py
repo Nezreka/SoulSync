@@ -146,3 +146,36 @@ def test_no_services_configured_is_a_no_op(conn):
 
     assert enrich.seen == []
     assert stats["scanned"] == 0
+
+
+def test_a_stop_is_honoured_between_items(conn):
+    """A full budget against MusicBrainz's one-per-second limiter is minutes.
+
+    The job only checked for a stop before the phase began, so pressing stop
+    meant "stop eventually" — and there is no smaller unit of work to fall back
+    on, because each item is a blocking provider call.
+    """
+    enrich = _enricher({"musicbrainz": {
+        "success": True, "source": "musicbrainz", "provider_id": "mbid-1"}})
+    calls = {"n": 0}
+
+    def _stop():
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    stats = backfill_missing_provider_ids(
+        conn, services=["musicbrainz"], limit=50, enricher=enrich,
+        should_stop=_stop)
+
+    assert stats["scanned"] == 1
+    assert len(enrich.seen) == 1
+
+
+def test_without_a_stop_callback_the_budget_is_spent_as_before(conn):
+    enrich = _enricher({"musicbrainz": {
+        "success": True, "source": "musicbrainz", "provider_id": "mbid-1"}})
+
+    stats = backfill_missing_provider_ids(
+        conn, services=["musicbrainz"], limit=50, enricher=enrich)
+
+    assert stats["scanned"] >= 1

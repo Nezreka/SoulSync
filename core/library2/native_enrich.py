@@ -570,6 +570,42 @@ def _apply_descriptive_metadata(
     return getattr(metadata, "image_url", None)
 
 
+def _musicbrainz_artist_identity(conn, artist_id: int, artist_name: str) -> Optional[str]:
+    """MusicBrainz's own answer for an artist, instead of a name-similarity guess.
+
+    The generic path below ranks a provider's search results by normalised-name
+    similarity. For an artist whose MusicBrainz name is written in another
+    script that similarity is 0.0, so the RIGHT entity is discarded — while a
+    same-script near-namesake sails through: "SawanoHiroyuki[nZk]" against
+    "Sawano Hiroyuki" normalises to 0.88, comfortably over the 0.85 gate. The
+    Enrich button and the provider backfill that shares this function therefore
+    could not match a cross-script artist at all, and could confidently match
+    the wrong one — writing that id onto the row, where the AcoustID alias
+    bridge then reads it.
+
+    ``match_artist`` already decides this properly, including the owned-catalogue
+    evidence that survives a script difference. Returns None to fall through to
+    the generic path.
+    """
+    try:
+        from core.musicbrainz_service import get_musicbrainz_service
+        from core.library2.worker_support import owned_album_titles
+    except Exception as exc:  # noqa: BLE001 — optional dependency, never fatal
+        logger.debug("musicbrainz artist match unavailable: %s", exc)
+        return None
+    try:
+        owned = owned_album_titles(conn, int(artist_id))
+    except Exception:  # noqa: BLE001 — no catalogue is not an error
+        owned = []
+    try:
+        result = get_musicbrainz_service().match_artist(
+            artist_name, owned_titles=owned) or {}
+    except Exception as exc:  # noqa: BLE001 — one provider, not the run
+        logger.debug("musicbrainz artist match failed for %r: %s", artist_name, exc)
+        return None
+    return str(result.get("mbid") or "").strip() or None
+
+
 def enrich_native_entity_for_service(
     conn: Any,
     entity_type: str,
@@ -634,6 +670,12 @@ def enrich_native_entity_for_service(
     provider_id = source_ids.get(service)
     actual_source = service
     hit: Dict[str, Any] = {}
+    if not provider_id and canonical == "artist" and service == "musicbrainz":
+        provider_id = _musicbrainz_artist_identity(
+            conn, int(entity_id), str(row["name"] or ""))
+        if provider_id:
+            actual_source = service
+
     if not provider_id:
         if searcher is None:
             from core.library.service_search import _search_service
@@ -1280,6 +1322,7 @@ def backfill_missing_provider_ids(
     limit: int,
     enricher: Optional[Callable[..., Dict[str, Any]]] = None,
     next_item: Optional[Callable[..., Optional[Dict[str, Any]]]] = None,
+    should_stop: Optional[Callable[[], bool]] = None,
 ) -> Dict[str, Any]:
     """Fill in per-provider gaps across owned artists, albums and tracks.
 
@@ -1297,6 +1340,10 @@ def backfill_missing_provider_ids(
     order and the retry window for a previous miss. That shared ledger is also
     what makes this safe to run alongside those workers: whoever reaches a row
     first records the attempt, and the other one is handed the next row instead.
+
+    ``should_stop`` is consulted between items. Without it a full budget against
+    MusicBrainz's one-request-per-second limiter was minutes of work that a stop
+    could not interrupt, because the job only checked before the phase began.
 
     ``limit`` is a whole-run budget spent round-robin over ``services``, so one
     provider's backlog cannot starve the rest. Every outcome is recorded,
@@ -1323,6 +1370,12 @@ def backfill_missing_provider_ids(
         progressed = False
         for service in queue:
             if budget <= 0:
+                break
+            # A 100-item budget against MusicBrainz's one-request-per-second
+            # limiter is minutes of work; checking only before the phase made
+            # "stop" mean "stop eventually".
+            if callable(should_stop) and should_stop():
+                budget = 0
                 break
             if service in exhausted:
                 continue

@@ -1238,3 +1238,91 @@ def test_anchor_walk_never_holds_a_write_transaction_across_a_provider_call(impo
     assert row["spotify_id"] == "SPOTIFY-ARTIST"
     assert row["musicbrainz_id"] == "MUSICBRAINZ-ARTIST"
     assert json.loads(row["external_ids"])["deezer"] == "DEEZER-ARTIST"
+
+
+# --- MusicBrainz decides its own identity ----------------------------------
+
+
+def test_musicbrainz_artist_enrichment_asks_match_artist_not_the_name_gate(
+    imported_conn, monkeypatch,
+):
+    """The Enrich button could not reach a cross-script artist at all.
+
+    This path ranks a provider's search results by normalised-name similarity,
+    and across scripts that is 0.0 by construction — so `澤野弘之`, the entity
+    MusicBrainz itself returns first at score 100, was discarded, while
+    `SawanoHiroyuki[nZk]` (a different MusicBrainz entity) normalises to 0.88
+    against "Sawano Hiroyuki" and clears the 0.85 gate. Nothing about that is
+    specific to the button: the provider-gap backfill drives the same function
+    across the whole library, so it could write that wrong id onto every
+    cross-script artist it touched — and the AcoustID alias bridge reads exactly
+    that id.
+    """
+    aid = _insert_native_artist(imported_conn, "Sawano Hiroyuki")
+    asked = {}
+
+    class _Service:
+        def match_artist(self, name, owned_titles=None):
+            asked["name"] = name
+            asked["owned_titles"] = list(owned_titles or [])
+            return {"mbid": "mbid-sawano", "name": "澤野弘之", "confidence": 80}
+
+    monkeypatch.setattr("core.musicbrainz_service.get_musicbrainz_service",
+                        lambda: _Service())
+
+    result = NE.enrich_native_entity_for_service(
+        imported_conn, "artist", aid, "musicbrainz",
+        searcher=lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("the name-similarity path must not be used")),
+    )
+
+    assert result["success"] is True
+    assert result["provider_id"] == "mbid-sawano"
+    assert asked["name"] == "Sawano Hiroyuki"
+    row = imported_conn.execute(
+        "SELECT musicbrainz_id FROM lib2_artists WHERE id=?", (aid,)).fetchone()
+    assert row["musicbrainz_id"] == "mbid-sawano"
+
+
+def test_musicbrainz_artist_enrichment_falls_through_when_no_match(
+    imported_conn, monkeypatch,
+):
+    """No answer from `match_artist` is not a reason to skip the generic path."""
+    aid = _insert_native_artist(imported_conn, "Some Artist")
+
+    class _Service:
+        def match_artist(self, name, owned_titles=None):
+            return None
+
+    monkeypatch.setattr("core.musicbrainz_service.get_musicbrainz_service",
+                        lambda: _Service())
+
+    result = NE.enrich_native_entity_for_service(
+        imported_conn, "artist", aid, "musicbrainz",
+        searcher=lambda *_a, **_k: [{
+            "id": "MB-FROM-SEARCH", "name": "Some Artist",
+            "provider": "musicbrainz"}],
+    )
+
+    assert result["provider_id"] == "MB-FROM-SEARCH"
+
+
+def test_musicbrainz_album_enrichment_is_untouched(imported_conn, monkeypatch):
+    """Only artists have a `match_artist`; albums keep the generic path."""
+    monkeypatch.setattr(
+        "core.musicbrainz_service.get_musicbrainz_service",
+        lambda: (_ for _ in ()).throw(AssertionError("albums must not ask")))
+    aid = _insert_native_artist(imported_conn, "Album Artist")
+    cur = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, ?)",
+        (aid, "Some Album"))
+    album_id = int(cur.lastrowid)
+
+    result = NE.enrich_native_entity_for_service(
+        imported_conn, "album", album_id, "musicbrainz",
+        searcher=lambda *_a, **_k: [{
+            "id": "MB-RELEASE", "name": "Some Album", "provider": "musicbrainz",
+            "artist_name": "Album Artist"}],
+    )
+
+    assert result["provider_id"] == "MB-RELEASE"

@@ -225,7 +225,8 @@ class NativeEnrichmentSweepJob(RepairJob):
             from core.library2.native_enrich import backfill_missing_provider_ids
 
             stats = backfill_missing_provider_ids(
-                conn, services=sorted(services), limit=limit)
+                conn, services=sorted(services), limit=limit,
+                should_stop=context.check_stop)
         except Exception as e:  # noqa: BLE001 — the artist pass already counted
             logger.error("provider gap backfill failed: %s", e)
             result.errors += 1
