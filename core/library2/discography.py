@@ -103,7 +103,7 @@ def _external_ids(raw: Any) -> Dict[str, str]:
 
 def _link_release_artists(
     conn, album_id: int, primary_artist_id: int, primary_artist_name: str,
-    credited_names: Any,
+    artist_credits: Any, source: Optional[str],
 ) -> None:
     """Link a provider release to every explicit album artist credit.
 
@@ -115,13 +115,19 @@ def _link_release_artists(
 
     names = []
     seen = set()
-    for raw_name in credited_names or ():
+    for credit in artist_credits or ():
+        if isinstance(credit, dict):
+            raw_name = credit.get("name")
+            provider_id = credit.get("id") or credit.get("provider_id")
+        else:
+            raw_name = getattr(credit, "name", credit)
+            provider_id = getattr(credit, "provider_id", None)
         name = str(raw_name or "").strip()
         key = normalize_name(name)
         if not key or key == normalize_name("Unknown Artist") or key in seen:
             continue
         seen.add(key)
-        names.append((name, key))
+        names.append((name, key, str(provider_id).strip() if provider_id else None))
 
     primary_key = normalize_name(primary_artist_name)
     conn.execute(
@@ -129,12 +135,14 @@ def _link_release_artists(
         "VALUES(?,?, 'primary')",
         (album_id, primary_artist_id),
     )
-    for name, key in names:
-        credited_id = (
-            primary_artist_id
-            if key == primary_key
-            else find_or_create_artist(conn, name)
+    for name, key, provider_id in names:
+        resolved_id = find_or_create_artist(
+            conn,
+            name,
+            spotify_id=provider_id,
+            source=source,
         )
+        credited_id = primary_artist_id if key == primary_key else resolved_id
         if credited_id is None or int(credited_id) == int(primary_artist_id):
             continue
         conn.execute(
@@ -624,7 +632,8 @@ def _expand_artist_discography(
                     existing["id"],
                     artist_id,
                     artist["name"],
-                    release.artists,
+                    release.artist_credits,
+                    source,
                 )
                 stats["enriched"] += 1
                 continue
@@ -658,7 +667,8 @@ def _expand_artist_discography(
                 new_id,
                 artist_id,
                 artist["name"],
-                release.artists,
+                release.artist_credits,
+                source,
             )
             index.setdefault(release_title_key(title), []).append({
                 "id": new_id, "title": title, "album_type": album_type,

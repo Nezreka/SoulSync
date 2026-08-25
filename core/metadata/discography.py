@@ -160,7 +160,12 @@ def _build_discography_release_dict(release: Any, artist_id: str,
     if typed_album is not None:
         if not typed_album.id:
             return None
-        artist_names = _clean_artist_names(typed_album.artists)
+        artist_credits = _extract_release_artist_credits(
+            release,
+            fallback_names=typed_album.artists,
+            fallback_primary_id=typed_album.artist_id,
+        )
+        artist_names = [credit['name'] for credit in artist_credits]
         artist_name = artist_names[0] if artist_names else ''
         return {
             'id': typed_album.id,
@@ -171,6 +176,7 @@ def _build_discography_release_dict(release: Any, artist_id: str,
             # typed Album to artists[0] made the remaining credits impossible
             # to recover downstream.
             'artists': artist_names,
+            'artist_credits': artist_credits,
             'release_date': typed_album.release_date or None,
             'album_type': typed_album.album_type or 'album',
             'image_url': typed_album.image_url,
@@ -187,12 +193,14 @@ def _build_discography_release_dict(release: Any, artist_id: str,
     album_type = _extract_lookup_value(release, 'album_type', default='album') or 'album'
     release_date = _extract_lookup_value(release, 'release_date')
 
-    artist_names = _extract_release_artist_names(release)
+    artist_credits = _extract_release_artist_credits(release)
+    artist_names = [credit['name'] for credit in artist_credits]
     return {
         'id': release_id,
         'name': _extract_lookup_value(release, 'name', 'title', default=release_id),
         'artist_name': artist_names[0] if artist_names else '',
         'artists': artist_names,
+        'artist_credits': artist_credits,
         'release_date': release_date,
         'album_type': album_type,
         'image_url': _extract_lookup_value(release, 'image_url', 'thumb_url', 'cover_image'),
@@ -236,25 +244,98 @@ def _clean_artist_names(values: Any) -> List[str]:
     return names
 
 
+def _clean_artist_credits(values: Any) -> List[Dict[str, Optional[str]]]:
+    """Normalize ordered artist identities from provider release payloads."""
+    if not values:
+        return []
+    if isinstance(values, (str, bytes, dict)):
+        values = [values]
+    try:
+        entries = list(values)
+    except TypeError:
+        entries = [values]
+
+    credits: List[Dict[str, Optional[str]]] = []
+    seen = set()
+    for entry in entries:
+        provider_id = None
+        if isinstance(entry, dict):
+            nested = entry.get('artist')
+            if isinstance(nested, dict):
+                entry = nested
+            name = _extract_lookup_value(
+                entry, 'name', 'artist_name', 'artistName', 'title', default=''
+            )
+            provider_id = _extract_lookup_value(
+                entry, 'id', 'artist_id', 'artistId', default=None
+            )
+        else:
+            name = entry
+        text = str(name or '').strip()
+        key = text.casefold()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        credits.append({
+            'name': text,
+            'id': str(provider_id).strip() if provider_id else None,
+        })
+    return credits
+
+
+def _extract_release_artist_credits(
+    release: Any,
+    *,
+    fallback_names: Any = None,
+    fallback_primary_id: Any = None,
+) -> List[Dict[str, Optional[str]]]:
+    """Return every album artist with its source-local provider identity."""
+    credits: List[Dict[str, Optional[str]]] = []
+    for key in ('artist_credits', 'artist-credit', 'artists', 'contributors'):
+        credits = _clean_artist_credits(
+            _extract_lookup_value(release, key, default=[])
+        )
+        if credits:
+            break
+    if not credits:
+        singular = _extract_lookup_value(
+            release, 'artist', 'artist_name', 'artistName', default=None
+        )
+        credits = _clean_artist_credits(singular)
+
+    # Spotify's discography client returns its Album dataclass here rather
+    # than the raw API dictionary.  That object deliberately stores display
+    # names and identities in parallel ``artists`` / ``artist_ids`` lists.
+    # Rejoin those fields before the normalized payload leaves this layer.
+    parallel_ids = _extract_lookup_value(
+        release, 'artist_ids', 'artistIds', default=[]
+    ) or []
+    if isinstance(parallel_ids, (str, bytes)):
+        parallel_ids = [parallel_ids]
+    try:
+        parallel_ids = list(parallel_ids)
+    except TypeError:
+        parallel_ids = [parallel_ids]
+    for index, credit in enumerate(credits):
+        if credit['id'] or index >= len(parallel_ids):
+            continue
+        provider_id = str(parallel_ids[index] or '').strip()
+        if provider_id:
+            credit['id'] = provider_id
+
+    known = {credit['name'].casefold() for credit in credits}
+    for name in _clean_artist_names(fallback_names):
+        if name.casefold() not in known:
+            known.add(name.casefold())
+            credits.append({'name': name, 'id': None})
+    if credits and fallback_primary_id and not credits[0]['id']:
+        credits[0]['id'] = str(fallback_primary_id).strip() or None
+    return credits
+
+
 def _extract_release_artist_names(release: Any) -> List[str]:
     """Return every explicit album artist carried by a provider release."""
-    artist_name = _extract_lookup_value(release, 'artist_name', 'artist', default='') or ''
-    if isinstance(artist_name, dict):
-        names = _clean_artist_names([artist_name])
-    else:
-        text = str(artist_name).strip()
-        names = [text] if text else []
-
-    artists = _extract_lookup_value(release, 'artists', default=[]) or []
-    explicit = _clean_artist_names(artists)
-    if not explicit:
-        explicit = _clean_artist_names(
-            _extract_lookup_value(release, 'artist-credit', default=[])
-        )
-    for name in explicit:
-        if name.casefold() not in {item.casefold() for item in names}:
-            names.append(name)
-    return names
+    return [credit['name'] for credit in _extract_release_artist_credits(release)]
 
 
 def _extract_release_artist_name(release: Any) -> str:
@@ -483,6 +564,11 @@ def _build_artist_detail_release_card(release: Dict[str, Any],
     """
     typed_album = _typed_album_for_source(release, source)
     if typed_album is not None and typed_album.id:
+        artist_credits = _extract_release_artist_credits(
+            release,
+            fallback_names=typed_album.artists,
+            fallback_primary_id=typed_album.artist_id,
+        )
         release_year = None
         if typed_album.release_date:
             try:
@@ -494,7 +580,8 @@ def _build_artist_detail_release_card(release: Dict[str, Any],
             'id': typed_album.id,
             'name': typed_album.name or typed_album.id,
             'title': typed_album.name or typed_album.id,
-            'artists': _clean_artist_names(typed_album.artists),
+            'artists': [credit['name'] for credit in artist_credits],
+            'artist_credits': artist_credits,
             'album_type': (typed_album.album_type or 'album').lower(),
             'image_url': typed_album.image_url,
             'year': release_year,
@@ -527,12 +614,14 @@ def _build_artist_detail_release_card(release: Dict[str, Any],
         if release_year is not None:
             release_year = str(release_year)
 
-    artist_names = _extract_release_artist_names(release)
+    artist_credits = _extract_release_artist_credits(release)
+    artist_names = [credit['name'] for credit in artist_credits]
     card = {
         'id': release_id,
         'name': _extract_lookup_value(release, 'name', 'title', default=release_id),
         'title': _extract_lookup_value(release, 'name', 'title', default=release_id),
         'artists': artist_names,
+        'artist_credits': artist_credits,
         'album_type': album_type,
         'image_url': _extract_lookup_value(release, 'image_url', 'thumb_url', 'cover_image'),
         'year': release_year,

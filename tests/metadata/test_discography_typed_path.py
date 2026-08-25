@@ -67,7 +67,56 @@ def test_typed_path_keeps_every_collaborative_album_artist():
 
     assert normalized['artist_name'] == 'Kendrick Lamar'
     assert normalized['artists'] == ['Kendrick Lamar', 'SZA']
+    assert normalized['artist_credits'] == [
+        {'name': 'Kendrick Lamar', 'id': 'kdot'},
+        {'name': 'SZA', 'id': 'sza'},
+    ]
     assert card['artists'] == ['Kendrick Lamar', 'SZA']
+    assert card['artist_credits'] == normalized['artist_credits']
+
+
+def test_musicbrainz_collaborative_credit_keeps_each_artist_mbid():
+    raw = {
+        'id': 'mb-release',
+        'title': 'Shared Score',
+        'artist-credit': [
+            {'artist': {'id': 'mb-composer-a', 'name': 'Composer A'}},
+            {'artist': {'id': 'mb-composer-b', 'name': 'Composer B'}},
+        ],
+        'release-group': {'primary-type': 'Album'},
+    }
+
+    normalized = discography._build_discography_release_dict(
+        raw, artist_id='mb-composer-a', source='musicbrainz',
+    )
+
+    assert normalized['artist_credits'] == [
+        {'name': 'Composer A', 'id': 'mb-composer-a'},
+        {'name': 'Composer B', 'id': 'mb-composer-b'},
+    ]
+
+
+def test_spotify_album_object_rejoins_parallel_artist_ids():
+    from core.spotify_client import Album as SpotifyAlbum
+
+    raw = SpotifyAlbum(
+        id='sp-release',
+        name='Shared Score',
+        artists=['Composer A', 'Composer B'],
+        artist_ids=['sp-composer-a', 'sp-composer-b'],
+        release_date='2026-01-01',
+        total_tracks=12,
+        album_type='album',
+    )
+
+    normalized = discography._build_discography_release_dict(
+        raw, artist_id='sp-composer-a', source='spotify',
+    )
+
+    assert normalized['artist_credits'] == [
+        {'name': 'Composer A', 'id': 'sp-composer-a'},
+        {'name': 'Composer B', 'id': 'sp-composer-b'},
+    ]
 
 
 def test_legacy_path_used_when_no_source():

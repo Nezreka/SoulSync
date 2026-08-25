@@ -17,10 +17,19 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 from utils.logging_config import get_logger
 
 
-DISCOGRAPHY_PARSER_VERSION = "library2-discography/2"
+DISCOGRAPHY_PARSER_VERSION = "library2-discography/3"
 TRACKLIST_PARSER_VERSION = "library2-tracklist/3"
 ARTWORK_PARSER_VERSION = "library2-artwork/1"
 logger = get_logger("library2.provider_adapters")
+
+
+@dataclass(frozen=True)
+class ProviderArtistCredit:
+    name: str
+    provider_id: Optional[str] = None
+
+    def to_payload(self) -> Dict[str, Optional[str]]:
+        return {"name": self.name, "id": self.provider_id}
 
 
 def _optional_text(value: Any) -> Optional[str]:
@@ -38,8 +47,8 @@ def _optional_nonnegative_int(value: Any) -> Optional[int]:
     return parsed if parsed >= 0 else None
 
 
-def _artist_names(value: Any) -> Tuple[str, ...]:
-    """Normalize provider artist lists while preserving credited order."""
+def _artist_credits(value: Any) -> Tuple[ProviderArtistCredit, ...]:
+    """Normalize provider artist identities while preserving credited order."""
     if not value:
         return ()
     if isinstance(value, (str, bytes, Mapping)):
@@ -49,9 +58,10 @@ def _artist_names(value: Any) -> Tuple[str, ...]:
     except TypeError:
         entries = [value]
 
-    names = []
+    credits = []
     seen = set()
     for entry in entries:
+        provider_id = None
         if isinstance(entry, Mapping):
             nested = entry.get("artist")
             if isinstance(nested, Mapping):
@@ -61,14 +71,22 @@ def _artist_names(value: Any) -> Tuple[str, ...]:
                 or entry.get("artist_name")
                 or entry.get("artistName")
             )
+            provider_id = entry.get("id") or entry.get("artist_id") or entry.get("artistId")
         else:
             name = entry
         text = str(name or "").strip()
         key = text.casefold()
         if text and key != "unknown artist" and key not in seen:
             seen.add(key)
-            names.append(text)
-    return tuple(names)
+            credits.append(ProviderArtistCredit(
+                name=text,
+                provider_id=str(provider_id).strip() if provider_id else None,
+            ))
+    return tuple(credits)
+
+
+def _artist_names(value: Any) -> Tuple[str, ...]:
+    return tuple(credit.name for credit in _artist_credits(value))
 
 
 def _item_artist_names(item: Mapping[str, Any]) -> Tuple[str, ...]:
@@ -83,11 +101,23 @@ def _item_artist_names(item: Mapping[str, Any]) -> Tuple[str, ...]:
     return ()
 
 
+def _item_artist_credits(item: Mapping[str, Any]) -> Tuple[ProviderArtistCredit, ...]:
+    for key in ("artist_credits", "artists", "contributors", "artist-credit"):
+        credits = _artist_credits(item.get(key))
+        if credits:
+            return credits
+    for key in ("artist", "artist_name", "artistName"):
+        credits = _artist_credits(item.get(key))
+        if credits:
+            return credits
+    return ()
+
+
 @dataclass(frozen=True)
 class DiscographyRelease:
     provider_id: str
     title: str
-    artists: Tuple[str, ...]
+    artist_credits: Tuple[ProviderArtistCredit, ...]
     album_type: str
     release_date: Optional[str]
     year: Optional[int]
@@ -121,7 +151,7 @@ class DiscographyRelease:
         return cls(
             provider_id=provider_id,
             title=title,
-            artists=_item_artist_names(card),
+            artist_credits=_item_artist_credits(card),
             album_type=album_type,
             release_date=release_date,
             year=year,
@@ -136,6 +166,7 @@ class DiscographyRelease:
             "id": self.provider_id,
             "title": self.title,
             "artists": list(self.artists),
+            "artist_credits": [credit.to_payload() for credit in self.artist_credits],
             "album_type": self.album_type,
             "release_date": self.release_date,
             "year": self.year,
@@ -144,6 +175,10 @@ class DiscographyRelease:
             "secondary_types": list(self.secondary_types),
             "explicit": self.explicit,
         }
+
+    @property
+    def artists(self) -> Tuple[str, ...]:
+        return tuple(credit.name for credit in self.artist_credits)
 
 
 @dataclass(frozen=True)

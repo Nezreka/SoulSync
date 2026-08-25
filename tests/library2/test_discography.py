@@ -90,14 +90,19 @@ def test_expand_adds_new_and_matches_existing(legacy_db, imported_conn, fake_dis
 def test_collaborative_release_is_linked_to_every_album_artist(
         legacy_db, imported_conn, monkeypatch):
     payload = _cards(("albums", {
-        "id": "sp-collab",
+        "id": "mb-collab-release",
         "title": "Shared Score",
         "album_type": "album",
         # The artist whose page is refreshed is deliberately second, matching
         # soundtrack releases whose displayed primary credit is the co-composer.
         "artists": ["Other Composer", "Drake"],
+        "artist_credits": [
+            {"name": "Other Composer", "id": "mb-other-composer"},
+            {"name": "Drake", "id": "mb-drake"},
+        ],
         "track_count": 12,
     }))
+    payload["source"] = "musicbrainz"
     monkeypatch.setattr(
         "core.metadata.discography.get_artist_detail_discography",
         lambda *_args, **_kwargs: payload,
@@ -129,10 +134,20 @@ def test_collaborative_release_is_linked_to_every_album_artist(
     ]
 
     other_id = imported_conn.execute(
-        "SELECT id FROM lib2_artists WHERE name='Other Composer'"
-    ).fetchone()["id"]
+        "SELECT id, spotify_id, external_ids FROM lib2_artists "
+        "WHERE name='Other Composer'"
+    ).fetchone()
+    assert other_id["spotify_id"] is None
+    assert json.loads(other_id["external_ids"])["musicbrainz"] == "mb-other-composer"
+    from core.library2.match_status import entity_match_status
+    musicbrainz = next(
+        chip for chip in entity_match_status(imported_conn, "artist", other_id["id"])
+        if chip["service"] == "musicbrainz"
+    )
+    assert musicbrainz["status"] == "matched"
+    assert musicbrainz["external_id"] == "mb-other-composer"
     from core.library2 import queries as Q
-    other_view = Q.get_artist(imported_conn, other_id)
+    other_view = Q.get_artist(imported_conn, other_id["id"])
     assert [release["title"] for release in other_view["albums"]] == ["Shared Score"]
 
 
