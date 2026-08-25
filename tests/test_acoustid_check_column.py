@@ -234,7 +234,9 @@ def test_a_file_acoustid_has_never_heard_of_is_recorded_as_skipped(db):
 
     row = _file_row(db, file_id)
     assert row["acoustid_status"] == "skip"
-    assert "no AcoustID match" in (row["pipeline_result_json"] or "")
+    # The wording now comes from the shared verifier, so the tooltip says
+    # exactly what the download would have said about the same file.
+    assert "No match in AcoustID database" in (row["pipeline_result_json"] or "")
 
 
 def test_a_fingerprint_below_the_threshold_is_recorded_as_skipped(db):

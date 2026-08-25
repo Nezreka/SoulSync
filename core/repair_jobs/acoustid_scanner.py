@@ -17,9 +17,8 @@ from typing import Any, Dict, Optional
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob, scoped_file_subjects
 from utils.logging_config import get_logger
-from core.matching.audio_verification import evaluate, fingerprint_is_ambiguous, Decision
+from core.matching.audio_verification import fingerprint_is_ambiguous, Decision
 from core.matching.acoustid_candidates import duration_mismatches_strongly
-from core.acoustid_verification import _resolve_expected_artist_aliases
 
 logger = get_logger("repair_job.acoustid")
 
@@ -230,104 +229,22 @@ class AcoustIDScannerJob(RepairJob):
         """Fingerprint a single file and check for mismatches."""
         fname = os.path.basename(fpath)
 
-        # Fingerprint the file.
+        # ONE verification path. Everything from "is AcoustID usable" through
+        # the lookup, the confidence floor, the MusicBrainz enrichment of
+        # title-less recordings, the lazy alias resolution and the final
+        # decision lives in `AcoustIDVerification.verify_audio_file` — the same
+        # call the download makes. The scan used to repeat all five steps
+        # around a shared decision core, which is precisely where the two drifted
+        # apart: the scan never enriched its recordings, and read its expected
+        # values from somewhere else. What stays here is what the scan alone
+        # has to answer: which files to look at, and what to do with a verdict.
         #
-        # `lookup_with_status` when the client offers it, because
-        # `fingerprint_and_lookup` collapses "AcoustID has no entry for this
-        # audio" and "the lookup itself failed" into the same None — and those
-        # need opposite answers here. A real no-match is a verdict worth
-        # recording ('skip'); a dead API key or a missing chromaprint is not,
-        # and marking a whole library "checked" off the back of one would be
-        # the worse failure of the two.
-        lookup_status = None
-        try:
-            if hasattr(acoustid_client, 'lookup_with_status'):
-                status_result = acoustid_client.lookup_with_status(fpath) or {}
-                lookup_status = str(status_result.get('status') or 'error')
-                fp_result = {
-                    'recordings': status_result.get('recordings') or [],
-                    'best_score': status_result.get('best_score', 0.0),
-                    'recording_mbids': status_result.get('recording_mbids') or [],
-                } if lookup_status == 'ok' else None
-            else:
-                fp_result = acoustid_client.fingerprint_and_lookup(fpath)
-        except Exception as e:
-            logger.debug("Fingerprint failed for %s: %s", fname, e)
-            result.errors += 1
-            if context.report_progress:
-                context.report_progress(log_line=f'Error: {fname} — {e}', log_type='error')
-            return
+        # The expected artist is the one input the scan must supply itself, so
+        # it is resolved before the call rather than after it.
+        expected_artist = self._expected_artist(fpath, expected, fname)
 
-        # An inconclusive check is still a check. Recording nothing here is
-        # what left files reading "Not scanned" after a completed run: the
-        # scan reached them, learned that AcoustID has no usable answer, and
-        # said so only in a log line nobody keeps. 'skip' is the schema's word
-        # for "checked, no claim" — and it never touches the file's
-        # verification standing, so nothing gets demoted for being obscure.
-        if not fp_result or not fp_result.get('recordings'):
-            if context.report_progress:
-                context.report_progress(log_line=f'No match: {fname}', log_type='skip')
-            if lookup_status in ('ok', 'no_match'):
-                self._persist_inconclusive(
-                    context, track_id, fpath, expected,
-                    'no AcoustID match for this fingerprint')
-            elif lookup_status:
-                # Broken, not answered. Leave the column alone so the run does
-                # not paint an unchecked library as checked.
-                result.errors += 1
-            return
-
-        best_score = fp_result.get('best_score', 0)
-        if best_score < fp_threshold:
-            self._persist_inconclusive(
-                context, track_id, fpath, expected,
-                f'fingerprint score {best_score:.0%} is below the {fp_threshold:.0%} threshold')
-            return
-
-        best_recording = fp_result['recordings'][0]
-        aid_title = best_recording.get('title', '')
-        aid_artist = best_recording.get('artist', '')
-
-        if not aid_title:
-            self._persist_inconclusive(
-                context, track_id, fpath, expected,
-                'the matched AcoustID recording has no title to compare against')
-            return
-
-        # Resolve which artist value to compare against, in priority order:
-        #   1. DB `track_artist` (per-track, manually curated or scanner-
-        #      populated) — trust it when populated. Respects user edits
-        #      from the enhanced library view.
-        #   2. File's ARTIST tag — ground truth for what's on disk.
-        #      Catches legacy compilation tracks where `track_artist`
-        #      column is NULL because they were downloaded before that
-        #      column existed; the file itself has the correct per-
-        #      track artist (Tidal/Spotify/Deezer all write it).
-        #   3. Album artist — final fallback for files without proper
-        #      ARTIST tags AND no DB track_artist.
-        track_artist = (expected.get('track_artist') or '').strip()
-        if track_artist:
-            expected_artist = track_artist
-        else:
-            file_artist = None
-            try:
-                from core.tag_writer import read_file_tags
-                file_tags = read_file_tags(fpath)
-                file_artist = (file_tags.get('artist') or '').strip() or None
-            except Exception as e:
-                logger.debug("file-tag artist read failed for %s: %s", fname, e)
-            expected_artist = (
-                file_artist
-                or (expected.get('album_artist') or '').strip()
-                or expected['artist']
-            )
-
-        # Verification status from the embedded SOULSYNC_VERIFICATION tag.
-        # Only a human decision short-circuits the scan: the user explicitly
-        # confirmed the file via the review queue. Everything else (verified /
-        # unverified / force_imported / untagged) is re-checked; force_imported
-        # mismatches are reported as informational below since a mismatch
-        # there is EXPECTED (the user accepted the best candidate).
+        # A human decision is checked BEFORE fingerprinting — the answer cannot
+        # change and the API call would be spent for nothing.
         file_verif_status = None
         try:
             from core.tag_writer import read_file_tags as _rft
@@ -349,6 +266,56 @@ class AcoustIDScannerJob(RepairJob):
                     log_line=f'Skipped (human-verified): {fname}', log_type='skip')
             return
 
+        probe: Dict[str, Any] = {}
+        try:
+            from core.acoustid_verification import (
+                AcoustIDVerification, VerificationResult,
+            )
+
+            verifier = AcoustIDVerification()
+            if acoustid_client is not None:
+                verifier.acoustid_client = acoustid_client
+            verdict, message = verifier.verify_audio_file(
+                fpath, expected['title'], expected_artist, probe,
+                min_score=fp_threshold,
+            )
+        except Exception as e:
+            logger.debug("Fingerprint failed for %s: %s", fname, e)
+            result.errors += 1
+            if context.report_progress:
+                context.report_progress(log_line=f'Error: {fname} — {e}', log_type='error')
+            return
+
+        if verdict == VerificationResult.ERROR:
+            # Broken, not answered. Leave the column alone so the run does not
+            # paint an unchecked library as checked.
+            if context.report_progress:
+                context.report_progress(
+                    log_line=f'Error: {fname} — {message}', log_type='error')
+            result.errors += 1
+            return
+
+        outcome = probe.get('_acoustid_decision')
+        recordings = probe.get('_acoustid_recordings') or []
+        best_score = probe.get('_acoustid_best_score') or 0.0
+        if outcome is None:
+            # The verifier never reached a judgement — no match, or a
+            # fingerprint too weak to trust. An inconclusive check is still a
+            # check, and recording nothing is what left files reading "Not
+            # scanned" after a completed run. 'skip' is the schema's word for
+            # "checked, no claim"; it never touches the file's verification
+            # standing, so nothing gets demoted for being obscure.
+            if context.report_progress:
+                context.report_progress(log_line=f'No match: {fname}', log_type='skip')
+            self._persist_inconclusive(
+                context, track_id, fpath, expected, message)
+            return
+        if not any(r.get('title') for r in recordings):
+            self._persist_inconclusive(
+                context, track_id, fpath, expected,
+                'the matched AcoustID recording has no title to compare against')
+            return
+
         # Fingerprint-collision guard: when the match's length is wildly
         # different from the file, the fingerprint hit is a hash collision (the
         # 17-min mashup → 5-min track case), not a real match — skip BEFORE any
@@ -365,7 +332,7 @@ class AcoustIDScannerJob(RepairJob):
             file_duration_s = (expected.get('duration_ms') or 0) / 1000.0
         except Exception:
             file_duration_s = 0.0
-        _recs = fp_result['recordings']
+        _recs = recordings
         _scored = [r for r in _recs if r.get('score') is not None]
         _top = max((r['score'] for r in _scored), default=None)
         _judge = [r for r in _scored if r['score'] >= _top] if _top is not None else _recs
@@ -382,26 +349,6 @@ class AcoustIDScannerJob(RepairJob):
                               f'collision): {fname}'),
                     log_type='skip')
             return
-
-        # Decision via the shared verification core — identical logic to import-
-        # time verification (alias-aware artist match + cross-script SKIP), so the
-        # scan no longer false-flags correct cross-script tracks. Only a FAIL
-        # produces a "Wrong download" finding.
-        _alias_cache = {}
-
-        def _aliases():
-            if 'v' not in _alias_cache:
-                try:
-                    _alias_cache['v'] = _resolve_expected_artist_aliases(expected_artist)
-                except Exception:
-                    _alias_cache['v'] = []
-            return _alias_cache['v']
-
-        outcome = evaluate(
-            expected['title'], expected_artist, fp_result['recordings'],
-            fingerprint_score=best_score,
-            aliases_provider=_aliases,
-        )
 
         # What the download verified, the scan may not overturn for free.
         # Both paths share this decision core, so a flip can only come from
@@ -423,10 +370,9 @@ class AcoustIDScannerJob(RepairJob):
         if outcome.decision == Decision.FAIL and _stands_verified:
             import_mbids = expected.get('import_recording_mbids') or frozenset()
             current_mbids = {
-                str(m) for m in (fp_result.get('recording_mbids') or [])
-                if m
+                str(m) for m in (probe.get('_acoustid_recording_mbids') or []) if m
             } or {
-                str(r.get('mbid')) for r in fp_result['recordings'] if r.get('mbid')
+                str(r.get('mbid')) for r in recordings if r.get('mbid')
             }
             if import_mbids and (import_mbids & current_mbids):
                 if context.report_progress:
@@ -489,12 +435,12 @@ class AcoustIDScannerJob(RepairJob):
         # The DETECTION stands either way — it only asks whether ANY candidate
         # matched, which ties don't affect. What gets withheld is the single
         # "is actually Y" claim, replaced by the candidate list.
-        _ambiguous = fingerprint_is_ambiguous(fp_result['recordings'])
+        _ambiguous = fingerprint_is_ambiguous(recordings)
 
         title_sim = outcome.title_sim
         artist_sim = outcome.artist_sim
-        matched_title = outcome.matched_title or aid_title
-        matched_artist = outcome.matched_artist or aid_artist
+        matched_title = outcome.matched_title or '?'
+        matched_artist = outcome.matched_artist or '?'
 
         # Distinct candidate labels for the ambiguous copy — drawn from the
         # TIED TOP scores only (the set the ambiguity verdict was made on).
@@ -584,6 +530,33 @@ class AcoustIDScannerJob(RepairJob):
                 result.findings_created += 1
             else:
                 result.findings_skipped_dedup += 1
+
+    def _expected_artist(self, fpath, expected, fname):
+        """Which artist value the scan compares against, in priority order:
+
+        1. the catalogue's per-track artist — manually curated or scanner
+           populated, so it wins when it is there;
+        2. the file's ARTIST tag — ground truth for what is on disk, and the
+           rescue for compilation rows whose per-track artist is NULL because
+           they predate that column;
+        3. the album artist, for files with neither.
+
+        This is the one input the download gets from its provider payload and
+        the scan has to derive, which is why it lives here and not in the
+        shared verifier.
+        """
+        track_artist = (expected.get('track_artist') or '').strip()
+        if track_artist:
+            return track_artist
+        file_artist = None
+        try:
+            from core.tag_writer import read_file_tags
+            file_artist = ((read_file_tags(fpath) or {}).get('artist') or '').strip() or None
+        except Exception as e:  # noqa: BLE001
+            logger.debug("file-tag artist read failed for %s: %s", fname, e)
+        return (file_artist
+                or (expected.get('album_artist') or '').strip()
+                or expected['artist'])
 
     def _persist_inconclusive(self, context, track_id, fpath, expected, reason):
         """Record "checked, no claim" — the verdict, plus why, and nothing else."""

@@ -118,7 +118,7 @@ def scan(tmp_path, monkeypatch):
             "core.tag_writer.write_verification_status",
             lambda _p, status: tags_written.append(status) or True)
         monkeypatch.setattr(
-            "core.repair_jobs.acoustid_scanner._resolve_expected_artist_aliases",
+            "core.acoustid_verification._resolve_expected_artist_aliases",
             lambda _n: [])
 
         job = AcoustIDScannerJob()

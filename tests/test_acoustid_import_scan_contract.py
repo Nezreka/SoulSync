@@ -106,7 +106,7 @@ def _run(context, path, client, monkeypatch):
     monkeypatch.setattr("core.tag_writer.read_file_tags", lambda _p: {})
     monkeypatch.setattr("core.tag_writer.write_verification_status",
                         lambda *_a, **_k: None)
-    monkeypatch.setattr("core.repair_jobs.acoustid_scanner._resolve_expected_artist_aliases",
+    monkeypatch.setattr("core.acoustid_verification._resolve_expected_artist_aliases",
                         lambda _name: [])
     tracks = job._load_db_tracks(context)
     expected = tracks["lib2:42"]

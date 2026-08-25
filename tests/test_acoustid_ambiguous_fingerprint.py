@@ -328,7 +328,7 @@ def test_the_scanner_imports_and_uses_the_guard():
     from core.repair_jobs import acoustid_scanner
 
     src = inspect.getsource(acoustid_scanner.AcoustIDScannerJob._scan_file)
-    assert "fingerprint_is_ambiguous(fp_result['recordings'])" in src, (
+    assert "fingerprint_is_ambiguous(recordings)" in src, (
         "the ambiguity guard is no longer consulted before creating a finding")
     # It must run BEFORE the finding is built, not after.
     assert src.index("fingerprint_is_ambiguous") < src.index("create_finding")
