@@ -10,6 +10,7 @@ import {
   fetchDiscoveryWeekly,
   fetchHiddenGems,
   fetchListeningMix,
+  fetchDailyMixes,
   fetchPopularPicks,
   fetchReleaseRadar,
   fetchSeasonalCurrent,
@@ -112,6 +113,7 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
 
   // Slow external — enabled from mount, awaited by nothing.
   const releaseRadar = useQuery(mixQuery('release-radar', fetchReleaseRadar));
+  const daily = useQuery(mixQuery('daily-mixes', fetchDailyMixes));
   const weekly = useQuery(mixQuery('discovery-weekly', fetchDiscoveryWeekly));
 
   const seasonalOutcome = seasonal.data as SectionOutcome<SeasonData> | undefined;
@@ -194,6 +196,22 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
         subtitle: feeder.subtitle,
         tracks,
         syncKey: feeder.key,
+      });
+    }
+  }
+
+  // Daily Mixes - one card per taste cluster, subtitled by its artists.
+  const dailyOutcome = daily.data as SectionOutcome<Record<string, unknown>> | undefined;
+  const dailyPayload = dailyOutcome?.kind === 'ok' ? dailyOutcome.data : undefined;
+  if (dailyPayload && Array.isArray(dailyPayload.mixes)) {
+    for (const raw of dailyPayload.mixes as Record<string, unknown>[]) {
+      const tracks = Array.isArray(raw.tracks) ? raw.tracks : [];
+      if (!tracks.length || typeof raw.key !== 'string') continue;
+      mixes.push({
+        key: raw.key,
+        title: String(raw.name || raw.key),
+        subtitle: String(raw.subtitle || ''),
+        tracks,
       });
     }
   }

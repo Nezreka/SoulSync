@@ -66,8 +66,10 @@ export const YOUR_MIX_FEEDERS = [
   { key: 'popular_picks', title: 'Popular Picks', syncKey: 'popular_picks', live: true },
   { key: 'hidden_gems', title: 'Hidden Gems', syncKey: 'hidden_gems', live: true },
   { key: 'listening_mix', title: 'Your Listening Mix', syncKey: 'listening_mix', live: true },
-  // variadic, no syncKey — and its only producer is unreachable
-  { key: 'daily_mix_*', title: null, syncKey: null, live: false },
+  // variadic - rebuilt aug 25 on core/personalized/daily_mixes.py (taste
+  // clusters, mostly owned + discovery flavor). play + download; no sync
+  // key yet (sync needs a registered playlist type - P5's job)
+  { key: 'daily_mix_*', title: null, syncKey: null, live: true },
   {
     key: 'discovery_shuffle',
     title: 'Discovery Shuffle',

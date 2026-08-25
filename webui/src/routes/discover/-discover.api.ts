@@ -205,6 +205,8 @@ export const fetchListeningMix = () =>
   section<Record<string, unknown>>('discover/personalized/listening-mix');
 export const fetchPopularPicks = () =>
   section<Record<string, unknown>>('discover/personalized/popular-picks');
+export const fetchDailyMixes = () =>
+  section<Record<string, unknown>>('discover/personalized/daily-mixes');
 export const fetchHiddenGems = () =>
   section<Record<string, unknown>>('discover/personalized/hidden-gems');
 

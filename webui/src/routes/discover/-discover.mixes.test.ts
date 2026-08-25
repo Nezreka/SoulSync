@@ -56,13 +56,16 @@ describe('the feeder inventory', () => {
     expect(noSync.map((f) => f.key)).toEqual(['daily_mix_*']);
   });
 
-  it('marks daily mixes DEAD — only seven feeders can reach the shelf', () => {
-    // loadPersonalizedDailyMixes (4639) is unreachable: no reachable function
-    // names it, and it is absent from index.html and every other static script.
-    // Listing it as live would "restore" a section users have never seen.
-    expect(YOUR_MIX_FEEDERS.filter((f) => !f.live).map((f) => f.key)).toEqual(['daily_mix_*']);
-    expect(LIVE_MIX_FEEDERS).toHaveLength(7);
-    expect(LIVE_MIX_FEEDERS.every((f) => f.syncKey !== null)).toBe(true);
+  it('every feeder is live now, daily mixes included', () => {
+    // daily_mix_* was dead (its vanilla producer was unreachable) until the
+    // aug 25 rebuild on core/personalized/daily_mixes.py. it is the one
+    // feeder without a syncKey - play + download only, until P5 registers a
+    // sync playlist type for it.
+    expect(YOUR_MIX_FEEDERS.filter((f) => !f.live)).toEqual([]);
+    expect(LIVE_MIX_FEEDERS).toHaveLength(8);
+    expect(LIVE_MIX_FEEDERS.filter((f) => f.syncKey === null).map((f) => f.key)).toEqual([
+      'daily_mix_*',
+    ]);
   });
 
   it('records the two feeders whose titles are built at runtime', () => {

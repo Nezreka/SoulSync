@@ -29091,18 +29091,23 @@ def get_hidden_gems_playlist():
 
 @app.route('/api/discover/personalized/daily-mixes', methods=['GET'])
 def get_daily_mixes():
-    """Get all Daily Mix playlists (hybrid library + discovery)"""
+    """Daily Mixes - taste-clustered blends of owned + discovery tracks.
+
+    Rebuilt aug 25 on core/personalized/daily_mixes.py: the legacy service's
+    '50% your library' half permanently returned nothing (library tracks
+    carry no source ids) so every mix degraded to a relabeled genre playlist,
+    and the shelf feeder was rightly marked dead. These are the real thing -
+    clustered from listening_history, mostly owned (playable now), flavored
+    with similar-artist discovery, regenerated daily via TTL."""
     try:
-        from core.personalized_playlists import get_personalized_playlists_service
-
-        database = get_database()
-        service = get_personalized_playlists_service(database, spotify_client)
-
-        mixes = service.get_all_daily_mixes(max_mixes=4)
-
+        from core.personalized.daily_mixes import get_or_build_daily_mixes
+        force = request.args.get('refresh') in ('1', 'true')
+        payload = get_or_build_daily_mixes(
+            get_database(), get_current_profile_id(), force=force)
         return jsonify({
             "success": True,
-            "mixes": mixes
+            "mixes": payload.get("mixes", []),
+            "generated_at": payload.get("generated_at"),
         })
 
     except Exception as e:
