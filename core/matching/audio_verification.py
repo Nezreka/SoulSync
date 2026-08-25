@@ -322,6 +322,18 @@ def evaluate(expected_title: str, expected_artist: str,
     matched_title = best_rec.get('title', '?') or '?'
     matched_artist = best_rec.get('artist', '?') or '?'
 
+    # Is each dimension's score EVIDENCE at all? A similarity between two
+    # different writing systems carries no information — romaji vs kanji scores
+    # 0.00 whether or not it names the same thing — so such a dimension is
+    # UNKNOWN, never FAILED, and must never be what a FAIL rests on. Two
+    # production findings came from ignoring that: a 100% fingerprint with a
+    # 100% title match was reported as "Wrong download" because
+    # 'Sawano Hiroyuki' vs '澤野弘之' scored 0.00 and 0.00 is below
+    # CLEAR_MISMATCH_THRESHOLD. Same-script disagreement stays real evidence,
+    # so a genuinely wrong artist or song fails exactly as before.
+    title_comparable = not is_cross_script_mismatch(expected_title, matched_title)
+    artist_comparable = not is_cross_script_mismatch(expected_artist, matched_artist)
+
     def out(dec, reason):
         return Outcome(dec, title_sim, artist_sim, matched_title, matched_artist, reason)
 
@@ -352,6 +364,22 @@ def evaluate(expected_title: str, expected_artist: str,
                 expected_artist, rec.get('artist', ''), aliases_provider,
             ) >= ARTIST_MATCH_THRESHOLD:
                 return out(Decision.PASS, "Expected artist found in AcoustID results")
+        if not artist_comparable:
+            # The title already agrees and the artist score is unreadable, so
+            # there is nothing here that says the file is wrong.
+            #
+            # Deliberate and known: a cover of the right song by a non-Latin
+            # artist is a real wrong download and is unreportable through this
+            # branch. Nothing cheap distinguishes it — MusicBrainz alias lists
+            # are incomplete often enough that "the aliases did not match" is
+            # not evidence either, and a fingerprint bar here would re-quarantine
+            # the correct files this change exists for. A matching title after a
+            # matching fingerprint is corroboration; we take it.
+            return out(Decision.SKIP,
+                       f"Title matches and the artist is written in a different "
+                       f"script, so the names cannot be compared: "
+                       f"'{matched_title}' by '{matched_artist}' "
+                       f"(expected '{expected_artist}')")
         if artist_sim < CLEAR_MISMATCH_THRESHOLD:
             return out(Decision.FAIL,
                        f"Audio mismatch: '{matched_title}' by '{matched_artist}' "
@@ -388,9 +416,30 @@ def evaluate(expected_title: str, expected_artist: str,
                                          and artist_sim >= ARTIST_MATCH_THRESHOLD)
     cross_script_artist_skip = (fingerprint_score >= MIN_ACOUSTID_SCORE
                                 and artist_sim >= ARTIST_MATCH_THRESHOLD
-                                and is_cross_script_mismatch(expected_artist, matched_artist))
+                                and not artist_comparable)
+    # The title is the dimension that disagreed — but if it is written in
+    # another script its score was never readable, and the artist either agrees
+    # or is unreadable too. Nothing comparable disagrees, so no claim can be
+    # made. `language_script_skip` above covered a slice of this behind a
+    # fingerprint >= 0.95 bar, which left an ordinary 0.90 match on a
+    # Japanese-titled track quarantined; the script signal does not depend on
+    # how well the fingerprint scored.
+    #
+    # Known and accepted: when BOTH dimensions are unreadable there is no
+    # evidence in either direction, so a genuinely wrong non-Latin download is
+    # unreportable here. Re-adding a fingerprint bar for that case was tried and
+    # reverted — it does not separate the two, because the score says nothing
+    # about the NAMES. What it does instead is quarantine the correct file this
+    # change exists for: "Zankoku na Tenshi no These" by "Yoko Takahashi"
+    # against 残酷な天使のテーゼ by 高橋洋子 at a perfectly ordinary 0.90 is the
+    # same shape as a wrong one, and that is the direction that costs a user
+    # their file. Silence is the safe half of an unanswerable question.
+    incomparable_title_skip = (
+        not title_comparable
+        and (not artist_comparable or artist_sim >= ARTIST_MATCH_THRESHOLD)
+    )
     if (language_script_skip or high_confidence_strong_match_skip
-            or cross_script_artist_skip):
+            or cross_script_artist_skip or incomparable_title_skip):
         return out(Decision.SKIP, "Likely same song in different language/script")
 
     return out(Decision.FAIL,
