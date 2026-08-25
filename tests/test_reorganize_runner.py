@@ -456,3 +456,51 @@ def test_a_missing_findings_table_does_not_break_the_reorganize(repoint):
 
     assert conn.execute(
         "SELECT file_path FROM tracks WHERE id = 't1'").fetchone()[0] == NEW
+
+
+# ── the catalogue update must never fail silently ────────────────────────────
+#
+# `_finalize_track` (core/library_reorganize.py) decides "the DB row now points
+# at the new path" SOLELY by whether this callback raised. On success it goes on
+# to `os.remove` the original. A callback that swallows its errors therefore
+# destroys the user's only copy while the catalogue still names the old path —
+# the track reads as MISSING and the file sits somewhere nothing points at.
+#
+# Reported against a fresh library: songs downloaded, Reorganize run while the
+# import pipeline still held the SQLite write lock, tracks came back missing.
+
+def test_a_failed_db_write_raises_instead_of_being_swallowed(repoint):
+    """`database is locked` (or any DB error) must reach the caller. Swallowing
+    it makes `_finalize_track` delete the original after a failed update."""
+    update_path, conn = repoint
+    _add_track(conn)
+    conn.execute("DROP TABLE tracks")
+    conn.commit()
+
+    with pytest.raises(Exception):
+        update_path('t1', NEW)
+
+
+def test_an_update_that_matched_no_row_raises(repoint):
+    """A 0-row UPDATE is not an SQLite error — it is silent success. Without an
+    explicit rowcount check the file is moved and deleted for a track the
+    catalogue never repointed."""
+    update_path, conn = repoint
+    _add_track(conn)          # id 't1' exists ...
+
+    with pytest.raises(Exception):
+        update_path('nope', NEW)   # ... but this one does not
+
+    assert conn.execute(
+        "SELECT file_path FROM tracks WHERE id = 't1'").fetchone()[0] == OLD
+
+
+def test_a_successful_update_still_does_not_raise(repoint):
+    """The guard must not turn ordinary success into a failure."""
+    update_path, conn = repoint
+    _add_track(conn)
+
+    update_path('t1', NEW)
+
+    assert conn.execute(
+        "SELECT file_path FROM tracks WHERE id = 't1'").fetchone()[0] == NEW

@@ -438,6 +438,38 @@ def _feat_in_title_enabled() -> bool:
         return False
 
 
+# A folder the organizer itself writes for one disc of a multi-disc release:
+# "Disc 1" / "CD 1" (the `file_organization.disc_label` setting) and "CD01"
+# (the `$cdnum` template variable). Anchored and numeric so a real album called
+# "Discovery" or an artist called "CD" is never mistaken for one.
+_DISC_FOLDER_RE = re.compile(r'^(disc|disk|cd|volume|vol)\s*\.?\s*\d+$', re.IGNORECASE)
+
+
+def _already_organized_by_disc(tracks) -> bool:
+    """Do the user's files already sit in per-disc folders?
+
+    The single-disc cap below reads the user's layout from their track NUMBERS,
+    which cannot distinguish "a single-disc edition mis-matched against a deluxe"
+    (#1080) from "a multi-disc album that is still downloading". A part-downloaded
+    box set has only disc 1 on disk, uniquely numbered and inside disc 1 — exactly
+    what the cap keys on — so Reorganize proposed moving the album straight back
+    out of the disc folders the download pipeline had just created, and flipped it
+    back again once disc 2 arrived.
+
+    The files settle it. SoulSync only writes a disc folder when the release IS
+    multi-disc, so an album already living in one is organized, not mis-matched,
+    and the setting gating this cap is "preserve my organization".
+    """
+    for track in tracks or []:
+        path = str(track.get('file_path') or '').replace('\\', '/')
+        if not path:
+            continue                      # a missing file carries no evidence
+        parent = os.path.basename(os.path.dirname(path))
+        if parent and _DISC_FOLDER_RE.match(parent):
+            return True
+    return False
+
+
 def _preserve_casing_enabled() -> bool:
     """Whether the reorganize leaves a title/album alone when the metadata
     source differs from the user's file only by letter-case (#1078 QT3496:
@@ -1007,7 +1039,8 @@ def plan_album_reorganize(
     #   * every user track fits within the source's disc 1  → a continuously-
     #     numbered 2-disc set (1..25) spills past disc 1 → left multi-disc.
     # Gated on the same preserve-my-organization setting as casing/year.
-    if total_discs > 1 and _preserve_casing_enabled():
+    if (total_discs > 1 and _preserve_casing_enabled()
+            and not _already_organized_by_disc(tracks)):
         try:
             user_nums = [int(t.get('track_number')) for t in tracks
                          if str(t.get('track_number') or '').strip().isdigit()]
@@ -1110,6 +1143,11 @@ def _build_post_process_context(
             'release_date': api_album_release,
             'total_tracks': api_album_total_tracks,
             'total_discs': total_discs,
+            # Reorganize is the caller that really knows: it counted the discs
+            # off the source tracklist it just resolved, so the path builder must
+            # not go and ask a provider again (that lookup's success or failure
+            # would decide the destination).
+            'total_discs_declared': True,
             'image_url': api_album_image,
         },
         'track_info': {
@@ -1142,6 +1180,19 @@ def _build_post_process_context(
         # that stayed happily in the library (TheHomeGuy: 'Through Glass'
         # 283s vs Discogs' 241s). Size + parse corruption legs still run.
         'is_local_import': True,
+        # ...and for the same reason, the AcoustID identity leg does not get to
+        # quarantine this file. A reorganize stages a COPY of a track the user
+        # ALREADY OWNS and runs it through the download post-process; when the
+        # fingerprint disagreed, that leg moved the copy into ss_quarantine and
+        # the whole run reported `failed`, so a rename that should have been a
+        # no-op only worked on a second attempt with "Rename only" ticked. The
+        # disagreement is routinely legitimate — a different master, a regional
+        # release, or an artist credited in another script (Sawano Hiroyuki
+        # fingerprints as 澤野弘之). Identity of files already in the library is
+        # the AcoustID Scanner's job, and that one raises a finding instead of
+        # moving anyone's audio. The size and parse-corruption legs still run:
+        # skipping identity is not skipping safety.
+        '_skip_quarantine_check': 'acoustid',
         # Reorganize destinations must come from the CURRENT template alone.
         # The #829 existing-folder reuse would resolve to the folder the album
         # already lives in — the very folder reorganize is trying to move it
@@ -1320,11 +1371,7 @@ def preview_album_reorganize(
                 context, spotify_artist, album_info, file_ext, create_dirs=False
             )
             item['new_path_abs'] = new_full or ''
-            item['new_path'] = (
-                os.path.relpath(new_full, transfer_dir)
-                if transfer_dir and new_full and new_full.startswith(transfer_dir)
-                else new_full or ''
-            )
+            item['new_path'] = _display_relative_to_root(new_full, transfer_dir)
             if resolved and new_full and os.path.normpath(resolved) == os.path.normpath(new_full):
                 item['unchanged'] = True
         except Exception as e:
@@ -1388,11 +1435,35 @@ def _is_in_deleted_quarantine(resolved_path, transfer_dir) -> bool:
     return 'deleted' in norm.split('/')
 
 
+def _display_relative_to_root(path, root):
+    """``path`` shown relative to ``root`` when it lives inside it, else whole.
+
+    A raw ``startswith`` was wrong twice over. It matched a SIBLING root
+    (``/music/Transfer2`` starts with ``/music/Transfer``), and it compared two
+    strings that different code paths had spelled differently — the proposed
+    path came from the path builder rooted at the config value, the current
+    path from the resolver (absolute, symlinks resolved). With a relative root
+    configured the two never shared a prefix, so the preview trimmed one column
+    and printed the raw stored value in the other, for the very same file.
+    """
+    if not path or not root:
+        return path or ''
+    p = os.path.normpath(str(path))
+    r = os.path.normpath(str(root))
+    if p == r:
+        return ''
+    if p.startswith(r + os.sep) or (os.altsep and p.startswith(r + os.altsep)):
+        return p[len(r):].lstrip(os.sep).lstrip('/')
+    return path
+
+
 def _trim_to_transfer(db_path, resolved, transfer_dir):
     """Compose the user-facing 'current path' string — relative to the
     transfer dir if the file lives there, else the raw DB value."""
-    if resolved and transfer_dir and resolved.startswith(transfer_dir):
-        return resolved[len(transfer_dir):].lstrip(os.sep).lstrip('/')
+    if resolved and transfer_dir:
+        trimmed = _display_relative_to_root(resolved, transfer_dir)
+        if trimmed != resolved:
+            return trimmed
     return db_path or 'No file'
 
 
@@ -2087,8 +2158,14 @@ def reorganize_album_rename_only(
 
         # Skip anything that isn't a real, changing move. `unchanged` is the key one —
         # it's why a rename no longer rewrites files whose name didn't change.
+        # `current_path_abs` is the other one: the preview leaves it empty when the
+        # stored path resolves to nothing on disk (`file_exists` False). Passing that
+        # to the mover fails on os.rename — but only AFTER os.makedirs has built the
+        # destination tree, so an unresolvable track used to litter the library with
+        # empty folders, which is exactly what the preview avoids with create_dirs=False.
         if (not t.get('matched') or t.get('unchanged')
-                or t.get('collision') or not t.get('new_path_abs')):
+                or t.get('collision') or not t.get('new_path_abs')
+                or not t.get('current_path_abs')):
             summary['skipped'] += 1
             _emit(skipped=summary['skipped'])
             continue
@@ -2106,17 +2183,41 @@ def reorganize_album_rename_only(
             continue
 
         # File is at its new home — update the DB directly (authoritative; no need to
-        # round-trip through a server scan to learn what we just did). On DB failure the
-        # file still moved; a library scan reconciles it, so we don't fail the track.
+        # round-trip through a server scan to learn what we just did).
+        #
+        # A rename MOVES the only copy, so a failed catalogue update is NOT
+        # recoverable by "a scan will reconcile": the file sits at a path nothing
+        # points at, the track reads as MISSING, and the wishlist re-downloads
+        # something the user already owns. Reported against a fresh library — songs
+        # downloaded, Reorganize run while the import still held the write lock.
+        # Put the file back and fail the track loudly instead.
         if update_track_path_fn:
             try:
                 update_track_path_fn(t.get('track_id'), new_abs)
             except Exception as db_err:
-                logger.warning(
-                    "[Reorganize/rename] DB path update failed for %s: %s "
-                    "(file moved to %s; a scan will reconcile)",
-                    t.get('track_id'), db_err, new_abs,
-                )
+                undone, undo_err = _rename_track_in_place(new_abs, current_abs)
+                if undone:
+                    detail = f'{db_err} (move undone)'
+                    logger.warning(
+                        "[Reorganize/rename] catalogue update failed for %s: %s "
+                        "— moved %s back to %s",
+                        t.get('track_id'), db_err, new_abs, current_abs,
+                    )
+                else:
+                    detail = (f'{db_err} — and the file could not be moved back '
+                              f'to {current_abs}: {undo_err}')
+                    logger.error(
+                        "[Reorganize/rename] catalogue update failed for %s (%s) AND "
+                        "the rollback failed (%s): the file is at %s while the "
+                        "catalogue still names %s",
+                        t.get('track_id'), db_err, undo_err, new_abs, current_abs,
+                    )
+                summary['failed'] += 1
+                summary['errors'].append({
+                    'track_id': t.get('track_id'), 'title': title, 'error': detail,
+                })
+                _emit(failed=summary['failed'], errors=list(summary['errors']))
+                continue
         if current_abs:
             src_dirs_touched.add(os.path.dirname(current_abs))
         summary['moved'] += 1
