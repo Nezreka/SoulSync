@@ -24,11 +24,16 @@ from urllib.parse import quote_plus, urlencode, urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup, Tag
 
+from core.flaresolverr import (
+    DEFAULT_FLARESOLVERR_URL,
+    FlareSolverrClient as _SharedFlareSolverrClient,
+    flaresolverr_url,
+)
+
 from utils.logging_config import get_logger
 
 logger = get_logger("video.extto_search")
 
-DEFAULT_FLARESOLVERR_URL = "http://localhost:8191"
 BASES = ("https://ext.to", "https://search.extto.com")
 SEARCH_PATHS = (
     "/browse/?q={q}&with_adult=1",
@@ -62,59 +67,11 @@ class ExtToBlocked(RuntimeError):
     pass
 
 
-class FlareSolverrClient:
+class FlareSolverrClient(_SharedFlareSolverrClient):
+    """EXT.to's client - the shared wire protocol with its own browser session."""
+
     def __init__(self, base_url: str, timeout: int = 30):
-        self.base_url = str(base_url or "").rstrip("/")
-        self.timeout = timeout
-        self.session_id = "soulsync-extto"
-        # The clearance FlareSolverr solved, kept so a DIRECT fetch (image bytes,
-        # which FlareSolverr cannot stream) can reuse it. See `clearance()`.
-        self.last_cookies: dict[str, str] = {}
-        self.last_user_agent: str = ""
-
-    def close(self) -> None:
-        try:
-            requests.post(self.base_url + "/v1", json={"cmd": "sessions.destroy", "session": self.session_id}, timeout=10)
-        except requests.RequestException:
-            pass
-
-    def request(self, method: str, url: str, data: dict[str, str] | None = None) -> tuple[int, str, str]:
-        payload: dict[str, Any] = {
-            "cmd": "request.post" if method.upper() == "POST" else "request.get",
-            "url": url,
-            "session": self.session_id,
-            "maxTimeout": self.timeout * 1000,
-        }
-        if method.upper() == "POST":
-            payload["postData"] = urlencode(data or {})
-        r = requests.post(self.base_url + "/v1", json=payload, timeout=self.timeout + 10)
-        # FlareSolverr answers a failed solve with HTTP 500 AND a JSON body naming the
-        # cause ("Error solving the challenge. Timeout after 20.0 seconds."). This used
-        # to raise_for_status() first, which threw that body away and surfaced
-        # "500 Server Error: Internal Server Error for url: http://localhost:8191/v1" —
-        # a message that names the proxy instead of the problem and reads like
-        # FlareSolverr is broken when it is really just out of time.
-        try:
-            body = r.json()
-        except ValueError:
-            body = {}
-        if body.get("status") != "ok":
-            raise RuntimeError(body.get("message")
-                               or "FlareSolverr returned HTTP %s" % r.status_code)
-        sol = body.get("solution") or {}
-        try:
-            self.last_cookies = {str(c.get("name")): str(c.get("value"))
-                                 for c in (sol.get("cookies") or []) if c.get("name")}
-            self.last_user_agent = str(sol.get("userAgent") or "")
-        except Exception:   # noqa: BLE001 - clearance is a bonus, never the request
-            pass
-        return int(sol.get("status") or 0), str(sol.get("response") or ""), str(sol.get("url") or url)
-
-
-def flaresolverr_url() -> str:
-    from core.settings import config_manager
-
-    return str(config_manager.get("flaresolverr.url", DEFAULT_FLARESOLVERR_URL) or "").rstrip("/")
+        super().__init__(base_url, timeout=timeout, session_id="soulsync-extto")
 
 
 def is_configured() -> bool:

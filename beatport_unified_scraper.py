@@ -16,6 +16,7 @@ from typing import Dict, List, Optional
 import concurrent.futures
 from threading import Lock
 
+from core.flaresolverr import FlareSolverrClient, flaresolverr_url
 from utils.logging_config import get_logger
 
 
@@ -48,6 +49,30 @@ def _beatport_log(message: str):
         level = logging.WARNING
 
     logger.log(level, text)
+
+# beatport sits behind cloudflare and 403s plain requests sessions. when a
+# flaresolverr instance is around (same config the ext.to scraper uses) we
+# solve the challenge once, remember the clearance, and ride it on direct
+# requests until it goes stale. without flaresolverr every fetch behaves
+# exactly as it always has - the 403 surfaces to the caller unchanged.
+CF_BLOCK_STATUSES = (403, 503)
+CF_CLEARANCE_TTL = 900          # seconds; cf_clearance lives far longer, this just re-solves lazily
+_cf_clearance = {'at': 0.0, 'cookies': {}, 'ua': ''}
+_cf_solve_lock = Lock()
+
+
+class _SolvedResponse:
+    """the flaresolverr-rendered page, shaped like the response callers expect"""
+    def __init__(self, status_code, html, url):
+        self.status_code = status_code
+        self.text = html
+        self.content = html.encode('utf-8', 'replace')
+        self.url = url
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f'{self.status_code} Error for url: {self.url}')
+
 
 class BeatportUnifiedScraper:
     def __init__(self):
@@ -155,10 +180,50 @@ class BeatportUnifiedScraper:
         # Accept everything else
         return True
 
+    def _apply_clearance(self, cookies, ua):
+        for name, value in cookies.items():
+            self.session.cookies.set(name, value)
+        if ua:
+            self.session.headers['User-Agent'] = ua
+
+    def _get(self, url, timeout=None):
+        """plain GET, with a flaresolverr fallback when cloudflare blocks us.
+
+        no flaresolverr configured -> the blocked response is returned as-is,
+        which is byte-for-byte the old behavior. a fresh clearance from an
+        earlier solve is tried before paying for a new solve, and a successful
+        solve leaves its cookies on the session so later requests go direct.
+        """
+        response = self.session.get(url, timeout=timeout)
+        if response.status_code not in CF_BLOCK_STATUSES:
+            return response
+        solver = flaresolverr_url()
+        if not solver:
+            return response
+        with _cf_solve_lock:
+            if _cf_clearance['cookies'] and (time.time() - _cf_clearance['at']) < CF_CLEARANCE_TTL:
+                self._apply_clearance(_cf_clearance['cookies'], _cf_clearance['ua'])
+                retry = self.session.get(url, timeout=timeout)
+                if retry.status_code not in CF_BLOCK_STATUSES:
+                    return retry
+            try:
+                client = FlareSolverrClient(solver, timeout=45, session_id='soulsync-beatport')
+                status, html, _final = client.request('GET', url)
+            except Exception as e:
+                _beatport_log(f"FlareSolverr fallback failed for {url}: {e}")
+                return response
+            if not html or status >= 400 or not status:
+                return response
+            if client.last_cookies:
+                _cf_clearance.update({'at': time.time(), 'cookies': client.last_cookies,
+                                      'ua': client.last_user_agent})
+                self._apply_clearance(client.last_cookies, client.last_user_agent)
+            return _SolvedResponse(status, html, url)
+
     def get_page(self, url: str) -> Optional[BeautifulSoup]:
         """Fetch and parse a page with error handling"""
         try:
-            response = self.session.get(url, timeout=15)
+            response = self._get(url, timeout=15)
             response.raise_for_status()
             return BeautifulSoup(response.content, 'html.parser')
         except requests.RequestException as e:
@@ -3975,7 +4040,7 @@ class BeatportUnifiedScraper:
 
         genre_url = f"https://www.beatport.com/genre/{genre_slug}/{genre_id}"
 
-        response = self.session.get(genre_url)
+        response = self._get(genre_url)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
 
@@ -4103,7 +4168,7 @@ class BeatportUnifiedScraper:
 
         genre_url = f"https://www.beatport.com/genre/{genre_slug}/{genre_id}"
 
-        response = self.session.get(genre_url)
+        response = self._get(genre_url)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
 
