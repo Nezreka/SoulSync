@@ -102,6 +102,28 @@ class AcoustIDScannerJob(RepairJob):
                 logger.warning("AcoustID client not available: %s", e)
                 return result
 
+        # Is the client usable AT ALL? `verify_audio_file` probes this per file
+        # and answers SKIP when it is not — which for a scan means stamping
+        # every row in the library 'skip' ("checked, no claim") and reporting a
+        # clean run, wiping whatever earlier scans had concluded. A disabled
+        # integration, a missing key or no chromaprint is a property of the RUN,
+        # not a verdict about a file, so it belongs here, once, as a refusal to
+        # start.
+        probe_available = getattr(acoustid_client, 'is_available', None)
+        if callable(probe_available):
+            try:
+                available, reason = probe_available()
+            except Exception as e:  # noqa: BLE001 — a broken probe is not a verdict
+                available, reason = False, f'availability check failed: {e}'
+            if not available:
+                logger.warning("AcoustID scan not started: %s", reason)
+                if context.report_progress:
+                    context.report_progress(
+                        log_line=f'AcoustID unavailable — nothing scanned: {reason}',
+                        log_type='error')
+                result.errors += 1
+                return result
+
         # Load all library tracks from DB with their file paths
         db_tracks = self._load_db_tracks(context)
         if not db_tracks:
@@ -367,14 +389,15 @@ class AcoustIDScannerJob(RepairJob):
         # and requiring both would make the contract depend on which of the two
         # a given file still happens to carry.
         _stands_verified = verif_status == 'verified'
+        import_mbids = expected.get('import_recording_mbids') or frozenset()
+        current_mbids = {
+            str(m) for m in (probe.get('_acoustid_recording_mbids') or []) if m
+        } or {
+            str(r.get('mbid')) for r in recordings if r.get('mbid')
+        }
+        same_recording_as_import = bool(import_mbids and (import_mbids & current_mbids))
         if outcome.decision == Decision.FAIL and _stands_verified:
-            import_mbids = expected.get('import_recording_mbids') or frozenset()
-            current_mbids = {
-                str(m) for m in (probe.get('_acoustid_recording_mbids') or []) if m
-            } or {
-                str(r.get('mbid')) for r in recordings if r.get('mbid')
-            }
-            if import_mbids and (import_mbids & current_mbids):
+            if same_recording_as_import:
                 if context.report_progress:
                     context.report_progress(
                         log_line=(f'OK (same recording as at import): {fname}'),
@@ -402,6 +425,18 @@ class AcoustIDScannerJob(RepairJob):
             new_status = 'verified'
         elif outcome.decision == Decision.SKIP and not verif_status:
             new_status = 'unverified'
+        elif (outcome.decision == Decision.SKIP and verif_status == 'unverified'
+                and same_recording_as_import):
+            # Healing, for the files an earlier build of this scanner demoted.
+            # It read the standing from the file TAG and wrote to the catalogue
+            # COLUMN, so a file whose tag had gone missing was recorded
+            # 'unverified' however the import had judged it — and nothing since
+            # gives it back, because a SKIP is by design not allowed to move the
+            # standing. The one thing that settles it is identity: the
+            # fingerprint still lands on the recording the import checked this
+            # file against, and only files the import let through are here at
+            # all. That is the same evidence the FAIL guard above trusts.
+            new_status = 'verified'
         # The fingerprint's own verdict is recorded even when the overall
         # verification standing does not move. Those are different questions —
         # "does this file stand verified" vs "what did the fingerprint check
@@ -413,7 +448,12 @@ class AcoustIDScannerJob(RepairJob):
             context, track_id, fpath,
             (expected.get('file_path') or '').strip() or None,
             new_status, write_tag=(bool(new_status) and new_status != file_verif_status),
-            expected=expected, acoustid_status=outcome.decision.value)
+            expected=expected, acoustid_status=outcome.decision.value,
+            # Without this the row keeps whatever reason was written last —
+            # which for a downloaded file is the IMPORT's message. The Check
+            # column then renders "Skipped" with a tooltip reading "Audio
+            # verified: ... artist 100%", two runs disagreeing in one row.
+            acoustid_message=outcome.reason)
 
         if outcome.decision != Decision.FAIL:
             if context.report_progress:

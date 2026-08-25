@@ -325,11 +325,6 @@ class AcoustIDVerification:
             # which for cross-script metadata differ between the two paths and
             # were what made the scan disagree with the download.
             if isinstance(context, dict):
-                mbids = acoustid_result.get('recording_mbids') or [
-                    rec.get('mbid') for rec in recordings if rec.get('mbid')
-                ]
-                context['_acoustid_recording_mbids'] = sorted(
-                    {str(m) for m in mbids if m})
                 context['_acoustid_best_score'] = best_score
 
             logger.debug(
@@ -343,6 +338,17 @@ class AcoustIDVerification:
                 msg = f"AcoustID fingerprint score too low ({best_score:.2f}) to verify"
                 logger.info(msg)
                 return VerificationResult.SKIP, msg
+
+            # Only now are these "the recording identity this verdict was made
+            # against" — the contract a later scan reads them under. Written
+            # above the floor they also described lookups that never reached a
+            # verdict at all.
+            if isinstance(context, dict):
+                mbids = acoustid_result.get('recording_mbids') or [
+                    rec.get('mbid') for rec in recordings if rec.get('mbid')
+                ]
+                context['_acoustid_recording_mbids'] = sorted(
+                    {str(m) for m in mbids if m})
 
             # Enrich recordings that are missing title/artist via MusicBrainz lookup
             recordings = _enrich_recordings_from_musicbrainz(recordings)
@@ -414,9 +420,16 @@ class AcoustIDVerification:
             return result, outcome.reason
 
         except Exception as e:
-            # Any unexpected error -> SKIP (fail open)
+            # An unexpected fault in OUR code or in a lookup it depends on is
+            # not a statement about the file. Reported as SKIP it became one:
+            # the library scan persists a SKIP as 'skip' — "checked, no claim" —
+            # so a database error or a MusicBrainz outage mid-verification got
+            # written down as a completed check, and with `require_verified` on,
+            # the download path turned the same SKIP into a rejection. ERROR
+            # says what it is; both callers already handle it without touching
+            # the file's standing.
             logger.error(f"Unexpected error during AcoustID verification: {e}")
-            return VerificationResult.SKIP, f"Verification error: {str(e)}"
+            return VerificationResult.ERROR, f"Verification error: {str(e)}"
 
     def quick_check_available(self) -> Tuple[bool, str]:
         """
