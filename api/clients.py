@@ -174,13 +174,18 @@ def create_blueprint() -> Blueprint:
                             "error": str(e), "items": []})
         known = _known('slskd')
         rows = []
-        for d in items:
-            row = asdict(d)
-            row.pop('audio_files', None)
-            hit = known.get((d.username, d.filename))
-            if hit:
-                row['soulsync'] = hit
-            rows.append(row)
+        try:
+            for d in items:
+                row = asdict(d)
+                row.pop('audio_files', None)
+                hit = known.get((d.username, d.filename))
+                if hit:
+                    row['soulsync'] = hit
+                rows.append(row)
+        except Exception as e:
+            logger.error(f"[Clients] slskd row build failed: {e}")
+            return jsonify({"success": False, "error": f"row build failed: {e}"}), 500
+        logger.debug(f"[Clients] slskd listing: {len(rows)} transfers")
         return jsonify({"success": True, "configured": True, "connected": True,
                         "items": rows})
 

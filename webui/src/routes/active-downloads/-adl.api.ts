@@ -306,33 +306,49 @@ export function quarantineClear(): Promise<AdlResult> {
 
 // ── The Clients tab (external download clients) ───────────────────────────
 
-async function fetchClientOverview<T>(path: string): Promise<ClientOverview<T> | null> {
+/**
+ * Either the overview or the reason it could not be fetched. The failure
+ * carries its message on purpose: the first version returned null and the
+ * section sat on "loading…" forever with no way to see why.
+ */
+export type ClientFetch<T> =
+  | { ok: true; overview: ClientOverview<T> }
+  | { ok: false; message: string };
+
+async function fetchClientOverview<T>(path: string): Promise<ClientFetch<T>> {
   try {
-    const data = await readJson<{ success?: boolean } & Partial<ClientOverview<T>>>(
-      apiClient.get(path),
+    const data = await readJson<
+      { success?: boolean; error?: string } & Partial<ClientOverview<T>>
+    >(
+      // 30s: a cold adapter call can sit on a slow client handshake longer
+      // than ky's 10s default.
+      apiClient.get(path, { timeout: 30000 }),
     );
-    if (!data?.success) return null;
+    if (!data?.success) return { ok: false, message: data?.error || 'the server said no' };
     return {
-      configured: Boolean(data.configured),
-      connected: Boolean(data.connected),
-      type: data.type,
-      error: data.error,
-      items: Array.isArray(data.items) ? data.items : [],
+      ok: true,
+      overview: {
+        configured: Boolean(data.configured),
+        connected: Boolean(data.connected),
+        type: data.type,
+        error: data.error,
+        items: Array.isArray(data.items) ? data.items : [],
+      },
     };
-  } catch {
-    return null;
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
 }
 
-export function fetchTorrentClient(): Promise<ClientOverview<ClientTorrentItem> | null> {
+export function fetchTorrentClient(): Promise<ClientFetch<ClientTorrentItem>> {
   return fetchClientOverview('clients/torrent');
 }
 
-export function fetchUsenetClient(): Promise<ClientOverview<ClientUsenetItem> | null> {
+export function fetchUsenetClient(): Promise<ClientFetch<ClientUsenetItem>> {
   return fetchClientOverview('clients/usenet');
 }
 
-export function fetchSlskdClient(): Promise<ClientOverview<ClientSlskdItem> | null> {
+export function fetchSlskdClient(): Promise<ClientFetch<ClientSlskdItem>> {
   return fetchClientOverview('clients/slskd');
 }
 

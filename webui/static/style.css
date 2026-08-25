@@ -76746,6 +76746,83 @@ body.em-scroll-lock { overflow: hidden; }
     border-color: rgba(255, 255, 255, 0.15);
 }
 
+/* sub-tab banner: health dots on the pills, type + status on the right */
+.adl-clients-banner {
+    align-items: center;
+}
+
+.adl-client-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+    background: rgba(255, 255, 255, 0.25);
+    vertical-align: middle;
+}
+
+.adl-client-dot-ok { background: #2ecc71; box-shadow: 0 0 6px rgba(46, 204, 113, 0.6); }
+.adl-client-dot-bad { background: #e74c3c; box-shadow: 0 0 6px rgba(231, 76, 60, 0.6); }
+.adl-client-dot-off { background: rgba(255, 255, 255, 0.2); }
+.adl-client-dot-wait { background: #f1c40f; }
+
+.adl-client-health-wait { color: rgba(255, 255, 255, 0.5); }
+
+.adl-client-empty-error { color: #e74c3c; }
+
+/* rows: name + owner chip on top, progress bar, stats line */
+.adl-client-row {
+    align-items: center;
+}
+
+.adl-client-row-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.adl-client-row-top .adl-row-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.adl-client-progress {
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    margin: 6px 0 4px;
+    overflow: hidden;
+}
+
+.adl-client-progress-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: rgb(var(--accent-rgb));
+    transition: width 0.4s ease;
+}
+
+.adl-client-progress[data-state="seeding"] .adl-client-progress-fill,
+.adl-client-progress[data-state="completed"] .adl-client-progress-fill {
+    background: #2ecc71;
+}
+
+.adl-client-progress[data-state="paused"] .adl-client-progress-fill { background: #f1c40f; }
+.adl-client-progress[data-state="stalled"] .adl-client-progress-fill { background: #f39c12; }
+.adl-client-progress[data-state="error"] .adl-client-progress-fill { background: #e74c3c; }
+
+.adl-client-row-stats {
+    display: flex;
+    gap: 10px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.adl-client-actions {
+    flex-shrink: 0;
+}
+
 /* one-line explainer under the review banner - what this sub-view IS */
 .adl-review-explainer {
     margin: 2px 0 10px;

@@ -1,16 +1,19 @@
 /**
- * The Clients tab — the external download clients in one pane.
+ * The Clients tab — the external download clients, one sub-tab each.
  *
- * Three self-loading sections (slskd, torrent, usenet), each with its own
- * health line and 10s poll while mounted. Scope is "see what's happening and
- * unstick it": pause / resume / remove / cancel. Rows SoulSync itself
- * dispatched carry a chip saying what they are; everything else is honestly
- * labeled external.
+ * Boulder's call: isolate them like the review area's sub-views rather than
+ * stacking three sections. All three poll every 10s regardless of which is
+ * open, so every pill's health dot and count stay live; only the active
+ * client's list renders.
+ *
+ * A failed fetch NEVER leaves "loading…" standing: the failure message is
+ * kept and shown, because the first version swallowed errors into an
+ * eternal spinner and the user had no way to see what was wrong.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { ClientAction } from '../-adl.api';
+import type { ClientAction, ClientFetch } from '../-adl.api';
 import type {
   ClientOverview,
   ClientSlskdItem,
@@ -32,6 +35,8 @@ const toast = (message: string, type: string) => window.showToast?.(message, typ
 
 export const CLIENTS_POLL_MS = 10_000;
 
+export type ClientSubTab = 'soulseek' | 'torrent' | 'usenet';
+
 const CLIENT_TYPE_LABELS: Record<string, string> = {
   qbittorrent: 'qBittorrent',
   transmission: 'Transmission',
@@ -41,21 +46,30 @@ const CLIENT_TYPE_LABELS: Record<string, string> = {
   nzbget: 'NZBGet',
 };
 
-function clientTypeLabel(type: string | undefined, fallback: string): string {
-  if (!type) return fallback;
-  return CLIENT_TYPE_LABELS[type] ?? type;
+interface ClientState<T> {
+  overview: ClientOverview<T> | null;
+  /** the last fetch failure, shown when there is nothing better to show. */
+  fetchError: string | null;
+  loaded: boolean;
 }
 
-/** one section's live state: null until the first fetch lands. */
-function useClientPoll<T>(fetcher: () => Promise<ClientOverview<T> | null>) {
-  const [data, setData] = useState<ClientOverview<T> | null>(null);
+function useClientPoll<T>(fetcher: () => Promise<ClientFetch<T>>) {
+  const [state, setState] = useState<ClientState<T>>({
+    overview: null,
+    fetchError: null,
+    loaded: false,
+  });
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
 
   const reload = useCallback(async () => {
     const next = await fetcherRef.current();
-    // a failed fetch keeps the last known state instead of blanking the table
-    if (next) setData(next);
+    setState((prev) =>
+      next.ok
+        ? { overview: next.overview, fetchError: null, loaded: true }
+        : // keep the last good overview on a blip; only the error text updates
+          { overview: prev.overview, fetchError: next.message, loaded: true },
+    );
   }, []);
 
   useEffect(() => {
@@ -64,23 +78,64 @@ function useClientPoll<T>(fetcher: () => Promise<ClientOverview<T> | null>) {
     return () => clearInterval(timer);
   }, [reload]);
 
-  return { data, reload };
+  return { ...state, reload };
 }
+
+/* ── little pieces ───────────────────────────────────────────────────────── */
+
+type Health = 'wait' | 'ok' | 'bad' | 'off';
+
+function healthOf(s: ClientState<unknown>): Health {
+  if (!s.loaded) return 'wait';
+  if (s.overview === null) return 'bad'; // never fetched successfully
+  if (!s.overview.configured) return 'off';
+  return s.overview.connected ? 'ok' : 'bad';
+}
+
+const HEALTH_TEXT: Record<Health, string> = {
+  wait: 'checking…',
+  ok: 'connected',
+  bad: 'unreachable',
+  off: 'not configured',
+};
 
 function speedText(bytesPerSec: number): string {
   if (!bytesPerSec) return '';
   return `${formatBytes(bytesPerSec)}/s`;
 }
 
-function progressText(progress: number): string {
+function pct(progress: number): number {
   // torrent/usenet report 0-1, slskd reports 0-100
-  const pct = progress > 1 ? progress : progress * 100;
-  return `${Math.round(pct)}%`;
+  const value = progress > 1 ? progress : progress * 100;
+  return Math.max(0, Math.min(100, value));
+}
+
+function etaText(seconds: number | null | undefined): string {
+  if (!seconds || seconds <= 0) return '';
+  if (seconds < 60) return `${Math.round(seconds)}s left`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m left`;
+  return `${Math.floor(seconds / 3600)}h ${Math.round((seconds % 3600) / 60)}m left`;
+}
+
+/** normalize a client's state string into one of the css-known buckets. */
+function stateBucket(state: string): string {
+  const lower = state.toLowerCase();
+  if (lower.includes('progress') || lower.includes('download')) return 'downloading';
+  if (lower.includes('queue')) return 'queued';
+  if (lower.includes('seed')) return 'seeding';
+  if (lower.includes('complete') || lower.includes('succeed')) return 'completed';
+  if (lower.includes('pause')) return 'paused';
+  if (lower.includes('stall')) return 'stalled';
+  if (lower.includes('error') || lower.includes('fail')) return 'error';
+  return 'other';
 }
 
 function StateChip({ state, error }: { state: string; error?: string | null }) {
   return (
-    <span className={`adl-client-state adl-client-state-${state}`} title={error || state}>
+    <span
+      className={`adl-client-state adl-client-state-${stateBucket(state)}`}
+      title={error || state}
+    >
       {state}
     </span>
   );
@@ -89,7 +144,10 @@ function StateChip({ state, error }: { state: string; error?: string | null }) {
 function SoulsyncChip({ item }: { item: { soulsync?: { kind?: string; title?: string } } }) {
   if (!item.soulsync) {
     return (
-      <span className="adl-client-owner adl-client-owner-external" title="Not dispatched by SoulSync">
+      <span
+        className="adl-client-owner adl-client-owner-external"
+        title="Not dispatched by SoulSync"
+      >
         external
       </span>
     );
@@ -102,93 +160,87 @@ function SoulsyncChip({ item }: { item: { soulsync?: { kind?: string; title?: st
   );
 }
 
-function SectionShell({
-  title,
-  typeLabel,
-  data,
-  children,
-}: {
-  title: string;
-  typeLabel: string;
-  data: ClientOverview<unknown> | null;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="adl-client-section">
-      <div className="adl-client-section-header">
-        <span className="adl-client-section-title">{title}</span>
-        <span className="adl-client-section-type">{typeLabel}</span>
-        {data === null ? (
-          <span className="adl-client-health">checking…</span>
-        ) : !data.configured ? (
-          <span className="adl-client-health adl-client-health-off">not configured</span>
-        ) : data.connected ? (
-          <span className="adl-client-health adl-client-health-ok">connected</span>
-        ) : (
-          <span className="adl-client-health adl-client-health-bad" title={data.error}>
-            unreachable
-          </span>
-        )}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function EmptyLine({ data, noun }: { data: ClientOverview<unknown> | null; noun: string }) {
-  if (data === null) return <div className="adl-client-empty">loading…</div>;
-  if (!data.configured) {
-    return <div className="adl-client-empty">configure one in Settings to manage it here</div>;
-  }
-  if (!data.connected) {
-    return <div className="adl-client-empty">{data.error || 'could not reach the client'}</div>;
-  }
-  return <div className="adl-client-empty">no {noun} right now</div>;
-}
-
-/* ── torrent + usenet share one row shape ────────────────────────────────── */
-
-function TransferRow({
+function ClientRow({
   name,
+  sub,
   state,
   error,
   progress,
-  size,
-  speed,
-  extra,
+  detail,
   owner,
   actions,
 }: {
   name: string;
+  sub?: string;
   state: string;
   error?: string | null;
   progress: number;
-  size: number;
-  speed: number;
-  extra?: string;
+  detail: string;
   owner: React.ReactNode;
   actions: React.ReactNode;
 }) {
+  const bucket = stateBucket(state);
   return (
     <div className="adl-row adl-client-row">
       <div className="adl-row-info">
-        <div className="adl-row-title" title={name}>
-          {name}
+        <div className="adl-client-row-top">
+          <span className="adl-row-title" title={name}>
+            {name}
+          </span>
+          {owner}
         </div>
-        <div className="adl-row-meta">
-          {progressText(progress)}
-          {size ? ` of ${formatBytes(size)}` : ''}
-          {speed ? ` · ${speedText(speed)}` : ''}
-          {extra ? ` · ${extra}` : ''}
+        {sub ? <div className="adl-row-meta">{sub}</div> : null}
+        <div className="adl-client-progress" data-state={bucket}>
+          <div className="adl-client-progress-fill" style={{ width: `${pct(progress)}%` }} />
+        </div>
+        <div className="adl-client-row-stats">
+          <span>{Math.round(pct(progress))}%</span>
+          {detail ? <span>{detail}</span> : null}
         </div>
       </div>
-      <div className="verif-actions">
-        {owner}
+      <div className="verif-actions adl-client-actions">
         <StateChip state={state} error={error} />
         {actions}
       </div>
     </div>
   );
+}
+
+function EmptyState({
+  health,
+  fetchError,
+  overview,
+  noun,
+}: {
+  health: Health;
+  fetchError: string | null;
+  overview: ClientOverview<unknown> | null;
+  noun: string;
+}) {
+  if (health === 'wait') return <div className="adl-client-empty">loading…</div>;
+  if (overview === null) {
+    // every fetch so far failed - say WHY instead of spinning forever
+    return (
+      <div className="adl-client-empty adl-client-empty-error">
+        couldn't load this from the SoulSync server{fetchError ? ` — ${fetchError}` : ''}
+      </div>
+    );
+  }
+  if (!overview.configured) {
+    return (
+      <div className="adl-client-empty">
+        nothing set up — configure a client in Settings and it shows up here
+      </div>
+    );
+  }
+  if (!overview.connected) {
+    return (
+      <div className="adl-client-empty adl-client-empty-error">
+        {overview.error || 'could not reach the client'}
+      </div>
+    );
+  }
+  return <div className="adl-client-empty">no {noun} right now — all quiet</div>;
 }
 
 function PauseResumeRemove({
@@ -198,7 +250,7 @@ function PauseResumeRemove({
   item: { id: string; name: string; state: string };
   onAction: (id: string, action: ClientAction, deleteFiles: boolean) => void;
 }) {
-  const paused = item.state === 'paused';
+  const paused = stateBucket(item.state) === 'paused';
   return (
     <>
       <button
@@ -240,9 +292,14 @@ export function AdlClientsTab() {
   const slskd = useClientPoll<ClientSlskdItem>(fetchSlskdClient);
   const torrent = useClientPoll<ClientTorrentItem>(fetchTorrentClient);
   const usenet = useClientPoll<ClientUsenetItem>(fetchUsenetClient);
+  const [tab, setTab] = useState<ClientSubTab>('soulseek');
 
   const runAction = useCallback(
-    async (label: string, call: () => Promise<{ success?: boolean; error?: string }>, reload: () => Promise<void>) => {
+    async (
+      label: string,
+      call: () => Promise<{ success?: boolean; error?: string }>,
+      reload: () => Promise<void>,
+    ) => {
       try {
         const data = await call();
         if (data.success) toast(`${label} ok`, 'success');
@@ -255,99 +312,152 @@ export function AdlClientsTab() {
     [],
   );
 
+  const pills: {
+    key: ClientSubTab;
+    label: string;
+    state: ClientState<unknown>;
+  }[] = [
+    { key: 'soulseek', label: '🎧 Soulseek', state: slskd },
+    { key: 'torrent', label: '🧲 Torrents', state: torrent },
+    { key: 'usenet', label: '📰 Usenet', state: usenet },
+  ];
+
+  const activeState = tab === 'soulseek' ? slskd : tab === 'torrent' ? torrent : usenet;
+  const activeHealth = healthOf(activeState);
+  const typeLabel =
+    tab === 'soulseek'
+      ? 'slskd'
+      : activeState.overview?.type
+        ? (CLIENT_TYPE_LABELS[activeState.overview.type] ?? activeState.overview.type)
+        : '';
+
   return (
     <div className="adl-clients" id="adl-clients">
-      <SectionShell title="Soulseek" typeLabel="slskd" data={slskd.data}>
-        {slskd.data?.connected && slskd.data.items.length > 0 ? (
-          slskd.data.items.map((item) => (
-            <TransferRow
-              key={`${item.username}:${item.id}`}
-              name={item.filename}
-              state={item.state}
-              progress={item.progress}
-              size={item.size}
-              speed={item.speed}
-              extra={`from ${item.username}`}
-              owner={<SoulsyncChip item={item} />}
-              actions={
-                <button
-                  type="button"
-                  className="verif-act verif-act-del"
-                  title="Cancel this transfer in slskd"
-                  onClick={() =>
-                    void runAction(
-                      'Cancel',
-                      () => slskdClientCancel(item.id, item.username, true),
-                      slskd.reload,
-                    )
-                  }
-                >
-                  ✕
-                </button>
-              }
-            />
-          ))
-        ) : (
-          <EmptyLine data={slskd.data} noun="transfers" />
-        )}
-      </SectionShell>
+      <div className="adl-batch-filter-banner adl-clients-banner">
+        {pills.map((pill) => {
+          const health = healthOf(pill.state);
+          const count = pill.state.overview?.items.length ?? null;
+          return (
+            <button
+              key={pill.key}
+              type="button"
+              className={`adl-pill${tab === pill.key ? ' active' : ''}`}
+              data-client-tab={pill.key}
+              title={HEALTH_TEXT[health]}
+              onClick={() => setTab(pill.key)}
+            >
+              <span className={`adl-client-dot adl-client-dot-${health}`} />
+              {pill.label}
+              {count !== null && health === 'ok' ? ` (${count})` : ''}
+            </button>
+          );
+        })}
+        <span className="verif-banner-spacer" />
+        {typeLabel ? <span className="adl-client-section-type">{typeLabel}</span> : null}
+        <span className={`adl-client-health adl-client-health-${activeHealth}`}>
+          {HEALTH_TEXT[activeHealth]}
+        </span>
+      </div>
 
-      <SectionShell
-        title="Torrents"
-        typeLabel={clientTypeLabel(torrent.data?.type, 'torrent client')}
-        data={torrent.data}
-      >
-        {torrent.data?.connected && torrent.data.items.length > 0 ? (
-          torrent.data.items.map((item) => (
-            <TransferRow
+      <div className="adl-list adl-clients-list">
+        {tab === 'soulseek' ? (
+          slskd.overview?.connected && slskd.overview.items.length > 0 ? (
+            slskd.overview.items.map((item) => (
+              <ClientRow
+                key={`${item.username}:${item.id}`}
+                name={item.filename.split(/[\\/]/).pop() || item.filename}
+                sub={`from ${item.username} · ${item.filename}`}
+                state={item.state}
+                progress={item.progress}
+                detail={[
+                  item.size ? formatBytes(item.size) : '',
+                  speedText(item.speed),
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+                owner={<SoulsyncChip item={item} />}
+                actions={
+                  <button
+                    type="button"
+                    className="verif-act verif-act-del"
+                    title="Cancel this transfer in slskd"
+                    onClick={() =>
+                      void runAction(
+                        'Cancel',
+                        () => slskdClientCancel(item.id, item.username, true),
+                        slskd.reload,
+                      )
+                    }
+                  >
+                    ✕
+                  </button>
+                }
+              />
+            ))
+          ) : (
+            <EmptyState
+              health={activeHealth}
+              fetchError={slskd.fetchError}
+              overview={slskd.overview}
+              noun="transfers"
+            />
+          )
+        ) : tab === 'torrent' ? (
+          torrent.overview?.connected && torrent.overview.items.length > 0 ? (
+            torrent.overview.items.map((item) => (
+              <ClientRow
+                key={item.id}
+                name={item.name}
+                state={item.state}
+                error={item.error}
+                progress={item.progress}
+                detail={[
+                  item.size ? formatBytes(item.size) : '',
+                  speedText(item.download_speed),
+                  etaText(item.eta),
+                  item.seeders ? `${item.seeders} seeders` : '',
+                  item.ratio != null ? `ratio ${item.ratio.toFixed(2)}` : '',
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+                owner={<SoulsyncChip item={item} />}
+                actions={
+                  <PauseResumeRemove
+                    item={item}
+                    onAction={(id, action, deleteFiles) =>
+                      void runAction(
+                        action === 'remove' ? 'Remove' : action === 'pause' ? 'Pause' : 'Resume',
+                        () => torrentClientAction(id, action, deleteFiles),
+                        torrent.reload,
+                      )
+                    }
+                  />
+                }
+              />
+            ))
+          ) : (
+            <EmptyState
+              health={activeHealth}
+              fetchError={torrent.fetchError}
+              overview={torrent.overview}
+              noun="torrents"
+            />
+          )
+        ) : usenet.overview?.connected && usenet.overview.items.length > 0 ? (
+          usenet.overview.items.map((item) => (
+            <ClientRow
               key={item.id}
               name={item.name}
               state={item.state}
               error={item.error}
               progress={item.progress}
-              size={item.size}
-              speed={item.download_speed}
-              extra={[
-                item.seeders ? `${item.seeders} seeders` : '',
-                item.ratio != null ? `ratio ${item.ratio.toFixed(2)}` : '',
+              detail={[
+                item.size ? formatBytes(item.size) : '',
+                speedText(item.download_speed),
+                etaText(item.eta),
               ]
                 .filter(Boolean)
                 .join(' · ')}
-              owner={<SoulsyncChip item={item} />}
-              actions={
-                <PauseResumeRemove
-                  item={item}
-                  onAction={(id, action, deleteFiles) =>
-                    void runAction(
-                      action === 'remove' ? 'Remove' : action === 'pause' ? 'Pause' : 'Resume',
-                      () => torrentClientAction(id, action, deleteFiles),
-                      torrent.reload,
-                    )
-                  }
-                />
-              }
-            />
-          ))
-        ) : (
-          <EmptyLine data={torrent.data} noun="torrents" />
-        )}
-      </SectionShell>
-
-      <SectionShell
-        title="Usenet"
-        typeLabel={clientTypeLabel(usenet.data?.type, 'usenet client')}
-        data={usenet.data}
-      >
-        {usenet.data?.connected && usenet.data.items.length > 0 ? (
-          usenet.data.items.map((item) => (
-            <TransferRow
-              key={item.id}
-              name={item.name}
-              state={item.state}
-              error={item.error}
-              progress={item.progress}
-              size={item.size}
-              speed={item.download_speed}
               owner={<SoulsyncChip item={item} />}
               actions={
                 <PauseResumeRemove
@@ -364,9 +474,14 @@ export function AdlClientsTab() {
             />
           ))
         ) : (
-          <EmptyLine data={usenet.data} noun="jobs" />
+          <EmptyState
+            health={activeHealth}
+            fetchError={usenet.fetchError}
+            overview={usenet.overview}
+            noun="jobs"
+          />
         )}
-      </SectionShell>
+      </div>
     </div>
   );
 }

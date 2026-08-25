@@ -1,6 +1,7 @@
 /**
- * the Clients tab: three sections, health states, actions, and the
- * soulsync-vs-external labeling.
+ * the Clients tab: sub-tab per client, live health dots, progress rows,
+ * actions — and the rule that a failed fetch SHOWS ITS ERROR instead of
+ * sitting on "loading…" forever (the bug that shipped first).
  */
 
 import { render, waitFor, fireEvent } from '@testing-library/react';
@@ -21,7 +22,7 @@ const TORRENT_OK = {
       name: 'Movie.2026.1080p.mkv',
       state: 'downloading',
       progress: 0.42,
-      size: 1000_000_000,
+      size: 1_000_000_000,
       downloaded: 420_000_000,
       download_speed: 5_000_000,
       upload_speed: 0,
@@ -41,25 +42,42 @@ const TORRENT_OK = {
   ],
 };
 
-const EMPTY_UNCONFIGURED = {
+const SLSKD_OK = {
   success: true,
-  configured: false,
-  connected: false,
-  items: [],
+  configured: true,
+  connected: true,
+  items: [
+    {
+      id: 'd9',
+      filename: 'Music\\Artist\\song.flac',
+      username: 'peer1',
+      state: 'InProgress',
+      progress: 30,
+      size: 100,
+      transferred: 30,
+      speed: 5,
+    },
+  ],
 };
+
+const UNCONFIGURED = { success: true, configured: false, connected: false, items: [] };
 
 let toasts: string[] = [];
 
 function mockAll({
   torrent = TORRENT_OK,
-  usenet = EMPTY_UNCONFIGURED,
-  slskd = EMPTY_UNCONFIGURED,
+  usenet = UNCONFIGURED,
+  slskd = SLSKD_OK,
 }: Record<string, unknown> = {}) {
   server.use(
     http.get('/api/clients/torrent', () => HttpResponse.json(torrent)),
     http.get('/api/clients/usenet', () => HttpResponse.json(usenet)),
     http.get('/api/clients/slskd', () => HttpResponse.json(slskd)),
   );
+}
+
+function pill(container: HTMLElement, key: string) {
+  return container.querySelector(`[data-client-tab="${key}"]`) as HTMLElement;
 }
 
 beforeEach(() => {
@@ -71,34 +89,68 @@ beforeEach(() => {
 });
 
 describe('AdlClientsTab', () => {
-  it('renders three sections with honest health states', async () => {
+  it('renders three pills with health dots; soulseek opens first', async () => {
     mockAll();
     const { container } = render(<AdlClientsTab />);
-    await waitFor(() => {
-      expect(container.textContent).toContain('connected');
-    });
-    const sections = container.querySelectorAll('.adl-client-section');
-    expect(sections).toHaveLength(3);
-    expect(container.textContent).toContain('Soulseek');
-    expect(container.textContent).toContain('Torrents');
-    expect(container.textContent).toContain('Usenet');
-    // the two unconfigured clients say so instead of pretending to be empty
-    expect(container.textContent).toContain('not configured');
-    expect(container.textContent).toContain('qBittorrent');
-  });
-
-  it('labels soulsync-dispatched rows and external rows differently', async () => {
-    mockAll();
-    const { container } = render(<AdlClientsTab />);
-    await waitFor(() => expect(container.textContent).toContain('Movie (2026)'));
-    const owners = [...container.querySelectorAll('.adl-client-owner')].map(
-      (el) => el.textContent,
+    await waitFor(() =>
+      expect(container.querySelector('.adl-client-dot-ok')).not.toBeNull(),
     );
-    expect(owners).toContain('Movie (2026)');
-    expect(owners).toContain('external');
+    expect(container.querySelectorAll('[data-client-tab]')).toHaveLength(3);
+    // soulseek is the active tab: its transfer renders, filename basename first
+    expect(container.textContent).toContain('song.flac');
+    expect(container.textContent).toContain('from peer1');
+    // usenet is unconfigured: gray dot, no count
+    expect(pill(container, 'usenet').querySelector('.adl-client-dot-off')).not.toBeNull();
+    expect(pill(container, 'usenet').textContent).not.toContain('(');
   });
 
-  it('an unreachable client reports its error, not an empty list', async () => {
+  it('switching pills swaps the list', async () => {
+    mockAll();
+    const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(container.textContent).toContain('song.flac'));
+    fireEvent.click(pill(container, 'torrent'));
+    await waitFor(() => expect(container.textContent).toContain('Movie.2026.1080p.mkv'));
+    expect(container.textContent).not.toContain('song.flac');
+    expect(container.textContent).toContain('qBittorrent');
+    expect(container.textContent).toContain('12 seeders');
+  });
+
+  it('rows carry a progress bar sized to the transfer', async () => {
+    mockAll();
+    const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(container.textContent).toContain('song.flac'));
+    const fill = container.querySelector('.adl-client-progress-fill') as HTMLElement;
+    // slskd reports 0-100 already
+    expect(fill.style.width).toBe('30%');
+    expect(container.textContent).toContain('30%');
+  });
+
+  it('a failed fetch shows its error text, never an eternal loading state', async () => {
+    mockAll({ slskd: undefined });
+    server.use(
+      http.get('/api/clients/slskd', () =>
+        HttpResponse.json({ success: false, error: 'boom from the bridge' }),
+      ),
+    );
+    const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(container.textContent).toContain("couldn't load"));
+    expect(container.textContent).toContain('boom from the bridge');
+    expect(container.textContent).not.toContain('loading…');
+    expect(pill(container, 'soulseek').querySelector('.adl-client-dot-bad')).not.toBeNull();
+  });
+
+  it('an http 500 also surfaces instead of spinning', async () => {
+    mockAll({ slskd: undefined });
+    server.use(
+      http.get('/api/clients/slskd', () =>
+        HttpResponse.json({ error: 'internal' }, { status: 500 }),
+      ),
+    );
+    const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(container.textContent).toContain("couldn't load"));
+  });
+
+  it('an unreachable client reports the adapter error', async () => {
     mockAll({
       torrent: {
         success: true,
@@ -110,8 +162,10 @@ describe('AdlClientsTab', () => {
       },
     });
     const { container } = render(<AdlClientsTab />);
-    await waitFor(() => expect(container.textContent).toContain('unreachable'));
-    expect(container.textContent).toContain('connection refused');
+    await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
+    fireEvent.click(pill(container, 'torrent'));
+    await waitFor(() => expect(container.textContent).toContain('connection refused'));
+    expect(container.textContent).toContain('unreachable');
   });
 
   it('pause fires the action endpoint for the right torrent', async () => {
@@ -124,6 +178,8 @@ describe('AdlClientsTab', () => {
       }),
     );
     const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
+    fireEvent.click(pill(container, 'torrent'));
     await waitFor(() => expect(container.textContent).toContain('Movie (2026)'));
     const pauseBtn = [...container.querySelectorAll('.verif-act')].find(
       (b) => b.getAttribute('title') === 'Pause',
@@ -137,6 +193,8 @@ describe('AdlClientsTab', () => {
   it('a paused row offers resume instead of pause', async () => {
     mockAll();
     const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
+    fireEvent.click(pill(container, 'torrent'));
     await waitFor(() => expect(container.textContent).toContain('someone.elses.iso'));
     const titles = [...container.querySelectorAll('.verif-act')].map((b) =>
       b.getAttribute('title'),
@@ -154,6 +212,8 @@ describe('AdlClientsTab', () => {
       }),
     );
     const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
+    fireEvent.click(pill(container, 'torrent'));
     await waitFor(() => expect(container.textContent).toContain('Movie (2026)'));
     const removeBtn = [...container.querySelectorAll('.verif-act-del')][0];
     fireEvent.click(removeBtn as HTMLElement);
@@ -162,25 +222,7 @@ describe('AdlClientsTab', () => {
   });
 
   it('slskd rows cancel with username and id', async () => {
-    mockAll({
-      slskd: {
-        success: true,
-        configured: true,
-        connected: true,
-        items: [
-          {
-            id: 'd9',
-            filename: 'Music/song.flac',
-            username: 'peer1',
-            state: 'InProgress',
-            progress: 30,
-            size: 100,
-            transferred: 30,
-            speed: 5,
-          },
-        ],
-      },
-    });
+    mockAll();
     let body: unknown;
     server.use(
       http.post('/api/clients/slskd/action', async ({ request }) => {
@@ -190,12 +232,24 @@ describe('AdlClientsTab', () => {
     );
     const { container } = render(<AdlClientsTab />);
     await waitFor(() => expect(container.textContent).toContain('song.flac'));
-    expect(container.textContent).toContain('from peer1');
     const cancelBtn = [...container.querySelectorAll('.verif-act-del')].find(
       (b) => b.getAttribute('title') === 'Cancel this transfer in slskd',
     );
     fireEvent.click(cancelBtn as HTMLElement);
     await waitFor(() => expect(body).toBeTruthy());
     expect(body).toEqual({ id: 'd9', username: 'peer1', action: 'cancel', remove: true });
+  });
+
+  it('labels soulsync rows and external rows differently', async () => {
+    mockAll();
+    const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
+    fireEvent.click(pill(container, 'torrent'));
+    await waitFor(() => expect(container.textContent).toContain('Movie (2026)'));
+    const owners = [...container.querySelectorAll('.adl-client-owner')].map(
+      (el) => el.textContent,
+    );
+    expect(owners).toContain('Movie (2026)');
+    expect(owners).toContain('external');
   });
 });
