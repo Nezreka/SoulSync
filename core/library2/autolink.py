@@ -432,6 +432,12 @@ def _pipeline_result_json(context: Dict[str, Any]) -> str:
     message = context.get("_acoustid_message")
     if message:
         result["acoustid_message"] = str(message)
+    # The recording identity the import-time check judged, so a later scan can
+    # recognise the same recording instead of re-arguing about title/artist
+    # strings it reads from different sources than the download did.
+    mbids = context.get("_acoustid_recording_mbids")
+    if mbids:
+        result["acoustid_recording_mbids"] = [str(m) for m in mbids if m]
     version = context.get("_version_mismatch_fallback")
     if version:
         result["version_mismatch_fallback"] = str(version)

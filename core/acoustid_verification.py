@@ -293,6 +293,20 @@ class AcoustIDVerification:
             if not recordings:
                 return VerificationResult.SKIP, "No match in AcoustID database"
 
+            # Hand the caller the recording identity this verdict was made
+            # against. The same audio always fingerprints to the same MBIDs, so
+            # a later library scan can tell "I am looking at the same recording
+            # the import already judged" from "the fingerprint now says
+            # something else" — without going back through title/artist strings,
+            # which for cross-script metadata differ between the two paths and
+            # were what made the scan disagree with the download.
+            if isinstance(context, dict):
+                mbids = acoustid_result.get('recording_mbids') or [
+                    rec.get('mbid') for rec in recordings if rec.get('mbid')
+                ]
+                context['_acoustid_recording_mbids'] = sorted(
+                    {str(m) for m in mbids if m})
+
             logger.debug(
                 f"AcoustID returned {len(recordings)} recording(s) "
                 f"(best fingerprint score: {best_score:.2f})"

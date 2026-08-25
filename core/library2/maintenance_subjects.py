@@ -72,6 +72,7 @@ def active_file_subjects(
                        f.import_status, f.processing_status,
                        f.verification_status, f.acoustid_status,
                        f.tags_json, f.missing_tags_json, f.metadata_gaps_json,
+                       f.pipeline_result_json,
                        f.content_hash, f.file_state,
                        t.album_id, t.title, t.duration, t.track_number,
                        t.disc_number, t.isrc, t.spotify_id AS track_spotify_id,

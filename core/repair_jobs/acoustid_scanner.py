@@ -26,6 +26,31 @@ logger = get_logger("repair_job.acoustid")
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
 
 
+def _import_recording_mbids(subject: Dict[str, Any]) -> frozenset:
+    """The AcoustID recordings the import-time check judged this file against.
+
+    Written by the download pipeline into ``pipeline_result_json`` (see
+    ``core/library2/autolink._pipeline_result_json``). Empty for files that
+    predate it or that SoulSync never downloaded — those simply get no
+    identity contract and the scan decides on its own, as it always did.
+    """
+    import json
+
+    raw = subject.get("pipeline_result_json")
+    if not raw:
+        return frozenset()
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return frozenset()
+    if not isinstance(parsed, dict):
+        return frozenset()
+    values = parsed.get("acoustid_recording_mbids") or []
+    if not isinstance(values, (list, tuple, set)):
+        return frozenset()
+    return frozenset(str(v) for v in values if v)
+
+
 @register_job
 class AcoustIDScannerJob(RepairJob):
     job_id = 'acoustid_scanner'
@@ -222,6 +247,7 @@ class AcoustIDScannerJob(RepairJob):
                 fp_result = {
                     'recordings': status_result.get('recordings') or [],
                     'best_score': status_result.get('best_score', 0.0),
+                    'recording_mbids': status_result.get('recording_mbids') or [],
                 } if lookup_status == 'ok' else None
             else:
                 fp_result = acoustid_client.fingerprint_and_lookup(fpath)
@@ -369,6 +395,43 @@ class AcoustIDScannerJob(RepairJob):
             fingerprint_score=best_score,
             aliases_provider=_aliases,
         )
+
+        # What the download verified, the scan may not overturn for free.
+        # Both paths share this decision core, so a flip can only come from
+        # their inputs — and they read the expected title/artist from
+        # different places (provider payload vs catalogue row), which for
+        # cross-script metadata are different strings for the same thing.
+        # Recording MBIDs are not: the same audio fingerprints to the same set
+        # every time. So if this file still identifies as the recording it
+        # identified when it was verified, the scan has learned nothing new
+        # and has no standing to call it a wrong download. A fingerprint that
+        # lands on a genuinely different recording IS new information and
+        # still fails below.
+        # Either record of the verdict will do. The tag is the one the import
+        # writes onto the file; the catalogue column is the one that survives a
+        # later retag or a copy that dropped the tag. They say the same thing,
+        # and requiring both would make the contract depend on which of the two
+        # a given file still happens to carry.
+        _stands_verified = 'verified' in (
+            file_verif_status, expected.get('db_verification_status'))
+        if outcome.decision == Decision.FAIL and _stands_verified:
+            import_mbids = expected.get('import_recording_mbids') or frozenset()
+            current_mbids = {
+                str(m) for m in (fp_result.get('recording_mbids') or [])
+                if m
+            } or {
+                str(r.get('mbid')) for r in fp_result['recordings'] if r.get('mbid')
+            }
+            if import_mbids and (import_mbids & current_mbids):
+                if context.report_progress:
+                    context.report_progress(
+                        log_line=(f'OK (same recording as at import): {fname}'),
+                        log_type='ok')
+                self._persist_inconclusive(
+                    context, track_id, fpath, expected,
+                    'the fingerprint still identifies the recording this file '
+                    'was verified against at import')
+                return
 
         # Persist the scan outcome so it feeds the same review pipeline as
         # import-time verification: PASS backfills 'verified' on untagged or
@@ -683,6 +746,8 @@ class AcoustIDScannerJob(RepairJob):
                     "duration_ms": subject.get("duration") or 0,
                     "lib2_file_id": int(subject["file_id"]),
                     "lib2_subject": subject,
+                    "import_recording_mbids": _import_recording_mbids(subject),
+                    "db_verification_status": subject.get("verification_status"),
                 }
         except Exception as exc:  # noqa: BLE001
             logger.error("Native AcoustID subject enumeration failed: %s", exc)
