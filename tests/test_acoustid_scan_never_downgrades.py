@@ -105,11 +105,11 @@ def scan(tmp_path, monkeypatch):
         monkeypatch.setattr(
             "core.tag_writer.write_verification_status",
             lambda _p, status: tags_written.append(status) or True)
-        # The scanner binds this at import time, so the patch has to land on
-        # ITS name — patching the source module would leave the real lookup
-        # (and a real database connection) in the path.
+        # Alias resolution lives inside the shared verifier, which is where
+        # the scan reaches it from — the real one would open a database
+        # connection and hit MusicBrainz.
         monkeypatch.setattr(
-            "core.repair_jobs.acoustid_scanner._resolve_expected_artist_aliases",
+            "core.acoustid_verification._resolve_expected_artist_aliases",
             lambda _n: [])
 
         job = AcoustIDScannerJob()

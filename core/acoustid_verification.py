@@ -241,7 +241,8 @@ class AcoustIDVerification:
         audio_file_path: str,
         expected_track_name: str,
         expected_artist_name: str,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
+        min_score: Optional[float] = None,
     ) -> Tuple[VerificationResult, str]:
         """
         Verify that an audio file matches expected track metadata.
@@ -249,28 +250,52 @@ class AcoustIDVerification:
         Compares title/artist from AcoustID fingerprint results against
         the expected track info. No MusicBrainz lookup needed.
 
+        This is the ONE verification path. The library scan calls it too
+        (``core/repair_jobs/acoustid_scanner``) rather than repeating the
+        availability check, the lookup, the score gate, the MusicBrainz
+        enrichment of title-less recordings and the alias wiring — which is how
+        those five drifted apart in the first place, while only the final
+        decision was shared.
+
         Args:
             audio_file_path: Path to the downloaded audio file
             expected_track_name: Track name we expected to download
             expected_artist_name: Artist name we expected
-            context: Optional download context for logging/debugging
+            context: Optional dict. Used for download-specific hints on the way
+                in, and written back on the way out with what this lookup saw
+                (``_acoustid_recordings``, ``_acoustid_best_score``,
+                ``_acoustid_decision``) so a caller needing the evidence does
+                not have to fingerprint the file a second time.
+            min_score: Override the fingerprint-confidence floor. The scan
+                exposes it as a job setting; the download uses the constant.
 
         Returns:
             Tuple of (VerificationResult, reason_message)
         """
         try:
-            # Step 1: Check availability
-            available, reason = self.acoustid_client.is_available()
-            if not available:
-                logger.debug(f"AcoustID verification skipped: {reason}")
-                return VerificationResult.SKIP, reason
+            # Step 1: Check availability. A caller that injected its own client
+            # has already decided the client is usable, and need not implement
+            # the probe — the library scan passes whatever the job context
+            # carries.
+            probe_available = getattr(self.acoustid_client, 'is_available', None)
+            if callable(probe_available):
+                available, reason = probe_available()
+                if not available:
+                    logger.debug(f"AcoustID verification skipped: {reason}")
+                    return VerificationResult.SKIP, reason
 
             # Step 2: Fingerprint and lookup in AcoustID (structured so an
             # actual error — invalid key / rate limit / no chromaprint — is
             # reported distinctly from a genuine no-match, instead of both
             # silently surfacing as "Skipped").
             logger.info(f"Fingerprinting and looking up: {audio_file_path}")
-            lookup = self.acoustid_client.lookup_with_status(audio_file_path) or {}
+            if hasattr(self.acoustid_client, 'lookup_with_status'):
+                lookup = self.acoustid_client.lookup_with_status(audio_file_path) or {}
+            else:
+                # Older client shape: dict-or-None, with no way to tell a real
+                # no-match from a failed lookup. Treated as a no-match, which is
+                # the safe reading — it makes no claim about the file.
+                lookup = self.acoustid_client.fingerprint_and_lookup(audio_file_path) or {}
             status = lookup.get('status')
             # Infer status by content when absent (a caller/stub that returned
             # just recordings): recordings => matched, none => no match.
@@ -293,13 +318,17 @@ class AcoustIDVerification:
             if not recordings:
                 return VerificationResult.SKIP, "No match in AcoustID database"
 
+            if isinstance(context, dict):
+                context['_acoustid_best_score'] = best_score
+
             logger.debug(
                 f"AcoustID returned {len(recordings)} recording(s) "
                 f"(best fingerprint score: {best_score:.2f})"
             )
 
             # Step 3: Check fingerprint confidence
-            if best_score < MIN_ACOUSTID_SCORE:
+            floor = MIN_ACOUSTID_SCORE if min_score is None else float(min_score)
+            if best_score < floor:
                 msg = f"AcoustID fingerprint score too low ({best_score:.2f}) to verify"
                 logger.info(msg)
                 return VerificationResult.SKIP, msg
@@ -358,6 +387,12 @@ class AcoustIDVerification:
                 _CoreDecision.SKIP: VerificationResult.SKIP,
                 _CoreDecision.FAIL: VerificationResult.FAIL,
             }
+            if isinstance(context, dict):
+                # The evidence, for a caller that has to say more than
+                # pass/fail about it — which candidates were in contention, and
+                # what the core concluded.
+                context['_acoustid_recordings'] = recordings
+                context['_acoustid_decision'] = outcome
             result = _decision_map[outcome.decision]
             if result == VerificationResult.PASS:
                 logger.info("AcoustID verification PASSED - %s", outcome.reason)
@@ -368,9 +403,16 @@ class AcoustIDVerification:
             return result, outcome.reason
 
         except Exception as e:
-            # Any unexpected error -> SKIP (fail open)
+            # An unexpected fault in OUR code, or in a lookup it depends on, is
+            # not a statement about the file. Reported as SKIP it became one:
+            # the library scan turns a SKIP on an untagged file into
+            # 'unverified', so a database error or a MusicBrainz outage
+            # mid-verification got written down as a verdict — and with
+            # `require_verified` on, the download path turns the same SKIP into
+            # a rejection. ERROR says what it is, and both callers already
+            # handle it without touching the file's standing.
             logger.error(f"Unexpected error during AcoustID verification: {e}")
-            return VerificationResult.SKIP, f"Verification error: {str(e)}"
+            return VerificationResult.ERROR, f"Verification error: {str(e)}"
 
     def quick_check_available(self) -> Tuple[bool, str]:
         """
