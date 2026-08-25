@@ -26,6 +26,8 @@ export interface AdlVerificationState {
   subView: AdlSubView;
   quarantine: AdlQuarantineEntry[];
   quarantineLoaded: boolean;
+  /** the last list-fetch failure; null when the list is trustworthy. */
+  quarantineError: string | null;
   /**
    * server counts, polled. null until the first one lands.
    *
@@ -73,6 +75,7 @@ export function useAdlVerification(): AdlVerificationController {
     subView: 'unverified',
     quarantine: [],
     quarantineLoaded: false,
+    quarantineError: null,
     summary: null,
     deleted: null,
     deletedLoaded: false,
@@ -108,10 +111,16 @@ export function useAdlVerification(): AdlVerificationController {
     if (loadingRef.current || (loadedRef.current && !force)) return;
 
     loadingRef.current = true;
-    const entries = await fetchQuarantine();
+    const result = await fetchQuarantine();
     loadedRef.current = true;
     loadingRef.current = false;
-    setState((prev) => ({ ...prev, quarantine: entries, quarantineLoaded: true }));
+    // a failed fetch keeps the last good list and carries the reason - an
+    // empty render with a big badge number must say WHY, not look empty
+    setState((prev) =>
+      'entries' in result
+        ? { ...prev, quarantine: result.entries, quarantineLoaded: true, quarantineError: null }
+        : { ...prev, quarantineLoaded: true, quarantineError: result.error },
+    );
     void refreshSummaryRef.current?.();
   }, []);
 

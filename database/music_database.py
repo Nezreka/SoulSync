@@ -17712,8 +17712,16 @@ class MusicDatabase:
             logger.debug(f"Error deleting track by path: {e}")
             return 0
 
-    def get_library_history(self, event_type=None, page=1, limit=50):
+    def get_library_history(self, event_type=None, page=1, limit=50,
+                            exclude_download_sources=()):
         """Query library history with optional type filter and pagination.
+
+        ``exclude_download_sources`` drops rows whose download_source matches -
+        the Downloads page tail passes ('acoustid_scan',) because the scanner's
+        synthetic review rows carry event_type='download' but are NOT downloads:
+        a first library scan wrote hundreds of pre-existing songs into the
+        Completed list and their newer timestamps pushed every real download
+        out of the capped tail.
 
         Returns (entries_list, total_count).
         """
@@ -17721,8 +17729,15 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            where = "WHERE event_type = ?" if event_type else ""
-            params = [event_type] if event_type else []
+            clauses = []
+            params = []
+            if event_type:
+                clauses.append("event_type = ?")
+                params.append(event_type)
+            for src in (exclude_download_sources or ()):
+                clauses.append("COALESCE(download_source, '') != ?")
+                params.append(src)
+            where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
             cursor.execute(f"SELECT COUNT(*) as cnt FROM library_history {where}", params)
             total = cursor.fetchone()['cnt']

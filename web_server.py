@@ -19169,6 +19169,11 @@ def _build_status_deps():
             event_type='download',
             page=1,
             limit=limit,
+            # the acoustid scanner's synthetic review rows carry
+            # event_type='download' but are pre-existing library files, not
+            # downloads - a first scan flooded the Completed tail with them
+            # and pushed every real download out of the cap
+            exclude_download_sources=('acoustid_scan',),
         )[0],
         get_unverified_download_history=lambda: get_database().get_library_history_unverified(),
     )
@@ -26439,6 +26444,17 @@ def _calculate_similarity(str1, str2):
 @app.route('/api/youtube/sync/start/<url_hash>', methods=['POST'])
 def start_youtube_sync(url_hash):
     """Start sync process for a YouTube playlist using discovered Spotify tracks"""
+    # mirrored playlists ride this endpoint too (mirrored_<id> keys). their
+    # card-level "Sync now" runs the pipeline behind a global
+    # is_pipeline_running() gate - the discovery modal's "Sync This Playlist"
+    # must respect the same gate or it schedules a second sync over the
+    # running pipeline (user report, aug 25).
+    if str(url_hash).startswith('mirrored_'):
+        try:
+            if _automation_deps.state.is_pipeline_running():
+                return jsonify({"error": "A playlist pipeline is already running"}), 409
+        except Exception as _pg_exc:
+            logger.debug(f"pipeline-running check unavailable: {_pg_exc}")
     return _start_source_sync(
         youtube_playlist_states, url_hash, sync_id_prefix="youtube",
         not_found_message="YouTube playlist not found",

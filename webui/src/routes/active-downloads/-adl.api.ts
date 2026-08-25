@@ -112,14 +112,25 @@ export async function fetchReviewQueueSummary(): Promise<AdlReviewSummary | null
   }
 }
 
-export async function fetchQuarantine(): Promise<AdlQuarantineEntry[]> {
+/**
+ * The list, or the reason it could not be fetched. Failure must be
+ * distinguishable from empty: the server reads one sidecar per entry, so a
+ * big quarantine can outlast ky's 10s default - swallowing that into []
+ * showed "hundreds in the badge, list empty" (user report, aug 25).
+ */
+export async function fetchQuarantine(): Promise<
+  { entries: AdlQuarantineEntry[] } | { error: string }
+> {
   try {
-    const data = await readJson<{ success?: boolean; entries?: AdlQuarantineEntry[] }>(
-      apiClient.get('quarantine/list'),
-    );
-    return data?.success && Array.isArray(data.entries) ? data.entries : [];
-  } catch {
-    return [];
+    const data = await readJson<{
+      success?: boolean;
+      error?: string;
+      entries?: AdlQuarantineEntry[];
+    }>(apiClient.get('quarantine/list', { timeout: 60000 }));
+    if (data?.success && Array.isArray(data.entries)) return { entries: data.entries };
+    return { error: data?.error || 'the server said no' };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
   }
 }
 

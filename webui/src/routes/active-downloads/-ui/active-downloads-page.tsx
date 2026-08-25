@@ -246,7 +246,14 @@ export function ActiveDownloadsPage() {
             counts={counts}
             hasRunningWork={hasRunningWork}
             acoustidEnabled={verification.acoustidEnabled}
-            reviewCount={verification.state.summary?.total ?? null}
+            reviewCount={
+              // only what the review views can actually show: with no
+              // unverified queue possible, hundreds of unverified rows
+              // inflated a pill that opened an empty quarantine list
+              verification.acoustidEnabled
+                ? (verification.state.summary?.total ?? null)
+                : (verification.state.summary?.quarantine ?? null)
+            }
             onFilter={downloads.setFilter}
             onCancelAll={() => void onCancelAll()}
             onClearCompleted={() => void onClearCompleted()}
@@ -309,6 +316,11 @@ export function ActiveDownloadsPage() {
             </div>
           ) : showQuarantine ? (
             <div className="adl-list" id="adl-list">
+              {verification.state.quarantineError ? (
+                <div className="adl-client-empty adl-client-empty-error">
+                  couldn't load the quarantine list — {verification.state.quarantineError}
+                </div>
+              ) : null}
               {!verification.state.quarantineLoaded ? (
                 <div className="adl-section-header">Loading quarantine…</div>
               ) : quarantineGroups.length === 0 ? (

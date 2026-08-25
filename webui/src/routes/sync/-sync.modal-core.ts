@@ -154,6 +154,24 @@ export function seededProgress(state: SourcePlaylistState): { progress: number; 
 }
 
 /**
+ * The numbers the "M / T tracks matched (P%)" line may print. The percent is
+ * derived from matched/total and clamped - it is NOT the discovery-scan
+ * percent, which measures how far the WORKER got, not how many tracks
+ * matched. Rendering the scan percent in a line labeled "matched" is how a
+ * cached mirrored open said "134 / 230 tracks matched (100%)", and an
+ * inflated client-side counter is how a fix during discovery printed
+ * "105 / 100" (user report, aug 25). Both are capped here at the display.
+ */
+export function matchLineNumbers(
+  matches: number,
+  total: number,
+): { matches: number; percent: number } {
+  if (total <= 0) return { matches, percent: 0 };
+  const shown = Math.max(0, Math.min(matches, total));
+  return { matches: shown, percent: Math.min(100, Math.round((shown / total) * 100)) };
+}
+
+/**
  * The two-format download-track builder from startYouTubeDownloadMissing
  * (10727-10753): spotify_data verbatim when present, else reconstructed from
  * the flat fields with the album coerced to an object for wishlist compat.

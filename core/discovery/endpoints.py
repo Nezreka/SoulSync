@@ -795,6 +795,19 @@ def start_sync(
             return {"error": "No Spotify matches found for sync"}, 400
 
         sync_playlist_id = f"{sync_id_prefix}_{key}"
+
+        # the same guard the card-level /api/sync/start enforces. without it
+        # the discovery modal's "Sync This Playlist" scheduled a second sync
+        # over a running one AND overwrote active_sync_workers[id], losing the
+        # handle to the in-flight worker.
+        with sync_lock:
+            existing = active_sync_workers.get(sync_playlist_id)
+            # `done` via getattr: only a real in-flight Future blocks - an
+            # object that can't say (tests stash plain sentinels here) counts
+            # as finished, which is also the pre-guard behavior for stale keys
+            if existing is not None and not getattr(existing, 'done', lambda: True)():
+                return {"error": "Sync is already in progress for this playlist."}, 409
+
         playlist_name = playlist_name_getter(state)
 
         add_activity_item("", f"{activity_label} Sync Started", f"'{playlist_name}' - {len(spotify_tracks)} tracks", "Now")

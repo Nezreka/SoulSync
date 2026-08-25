@@ -284,12 +284,12 @@ export function applyFixedMatch(
     rawResults,
     rows: toDiscoveryRows(config.id, config.ux.foundVariant, rawResults),
     spotifyMatches,
-    // The vanilla repaints matches/total, 0 when total is 0 (529).
-    discoveryProgress: wasNotFound
-      ? total > 0
-        ? Math.round((spotifyMatches / total) * 100)
-        : 0
-      : state.discoveryProgress,
+    // discoveryProgress deliberately untouched: it is the SCAN percent. the
+    // vanilla overwrote it with a match ratio here (unclamped - "105/100,
+    // over 100%"), which the display now derives itself, clamped, in
+    // matchLineNumbers. total stays computed above for parity with the
+    // vanilla's guard even though nothing else reads it now.
+    discoveryProgress: state.discoveryProgress,
   };
 }
 

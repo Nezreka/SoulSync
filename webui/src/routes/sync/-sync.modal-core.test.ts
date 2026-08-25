@@ -10,6 +10,7 @@ import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  matchLineNumbers,
   buildDownloadTracks,
   descriptionSourceWord,
   initialProgressText,
@@ -88,6 +89,27 @@ describe('title/label/description ladders (9356-9379, 9930-9944)', () => {
     expect(initialProgressText('discovering')).toBe('Starting discovery...');
     expect(initialProgressText('download_complete')).toBe('Discovery completed!');
     expect(progressLineText(3, 10, 30)).toBe('3 / 10 tracks matched (30%)');
+  });
+});
+
+describe('matchLineNumbers (the "M / T tracks matched (P%)" numbers)', () => {
+  it('derives the percent from matched/total, not the scan percent', () => {
+    // "134 / 230 tracks matched (100%)" (aug 25): the line used to print
+    // discoveryProgress - how far the WORKER got - as the match percent
+    expect(matchLineNumbers(134, 230)).toEqual({ matches: 134, percent: 58 });
+  });
+
+  it('clamps an inflated counter at the display', () => {
+    // "going 105/100, over 100%" (aug 25)
+    expect(matchLineNumbers(105, 100)).toEqual({ matches: 100, percent: 100 });
+  });
+
+  it('never divides by zero', () => {
+    expect(matchLineNumbers(5, 0)).toEqual({ matches: 5, percent: 0 });
+  });
+
+  it('negative garbage floors at zero', () => {
+    expect(matchLineNumbers(-3, 10)).toEqual({ matches: 0, percent: 0 });
   });
 });
 
