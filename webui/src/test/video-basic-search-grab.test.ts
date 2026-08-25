@@ -87,7 +87,7 @@ function lift(): Lifted {
 }
 
 const SOULSEEK: Row = { title: 'Silo S03E08 1080p WEB', filename: '@@silo/Silo.S03E08.mkv', username: 'peer1', season: 3, episode: 8, size_bytes: 5 };
-const TORRENT: Row = { title: 'Silo S03E08 1080p WEB', download_url: 'https://prowlarr/dl.torrent', magnet_uri: 'magnet:?xt=1', indexer_id: 42, protocol: 'torrent', season: 3, episode: 8 } as Row;
+const TORRENT: Row = { title: 'Silo S03E08 1080p WEB', download_url: 'https://prowlarr/dl.torrent', magnet_uri: 'magnet:?xt=1', indexer_id: 42, protocol: 'torrent', season: 3, episode: 8 } as unknown as Row;
 const EXTTO: Row = { title: 'Silo S03E08 1080p WEB', magnet_uri: 'magnet:?xt=2', season: 3, episode: 8 };
 
 describe('Basic Search grab descriptor', () => {

@@ -85,7 +85,7 @@ function mockAll({
   torrent = TORRENT_OK,
   usenet = UNCONFIGURED,
   slskd = SLSKD_OK,
-}: Record<string, unknown> = {}) {
+}: Record<string, Record<string, unknown>> = {}) {
   server.use(
     http.get('/api/clients/torrent', () => HttpResponse.json(torrent)),
     http.get('/api/clients/usenet', () => HttpResponse.json(usenet)),
@@ -143,7 +143,7 @@ describe('AdlClientsTab', () => {
   });
 
   it('a failed fetch shows its error text, never an eternal loading state', async () => {
-    mockAll({ slskd: undefined });
+    mockAll({});
     server.use(
       http.get('/api/clients/slskd', () =>
         HttpResponse.json({ success: false, error: 'boom from the bridge' }),
@@ -157,7 +157,7 @@ describe('AdlClientsTab', () => {
   });
 
   it('an http 500 also surfaces instead of spinning', async () => {
-    mockAll({ slskd: undefined });
+    mockAll({});
     server.use(
       http.get('/api/clients/slskd', () =>
         HttpResponse.json({ error: 'internal' }, { status: 500 }),
