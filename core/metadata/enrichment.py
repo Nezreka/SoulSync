@@ -131,6 +131,7 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
             from core.metadata.track_number_format import (
                 format_track_number_tag,
                 format_track_number_tuple,
+                format_vorbis_track_fields,
             )
             track_num_str = format_track_number_tag(
                 metadata.get('track_number'), metadata.get('total_tracks')
@@ -190,7 +191,15 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                     audio_file["date"] = [metadata["date"]]
                 if metadata.get("genre"):
                     audio_file["genre"] = [metadata["genre"]]
-                audio_file["tracknumber"] = [track_num_str]
+                # Vorbis has no ID3-style "N/M" convention — TRACKNUMBER is the
+                # bare number, the total goes in its own field. "1/1" here is what
+                # displayed literally as the track number (Discord, mrderekibmusic).
+                _vorbis_num, _vorbis_total = format_vorbis_track_fields(
+                    metadata.get('track_number'), metadata.get('total_tracks'))
+                audio_file["tracknumber"] = [_vorbis_num]
+                if _vorbis_total is not None:
+                    audio_file["tracktotal"] = [_vorbis_total]
+                    audio_file["totaltracks"] = [_vorbis_total]   # legacy readers
                 audio_file["discnumber"] = [disc_num_str]
             elif isinstance(audio_file, symbols.MP4):
                 if metadata.get("title"):

@@ -32,11 +32,13 @@ def format_track_number_tag(
     - ``track_number=None, total_tracks=13`` → ``"1/13"`` (track defaults to 1)
     - ``track_number=None, total_tracks=None`` → ``"1"``
 
-    ID3 spec allows ``TRCK`` to be either ``"N"`` or ``"N/M"``. Vorbis
-    ``tracknumber`` follows the same convention. Avoiding the ``/0``
-    suffix keeps the tag honest — most media servers and taggers
-    interpret ``6/0`` as "track 6 of 0" which is nonsensical, while
-    ``6`` reads as "track 6, total unknown".
+    ID3 spec allows ``TRCK`` to be either ``"N"`` or ``"N/M"``. Avoiding
+    the ``/0`` suffix keeps the tag honest — most media servers and
+    taggers interpret ``6/0`` as "track 6 of 0" which is nonsensical,
+    while ``6`` reads as "track 6, total unknown".
+
+    NOTE: this combined form is for ID3 ONLY. Vorbis comments do NOT
+    share the convention — use :func:`format_vorbis_track_fields` there.
     """
     num = _coerce_positive_int(track_number, default=1)
     total = _coerce_positive_int(total_tracks, default=0)
@@ -75,3 +77,27 @@ def _coerce_positive_int(value, *, default: int) -> int:
     if coerced < 0:
         return default
     return coerced
+
+
+def format_vorbis_track_fields(
+    track_number: Optional[int],
+    total_tracks: Optional[int],
+) -> Tuple[str, Optional[str]]:
+    """``(tracknumber, tracktotal)`` for a Vorbis-comment file (FLAC/ogg/opus).
+
+    Vorbis has no combined ``"N/M"`` convention — that is ID3's ``TRCK``.
+    The Vorbis fields are separate: ``TRACKNUMBER`` holds the bare number and
+    ``TRACKTOTAL`` the album's track count. Writing ``"1/1"`` into TRACKNUMBER
+    (which both tag writers did) produced files whose track number displays
+    literally as "1/1" in tools that read the field as written — the Discord
+    report (mrderekibmusic), where opening the album in Picard "fixed" the
+    number to ``1`` because Picard splits the fields correctly. This module's
+    own readers already map TRACKTOTAL/TOTALTRACKS (core/library/file_tags.py),
+    so SoulSync could read the correct form all along — it just never wrote it.
+
+    ``tracktotal`` comes back None when the total is unknown (0/None), so the
+    caller writes no total field rather than a lie.
+    """
+    number = track_number if track_number is not None else 1
+    total = total_tracks if total_tracks else None
+    return str(number), (str(total) if total is not None else None)
