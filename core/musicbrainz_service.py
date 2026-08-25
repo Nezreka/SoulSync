@@ -630,10 +630,20 @@ class MusicBrainzService:
             ).fetchone()
             if not row:
                 return
-            artist_id = int(row[0])
-            if not row[1]:
+            artist_id, stored_mbid = int(row[0]), row[1]
+            # The aliases were fetched FROM this MBID, so they are only this
+            # artist's aliases if this MBID is. Writing them without that is
+            # how one artist's alternate spellings end up on another's row.
+            if stored_mbid:
+                identity_agreed = str(stored_mbid) == str(mbid)
+                if not identity_agreed:
+                    logger.debug(
+                        "alias write-back skipped for %r: row holds MBID %s, "
+                        "the name search resolved %s", artist_name, stored_mbid, mbid)
+            else:
                 conflict = provider_id_conflict(
                     conn, 'musicbrainz', mbid, artist_id, artist_name)
+                identity_agreed = not conflict
                 if conflict:
                     logger.debug(
                         "alias write-back skipped for %r: MBID %s already held "
@@ -644,6 +654,8 @@ class MusicBrainzService:
                         service='musicbrainz', provider_id=mbid)
                     record_attempt(conn, entity_type='artist', entity_id=artist_id,
                                    service='musicbrainz', status='matched')
+            if not identity_agreed:
+                return
             if aliases:
                 write_provider_enrichment(
                     conn, entity_type='artist', entity_id=artist_id,

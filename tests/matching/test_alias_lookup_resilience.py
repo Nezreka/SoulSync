@@ -121,6 +121,18 @@ def test_successful_lookup_is_persisted_to_the_catalogue(service):
         "Sawano Hiroyuki", "mbid-sawano", ["澤野弘之", "Sawano, Hiroyuki"])
 
 
+def test_populated_aliases_short_circuit_before_any_write_back(service):
+    # Tier 1 answered, so no search, no cache write and no write-back: an
+    # alias list already on the artist is authoritative and left alone.
+    service.get_artist_aliases.return_value = ["澤野弘之", "Sawano, Hiroyuki"]
+
+    assert service.lookup_artist_aliases("Sawano Hiroyuki") == [
+        "澤野弘之", "Sawano, Hiroyuki"]
+    service.mb_client.search_artist.assert_not_called()
+    service._persist_artist_identity.assert_not_called()
+    service._save_to_cache.assert_not_called()
+
+
 def test_write_back_failure_never_costs_the_caller_its_aliases(service):
     service.mb_client.search_artist.return_value = [
         {"id": "mbid-sawano", "name": "Sawano Hiroyuki", "score": 100},
@@ -129,3 +141,98 @@ def test_write_back_failure_never_costs_the_caller_its_aliases(service):
     service._persist_artist_identity.side_effect = RuntimeError("db is locked")
 
     assert service.lookup_artist_aliases("Sawano Hiroyuki") == ["澤野弘之"]
+
+
+# --- the write-back must not put one artist's aliases on another ------------
+
+
+def _artist_row_service(tmp_path, name, mbid=None, aliases=None):
+    """A real lib2 catalogue with one artist, so the write-back's guards run
+    against actual rows rather than mocks."""
+    import json
+    import sqlite3
+
+    from core.library2.schema import ensure_library_v2_schema
+
+    db_path = tmp_path / "aliases.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    ensure_library_v2_schema(conn)
+    conn.execute(
+        "INSERT INTO lib2_artists (id, name, musicbrainz_id, aliases) "
+        "VALUES (1, ?, ?, ?)",
+        (name, mbid, json.dumps(aliases) if aliases else '[]'),
+    )
+    # A second artist that already owns the MBID our name search resolves to.
+    conn.execute(
+        "INSERT INTO lib2_artists (id, name, musicbrainz_id) "
+        "VALUES (2, 'Someone Else', 'mbid-taken')")
+    conn.commit()
+    conn.close()
+
+    class _DB:
+        def _get_connection(self):
+            c = sqlite3.connect(str(db_path))
+            c.row_factory = sqlite3.Row
+            return c
+
+    svc = MusicBrainzService.__new__(MusicBrainzService)
+    svc.db = _DB()
+    return svc, db_path
+
+
+def _stored(db_path, artist_id):
+    """``(musicbrainz_id, aliases)`` with the alias column decoded — it is
+    stored as escaped JSON, which is the column's existing convention."""
+    import json
+    import sqlite3
+
+    conn = sqlite3.connect(str(db_path))
+    mbid, aliases = conn.execute(
+        "SELECT musicbrainz_id, aliases FROM lib2_artists WHERE id=?",
+        (artist_id,)).fetchone()
+    conn.close()
+    return mbid, json.loads(aliases) if aliases else []
+
+
+def test_write_back_stores_identity_on_an_unmatched_artist(tmp_path):
+    svc, db_path = _artist_row_service(tmp_path, "Sawano Hiroyuki")
+
+    svc._persist_artist_identity("Sawano Hiroyuki", "mbid-sawano", ["澤野弘之"])
+
+    mbid, aliases = _stored(db_path, 1)
+    assert mbid == "mbid-sawano"
+    assert aliases == ["澤野弘之"]
+
+
+def test_a_conflicting_mbid_writes_neither_id_nor_its_aliases(tmp_path):
+    # 'mbid-taken' belongs to another artist, so the name search landed on the
+    # wrong entity — and its alias list is just as wrong as its id.
+    svc, db_path = _artist_row_service(tmp_path, "Sawano Hiroyuki")
+
+    svc._persist_artist_identity("Sawano Hiroyuki", "mbid-taken", ["Someone Else"])
+
+    assert _stored(db_path, 1) == (None, [])
+
+
+def test_an_artist_matched_to_a_different_mbid_keeps_its_own_aliases(tmp_path):
+    svc, db_path = _artist_row_service(
+        tmp_path, "Sawano Hiroyuki", mbid="mbid-already-set",
+        aliases=["澤野弘之"])
+
+    svc._persist_artist_identity("Sawano Hiroyuki", "mbid-other", ["Wrong Person"])
+
+    mbid, aliases = _stored(db_path, 1)
+    assert mbid == "mbid-already-set"
+    assert aliases == ["澤野弘之"]
+
+
+def test_the_same_mbid_refreshes_the_alias_list(tmp_path):
+    svc, db_path = _artist_row_service(
+        tmp_path, "Sawano Hiroyuki", mbid="mbid-sawano", aliases=["澤野弘之"])
+
+    svc._persist_artist_identity(
+        "Sawano Hiroyuki", "mbid-sawano", ["澤野弘之", "さわの ひろゆき"])
+
+    _mbid, aliases = _stored(db_path, 1)
+    assert aliases == ["澤野弘之", "さわの ひろゆき"]
