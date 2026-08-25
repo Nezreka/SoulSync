@@ -99,6 +99,35 @@ class MusicBrainzService:
             if conn:
                 conn.close()
     
+    @staticmethod
+    def _cached_aliases(cached: Optional[Dict[str, Any]], *,
+                        for_mbid: Optional[str] = None) -> Optional[list]:
+        """What a cache row settles about an artist's aliases, or None.
+
+        An EMPTY list is an answer only when the row records that MusicBrainz
+        actually answered (the ``resolved`` marker). A stored MBID used to count
+        as that proof, and it is not: ``fetch_artist_aliases`` returned ``[]``
+        for a timeout exactly as readily as for a genuine absence, so a single
+        rate-limited fetch wrote "this artist has no aliases" against a perfectly
+        good identity and held it for the row's whole 90-day TTL. That is what
+        left a correct download unverifiable on every later scan.
+
+        ``for_mbid`` restricts the answer to a row resolved against that
+        identity — a name-keyed row for some other entity says nothing about it.
+        """
+        if not cached:
+            return None
+        metadata = cached.get('metadata')
+        metadata = metadata if isinstance(metadata, dict) else {}
+        if for_mbid is not None and str(cached.get('musicbrainz_id') or '') != str(for_mbid):
+            return None
+        raw = metadata.get('aliases')
+        cleaned = ([str(x).strip() for x in raw if x]
+                   if isinstance(raw, list) else [])
+        if cleaned:
+            return cleaned
+        return [] if metadata.get('resolved') else None
+
     def _save_to_cache(self, entity_type: str, entity_name: str, artist_name: Optional[str],
                        musicbrainz_id: Optional[str], metadata: Optional[Dict], confidence: int):
         """Save MusicBrainz result to cache"""
@@ -550,41 +579,37 @@ class MusicBrainzService:
         # relevance scores are not stable enough for the escape hatch to be
         # relied on. That is why the bridge could work one day and not the
         # next. There is nothing to guess once the row carries the MBID.
+        cached = self._check_cache('artist_aliases', artist_name)
         row_mbid = self._artist_row_mbid(artist_name)
         if row_mbid:
-            aliases = self.fetch_artist_aliases(row_mbid)
-            if aliases:
+            # A cache row that was resolved against THIS identity says exactly
+            # what a fresh fetch would say, and every fetch spends a second of
+            # the process-wide MusicBrainz budget — one per scanned file for an
+            # artist MusicBrainz lists no alias for, all of it contending with
+            # the enrichment worker on the same lock.
+            known = self._cached_aliases(cached, for_mbid=row_mbid)
+            if known is not None:
+                return known
+            aliases = self.resolve_artist_aliases(row_mbid)
+            if aliases is not None:
                 self._save_to_cache(
                     'artist_aliases', artist_name, None, row_mbid,
-                    {'aliases': aliases}, 100,
+                    {'aliases': aliases, 'resolved': True}, 100,
                 )
-                try:
-                    self._persist_artist_identity(artist_name, row_mbid, aliases)
-                except Exception as e:  # noqa: BLE001
-                    logger.debug("alias write-back for %r failed: %s", artist_name, e)
+                if aliases:
+                    try:
+                        self._persist_artist_identity(artist_name, row_mbid, aliases)
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("alias write-back for %r failed: %s",
+                                     artist_name, e)
                 return aliases
-            # MusicBrainz lists no alternate spelling for it, or the fetch did
-            # not come back. Neither settles the question, so carry on rather
-            # than reporting "no aliases" off the back of it.
+            # The fetch did not come back. That settles nothing, so carry on
+            # rather than reporting "no aliases" off the back of it.
 
         # Tier 2: cached live lookup (re-uses musicbrainz_cache table)
-        cached = self._check_cache('artist_aliases', artist_name)
-        if cached:
-            metadata = cached.get('metadata') or {}
-            aliases = metadata.get('aliases') if isinstance(metadata, dict) else None
-            cleaned = ([str(x).strip() for x in aliases if x]
-                       if isinstance(aliases, list) else [])
-            if cleaned:
-                return cleaned
-            # An empty result is only a verdict when MusicBrainz actually
-            # answered. A stored MBID or the `resolved` marker says it did; a
-            # bare empty list with neither is the shape the old failure path
-            # wrote (a timeout cached as "no aliases"), and honouring that
-            # blocked every retry for the row's whole TTL. Fall through and ask
-            # again — once, since the retry re-caches with the marker.
-            metadata = metadata if isinstance(metadata, dict) else {}
-            if cached.get('musicbrainz_id') or metadata.get('resolved'):
-                return []
+        answered = self._cached_aliases(cached)
+        if answered is not None:
+            return answered
 
         # Tier 3: live MB lookup. Search → fetch by MBID → cache.
         # Issue #586 — strict search queries `artist:"..."` only and
@@ -676,10 +701,20 @@ class MusicBrainzService:
             self._save_to_cache('artist_aliases', artist_name, None, None, _NO_ALIASES, 0)
             return []
 
-        aliases = self.fetch_artist_aliases(chosen_mbid)
+        aliases = self.resolve_artist_aliases(chosen_mbid)
+        if aliases is None:
+            # The identity resolved, the alias fetch did not come back. Writing
+            # that down as "no aliases" is precisely what froze this lookup for
+            # a 90-day TTL and took the romaji-kanji bridge with it; leave the
+            # question open instead.
+            logger.debug(
+                "lookup_artist_aliases: alias fetch for %r (%s) did not "
+                "complete — not recording a result", artist_name, chosen_mbid,
+            )
+            return []
         self._save_to_cache(
             'artist_aliases', artist_name, None, chosen_mbid,
-            {'aliases': aliases}, int(chosen_conf * 100),
+            {'aliases': aliases, 'resolved': True}, int(chosen_conf * 100),
         )
         # Keep what we just learned on the ARTIST, not only in a cache keyed by
         # the spelling this caller happened to pass. Without this the knowledge
@@ -826,6 +861,16 @@ class MusicBrainzService:
         return max((s[0] for s in scored), default=0.0) if scored else 0.0
 
     def fetch_artist_aliases(self, mbid: str) -> list:
+        """Alias list for an artist, with a failed fetch reported as empty.
+
+        Kept for callers that genuinely cannot act on the difference (the
+        enrichment worker, which only ever stores a non-empty list). Anything
+        that CACHES the answer must use :meth:`resolve_artist_aliases` — see the
+        note there.
+        """
+        return self.resolve_artist_aliases(mbid) or []
+
+    def resolve_artist_aliases(self, mbid: str) -> Optional[list]:
         """Fetch the alias list for an artist from MusicBrainz.
 
         Issue #442 — Japanese kanji / Cyrillic / etc. spellings of an
@@ -841,21 +886,22 @@ class MusicBrainzService:
         themselves valid alternate spellings for matching purposes,
         so include them alongside the explicit alias entries.
 
-        Returns the deduplicated list of alias `name` strings. Returns
-        empty list (NOT None) on any failure — caller should treat
-        empty as "no aliases available, fall back to direct match" so
-        a transient MB outage never causes a stricter verification
-        decision than today.
+        Returns the deduplicated list of alias `name` strings, or **None**
+        when MusicBrainz never answered. That distinction is the whole point:
+        an empty list means "MusicBrainz lists no alternate spelling", None
+        means "we do not know", and only the first may ever be written down as
+        a result. Collapsing the two is what let one timeout freeze a working
+        cross-script bridge for 90 days.
         """
         if not mbid:
-            return []
+            return None
         try:
             data = self.mb_client.get_artist(mbid, includes=['aliases'])
         except Exception as e:
-            logger.debug("fetch_artist_aliases: get_artist(%s) raised: %s", mbid, e)
-            return []
+            logger.debug("resolve_artist_aliases: get_artist(%s) raised: %s", mbid, e)
+            return None
         if not data:
-            return []
+            return None
 
         seen = set()
         cleaned = []

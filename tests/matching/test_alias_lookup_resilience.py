@@ -73,7 +73,7 @@ def test_strict_failure_still_uses_a_working_non_strict_result(service):
         return [{"id": "mbid-sawano", "name": "Sawano Hiroyuki", "score": 100}]
 
     service.mb_client.search_artist.side_effect = _search
-    service.fetch_artist_aliases = MagicMock(return_value=["澤野弘之"])
+    service.resolve_artist_aliases = MagicMock(return_value=["澤野弘之"])
 
     assert service.lookup_artist_aliases("Sawano Hiroyuki") == ["澤野弘之"]
 
@@ -88,20 +88,53 @@ def test_poisoned_empty_cache_row_does_not_block_a_retry(service):
     service.mb_client.search_artist.return_value = [
         {"id": "mbid-sawano", "name": "Sawano Hiroyuki", "score": 100},
     ]
-    service.fetch_artist_aliases = MagicMock(return_value=["澤野弘之"])
+    service.resolve_artist_aliases = MagicMock(return_value=["澤野弘之"])
 
     assert service.lookup_artist_aliases("Sawano Hiroyuki") == ["澤野弘之"]
 
 
 def test_genuine_empty_cache_row_is_still_respected(service):
-    # MusicBrainz found the artist and it truly has no aliases: an mbid is
-    # present, so this IS a verdict and must be honoured without re-querying.
+    # MusicBrainz answered and the artist truly has no aliases. The `resolved`
+    # marker is what says so, and it must be honoured without re-querying.
     service._check_cache.return_value = {
-        "musicbrainz_id": "mbid-x", "metadata": {"aliases": []}, "confidence": 95,
+        "musicbrainz_id": "mbid-x", "confidence": 95,
+        "metadata": {"aliases": [], "resolved": True},
     }
 
     assert service.lookup_artist_aliases("Some Artist") == []
     service.mb_client.search_artist.assert_not_called()
+
+
+def test_an_mbid_alone_never_makes_an_empty_row_a_verdict(service):
+    """The production failure, as a test.
+
+    A row carrying an MBID and an empty alias list used to count as "this
+    artist has no aliases" for the full 90-day TTL. But `fetch_artist_aliases`
+    returned `[]` for a rate-limited fetch exactly as readily as for a genuine
+    absence, so one timeout during a download froze the romaji-kanji bridge —
+    and every later scan of those files reported "cannot compare the names"
+    while the download that wrote the row had passed them.
+    """
+    service._check_cache.return_value = {
+        "musicbrainz_id": "mbid-sawano", "metadata": {"aliases": []},
+        "confidence": 100,
+    }
+    service.mb_client.search_artist.return_value = [
+        {"id": "mbid-sawano", "name": "Sawano Hiroyuki", "score": 100},
+    ]
+    service.resolve_artist_aliases = MagicMock(return_value=["澤野弘之"])
+
+    assert service.lookup_artist_aliases("Sawano Hiroyuki") == ["澤野弘之"]
+
+
+def test_a_fetch_that_did_not_come_back_is_never_written_down(service):
+    service.mb_client.search_artist.return_value = [
+        {"id": "mbid-sawano", "name": "Sawano Hiroyuki", "score": 100},
+    ]
+    service.resolve_artist_aliases = MagicMock(return_value=None)
+
+    assert service.lookup_artist_aliases("Sawano Hiroyuki") == []
+    service._save_to_cache.assert_not_called()
 
 
 # --- 2. a successful lookup is written back onto the catalogue -------------
@@ -111,7 +144,7 @@ def test_successful_lookup_is_persisted_to_the_catalogue(service):
     service.mb_client.search_artist.return_value = [
         {"id": "mbid-sawano", "name": "Sawano Hiroyuki", "score": 100},
     ]
-    service.fetch_artist_aliases = MagicMock(
+    service.resolve_artist_aliases = MagicMock(
         return_value=["澤野弘之", "Sawano, Hiroyuki"])
 
     aliases = service.lookup_artist_aliases("Sawano Hiroyuki")
@@ -137,7 +170,7 @@ def test_write_back_failure_never_costs_the_caller_its_aliases(service):
     service.mb_client.search_artist.return_value = [
         {"id": "mbid-sawano", "name": "Sawano Hiroyuki", "score": 100},
     ]
-    service.fetch_artist_aliases = MagicMock(return_value=["澤野弘之"])
+    service.resolve_artist_aliases = MagicMock(return_value=["澤野弘之"])
     service._persist_artist_identity.side_effect = RuntimeError("db is locked")
 
     assert service.lookup_artist_aliases("Sawano Hiroyuki") == ["澤野弘之"]
@@ -253,10 +286,10 @@ def test_a_known_mbid_is_used_instead_of_searching_by_name(tmp_path):
     svc.get_artist_aliases = MagicMock(return_value=[])
     svc._check_cache = MagicMock(return_value=None)
     svc._save_to_cache = MagicMock()
-    svc.fetch_artist_aliases = MagicMock(return_value=["澤野弘之"])
+    svc.resolve_artist_aliases = MagicMock(return_value=["澤野弘之"])
 
     assert svc.lookup_artist_aliases("Sawano Hiroyuki") == ["澤野弘之"]
-    svc.fetch_artist_aliases.assert_called_once_with("mbid-sawano")
+    svc.resolve_artist_aliases.assert_called_once_with("mbid-sawano")
     svc.mb_client.search_artist.assert_not_called()
 
 
@@ -267,7 +300,7 @@ def test_the_mbid_fetch_persists_so_the_next_lookup_is_free(tmp_path):
     svc.get_artist_aliases = MagicMock(return_value=[])
     svc._check_cache = MagicMock(return_value=None)
     svc._save_to_cache = MagicMock()
-    svc.fetch_artist_aliases = MagicMock(return_value=["澤野弘之"])
+    svc.resolve_artist_aliases = MagicMock(return_value=["澤野弘之"])
 
     svc.lookup_artist_aliases("Sawano Hiroyuki")
 
@@ -275,7 +308,7 @@ def test_the_mbid_fetch_persists_so_the_next_lookup_is_free(tmp_path):
     assert aliases == ["澤野弘之"]
 
 
-def test_an_mbid_that_yields_nothing_falls_through_to_the_name_search(tmp_path):
+def test_a_fetch_for_the_row_mbid_that_failed_falls_through_to_the_name_search(tmp_path):
     svc, db_path = _artist_row_service(tmp_path, "Sawano Hiroyuki",
                                        mbid="mbid-sawano")
     svc.mb_client = MagicMock()
@@ -285,10 +318,68 @@ def test_an_mbid_that_yields_nothing_falls_through_to_the_name_search(tmp_path):
     svc.get_artist_aliases = MagicMock(return_value=[])
     svc._check_cache = MagicMock(return_value=None)
     svc._save_to_cache = MagicMock()
-    svc.fetch_artist_aliases = MagicMock(side_effect=[[], ["from-search"]])
+    svc.resolve_artist_aliases = MagicMock(side_effect=[None, ["from-search"]])
 
     assert svc.lookup_artist_aliases("Sawano Hiroyuki") == ["from-search"]
     svc.mb_client.search_artist.assert_called()
+
+
+def test_the_row_mbid_answering_none_is_an_answer_not_a_reason_to_guess(tmp_path):
+    """MusicBrainz listing no alias for the artist's OWN identity settles it.
+
+    Falling through to the name search here would be guessing about an artist
+    we have already identified — which is how a decoy entity's aliases got
+    attached to the wrong artist in the first place.
+    """
+    svc, _db_path = _artist_row_service(tmp_path, "Sawano Hiroyuki",
+                                        mbid="mbid-sawano")
+    svc.mb_client = MagicMock()
+    svc.get_artist_aliases = MagicMock(return_value=[])
+    svc._check_cache = MagicMock(return_value=None)
+    svc._save_to_cache = MagicMock()
+    svc.resolve_artist_aliases = MagicMock(return_value=[])
+
+    assert svc.lookup_artist_aliases("Sawano Hiroyuki") == []
+    svc.mb_client.search_artist.assert_not_called()
+
+
+def test_a_cache_row_for_the_same_mbid_spares_the_fetch(tmp_path):
+    """One rate-limited MusicBrainz call per scanned file, removed.
+
+    Tier 1b sat in front of the cache, so an artist MusicBrainz lists no alias
+    for cost a blocking request on every single comparison — all of it queued
+    behind the enrichment worker on the same one-per-second lock.
+    """
+    svc, _db_path = _artist_row_service(tmp_path, "Sawano Hiroyuki",
+                                        mbid="mbid-sawano")
+    svc.mb_client = MagicMock()
+    svc.get_artist_aliases = MagicMock(return_value=[])
+    svc._save_to_cache = MagicMock()
+    svc._check_cache = MagicMock(return_value={
+        "musicbrainz_id": "mbid-sawano", "confidence": 100,
+        "metadata": {"aliases": [], "resolved": True},
+    })
+    svc.resolve_artist_aliases = MagicMock()
+
+    assert svc.lookup_artist_aliases("Sawano Hiroyuki") == []
+    svc.resolve_artist_aliases.assert_not_called()
+    svc.mb_client.search_artist.assert_not_called()
+
+
+def test_a_cache_row_for_a_different_mbid_does_not_answer_for_this_one(tmp_path):
+    svc, _db_path = _artist_row_service(tmp_path, "Sawano Hiroyuki",
+                                        mbid="mbid-sawano")
+    svc.mb_client = MagicMock()
+    svc.get_artist_aliases = MagicMock(return_value=[])
+    svc._save_to_cache = MagicMock()
+    svc._check_cache = MagicMock(return_value={
+        "musicbrainz_id": "mbid-decoy", "confidence": 100,
+        "metadata": {"aliases": [], "resolved": True},
+    })
+    svc.resolve_artist_aliases = MagicMock(return_value=["澤野弘之"])
+
+    assert svc.lookup_artist_aliases("Sawano Hiroyuki") == ["澤野弘之"]
+    svc.resolve_artist_aliases.assert_called_once_with("mbid-sawano")
 
 
 def test_no_mbid_on_the_row_still_searches_by_name(tmp_path):
@@ -300,7 +391,7 @@ def test_no_mbid_on_the_row_still_searches_by_name(tmp_path):
     svc.get_artist_aliases = MagicMock(return_value=[])
     svc._check_cache = MagicMock(return_value=None)
     svc._save_to_cache = MagicMock()
-    svc.fetch_artist_aliases = MagicMock(return_value=["澤野弘之"])
+    svc.resolve_artist_aliases = MagicMock(return_value=["澤野弘之"])
 
     assert svc.lookup_artist_aliases("Sawano Hiroyuki") == ["澤野弘之"]
     svc.mb_client.search_artist.assert_called()
