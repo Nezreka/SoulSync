@@ -13581,6 +13581,19 @@ def library_delete_tracks_batch():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/discover/stations', methods=['GET'])
+def get_recommended_stations():
+    """Recommended Stations - the user's heaviest recent artists as one-click
+    artist radio (startArtistRadioById plays the library's own tracks)."""
+    try:
+        from core.discovery.stations import build_stations
+        stations = build_stations(get_database(), get_current_profile_id())
+        return jsonify({"success": True, "stations": stations})
+    except Exception as e:
+        logger.error(f"[Discover] stations failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/discover/resolve-playable', methods=['POST'])
 def resolve_playable_endpoint():
     """Match a mix's artist/title list against owned tracks so the player can

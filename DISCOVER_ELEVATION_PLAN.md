@@ -78,7 +78,7 @@ P6 - POLISH + AURRAL PARITY EXTRAS
 ## status
 - [x] P1 play affordances (mix modal + library radio card) - aug 25
 - [x] P2 daily mixes v1 (clustering + generator + TTL refresh + shelf) - aug 25, real-data verified
-- [ ] P3 stations row
+- [x] P3 stations row - aug 25, real-data verified (matches spotify's row)
 - [ ] P4 hydration fallback + hidden gems + shuffle seen-set
 - [ ] P5 stack unification
 - [ ] P6 polish pass

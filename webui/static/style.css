@@ -77002,6 +77002,111 @@ body.em-scroll-lock { overflow: hidden; }
     flex-shrink: 0;
 }
 
+/* discover: recommended stations - one-click artist radio cards */
+.discover-stations-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+
+.discover-stations-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.94);
+}
+
+.discover-stations-sub {
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.55);
+    margin-top: 3px;
+}
+
+.discover-stations-row {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 168px;
+    gap: 14px;
+    overflow-x: auto;
+    padding-bottom: 8px;
+    scrollbar-width: thin;
+}
+
+.discover-station-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: linear-gradient(160deg,
+            rgba(var(--accent-rgb), 0.14) 0%,
+            rgba(255, 255, 255, 0.03) 70%);
+    cursor: pointer;
+    text-align: left;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.discover-station-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(var(--accent-rgb), 0.5);
+}
+
+.discover-station-card--loading {
+    min-height: 210px;
+    animation: pulse 1.4s ease-in-out infinite;
+    cursor: default;
+}
+
+.discover-station-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: rgba(255, 255, 255, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 999px;
+    padding: 2px 7px;
+}
+
+.discover-station-art {
+    width: 104px;
+    height: 104px;
+    border-radius: 50%;
+    background-size: cover;
+    background-position: center;
+    background-color: rgba(255, 255, 255, 0.08);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 34px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.discover-station-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.95);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+.discover-station-with {
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.55);
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
 /* discover: the library radio play-now card (tools zone) */
 .discover-library-radio-card {
     display: flex;

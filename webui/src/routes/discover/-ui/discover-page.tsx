@@ -6,6 +6,7 @@ import type { CacheItem } from '../-discover.cache-sections';
 import type { DiscoverSectionId } from '../-discover.layout';
 import type { DiscoverMix, MixAction } from '../-discover.mixes';
 import { playMixNow } from '../-discover.playable';
+import { StationsRow } from './stations-row';
 import type { RecentAlbum } from '../-discover.recent-releases';
 import type { RecommendedArtist } from '../-discover.recommended';
 import type { SeasonData, SeasonalAlbum } from '../-discover.seasonal';
@@ -1007,8 +1008,9 @@ export function DiscoverPage() {
             tone="for-you"
             metric={`${personalSignalCount} signals`}
           >
+            {renderZoneSections(['your-mixes-section'])}
+            <StationsRow />
             {renderZoneSections([
-              'your-mixes-section',
               'adv-wave',
               'listening-recs-section',
               'recommended-artists-section',
