@@ -50,6 +50,9 @@ class _FakeSlskd:
     def __init__(self):
         self.calls = []
 
+    def is_configured(self):
+        return True
+
     async def get_all_downloads(self):
         return [DownloadStatus(id='d1', filename='a.flac', username='uploader',
                                state='InProgress', progress=41.0, size=100,
@@ -195,3 +198,49 @@ def test_a_broken_known_items_getter_never_breaks_the_listing(monkeypatch):
     data = app.test_client().get('/api/clients/torrent').get_json()
     assert data['connected'] is True
     assert 'soulsync' not in data['items'][0]
+
+
+class _FakeOrchestrator:
+    """the shape web_server actually injects: is_configured(), no base_url."""
+
+    def is_configured(self):
+        return True
+
+    async def get_all_downloads(self):
+        return [DownloadStatus(id='d2', filename='b.flac', username='tidal',
+                               state='InProgress', progress=10.0, size=50,
+                               transferred=5, speed=1)]
+
+
+def test_an_orchestrator_shaped_client_lists_fine(monkeypatch):
+    """no base_url attr - the configured check must use is_configured().
+    the first wiring keyed on base_url and would have reported the whole
+    tab unconfigured once the getter itself was fixed."""
+    c = _client(monkeypatch, slskd=_FakeOrchestrator())
+    data = c.get('/api/clients/slskd').get_json()
+    assert data['configured'] is True and data['connected'] is True
+    assert data['items'][0]['username'] == 'tidal'
+
+
+def test_a_getter_that_raises_returns_json_not_flask_html(monkeypatch):
+    """THE shipped bug: web_server handed a lambda over a name it never
+    binds, every request died with a NameError, and flask rendered its html
+    500 page - which the ui could only display raw. any exception must
+    leave as json with a message."""
+    def bad_getter():
+        raise NameError("name 'soulseek_client' is not defined")
+    import core.torrent_clients as tc
+    import core.usenet_clients as uc
+    monkeypatch.setattr(tc, 'get_active_adapter', lambda: None)
+    monkeypatch.setattr(uc, 'get_active_adapter', lambda: None)
+    clients_api.configure(config_manager_=_FakeConfig(), soulseek_client_getter=bad_getter,
+                          known_items_getter=None)
+    from flask import Flask
+    app = Flask(__name__)
+    app.register_blueprint(clients_api.create_blueprint())
+    r = app.test_client().get('/api/clients/slskd')
+    assert r.status_code == 500
+    data = r.get_json()
+    assert data is not None, "response must be json, never flask's html 500 page"
+    assert data['success'] is False
+    assert 'soulseek_client' in data['error']

@@ -240,6 +240,55 @@ describe('AdlClientsTab', () => {
     expect(body).toEqual({ id: 'd9', username: 'peer1', action: 'cancel', remove: true });
   });
 
+  it('a card expands on click to show everything the client reports', async () => {
+    mockAll();
+    const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
+    fireEvent.click(pill(container, 'torrent'));
+    await waitFor(() => expect(container.textContent).toContain('Movie (2026)'));
+    // collapsed: no detail grid
+    expect(container.querySelector('.adl-client-details')).toBeNull();
+    const card = container.querySelector('.adl-client-card') as HTMLElement;
+    fireEvent.click(card);
+    const details = container.querySelector('.adl-client-details') as HTMLElement;
+    expect(details).not.toBeNull();
+    expect(details.textContent).toContain('Hash');
+    expect(details.textContent).toContain('HASH1');
+    expect(details.textContent).toContain('Seeders');
+    // click again folds it back up
+    fireEvent.click(card);
+    expect(container.querySelector('.adl-client-details')).toBeNull();
+  });
+
+  it('clicking an action button does not toggle the card', async () => {
+    mockAll();
+    server.use(
+      http.post('/api/clients/torrent/action', () => HttpResponse.json({ success: true })),
+    );
+    const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
+    fireEvent.click(pill(container, 'torrent'));
+    await waitFor(() => expect(container.textContent).toContain('Movie (2026)'));
+    const pauseBtn = [...container.querySelectorAll('.verif-act')].find(
+      (b) => b.getAttribute('title') === 'Pause',
+    );
+    fireEvent.click(pauseBtn as HTMLElement);
+    expect(container.querySelector('.adl-client-details')).toBeNull();
+  });
+
+  it('empty detail values are dropped from the grid', async () => {
+    mockAll();
+    const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(container.textContent).toContain('song.flac'));
+    fireEvent.click(container.querySelector('.adl-client-card') as HTMLElement);
+    const details = container.querySelector('.adl-client-details') as HTMLElement;
+    // the slskd fixture has no file_path/soulsync - those labels must not render
+    expect(details.textContent).toContain('Remote path');
+    expect(details.textContent).toContain('Music\\Artist\\song.flac');
+    expect(details.textContent).not.toContain('Local file');
+    expect(details.textContent).not.toContain('SoulSync');
+  });
+
   it('labels soulsync rows and external rows differently', async () => {
     mockAll();
     const { container } = render(<AdlClientsTab />);

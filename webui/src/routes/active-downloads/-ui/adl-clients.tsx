@@ -160,6 +160,15 @@ function SoulsyncChip({ item }: { item: { soulsync?: { kind?: string; title?: st
   );
 }
 
+/** [label, value] pairs; empty values are dropped so the grid stays tight. */
+type DetailPairs = [string, string | null | undefined][];
+
+function durationText(seconds: number | null | undefined): string {
+  if (!seconds || seconds <= 0) return '';
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+  return `${Math.floor(seconds / 3600)}h ${Math.round((seconds % 3600) / 60)}m`;
+}
+
 function ClientRow({
   name,
   sub,
@@ -167,8 +176,11 @@ function ClientRow({
   error,
   progress,
   detail,
+  details,
   owner,
   actions,
+  expanded,
+  onToggle,
 }: {
   name: string;
   sub?: string;
@@ -176,32 +188,63 @@ function ClientRow({
   error?: string | null;
   progress: number;
   detail: string;
+  /** everything the client knows, shown when the card is open. */
+  details: DetailPairs;
   owner: React.ReactNode;
   actions: React.ReactNode;
+  expanded: boolean;
+  onToggle: () => void;
 }) {
   const bucket = stateBucket(state);
+  const shown = details.filter(([, value]) => value != null && String(value).trim() !== '');
   return (
-    <div className="adl-row adl-client-row">
-      <div className="adl-row-info">
-        <div className="adl-client-row-top">
-          <span className="adl-row-title" title={name}>
-            {name}
+    <div
+      className={`adl-client-card${expanded ? ' expanded' : ''}`}
+      data-state={bucket}
+      title={expanded ? undefined : 'Click to show everything the client reports'}
+      onClick={onToggle}
+    >
+      <div className="adl-client-card-main">
+        <div className="adl-row-info">
+          <div className="adl-client-row-top">
+            <span className="adl-row-title" title={name}>
+              {name}
+            </span>
+            {owner}
+          </div>
+          {sub ? <div className="adl-row-meta">{sub}</div> : null}
+          <div className="adl-client-progress" data-state={bucket}>
+            <div className="adl-client-progress-fill" style={{ width: `${pct(progress)}%` }} />
+          </div>
+          <div className="adl-client-row-stats">
+            <span>{Math.round(pct(progress))}%</span>
+            {detail ? <span>{detail}</span> : null}
+          </div>
+        </div>
+        <div
+          className="verif-actions adl-client-actions"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <StateChip state={state} error={error} />
+          {actions}
+          <span className={`adl-client-chevron${expanded ? ' open' : ''}`} aria-hidden>
+            ▾
           </span>
-          {owner}
-        </div>
-        {sub ? <div className="adl-row-meta">{sub}</div> : null}
-        <div className="adl-client-progress" data-state={bucket}>
-          <div className="adl-client-progress-fill" style={{ width: `${pct(progress)}%` }} />
-        </div>
-        <div className="adl-client-row-stats">
-          <span>{Math.round(pct(progress))}%</span>
-          {detail ? <span>{detail}</span> : null}
         </div>
       </div>
-      <div className="verif-actions adl-client-actions">
-        <StateChip state={state} error={error} />
-        {actions}
-      </div>
+      {expanded ? (
+        <div className="adl-client-details" onClick={(event) => event.stopPropagation()}>
+          {error ? <div className="adl-client-details-error">{error}</div> : null}
+          <dl>
+            {shown.map(([label, value]) => (
+              <div className="adl-client-detail" key={label}>
+                <dt>{label}</dt>
+                <dd title={String(value)}>{String(value)}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -293,6 +336,16 @@ export function AdlClientsTab() {
   const torrent = useClientPoll<ClientTorrentItem>(fetchTorrentClient);
   const usenet = useClientPoll<ClientUsenetItem>(fetchUsenetClient);
   const [tab, setTab] = useState<ClientSubTab>('soulseek');
+  // expanded cards, keyed tab:id so the 10s poll re-render keeps them open
+  const [openCards, setOpenCards] = useState<ReadonlySet<string>>(new Set());
+  const toggleCard = useCallback((key: string) => {
+    setOpenCards((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   const runAction = useCallback(
     async (
@@ -366,15 +419,30 @@ export function AdlClientsTab() {
               <ClientRow
                 key={`${item.username}:${item.id}`}
                 name={item.filename.split(/[\\/]/).pop() || item.filename}
-                sub={`from ${item.username} · ${item.filename}`}
+                sub={`from ${item.username}`}
                 state={item.state}
                 progress={item.progress}
                 detail={[
                   item.size ? formatBytes(item.size) : '',
                   speedText(item.speed),
+                  etaText(item.time_remaining),
                 ]
                   .filter(Boolean)
                   .join(' · ')}
+                details={[
+                  ['Remote path', item.filename],
+                  ['Uploader', item.username],
+                  ['State', item.state],
+                  ['Size', item.size ? formatBytes(item.size) : ''],
+                  ['Transferred', item.transferred ? formatBytes(item.transferred) : ''],
+                  ['Speed', speedText(item.speed)],
+                  ['Time left', durationText(item.time_remaining)],
+                  ['Local file', item.file_path],
+                  ['Transfer id', item.id],
+                  ['SoulSync', item.soulsync?.title],
+                ]}
+                expanded={openCards.has(`soulseek:${item.username}:${item.id}`)}
+                onToggle={() => toggleCard(`soulseek:${item.username}:${item.id}`)}
                 owner={<SoulsyncChip item={item} />}
                 actions={
                   <button
@@ -416,10 +484,27 @@ export function AdlClientsTab() {
                   speedText(item.download_speed),
                   etaText(item.eta),
                   item.seeders ? `${item.seeders} seeders` : '',
-                  item.ratio != null ? `ratio ${item.ratio.toFixed(2)}` : '',
                 ]
                   .filter(Boolean)
                   .join(' · ')}
+                details={[
+                  ['State', item.state],
+                  ['Size', item.size ? formatBytes(item.size) : ''],
+                  ['Downloaded', item.downloaded ? formatBytes(item.downloaded) : ''],
+                  ['Down speed', speedText(item.download_speed)],
+                  ['Up speed', speedText(item.upload_speed)],
+                  ['ETA', durationText(item.eta)],
+                  ['Seeders', item.seeders ? String(item.seeders) : ''],
+                  ['Peers', item.peers ? String(item.peers) : ''],
+                  ['Ratio', item.ratio != null ? item.ratio.toFixed(2) : ''],
+                  ['Seeding time', durationText(item.seeding_time)],
+                  ['Save path', item.save_path],
+                  ['Content path', item.content_path],
+                  ['Hash', item.id],
+                  ['SoulSync', item.soulsync?.title],
+                ]}
+                expanded={openCards.has(`torrent:${item.id}`)}
+                onToggle={() => toggleCard(`torrent:${item.id}`)}
                 owner={<SoulsyncChip item={item} />}
                 actions={
                   <PauseResumeRemove
@@ -458,6 +543,20 @@ export function AdlClientsTab() {
               ]
                 .filter(Boolean)
                 .join(' · ')}
+              details={[
+                ['State', item.state],
+                ['Size', item.size ? formatBytes(item.size) : ''],
+                ['Downloaded', item.downloaded ? formatBytes(item.downloaded) : ''],
+                ['Speed', speedText(item.download_speed)],
+                ['ETA', durationText(item.eta)],
+                ['Category', item.category],
+                ['Save path', item.save_path],
+                ['Staging path', item.incomplete_path],
+                ['Job id', item.id],
+                ['SoulSync', item.soulsync?.title],
+              ]}
+              expanded={openCards.has(`usenet:${item.id}`)}
+              onToggle={() => toggleCard(`usenet:${item.id}`)}
               owner={<SoulsyncChip item={item} />}
               actions={
                 <PauseResumeRemove

@@ -76770,9 +76770,96 @@ body.em-scroll-lock { overflow: hidden; }
 
 .adl-client-empty-error { color: #e74c3c; }
 
-/* rows: name + owner chip on top, progress bar, stats line */
-.adl-client-row {
+/* expandable cards: name + owner chip, progress bar, stats; click opens
+   the full detail grid */
+.adl-client-card {
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 12px;
+    background: linear-gradient(135deg,
+            rgba(255, 255, 255, 0.03) 0%,
+            rgba(255, 255, 255, 0.015) 100%);
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.adl-client-card:hover {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.045);
+}
+
+.adl-client-card.expanded {
+    border-color: rgba(var(--accent-rgb), 0.35);
+}
+
+.adl-client-card[data-state="error"] {
+    border-color: rgba(231, 76, 60, 0.35);
+}
+
+.adl-client-card-main {
+    display: flex;
     align-items: center;
+    gap: 12px;
+}
+
+.adl-client-card-main .adl-row-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.adl-client-chevron {
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 12px;
+    transition: transform 0.2s ease;
+    margin-left: 2px;
+}
+
+.adl-client-chevron.open {
+    transform: rotate(180deg);
+}
+
+.adl-client-details {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    cursor: default;
+}
+
+.adl-client-details dl {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 6px 18px;
+    margin: 0;
+}
+
+.adl-client-detail {
+    display: flex;
+    gap: 8px;
+    min-width: 0;
+    font-size: 11.5px;
+    line-height: 1.5;
+}
+
+.adl-client-detail dt {
+    color: rgba(255, 255, 255, 0.4);
+    flex-shrink: 0;
+    min-width: 84px;
+}
+
+.adl-client-detail dd {
+    color: rgba(255, 255, 255, 0.75);
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.adl-client-details-error {
+    color: #e74c3c;
+    font-size: 12px;
+    margin-bottom: 8px;
+    word-break: break-word;
 }
 
 .adl-client-row-top {

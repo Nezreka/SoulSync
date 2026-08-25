@@ -43,6 +43,22 @@ def _run(coro, timeout=25):
     return asyncio.run(_capped())
 
 
+def _json_guard(fn):
+    """Every route failure leaves as json with a message. The first version
+    let a broken getter escape as flask's html 500 page, and the ui could
+    only show that raw."""
+    from functools import wraps
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"[Clients] {fn.__name__} failed: {e}", exc_info=True)
+            return jsonify({"success": False, "error": str(e)}), 500
+    return wrapper
+
+
 def _known(kind):
     try:
         return (_known_items() or {}).get(kind, {}) if _known_items else {}
@@ -57,6 +73,7 @@ def create_blueprint() -> Blueprint:
     # ── torrent ───────────────────────────────────────────────────────────
 
     @bp.route('/api/clients/torrent', methods=['GET'])
+    @_json_guard
     def torrent_overview():
         from core.torrent_clients import get_active_adapter
         client_type = (config_manager.get('torrent_client.type', '') or '').strip().lower()
@@ -83,6 +100,7 @@ def create_blueprint() -> Blueprint:
                         "connected": True, "items": rows})
 
     @bp.route('/api/clients/torrent/action', methods=['POST'])
+    @_json_guard
     def torrent_action():
         from core.torrent_clients import get_active_adapter
         payload = request.get_json(silent=True) or {}
@@ -109,6 +127,7 @@ def create_blueprint() -> Blueprint:
     # ── usenet ────────────────────────────────────────────────────────────
 
     @bp.route('/api/clients/usenet', methods=['GET'])
+    @_json_guard
     def usenet_overview():
         from core.usenet_clients import get_active_adapter
         client_type = (config_manager.get('usenet_client.type', '') or '').strip().lower()
@@ -135,6 +154,7 @@ def create_blueprint() -> Blueprint:
                         "connected": True, "items": rows})
 
     @bp.route('/api/clients/usenet/action', methods=['POST'])
+    @_json_guard
     def usenet_action():
         from core.usenet_clients import get_active_adapter
         payload = request.get_json(silent=True) or {}
@@ -161,20 +181,30 @@ def create_blueprint() -> Blueprint:
     # ── slskd ─────────────────────────────────────────────────────────────
 
     @bp.route('/api/clients/slskd', methods=['GET'])
+    @_json_guard
     def slskd_overview():
-        client = _soulseek_client() if _soulseek_client else None
-        if not client or not getattr(client, 'base_url', ''):
-            return jsonify({"success": True, "configured": False, "connected": False,
-                            "items": []})
+        # the whole body is guarded: the first version let a broken getter
+        # escape as flask's html 500, which the ui can only show raw. every
+        # failure from here leaves as json with a message.
         try:
-            items = _run(client.get_all_downloads())
-        except Exception as e:
-            logger.warning(f"[Clients] slskd get_all_downloads failed: {e}")
-            return jsonify({"success": True, "configured": True, "connected": False,
-                            "error": str(e), "items": []})
-        known = _known('slskd')
-        rows = []
-        try:
+            client = _soulseek_client() if _soulseek_client else None
+            configured = False
+            if client is not None:
+                try:
+                    configured = bool(client.is_configured())
+                except Exception:
+                    configured = bool(getattr(client, 'base_url', ''))
+            if not client or not configured:
+                return jsonify({"success": True, "configured": False, "connected": False,
+                                "items": []})
+            try:
+                items = _run(client.get_all_downloads())
+            except Exception as e:
+                logger.warning(f"[Clients] slskd get_all_downloads failed: {e}")
+                return jsonify({"success": True, "configured": True, "connected": False,
+                                "error": str(e), "items": []})
+            known = _known('slskd')
+            rows = []
             for d in items:
                 row = asdict(d)
                 row.pop('audio_files', None)
@@ -182,14 +212,15 @@ def create_blueprint() -> Blueprint:
                 if hit:
                     row['soulsync'] = hit
                 rows.append(row)
+            logger.debug(f"[Clients] slskd listing: {len(rows)} transfers")
+            return jsonify({"success": True, "configured": True, "connected": True,
+                            "items": rows})
         except Exception as e:
-            logger.error(f"[Clients] slskd row build failed: {e}")
-            return jsonify({"success": False, "error": f"row build failed: {e}"}), 500
-        logger.debug(f"[Clients] slskd listing: {len(rows)} transfers")
-        return jsonify({"success": True, "configured": True, "connected": True,
-                        "items": rows})
+            logger.error(f"[Clients] slskd overview failed: {e}", exc_info=True)
+            return jsonify({"success": False, "error": str(e)}), 500
 
     @bp.route('/api/clients/slskd/action', methods=['POST'])
+    @_json_guard
     def slskd_action():
         client = _soulseek_client() if _soulseek_client else None
         payload = request.get_json(silent=True) or {}

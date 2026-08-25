@@ -36368,8 +36368,12 @@ def _client_known_items():
     return known
 
 from api.clients import configure as _cfg_cl, create_blueprint as _bp_cl
+# the orchestrator, NOT SoulseekClient - web_server never binds a global
+# by that name (the first wiring did exactly that and every request died
+# with a NameError 500). the orchestrator is the drop-in with the same
+# get_all_downloads/cancel_download surface, aggregated across sources.
 _cfg_cl(config_manager_=config_manager,
-        soulseek_client_getter=lambda: soulseek_client,
+        soulseek_client_getter=lambda: download_orchestrator,
         known_items_getter=_client_known_items)
 app.register_blueprint(_bp_cl())
 

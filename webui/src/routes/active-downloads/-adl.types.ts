@@ -251,6 +251,9 @@ export interface ClientTorrentItem {
   peers?: number;
   eta?: number | null;
   ratio?: number | null;
+  seeding_time?: number | null;
+  save_path?: string | null;
+  content_path?: string | null;
   error?: string | null;
   /** present when SoulSync itself dispatched this item. */
   soulsync?: { kind?: string; title?: string };
@@ -265,6 +268,9 @@ export interface ClientUsenetItem {
   downloaded: number;
   download_speed: number;
   eta?: number | null;
+  save_path?: string | null;
+  incomplete_path?: string | null;
+  category?: string | null;
   error?: string | null;
   soulsync?: { kind?: string; title?: string };
 }
@@ -278,6 +284,8 @@ export interface ClientSlskdItem {
   size: number;
   transferred: number;
   speed: number;
+  time_remaining?: number | null;
+  file_path?: string | null;
   soulsync?: { kind?: string; title?: string };
 }
 
