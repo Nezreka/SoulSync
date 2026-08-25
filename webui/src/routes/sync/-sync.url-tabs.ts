@@ -276,12 +276,15 @@ export function slashTextCounts(progress: { spotify_total?: number; spotify_matc
   percentage: number;
 } {
   const total = progress.spotify_total || 0;
-  const matches = progress.spotify_matches || 0;
+  // clamped for the same reason as the lb card and the modal line: the
+  // counter can outrun the total and nothing corrects it after discovery
+  const matchesRaw = progress.spotify_matches || 0;
+  const matches = total > 0 ? Math.min(matchesRaw, total) : matchesRaw;
   return {
     total,
     matches,
-    failed: total - matches,
-    percentage: total > 0 ? Math.round((matches / total) * 100) : 0,
+    failed: Math.max(0, total - matches),
+    percentage: total > 0 ? Math.min(100, Math.round((matches / total) * 100)) : 0,
   };
 }
 

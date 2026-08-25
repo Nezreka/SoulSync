@@ -312,6 +312,15 @@ describe('slashTextCounts — one arithmetic for the card bar and the legacy str
     expect(slashTextCounts({})).toEqual({ total: 0, matches: 0, failed: 0, percentage: 0 });
   });
 
+  it('an inflated counter clamps to the total instead of painting 105%', () => {
+    expect(slashTextCounts({ spotify_total: 100, spotify_matches: 105 })).toEqual({
+      total: 100,
+      matches: 100,
+      failed: 0,
+      percentage: 100,
+    });
+  });
+
   it('the string is built FROM it, so the two can never disagree', () => {
     // The card renders the numbers and the vanilla string renders the text;
     // splitting them was only safe because both read this one function.
