@@ -242,7 +242,15 @@ export function fetchLabelExplorer(): Promise<SectionOutcome<Record<string, unkn
 export function fetchGenreDeepDive(
   genre: string,
 ): Promise<DiscoverResult & { albums?: DiscoverAlbum[] }> {
-  return readJson(apiClient.get('discover/genre-deep-dive', { searchParams: { genre } }));
+  // A COLD deep-dive legitimately takes the server ~30-60s to assemble (it only
+  // gets cheap once the discovery cache is warm). ky's default timeout is 10s,
+  // so the modal errored out ("failed to load genre data") while the server was
+  // still working - and the same click 30s later "worked" off the now-warm
+  // cache. Give this one call the time the server actually needs; everything
+  // else keeps the tight default so a hung request still surfaces.
+  return readJson(
+    apiClient.get('discover/genre-deep-dive', { searchParams: { genre }, timeout: 120000 }),
+  );
 }
 
 /**
