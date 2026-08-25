@@ -53,6 +53,7 @@ class UnknownArtistFixerJob(RepairJob):
         'reorganize_files': True,
     }
     auto_fix = True
+    writes_library_files = True
 
     def estimate_scope(self, context: JobContext) -> int:
         try:

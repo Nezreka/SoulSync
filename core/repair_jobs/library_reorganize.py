@@ -78,6 +78,7 @@ class LibraryReorganizeJob(RepairJob):
         'dry_run': True,
     }
     auto_fix = True
+    writes_library_files = True
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()

@@ -46,7 +46,10 @@ class DuplicateDetectorJob(RepairJob):
         settings = self._get_settings(context)
         title_threshold = float(settings.get('title_similarity', 0.85))
         artist_threshold = float(settings.get('artist_similarity', 0.80))
-        ignore_cross_album = settings.get('ignore_cross_album', True)
+        # fallback matches default_settings — it used to say True, which would have
+        # silently enabled the 'most common cause of missed duplicates' (per this
+        # job's own help text) on any settings dict missing the key
+        ignore_cross_album = settings.get('ignore_cross_album', False)
 
         # Respect the global "allow duplicate tracks across albums" setting —
         # if the user explicitly allows duplicates across albums, never flag them

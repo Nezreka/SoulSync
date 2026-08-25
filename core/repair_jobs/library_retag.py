@@ -270,6 +270,7 @@ class LibraryRetagJob(RepairJob):
         'source': ['auto', 'spotify', 'itunes', 'deezer', 'musicbrainz'],
     }
     auto_fix = True
+    writes_library_files = True
 
     def _get_settings(self, context: JobContext) -> dict:
         merged = dict(self.default_settings)
