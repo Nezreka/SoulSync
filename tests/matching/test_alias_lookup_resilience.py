@@ -68,7 +68,7 @@ def test_genuine_no_results_is_still_cached(service):
 
 
 def test_strict_failure_still_uses_a_working_non_strict_result(service):
-    def _search(name, limit=3, strict=True):
+    def _search(name, limit=3, strict=True, **_kw):
         if strict:
             raise TimeoutError("read timed out")
         return [{"id": "mbid-sawano", "name": "Sawano Hiroyuki", "score": 100}]
@@ -406,3 +406,167 @@ def test_no_mbid_on_the_row_still_searches_by_name(tmp_path):
 
     assert svc.lookup_artist_aliases("Sawano Hiroyuki") == ["澤野弘之"]
     svc.mb_client.search_artist.assert_called()
+
+
+# --- review round: the five ways the guards above could still be bypassed ---
+
+
+def test_a_client_that_swallows_a_timeout_is_still_a_failure(service):
+    """The one that defeated everything else.
+
+    `MusicBrainzClient.search_artist` catches its own exceptions and returns
+    `[]` — the same value it uses for "MusicBrainz knows nobody by that name".
+    Read through that lens the outage becomes a completed no-result search, and
+    the negative cache is written exactly as before. The service asks for the
+    failure to be raised.
+    """
+    def _search(name, limit=3, strict=True, raise_on_error=False):
+        if raise_on_error:
+            raise TimeoutError("read timed out")
+        return []
+
+    service.mb_client.search_artist.side_effect = _search
+
+    assert service.lookup_artist_aliases("Sawano Hiroyuki") == []
+    service._save_to_cache.assert_not_called()
+
+
+def test_a_failed_fallback_search_does_not_cache_through_the_trust_gate(service):
+    """Strict answered with something weak, non-strict never answered.
+
+    `scored` is non-empty, so the "no results" guard does not fire — and the
+    candidates then fail the trust gate, which used to cache "no aliases" on
+    the way out. But the entity that would have passed may only ever have
+    existed in the query that timed out: for a cross-script artist the alias
+    index IS the non-strict one.
+    """
+    def _search(name, limit=3, strict=True, **_kw):
+        if strict:
+            return [{"id": "mbid-decoy", "name": "Someone Else", "score": 50}]
+        raise TimeoutError("read timed out")
+
+    service.mb_client.search_artist.side_effect = _search
+
+    assert service.lookup_artist_aliases("Sawano Hiroyuki") == []
+    service._save_to_cache.assert_not_called()
+
+
+def test_two_indistinguishable_candidates_are_still_cached_when_the_search_ran(service):
+    """The ambiguity gate keeps its negative-cache write.
+
+    It cannot currently be reached with a failed search — the fallback only
+    runs when the strict score is weak, and a weak score fails the trust gate
+    before this. It carries the same guard anyway, because that reachability
+    argument is a property of the code above it, not of this branch.
+    """
+    service.mb_client.search_artist.return_value = [
+        {"id": "mbid-a", "name": "Sawano Hiroyuki", "score": 80},
+        {"id": "mbid-b", "name": "Sawano Hiroyuki", "score": 79},
+    ]
+
+    assert service.lookup_artist_aliases("Sawano Hiroyuki") == []
+    service._save_to_cache.assert_called_once()
+
+
+def test_a_complete_search_that_rejects_its_candidates_is_still_cached(service):
+    """The guards above must not turn every rejection into a retry."""
+    service.mb_client.search_artist.return_value = [
+        {"id": "mbid-decoy", "name": "Someone Else Entirely", "score": 50},
+    ]
+
+    assert service.lookup_artist_aliases("Sawano Hiroyuki") == []
+    service._save_to_cache.assert_called_once()
+
+
+# --- the name has to identify ONE artist -----------------------------------
+
+
+# The shipped schema starts artists.id as INTEGER and MIGRATES it to TEXT
+# (`artists_new` in database/music_database.py), because a library keys artists
+# by the media server's id — a GUID on Jellyfin. Rows here use the migrated
+# shape, which is what an installed database actually has.
+_ARTISTS_DDL_TEXT_ID = _ARTISTS_DDL.replace(
+    "id INTEGER PRIMARY KEY", "id TEXT PRIMARY KEY")
+
+
+def _two_rows(tmp_path, rows):
+    import sqlite3
+
+    db_path = tmp_path / "dupes.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(_ARTISTS_DDL_TEXT_ID)
+    for row in rows:
+        conn.execute(
+            "INSERT INTO artists (id, name, musicbrainz_id) VALUES (?, ?, ?)", row)
+    conn.commit()
+    conn.close()
+
+    class _DB:
+        def _get_connection(self):
+            c = sqlite3.connect(str(db_path))
+            c.row_factory = sqlite3.Row
+            return c
+
+    svc = MusicBrainzService.__new__(MusicBrainzService)
+    svc.db = _DB()
+    return svc, db_path
+
+
+def test_same_name_rows_with_different_mbids_do_not_settle_the_identity(tmp_path):
+    """Two artists share a display name. Whichever row sorted first would
+    otherwise become authoritative for every verification against that name,
+    and its aliases could let the wrong artist pass."""
+    svc, _ = _two_rows(tmp_path, [
+        ("1", "Rone", "mbid-rone-fr"),
+        ("2", "Rone", "mbid-rone-us"),
+    ])
+
+    assert svc._artist_row_mbid("Rone") is None
+
+
+def test_same_name_rows_agreeing_on_one_mbid_still_settle_it(tmp_path):
+    """The ordinary case: one artist indexed on two media servers."""
+    svc, _ = _two_rows(tmp_path, [
+        ("1", "Sawano Hiroyuki", "mbid-sawano"),
+        ("2", "Sawano Hiroyuki", "mbid-sawano"),
+    ])
+
+    assert svc._artist_row_mbid("Sawano Hiroyuki") == "mbid-sawano"
+
+
+def test_write_back_refuses_when_one_of_the_rows_names_another_identity(tmp_path):
+    svc, db_path = _two_rows(tmp_path, [
+        ("1", "Rone", None),
+        ("2", "Rone", "mbid-rone-us"),
+    ])
+
+    svc._persist_artist_identity("Rone", "mbid-rone-fr", ["Erwan Castex"])
+
+    assert _stored(db_path, "1") == (None, [])
+    assert _stored(db_path, "2")[0] == "mbid-rone-us"
+
+
+def test_write_back_reaches_every_row_the_name_addresses(tmp_path):
+    svc, db_path = _two_rows(tmp_path, [
+        ("1", "Sawano Hiroyuki", None),
+        ("2", "Sawano Hiroyuki", None),
+    ])
+
+    svc._persist_artist_identity("Sawano Hiroyuki", "mbid-sawano", ["澤野弘之"])
+
+    assert _stored(db_path, "1") == ("mbid-sawano", ["澤野弘之"])
+    assert _stored(db_path, "2") == ("mbid-sawano", ["澤野弘之"])
+
+
+def test_a_non_numeric_artist_id_is_written_not_dropped(tmp_path):
+    """A migrated library keys artists by the media server's id — a GUID on
+    Jellyfin. int() raised there, the caller swallowed it as a best-effort
+    failure, and the deterministic identity tier silently never arrived."""
+    svc, db_path = _two_rows(tmp_path, [
+        ("a1b2c3d4-e5f6-7890-abcd-ef1234567890", "Sawano Hiroyuki", None),
+    ])
+
+    svc._persist_artist_identity("Sawano Hiroyuki", "mbid-sawano", ["澤野弘之"])
+
+    assert _stored(db_path, "a1b2c3d4-e5f6-7890-abcd-ef1234567890") == (
+        "mbid-sawano", ["澤野弘之"])

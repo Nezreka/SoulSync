@@ -82,7 +82,7 @@ def _fake_mb_client(monkeypatch, relations, calls):
         def __init__(self, *a, **k):
             pass
 
-        def get_artist(self, mbid, includes=None):
+        def get_artist(self, mbid, includes=None, **_kw):
             calls.append(mbid)
             return {"relations": relations}
 
