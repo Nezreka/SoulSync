@@ -28338,6 +28338,12 @@ def get_discover_release_radar():
 
         # Try source-specific playlist first, then fall back to generic
         pid = get_current_profile_id()
+        # full-row snapshot first: immune to pool rotation (the silent-shrink
+        # bug). the id path below stays for pre-snapshot curated rows.
+        from core.discovery.curated_full import read_curated_full
+        full_rows = read_curated_full(database, 'release_radar', active_source, pid)
+        if full_rows:
+            return jsonify({"success": True, "tracks": full_rows, "source": active_source})
         curated_track_ids = database.get_curated_playlist(f'release_radar_{active_source}', profile_id=pid)
         if not curated_track_ids:
             curated_track_ids = database.get_curated_playlist('release_radar', profile_id=pid)
@@ -28657,6 +28663,11 @@ def get_discover_weekly():
 
         # Try source-specific playlist first, then fall back to generic
         pid = get_current_profile_id()
+        # full-row snapshot first - see release-radar above
+        from core.discovery.curated_full import read_curated_full
+        full_rows = read_curated_full(database, 'discovery_weekly', active_source, pid)
+        if full_rows:
+            return jsonify({"success": True, "tracks": full_rows, "source": active_source})
         curated_track_ids = database.get_curated_playlist(f'discovery_weekly_{active_source}', profile_id=pid)
         if not curated_track_ids:
             curated_track_ids = database.get_curated_playlist('discovery_weekly', profile_id=pid)
@@ -29091,7 +29102,10 @@ def get_hidden_gems_playlist():
         database = get_database()
         service = get_personalized_playlists_service(database, spotify_client)
 
-        tracks = service.get_hidden_gems(limit=50)
+        # "best obscure, not random obscure" - the cached genre-taste profile
+        # ranks candidates before the diversity cut
+        tracks = service.get_hidden_gems(
+            limit=50, taste_profile=_discover_genre_taste(database, get_current_profile_id()))
 
         return jsonify({
             "success": True,

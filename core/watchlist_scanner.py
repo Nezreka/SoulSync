@@ -3903,6 +3903,17 @@ class WatchlistScanner:
                 # Save with source suffix for multi-source support
                 playlist_key = f'release_radar_{source}'
                 self.database.save_curated_playlist(playlist_key, release_radar_tracks, profile_id=profile_id)
+                # ALSO snapshot the full rows: the id list rehydrates from the
+                # rotating pool and silently shrinks (the "only 5-10 tracks"
+                # reports) - the snapshot can't
+                try:
+                    from core.discovery.curated_full import full_row_from_track_data
+                    self.database.save_curated_playlist(
+                        f'{playlist_key}_full',
+                        [full_row_from_track_data(t, source) for t in top_tracks[:50]],
+                        profile_id=profile_id)
+                except Exception as e:  # noqa: BLE001
+                    logger.debug(f"release radar full snapshot failed: {e}")
                 logger.info(f"Release Radar ({source}) curated: {len(release_radar_tracks)} tracks")
                 # Flag personalized Fresh Tape snapshot as stale so the
                 # pipeline auto-regenerates it on the next run.
@@ -3986,6 +3997,15 @@ class WatchlistScanner:
 
                 playlist_key = f'discovery_weekly_{source}'
                 self.database.save_curated_playlist(playlist_key, discovery_weekly_tracks, profile_id=profile_id)
+                # full-row snapshot, same reason as fresh tape's above
+                try:
+                    from core.discovery.curated_full import full_row_from_pool_track
+                    self.database.save_curated_playlist(
+                        f'{playlist_key}_full',
+                        [full_row_from_pool_track(t) for t in selected_tracks],
+                        profile_id=profile_id)
+                except Exception as e:  # noqa: BLE001
+                    logger.debug(f"discovery weekly full snapshot failed: {e}")
                 logger.info(f"Discovery Weekly ({source}) curated: {len(discovery_weekly_tracks)} tracks")
                 try:
                     _mark_personalized_kinds_stale(
