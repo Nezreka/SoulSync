@@ -319,7 +319,9 @@ def test_an_empty_batch_is_fine(monkeypatch):
 
 
 def test_the_endpoint_exposes_the_setting():
-    src = Path("web_server.py").read_text(encoding="utf-8")
+    # the watchlist endpoints moved to api/artist_watchlist.py in the
+    # web_server decomposition; the behaviour pinned here is unchanged
+    src = Path("api/artist_watchlist.py").read_text(encoding="utf-8")
     fn = src[src.index("def watchlist_global_config()"):src.index("def watchlist_global_config()") + 6000]
     assert "'global_auto_download': config_manager.get('watchlist.global_auto_download', True)" in fn
     assert "config_manager.set('watchlist.global_auto_download', global_auto_download)" in fn
