@@ -790,52 +790,11 @@ def mirrored_playlist_visible(playlist) -> bool:
         return False
 
 
-def get_current_profile_id() -> int:
-    """Get the current profile ID from Flask g context or default to 1.
+# get_current_profile_id + admin_only live in core/profile_context.py now —
+# api/* blueprint modules need them at import time, and importing web_server
+# from there is circular. Same objects, one home.
+from core.profile_context import admin_only, get_current_profile_id  # noqa: E402
 
-    Background callers (automation engine, sync threads, watchlist
-    scanner) have no request context, so `g.profile_id` raises
-    `RuntimeError("Working outside of application context")` rather
-    than `AttributeError`. Catch both so non-request callers degrade
-    to the admin profile instead of crashing the handler.
-
-    A real web request always wins. Only when there's NO request do we honour a
-    background-profile override (set by the automation engine to the automation's
-    owner) — so a non-admin's scheduled job acts as them, while admin/system jobs
-    (profile 1) and anything with no override resolve to admin exactly as before."""
-    try:
-        return g.profile_id
-    except (AttributeError, RuntimeError):
-        pass
-    from core.profile_context import get_background_profile
-    pid = get_background_profile()
-    return pid if pid is not None else 1
-
-
-def admin_only(view_fn):
-    """Restrict a Flask view to the admin profile (profile_id == 1).
-
-    Settings-class endpoints expose / mutate service tokens, OAuth
-    secrets, and API keys. Non-admin profiles must not see them.
-
-    NOTE on the underlying auth model: `get_current_profile_id()`
-    defaults to 1 (admin) when no session is present, which means
-    single-admin / no-multi-profile installs have no actual gate here —
-    any request from the local network is treated as admin. This
-    decorator's job is to gate non-admin profiles in MULTI-profile
-    setups, not to authenticate the network. The "trust local network"
-    posture is the project's existing model; tightening it (real auth
-    on every request) is out of scope for this decorator.
-    """
-    @functools.wraps(view_fn)
-    def wrapper(*args, **kwargs):
-        if get_current_profile_id() != 1:
-            return jsonify({
-                "success": False,
-                "error": "Admin access required",
-            }), 403
-        return view_fn(*args, **kwargs)
-    return wrapper
 
 def get_spotify_client_for_profile(profile_id=None):
     """Get the Spotify client for the current profile.
@@ -5153,276 +5112,7 @@ def select_navidrome_music_folder():
 # == QUALITY PROFILE API       ==
 # ===============================
 
-@app.route('/api/quality-profile', methods=['GET'])
-def get_quality_profile():
-    """Get current quality profile configuration"""
-    try:
-        from database.music_database import MusicDatabase
-        db = MusicDatabase()
-        profile = db.get_quality_profile()
-
-        return jsonify({
-            "success": True,
-            "profile": profile
-        })
-    except Exception as e:
-        logger.error(f"Error getting quality profile: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/quality-profile', methods=['POST'])
-def save_quality_profile():
-    """Save quality profile configuration"""
-    try:
-        from database.music_database import MusicDatabase
-        db = MusicDatabase()
-
-        data = request.get_json()
-        if not data:
-            return jsonify({"success": False, "error": "No profile data provided"}), 400
-
-        success = db.set_quality_profile(data)
-
-        if success:
-            add_activity_item("", "Quality Profile Updated", f"Preset: {data.get('preset', 'custom')}", "Now")
-            return jsonify({"success": True, "message": "Quality profile saved successfully"})
-        else:
-            return jsonify({"success": False, "error": "Failed to save quality profile"}), 500
-
-    except Exception as e:
-        logger.error(f"Error saving quality profile: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/quality-profile/presets', methods=['GET'])
-def get_quality_presets():
-    """Get all available quality presets"""
-    try:
-        from database.music_database import MusicDatabase
-        db = MusicDatabase()
-
-        presets = {
-            "audiophile": db.get_quality_preset("audiophile"),
-            "balanced": db.get_quality_preset("balanced"),
-            "space_saver": db.get_quality_preset("space_saver")
-        }
-
-        return jsonify({
-            "success": True,
-            "presets": presets
-        })
-    except Exception as e:
-        logger.error(f"Error getting quality presets: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/quality-profile/preset/<preset_name>', methods=['POST'])
-def apply_quality_preset(preset_name):
-    """Switch to a quality preset, restoring its saved edits if it has any."""
-    try:
-        from database.music_database import MusicDatabase
-        db = MusicDatabase()
-
-        current = db.get_quality_profile()
-        preset = dict(db.get_quality_preset(preset_name))
-        # search_mode + rank_candidates_by_quality are global search/ordering
-        # strategies, not per-preset audio settings — carry the user's current
-        # choices across preset switches.
-        preset['search_mode'] = current.get('search_mode', preset.get('search_mode', 'priority'))
-        preset['rank_candidates_by_quality'] = current.get(
-            'rank_candidates_by_quality', preset.get('rank_candidates_by_quality', False))
-        success = db.set_quality_profile(preset)
-
-        if success:
-            add_activity_item("", "Quality Preset Applied", f"Switched to '{preset_name}' preset", "Now")
-            return jsonify({
-                "success": True,
-                "message": f"Switched to '{preset_name}' preset",
-                "profile": preset
-            })
-        else:
-            return jsonify({"success": False, "error": "Failed to apply preset"}), 500
-
-    except Exception as e:
-        logger.error(f"Error applying quality preset: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/quality-profile/preset/<preset_name>/reset', methods=['POST'])
-def reset_quality_preset(preset_name):
-    """Discard a preset's saved edits and restore its factory defaults."""
-    try:
-        from database.music_database import MusicDatabase
-        db = MusicDatabase()
-
-        current = db.get_quality_profile()
-        preset = dict(db.reset_quality_preset(preset_name))
-        preset['search_mode'] = current.get('search_mode', preset.get('search_mode', 'priority'))
-        preset['rank_candidates_by_quality'] = current.get(
-            'rank_candidates_by_quality', preset.get('rank_candidates_by_quality', False))
-        success = db.set_quality_profile(preset)
-
-        if success:
-            add_activity_item("", "Quality Preset Reset", f"Reset '{preset_name}' to defaults", "Now")
-            return jsonify({
-                "success": True,
-                "message": f"Reset '{preset_name}' to defaults",
-                "profile": preset
-            })
-        else:
-            return jsonify({"success": False, "error": "Failed to reset preset"}), 500
-
-    except Exception as e:
-        logger.error(f"Error resetting quality preset: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-# ── Named global quality profiles (assignable to Wishlist items / per-context
-# overrides like Auto-Import, not just the single active default) — CRUD over
-# `quality_profiles`. ──────────
-
-@app.route('/api/quality-profile/custom', methods=['GET'])
-def list_custom_quality_profiles():
-    """List every quality profile (built-ins + user-created), default first."""
-    try:
-        from database.music_database import MusicDatabase
-        db = MusicDatabase()
-        return jsonify({"success": True, "profiles": db.list_quality_profiles()})
-    except Exception as e:
-        logger.error(f"Error listing quality profiles: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/quality-profile/custom', methods=['POST'])
-def create_custom_quality_profile():
-    """Save the current Quality-page settings as a new named profile."""
-    try:
-        from database.music_database import MusicDatabase
-        db = MusicDatabase()
-
-        data = request.get_json() or {}
-        name = str(data.get('name') or '').strip()
-        if not name:
-            return jsonify({"success": False, "error": "Name is required"}), 400
-
-        profile_id = db.create_quality_profile(name, data)
-        if profile_id is None:
-            return jsonify({"success": False, "error": "A profile with that name may already exist"}), 400
-
-        add_activity_item("", "Quality Profile Created", f"Saved '{name}'", "Now")
-        return jsonify({"success": True, "id": profile_id, "profiles": db.list_quality_profiles()})
-    except Exception as e:
-        logger.error(f"Error creating quality profile: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/quality-profile/custom/<int:profile_id>', methods=['GET'])
-def get_custom_quality_profile(profile_id):
-    """Read-only: a single profile in the same full v3 shape `/apply` and
-    `/api/quality-profile` return (parsed ranked_targets, real booleans,
-    `preset`), so the Settings UI can load a profile's settings into the page
-    for viewing/editing WITHOUT the side effects `/apply` has (making it the
-    default, pushing into live config) — purely a SELECT."""
-    try:
-        from core.quality.selection import load_profile_by_id
-        from database.music_database import MusicDatabase
-
-        db = MusicDatabase()
-        if not any(p['id'] == profile_id for p in db.list_quality_profiles()):
-            return jsonify({"success": False, "error": "Profile not found"}), 404
-
-        return jsonify({"success": True, "profile": load_profile_by_id(profile_id)})
-    except Exception as e:
-        logger.error(f"Error loading quality profile {profile_id}: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/quality-profile/custom/<int:profile_id>/apply', methods=['POST'])
-def apply_custom_quality_profile(profile_id):
-    """Make a named profile the app-wide default AND push every setting it
-    captures (AcoustID strictness, downsample, deep verify, import
-    quality-filter/replace-lower-quality, lossy-copy) into the live global
-    settings — not just the ranked-target ladder."""
-    try:
-        from database.music_database import MusicDatabase
-        db = MusicDatabase()
-
-        profile = db.apply_quality_profile_to_settings(profile_id)
-        if profile is None:
-            return jsonify({"success": False, "error": "Profile not found"}), 404
-
-        add_activity_item("", "Quality Profile Applied", f"Now using '{profile.get('preset', 'custom')}'", "Now")
-        return jsonify({"success": True, "profile": profile})
-    except Exception as e:
-        logger.error(f"Error applying quality profile: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/quality-profile/custom/<int:profile_id>/update', methods=['POST'])
-def update_custom_quality_profile(profile_id):
-    """Overwrite a named profile's captured settings with whatever is
-    currently on the Quality page (edit-in-place, keeps the name)."""
-    try:
-        from database.music_database import MusicDatabase
-        db = MusicDatabase()
-
-        data = request.get_json() or {}
-        if not db.update_quality_profile(profile_id, data):
-            return jsonify({"success": False, "error": "Profile not found"}), 404
-
-        profiles = db.list_quality_profiles()
-        # Editing the ACTIVE DEFAULT profile must also push the new values
-        # into config.json — every profile-owned key the rest of the app
-        # reads directly (AcoustID, lossy-copy, deep-verify, replace-lower-
-        # quality). Without this, the row and config.json go out of sync,
-        # and the next unrelated Settings save (which mirrors config -> the
-        # default row via sync_default_quality_profile_from_config) silently
-        # reverts this edit back to the stale config values.
-        if any(p['id'] == profile_id and p.get('is_default') for p in profiles):
-            db.apply_quality_profile_to_settings(profile_id)
-            profiles = db.list_quality_profiles()
-
-        add_activity_item("", "Quality Profile Updated", f"Updated saved profile {profile_id}", "Now")
-        return jsonify({"success": True, "profiles": profiles})
-    except Exception as e:
-        logger.error(f"Error updating quality profile: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/quality-profile/custom/<int:profile_id>', methods=['PUT'])
-def rename_custom_quality_profile(profile_id):
-    try:
-        from database.music_database import MusicDatabase
-        db = MusicDatabase()
-
-        data = request.get_json() or {}
-        name = str(data.get('name') or '').strip()
-        if not name:
-            return jsonify({"success": False, "error": "Name is required"}), 400
-
-        ok, reason = db.rename_quality_profile(profile_id, name)
-        if not ok:
-            status = 404 if reason == "Profile not found" else 400
-            return jsonify({"success": False, "error": reason}), status
-        return jsonify({"success": True, "profiles": db.list_quality_profiles()})
-    except Exception as e:
-        logger.error(f"Error renaming quality profile: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/quality-profile/custom/<int:profile_id>', methods=['DELETE'])
-def delete_custom_quality_profile(profile_id):
-    """Delete any profile, including the built-ins. Only refuses when it
-    would leave zero profiles — deleting the current default auto-promotes
-    another remaining profile first (see `MusicDatabase.delete_quality_profile`)."""
-    try:
-        from database.music_database import MusicDatabase
-        db = MusicDatabase()
-
-        ok, reason = db.delete_quality_profile(profile_id)
-        if not ok:
-            return jsonify({"success": False, "error": reason}), 400
-        return jsonify({"success": True, "profiles": db.list_quality_profiles()})
-    except Exception as e:
-        logger.error(f"Error deleting quality profile: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
+# /api/quality-profile* endpoints: lifted to api/quality_profiles.py.
 # ===============================
 # == END QUALITY PROFILE API   ==
 # ===============================
@@ -19271,245 +18961,7 @@ def enable_incremental_vacuum():
 # == METADATA CACHE API        ==
 # ===============================
 
-@app.route('/api/metadata-cache/stats', methods=['GET'])
-def metadata_cache_stats():
-    """Get metadata cache statistics."""
-    try:
-        cache = get_metadata_cache()
-        stats = cache.get_stats()
-        return jsonify(stats)
-    except Exception as e:
-        logger.error(f"Error getting metadata cache stats: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/metadata-cache/browse', methods=['GET'])
-def metadata_cache_browse():
-    """Browse cached metadata entities with filtering, search, sorting, and pagination."""
-    try:
-        cache = get_metadata_cache()
-        entity_type = request.args.get('type', 'artist')
-        source = request.args.get('source')
-        search = request.args.get('search')
-        sort = request.args.get('sort', 'last_accessed_at')
-        sort_dir = request.args.get('sort_dir', 'desc')
-        offset = int(request.args.get('offset', 0))
-        limit = int(request.args.get('limit', 48))
-
-        result = cache.browse(
-            entity_type=entity_type,
-            source=source if source else None,
-            search=search if search else None,
-            sort=sort,
-            sort_dir=sort_dir,
-            offset=offset,
-            limit=limit
-        )
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Error browsing metadata cache: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/metadata-cache/entity/<source>/<entity_type>/<path:entity_id>', methods=['GET'])
-def metadata_cache_entity_detail(source, entity_type, entity_id):
-    """Get detailed view of a single cached entity."""
-    try:
-        cache = get_metadata_cache()
-        detail = cache.get_entity_detail(source, entity_type, entity_id)
-        if detail is None:
-            return jsonify({"error": "Entity not found"}), 404
-        return jsonify(detail)
-    except Exception as e:
-        logger.error(f"Error getting metadata cache entity: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/metadata-cache/browse-musicbrainz', methods=['GET'])
-def metadata_cache_browse_musicbrainz():
-    """Browse MusicBrainz cache entries in the same format as metadata cache browse."""
-    try:
-        entity_type = request.args.get('entity_type', 'artist')
-        search = request.args.get('search', '').strip()
-        page = int(request.args.get('page', 1))
-        limit = int(request.args.get('limit', 48))
-        offset = (page - 1) * limit
-
-        database = get_database()
-        conn = database._get_connection()
-        try:
-            cursor = conn.cursor()
-
-            where_parts = []
-            params = []
-            if entity_type:
-                where_parts.append("entity_type = ?")
-                params.append(entity_type)
-            if search:
-                where_parts.append("LOWER(entity_name) LIKE LOWER(?)")
-                params.append(f"%{search}%")
-
-            where_clause = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
-
-            cursor.execute(f"SELECT COUNT(*) FROM musicbrainz_cache {where_clause}", params)
-            total = cursor.fetchone()[0]
-
-            cursor.execute(f"""
-                SELECT * FROM musicbrainz_cache
-                {where_clause}
-                ORDER BY last_updated DESC
-                LIMIT ? OFFSET ?
-            """, params + [limit, offset])
-
-            items = []
-            for row in cursor.fetchall():
-                r = dict(row)
-                matched = r.get('musicbrainz_id') is not None
-                items.append({
-                    'entity_id': r.get('musicbrainz_id') or f"mb-{r.get('entity_type','')}-{r.get('entity_name','')}",
-                    'source': 'musicbrainz',
-                    'name': r.get('entity_name', ''),
-                    'artist_name': r.get('artist_name', ''),
-                    'image_url': None,
-                    'popularity': int((r.get('match_confidence') or 0) * 100),
-                    'access_count': 1,
-                    'last_accessed_at': r.get('last_updated', ''),
-                    'created_at': r.get('last_updated', ''),
-                    '_mb_matched': matched,
-                    '_mb_id': r.get('musicbrainz_id', ''),
-                })
-
-            return jsonify({'items': items, 'total': total, 'offset': offset})
-        finally:
-            conn.close()
-    except Exception as e:
-        logger.error(f"Error browsing MusicBrainz cache: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/metadata-cache/clear', methods=['DELETE'])
-@admin_only
-def metadata_cache_clear():
-    """Clear cached metadata. Optional query params: source, type."""
-    try:
-        cache = get_metadata_cache()
-        source = request.args.get('source')
-        entity_type = request.args.get('type')
-        cleared = cache.clear(
-            source=source if source else None,
-            entity_type=entity_type if entity_type else None
-        )
-        return jsonify({"success": True, "cleared": cleared})
-    except Exception as e:
-        logger.error(f"Error clearing metadata cache: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/metadata-cache/evict', methods=['POST'])
-@admin_only
-def metadata_cache_evict():
-    """Evict expired entries from the metadata cache."""
-    try:
-        cache = get_metadata_cache()
-        evicted = cache.evict_expired()
-        return jsonify({"success": True, "evicted": evicted})
-    except Exception as e:
-        logger.error(f"Error evicting metadata cache: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/metadata-cache/clear-musicbrainz', methods=['DELETE'])
-@admin_only
-def metadata_cache_clear_musicbrainz():
-    """Clear MusicBrainz cache entries. Optional query param: failed_only=true."""
-    try:
-        cache = get_metadata_cache()
-        failed_only = request.args.get('failed_only', '').lower() == 'true'
-        cleared = cache.clear_musicbrainz(failed_only=failed_only)
-        return jsonify({"success": True, "cleared": cleared})
-    except Exception as e:
-        logger.error(f"Error clearing MusicBrainz cache: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/metadata-cache/failed-mb-lookups', methods=['GET'])
-def metadata_cache_failed_mb_lookups():
-    """Get all failed MusicBrainz lookups with pagination and filtering."""
-    try:
-        entity_type = request.args.get('entity_type', '')
-        search = request.args.get('search', '').strip()
-        page = int(request.args.get('page', 1))
-        limit = int(request.args.get('limit', 50))
-        offset = (page - 1) * limit
-        # Only fetch type_counts on first load (page 1, no filters) — frontend caches them
-        include_counts = request.args.get('counts', '').lower() == 'true'
-
-        database = get_database()
-        conn = database._get_connection()
-        try:
-            cursor = conn.cursor()
-            where_parts = ["musicbrainz_id IS NULL"]
-            params = []
-            if entity_type:
-                where_parts.append("entity_type = ?")
-                params.append(entity_type)
-            if search:
-                where_parts.append("(entity_name LIKE ? COLLATE NOCASE OR artist_name LIKE ? COLLATE NOCASE)")
-                params.extend([f"%{search}%", f"%{search}%"])
-
-            where_clause = f"WHERE {' AND '.join(where_parts)}"
-
-            # Single query: fetch items + use SQL window for total count
-            cursor.execute(f"""
-                SELECT id, entity_type, entity_name, artist_name, match_confidence, last_updated,
-                       COUNT(*) OVER() as _total
-                FROM musicbrainz_cache {where_clause}
-                ORDER BY last_updated DESC
-                LIMIT ? OFFSET ?
-            """, params + [limit, offset])
-
-            rows = cursor.fetchall()
-            total = rows[0]['_total'] if rows else 0
-            items = [{
-                'id': r['id'],
-                'entity_type': r['entity_type'],
-                'entity_name': r['entity_name'],
-                'artist_name': r['artist_name'] or '',
-                'confidence': r['match_confidence'] or 0,
-                'last_updated': r['last_updated'] or '',
-            } for r in rows]
-
-            result = {'items': items, 'total': total, 'page': page}
-
-            # Type counts only when requested (avoids full table scan on every tab switch)
-            if include_counts:
-                cursor.execute("""
-                    SELECT entity_type, COUNT(*) as cnt
-                    FROM musicbrainz_cache WHERE musicbrainz_id IS NULL
-                    GROUP BY entity_type
-                """)
-                result['type_counts'] = {row['entity_type']: row['cnt'] for row in cursor.fetchall()}
-
-            return jsonify(result)
-        finally:
-            conn.close()
-    except Exception as e:
-        logger.error(f"Error getting failed MB lookups: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/metadata-cache/mb-entry/<int:entry_id>', methods=['DELETE'])
-def metadata_cache_delete_mb_entry(entry_id):
-    """Delete a single MusicBrainz cache entry by ID."""
-    try:
-        database = get_database()
-        conn = database._get_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM musicbrainz_cache WHERE id = ?", (entry_id,))
-            conn.commit()
-            return jsonify({"success": True, "deleted": cursor.rowcount})
-        finally:
-            conn.close()
-    except Exception as e:
-        logger.error(f"Error deleting MB cache entry: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
+# /api/metadata-cache* endpoints: lifted to api/metadata_cache.py.
 @app.route('/api/musicbrainz/search', methods=['GET'])
 def musicbrainz_search_api():
     """Search MusicBrainz for manual matching. Returns raw results."""
@@ -19609,42 +19061,6 @@ def musicbrainz_recording_lookup_api(mbid):
     except Exception as e:
         logger.error(f"Error looking up MB recording {mbid}: {e}")
         return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/metadata-cache/mb-match', methods=['POST'])
-def metadata_cache_save_mb_match():
-    """Save a manual MusicBrainz match for a failed lookup."""
-    try:
-        data = request.get_json()
-        entry_id = data.get('entry_id')
-        mbid = data.get('mbid', '').strip()
-        mb_name = data.get('mb_name', '').strip()
-
-        if not entry_id or not mbid:
-            return jsonify({"success": False, "error": "Missing entry_id or mbid"}), 400
-
-        database = get_database()
-        conn = database._get_connection()
-        try:
-            cursor = conn.cursor()
-            # Update the failed entry with the user-selected MBID
-            cursor.execute("""
-                UPDATE musicbrainz_cache
-                SET musicbrainz_id = ?, match_confidence = 100, metadata_json = ?, last_updated = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (mbid, json.dumps({'name': mb_name, 'manual_match': True}), entry_id))
-            conn.commit()
-
-            if cursor.rowcount == 0:
-                return jsonify({"success": False, "error": "Entry not found"}), 404
-
-            logger.info(f"Manual MB match: entry {entry_id} → {mbid} ({mb_name})")
-            return jsonify({"success": True})
-        finally:
-            conn.close()
-    except Exception as e:
-        logger.error(f"Error saving MB match: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
 
 
 # ===============================
@@ -27160,33 +26576,6 @@ def get_itunes_link_discovery_status(url_hash):
     return _get_source_discovery_status(itunes_link_discovery_states, url_hash, "iTunes Link discovery not found", "iTunes Link")
 
 
-def _update_itunes_link_discovery_result(identifier, track_index, spotify_track):
-    state = itunes_link_discovery_states.get(identifier)
-    if not state:
-        return None, ('Discovery state not found', 404)
-    if track_index >= len(state['discovery_results']):
-        return None, ('Invalid track index', 400)
-
-    result = state['discovery_results'][track_index]
-    old_status = result.get('status')
-    result['status'] = 'Found'
-    result['status_class'] = 'found'
-    result['spotify_track'] = spotify_track['name']
-    result['spotify_artist'] = _join_artist_names(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else _extract_artist_name(spotify_track['artists'])
-    result['spotify_album'] = spotify_track['album']
-    result['spotify_id'] = spotify_track['id']
-    result['duration'] = '0:00'
-    duration_ms = spotify_track.get('duration_ms', 0)
-    if duration_ms:
-        result['duration'] = f"{duration_ms // 60000}:{(duration_ms % 60000) // 1000:02d}"
-    result['spotify_data'] = _build_fix_modal_spotify_data(spotify_track)
-    result['wing_it_fallback'] = False
-    result['manual_match'] = True
-    if old_status not in ('found', 'Found'):
-        state['spotify_matches'] = state.get('spotify_matches', 0) + 1
-    return result, None
-
-
 @app.route('/api/itunes-link/discovery/update_match', methods=['POST'])
 def update_itunes_link_discovery_match():
     try:
@@ -27322,32 +26711,6 @@ def update_itunes_link_playlist_phase(url_hash):
         return jsonify({"error": str(e)}), 500
 
 
-def _build_itunes_link_discovery_deps():
-    return _discovery_spotify_public.SpotifyPublicDiscoveryDeps(
-        spotify_public_discovery_states=itunes_link_discovery_states,
-        spotify_client=spotify_client,
-        pause_enrichment_workers=_pause_enrichment_workers,
-        resume_enrichment_workers=_resume_enrichment_workers,
-        get_active_discovery_source=_get_active_discovery_source,
-        get_metadata_fallback_client=_get_metadata_fallback_client,
-        get_discovery_cache_key=_get_discovery_cache_key,
-        get_database=get_database,
-        validate_discovery_cache_artist=_validate_discovery_cache_artist,
-        search_spotify_for_tidal_track=_search_spotify_for_tidal_track,
-        build_discovery_wing_it_stub=_build_discovery_wing_it_stub,
-        add_activity_item=add_activity_item,
-        source_label="iTunes Link",
-        activity_label="iTunes Link",
-        original_track_key="itunes_link_track",
-    )
-
-
-def _run_itunes_link_discovery_worker(url_hash):
-    return _discovery_spotify_public.run_spotify_public_discovery_worker(
-        url_hash, _build_itunes_link_discovery_deps()
-    )
-
-
 @app.route('/api/itunes-link/sync/start/<url_hash>', methods=['POST'])
 def start_itunes_link_sync(url_hash):
     try:
@@ -27398,6 +26761,135 @@ def get_itunes_link_sync_status(url_hash):
 @app.route('/api/itunes-link/sync/cancel/<url_hash>', methods=['POST'])
 def cancel_itunes_link_sync(url_hash):
     return _cancel_source_sync(itunes_link_discovery_states, url_hash, "iTunes Link", "iTunes Link not found")
+
+
+@app.route('/api/itunes-link/discovery/unmatch', methods=['POST'])
+@app.route('/api/beatport/discovery/unmatch', methods=['POST'])
+@app.route('/api/listenbrainz/discovery/unmatch', methods=['POST'])
+def unmatch_discovery_track():
+    """Remove a discovery match — sets track back to Not Found"""
+    try:
+        data = request.get_json()
+        identifier = data.get('identifier')
+        track_index = data.get('track_index')
+
+        if not identifier or track_index is None:
+            return jsonify({'success': False, 'error': 'Missing required fields'}), 400
+
+        # Find the state dict for this discovery
+        state = (youtube_playlist_states.get(identifier)
+                 or tidal_discovery_states.get(identifier)
+                 or deezer_discovery_states.get(identifier)
+                 or spotify_public_discovery_states.get(identifier)
+                 or itunes_link_discovery_states.get(identifier)
+                 or beatport_chart_states.get(identifier)
+                 or listenbrainz_playlist_states.get(identifier))
+
+        if not state:
+            return jsonify({'success': False, 'error': 'Discovery state not found'}), 404
+
+        results = state.get('discovery_results', [])
+        if track_index >= len(results):
+            return jsonify({'success': False, 'error': 'Invalid track index'}), 400
+
+        result = results[track_index]
+        old_status = result.get('status_class')
+
+        # Clear the match
+        result['status'] = 'Not Found'
+        result['status_class'] = 'not-found'
+        result['spotify_track'] = ''
+        result['spotify_artist'] = ''
+        result['spotify_album'] = ''
+        result['spotify_data'] = None
+        result['matched_data'] = None
+        result['match_data'] = None
+        result['confidence'] = 0
+        result['wing_it_fallback'] = False
+        result['manual_match'] = False
+
+        # Update match count
+        if old_status in ('found', 'wing-it'):
+            state['spotify_matches'] = max(0, state.get('spotify_matches', 0) - 1)
+        if old_status == 'wing-it':
+            state['wing_it_count'] = max(0, state.get('wing_it_count', 0) - 1)
+
+        # If mirrored playlist, also clear in DB
+        if identifier.startswith('mirrored_'):
+            try:
+                db = get_database()
+                tracks = state.get('tracks', [])
+                if track_index < len(tracks):
+                    db_track_id = tracks[track_index].get('db_track_id')
+                    if db_track_id:
+                        db.update_mirrored_track_extra_data(db_track_id, {
+                            'discovered': False,
+                            'discovery_attempted': True,
+                            'provider': '',
+                            'unmatched_by_user': True,
+                        })
+            except Exception as e:
+                logger.error(f"Error clearing mirrored track match: {e}")
+
+        logger.info(f"Unmatched discovery track {track_index}: {result.get('yt_track', result.get('lb_track', ''))}")
+        return jsonify({'success': True})
+
+    except Exception as e:
+        logger.error(f"Error unmatching discovery track: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _update_itunes_link_discovery_result(identifier, track_index, spotify_track):
+    state = itunes_link_discovery_states.get(identifier)
+    if not state:
+        return None, ('Discovery state not found', 404)
+    if track_index >= len(state['discovery_results']):
+        return None, ('Invalid track index', 400)
+
+    result = state['discovery_results'][track_index]
+    old_status = result.get('status')
+    result['status'] = 'Found'
+    result['status_class'] = 'found'
+    result['spotify_track'] = spotify_track['name']
+    result['spotify_artist'] = _join_artist_names(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else _extract_artist_name(spotify_track['artists'])
+    result['spotify_album'] = spotify_track['album']
+    result['spotify_id'] = spotify_track['id']
+    result['duration'] = '0:00'
+    duration_ms = spotify_track.get('duration_ms', 0)
+    if duration_ms:
+        result['duration'] = f"{duration_ms // 60000}:{(duration_ms % 60000) // 1000:02d}"
+    result['spotify_data'] = _build_fix_modal_spotify_data(spotify_track)
+    result['wing_it_fallback'] = False
+    result['manual_match'] = True
+    if old_status not in ('found', 'Found'):
+        state['spotify_matches'] = state.get('spotify_matches', 0) + 1
+    return result, None
+
+
+def _build_itunes_link_discovery_deps():
+    return _discovery_spotify_public.SpotifyPublicDiscoveryDeps(
+        spotify_public_discovery_states=itunes_link_discovery_states,
+        spotify_client=spotify_client,
+        pause_enrichment_workers=_pause_enrichment_workers,
+        resume_enrichment_workers=_resume_enrichment_workers,
+        get_active_discovery_source=_get_active_discovery_source,
+        get_metadata_fallback_client=_get_metadata_fallback_client,
+        get_discovery_cache_key=_get_discovery_cache_key,
+        get_database=get_database,
+        validate_discovery_cache_artist=_validate_discovery_cache_artist,
+        search_spotify_for_tidal_track=_search_spotify_for_tidal_track,
+        build_discovery_wing_it_stub=_build_discovery_wing_it_stub,
+        add_activity_item=add_activity_item,
+        source_label="iTunes Link",
+        activity_label="iTunes Link",
+        original_track_key="itunes_link_track",
+    )
+
+
+def _run_itunes_link_discovery_worker(url_hash):
+    return _discovery_spotify_public.run_spotify_public_discovery_worker(
+        url_hash, _build_itunes_link_discovery_deps()
+    )
 
 
 # ===================================================================
@@ -27552,82 +27044,6 @@ def get_youtube_discovery_status(url_hash):
 @app.route('/api/tidal/discovery/unmatch', methods=['POST'])
 @app.route('/api/deezer/discovery/unmatch', methods=['POST'])
 @app.route('/api/spotify-public/discovery/unmatch', methods=['POST'])
-@app.route('/api/itunes-link/discovery/unmatch', methods=['POST'])
-@app.route('/api/beatport/discovery/unmatch', methods=['POST'])
-@app.route('/api/listenbrainz/discovery/unmatch', methods=['POST'])
-def unmatch_discovery_track():
-    """Remove a discovery match — sets track back to Not Found"""
-    try:
-        data = request.get_json()
-        identifier = data.get('identifier')
-        track_index = data.get('track_index')
-
-        if not identifier or track_index is None:
-            return jsonify({'success': False, 'error': 'Missing required fields'}), 400
-
-        # Find the state dict for this discovery
-        state = (youtube_playlist_states.get(identifier)
-                 or tidal_discovery_states.get(identifier)
-                 or deezer_discovery_states.get(identifier)
-                 or spotify_public_discovery_states.get(identifier)
-                 or itunes_link_discovery_states.get(identifier)
-                 or beatport_chart_states.get(identifier)
-                 or listenbrainz_playlist_states.get(identifier))
-
-        if not state:
-            return jsonify({'success': False, 'error': 'Discovery state not found'}), 404
-
-        results = state.get('discovery_results', [])
-        if track_index >= len(results):
-            return jsonify({'success': False, 'error': 'Invalid track index'}), 400
-
-        result = results[track_index]
-        old_status = result.get('status_class')
-
-        # Clear the match
-        result['status'] = 'Not Found'
-        result['status_class'] = 'not-found'
-        result['spotify_track'] = ''
-        result['spotify_artist'] = ''
-        result['spotify_album'] = ''
-        result['spotify_data'] = None
-        result['matched_data'] = None
-        result['match_data'] = None
-        result['confidence'] = 0
-        result['wing_it_fallback'] = False
-        result['manual_match'] = False
-
-        # Update match count
-        if old_status in ('found', 'wing-it'):
-            state['spotify_matches'] = max(0, state.get('spotify_matches', 0) - 1)
-        if old_status == 'wing-it':
-            state['wing_it_count'] = max(0, state.get('wing_it_count', 0) - 1)
-
-        # If mirrored playlist, also clear in DB
-        if identifier.startswith('mirrored_'):
-            try:
-                db = get_database()
-                tracks = state.get('tracks', [])
-                if track_index < len(tracks):
-                    db_track_id = tracks[track_index].get('db_track_id')
-                    if db_track_id:
-                        db.update_mirrored_track_extra_data(db_track_id, {
-                            'discovered': False,
-                            'discovery_attempted': True,
-                            'provider': '',
-                            'unmatched_by_user': True,
-                        })
-            except Exception as e:
-                logger.error(f"Error clearing mirrored track match: {e}")
-
-        logger.info(f"Unmatched discovery track {track_index}: {result.get('yt_track', result.get('lb_track', ''))}")
-        return jsonify({'success': True})
-
-    except Exception as e:
-        logger.error(f"Error unmatching discovery track: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
 @app.route('/api/youtube/discovery/update_match', methods=['POST'])
 def update_youtube_discovery_match():
     """Update a YouTube discovery result with manually selected Spotify track"""
@@ -30149,7 +29565,6 @@ _DISCOVER_SHELF_TTL_S = 1800
 
 def _discover_shelf_cache(key_extra=None):
     def deco(fn):
-        import functools
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
@@ -37111,209 +36526,7 @@ except Exception as _ai_err:
     logger.error(f"Auto-import worker init failed: {_ai_err}")
 
 
-@app.route('/api/auto-import/status', methods=['GET'])
-def auto_import_status():
-    if not auto_import_worker:
-        return jsonify({"success": False, "error": "Auto-import not available"}), 500
-    return jsonify({"success": True, **auto_import_worker.get_status()})
-
-
-@app.route('/api/auto-import/toggle', methods=['POST'])
-def auto_import_toggle():
-    if not auto_import_worker:
-        return jsonify({"success": False, "error": "Auto-import not available"}), 500
-    data = request.get_json() or {}
-    enabled = data.get('enabled', not auto_import_worker.running)
-    if enabled:
-        config_manager.set('auto_import.enabled', True)
-        if not auto_import_worker.running:
-            auto_import_worker.start()
-    else:
-        config_manager.set('auto_import.enabled', False)
-        auto_import_worker.stop()
-    return jsonify({"success": True, "enabled": enabled})
-
-
-@app.route('/api/auto-import/settings', methods=['GET', 'POST'])
-def auto_import_settings():
-    def normalize_quality_profile_id(raw_profile_id):
-        if raw_profile_id in (None, '', 0, '0'):
-            return None
-        try:
-            profile_id = int(raw_profile_id)
-        except (TypeError, ValueError):
-            return None
-        return profile_id if profile_id > 0 else None
-
-    if request.method == 'GET':
-        return jsonify({
-            "success": True,
-            "enabled": config_manager.get('auto_import.enabled', False),
-            "scan_interval": config_manager.get('auto_import.scan_interval', 60),
-            "confidence_threshold": config_manager.get('auto_import.confidence_threshold', 0.9),
-            "auto_process": config_manager.get('auto_import.auto_process', True),
-            # Per-context quality profile override (see core/auto_import_worker.py
-            # _process_matches) — None/0 means "use the app-wide default profile",
-            # same as every other context that doesn't specify its own.
-            "quality_profile_id": normalize_quality_profile_id(config_manager.get('auto_import.quality_profile_id')),
-        })
-    data = request.get_json() or {}
-    if 'quality_profile_id' in data:
-        raw_profile_id = data.get('quality_profile_id')
-        if raw_profile_id in (None, '', 0, '0'):
-            data['quality_profile_id'] = None
-        else:
-            profile_id = normalize_quality_profile_id(raw_profile_id)
-            if profile_id is None:
-                return jsonify({"success": False, "error": "Invalid quality profile"}), 400
-
-            try:
-                from database.music_database import MusicDatabase
-                db = MusicDatabase()
-                profile_ids = {int(profile.get('id')) for profile in db.list_quality_profiles()}
-            except Exception as e:
-                logger.error(f"Error validating Auto-Import quality profile: {e}")
-                return jsonify({"success": False, "error": str(e)}), 500
-
-            if profile_id not in profile_ids:
-                return jsonify({"success": False, "error": "Quality profile not found"}), 404
-            data['quality_profile_id'] = profile_id
-
-    for key in ['enabled', 'scan_interval', 'confidence_threshold', 'auto_process', 'quality_profile_id']:
-        if key in data:
-            config_manager.set(f'auto_import.{key}', data[key])
-    return jsonify({"success": True})
-
-
-@app.route('/api/auto-import/results', methods=['GET'])
-def auto_import_results():
-    if not auto_import_worker:
-        return jsonify({"success": False, "error": "Auto-import not available"}), 500
-    status_filter = request.args.get('status')
-    limit = request.args.get('limit', 50, type=int)
-    results = auto_import_worker.get_results(status_filter=status_filter, limit=limit)
-    return jsonify({"success": True, "results": results})
-
-
-@app.route('/api/auto-import/approve/<int:item_id>', methods=['POST'])
-def auto_import_approve(item_id):
-    if not auto_import_worker:
-        return jsonify({"success": False, "error": "Auto-import not available"}), 500
-    result = auto_import_worker.approve_item(item_id)
-    if result.get('success') and auto_import_worker.running:
-        threading.Thread(
-            target=auto_import_worker.trigger_scan,
-            daemon=True,
-            name='AutoImportApprovalScan',
-        ).start()
-    return jsonify(result)
-
-
-@app.route('/api/auto-import/reject/<int:item_id>', methods=['POST'])
-def auto_import_reject(item_id):
-    if not auto_import_worker:
-        return jsonify({"success": False, "error": "Auto-import not available"}), 500
-    return jsonify(auto_import_worker.reject_item(item_id))
-
-
-@app.route('/api/auto-import/scan-now', methods=['POST'])
-def auto_import_scan_now():
-    """Trigger an immediate scan cycle.
-
-    Routes through `trigger_scan()`, the canonical entry point shared
-    with the worker's timer loop. Pre-refactor this endpoint spawned
-    a fresh `_scan_cycle` thread per click — emergent parallelism
-    that grew unbounded with each click and produced racy access to
-    candidate-tracking state. Post-refactor:
-
-    - Manual triggers + the timer loop share one scan-lock, so only
-      one scan runs at a time
-    - Per-candidate processing happens on the worker's bounded
-      `ThreadPoolExecutor` (default 3 workers — predictable
-      concurrency, configurable via `auto_import.max_workers`)
-    - Multiple "Scan Now" clicks while a scan is in flight no-op
-      instead of stacking up parallel scanners
-
-    Runs the scan in a background thread so the HTTP response returns
-    immediately — `trigger_scan()` itself is fast (just enumeration +
-    submit), but a slow filesystem walk on a large staging dir could
-    still hold the request thread for seconds. Detached thread is
-    safe: scan-lock prevents duplicate work, executor handles
-    per-candidate processing.
-    """
-    if not auto_import_worker:
-        return jsonify({"success": False, "error": "Auto-import not available"}), 500
-    if not auto_import_worker.running:
-        return jsonify({"success": False, "error": "Auto-import is not running"}), 400
-    threading.Thread(
-        target=auto_import_worker.trigger_scan,
-        daemon=True,
-        name='AutoImportScanNow',
-    ).start()
-    return jsonify({"success": True})
-
-
-@app.route('/api/auto-import/approve-all', methods=['POST'])
-def auto_import_approve_all():
-    """Approve all pending review items."""
-    if not auto_import_worker:
-        return jsonify({"success": False, "error": "Auto-import not available"}), 500
-    try:
-        results = auto_import_worker.get_results(status_filter='pending_review', limit=200)
-        count = 0
-        for r in results:
-            result = auto_import_worker.approve_item(r['id'])
-            if result.get('success'):
-                count += 1
-        if count and auto_import_worker.running:
-            threading.Thread(
-                target=auto_import_worker.trigger_scan,
-                daemon=True,
-                name='AutoImportApprovalScan',
-            ).start()
-        return jsonify({"success": True, "count": count})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/auto-import/clear-completed', methods=['POST'])
-def auto_import_clear_completed():
-    """Remove completed/imported items from history.
-
-    `processing` rows are included so zombie entries (server restarted
-    mid-import → `_record_in_progress` row never got finalized) get
-    swept. Live in-flight imports are protected by intersecting against
-    `_snapshot_active()` — anything currently registered in the worker's
-    `_active_imports` map keeps its row. `pending_review` is left out so
-    user still has to approve/reject those explicitly.
-    """
-    if not auto_import_worker:
-        return jsonify({"success": False, "error": "Auto-import not available"}), 500
-    try:
-        active_hashes = {e['folder_hash'] for e in auto_import_worker._snapshot_active()}
-        db = get_database()
-        with db._get_connection() as conn:
-            cursor = conn.cursor()
-            base_sql = (
-                "DELETE FROM auto_import_history "
-                "WHERE status IN ('completed', 'partial', 'approved', 'failed', "
-                "'needs_identification', 'rejected', 'processing')"
-            )
-            if active_hashes:
-                placeholders = ','.join('?' * len(active_hashes))
-                cursor.execute(
-                    f"{base_sql} AND folder_hash NOT IN ({placeholders})",
-                    tuple(active_hashes),
-                )
-            else:
-                cursor.execute(base_sql)
-            count = cursor.rowcount
-            conn.commit()
-        return jsonify({"success": True, "count": count})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
+# /api/auto-import* endpoints: lifted to api/auto_import.py.
 @app.route('/api/import/staging/suggestions', methods=['GET'])
 def import_staging_suggestions():
     payload, status = _import_staging_suggestions()
@@ -38132,6 +37345,20 @@ _configure_stats_api(get_database=get_database, config_manager=config_manager,
                      listening_stats_worker_getter=lambda: listening_stats_worker,
                      lastfm_import_worker_getter=lambda: lastfm_import_worker)
 app.register_blueprint(_create_stats_blueprint())
+
+# Quality profiles / auto-import watcher / metadata-cache browser - three
+# self-contained clusters lifted to their own api/ modules.
+from api.quality_profiles import configure as _cfg_qp, create_blueprint as _bp_qp
+_cfg_qp(get_database=get_database, add_activity_item=add_activity_item)
+app.register_blueprint(_bp_qp())
+from api.auto_import import configure as _cfg_ai, create_blueprint as _bp_ai
+_cfg_ai(get_database=get_database, config_manager=config_manager,
+        _auto_import_worker=lambda: auto_import_worker)
+app.register_blueprint(_bp_ai())
+from api.metadata_cache import configure as _cfg_mc, create_blueprint as _bp_mc
+_cfg_mc(get_database=get_database, get_metadata_cache=get_metadata_cache,
+        docker_resolve_path=docker_resolve_path)
+app.register_blueprint(_bp_mc())
 
 from api.labels import configure as _configure_labels_api, create_blueprint as _create_labels_blueprint
 _configure_labels_api(db_getter=get_database, itunes_getter=_get_itunes_client,
