@@ -7351,7 +7351,7 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 
 .version-modal-subtitle {
     color: rgba(255, 255, 255, 0.7);
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 500;
     letter-spacing: 0.1px;
     margin: 0;
@@ -7399,7 +7399,8 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 
 .version-section-title {
     color: rgb(var(--accent-light-rgb));
-    font-size: 14px;
+    /* #1184: was 14px over 11px body - reading glasses territory */
+    font-size: 17px;
     font-weight: 600;
     letter-spacing: -0.2px;
     margin: 0 0 8px 0;
@@ -7408,8 +7409,8 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 
 .version-section-description {
     color: rgba(255, 255, 255, 0.8);
-    font-size: 11px;
-    line-height: 1.4;
+    font-size: 13.5px;
+    line-height: 1.55;
     margin: 0 0 12px 0;
     font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
 }
@@ -7421,18 +7422,18 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 }
 
 .version-feature-item {
-    color: rgba(255, 255, 255, 0.7);
-    font-size: 10px;
-    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 13px;
+    line-height: 1.6;
     padding: 2px 0 2px 8px;
-    margin: 2px 0;
+    margin: 3px 0;
     font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
 }
 
 .version-usage-note {
     color: rgb(var(--accent-light-rgb));
-    font-size: 10px;
-    line-height: 1.4;
+    font-size: 12.5px;
+    line-height: 1.5;
     margin: 8px 0 0 0;
     padding: 8px 0;
     font-style: italic;
