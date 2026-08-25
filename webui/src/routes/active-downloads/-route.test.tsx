@@ -239,6 +239,24 @@ describe('the active-downloads route', () => {
     expect(pills[1].textContent).toContain('Deleted');
   });
 
+  it('the review badge counts only what the views can show', async () => {
+    // "hundreds in the quarantine badge, list empty" (aug 25): with no
+    // unverified view possible, unverified rows must not inflate the pill
+    stub({ acoustid: { success: true, acoustid_enabled: false, require_verified: false } });
+    server.use(
+      http.get('/api/review-queue/summary', () =>
+        HttpResponse.json({ success: true, quarantine: 2, unverified: 300, total: 302 }),
+      ),
+    );
+    const { container } = renderRoute();
+    await settled();
+    await waitFor(() =>
+      expect(container.querySelector('[data-filter="unverified"] .adl-pill-badge')?.textContent).toBe(
+        '2',
+      ),
+    );
+  });
+
   it('hides Cancel All and Clear Completed when there is nothing to act on', async () => {
     const { container } = renderRoute();
     await settled();
