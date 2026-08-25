@@ -85,8 +85,10 @@ def test_removes_real_duplicate_file_and_db_row(tmp_path):
     assert not dupe.exists()       # moved out of its library location
     assert keep.exists()           # keeper untouched
     assert _track_ids(db) == ['1']   # duplicate DB row gone
-    # Recoverable: the duplicate lands in <transfer>/deleted, not hard-deleted.
-    quarantined = list((tmp_path / "Transfer" / "deleted").rglob("*.flac"))
+    # Recoverable: the duplicate lands in <transfer>/.deleted, not hard-deleted.
+    # Hidden spelling on purpose — media servers skip dot-folders, so quarantined
+    # files stop showing up in people's libraries (Discord, Jose).
+    quarantined = list((tmp_path / "Transfer" / ".deleted").rglob("*.flac"))
     assert len(quarantined) == 1
     assert quarantined[0].read_text() == "d"   # same file, recoverable
     assert 'moved 1 file(s) to the deleted folder' in res['message']

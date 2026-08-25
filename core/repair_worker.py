@@ -945,8 +945,23 @@ class RepairWorker:
         run_status = 'completed'
         run_error = None
 
+        # The dialog Boulder promised on Discord, enforced where it protects
+        # every caller (UI, automations, Run Now alike): a job that moves or
+        # rewrites library files may not run LIVE against a library this
+        # process cannot see. Dry runs still work — findings are reviewable.
+        if getattr(job, 'writes_library_files', False) and self._job_runs_live(job):
+            ok, detail = self.library_visibility_preflight()
+            if not ok:
+                logger.error("%s refused to run live: %s", job.display_name, detail)
+                _report_progress(phase='Refused — library not visible',
+                                 log_line=detail, log_type='error')
+                result.errors += 1
+                run_status = 'failed'
+                run_error = detail[:500]
+
         try:
-            result = job.scan(context)
+            if run_status != 'failed':
+                result = job.scan(context)
         except Exception as e:
             logger.error("Job %s failed: %s", job_id, e, exc_info=True)
             result.errors += 1
@@ -1422,6 +1437,66 @@ class RepairWorker:
         finally:
             if conn:
                 conn.close()
+
+    def library_visibility_preflight(self, sample_size: int = 200) -> tuple:
+        """Can this process actually SEE the library the catalogue describes?
+
+        Samples stored track paths and resolves them the same way every repair
+        job does. When almost none resolve, the catalogue and the filesystem are
+        different worlds — Navidrome with "Report Real Path" off, or a Docker
+        mount that isn't there — and a LIVE file-writing job must not run: it
+        would rearrange (or quarantine) a library it is blind to. Same idea as
+        the dead-file cleaner's mass-false-positive guard, applied BEFORE a job
+        that moves files instead of after one that only reports.
+
+        Returns ``(ok, detail)``. Errs on the side of running: an unreadable DB
+        or a tiny library never blocks a job the user asked for.
+        """
+        try:
+            conn = self.db._get_connection()
+            try:
+                rows = conn.execute(
+                    "SELECT file_path FROM tracks WHERE file_path IS NOT NULL "
+                    "AND file_path != '' ORDER BY RANDOM() LIMIT ?",
+                    (int(sample_size),)).fetchall()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug("Visibility preflight skipped (db read failed): %s", e)
+            return True, ''
+        # Below this size a poor resolve rate can be real (a hand-broken library),
+        # and the stakes are small anyway. Mirrors the dead-file cleaner's floor.
+        if len(rows) < 25:
+            return True, ''
+        download_folder = None
+        if self._config_manager:
+            download_folder = self._config_manager.get('soulseek.download_path', '')
+        resolved = 0
+        for row in rows:
+            raw = row['file_path'] if not isinstance(row, tuple) else row[0]
+            hit = _resolve_file_path(raw, self.transfer_folder, download_folder,
+                                     config_manager=self._config_manager)
+            if hit and os.path.exists(hit):
+                resolved += 1
+        fraction = resolved / len(rows)
+        if fraction >= 0.5:
+            return True, ''
+        from core.repair_jobs.dead_file_cleaner import _path_mapping_hint
+        return False, (
+            f"Refused to run live: only {resolved} of {len(rows)} sampled tracks "
+            f"resolve to files on disk, so SoulSync cannot see the library the "
+            f"catalogue describes and a live run would move or rewrite the wrong "
+            f"files. Fix the path mapping, run a deep scan, then try again. "
+            f"{_path_mapping_hint(self._config_manager)}"
+        )
+
+    def _job_runs_live(self, job) -> bool:
+        """Whether this job's next run will WRITE (its dry_run setting is off)."""
+        try:
+            cfg = self.get_job_config(job.job_id) or {}
+            return not (cfg.get('settings') or {}).get('dry_run', True)
+        except Exception:
+            return False
 
     def retire_vanished_findings(self, job_id: str) -> int:
         """Close this job's pending findings whose file is no longer on disk.
@@ -3196,7 +3271,8 @@ class RepairWorker:
         if self._config_manager:
             download_folder = self._config_manager.get('soulseek.download_path', '')
         transfer_norm = os.path.normpath(self.transfer_folder)
-        deleted_root = os.path.join(self.transfer_folder, 'deleted')
+        from core.repair_jobs.base import deleted_quarantine_root
+        deleted_root = deleted_quarantine_root(self.transfer_folder)
         files_deleted = 0
         files_failed = 0
         db_remove_ids = []

@@ -1401,10 +1401,11 @@ def preview_album_reorganize(
 
 def _is_in_deleted_quarantine(resolved_path, transfer_dir) -> bool:
     """True when ``resolved_path`` lives inside the duplicate-cleaner
-    quarantine folder (``<transfer_dir>/deleted/...``).
+    quarantine folder (``<transfer_dir>/.deleted/...``, or the legacy bare
+    ``deleted`` spelling older installs still carry).
 
     The Duplicate Cleaner (``core/library/duplicate_cleaner.py``) moves
-    de-duplicated files into ``<transfer_dir>/deleted/``. If the user's
+    de-duplicated files into the quarantine. If the user's
     media server scans the transfer folder (e.g. a ``/music`` root that
     contains both the library and the transfer dir), those quarantined
     files get real rows in SoulSync's DB — and Reorganize, being purely
@@ -1412,7 +1413,7 @@ def _is_in_deleted_quarantine(resolved_path, transfer_dir) -> bool:
     to the template location. This guard makes Reorganize skip them so
     the quarantine stays quarantined (#746).
 
-    Anchored to ``<transfer_dir>/deleted`` specifically so a legitimately
+    Anchored to the transfer dir specifically so a legitimately
     named artist/album like "Deleted" elsewhere in the library is NOT
     skipped. When ``transfer_dir`` is unavailable we fall back to an exact
     ``deleted`` path-SEGMENT match (mirrors the cleaner's own
@@ -1430,9 +1431,12 @@ def _is_in_deleted_quarantine(resolved_path, transfer_dir) -> bool:
 
     norm = _norm(resolved_path)
     if transfer_dir:
-        quarantine = _norm(os.path.join(transfer_dir, 'deleted'))
-        return norm == quarantine or norm.startswith(quarantine + '/')
-    return 'deleted' in norm.split('/')
+        for name in ('.deleted', 'deleted'):     # hidden spelling + legacy installs
+            quarantine = _norm(os.path.join(transfer_dir, name))
+            if norm == quarantine or norm.startswith(quarantine + '/'):
+                return True
+        return False
+    return any(seg in ('.deleted', 'deleted') for seg in norm.split('/'))
 
 
 def _display_relative_to_root(path, root):
