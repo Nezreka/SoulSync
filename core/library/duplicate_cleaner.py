@@ -174,6 +174,12 @@ def _run_duplicate_cleaner():
                         # Move the file
                         shutil.move(duplicate_file['full_path'], deleted_path)
 
+                        # remember where it came from so the deleted-files
+                        # manager can restore it and retention can age it
+                        from core.library.deleted_quarantine import record_deleted_entry
+                        record_deleted_entry(deleted_folder, deleted_path,
+                                             duplicate_file['full_path'], 'duplicate-cleaner')
+
                         # Track stats
                         deleted_count += 1
                         space_freed += duplicate_file['size']

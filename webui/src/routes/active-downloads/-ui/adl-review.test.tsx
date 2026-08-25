@@ -344,18 +344,28 @@ describe('AdlReviewBanner', () => {
     onDeleteAll: vi.fn(),
     onQuarantineApproveAll: vi.fn(),
     onQuarantineClearAll: vi.fn(),
+    deletedCount: 4,
+    onRestoreAllDeleted: vi.fn(),
+    onEmptyDeleted: vi.fn(),
   };
 
-  it('shows both pills with counts', () => {
+  it('shows all three pills with counts', () => {
     const { container } = render(<AdlReviewBanner {...props} />);
     const pills = [...container.querySelectorAll('.adl-pill')].map((p) => p.textContent);
-    expect(pills).toEqual(['⚠ Unverified (3)', '🛡 Quarantine (2)']);
+    expect(pills).toEqual(['⚠ Unverified (3)', '🛡 Quarantine (2)', '🗑 Deleted (4)']);
   });
 
   it('hides the unverified pill when no such queue can exist', () => {
     const { container } = render(<AdlReviewBanner {...props} acoustidEnabled={false} />);
     const pills = [...container.querySelectorAll('.adl-pill')].map((p) => p.textContent);
-    expect(pills).toEqual(['🛡 Quarantine (2)']);
+    // the deleted bin exists regardless of acoustid - only unverified hides
+    expect(pills).toEqual(['🛡 Quarantine (2)', '🗑 Deleted (4)']);
+  });
+
+  it('shows the deleted pill with no count until the bin has been loaded', () => {
+    const { container } = render(<AdlReviewBanner {...props} deletedCount={null} />);
+    const pills = [...container.querySelectorAll('.adl-pill')].map((p) => p.textContent);
+    expect(pills[2]).toBe('🗑 Deleted');
   });
 
   it('omits the quarantine count until it is actually known', () => {

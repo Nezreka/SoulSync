@@ -1,9 +1,10 @@
 import { useState } from 'react';
 
-import type { AdlDownload, AdlQuarantineEntry, AdlSubView } from '../-adl.types';
+import type { AdlDeletedEntry, AdlDownload, AdlQuarantineEntry, AdlSubView } from '../-adl.types';
 import type { QuarantineGroup } from '../-adl.use-verification';
 
 import {
+  formatBytes,
   qualityChipTitle,
   quarantineSourceLabel,
   quarantineTrigger,
@@ -371,24 +372,30 @@ export function AdlReviewBanner({
   unverifiedCount,
   quarantineCount,
   quarantineLoaded,
+  deletedCount,
   onSubView,
   onApproveAll,
   onCleanOrphans,
   onDeleteAll,
   onQuarantineApproveAll,
   onQuarantineClearAll,
+  onRestoreAllDeleted,
+  onEmptyDeleted,
 }: {
   subView: AdlSubView;
   acoustidEnabled: boolean;
   unverifiedCount: number;
   quarantineCount: number;
   quarantineLoaded: boolean;
+  deletedCount: number | null;
   onSubView: (view: AdlSubView) => void;
   onApproveAll: () => void;
   onCleanOrphans: () => void;
   onDeleteAll: () => void;
   onQuarantineApproveAll: () => void;
   onQuarantineClearAll: () => void;
+  onRestoreAllDeleted: () => void;
+  onEmptyDeleted: () => void;
 }) {
   return (
     <div className="adl-batch-filter-banner" id="verif-subview-banner">
@@ -412,8 +419,35 @@ export function AdlReviewBanner({
         {/* The count only appears once it is known, rather than showing (0). */}🛡 Quarantine
         {quarantineLoaded ? ` (${quarantineCount})` : ''}
       </button>
+      <button
+        type="button"
+        className={`adl-pill${subView === 'deleted' ? ' active' : ''}`}
+        title="Files removed by repair tools and the duplicate cleaner — restorable until purged"
+        onClick={() => onSubView('deleted')}
+      >
+        🗑 Deleted{deletedCount == null ? '' : ` (${deletedCount})`}
+      </button>
       <span className="verif-banner-spacer" />
-      {subView === 'quarantine' ? (
+      {subView === 'deleted' ? (
+        <>
+          <button
+            type="button"
+            className="adl-filter-banner-clear"
+            title="Put every file back exactly where it was removed from"
+            onClick={onRestoreAllDeleted}
+          >
+            ↩ Restore all
+          </button>
+          <button
+            type="button"
+            className="adl-filter-banner-clear verif-bulk-danger"
+            title="Permanently delete everything in the bin"
+            onClick={onEmptyDeleted}
+          >
+            🗑 Empty bin
+          </button>
+        </>
+      ) : subView === 'quarantine' ? (
         <>
           <button
             type="button"
@@ -461,5 +495,170 @@ export function AdlReviewBanner({
         </>
       )}
     </div>
+  );
+}
+
+
+/**
+ * One line under the banner saying what the current sub-view actually IS —
+ * uberdude72 and kvkarlsson both asked, so the page now answers.
+ */
+export function AdlReviewExplainer({ subView }: { subView: AdlSubView }) {
+  const text =
+    subView === 'unverified'
+      ? "these files imported fine but AcoustID couldn't hard-confirm them. approve means \"i listened, it's the right track\" — it marks the file human-verified and nothing flags it again. the other buttons help you check first."
+      : subView === 'quarantine'
+        ? 'these files failed verification and were never imported. approve pulls one out and imports it as if it had passed — nothing is renamed. delete removes the bad download for good.'
+        : 'files removed by repair tools and the duplicate cleaner land here instead of dying, hidden from media servers. restore puts one back exactly where it was.';
+  return (
+    <div className="adl-review-explainer" data-subview={subView}>
+      {text}
+    </div>
+  );
+}
+
+/* ── The deleted-files view (the music recycle bin) ──────────────────────── */
+
+export interface DeletedRowHandlers {
+  onRestore: () => void;
+  onPurge: () => void;
+}
+
+export function AdlDeletedRow({
+  entry,
+  handlers,
+}: {
+  entry: AdlDeletedEntry;
+  handlers: DeletedRowHandlers;
+}) {
+  const [busy, setBusy] = useState(false);
+  const sourceLabel =
+    entry.source === 'repair'
+      ? 'Repair tool'
+      : entry.source === 'duplicate-cleaner'
+        ? 'Duplicate cleaner'
+        : null;
+  const ago = entry.deleted_at ? timeAgo(entry.deleted_at) || entry.deleted_at : 'age unknown';
+  return (
+    <div className="adl-row adl-row-completed verif-quar-row" data-deleted-id={entry.id}>
+      <div className="adl-row-info">
+        <div className="adl-row-title" title={entry.rel}>
+          {entry.name}
+        </div>
+        <div className="adl-row-meta" title={`will be restored to ${entry.original_path}`}>
+          {entry.original_path}
+        </div>
+      </div>
+      <div className="verif-actions">
+        {sourceLabel ? <span className="adl-quality-chip">{sourceLabel}</span> : null}
+        <span className="adl-quality-chip" title="File size">
+          {formatBytes(entry.size) || '—'}
+        </span>
+        <span className="verif-time" title={entry.deleted_at ?? 'deleted before tracking existed'}>
+          {ago}
+        </span>
+        <button
+          type="button"
+          className="verif-act verif-act-ok"
+          title="Restore this file to where it was removed from"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            handlers.onRestore();
+          }}
+        >
+          ↩
+        </button>
+        <button
+          type="button"
+          className="verif-act verif-act-del"
+          title="Delete this file permanently"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            handlers.onPurge();
+          }}
+        >
+          🗑
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const RETENTION_CHOICES: { value: number; label: string }[] = [
+  { value: 0, label: 'keep forever' },
+  { value: 7, label: 'auto-delete after 7 days' },
+  { value: 14, label: 'auto-delete after 14 days' },
+  { value: 30, label: 'auto-delete after 30 days' },
+  { value: 90, label: 'auto-delete after 90 days' },
+];
+
+function RetentionSelect({
+  keepDays,
+  onKeepDays,
+}: {
+  keepDays: number;
+  onKeepDays: (days: number) => void;
+}) {
+  return (
+    <select
+      className="adl-deleted-retention"
+      title="Files older than this are purged automatically. Only files deleted after this feature shipped carry an age; older ones are never auto-purged."
+      value={RETENTION_CHOICES.some((c) => c.value === keepDays) ? keepDays : 0}
+      onChange={(event) => onKeepDays(Number(event.target.value))}
+    >
+      {RETENTION_CHOICES.map((c) => (
+        <option key={c.value} value={c.value}>
+          {c.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+export function AdlDeletedList({
+  entries,
+  totalSize,
+  loaded,
+  keepDays,
+  handlersFor,
+  onKeepDays,
+}: {
+  entries: AdlDeletedEntry[];
+  totalSize: number;
+  loaded: boolean;
+  keepDays: number;
+  handlersFor: (entry: AdlDeletedEntry) => DeletedRowHandlers;
+  onKeepDays: (days: number) => void;
+}) {
+  if (!loaded) {
+    return <div className="adl-section-header">Loading deleted files…</div>;
+  }
+  if (entries.length === 0) {
+    return (
+      <>
+        <div className="adl-empty" id="adl-empty">
+          the bin is empty — files removed by repair tools and the duplicate cleaner land here
+        </div>
+        <div className="adl-section-header adl-deleted-header">
+          <RetentionSelect keepDays={keepDays} onKeepDays={onKeepDays} />
+        </div>
+      </>
+    );
+  }
+  return (
+    <>
+      <div className="adl-section-header adl-deleted-header">
+        <span>
+          {entries.length} file{entries.length === 1 ? '' : 's'} ·{' '}
+          {formatBytes(totalSize) || '0 B'}
+        </span>
+        <RetentionSelect keepDays={keepDays} onKeepDays={onKeepDays} />
+      </div>
+      {entries.map((entry) => (
+        <AdlDeletedRow key={entry.id} entry={entry} handlers={handlersFor(entry)} />
+      ))}
+    </>
   );
 }

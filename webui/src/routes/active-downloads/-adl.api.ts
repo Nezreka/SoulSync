@@ -1,6 +1,7 @@
 import { apiClient, readJson } from '@/app/api-client';
 
 import type {
+  AdlDeletedList,
   AdlBatchHistoryEntry,
   AdlDownloadsResponse,
   AdlQuarantineEntry,
@@ -116,6 +117,50 @@ export async function fetchQuarantine(): Promise<AdlQuarantineEntry[]> {
   } catch {
     return [];
   }
+}
+
+// ── Deleted-files manager (the music recycle bin) ─────────────────────────
+
+export async function fetchDeletedFiles(): Promise<AdlDeletedList | null> {
+  try {
+    const data = await readJson<{ success?: boolean } & Partial<AdlDeletedList>>(
+      apiClient.get('deleted-files'),
+    );
+    if (!data?.success) return null;
+    return {
+      entries: Array.isArray(data.entries) ? data.entries : [],
+      total_size: data.total_size ?? 0,
+      count: data.count ?? 0,
+      keep_days: data.keep_days ?? 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export interface DeletedActionResult extends AdlResult {
+  restored?: string[];
+  purged?: string[];
+  errors?: { id: string; error: string }[];
+}
+
+export function restoreDeletedFiles(ids: string[]): Promise<DeletedActionResult> {
+  return readJson<DeletedActionResult>(apiClient.post('deleted-files/restore', { json: { ids } }));
+}
+
+export function purgeDeletedFiles(
+  ids: string[] | null,
+  all = false,
+): Promise<DeletedActionResult> {
+  return readJson<DeletedActionResult>(
+    apiClient.post('deleted-files/purge', { json: all ? { all: true } : { ids: ids ?? [] } }),
+  );
+}
+
+export function setDeletedRetention(days: number): Promise<AdlResult & { keep_days?: number }> {
+  return readJson<AdlResult & { keep_days?: number }>(
+    apiClient.post('deleted-files/retention', { json: { days } }),
+  );
 }
 
 // ── Downloads mutations ───────────────────────────────────────────────────

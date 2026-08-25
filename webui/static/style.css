@@ -76638,6 +76638,36 @@ body.em-scroll-lock { overflow: hidden; }
 .verif-rb-force { color: #ef5350; border-color: rgba(239,83,80,0.5); }
 .verif-rb-int { color: #facc15; border-color: rgba(250,204,21,0.5); }
 .verif-time { font-size: 11px; color: rgba(255,255,255,0.45); white-space: nowrap; }
+
+/* deleted-files view: header row carries the retention select on the right */
+.adl-deleted-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.adl-deleted-retention {
+    background: rgba(20, 20, 20, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.8);
+    border-radius: 6px;
+    font-size: 11.5px;
+    padding: 3px 8px;
+    cursor: pointer;
+}
+
+/* one-line explainer under the review banner - what this sub-view IS */
+.adl-review-explainer {
+    margin: 2px 0 10px;
+    padding: 8px 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.55);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+}
 .verif-quar-details { margin-top: 6px; font-size: 11.5px; color: rgba(255,255,255,0.6); line-height: 1.5; word-break: break-all; }
 .verif-detail-label { color: rgba(255,255,255,0.4); margin-right: 4px; }
 .verif-banner-spacer { flex: 1; }

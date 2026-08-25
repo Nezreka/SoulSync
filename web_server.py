@@ -36324,6 +36324,10 @@ from api.metadata_cache import configure as _cfg_mc, create_blueprint as _bp_mc
 _cfg_mc(get_database=get_database, get_metadata_cache=get_metadata_cache,
         docker_resolve_path=docker_resolve_path)
 app.register_blueprint(_bp_mc())
+# Deleted-files manager - the browsable music recycle bin (api/deleted_files.py).
+from api.deleted_files import configure as _cfg_df, create_blueprint as _bp_df
+_cfg_df(config_manager_=config_manager, docker_resolve_path_=docker_resolve_path)
+app.register_blueprint(_bp_df())
 
 # Multi-user profile + per-profile credential endpoints - api/user_profiles.py.
 from api.user_profiles import configure as _cfg_up, create_blueprint as _bp_up

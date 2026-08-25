@@ -233,8 +233,10 @@ describe('the active-downloads route', () => {
     act(() => (container.querySelector('[data-filter="unverified"]') as HTMLElement).click());
     await waitFor(() => expect(container.querySelector('#verif-subview-banner')).not.toBeNull());
     const pills = [...container.querySelectorAll('#verif-subview-banner .adl-pill')];
-    expect(pills).toHaveLength(1);
+    // unverified is gone; quarantine and the deleted bin remain
+    expect(pills).toHaveLength(2);
     expect(pills[0].textContent).toContain('Quarantine');
+    expect(pills[1].textContent).toContain('Deleted');
   });
 
   it('hides Cancel All and Clear Completed when there is nothing to act on', async () => {

@@ -1,10 +1,10 @@
 import { useNavigate } from '@tanstack/react-router';
 import { useCallback, useState } from 'react';
 
-import type { AdlBatch, AdlDownload, AdlQuarantineEntry } from '../-adl.types';
+import type { AdlBatch, AdlDeletedEntry, AdlDownload, AdlQuarantineEntry } from '../-adl.types';
 import type { ReviewActionHandlers } from './adl-review';
 
-import { cancelBatch, cancelTask, clearCompleted } from '../-adl.api';
+import { cancelBatch, cancelTask, clearCompleted, setDeletedRetention } from '../-adl.api';
 import { verificationHistoryId, unverifiedKey } from '../-adl.helpers';
 import { useAdlDownloads } from '../-adl.use-downloads';
 import { groupQuarantine, useAdlVerification } from '../-adl.use-verification';
@@ -14,6 +14,10 @@ import {
   cleanOrphans,
   clearAllQuarantine,
   deleteAllUnverified,
+  emptyDeletedBin,
+  purgeDeletedEntry,
+  restoreAllDeleted,
+  restoreDeletedEntry,
   quarantineApproveEntry,
   quarantineAudit,
   quarantineCompare,
@@ -30,7 +34,13 @@ import {
 import { AdlBatchPanel } from './adl-batch-panel';
 import { AdlHeader } from './adl-header';
 import { AdlList, ADL_EMPTY_TEXT, BatchFilterBanner } from './adl-list';
-import { AdlQuarantineList, AdlReviewBanner, AdlUnverifiedRow } from './adl-review';
+import {
+  AdlDeletedList,
+  AdlQuarantineList,
+  AdlReviewBanner,
+  AdlReviewExplainer,
+  AdlUnverifiedRow,
+} from './adl-review';
 
 const toast = (message: string, type: string) => window.showToast?.(message, type);
 
@@ -52,6 +62,30 @@ export function ActiveDownloadsPage() {
   const refreshQuarantine = useCallback(
     () => void verification.loadQuarantine(true),
     [verification],
+  );
+  const refreshDeleted = useCallback(() => void verification.loadDeleted(true), [verification]);
+  const onKeepDays = useCallback(
+    async (days: number) => {
+      try {
+        const data = await setDeletedRetention(days);
+        if (data.success) {
+          toast(days ? `Auto-delete after ${days} days` : 'Keeping deleted files forever', 'success');
+        } else {
+          toast(data.error || 'Could not save retention', 'error');
+        }
+      } catch {
+        toast('Could not save retention', 'error');
+      }
+      refreshDeleted();
+    },
+    [refreshDeleted],
+  );
+  const deletedHandlers = useCallback(
+    (entry: AdlDeletedEntry) => ({
+      onRestore: () => void restoreDeletedEntry(entry, refreshDeleted),
+      onPurge: () => void purgeDeletedEntry(entry, refreshDeleted),
+    }),
+    [refreshDeleted],
   );
 
   const onCancelRow = useCallback(
@@ -197,7 +231,9 @@ export function ActiveDownloadsPage() {
     : null;
 
   const showQuarantine = reviewing && verification.state.subView === 'quarantine';
+  const showDeleted = reviewing && verification.state.subView === 'deleted';
   const quarantineGroups = showQuarantine ? groupQuarantine(verification.state.quarantine) : [];
+  const deletedEntries = verification.state.deleted?.entries ?? [];
 
   return (
     <div className="adl-layout">
@@ -248,10 +284,26 @@ export function ActiveDownloadsPage() {
               onQuarantineClearAll={() =>
                 void clearAllQuarantine(verification.state.quarantine, refreshQuarantine)
               }
+              deletedCount={verification.state.deletedLoaded ? deletedEntries.length : null}
+              onRestoreAllDeleted={() => void restoreAllDeleted(deletedEntries, refreshDeleted)}
+              onEmptyDeleted={() => void emptyDeletedBin(deletedEntries.length, refreshDeleted)}
             />
           ) : null}
 
-          {showQuarantine ? (
+          {reviewing ? <AdlReviewExplainer subView={verification.state.subView} /> : null}
+
+          {showDeleted ? (
+            <div className="adl-list" id="adl-list">
+              <AdlDeletedList
+                entries={deletedEntries}
+                totalSize={verification.state.deleted?.total_size ?? 0}
+                loaded={verification.state.deletedLoaded}
+                keepDays={verification.state.deleted?.keep_days ?? 0}
+                handlersFor={deletedHandlers}
+                onKeepDays={(days) => void onKeepDays(days)}
+              />
+            </div>
+          ) : showQuarantine ? (
             <div className="adl-list" id="adl-list">
               {!verification.state.quarantineLoaded ? (
                 <div className="adl-section-header">Loading quarantine…</div>

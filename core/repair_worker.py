@@ -3309,6 +3309,10 @@ class RepairWorker:
                 dest = self._quarantine_dest(resolved, deleted_root)
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 shutil.move(resolved, dest)
+                # remember where it came from so the deleted-files manager can
+                # restore it and retention can age it
+                from core.library.deleted_quarantine import record_deleted_entry
+                record_deleted_entry(deleted_root, dest, resolved, 'repair')
                 files_deleted += 1
                 db_remove_ids.append(tid)
             except OSError as e:

@@ -236,7 +236,27 @@ export const ADL_FILTERS = [
 
 export type AdlFilter = (typeof ADL_FILTERS)[number]['value'] | 'unverified';
 
-export type AdlSubView = 'unverified' | 'quarantine';
+export type AdlSubView = 'unverified' | 'quarantine' | 'deleted';
+
+/** One file in the <transfer>/.deleted quarantine - the music recycle bin. */
+export interface AdlDeletedEntry {
+  id: string;
+  name: string;
+  rel: string;
+  size: number;
+  /** null for files quarantined before the manifest existed. */
+  deleted_at: string | null;
+  /** 'repair' | 'duplicate-cleaner' | null when unknown. */
+  source: string | null;
+  original_path: string;
+}
+
+export interface AdlDeletedList {
+  entries: AdlDeletedEntry[];
+  total_size: number;
+  count: number;
+  keep_days: number;
+}
 
 /**
  * Which statuses each FILTER pill accepts.

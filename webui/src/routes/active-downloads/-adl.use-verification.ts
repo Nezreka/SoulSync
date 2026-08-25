@@ -1,8 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { AdlQuarantineEntry, AdlReviewSummary, AdlSubView } from './-adl.types';
+import type {
+  AdlDeletedList,
+  AdlQuarantineEntry,
+  AdlReviewSummary,
+  AdlSubView,
+} from './-adl.types';
 
-import { fetchQuarantine, fetchReviewQueueSummary, fetchVerificationConfig } from './-adl.api';
+import {
+  fetchDeletedFiles,
+  fetchQuarantine,
+  fetchReviewQueueSummary,
+  fetchVerificationConfig,
+} from './-adl.api';
 
 export interface AdlVerificationState {
   /**
@@ -25,6 +35,9 @@ export interface AdlVerificationState {
    * badge reads instead.
    */
   summary: AdlReviewSummary | null;
+  /** the .deleted quarantine - loaded when the Deleted pill is opened. */
+  deleted: AdlDeletedList | null;
+  deletedLoaded: boolean;
   openUnverified: ReadonlySet<string>;
   openQuarantine: ReadonlySet<string>;
   openGroups: ReadonlySet<string>;
@@ -36,6 +49,7 @@ export interface AdlVerificationController {
   acoustidEnabled: boolean;
   setSubView: (view: AdlSubView) => void;
   loadQuarantine: (force?: boolean) => Promise<void>;
+  loadDeleted: (force?: boolean) => Promise<void>;
   refreshSummary: () => Promise<void>;
   toggleUnverified: (key: string) => void;
   toggleQuarantine: (id: string) => void;
@@ -60,6 +74,8 @@ export function useAdlVerification(): AdlVerificationController {
     quarantine: [],
     quarantineLoaded: false,
     summary: null,
+    deleted: null,
+    deletedLoaded: false,
     openUnverified: new Set<string>(),
     openQuarantine: new Set<string>(),
     openGroups: new Set<string>(),
@@ -77,6 +93,8 @@ export function useAdlVerification(): AdlVerificationController {
    */
   const loadingRef = useRef(false);
   const loadedRef = useRef(false);
+  const deletedLoadingRef = useRef(false);
+  const deletedLoadedRef = useRef(false);
 
   /**
    * Set every render, read only when loadQuarantine runs. Lets the two call
@@ -95,6 +113,24 @@ export function useAdlVerification(): AdlVerificationController {
     loadingRef.current = false;
     setState((prev) => ({ ...prev, quarantine: entries, quarantineLoaded: true }));
     void refreshSummaryRef.current?.();
+  }, []);
+
+  const loadDeleted = useCallback(async (force = false) => {
+    // same shape as loadQuarantine - one in flight, cached until forced,
+    // because the server side walks a folder tree.
+    if (deletedLoadingRef.current || (deletedLoadedRef.current && !force)) return;
+
+    deletedLoadingRef.current = true;
+    const list = await fetchDeletedFiles();
+    deletedLoadedRef.current = true;
+    deletedLoadingRef.current = false;
+    // null means the fetch failed - keep whatever was shown rather than
+    // flashing an empty bin at someone.
+    setState((prev) => ({
+      ...prev,
+      deleted: list ?? prev.deleted,
+      deletedLoaded: true,
+    }));
   }, []);
 
   /**
@@ -149,13 +185,15 @@ export function useAdlVerification(): AdlVerificationController {
   const setSubView = useCallback(
     (view: AdlSubView) => {
       setState((prev) => {
-        // With no unverified queue possible, quarantine is the only view.
-        const next = prev.acoustidEnabled === false ? 'quarantine' : view;
+        // With no unverified queue possible, quarantine stands in for it -
+        // but the deleted view exists either way.
+        const next = prev.acoustidEnabled === false && view === 'unverified' ? 'quarantine' : view;
         return { ...prev, subView: next };
       });
       if (view === 'quarantine') void loadQuarantine(true);
+      if (view === 'deleted') void loadDeleted(true);
     },
-    [loadQuarantine],
+    [loadQuarantine, loadDeleted],
   );
 
   const toggleIn = useCallback(
@@ -182,6 +220,7 @@ export function useAdlVerification(): AdlVerificationController {
     acoustidEnabled: state.acoustidEnabled !== false,
     setSubView,
     loadQuarantine,
+    loadDeleted,
     refreshSummary,
     toggleUnverified,
     toggleQuarantine,
