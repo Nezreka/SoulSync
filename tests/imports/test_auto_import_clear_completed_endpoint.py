@@ -143,7 +143,7 @@ class TestClearCompletedEndpoint:
         fake_worker = MagicMock()
         fake_worker._snapshot_active.return_value = [{'folder_hash': 'hash-LIVE'}]
         monkeypatch.setattr('web_server.auto_import_worker', fake_worker)
-        monkeypatch.setattr('web_server.get_database', lambda: fake_db)
+        monkeypatch.setattr('api.auto_import.get_database', lambda: fake_db)  # routes live in api/auto_import.py now
 
         resp = app_test_client.post('/api/auto-import/clear-completed')
         assert resp.status_code == 200
@@ -174,7 +174,7 @@ class TestClearCompletedEndpoint:
         fake_worker = MagicMock()
         fake_worker._snapshot_active.return_value = [{'folder_hash': 'hash-LIVE'}]
         monkeypatch.setattr('web_server.auto_import_worker', fake_worker)
-        monkeypatch.setattr('web_server.get_database', lambda: fake_db)
+        monkeypatch.setattr('api.auto_import.get_database', lambda: fake_db)  # routes live in api/auto_import.py now
 
         resp = app_test_client.post('/api/auto-import/clear-completed')
         body = resp.get_json()
@@ -198,7 +198,7 @@ class TestClearCompletedEndpoint:
         fake_worker = MagicMock()
         fake_worker._snapshot_active.return_value = []  # nothing active
         monkeypatch.setattr('web_server.auto_import_worker', fake_worker)
-        monkeypatch.setattr('web_server.get_database', lambda: fake_db)
+        monkeypatch.setattr('api.auto_import.get_database', lambda: fake_db)  # routes live in api/auto_import.py now
 
         resp = app_test_client.post('/api/auto-import/clear-completed')
         assert resp.status_code == 200
@@ -232,7 +232,7 @@ class TestClearCompletedEndpoint:
         fake_worker = MagicMock()
         fake_worker._snapshot_active.return_value = []
         monkeypatch.setattr('web_server.auto_import_worker', fake_worker)
-        monkeypatch.setattr('web_server.get_database', lambda: fake_db)
+        monkeypatch.setattr('api.auto_import.get_database', lambda: fake_db)  # routes live in api/auto_import.py now
 
         app_test_client.post('/api/auto-import/clear-completed')
 

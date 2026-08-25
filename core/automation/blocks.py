@@ -521,7 +521,10 @@ _CATEGORY_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("Advanced", ("run_script",)),
     # Then keywords, most specific first.
     ("Maintenance", ("repair", "duplicate", "quality", "cleanup", "clean_", "_clean",
-                     "expired", "backup", "cache", "overlays", "plex_images")),
+                     "expired", "backup", "cache", "overlays", "plex_images",
+                     # emptying the recycle bin is cleanup; the EXT.to fresh-board
+                     # refresh is a cache warmer (same family as refresh_beatport_cache)
+                     "recycle", "extto_fresh")),
     ("Wishlist", ("wishlist",)),
     ("Watchlist", ("watchlist",)),
     ("Playlists", ("playlist", "mirrored", "discover", "collections", "personalized")),
