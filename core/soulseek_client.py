@@ -889,6 +889,42 @@ class SoulseekClient(DownloadSourcePlugin):
             logger.error(f"Error getting downloads: {e}")
             return []
     
+    async def get_all_uploads(self) -> List[DownloadStatus]:
+        """Everyone pulling FROM this slskd - same nested shape as the
+        downloads listing, same projection. Read-only surface for the
+        clients tab; an unreachable slskd just means an empty list."""
+        if not self.base_url:
+            return []
+        try:
+            response = await self._make_request('GET', 'transfers/uploads')
+            if not response:
+                return []
+            uploads = []
+            for user_data in response:
+                username = user_data.get('username', '')
+                for directory in user_data.get('directories', []):
+                    for file_data in directory.get('files', []):
+                        progress = 0.0
+                        if file_data.get('state', '').lower().startswith('completed'):
+                            progress = 100.0
+                        elif 'progress' in file_data:
+                            progress = float(file_data.get('progress', 0.0))
+                        uploads.append(DownloadStatus(
+                            id=file_data.get('id', ''),
+                            filename=file_data.get('filename', ''),
+                            username=username,
+                            state=file_data.get('state', ''),
+                            progress=progress,
+                            size=file_data.get('size', 0),
+                            transferred=file_data.get('bytesTransferred', 0),
+                            speed=file_data.get('averageSpeed', 0),
+                            time_remaining=file_data.get('timeRemaining'),
+                        ))
+            return uploads
+        except Exception as e:
+            logger.error(f"Error getting uploads: {e}")
+            return []
+
     async def cancel_download(self, download_id: str, username: str = None, remove: bool = False) -> bool:
         if not self.base_url:
             return False

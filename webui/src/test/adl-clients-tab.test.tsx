@@ -60,6 +60,23 @@ const SLSKD_OK = {
   ],
 };
 
+const SLSKD_WITH_UPLOADS = {
+  ...SLSKD_OK,
+  uploads: [
+    {
+      id: 'u1',
+      filename: 'Shared\\give.flac',
+      username: 'leecher9',
+      state: 'InProgress',
+      progress: 55,
+      size: 200,
+      transferred: 110,
+      speed: 42,
+    },
+  ],
+  counts: { downloads_completed: 250, uploads_completed: 14000 },
+};
+
 const UNCONFIGURED = { success: true, configured: false, connected: false, items: [] };
 
 let toasts: string[] = [];
@@ -300,5 +317,145 @@ describe('AdlClientsTab', () => {
     );
     expect(owners).toContain('Movie (2026)');
     expect(owners).toContain('external');
+  });
+});
+
+
+describe('the toolbar', () => {
+  it('search filters the list by name', async () => {
+    mockAll({
+      torrent: {
+        ...TORRENT_OK,
+        items: [
+          ...TORRENT_OK.items,
+          { ...TORRENT_OK.items[1], id: 'HASH3', name: 'Different.Show.mkv' },
+        ],
+      },
+    });
+    const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
+    fireEvent.click(pill(container, 'torrent'));
+    await waitFor(() => expect(container.textContent).toContain('Movie.2026.1080p.mkv'));
+    fireEvent.change(container.querySelector('.adl-client-search') as HTMLElement, {
+      target: { value: 'different' },
+    });
+    expect(container.textContent).toContain('Different.Show.mkv');
+    expect(container.textContent).not.toContain('Movie.2026.1080p.mkv');
+    expect(container.textContent).toContain('1 shown');
+  });
+
+  it('state chips filter and show counts', async () => {
+    mockAll();
+    const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
+    fireEvent.click(pill(container, 'torrent'));
+    await waitFor(() => expect(container.textContent).toContain('Movie.2026.1080p.mkv'));
+    const chips = [...container.querySelectorAll('.adl-client-chip')].map((c) => c.textContent);
+    expect(chips).toContain('downloading (1)');
+    expect(chips).toContain('paused (1)');
+    const pausedChip = [...container.querySelectorAll('.adl-client-chip')].find(
+      (c) => c.textContent === 'paused (1)',
+    );
+    fireEvent.click(pausedChip as HTMLElement);
+    expect(container.textContent).toContain('someone.elses.iso');
+    expect(container.textContent).not.toContain('Movie.2026.1080p.mkv');
+  });
+
+  it('aggregates the visible download speed', async () => {
+    mockAll();
+    const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
+    fireEvent.click(pill(container, 'torrent'));
+    await waitFor(() => expect(container.textContent).toContain('shown'));
+    expect(container.querySelector('.adl-client-aggregate')?.textContent).toContain('4.8 MB/s');
+  });
+});
+
+describe('bulk actions', () => {
+  it('pause all sends every visible id in one request', async () => {
+    mockAll();
+    let body: unknown;
+    server.use(
+      http.post('/api/clients/torrent/action', async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({ success: true, done: 2, failed: [] });
+      }),
+    );
+    const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
+    fireEvent.click(pill(container, 'torrent'));
+    await waitFor(() => expect(container.textContent).toContain('Movie.2026.1080p.mkv'));
+    const pauseAll = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === '⏸ Pause all',
+    );
+    fireEvent.click(pauseAll as HTMLElement);
+    await waitFor(() => expect(body).toBeTruthy());
+    expect(body).toEqual({ ids: ['HASH1', 'HASH2'], action: 'pause', delete_files: false });
+    expect(toasts[0]).toBe('Pause all: 2 ok');
+  });
+});
+
+describe('the add box', () => {
+  it('sends a magnet to the torrent client and clears on success', async () => {
+    mockAll();
+    let body: unknown;
+    server.use(
+      http.post('/api/clients/torrent/add', async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({ success: true, ref: 'NEWHASH' });
+      }),
+    );
+    const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
+    fireEvent.click(pill(container, 'torrent'));
+    await waitFor(() => expect(container.querySelector('.adl-client-add-input')).not.toBeNull());
+    const input = container.querySelector('.adl-client-add-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'magnet:?xt=urn:btih:abc' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(body).toBeTruthy());
+    expect(body).toEqual({ url: 'magnet:?xt=urn:btih:abc' });
+    await waitFor(() => expect(input.value).toBe(''));
+    expect(toasts[0]).toBe('Sent to the torrent client');
+  });
+});
+
+describe('slskd extras', () => {
+  it('uploads view lists who is pulling from this install, read-only', async () => {
+    mockAll({ slskd: SLSKD_WITH_UPLOADS });
+    const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(container.textContent).toContain('song.flac'));
+    const upSwitch = [...container.querySelectorAll('.adl-client-chip')].find((c) =>
+      c.textContent?.includes('uploads (1)'),
+    );
+    fireEvent.click(upSwitch as HTMLElement);
+    await waitFor(() => expect(container.textContent).toContain('give.flac'));
+    expect(container.textContent).toContain('to leecher9');
+    // read-only: no cancel button on upload rows
+    expect(
+      [...container.querySelectorAll('.verif-act-del')].filter(
+        (b) => b.getAttribute('title') === 'Cancel this transfer in slskd',
+      ),
+    ).toHaveLength(0);
+    // the 14k completed uploads the server trimmed are named, not hidden
+    expect(container.textContent).toContain('14000 completed trimmed');
+  });
+
+  it('clear completed asks slskd and reloads', async () => {
+    mockAll({ slskd: SLSKD_WITH_UPLOADS });
+    const hit = vi.fn();
+    server.use(
+      http.post('/api/clients/slskd/clear-completed', () => {
+        hit();
+        return HttpResponse.json({ success: true });
+      }),
+    );
+    const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(container.textContent).toContain('song.flac'));
+    const clearBtn = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === '🧹 Clear completed',
+    );
+    fireEvent.click(clearBtn as HTMLElement);
+    await waitFor(() => expect(hit).toHaveBeenCalled());
+    expect(toasts[0]).toBe('Clear completed ok');
   });
 });

@@ -333,6 +333,8 @@ async function fetchClientOverview<T>(path: string): Promise<ClientFetch<T>> {
         type: data.type,
         error: data.error,
         items: Array.isArray(data.items) ? data.items : [],
+        uploads: Array.isArray(data.uploads) ? data.uploads : undefined,
+        counts: data.counts,
       },
     };
   } catch (error) {
@@ -376,6 +378,73 @@ export function usenetClientAction(
       json: { id, action, delete_files: deleteFiles },
     }),
   );
+}
+
+export interface ClientBulkResult extends AdlResult {
+  done?: number;
+  failed?: string[];
+}
+
+export function torrentClientBulk(
+  ids: string[],
+  action: ClientAction,
+  deleteFiles = false,
+): Promise<ClientBulkResult> {
+  return readJson<ClientBulkResult>(
+    apiClient.post('clients/torrent/action', {
+      json: { ids, action, delete_files: deleteFiles },
+      timeout: 60000,
+    }),
+  );
+}
+
+export function usenetClientBulk(
+  ids: string[],
+  action: ClientAction,
+  deleteFiles = false,
+): Promise<ClientBulkResult> {
+  return readJson<ClientBulkResult>(
+    apiClient.post('clients/usenet/action', {
+      json: { ids, action, delete_files: deleteFiles },
+      timeout: 60000,
+    }),
+  );
+}
+
+export function torrentClientAdd(url: string): Promise<AdlResult & { ref?: string }> {
+  return readJson<AdlResult & { ref?: string }>(
+    apiClient.post('clients/torrent/add', { json: { url }, timeout: 60000 }),
+  );
+}
+
+export function usenetClientAdd(url: string): Promise<AdlResult & { ref?: string }> {
+  return readJson<AdlResult & { ref?: string }>(
+    apiClient.post('clients/usenet/add', { json: { url }, timeout: 60000 }),
+  );
+}
+
+export function slskdClearCompleted(): Promise<AdlResult> {
+  return readJson<AdlResult>(
+    apiClient.post('clients/slskd/clear-completed', { timeout: 60000 }),
+  );
+}
+
+export interface ClientLinks {
+  slskd: string;
+  torrent: string;
+  usenet: string;
+}
+
+export async function fetchClientLinks(): Promise<ClientLinks | null> {
+  try {
+    const data = await readJson<{ success?: boolean } & Partial<ClientLinks>>(
+      apiClient.get('clients/links'),
+    );
+    if (!data?.success) return null;
+    return { slskd: data.slskd ?? '', torrent: data.torrent ?? '', usenet: data.usenet ?? '' };
+  } catch {
+    return null;
+  }
 }
 
 export function slskdClientCancel(

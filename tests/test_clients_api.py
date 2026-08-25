@@ -129,7 +129,7 @@ def test_torrent_pause_resume(monkeypatch, action, expect):
     t = _FakeTorrent([TORRENT])
     c = _client(monkeypatch, torrent=t)
     r = c.post('/api/clients/torrent/action', json={'id': 'ABCDEF', 'action': action})
-    assert r.get_json() == {'success': True}
+    assert r.get_json() == {'success': True, 'done': 1, 'failed': []}
     assert t.calls == [expect]
 
 
@@ -244,3 +244,94 @@ def test_a_getter_that_raises_returns_json_not_flask_html(monkeypatch):
     assert data is not None, "response must be json, never flask's html 500 page"
     assert data['success'] is False
     assert 'soulseek_client' in data['error']
+
+
+def test_bulk_action_hits_every_id_and_reports_partials(monkeypatch):
+    class _HalfBroken(_FakeTorrent):
+        async def pause(self, tid):
+            self.calls.append(('pause', tid))
+            return tid != 'BAD'
+    t = _HalfBroken([TORRENT])
+    c = _client(monkeypatch, torrent=t)
+    r = c.post('/api/clients/torrent/action',
+               json={'ids': ['ABCDEF', 'BAD', 'HASH2'], 'action': 'pause'})
+    data = r.get_json()
+    assert data == {'success': True, 'done': 2, 'failed': ['BAD']}
+    assert [call[1] for call in t.calls] == ['ABCDEF', 'BAD', 'HASH2']
+
+
+def test_add_torrent_validates_and_forwards(monkeypatch):
+    class _Adder(_FakeTorrent):
+        async def add_torrent(self, url, category='soulsync', save_path=None):
+            self.calls.append(('add', url, category))
+            return 'NEWHASH'
+    t = _Adder()
+    c = _client(monkeypatch, torrent=t,
+                cfg={'torrent_client.type': 'qbittorrent',
+                     'torrent_client.category': 'soulsync'})
+    assert c.post('/api/clients/torrent/add', json={'url': 'ftp://nope'}).status_code == 400
+    assert c.post('/api/clients/torrent/add', json={}).status_code == 400
+    r = c.post('/api/clients/torrent/add', json={'url': 'magnet:?xt=urn:btih:abc'})
+    assert r.get_json() == {'success': True, 'ref': 'NEWHASH'}
+    assert t.calls == [('add', 'magnet:?xt=urn:btih:abc', 'soulsync')]
+
+
+def test_add_nzb_validates_and_forwards(monkeypatch):
+    class _Adder(_FakeTorrent):
+        async def add_nzb(self, url, category='soulsync', save_path=None):
+            self.calls.append(('add', url, category))
+            return 'SABnzbd_nzo_9'
+    u = _Adder()
+    c = _client(monkeypatch, usenet=u)
+    assert c.post('/api/clients/usenet/add', json={'url': 'magnet:?x'}).status_code == 400
+    r = c.post('/api/clients/usenet/add', json={'url': 'https://indexer/x.nzb'})
+    assert r.get_json() == {'success': True, 'ref': 'SABnzbd_nzo_9'}
+
+
+def test_slskd_clear_completed(monkeypatch):
+    class _Clearing(_FakeSlskd):
+        async def clear_all_completed_downloads(self):
+            self.calls.append('clear')
+            return True
+    s = _Clearing()
+    c = _client(monkeypatch, slskd=s)
+    r = c.post('/api/clients/slskd/clear-completed')
+    assert r.get_json() == {'success': True}
+    assert s.calls == ['clear']
+
+
+def test_links_come_from_config(monkeypatch):
+    c = _client(monkeypatch, cfg={
+        'torrent_client.type': 'qbittorrent',
+        'soulseek.slskd_url': 'http://host:5030',
+        'torrent_client.url': 'http://host:8080',
+        'usenet_client.url': '',
+    })
+    data = c.get('/api/clients/links').get_json()
+    assert data == {'success': True, 'slskd': 'http://host:5030',
+                    'torrent': 'http://host:8080', 'usenet': ''}
+
+
+def test_slskd_overview_trims_the_completed_flood(monkeypatch):
+    """live install held 14k+ completed uploads - the listing must never
+    ship a session's whole history."""
+    class _Flooded(_FakeSlskd):
+        async def get_all_downloads(self):
+            active = [DownloadStatus(id=f'a{i}', filename=f'a{i}.flac', username='u',
+                                     state='InProgress', progress=1.0, size=1,
+                                     transferred=0, speed=1) for i in range(3)]
+            done = [DownloadStatus(id=f'c{i}', filename=f'c{i}.flac', username='u',
+                                   state='Completed, Succeeded', progress=100.0, size=1,
+                                   transferred=1, speed=0) for i in range(300)]
+            return active + done
+
+        async def get_all_uploads(self):
+            return [DownloadStatus(id=f'u{i}', filename=f'u{i}.flac', username='leech',
+                                   state='Completed, Errored', progress=100.0, size=1,
+                                   transferred=1, speed=0) for i in range(500)]
+    c = _client(monkeypatch, slskd=_Flooded())
+    data = c.get('/api/clients/slskd').get_json()
+    # all 3 active + at most 100 completed
+    assert len(data['items']) == 103
+    assert len(data['uploads']) == 25
+    assert data['counts'] == {'downloads_completed': 300, 'uploads_completed': 500}

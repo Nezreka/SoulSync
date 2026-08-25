@@ -43,6 +43,34 @@ def _run(coro, timeout=25):
     return asyncio.run(_capped())
 
 
+def _is_completed_state(state: str) -> bool:
+    return 'completed' in str(state or '').lower()
+
+
+def _trim_completed(rows, cap):
+    """Active transfers always; completed ones only up to ``cap``. A
+    long-running slskd holds its whole session history (14k+ uploads seen
+    live) and shipping that every 10s would crush the tab."""
+    active = [r for r in rows if not _is_completed_state(r.get('state'))]
+    completed = [r for r in rows if _is_completed_state(r.get('state'))]
+    return active + completed[:cap], len(completed)
+
+
+def _slskd_uploader(client):
+    """The object that can list slskd uploads. The orchestrator itself can't -
+    its soulseek plugin (a SoulseekClient) can. A raw SoulseekClient getter
+    just returns itself."""
+    if hasattr(client, 'get_all_uploads'):
+        return client
+    plugin = client.client('soulseek') if hasattr(client, 'client') else None
+    if plugin is not None and hasattr(plugin, 'get_all_uploads'):
+        return plugin
+    class _NoUploads:
+        async def get_all_uploads(self):
+            return []
+    return _NoUploads()
+
+
 def _json_guard(fn):
     """Every route failure leaves as json with a message. The first version
     let a broken getter escape as flask's html 500 page, and the ui could
@@ -104,25 +132,38 @@ def create_blueprint() -> Blueprint:
     def torrent_action():
         from core.torrent_clients import get_active_adapter
         payload = request.get_json(silent=True) or {}
-        item_id = str(payload.get('id') or '').strip()
+        ids = payload.get('ids') if isinstance(payload.get('ids'), list) else None
+        if ids is None:
+            single = str(payload.get('id') or '').strip()
+            ids = [single] if single else []
+        ids = [str(i).strip() for i in ids if str(i).strip()]
         action = str(payload.get('action') or '').strip()
-        if not item_id or action not in ('pause', 'resume', 'remove'):
-            return jsonify({"success": False, "error": "id and a valid action required"}), 400
+        if not ids or action not in ('pause', 'resume', 'remove'):
+            return jsonify({"success": False, "error": "id(s) and a valid action required"}), 400
         adapter = get_active_adapter()
         if not adapter or not adapter.is_configured():
             return jsonify({"success": False, "error": "no torrent client configured"}), 400
-        try:
-            if action == 'pause':
-                ok = _run(adapter.pause(item_id))
-            elif action == 'resume':
-                ok = _run(adapter.resume(item_id))
+        done, failed = 0, []
+        for item_id in ids:
+            try:
+                if action == 'pause':
+                    ok = _run(adapter.pause(item_id))
+                elif action == 'resume':
+                    ok = _run(adapter.resume(item_id))
+                else:
+                    ok = _run(adapter.remove(item_id, delete_files=bool(payload.get('delete_files'))))
+            except Exception as e:
+                logger.warning(f"[Clients] torrent {action} failed for {item_id}: {e}")
+                failed.append(item_id)
+                continue
+            if ok:
+                done += 1
             else:
-                ok = _run(adapter.remove(item_id, delete_files=bool(payload.get('delete_files'))))
-            return jsonify({"success": bool(ok)} if ok else
-                           {"success": False, "error": f"{action} was refused by the client"})
-        except Exception as e:
-            logger.warning(f"[Clients] torrent {action} failed for {item_id}: {e}")
-            return jsonify({"success": False, "error": str(e)}), 500
+                failed.append(item_id)
+        if failed and not done:
+            return jsonify({"success": False, "error": f"{action} was refused by the client",
+                            "failed": failed})
+        return jsonify({"success": True, "done": done, "failed": failed})
 
     # ── usenet ────────────────────────────────────────────────────────────
 
@@ -158,25 +199,38 @@ def create_blueprint() -> Blueprint:
     def usenet_action():
         from core.usenet_clients import get_active_adapter
         payload = request.get_json(silent=True) or {}
-        item_id = str(payload.get('id') or '').strip()
+        ids = payload.get('ids') if isinstance(payload.get('ids'), list) else None
+        if ids is None:
+            single = str(payload.get('id') or '').strip()
+            ids = [single] if single else []
+        ids = [str(i).strip() for i in ids if str(i).strip()]
         action = str(payload.get('action') or '').strip()
-        if not item_id or action not in ('pause', 'resume', 'remove'):
-            return jsonify({"success": False, "error": "id and a valid action required"}), 400
+        if not ids or action not in ('pause', 'resume', 'remove'):
+            return jsonify({"success": False, "error": "id(s) and a valid action required"}), 400
         adapter = get_active_adapter()
         if not adapter or not adapter.is_configured():
             return jsonify({"success": False, "error": "no usenet client configured"}), 400
-        try:
-            if action == 'pause':
-                ok = _run(adapter.pause(item_id))
-            elif action == 'resume':
-                ok = _run(adapter.resume(item_id))
+        done, failed = 0, []
+        for item_id in ids:
+            try:
+                if action == 'pause':
+                    ok = _run(adapter.pause(item_id))
+                elif action == 'resume':
+                    ok = _run(adapter.resume(item_id))
+                else:
+                    ok = _run(adapter.remove(item_id, delete_files=bool(payload.get('delete_files'))))
+            except Exception as e:
+                logger.warning(f"[Clients] usenet {action} failed for {item_id}: {e}")
+                failed.append(item_id)
+                continue
+            if ok:
+                done += 1
             else:
-                ok = _run(adapter.remove(item_id, delete_files=bool(payload.get('delete_files'))))
-            return jsonify({"success": bool(ok)} if ok else
-                           {"success": False, "error": f"{action} was refused by the client"})
-        except Exception as e:
-            logger.warning(f"[Clients] usenet {action} failed for {item_id}: {e}")
-            return jsonify({"success": False, "error": str(e)}), 500
+                failed.append(item_id)
+        if failed and not done:
+            return jsonify({"success": False, "error": f"{action} was refused by the client",
+                            "failed": failed})
+        return jsonify({"success": True, "done": done, "failed": failed})
 
     # ── slskd ─────────────────────────────────────────────────────────────
 
@@ -212,9 +266,22 @@ def create_blueprint() -> Blueprint:
                 if hit:
                     row['soulsync'] = hit
                 rows.append(row)
-            logger.debug(f"[Clients] slskd listing: {len(rows)} transfers")
+            rows, dl_completed = _trim_completed(rows, cap=100)
+            uploads = []
+            up_completed = 0
+            try:
+                for u in _run(_slskd_uploader(client).get_all_uploads()):
+                    up = asdict(u)
+                    up.pop('audio_files', None)
+                    uploads.append(up)
+                uploads, up_completed = _trim_completed(uploads, cap=25)
+            except Exception as e:
+                logger.debug(f"[Clients] slskd uploads unavailable: {e}")
+            logger.debug(f"[Clients] slskd listing: {len(rows)} transfers, {len(uploads)} uploads")
             return jsonify({"success": True, "configured": True, "connected": True,
-                            "items": rows})
+                            "items": rows, "uploads": uploads,
+                            "counts": {"downloads_completed": dl_completed,
+                                       "uploads_completed": up_completed}})
         except Exception as e:
             logger.error(f"[Clients] slskd overview failed: {e}", exc_info=True)
             return jsonify({"success": False, "error": str(e)}), 500
@@ -239,5 +306,63 @@ def create_blueprint() -> Blueprint:
         except Exception as e:
             logger.warning(f"[Clients] slskd cancel failed for {item_id}: {e}")
             return jsonify({"success": False, "error": str(e)}), 500
+
+    @bp.route('/api/clients/torrent/add', methods=['POST'])
+    @_json_guard
+    def torrent_add():
+        from core.torrent_clients import get_active_adapter
+        payload = request.get_json(silent=True) or {}
+        url = str(payload.get('url') or '').strip()
+        if not url or not (url.startswith('magnet:') or url.startswith('http://')
+                           or url.startswith('https://')):
+            return jsonify({"success": False,
+                            "error": "paste a magnet link or a .torrent url"}), 400
+        adapter = get_active_adapter()
+        if not adapter or not adapter.is_configured():
+            return jsonify({"success": False, "error": "no torrent client configured"}), 400
+        category = str(config_manager.get('torrent_client.category', 'soulsync') or 'soulsync')
+        ref = _run(adapter.add_torrent(url, category=category), timeout=60)
+        if not ref:
+            return jsonify({"success": False, "error": "the client did not accept it"})
+        return jsonify({"success": True, "ref": str(ref)})
+
+    @bp.route('/api/clients/usenet/add', methods=['POST'])
+    @_json_guard
+    def usenet_add():
+        from core.usenet_clients import get_active_adapter
+        payload = request.get_json(silent=True) or {}
+        url = str(payload.get('url') or '').strip()
+        if not url or not (url.startswith('http://') or url.startswith('https://')):
+            return jsonify({"success": False, "error": "paste an .nzb url"}), 400
+        adapter = get_active_adapter()
+        if not adapter or not adapter.is_configured():
+            return jsonify({"success": False, "error": "no usenet client configured"}), 400
+        category = str(config_manager.get('usenet_client.category', 'soulsync') or 'soulsync')
+        ref = _run(adapter.add_nzb(url, category=category), timeout=60)
+        if not ref:
+            return jsonify({"success": False, "error": "the client did not accept it"})
+        return jsonify({"success": True, "ref": str(ref)})
+
+    @bp.route('/api/clients/slskd/clear-completed', methods=['POST'])
+    @_json_guard
+    def slskd_clear_completed():
+        client = _soulseek_client() if _soulseek_client else None
+        if not client:
+            return jsonify({"success": False, "error": "slskd is not configured"}), 400
+        ok = _run(client.clear_all_completed_downloads(), timeout=60)
+        return jsonify({"success": bool(ok)} if ok else
+                       {"success": False, "error": "slskd refused to clear"})
+
+    @bp.route('/api/clients/links', methods=['GET'])
+    @_json_guard
+    def client_links():
+        """Each client's own web ui, for the open-in-new-tab buttons. Straight
+        from config - the same urls the adapters call."""
+        return jsonify({
+            "success": True,
+            "slskd": str(config_manager.get('soulseek.slskd_url', '') or ''),
+            "torrent": str(config_manager.get('torrent_client.url', '') or ''),
+            "usenet": str(config_manager.get('usenet_client.url', '') or ''),
+        })
 
     return bp

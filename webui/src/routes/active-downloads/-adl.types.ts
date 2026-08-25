@@ -295,6 +295,10 @@ export interface ClientOverview<T> {
   type?: string;
   error?: string;
   items: T[];
+  /** slskd only: who is pulling FROM this install. */
+  uploads?: ClientSlskdItem[];
+  /** slskd only: how many completed transfers the server trimmed away. */
+  counts?: { downloads_completed?: number; uploads_completed?: number };
 }
 
 export type AdlSubView = 'unverified' | 'quarantine' | 'deleted';
