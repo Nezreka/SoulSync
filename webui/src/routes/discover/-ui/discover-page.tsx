@@ -5,6 +5,7 @@ import type { WebLens } from '../-discover.artist-web';
 import type { CacheItem } from '../-discover.cache-sections';
 import type { DiscoverSectionId } from '../-discover.layout';
 import type { DiscoverMix, MixAction } from '../-discover.mixes';
+import { playMixNow } from '../-discover.playable';
 import type { RecentAlbum } from '../-discover.recent-releases';
 import type { RecommendedArtist } from '../-discover.recommended';
 import type { SeasonData, SeasonalAlbum } from '../-discover.seasonal';
@@ -449,6 +450,17 @@ export function DiscoverPage() {
       const mix = modal.mix;
       if (!mix) return;
       const [verb, ...rest] = action.onclick.split(':');
+      if (verb === 'play') {
+        // resolve against the library and play what's owned RIGHT NOW; the
+        // rest stays a download away. LB/lastfm cards load tracks lazily -
+        // with nothing loaded yet there is nothing resolvable, and
+        // playMixNow's empty answer says so honestly.
+        void (async () => {
+          const outcome = await playMixNow(modal.tracks ?? [], mix.title);
+          if (outcome === 'played') modal.close();
+        })();
+        return;
+      }
       if (verb === 'lb-download') {
         // The FULL discovery flow (state check, rehydrate, seed + poll + the
         // sync-services discovery modal), verbatim in the core.js bridge —
@@ -1048,6 +1060,24 @@ export function DiscoverPage() {
                   onOpenExplorer={() => setExplorerPromptOpen(true)}
                 />
                 <ArtistWebHub onOpenLens={(lens) => setWebRequest({ lens })} />
+              </div>
+            </div>
+            <div className="discovery-zone-section" id="library-radio-section">
+              <div className="discover-library-radio-card">
+                <div className="discover-library-radio-copy">
+                  <div className="discover-library-radio-title">📻 Library Radio</div>
+                  <div className="discover-library-radio-sub">
+                    Endless smart shuffle of your whole collection — play-count
+                    weighted, refills itself by similarity.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="modal-btn modal-btn-primary"
+                  onClick={() => void window.startLibraryRadio?.()}
+                >
+                  ▶ Start radio
+                </button>
               </div>
             </div>
             {renderZoneSections([

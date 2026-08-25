@@ -13581,6 +13581,25 @@ def library_delete_tracks_batch():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/discover/resolve-playable', methods=['POST'])
+def resolve_playable_endpoint():
+    """Match a mix's artist/title list against owned tracks so the player can
+    play what the user already has (window.playTrackList wants file_path
+    rows). The missing remainder stays with the download button."""
+    try:
+        from core.discovery.playable import resolve_playable_tracks
+        payload = request.get_json(silent=True) or {}
+        wanted = payload.get('tracks')
+        if not isinstance(wanted, list):
+            return jsonify({"success": False, "error": "tracks list required"}), 400
+        result = resolve_playable_tracks(get_database(), wanted)
+        result["success"] = "error" not in result
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"[Discover] resolve-playable failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/library/radio')
 def library_radio():
     """Get a smart queue of similar tracks for radio mode auto-play.

@@ -77002,6 +77002,37 @@ body.em-scroll-lock { overflow: hidden; }
     flex-shrink: 0;
 }
 
+/* discover: the library radio play-now card (tools zone) */
+.discover-library-radio-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 20px;
+    border-radius: 14px;
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+    background: linear-gradient(120deg,
+            rgba(var(--accent-rgb), 0.12) 0%,
+            rgba(255, 255, 255, 0.02) 60%);
+}
+
+.discover-library-radio-copy {
+    min-width: 0;
+}
+
+.discover-library-radio-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.92);
+    margin-bottom: 4px;
+}
+
+.discover-library-radio-sub {
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.55);
+    line-height: 1.5;
+}
+
 /* one-line explainer under the review banner - what this sub-view IS */
 .adl-review-explainer {
     margin: 2px 0 10px;

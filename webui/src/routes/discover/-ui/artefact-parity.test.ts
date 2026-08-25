@@ -75,6 +75,8 @@ const NEW_IDS = [
   'discover-zone-library',
   'discover-zone-new-missing',
   'discover-zone-tools',
+  // the play-now bridge (aug 25): library radio's discover card
+  'library-radio-section',
 ];
 
 /**

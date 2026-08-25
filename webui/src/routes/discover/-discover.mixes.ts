@@ -199,6 +199,7 @@ export function mixStatusBase(mix: DiscoverMix): string {
   return mix.statusBase || (mix.syncKey ? mix.syncKey.replace(/_/g, '-') : '');
 }
 
+export const MIX_ACTION_PLAY = '▶ Play';
 export const MIX_ACTION_DOWNLOAD = 'Download';
 export const MIX_ACTION_SYNC = 'Sync';
 
@@ -214,9 +215,14 @@ export const MIX_ACTION_SYNC = 'Sync';
  * one, which would otherwise be uninteractable.
  */
 export function mixActions(mix: DiscoverMix): MixAction[] {
-  if (mix.actions) return mix.actions;
-  if (!mix.syncKey) return [];
+  // Every mix can PLAY what the user already owns (resolve-playable +
+  // window.playTrackList) - the one thing no download-only discovery tool
+  // has. Prepended so listening is always the first offer.
+  const play: MixAction = { label: MIX_ACTION_PLAY, onclick: 'play' };
+  if (mix.actions) return [play, ...mix.actions];
+  if (!mix.syncKey) return [play];
   return [
+    play,
     { label: MIX_ACTION_DOWNLOAD, closeFirst: true, onclick: 'download' },
     { label: MIX_ACTION_SYNC, primary: true, isSync: true, onclick: 'sync' },
   ];
