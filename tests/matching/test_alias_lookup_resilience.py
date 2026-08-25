@@ -236,3 +236,71 @@ def test_the_same_mbid_refreshes_the_alias_list(tmp_path):
 
     _mbid, aliases = _stored(db_path, 1)
     assert aliases == ["澤野弘之", "さわの ひろゆき"]
+
+
+# --- the artist's own MBID beats guessing by name --------------------------
+
+
+def test_a_known_mbid_is_used_instead_of_searching_by_name(tmp_path):
+    """`Sawano Hiroyuki` is the case the trust gate was already documented as
+    losing: MusicBrainz has several entities matching that string, so the name
+    search either picks a decoy or refuses as ambiguous. None of that guessing
+    is necessary once the catalogue row carries the artist's MBID — the aliases
+    can be fetched from the identity we already know."""
+    svc, db_path = _artist_row_service(tmp_path, "Sawano Hiroyuki",
+                                       mbid="mbid-sawano")
+    svc.mb_client = MagicMock()
+    svc.get_artist_aliases = MagicMock(return_value=[])
+    svc._check_cache = MagicMock(return_value=None)
+    svc._save_to_cache = MagicMock()
+    svc.fetch_artist_aliases = MagicMock(return_value=["澤野弘之"])
+
+    assert svc.lookup_artist_aliases("Sawano Hiroyuki") == ["澤野弘之"]
+    svc.fetch_artist_aliases.assert_called_once_with("mbid-sawano")
+    svc.mb_client.search_artist.assert_not_called()
+
+
+def test_the_mbid_fetch_persists_so_the_next_lookup_is_free(tmp_path):
+    svc, db_path = _artist_row_service(tmp_path, "Sawano Hiroyuki",
+                                       mbid="mbid-sawano")
+    svc.mb_client = MagicMock()
+    svc.get_artist_aliases = MagicMock(return_value=[])
+    svc._check_cache = MagicMock(return_value=None)
+    svc._save_to_cache = MagicMock()
+    svc.fetch_artist_aliases = MagicMock(return_value=["澤野弘之"])
+
+    svc.lookup_artist_aliases("Sawano Hiroyuki")
+
+    _mbid, aliases = _stored(db_path, 1)
+    assert aliases == ["澤野弘之"]
+
+
+def test_an_mbid_that_yields_nothing_falls_through_to_the_name_search(tmp_path):
+    svc, db_path = _artist_row_service(tmp_path, "Sawano Hiroyuki",
+                                       mbid="mbid-sawano")
+    svc.mb_client = MagicMock()
+    svc.mb_client.search_artist.return_value = [
+        {"id": "mbid-other", "name": "Sawano Hiroyuki", "score": 100}]
+    svc._calculate_similarity = _simple_sim
+    svc.get_artist_aliases = MagicMock(return_value=[])
+    svc._check_cache = MagicMock(return_value=None)
+    svc._save_to_cache = MagicMock()
+    svc.fetch_artist_aliases = MagicMock(side_effect=[[], ["from-search"]])
+
+    assert svc.lookup_artist_aliases("Sawano Hiroyuki") == ["from-search"]
+    svc.mb_client.search_artist.assert_called()
+
+
+def test_no_mbid_on_the_row_still_searches_by_name(tmp_path):
+    svc, db_path = _artist_row_service(tmp_path, "Sawano Hiroyuki")
+    svc.mb_client = MagicMock()
+    svc.mb_client.search_artist.return_value = [
+        {"id": "mbid-found", "name": "Sawano Hiroyuki", "score": 100}]
+    svc._calculate_similarity = _simple_sim
+    svc.get_artist_aliases = MagicMock(return_value=[])
+    svc._check_cache = MagicMock(return_value=None)
+    svc._save_to_cache = MagicMock()
+    svc.fetch_artist_aliases = MagicMock(return_value=["澤野弘之"])
+
+    assert svc.lookup_artist_aliases("Sawano Hiroyuki") == ["澤野弘之"]
+    svc.mb_client.search_artist.assert_called()

@@ -478,6 +478,31 @@ class MusicBrainzService:
         if library:
             return library
 
+        # Tier 1b: the artist's own MusicBrainz identity, when the catalogue
+        # already knows it. Everything below this line GUESSES from the name,
+        # and for a cross-script artist that guess is exactly what fails: the
+        # trust gate's own comment names `Sawano Hiroyuki` as the case where a
+        # decoy entity outscores the real `澤野弘之`, and MusicBrainz's
+        # relevance scores are not stable enough for the escape hatch to be
+        # relied on. That is why the bridge could work one day and not the
+        # next. There is nothing to guess once the row carries the MBID.
+        row_mbid = self._artist_row_mbid(artist_name)
+        if row_mbid:
+            aliases = self.fetch_artist_aliases(row_mbid)
+            if aliases:
+                self._save_to_cache(
+                    'artist_aliases', artist_name, None, row_mbid,
+                    {'aliases': aliases}, 100,
+                )
+                try:
+                    self._persist_artist_identity(artist_name, row_mbid, aliases)
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("alias write-back for %r failed: %s", artist_name, e)
+                return aliases
+            # MusicBrainz lists no alternate spelling for it, or the fetch did
+            # not come back. Neither settles the question, so carry on rather
+            # than reporting "no aliases" off the back of it.
+
         # Tier 2: cached live lookup (re-uses musicbrainz_cache table)
         cached = self._check_cache('artist_aliases', artist_name)
         if cached:
@@ -603,6 +628,34 @@ class MusicBrainzService:
         except Exception as e:  # noqa: BLE001
             logger.debug("alias write-back for %r failed: %s", artist_name, e)
         return aliases
+
+    def _artist_row_mbid(self, artist_name: str) -> Optional[str]:
+        """The MusicBrainz id the catalogue already holds for this artist name.
+
+        Best-effort: any failure (no catalogue, no row, no id) returns None and
+        the caller falls back to resolving by name, which is what it did before
+        this existed.
+        """
+        try:
+            conn = self.db._get_connection()
+        except Exception:  # noqa: BLE001
+            return None
+        try:
+            row = conn.execute(
+                "SELECT musicbrainz_id FROM lib2_artists "
+                "WHERE name = ? COLLATE NOCASE AND COALESCE(musicbrainz_id,'') <> '' "
+                "LIMIT 1",
+                (artist_name,),
+            ).fetchone()
+            return str(row[0]) if row and row[0] else None
+        except Exception as e:  # noqa: BLE001
+            logger.debug("artist mbid lookup failed for %r: %s", artist_name, e)
+            return None
+        finally:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001, S110 — best effort
+                pass
 
     def _persist_artist_identity(self, artist_name: str, mbid: Optional[str],
                                  aliases: Optional[list]) -> None:
