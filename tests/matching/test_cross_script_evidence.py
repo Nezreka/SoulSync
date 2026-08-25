@@ -146,3 +146,48 @@ def test_cross_script_artist_but_genuinely_different_song_still_fails():
         aliases_provider=None,
     )
     assert out.decision is Decision.FAIL
+
+
+# --- the accepted cost of the rule above -----------------------------------
+
+
+def test_a_wrong_download_in_another_script_is_knowingly_unreportable():
+    """The blind spot, pinned so nobody "fixes" it by accident.
+
+    Both dimensions are unreadable, so nothing disagrees and nothing agrees —
+    and a Latin expectation against a Japanese recording looks identical whether
+    it is the same song or a completely different one. A fingerprint bar was
+    tried here and reverted: the score is not evidence about the NAMES, so all
+    it does is quarantine the correct files in the test above. Closing this
+    needs a signal that actually distinguishes the two — a duration or an MBID
+    the import already recorded — not a stricter reading of a silence.
+    """
+    out = evaluate(
+        "Blinding Lights", "The Weeknd",
+        [_rec("残酷な天使のテーゼ", "高橋洋子")],
+        fingerprint_score=0.90,
+        aliases_provider=None,
+    )
+    assert out.decision is Decision.SKIP
+
+
+def test_an_agreeing_artist_corroborates_an_unreadable_title():
+    """One comparable dimension that AGREES is evidence; two silences are not."""
+    out = evaluate(
+        "Zankoku na Tenshi no These", "Yoko Takahashi",
+        [_rec("残酷な天使のテーゼ", "Yoko Takahashi")],
+        fingerprint_score=0.82,
+        aliases_provider=None,
+    )
+    assert out.decision is Decision.SKIP
+
+
+def test_a_readable_artist_that_disagrees_is_still_a_wrong_download():
+    """The rule only ever protects UNREADABLE dimensions."""
+    out = evaluate(
+        "Zankoku na Tenshi no These", "Yoko Takahashi",
+        [_rec("残酷な天使のテーゼ", "Metallica")],
+        fingerprint_score=0.90,
+        aliases_provider=None,
+    )
+    assert out.decision is Decision.FAIL

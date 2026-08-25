@@ -373,6 +373,14 @@ def evaluate(expected_title: str, expected_artist: str,
         if not artist_comparable:
             # The title already agrees and the artist score is unreadable, so
             # there is nothing here that says the file is wrong.
+            #
+            # Deliberate and known: a cover of the right song by a non-Latin
+            # artist is a real wrong download and is unreportable through this
+            # branch. Nothing cheap distinguishes it — MusicBrainz alias lists
+            # are incomplete often enough that "the aliases did not match" is
+            # not evidence either, and a fingerprint bar here would re-quarantine
+            # the correct files this branch exists for. A matching title after a
+            # matching fingerprint is corroboration; we take it.
             return out(Decision.SKIP,
                        f"Title matches and the artist is written in a different "
                        f"script, so the names cannot be compared: "
@@ -428,6 +436,16 @@ def evaluate(expected_title: str, expected_artist: str,
     # fingerprint >= 0.95 bar, which left an ordinary 0.90 match on a
     # Japanese-titled track quarantined; the script signal does not depend on
     # how well the fingerprint scored.
+    #
+    # Known and accepted: when BOTH dimensions are unreadable there is no
+    # evidence in either direction, so a genuinely wrong non-Latin download is
+    # unreportable here. Re-adding a fingerprint bar for that case was tried and
+    # reverted — it does not separate the two, because the score says nothing
+    # about the NAMES. What it does instead is quarantine the correct file this
+    # branch exists for: "Zankoku na Tenshi no These" by "Yoko Takahashi" against
+    # 残酷な天使のテーゼ by 高橋洋子 at a perfectly ordinary 0.90 is the same
+    # shape as a wrong one, and that is the direction that costs a user their
+    # file. Silence is the safe half of an unanswerable question.
     incomparable_title_skip = (
         not title_comparable
         and (not artist_comparable or artist_sim >= ARTIST_MATCH_THRESHOLD)
