@@ -1272,7 +1272,104 @@ def default_artist_resolver(name: str) -> Optional[Dict[str, Any]]:
     return resolve_artist_identity(name)
 
 
+
+def backfill_missing_provider_ids(
+    conn,
+    *,
+    services: Any,
+    limit: int,
+    enricher: Optional[Callable[..., Dict[str, Any]]] = None,
+    next_item: Optional[Callable[..., Optional[Dict[str, Any]]]] = None,
+) -> Dict[str, Any]:
+    """Fill in per-provider gaps across owned artists, albums and tracks.
+
+    ``reconcile_unmapped_native_artists`` asks "does this artist have ANY
+    catalog id", which is the right question for an artist nothing has ever
+    resolved and the wrong one for an artist that Spotify matched and
+    MusicBrainz did not — the shape behind the user's `Sawano Hiroyuki`, whose
+    missing MBID left the AcoustID verifier without the alias bridge that makes
+    a romaji name comparable to a kanji one. The gap is per-provider, so the
+    backlog query has to be too.
+
+    Work comes from ``lib2_provider_attempts`` — the same ledger the twelve
+    enrichment workers drain — via :func:`core.library2.worker_queue.next_pending`,
+    which already knows the owned-library predicate, the artist→album→track
+    order and the retry window for a previous miss. That shared ledger is also
+    what makes this safe to run alongside those workers: whoever reaches a row
+    first records the attempt, and the other one is handed the next row instead.
+
+    ``limit`` is a whole-run budget spent round-robin over ``services``, so one
+    provider's backlog cannot starve the rest. Every outcome is recorded,
+    including a failure, because a row whose attempt went unrecorded is handed
+    straight back on the next iteration.
+    """
+    from core.library2.provider_attempts import record_attempt
+    from core.library2.worker_queue import next_pending
+
+    if enricher is None:
+        enricher = enrich_native_entity_for_service
+    if next_item is None:
+        next_item = next_pending
+
+    queue = [str(s).strip().lower() for s in (services or []) if str(s).strip()]
+    stats: Dict[str, Any] = {
+        "scanned": 0, "matched": 0, "not_found": 0, "errors": 0,
+        "by_service": {},
+    }
+    budget = max(0, int(limit))
+    exhausted: set = set()
+
+    while budget > 0 and len(exhausted) < len(queue):
+        progressed = False
+        for service in queue:
+            if budget <= 0:
+                break
+            if service in exhausted:
+                continue
+            try:
+                item = next_item(conn, service)
+            except Exception as exc:  # noqa: BLE001 — one provider, not the run
+                logger.debug("provider backfill: queue read for %s failed: %s",
+                             service, exc)
+                exhausted.add(service)
+                continue
+            if not item:
+                exhausted.add(service)
+                continue
+            progressed = True
+            budget -= 1
+            stats["scanned"] += 1
+            entity_type = str(item.get("type") or "")
+            entity_id = int(item.get("id"))
+            try:
+                result = enricher(conn, entity_type, entity_id, service) or {}
+                status = "matched" if result.get("success") else "not_found"
+            except Exception as exc:  # noqa: BLE001 — one entity, not the run
+                logger.debug("provider backfill: %s %s via %s failed: %s",
+                             entity_type, entity_id, service, exc)
+                status = "error"
+            stats["errors" if status == "error" else status] += 1
+            stats["by_service"].setdefault(service, {"matched": 0, "not_found": 0,
+                                                     "errors": 0})
+            stats["by_service"][service][
+                "errors" if status == "error" else status] += 1
+            try:
+                record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                               service=service, status=status)
+                conn.commit()
+            except Exception as exc:  # noqa: BLE001
+                # An unrecorded attempt means the queue hands this row straight
+                # back, so the run would spin on it. Drop the provider instead.
+                logger.debug("provider backfill: could not record %s attempt for "
+                             "%s %s: %s", service, entity_type, entity_id, exc)
+                exhausted.add(service)
+        if not progressed:
+            break
+    return stats
+
+
 __all__ = [
+    "backfill_missing_provider_ids",
     "enrich_native_entity_all_services",
     "schedule_native_entity_enrich",
     "enrich_native_entity_for_service",

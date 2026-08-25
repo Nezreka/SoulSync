@@ -44,6 +44,11 @@ logger = get_logger("repair_jobs.native_enrichment_sweep")
 # predicate shrinks as entities resolve, so consecutive runs make progress.
 DEFAULT_BATCH = 200
 
+# The per-provider gap pass is a second, independent budget: it walks every
+# owned artist, album and track rather than the handful with no provider id at
+# all, so a run has to take a smaller bite of a much larger backlog.
+DEFAULT_BACKFILL_BATCH = 100
+
 
 def _configured_services(config_manager) -> set:
     """Providers this instance actually has configured.
@@ -74,6 +79,11 @@ class NativeEnrichmentSweepJob(RepairJob):
         'configured, writing provider IDs, artwork, genres and descriptive metadata '
         'straight onto the library entry. It is the new library\'s equivalent of the '
         'metadata workers, and it never creates an old-library row to get there.\n\n'
+        'It then fills per-provider gaps across the rest of the library: an artist, '
+        'album or track that one source matched and another did not. An entry that '
+        'Spotify knows is not "done" while MusicBrainz has never been asked about '
+        'it — and a missing MusicBrainz ID is what leaves the AcoustID check without '
+        'the alternate spellings it needs to recognise a non-Latin artist name.\n\n'
         'Rate-limited by the providers themselves, and processed in batches, so a large '
         'backlog is worked off across several runs rather than in one long burst.'
     )
@@ -89,10 +99,11 @@ class NativeEnrichmentSweepJob(RepairJob):
     default_interval_hours = 24
     default_settings = {
         'batch_size': DEFAULT_BATCH,
+        'backfill_batch_size': DEFAULT_BACKFILL_BATCH,
     }
     auto_fix = True
 
-    def _batch_size(self, context: JobContext) -> int:
+    def _setting(self, context: JobContext, key: str, default: int) -> int:
         settings = {}
         if context.config_manager:
             raw = context.config_manager.get(
@@ -100,12 +111,18 @@ class NativeEnrichmentSweepJob(RepairJob):
             if isinstance(raw, dict):
                 settings = raw
         try:
-            value = settings.get('batch_size', DEFAULT_BATCH)
+            value = settings.get(key, default)
             if isinstance(value, bool):
                 raise ValueError
             return max(1, int(value))
         except (TypeError, ValueError):
-            return DEFAULT_BATCH
+            return default
+
+    def _batch_size(self, context: JobContext) -> int:
+        return self._setting(context, 'batch_size', DEFAULT_BATCH)
+
+    def _backfill_size(self, context: JobContext) -> int:
+        return self._setting(context, 'backfill_batch_size', DEFAULT_BACKFILL_BATCH)
 
     def _pending(self, conn, limit: int):
         """Native artists still short of a catalog provider id."""
@@ -139,6 +156,7 @@ class NativeEnrichmentSweepJob(RepairJob):
             context.report_progress(
                 phase=f'Enriching {total} native artist(s)...', total=total)
 
+        backfilled = None
         try:
             from core.library2.native_enrich import enrich_native_entity_all_services
 
@@ -166,6 +184,8 @@ class NativeEnrichmentSweepJob(RepairJob):
                             log_type='success')
                 if context.update_progress:
                     context.update_progress(i + 1, total)
+
+            backfilled = self._backfill_provider_gaps(context, conn, services, result)
         finally:
             if conn:
                 conn.close()
@@ -176,7 +196,44 @@ class NativeEnrichmentSweepJob(RepairJob):
                 log_line=(f'{result.auto_fixed} of {total} native artist(s) resolved'
                           if total else 'No native artists needed enrichment'),
                 log_type='success')
+            if backfilled:
+                context.report_progress(
+                    log_line=(f'Provider gaps: {backfilled["matched"]} filled, '
+                              f'{backfilled["not_found"]} still unknown, '
+                              f'out of {backfilled["scanned"]} checked'),
+                    log_type='success' if backfilled["matched"] else 'info')
         return result
+
+    def _backfill_provider_gaps(self, context: JobContext, conn, services,
+                                result: JobResult):
+        """Second phase: an entity one provider matched and another has never
+        been asked about.
+
+        Skipped outright when the configured-provider set is unknown, rather
+        than falling back to "walk them all" — an unconfigured Tidal client
+        starts an interactive login, and a scheduled job is the last place that
+        should open a browser tab.
+        """
+        if not services:
+            return None
+        limit = self._backfill_size(context)
+        if context.check_stop() or context.wait_if_paused():
+            return None
+        if context.report_progress:
+            context.report_progress(phase='Filling provider gaps...')
+        try:
+            from core.library2.native_enrich import backfill_missing_provider_ids
+
+            stats = backfill_missing_provider_ids(
+                conn, services=sorted(services), limit=limit)
+        except Exception as e:  # noqa: BLE001 — the artist pass already counted
+            logger.error("provider gap backfill failed: %s", e)
+            result.errors += 1
+            return None
+        result.scanned += stats["scanned"]
+        result.auto_fixed += stats["matched"]
+        result.errors += stats["errors"]
+        return stats
 
     def estimate_scope(self, context: JobContext) -> int:
         conn = None

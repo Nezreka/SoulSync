@@ -244,9 +244,24 @@ def _search_service(service, entity_type, query):
             return [{'id': t.id, 'name': t.name, 'image': t.image_url, 'extra': f"{', '.join(t.artists)} · {t.album or ''}"} for t in items]
 
     elif service == 'musicbrainz':
-        if not mb_worker or not mb_worker.mb_service:
-            raise ValueError("MusicBrainz worker not initialized")
-        mb_client = mb_worker.mb_service.mb_client
+        # MusicBrainz needs no credentials and no worker — only a client. When
+        # the worker is there, use its service so both share one rate limiter;
+        # otherwise fall back to the process-wide shared instance. Requiring
+        # the worker meant a MusicBrainz enrich raised, and the callers that
+        # swallow a per-provider failure turned that into "Enrich all" quietly
+        # leaving the chip pending.
+        mb_client = None
+        if mb_worker is not None and getattr(mb_worker, 'mb_service', None):
+            mb_client = mb_worker.mb_service.mb_client
+        else:
+            try:
+                from core.musicbrainz_service import get_musicbrainz_service
+
+                mb_client = get_musicbrainz_service().mb_client
+            except Exception as e:
+                logger.debug("shared MusicBrainz service unavailable: %s", e)
+        if mb_client is None:
+            raise ValueError("MusicBrainz client not available")
         # User-facing manual search — prefer recall (fuzzy / alias / diacritic-
         # folded) over strict phrase precision. User picks correct hit from list.
         if entity_type == 'artist':

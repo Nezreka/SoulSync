@@ -42506,6 +42506,14 @@ def _library_v2_configured_match_services() -> set:
         entry = status.get(key)
         if entry and entry.get("configured"):
             configured.add(service)
+    # MusicBrainz has no credentials to configure and no longer needs its
+    # worker to answer a search, so it is available whenever the app is.
+    # _get_enrichment_status() reports only services that HAVE a worker object,
+    # so a failed worker init used to drop MusicBrainz out of every enrich walk
+    # — silently, since the walk swallows per-provider failures. A missing MBID
+    # is what leaves the AcoustID check without an artist's alternate
+    # spellings, so this is the one service that must not go missing quietly.
+    configured.add("musicbrainz")
     return configured
 
 
