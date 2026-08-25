@@ -234,22 +234,6 @@ class MusicBrainzService:
                 scored.append((confidence, result))
             scored.sort(key=lambda s: s[0], reverse=True)
 
-            # A name written in another script scores 0.0 against ours however
-            # certain MusicBrainz is, so the formula above caps such a candidate
-            # at 40 against a gate of 70 — cross-script artists were structurally
-            # unmatchable, and the only way to give one an id was by hand. The
-            # name carries no information here, but the CATALOGUE does: album
-            # titles survive a script difference far better than names, and an
-            # entity holding records this library owns is not somebody else.
-            # Deliberately strict — MusicBrainz confident about the name AND at
-            # least one owned album in that entity's catalogue. Without owned
-            # albums to check against there is no evidence, and it stays
-            # unmatched rather than guessing.
-            cross = self._cross_script_catalogue_match(
-                artist_name, scored, owned_titles)
-            if cross is not None:
-                return cross
-
             # Among the strong (>=70) candidates, disambiguate same-name artists by
             # which one's release groups overlap the albums this library owns.
             gated = [r for conf, r in scored if conf >= 70]
@@ -279,11 +263,34 @@ class MusicBrainzService:
                     'confidence': best_confidence,
                     'cached': False
                 }
-            else:
-                logger.info(f"Low confidence match for artist '{artist_name}' (best: {best_confidence})")
-                self._save_to_cache('artist', artist_name, None, None, None, best_confidence)
-                return None
-                
+            # Nothing written in our own script cleared the bar. A name in
+            # another script scores 0.0 against ours however certain
+            # MusicBrainz is, so the formula above caps such a candidate at 40
+            # against a gate of 70 — cross-script artists were structurally
+            # unmatchable, and the only way to give one an id was by hand. The
+            # name carries no information here, but the CATALOGUE does: album
+            # titles survive a script difference far better than names, and an
+            # entity holding records this library owns is not somebody else.
+            # Deliberately strict — MusicBrainz confident about the name AND at
+            # least one owned album in that entity's catalogue. Without owned
+            # albums to check against there is no evidence, and it stays
+            # unmatched rather than guessing.
+            #
+            # Runs LAST on purpose. Ahead of the gate it beat a same-script
+            # candidate scoring 95 with one scoring 80, on nothing more than a
+            # shared album title as common as "Home" — and the id it picked was
+            # then written onto the artist row and fed the alias bridge from
+            # there on. A fallback cannot do that: it only ever speaks where the
+            # name path found nobody.
+            cross = self._cross_script_catalogue_match(
+                artist_name, scored, owned_titles)
+            if cross is not None:
+                return cross
+
+            logger.info(f"Low confidence match for artist '{artist_name}' (best: {best_confidence})")
+            self._save_to_cache('artist', artist_name, None, None, None, best_confidence)
+            return None
+
         except Exception as e:
             logger.error(f"Error matching artist '{artist_name}': {e}")
             return None

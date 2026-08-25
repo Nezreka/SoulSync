@@ -122,3 +122,46 @@ def test_a_same_script_near_miss_is_still_refused(service):
     _catalogue(service, {"mbid-grant": ["Heart in Motion"]})
 
     assert service.match_artist("Grant", owned_titles=["Heart in Motion"]) is None
+
+
+def test_a_shared_album_title_does_not_outrank_a_same_script_name_match():
+    """The cross-script rescue is a fallback, never a preemption.
+
+    Ahead of the name gate it returned the FIRST cross-script candidate with one
+    overlapping album — worth 80 by its own formula — before a same-script
+    candidate scoring 95 was ever considered. One shared title is a low bar:
+    "Home", "Anthology", a soundtrack two artists both appear on. And the id it
+    picked did not just answer this call, it was written onto the artist row and
+    fed the alias bridge from then on.
+    """
+    svc = MusicBrainzService.__new__(MusicBrainzService)
+    svc.mb_client = MagicMock()
+    svc._check_cache = MagicMock(return_value=None)
+    svc._save_to_cache = MagicMock()
+    svc.mb_client.search_artist.return_value = [
+        {"id": "mbid-right", "name": "Sawano Hiroyuki", "score": 95},
+        {"id": "mbid-cross", "name": "澤野弘之", "score": 100},
+    ]
+    _catalogue(svc, {"mbid-right": OWNED, "mbid-cross": OWNED})
+
+    out = svc.match_artist("Sawano Hiroyuki", owned_titles=OWNED)
+
+    assert out is not None
+    assert out["mbid"] == "mbid-right"
+
+
+def test_the_rescue_still_speaks_when_no_name_clears_the_gate():
+    svc = MusicBrainzService.__new__(MusicBrainzService)
+    svc.mb_client = MagicMock()
+    svc._check_cache = MagicMock(return_value=None)
+    svc._save_to_cache = MagicMock()
+    svc.mb_client.search_artist.return_value = [
+        {"id": "mbid-noise", "name": "Somebody Else", "score": 40},
+        {"id": "mbid-cross", "name": "澤野弘之", "score": 100},
+    ]
+    _catalogue(svc, {"mbid-noise": [], "mbid-cross": OWNED})
+
+    out = svc.match_artist("Sawano Hiroyuki", owned_titles=OWNED)
+
+    assert out is not None
+    assert out["mbid"] == "mbid-cross"
