@@ -50,9 +50,17 @@ describe('AdlRow', () => {
 
   it('shows the track position only for a real multi-track batch', () => {
     const { container } = render(
-      <AdlRow dl={row({ batch_name: 'My Batch', batch_total: 19, track_index: 2 })} />,
+      <AdlRow
+        dl={row({ batch_name: 'My Batch', batch_total: 19, track_index: 2, batch_position: 3 })}
+      />,
     );
     expect(container.querySelector('.adl-row-batch')?.textContent).toBe('My Batch · Track 3 of 19');
+    // #1183: track_index must NEVER be the ordinal - without a server
+    // position the label is omitted rather than wrong
+    const noPos = render(
+      <AdlRow dl={row({ batch_name: 'Wishlist', batch_total: 2, track_index: 4929 })} />,
+    );
+    expect(noPos.container.querySelector('.adl-row-batch')?.textContent).toBe('Wishlist');
 
     cleanup();
     const single = render(<AdlRow dl={row({ batch_name: 'Solo', batch_total: 1 })} />);

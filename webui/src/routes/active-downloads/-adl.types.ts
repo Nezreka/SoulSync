@@ -45,6 +45,13 @@ export interface AdlDownload {
   playlist_id: string;
   track_index: number;
   batch_total: number;
+  /**
+   * 1-based position within the batch queue - the DISPLAY ordinal.
+   * track_index is an identity (original playlist/wishlist position, used
+   * for cancel addressing) and must never be shown as a position: #1183
+   * had a 2-track album sub-batch printing "Track 4930 of 2".
+   */
+  batch_position?: number | null;
   timestamp: number;
   priority: number;
   quality: string;

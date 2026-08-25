@@ -194,7 +194,11 @@ export function AdlRow({ dl, onCancel, onRowAudit, actions }: AdlRowProps) {
 
   const meta = [dl.artist, dl.album].filter(Boolean).join(' · ');
   // "3 of 19" — only meaningful for a real multi-track batch.
-  const position = dl.batch_total > 1 ? `${(dl.track_index || 0) + 1} of ${dl.batch_total}` : '';
+  // batch_position, NEVER track_index: that one is an identity, not an
+  // ordinal, and rendering it printed "Track 4930 of 2" (#1183). no
+  // position from the server -> no label, rather than a wrong one.
+  const position =
+    dl.batch_total > 1 && dl.batch_position ? `${dl.batch_position} of ${dl.batch_total}` : '';
   const colorIdx = batchColorIndex(dl.batch_id);
 
   /**
