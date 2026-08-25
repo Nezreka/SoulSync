@@ -77002,6 +77002,37 @@ body.em-scroll-lock { overflow: hidden; }
     flex-shrink: 0;
 }
 
+/* lastfm radio: three fixes from the aug 25 report.
+   1) .discover-section's content-visibility paint-contains descendants, so
+      the absolutely-positioned dropdown was CLIPPED to nothing when the
+      section had no radios yet - search looked broken. this section opts
+      out; it's small, the perf win was negligible here anyway. */
+#lastfm-radio-section {
+    content-visibility: visible;
+}
+
+/* 2) the result rows are <button>s now (the vanilla used divs) and there is
+   no global button reset - native ButtonFace chrome painted white text on
+   light grey. */
+.lastfm-radio-result {
+    width: 100%;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+}
+
+.lastfm-radio-result:hover {
+    background: rgba(255, 255, 255, 0.07);
+}
+
+/* 3) eight ~56px rows with no scroll made a 450px wall. */
+.lastfm-radio-dropdown {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
 /* discover: recommended stations - one-click artist radio cards */
 .discover-stations-header {
     display: flex;

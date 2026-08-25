@@ -30573,7 +30573,15 @@ def get_listenbrainz_playlist_tracks(playlist_mbid):
         tracks = lb_manager.get_cached_tracks(playlist_mbid)
 
         if not tracks:
-            # Cache miss or stale entry with no tracks — try fetching from LB API
+            # Cache miss or stale entry with no tracks — try fetching from LB API.
+            # NEVER for a last.fm radio pseudo-mbid: it does not exist on the
+            # ListenBrainz API, so the delete-then-refetch below would
+            # permanently destroy the radio playlist on a mere READ.
+            if str(playlist_mbid).startswith('lastfm_radio_'):
+                return jsonify({
+                    "success": False,
+                    "error": "Radio playlist has no cached tracks - regenerate it"
+                }), 404
             if lb_manager.client.is_authenticated():
                 logger.debug(f"Cache miss for playlist {playlist_mbid}, fetching from ListenBrainz...")
                 # Remove stale playlist row (if any) so _update_playlist doesn't
@@ -30663,11 +30671,22 @@ def lastfm_search_tracks():
         for t in raw:
             # Last.fm image array: [{#text: url, size: small/medium/large/extralarge}]
             image_url = lf.get_best_image(t.get('image', []))
+            # last.fm's generic grey-star placeholder loads fine, so onError
+            # never fires and every row shows the same star - send '' and let
+            # the ui draw its own art-empty glyph instead
+            if image_url and '2a96cbd8b46e442fc41c2b86b821562f' in image_url:
+                image_url = ''
+            # listeners arrives as '' or missing on some matches; int('')
+            # raised and one bad row 500'd the WHOLE search
+            try:
+                listeners = int(t.get('listeners') or 0)
+            except (TypeError, ValueError):
+                listeners = 0
             results.append({
                 'name': t.get('name', ''),
                 'artist': t.get('artist', ''),
                 'mbid': t.get('mbid', ''),
-                'listeners': int(t.get('listeners', 0)),
+                'listeners': listeners,
                 'image_url': image_url or '',
             })
         return jsonify({"success": True, "results": results})

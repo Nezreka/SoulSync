@@ -404,6 +404,9 @@ export function DiscoverPage() {
     const due = [
       ...(mosaicsWanted.lb ? lb.mixes : []),
       ...(mosaicsWanted.decades ? mixes.decadeMixes : []),
+      // lastfm radios are few (one per generated radio) and were never
+      // hydrated at all - every card wore four placeholder tiles forever
+      ...lastfm.mixes,
     ];
     for (const mix of due) {
       if (mix.tracks?.length || lbCoversRef.current[mix.key]) continue;
@@ -414,7 +417,7 @@ export function DiscoverPage() {
         .then((tracks) => setLbCovers((prev) => ({ ...prev, [mix.key]: tracks })))
         .catch(() => {});
     }
-  }, [lb.mixes, mixes.decadeMixes, lbLazy, mosaicsWanted]);
+  }, [lb.mixes, mixes.decadeMixes, lastfm.mixes, lbLazy, mosaicsWanted]);
   const decadeMixesHydrated = useMemo(
     () =>
       mixes.decadeMixes.map((mix) =>
@@ -432,6 +435,15 @@ export function DiscoverPage() {
           : mix,
       ),
     [lb.mixes, lbCovers],
+  );
+  const lastfmMixesHydrated = useMemo(
+    () =>
+      lastfm.mixes.map((mix) =>
+        !mix.tracks?.length && lbCovers[mix.key]?.length
+          ? { ...mix, tracks: lbCovers[mix.key] }
+          : mix,
+      ),
+    [lastfm.mixes, lbCovers],
   );
 
   /** Convert + hand to the SHARED downloads.js modal (11129-11160). */
@@ -481,7 +493,17 @@ export function DiscoverPage() {
         // sync-services.js owns the WHOLE LB sync — fetch, virtual playlist,
         // polling — and writes into the -sync-total/-sync-matched spans the
         // modal's override renders (3592-3616). It survives PR2.
-        void window.startListenBrainzPlaylistSync?.(rest.join(':'));
+        //
+        // A playlist whose state never left 'fresh' (a just-generated lastfm
+        // radio) has no frontend sync state, and startListenBrainzPlaylistSync
+        // console.errors and returns - a silently dead button. Say what to do.
+        const lbId = rest.join(':');
+        const states = window.listenbrainzPlaylistStates;
+        if (states && !states[lbId]) {
+          toast('Run Download first — sync needs its discovery results', 'info');
+          return;
+        }
+        void window.startListenBrainzPlaylistSync?.(lbId);
         return;
       }
       const type = mix.syncKey ?? mix.key;
@@ -782,12 +804,13 @@ export function DiscoverPage() {
             results={lastfm.results}
             dropdownOpen={lastfm.dropdownOpen}
             searching={lastfm.searching}
-            mixes={lastfm.mixes}
+            mixes={lastfmMixesHydrated}
             loaded={lastfm.loaded}
             generating={lastfm.generating}
             onQueryChange={lastfm.setQuery}
             onPick={(t) => void lastfm.pick(t)}
             onClear={lastfm.clear}
+            onDismiss={lastfm.dismiss}
             onOpenMix={modal.open}
           />
         );
