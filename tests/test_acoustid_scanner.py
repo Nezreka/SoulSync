@@ -1,6 +1,25 @@
 from types import SimpleNamespace
 
+import pytest
+
 from core.repair_jobs.acoustid_scanner import AcoustIDScannerJob
+
+
+@pytest.fixture(autouse=True)
+def _no_live_alias_lookup(monkeypatch):
+    """Keep the alias chain off the network.
+
+    `_resolve_expected_artist_aliases` builds a MusicBrainzService and then
+    queries MusicBrainz over HTTP. These tests were reaching it for real: they
+    patched the name on the SCANNER module, which stopped importing it when the
+    scan was routed through the shared verifier, and the non-raising form of
+    monkeypatch turned that into a silent no-op. 35 seconds a piece, and a
+    different answer when rate-limited. Tests that are about the alias bridge
+    override this with the list they mean.
+    """
+    monkeypatch.setattr(
+        "core.acoustid_verification._resolve_expected_artist_aliases",
+        lambda name: [])
 
 
 class _FakeCursor:
@@ -830,9 +849,9 @@ def test_scanner_does_not_flag_cross_script_when_alias_bridges(monkeypatch):
     unified verification core recognises the match, so the library scan must NOT
     create a false 'Wrong download' finding (it did before, stripping all
     non-ASCII and never consulting aliases)."""
-    import core.repair_jobs.acoustid_scanner as scanner_mod
-    monkeypatch.setattr(scanner_mod, "_resolve_expected_artist_aliases",
-                        lambda name: ["澤野弘之"], raising=False)
+    monkeypatch.setattr(
+        "core.acoustid_verification._resolve_expected_artist_aliases",
+        lambda name: ["澤野弘之"])
     job = AcoustIDScannerJob()
     captured = []
     context = _make_finding_capturing_context(
@@ -858,9 +877,6 @@ def test_scanner_does_not_flag_cross_script_when_alias_bridges(monkeypatch):
 def _force_imported_scan(monkeypatch):
     """Drive a scan over a force-imported file whose fingerprint clearly
     mismatches. Returns the captured findings."""
-    import core.repair_jobs.acoustid_scanner as scanner_mod
-    monkeypatch.setattr(scanner_mod, "_resolve_expected_artist_aliases",
-                        lambda name: [], raising=False)
     monkeypatch.setattr(
         'core.tag_writer.read_file_tags',
         lambda fpath: {'artist': None, 'verification_status': 'force_imported'},
@@ -899,9 +915,6 @@ def test_force_imported_mismatch_is_reported_as_informational(monkeypatch):
 
 
 def test_human_verified_files_are_never_scanned(monkeypatch):
-    import core.repair_jobs.acoustid_scanner as scanner_mod
-    monkeypatch.setattr(scanner_mod, "_resolve_expected_artist_aliases",
-                        lambda name: [], raising=False)
     monkeypatch.setattr('core.tag_writer.read_file_tags',
                         lambda fpath: {'artist': None, 'verification_status': 'human_verified'})
     job = AcoustIDScannerJob()
@@ -938,9 +951,6 @@ def _run_persistence_scan(tmp_path, monkeypatch, *, file_status, aid_artist,
 
     from core.library2.schema import ensure_library_v2_schema
 
-    import core.repair_jobs.acoustid_scanner as scanner_mod
-    monkeypatch.setattr(scanner_mod, "_resolve_expected_artist_aliases",
-                        lambda name: [], raising=False)
     monkeypatch.setattr(
         'core.tag_writer.read_file_tags',
         lambda fpath: {'artist': None, 'verification_status': file_status})
