@@ -350,10 +350,15 @@ class AcoustIDScannerJob(RepairJob):
         # Listing every recording would pad the message with lower-scored
         # links that were never really in contention.
         _cand_labels = []
+        _cand_detail = []
         for _r in sorted(_judge, key=lambda r: r.get('score') or 0, reverse=True):
             _lbl = f'"{_r.get("title") or "?"}" by {_r.get("artist") or "?"}'
             if _lbl not in _cand_labels:
                 _cand_labels.append(_lbl)
+                # structured twin of the label, so the fix dialog's pick-one flow
+                # never has to parse a display string back apart
+                _cand_detail.append({'title': _r.get('title') or '',
+                                     'artist': _r.get('artist') or ''})
 
         # Mismatch (FAIL) — create finding.
         if context.report_progress:
@@ -422,6 +427,7 @@ class AcoustIDScannerJob(RepairJob):
                     # RETAG from this finding must refuse when this is set.
                     'ambiguous': _ambiguous,
                     'candidates': _cand_labels[:10],
+                    'candidates_detail': _cand_detail[:10],
                 }
             )
             if inserted:

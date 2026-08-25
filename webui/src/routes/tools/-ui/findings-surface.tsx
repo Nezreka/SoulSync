@@ -454,7 +454,10 @@ export function FindingsSurface({
         if (!fixAction) return;
       }
       if (type === TYPE_ACOUSTID) {
-        fixAction = await prompts.promptAcoustid();
+        // an ambiguous finding carries its candidate recordings - hand them to
+        // the dialog so the user can pick which one to retag/relocate as
+        const d = (finding.details || {}) as { ambiguous?: boolean; candidates?: string[] };
+        fixAction = await prompts.promptAcoustid(d.ambiguous ? d.candidates : undefined);
         if (!fixAction) return;
       }
       if (type === TYPE_QUALITY) {

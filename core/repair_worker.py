@@ -3652,6 +3652,29 @@ class RepairWorker:
         return {'success': True, 'action': 'fixed_unknown_artist',
                 'message': f'Fixed: {corrected_artist} - {corrected_title}'}
 
+    @staticmethod
+    def _acoustid_candidate(details, idx):
+        """``(title, artist)`` of candidate ``idx`` on an acoustid finding, or None.
+
+        New findings carry structured ``candidates_detail``; findings written
+        before that only have the display labels ('"Title" by Artist'), which
+        parse back losslessly because the title is always quoted whole.
+        """
+        detail = details.get('candidates_detail') or []
+        if 0 <= idx < len(detail):
+            entry = detail[idx] or {}
+            title = (entry.get('title') or '').strip()
+            artist = (entry.get('artist') or '').strip()
+            if title:
+                return title, artist
+        labels = details.get('candidates') or []
+        if 0 <= idx < len(labels):
+            import re as _re
+            m = _re.match(r'^"(?P<title>.*)" by (?P<artist>.*)$', str(labels[idx]))
+            if m and m.group('title').strip():
+                return m.group('title').strip(), m.group('artist').strip()
+        return None
+
     def _fix_acoustid_mismatch(self, entity_type, entity_id, file_path, details):
         """Fix an AcoustID mismatch. Actions:
            'retag' (default): Update DB title/artist to match the actual audio content
@@ -3661,14 +3684,35 @@ class RepairWorker:
         fix_action = details.get('_fix_action', 'retag')
         track_id = entity_id
 
+        # 'retag:<n>' / 'relocate:<n>' — the user PICKED candidate n of an
+        # ambiguous fingerprint in the fix dialog (Discord request: the finding
+        # names the possible recordings, so let me choose one instead of only
+        # offering manual/redownload/delete). Same composite-string convention
+        # the duplicate keeper uses ('track-42').
+        _chosen = None
+        if isinstance(fix_action, str) and ':' in fix_action:
+            _base, _, _idx = fix_action.partition(':')
+            if _base in ('retag', 'relocate') and _idx.isdigit():
+                fix_action = _base
+                _chosen = self._acoustid_candidate(details, int(_idx))
+                if _chosen is None:
+                    return {'success': False,
+                            'error': 'That candidate is not on this finding any more — '
+                                     'refresh and pick again.'}
+                # From here the ordinary retag/relocate path runs with the
+                # user's chosen recording as the answer.
+                details = dict(details)
+                details['acoustid_title'] = _chosen[0]
+                details['acoustid_artist'] = _chosen[1]
+
         # #1132: an ambiguous fingerprint has no single answer — its
         # `acoustid_title`/`acoustid_artist` are one arbitrary pick from several
         # equally-scored recordings. Both the retag and relocate paths below
         # WRITE those values (into the DB, and into the file's tags), which is
         # how a wrong suggestion becomes wrong data. Deleting or re-downloading
         # is still fine: those act on "this file is wrong", which the scan did
-        # establish.
-        if details.get('ambiguous') and fix_action in ('retag', 'relocate'):
+        # establish. A user's explicit pick above IS the single answer.
+        if details.get('ambiguous') and _chosen is None and fix_action in ('retag', 'relocate'):
             cands = details.get('candidates') or []
             return {
                 'success': False,
@@ -3676,7 +3720,7 @@ class RepairWorker:
                     'This fingerprint matches several different recordings, so there '
                     'is no single correct title to apply'
                     + (' (%s)' % '; '.join(cands[:3]) if cands else '')
-                    + '. Pick the right track manually, or use Re-download / Delete.'
+                    + '. Pick one of them in the fix dialog, or use Re-download / Delete.'
                 ),
             }
 

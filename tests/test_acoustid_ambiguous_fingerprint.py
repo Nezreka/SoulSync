@@ -324,3 +324,78 @@ def test_the_scanner_imports_and_uses_the_guard():
         "the ambiguity guard is no longer consulted before creating a finding")
     # It must run BEFORE the finding is built, not after.
     assert src.index("fingerprint_is_ambiguous") < src.index("create_finding")
+
+
+# ── picking one of the tied recordings (Discord QoL request) ─────────────────
+#
+# The finding already NAMES the possible recordings; refusing retag/relocate and
+# pointing at manual tools made the user do by hand what one click could do. The
+# fix dialog now lets them pick, and the choice rides the same composite
+# fix_action string the duplicate keeper uses ('retag:<candidate index>').
+
+def _ambiguous_details(**extra):
+    d = {'_fix_action': 'retag', 'ambiguous': True,
+         'acoustid_title': 'I Wish (My Taylor Swift)',
+         'acoustid_artist': 'The Knocks feat. Matthew Koma',
+         'candidates': ['"I Wish (My Taylor Swift)" by The Knocks feat. Matthew Koma',
+                        '"I Wish (My Taylor Swift) (Jayceeoh Remix)" by The Knocks & Matthew Koma']}
+    d.update(extra)
+    return d
+
+
+def test_a_picked_candidate_unlocks_the_retag():
+    """'retag:1' = the user chose the second recording. The ordinary retag path
+    then runs with THAT title/artist - the pick is the single answer the
+    ambiguity guard was waiting for."""
+    from core.repair_worker import RepairWorker
+
+    worker = RepairWorker.__new__(RepairWorker)
+    details = _ambiguous_details(
+        _fix_action='retag:1',
+        candidates_detail=[
+            {'title': 'I Wish (My Taylor Swift)', 'artist': 'The Knocks feat. Matthew Koma'},
+            {'title': 'I Wish (My Taylor Swift) (Jayceeoh Remix)',
+             'artist': 'The Knocks & Matthew Koma'},
+        ])
+    chosen = RepairWorker._acoustid_candidate(details, 1)
+    assert chosen == ('I Wish (My Taylor Swift) (Jayceeoh Remix)', 'The Knocks & Matthew Koma')
+    # and the guard itself no longer refuses: drive _fix_acoustid_mismatch far
+    # enough to pass the ambiguity check (it will fail later on the missing
+    # DB plumbing of this bare worker, which is fine - what matters is the
+    # error is NOT the several-recordings refusal)
+    out = worker._fix_acoustid_mismatch('track', '99', '', details)
+    assert 'several different recordings' not in str(out.get('error', ''))
+
+
+def test_an_old_finding_without_structured_candidates_still_resolves_the_pick():
+    """Findings written before candidates_detail existed only carry the display
+    labels - which parse back losslessly because the title is quoted whole."""
+    from core.repair_worker import RepairWorker
+
+    details = _ambiguous_details()
+    assert RepairWorker._acoustid_candidate(details, 0) == (
+        'I Wish (My Taylor Swift)', 'The Knocks feat. Matthew Koma')
+    assert RepairWorker._acoustid_candidate(details, 1) == (
+        'I Wish (My Taylor Swift) (Jayceeoh Remix)', 'The Knocks & Matthew Koma')
+    # a title that itself contains ' by ' must not split in the middle
+    tricky = {'candidates': ['"Stand by Me" by Ben E. King']}
+    assert RepairWorker._acoustid_candidate(tricky, 0) == ('Stand by Me', 'Ben E. King')
+
+
+def test_a_stale_candidate_index_is_refused_not_guessed():
+    from core.repair_worker import RepairWorker
+
+    worker = RepairWorker.__new__(RepairWorker)
+    out = worker._fix_acoustid_mismatch(
+        'track', '99', '', _ambiguous_details(_fix_action='retag:7'))
+    assert out['success'] is False
+    assert 'not on this finding' in out['error']
+
+
+def test_no_pick_still_refuses_exactly_as_before():
+    from core.repair_worker import RepairWorker
+
+    worker = RepairWorker.__new__(RepairWorker)
+    out = worker._fix_acoustid_mismatch('track', '99', '', _ambiguous_details())
+    assert out['success'] is False
+    assert 'several different recordings' in out['error']
