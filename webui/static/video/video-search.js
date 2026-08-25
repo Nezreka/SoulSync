@@ -46,6 +46,8 @@
     var basicConfigLoading = false;
     var basicActiveSource = null;
     var basicRowsBySource = {};   // source id -> the rows currently rendered for it
+    var basicOpen = {};           // hit key -> expanded
+    var basicDetail = {};         // ext.to detail url -> matched facts (or false = looked, nothing)
     var freshSeq = 0;
     var freshCache = null;
     var freshRefreshing = false;   // a manual Refresh is in flight
@@ -215,6 +217,82 @@
         return canFetchRelease((BASIC_SEARCH_SOURCES[sourceId] || {}).source || 'torrent', r);
     }
 
+    function basicHitKey(r, sourceId) {
+        return sourceId + '|' + (r.info_url || r.guid || r.download_url || r.filename || r.title || '');
+    }
+
+    // Age from an indexer's publish date. Indexers state an ISO timestamp; the
+    // board states 'x hours ago' already, so only the former needs converting.
+    function basicAgeLabel(r) {
+        if (r.age) return r.age;
+        if (!r.published_at) return '';
+        var t = Date.parse(r.published_at);
+        if (!isFinite(t)) return '';
+        var mins = Math.max(0, (Date.now() - t) / 60000);
+        if (mins < 90) return Math.round(mins) + ' min ago';
+        var hrs = mins / 60;
+        if (hrs < 36) return Math.round(hrs) + ' hours ago';
+        var days = hrs / 24;
+        if (days < 45) return Math.round(days) + ' days ago';
+        var mons = days / 30.4;
+        return mons < 18 ? Math.round(mons) + ' months ago' : Math.round(days / 365) + ' years ago';
+    }
+
+    // The extras a hit carries, which differ by source rather than being a poorer
+    // version of the same thing: an indexer knows age and grab count, Soulseek
+    // knows how many peers hold the file and how contended they are, EXT.to knows
+    // what the film IS. Show whichever the hit actually has.
+    function basicExtrasHTML(r, d) {
+        var bits = [];
+        if (d && d.imdb_rating != null) bits.push('<b class="vsr-fresh-rating">&#9733; ' + esc(d.imdb_rating) +
+            (d.imdb_votes ? ' <i>(' + esc(freshNum(d.imdb_votes)) + ')</i>' : '') + '</b>');
+        if (d && d.title) bits.push('<b>' + esc(d.title) + '</b>');
+        if (d && d.year) bits.push('<span>' + esc(d.year) + '</span>');
+        if (d && d.runtime_minutes) bits.push('<span>' + esc(d.runtime_minutes) + ' min</span>');
+        if (d && d.genres && d.genres.length) bits.push('<span>' + esc(d.genres.slice(0, 3).join(' \u00b7 ')) + '</span>');
+        var age = basicAgeLabel(r);
+        if (age) bits.push('<span>' + esc(age) + '</span>');
+        if (r.grabs) bits.push('<span>' + esc(freshNum(r.grabs)) + ' grabs</span>');
+        if (r.peer_count) bits.push('<span>' + esc(r.peer_count) + ' peer' + (r.peer_count === 1 ? '' : 's') + '</span>');
+        if (r.queue) bits.push('<span>queue ' + esc(r.queue) + '</span>');
+        if (!bits.length) return '';
+        return '<div class="vsr-fresh-meta">' + bits.join('') + '</div>';
+    }
+
+    // The expanded panel. EXT.to fills it from its detail page; every other source
+    // fills it from what the search itself returned, so the card opens for all of
+    // them rather than only the one with a scraper.
+    function basicFactsHTML(r, sourceId, d) {
+        var rows = [];
+        function add(label, value) { if (value != null && value !== '') rows.push({ label: label, value: value }); }
+        if (d && (d.facts || []).length) {
+            rows = (d.facts || []).slice();
+            if (d.imdb_id) add('IMDb', d.imdb_id);
+        } else {
+            add('Release', r.title);
+            add('Source', r.username || sourceId);
+            add('Protocol', (r.protocol || '').toUpperCase());
+            add('Size', basicSizeLabel(r));
+            add('Age', basicAgeLabel(r));
+            add('Swarm', basicHealthLabel(r));
+            add('Grabs', r.grabs ? freshNum(r.grabs) : '');
+            add('Peers holding it', r.peer_count || '');
+            add('Free slots', r.slots || '');
+            add('Queue', r.queue || '');
+            add('Quality', r.quality_label || r.resolution);
+            add('Codec', r.codec);
+            add('Audio', r.audio);
+            add('HDR', r.hdr);
+            add('Group', r.group);
+            add('Files', r.file_count || '');
+            if (r.rejected) add('Why review', r.rejected);
+        }
+        if (!rows.length) return '';
+        return '<div class="vsr-fresh-facts">' + rows.map(function (f) {
+            return '<div class="vsr-fresh-fact"><span>' + esc(f.label) + '</span><em>' + esc(f.value) + '</em></div>';
+        }).join('') + '</div>';
+    }
+
     function basicResultHTML(r, sourceId, index) {
         r = r || {};
         var bits = [r.quality_label || r.resolution, r.source, r.codec, r.audio, r.hdr, r.group].filter(Boolean);
@@ -225,11 +303,27 @@
         var analysis = r.rejected ? '<details class="vsr-basic-hit-analysis"><summary>Why review?</summary><p>' + esc(r.rejected) + '</p></details>' : '';
         var chipHtml = bits.length ? bits.slice(0, 7).map(function (b) { return '<span>' + esc(b) + '</span>'; }).join('') : '<span>Release</span>';
         var grabbable = basicHitGrabbable(r, sourceId);
-        return '<article class="vsr-basic-hit ' + (r.accepted === false ? 'vsr-basic-hit--review' : '') + '">' +
+        var key = basicHitKey(r, sourceId);
+        var d = r.info_url ? basicDetail[r.info_url] : null;
+        if (d === false) d = null;                       // looked, nothing came back
+        var open = !!basicOpen[key];
+        return '<article class="vsr-basic-hit ' + (r.accepted === false ? 'vsr-basic-hit--review' : '') +
+                (d ? ' vsr-basic-hit--rich' : '') +
+                // the extra grid column belongs to the IMAGE, not to having facts:
+                // a matched release with no artwork must keep the 2-column layout
+                (d && d.poster_url ? ' vsr-basic-hit--art' : '') +
+                (open ? ' vsr-basic-hit--open' : '') +
+                '" data-vsr-basic-toggle="' + esc(sourceId) + ':' + index + '" role="button" tabindex="0"' +
+                ' aria-expanded="' + (open ? 'true' : 'false') + '">' +
+            (d && d.poster_url
+                ? '<img class="vsr-basic-art" src="/api/video/img?u=' + esc(encodeURIComponent(d.poster_url)) +
+                  '" alt="" loading="lazy" decoding="async">'
+                : '') +
             '<div class="vsr-basic-hit-main">' +
                 '<div class="vsr-basic-hit-kicker"><span>' + esc(provider) + '</span><em>' + esc(protocol) + '</em></div>' +
                 '<strong title="' + esc(r.title || '') + '">' + esc(r.title || 'Untitled release') + '</strong>' +
                 '<div class="vsr-basic-hit-tags">' + chipHtml + '</div>' +
+                basicExtrasHTML(r, d) +
                 analysis +
             '</div>' +
             '<div class="vsr-basic-hit-side">' +
@@ -240,7 +334,47 @@
                 '<button class="vsr-basic-hit-grab" type="button" data-vsr-basic-grab="' + esc(sourceId) + ':' + index + '"' +
                     (grabbable ? '' : ' disabled') + '>' + (grabbable ? 'Identify' : 'No link') + '</button>' +
             '</div>' +
+            '<span class="vsr-fresh-chev" aria-hidden="true"></span>' +
+            (open ? basicFactsHTML(r, sourceId, d) : '') +
         '</article>';
+    }
+
+    // Rewrite ONE source's hit list in place. renderBasicPreview rebuilds the whole
+    // panel from the form, which would throw the results away and leave empty cards.
+    function basicRerenderHits(sourceId) {
+        var card = document.querySelector('[data-vsr-basic-card="' + sourceId + '"]');
+        var host = card && card.querySelector('[data-vsr-basic-hits]');
+        if (!host) return;
+        var rows = basicRowsBySource[sourceId] || [];
+        host.innerHTML = rows.map(function (r, i) { return basicResultHTML(r, sourceId, i); }).join('');
+    }
+
+    function basicToggleHit(sourceId, index) {
+        var rows = basicRowsBySource[sourceId] || [];
+        var r = rows[index];
+        if (!r) return;
+        var key = basicHitKey(r, sourceId);
+        if (basicOpen[key]) { delete basicOpen[key]; basicRerenderHits(sourceId); return; }
+        basicOpen[key] = true;
+        basicRerenderHits(sourceId);
+        // EXT.to can say much more than the search returned - but only by fetching
+        // its detail page, which is a Cloudflare challenge. So it happens HERE, on
+        // the card you actually opened, not while drawing a list of 25. The hourly
+        // board refresh has usually matched it already, in which case this is a
+        // cache read and returns instantly.
+        if (!r.info_url || basicDetail[r.info_url] !== undefined) return;
+        var token = ++basicSeq;
+        fetch('/api/video/downloads/detail?fetch=1&url=' + encodeURIComponent(r.info_url),
+              { headers: { 'Accept': 'application/json' } })
+            .then(_json).then(function (res) {
+                if (token !== basicSeq) return;
+                basicDetail[r.info_url] = (res && res.success && res.detail) ? res.detail : false;
+                basicRerenderHits(sourceId);
+            }).catch(function () {
+                if (token !== basicSeq) return;
+                basicDetail[r.info_url] = false;   // don't retry on every re-render
+                basicRerenderHits(sourceId);
+            });
     }
 
     function setBasicSourceTab(id) {
@@ -1315,6 +1449,13 @@
                     e.preventDefault();
                     var tb = String(ft.getAttribute('data-vsr-fresh-toggle') || '').split(':');
                     freshToggleRow(tb[0], parseInt(tb[1], 10));
+                    return;
+                }
+                var bt = e.target.closest('[data-vsr-basic-toggle]');
+                if (bt && results.contains(bt)) {
+                    e.preventDefault();
+                    var bb = String(bt.getAttribute('data-vsr-basic-toggle') || '').split(':');
+                    basicToggleHit(bb[0], parseInt(bb[1], 10));
                     return;
                 }
                 var fp = e.target.closest('[data-vsr-fresh-period]');

@@ -6560,3 +6560,25 @@ body[data-side="video"] #gsearch-aura {
 @media (max-width: 620px) {
     .vsr-fresh-fact { grid-template-columns: 1fr; gap: 2px; }
 }
+
+/* — Basic Search hits get the same treatment, with source-appropriate content.
+ *   EXT.to reaches parity with Fresh Releases (poster, rating, full fact list,
+ *   from the board's own match cache); a Prowlarr indexer contributes an age and
+ *   a grab count; Soulseek contributes peers, free slots and queue depth. The
+ *   card is one component — what differs is what the source can actually say. */
+.vsr-basic-hit { cursor: pointer; }
+.vsr-basic-hit:focus-visible { outline: 2px solid rgba(var(--vd-accent-rgb), 0.7); outline-offset: 2px; }
+/* the third column exists only when there is artwork to put in it — keying this
+ * off 'has facts' collapsed the title column to 44px on matched-but-art-less rows */
+.vsr-basic-hit--art { grid-template-columns: 44px minmax(0, 1fr) 200px; }
+.vsr-basic-art {
+    width: 44px; height: 62px; border-radius: 8px; object-fit: cover; align-self: flex-start;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+}
+.vsr-basic-hit .vsr-fresh-chev { position: absolute; right: 14px; bottom: 12px; }
+.vsr-basic-hit--open { grid-template-rows: auto auto; }
+.vsr-basic-hit--open .vsr-fresh-chev { transform: rotate(-135deg); border-color: rgba(var(--vd-accent-rgb), 0.9); }
+.vsr-basic-hit .vsr-fresh-facts { grid-column: 1 / -1; }
+@media (max-width: 820px) {
+    .vsr-basic-hit--art { grid-template-columns: 44px minmax(0, 1fr); }
+}

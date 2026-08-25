@@ -416,3 +416,51 @@ def test_identifying_a_release_does_not_toggle_its_card():
     toggle_at = handler.find("freshToggleRow(")
     assert pick_at != -1 and toggle_at != -1
     assert pick_at < toggle_at, "the toggle is checked before Identify — a grab would expand the card"
+
+
+def test_basic_search_cards_expand_with_whatever_their_source_can_say():
+    """Same treatment as Fresh Releases, but the sources differ in what they know:
+    EXT.to reaches parity via its detail page, an indexer contributes an age and a
+    grab count, Soulseek contributes peers/slots/queue. One card, source-appropriate
+    content — not a rich card and two poor imitations."""
+    assert "function basicExtrasHTML" in _JS and "function basicFactsHTML" in _JS
+    assert "data-vsr-basic-toggle" in _JS and "function basicToggleHit" in _JS
+
+    extras = _JS.split("function basicExtrasHTML")[1].split("function basicFactsHTML")[0]
+    for field in ("imdb_rating", "grabs", "peer_count", "queue"):
+        assert field in extras, "the card stopped showing " + field
+
+    facts = _JS.split("function basicFactsHTML")[1].split("function basicResultHTML")[0]
+    assert "d.facts" in facts, "EXT.to's own fact list is not used"
+    # ...and a source with no detail page still opens, from what the search returned
+    for label in ("'Free slots'", "'Peers holding it'", "'Grabs'", "'Swarm'"):
+        assert label in facts, "a non-EXT.to hit would open to nothing: " + label
+
+
+def test_a_basic_hit_only_gets_the_art_column_when_there_is_art():
+    """The third grid column belongs to the IMAGE. Keying it off 'has facts'
+    collapsed the title column to 44px on matched-but-art-less rows."""
+    row = _JS.split("function basicResultHTML")[1].split("function basicToggleHit")[0]
+    assert "d && d.poster_url ? ' vsr-basic-hit--art'" in row
+    assert ".vsr-basic-hit--art" in _CSS
+    assert ".vsr-basic-hit--rich { grid-template-columns" not in _CSS, \
+        "the art column is keyed off facts again"
+
+
+def test_opening_a_basic_card_never_redraws_the_whole_panel():
+    """renderBasicPreview rebuilds the panel from the FORM, which would throw the
+    results away and leave empty source cards. Only the touched source is redrawn."""
+    assert "function basicRerenderHits" in _JS
+    # the function's OWN body — a wider window runs on into the next declarations
+    # and catches renderBasicPreview's definition rather than a call
+    toggle = _JS.split("function basicToggleHit")[1].split("\n    function ")[0]
+    assert "renderBasicPreview()" not in toggle, "expanding a card would wipe the results"
+    assert "basicRerenderHits(sourceId)" in toggle
+
+
+def test_identifying_a_basic_hit_does_not_toggle_its_card():
+    handler = _JS.split("var basicPick = e.target.closest('[data-vsr-basic-grab]')")[1]
+    pick_at = handler.find("basicOpenIdentify(")
+    toggle_at = handler.find("basicToggleHit(")
+    assert pick_at != -1 and toggle_at != -1
+    assert pick_at < toggle_at, "the toggle runs before Identify — a grab would expand the card"

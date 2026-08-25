@@ -213,6 +213,14 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
             # (EXT.to). Without it every EXT.to hit rendered as "Result only" and had
             # nothing a grab could resolve from.
             "info_url": hit.get("info_url"), "magnet_id": hit.get("magnet_id"),
+            # Per-source extras. No source has all of them - an indexer knows the
+            # age and the grab count, Soulseek knows how many peers hold the file
+            # and how contended they are, EXT.to knows what the film IS. The card
+            # shows whichever of them the hit actually carries rather than pretending
+            # every source answers the same questions.
+            # (slots/queue/speed are already projected above for Soulseek)
+            "published_at": hit.get("published_at"), "grabs": hit.get("grabs"),
+            "peer_count": len(hit.get("users") or ()) or None,
             # Parsed IDENTITY, carried so a manual grab can prefill the identify
             # modal (Basic Search) instead of making you retype what the release
             # name already says. `source` above is the release source (WEB/BluRay),
@@ -712,6 +720,44 @@ def register_routes(bp):
                         "sections": board.get("sections") or {},
                         "total": board.get("total") or 0,
                         "fetched_at": board.get("fetched_at")})
+
+    @bp.route("/downloads/detail", methods=["GET"])
+    def video_downloads_release_detail():
+        """The facts behind ONE Basic Search hit, for its expanded card.
+
+        Cache-first by default: the hourly Fresh Releases refresh has already
+        matched everything recent, so most EXT.to hits are answered instantly with
+        no network at all. ``fetch=1`` allows a live lookup for a miss - that is one
+        Cloudflare-challenged page, so it happens when a card is actually opened,
+        never while drawing a list of 25.
+
+        Only EXT.to can answer this. A Prowlarr indexer states an age and a grab
+        count and nothing else; Soulseek states peers and queues. Their cards are
+        built from what the search already returned, so they never come here.
+        """
+        from . import get_video_db
+        from core.video.extto_detail import fetch_detail, is_extto_url
+
+        url = request.args.get("url") or ""
+        if not is_extto_url(url):
+            return jsonify({"success": False, "error": "Not an EXT.to release page."}), 400
+
+        from core.video.extto_board import _cached_detail
+        cached = _cached_detail(get_video_db(), url)
+        if cached is not None:
+            return jsonify({"success": True, "detail": cached, "cached": True})
+        if request.args.get("fetch") not in ("1", "true", "yes"):
+            return jsonify({"success": False, "pending": True,
+                            "error": "Not matched yet."}), 200
+
+        res = fetch_detail(url)
+        if not res.get("ok"):
+            return jsonify({"success": False, "error": res.get("error")}), 200
+        try:    # remember it, so the board and every later card get it free
+            get_video_db().extto_detail_store(url, res["detail"])
+        except Exception:   # noqa: BLE001 - failing to cache costs a refetch, nothing more
+            logger.exception("could not cache EXT.to detail for %s", url)
+        return jsonify({"success": True, "detail": res["detail"], "cached": False})
 
     @bp.route("/downloads/fresh-releases/refresh", methods=["POST"])
     def video_downloads_fresh_releases_refresh():

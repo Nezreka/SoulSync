@@ -387,3 +387,92 @@ def test_an_unstamped_legacy_entry_is_re_matched(monkeypatch):
     calls = _patch(monkeypatch, _board("https://ext.to/a-1/"), "fresh")
     extto_board.refresh_board(db, flaresolverr="http://fs")
     assert calls == ["https://ext.to/a-1/"]
+
+
+# ── Basic Search cards ───────────────────────────────────────────────────────
+def test_an_indexer_hit_keeps_the_age_and_grab_count_it_reported():
+    """Prowlarr states publishDate and grabs on every release and the projection
+    threw both away. An indexer cannot give a poster or a rating, but age and how
+    many people have taken a release is most of what you judge one on without art."""
+    from core.video.prowlarr_search import _project
+
+    class _R:
+        title = "Interstellar 2014 1080p BluRay x264-YIFY"
+        size = 2_400_000_000
+        seeders, leechers, grabs = 726, 339, 8123
+        indexer_name, indexer_id, guid = "The Pirate Bay", 7, "g1"
+        protocol, magnet_uri = "torrent", "magnet:?xt=1"
+        publish_date = "2026-08-20T10:00:00Z"
+        info_url = "https://tpb/desc/1"
+
+    hit = _project(_R(), "https://tpb/dl/1", "torrent")
+    assert hit["published_at"] == "2026-08-20T10:00:00Z"
+    assert hit["grabs"] == 8123
+    assert hit["info_url"] == "https://tpb/desc/1"
+
+
+def test_each_source_carries_its_own_signals_to_the_card():
+    """No source answers all the questions: an indexer knows age and grabs,
+    Soulseek knows how many peers hold the file and how contended they are. The
+    card shows whichever the hit has rather than assuming one shape."""
+    from api.video.downloads import _evaluate_hits
+
+    indexer = {"title": "Dune 2024 1080p WEB x264-GRP", "size_bytes": 3_000_000_000,
+               "protocol": "torrent", "seeders": 90, "download_url": "magnet:?a",
+               "published_at": "2026-08-20T10:00:00Z", "grabs": 512}
+    soulseek = {"title": "Dune 2024 1080p WEB x264-GRP", "size_bytes": 3_000_000_000,
+                "username": "peer1", "filename": "@@d/dune.mkv",
+                "users": {"a", "b", "c"}, "slots": 2, "queue": 4, "speed": 900}
+    out = {r["username"] or "indexer": r for r in _evaluate_hits(
+        [indexer, soulseek], None, "movie", None, None,
+        blocked=frozenset(), blocked_users=frozenset())}
+
+    ix = out["indexer"]
+    assert ix["published_at"] == "2026-08-20T10:00:00Z" and ix["grabs"] == 512
+    assert ix["peer_count"] is None          # an indexer has no such notion
+
+    ss = out["peer1"]
+    assert ss["peer_count"] == 3, "the peers holding the file were dropped"
+    assert ss["slots"] == 2 and ss["queue"] == 4
+    assert ss["grabs"] is None               # ...and Soulseek has no grab count
+
+
+def test_the_basic_detail_lookup_is_cache_first_and_extto_only(tmp_path, monkeypatch):
+    """Most EXT.to hits are already matched by the hourly board refresh, so the
+    expanded card is a cache read with no network. A miss only goes to the network
+    when the card is actually opened (fetch=1) — never while drawing 25 rows."""
+    import api.video as videoapi
+    from flask import Flask
+    from database.video_database import VideoDatabase
+    import core.video.extto_detail as ed
+    from core.video.extto_detail import PARSE_VERSION
+
+    db = VideoDatabase(database_path=str(tmp_path / "v.db"))
+    videoapi._video_db = db
+    try:
+        app = Flask(__name__)
+        app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+        c = app.test_client()
+
+        # a source that can't answer this is refused outright
+        assert c.get("/api/video/downloads/detail?url=https://tpb/desc/1").status_code == 400
+
+        url = "https://ext.to/interstellar-1/"
+        calls = []
+        monkeypatch.setattr(ed, "fetch_detail", lambda u, **k: calls.append(u) or {
+            "ok": True, "detail": {"title": "Interstellar", "v": PARSE_VERSION}})
+
+        # not matched yet, and not asked to fetch -> no network
+        r = c.get("/api/video/downloads/detail?url=" + url)
+        assert r.get_json()["pending"] is True and calls == []
+
+        # opened -> one fetch, and it is remembered for the board and later cards
+        r = c.get("/api/video/downloads/detail?fetch=1&url=" + url)
+        assert r.get_json()["detail"]["title"] == "Interstellar" and len(calls) == 1
+        assert db.extto_detail_cached(url)["title"] == "Interstellar"
+
+        # ...so the next open costs nothing
+        r = c.get("/api/video/downloads/detail?url=" + url)
+        assert r.get_json()["cached"] is True and len(calls) == 1
+    finally:
+        videoapi._video_db = None

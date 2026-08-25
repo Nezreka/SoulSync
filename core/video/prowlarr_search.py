@@ -213,6 +213,13 @@ def _project(r: Any, url: str, want_proto: str) -> dict:
         "protocol": getattr(r, "protocol", want_proto),
         "indexer_id": getattr(r, "indexer_id", None),
         "guid": getattr(r, "guid", None),
+        # Facts the indexer already stated and this projection used to drop on the
+        # floor. An indexer cannot give a poster or a rating, but it CAN say how old
+        # a release is and how many people have taken it - which is most of what you
+        # judge a release on when there is no artwork to look at.
+        "published_at": getattr(r, "publish_date", None),
+        "grabs": getattr(r, "grabs", None),
+        "info_url": getattr(r, "info_url", None),
     }
 
 
