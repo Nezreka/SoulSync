@@ -235,7 +235,14 @@ class AcoustIDScannerJob(RepairJob):
             file_verif_status = (_rft(fpath) or {}).get('verification_status')
         except Exception:  # noqa: S110 — verification tag is optional context; None is fine
             pass
-        if file_verif_status == 'human_verified':
+        # The tag and the catalogue column are two records of ONE fact, and the
+        # tag is the losable one: an import write that did not stick, a copy, a
+        # retag. Reading the standing from the tag alone while WRITING to the
+        # column is what let a scan demote a verified file to 'unverified' — it
+        # saw an untagged file and applied the rule for one. Either record
+        # saying so is the file standing verified.
+        verif_status = file_verif_status or expected.get('db_verification_status')
+        if verif_status == 'human_verified':
             # The user explicitly confirmed this file via the review queue —
             # never second-guess a human decision.
             if context.report_progress:
@@ -306,10 +313,13 @@ class AcoustIDScannerJob(RepairJob):
         # the title check) and 'verified' is never downgraded by a SKIP (the
         # import-time check ran with richer candidate metadata). FAIL keeps
         # the finding flow below.
-        new_status = file_verif_status
-        if outcome.decision == Decision.PASS and file_verif_status in (None, '', 'unverified'):
+        # Judged on `verif_status` — the standing across BOTH records — while
+        # `new_status` still starts from it so a file whose tag went missing
+        # gets it written back rather than replaced with the scan's guess.
+        new_status = verif_status
+        if outcome.decision == Decision.PASS and verif_status in (None, '', 'unverified'):
             new_status = 'verified'
-        elif outcome.decision == Decision.SKIP and not file_verif_status:
+        elif outcome.decision == Decision.SKIP and not verif_status:
             new_status = 'unverified'
         if new_status:
             self._persist_status(
@@ -367,7 +377,7 @@ class AcoustIDScannerJob(RepairJob):
                 log_type='error'
             )
         if context.create_finding:
-            _is_force = file_verif_status == 'force_imported'
+            _is_force = verif_status == 'force_imported'
             severity = 'info' if _is_force else ('warning' if best_score >= 0.90 else 'info')
             if _ambiguous:
                 _title = (
@@ -415,7 +425,7 @@ class AcoustIDScannerJob(RepairJob):
                     'artist_id': expected.get('artist_id'),
                     'album_title': expected.get('album_title', ''),
                     'track_number': expected.get('track_number'),
-                    'force_imported': file_verif_status == 'force_imported',
+                    'force_imported': verif_status == 'force_imported',
                     # #1132: True when the fingerprint's top recordings name
                     # different songs, so `acoustid_title`/`acoustid_artist`
                     # are one arbitrary pick among equals. Anything that would
@@ -541,7 +551,8 @@ class AcoustIDScannerJob(RepairJob):
                        NULLIF(t.track_artist, '') AS track_artist,
                        ar.name AS album_artist,
                        t.duration,
-                       ar.id AS artist_row_id
+                       ar.id AS artist_row_id,
+                       t.verification_status
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -573,6 +584,11 @@ class AcoustIDScannerJob(RepairJob):
                     # totally different length.
                     'duration_ms': row[10] or 0,
                     'artist_id': row[11],
+                    # The second record of the file's verification standing.
+                    # The scan writes here and reads the tag, so it has to
+                    # consult both or it demotes a verified file whose tag
+                    # went missing.
+                    'db_verification_status': row[12] or None,
                 }
         except Exception as e:
             logger.error("Error loading tracks from DB: %s", e)
