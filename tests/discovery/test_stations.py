@@ -46,7 +46,10 @@ def test_stations_are_owned_playable_artists_with_companions(db):
     # ids stay EXACTLY as the catalogue stores them (TEXT after the
     # artists_new migration; jellyfin installs hold GUIDs) - the #1185 lesson
     assert str(dp['artist_id']) == '1'
-    assert dp['image_url'] == 'http://dp.jpg'
+    # thumbs now pass through normalize_image_url - external urls become
+    # cache-proxied (/api/image-cache/<key>), media-server-relative ones
+    # become loadable. either way: browser-safe, never raw and never empty.
+    assert dp['image_url'].startswith(('/api/image-cache/', 'http://dp.jpg'))
     assert dp['with'] == ['Justice', 'SebastiAn']
 
 
