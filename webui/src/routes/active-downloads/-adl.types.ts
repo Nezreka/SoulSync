@@ -234,7 +234,60 @@ export const ADL_FILTERS = [
   { value: 'failed', label: 'Failed' },
 ] as const;
 
-export type AdlFilter = (typeof ADL_FILTERS)[number]['value'] | 'unverified';
+export type AdlFilter = (typeof ADL_FILTERS)[number]['value'] | 'unverified' | 'clients';
+
+/* ── The Clients tab: external download clients, adapter-uniform rows ────── */
+
+export interface ClientTorrentItem {
+  id: string;
+  name: string;
+  state: string;
+  progress: number;
+  size: number;
+  downloaded: number;
+  download_speed: number;
+  upload_speed: number;
+  seeders?: number;
+  peers?: number;
+  eta?: number | null;
+  ratio?: number | null;
+  error?: string | null;
+  /** present when SoulSync itself dispatched this item. */
+  soulsync?: { kind?: string; title?: string };
+}
+
+export interface ClientUsenetItem {
+  id: string;
+  name: string;
+  state: string;
+  progress: number;
+  size: number;
+  downloaded: number;
+  download_speed: number;
+  eta?: number | null;
+  error?: string | null;
+  soulsync?: { kind?: string; title?: string };
+}
+
+export interface ClientSlskdItem {
+  id: string;
+  filename: string;
+  username: string;
+  state: string;
+  progress: number;
+  size: number;
+  transferred: number;
+  speed: number;
+  soulsync?: { kind?: string; title?: string };
+}
+
+export interface ClientOverview<T> {
+  configured: boolean;
+  connected: boolean;
+  type?: string;
+  error?: string;
+  items: T[];
+}
 
 export type AdlSubView = 'unverified' | 'quarantine' | 'deleted';
 

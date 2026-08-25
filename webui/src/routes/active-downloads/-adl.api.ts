@@ -2,6 +2,10 @@ import { apiClient, readJson } from '@/app/api-client';
 
 import type {
   AdlDeletedList,
+  ClientOverview,
+  ClientSlskdItem,
+  ClientTorrentItem,
+  ClientUsenetItem,
   AdlBatchHistoryEntry,
   AdlDownloadsResponse,
   AdlQuarantineEntry,
@@ -298,4 +302,72 @@ export function quarantineDelete(id: string): Promise<AdlResult> {
 
 export function quarantineClear(): Promise<AdlResult> {
   return readJson<AdlResult>(apiClient.post('quarantine/clear'));
+}
+
+// ── The Clients tab (external download clients) ───────────────────────────
+
+async function fetchClientOverview<T>(path: string): Promise<ClientOverview<T> | null> {
+  try {
+    const data = await readJson<{ success?: boolean } & Partial<ClientOverview<T>>>(
+      apiClient.get(path),
+    );
+    if (!data?.success) return null;
+    return {
+      configured: Boolean(data.configured),
+      connected: Boolean(data.connected),
+      type: data.type,
+      error: data.error,
+      items: Array.isArray(data.items) ? data.items : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function fetchTorrentClient(): Promise<ClientOverview<ClientTorrentItem> | null> {
+  return fetchClientOverview('clients/torrent');
+}
+
+export function fetchUsenetClient(): Promise<ClientOverview<ClientUsenetItem> | null> {
+  return fetchClientOverview('clients/usenet');
+}
+
+export function fetchSlskdClient(): Promise<ClientOverview<ClientSlskdItem> | null> {
+  return fetchClientOverview('clients/slskd');
+}
+
+export type ClientAction = 'pause' | 'resume' | 'remove';
+
+export function torrentClientAction(
+  id: string,
+  action: ClientAction,
+  deleteFiles = false,
+): Promise<AdlResult> {
+  return readJson<AdlResult>(
+    apiClient.post('clients/torrent/action', {
+      json: { id, action, delete_files: deleteFiles },
+    }),
+  );
+}
+
+export function usenetClientAction(
+  id: string,
+  action: ClientAction,
+  deleteFiles = false,
+): Promise<AdlResult> {
+  return readJson<AdlResult>(
+    apiClient.post('clients/usenet/action', {
+      json: { id, action, delete_files: deleteFiles },
+    }),
+  );
+}
+
+export function slskdClientCancel(
+  id: string,
+  username: string,
+  remove = false,
+): Promise<AdlResult> {
+  return readJson<AdlResult>(
+    apiClient.post('clients/slskd/action', { json: { id, username, action: 'cancel', remove } }),
+  );
 }

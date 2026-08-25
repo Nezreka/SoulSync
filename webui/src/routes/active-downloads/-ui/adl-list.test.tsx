@@ -351,10 +351,10 @@ describe('AdlHeader', () => {
     cancelAllPending: false,
   };
 
-  it('renders six pills and marks the active one', () => {
+  it('renders seven pills and marks the active one', () => {
     const { container } = render(<AdlHeader {...props} filter="queued" />);
     const pills = [...container.querySelectorAll('.adl-pill')];
-    expect(pills).toHaveLength(6);
+    expect(pills).toHaveLength(7);
     expect(pills.map((p) => p.getAttribute('data-filter'))).toEqual([
       'all',
       'active',
@@ -362,6 +362,7 @@ describe('AdlHeader', () => {
       'completed',
       'failed',
       'unverified',
+      'clients',
     ]);
     expect(container.querySelector('.adl-pill.active')?.getAttribute('data-filter')).toBe('queued');
   });

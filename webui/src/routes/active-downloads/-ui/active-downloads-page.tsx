@@ -32,6 +32,7 @@ import {
   unverifiedPlay,
 } from '../-adl.verif-actions';
 import { AdlBatchPanel } from './adl-batch-panel';
+import { AdlClientsTab } from './adl-clients';
 import { AdlHeader } from './adl-header';
 import { AdlList, ADL_EMPTY_TEXT, BatchFilterBanner } from './adl-list';
 import {
@@ -230,6 +231,7 @@ export function ActiveDownloadsPage() {
     ? state.batches.find((b) => b.batch_id === state.filterBatchId)
     : null;
 
+  const showClients = state.filter === 'clients';
   const showQuarantine = reviewing && verification.state.subView === 'quarantine';
   const showDeleted = reviewing && verification.state.subView === 'deleted';
   const quarantineGroups = showQuarantine ? groupQuarantine(verification.state.quarantine) : [];
@@ -292,7 +294,9 @@ export function ActiveDownloadsPage() {
 
           {reviewing ? <AdlReviewExplainer subView={verification.state.subView} /> : null}
 
-          {showDeleted ? (
+          {showClients ? (
+            <AdlClientsTab />
+          ) : showDeleted ? (
             <div className="adl-list" id="adl-list">
               <AdlDeletedList
                 entries={deletedEntries}

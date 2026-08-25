@@ -36328,6 +36328,50 @@ app.register_blueprint(_bp_mc())
 from api.deleted_files import configure as _cfg_df, create_blueprint as _bp_df
 _cfg_df(config_manager_=config_manager, docker_resolve_path_=docker_resolve_path)
 app.register_blueprint(_bp_df())
+# Download-client hub - the Clients tab on the downloads page (api/clients.py).
+def _client_known_items():
+    """What SoulSync itself dispatched, per client, so hub rows can say what
+    they are. Video side keys off video_downloads.client_ref (torrent hash /
+    nzo id) or (username, filename) for soulseek grabs; music side off the
+    in-memory download_tasks. Best effort - a broken half never hides the
+    other's labels."""
+    known = {'torrent': {}, 'usenet': {}, 'slskd': {}}
+    try:
+        from api.video import get_video_db
+        for dl in get_video_db().list_video_downloads(limit=200):
+            if not isinstance(dl, dict):
+                continue
+            label = {'kind': dl.get('kind') or 'video',
+                     'title': dl.get('title') or dl.get('release_title') or ''}
+            ref = str(dl.get('client_ref') or '').strip()
+            source = dl.get('source')
+            if source == 'torrent' and ref:
+                known['torrent'][ref.lower()] = label
+            elif source == 'usenet' and ref:
+                known['usenet'][ref] = label
+            elif source == 'soulseek' and dl.get('username') and dl.get('filename'):
+                known['slskd'][(dl['username'], dl['filename'])] = label
+    except Exception as _vk_exc:
+        logger.debug(f"[Clients] video known-items unavailable: {_vk_exc}")
+    try:
+        with tasks_lock:
+            tasks_snapshot = [t for t in download_tasks.values() if isinstance(t, dict)]
+        for t in tasks_snapshot:
+            username, filename = t.get('username'), t.get('filename')
+            if not username or not filename:
+                continue
+            ti = t.get('track_info') if isinstance(t.get('track_info'), dict) else {}
+            known['slskd'][(username, filename)] = {
+                'kind': 'track', 'title': ti.get('name') or t.get('track_name') or ''}
+    except Exception as _mk_exc:
+        logger.debug(f"[Clients] music known-items unavailable: {_mk_exc}")
+    return known
+
+from api.clients import configure as _cfg_cl, create_blueprint as _bp_cl
+_cfg_cl(config_manager_=config_manager,
+        soulseek_client_getter=lambda: soulseek_client,
+        known_items_getter=_client_known_items)
+app.register_blueprint(_bp_cl())
 
 # Multi-user profile + per-profile credential endpoints - api/user_profiles.py.
 from api.user_profiles import configure as _cfg_up, create_blueprint as _bp_up
