@@ -127,6 +127,39 @@ class MusicBrainzService:
             if conn:
                 conn.close()
     
+    def _cross_script_catalogue_match(self, artist_name, scored, owned_titles):
+        """A match for an artist whose MusicBrainz name is in another script.
+
+        Returns the same dict shape as :meth:`match_artist`, or None when no
+        candidate clears the evidence bar and the normal name-based path should
+        continue.
+        """
+        from core.matching.script_compat import is_cross_script_mismatch
+
+        if not owned_titles:
+            return None
+        for _confidence, result in scored:
+            mb_name = result.get('name', '') or ''
+            if not is_cross_script_mismatch(artist_name, mb_name):
+                continue
+            if (result.get('score') or 0) < 90:
+                continue
+            overlap = catalog_overlap_score(
+                owned_titles, self._candidate_release_titles(result.get('id')))
+            if overlap < 1:
+                continue
+            mbid = result.get('id')
+            confidence = min(100, 60 + overlap * 20)
+            self._save_to_cache(
+                'artist', artist_name, None, mbid, result, confidence)
+            logger.info(
+                "Matched artist %r → %r across scripts on %d shared album(s) "
+                "(MBID: %s)", artist_name, mb_name, overlap, mbid,
+            )
+            return {'mbid': mbid, 'name': mb_name,
+                    'confidence': confidence, 'cached': False}
+        return None
+
     def _candidate_release_titles(self, mbid: str) -> list:
         """Release-group titles for a candidate MBID — the catalog side of
         same-name artist disambiguation."""
@@ -176,7 +209,15 @@ class MusicBrainzService:
         # Search MusicBrainz
         try:
             results = self.mb_client.search_artist(artist_name, limit=5)
-            
+            # Issue #586, which was fixed for the alias lookup and not for this:
+            # a strict query hits the `artist` field alone and skips the alias
+            # and sortname indexes — which is exactly where the romanised
+            # spelling of a natively-scripted artist lives. Ask the fuzzy index
+            # too when strict comes back empty.
+            if not results:
+                results = self.mb_client.search_artist(
+                    artist_name, limit=5, strict=False)
+
             if not results:
                 logger.info(f"No MusicBrainz results for artist '{artist_name}'")
                 self._save_to_cache('artist', artist_name, None, None, None, 0)
@@ -192,6 +233,22 @@ class MusicBrainzService:
                 confidence = min(100, int((similarity * 60) + (mb_score / 100 * 40)))
                 scored.append((confidence, result))
             scored.sort(key=lambda s: s[0], reverse=True)
+
+            # A name written in another script scores 0.0 against ours however
+            # certain MusicBrainz is, so the formula above caps such a candidate
+            # at 40 against a gate of 70 — cross-script artists were structurally
+            # unmatchable, and the only way to give one an id was by hand. The
+            # name carries no information here, but the CATALOGUE does: album
+            # titles survive a script difference far better than names, and an
+            # entity holding records this library owns is not somebody else.
+            # Deliberately strict — MusicBrainz confident about the name AND at
+            # least one owned album in that entity's catalogue. Without owned
+            # albums to check against there is no evidence, and it stays
+            # unmatched rather than guessing.
+            cross = self._cross_script_catalogue_match(
+                artist_name, scored, owned_titles)
+            if cross is not None:
+                return cross
 
             # Among the strong (>=70) candidates, disambiguate same-name artists by
             # which one's release groups overlap the albums this library owns.
