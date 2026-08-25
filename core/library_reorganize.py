@@ -62,6 +62,7 @@ _HUNG_WORKER_THRESHOLD_SECONDS = 300  # 5 min — generous; real worst-case
                                        # hi-res FLAC, ~30-60s typically.
 
 from core.metadata_service import (
+    ALBUM_SOURCE_ID_COLUMNS,
     get_album_for_source,
     get_album_tracks_for_source,
     get_client_for_source,
@@ -95,14 +96,9 @@ def _normalize_album_tracks(api_tracks):
 SUPPORTED_SOURCES = ('spotify', 'itunes', 'deezer', 'discogs', 'hydrabase')
 
 # Per-source album-ID column mapping on the `albums` table row.
-_ALBUM_ID_COLUMNS = {
-    'spotify': 'spotify_album_id',
-    'itunes': 'itunes_album_id',
-    'deezer': 'deezer_id',
-    'discogs': 'discogs_id',
-    'hydrabase': 'soul_id',
-    'musicbrainz': 'musicbrainz_release_id',
-}
+# Shared with the re-tag job (core/metadata/registry.py) so "which albums are
+# matched to a source" has one answer.
+_ALBUM_ID_COLUMNS = ALBUM_SOURCE_ID_COLUMNS
 
 # Human-facing label for each source.
 SOURCE_LABELS = {

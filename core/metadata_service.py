@@ -38,6 +38,7 @@ from core.metadata.discography import (
 )
 from core.metadata.lookup import MetadataLookupOptions
 from core.metadata.registry import (
+    ALBUM_SOURCE_ID_COLUMNS,
     METADATA_SOURCE_PRIORITY,
     clear_cached_metadata_client,
     clear_cached_metadata_clients,
