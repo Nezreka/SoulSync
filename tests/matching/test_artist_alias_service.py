@@ -166,7 +166,7 @@ class TestFetchArtistAliases:
         service.mb_client.get_artist.return_value = {'aliases': []}
         service.fetch_artist_aliases('mbid-x')
         service.mb_client.get_artist.assert_called_once_with(
-            'mbid-x', includes=['aliases'],
+            'mbid-x', includes=['aliases'], raise_on_error=True,
         )
 
 
@@ -446,7 +446,7 @@ class TestLookupArtistAliasesMultiTier:
         assert '澤野弘之' in aliases
         service.mb_client.search_artist.assert_called_once()
         service.mb_client.get_artist.assert_called_once_with(
-            'mb-sawano', includes=['aliases'],
+            'mb-sawano', includes=['aliases'], raise_on_error=True,
         )
 
     def test_tier2_cache_hit_skips_live_lookup(self, service, temp_db):

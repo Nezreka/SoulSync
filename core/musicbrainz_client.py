@@ -85,7 +85,8 @@ class MusicBrainzClient:
         logger.info(f"MusicBrainz client initialized with user agent: {self.user_agent}")
     
     @rate_limited
-    def search_artist(self, artist_name: str, limit: int = 10, strict: bool = True) -> List[Dict[str, Any]]:
+    def search_artist(self, artist_name: str, limit: int = 10, strict: bool = True,
+                      raise_on_error: bool = False) -> List[Dict[str, Any]]:
         """
         Search for artists by name.
 
@@ -99,6 +100,13 @@ class MusicBrainzClient:
                 sortname indexes — the right behavior for user-facing fuzzy
                 search (finds "Metallica" from typing "metalica", matches
                 aliased names, etc.).
+            raise_on_error: Re-raise a transport failure instead of reporting
+                it as an empty result. The default is the historical
+                fail-soft behaviour, which suits callers that only want a
+                best-effort list. It does NOT suit a caller that WRITES the
+                answer down: a timeout and "MusicBrainz knows nobody by that
+                name" are the same `[]` here, and the alias cache stored the
+                second meaning for a month after seeing the first.
 
         Returns:
             List of artist results with id, name, score, etc. MusicBrainz
@@ -138,6 +146,8 @@ class MusicBrainzClient:
 
         except Exception as e:
             logger.error(f"Error searching for artist '{artist_name}': {e}")
+            if raise_on_error:
+                raise
             return []
     
     @rate_limited
@@ -441,13 +451,18 @@ class MusicBrainzClient:
             return []
 
     @rate_limited
-    def get_artist(self, mbid: str, includes: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
+    def get_artist(self, mbid: str, includes: Optional[List[str]] = None,
+                   raise_on_error: bool = False) -> Optional[Dict[str, Any]]:
         """
         Get full artist details by MusicBrainz ID
         
         Args:
             mbid: MusicBrainz ID of the artist
             includes: Optional list of additional data to include (e.g., 'url-rels', 'genres')
+            raise_on_error: Re-raise a transport failure instead of collapsing
+                it into the same ``None`` a genuine miss returns. See
+                :meth:`search_artist` — a caller that caches the answer has to
+                be able to tell those apart.
             
         Returns:
             Artist data or None if not found
@@ -468,6 +483,8 @@ class MusicBrainzClient:
             
         except Exception as e:
             logger.error(f"Error fetching artist {mbid}: {e}")
+            if raise_on_error:
+                raise
             return None
     
     @rate_limited

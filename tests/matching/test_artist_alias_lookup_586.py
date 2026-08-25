@@ -112,7 +112,7 @@ def test_fetch_aliases_returns_empty_on_exception(service):
 def test_lookup_falls_back_to_non_strict_when_strict_returns_nothing(service):
     # Strict search returns nothing (typical cross-script case).
     # Non-strict hits the alias index and finds the artist.
-    def search(name, limit, strict):
+    def search(name, limit, strict, **_kw):
         if strict:
             return []
         return [{'id': 'mbid-yab', 'name': 'Дмитрий Яблонский', 'score': 100}]
@@ -135,7 +135,7 @@ def test_lookup_falls_back_to_non_strict_when_strict_returns_nothing(service):
 def test_lookup_falls_back_to_non_strict_when_strict_score_too_low(service):
     # Strict returns a low-confidence match (cross-script — local sim
     # near 0). Non-strict hits a stronger match via alias index.
-    def search(name, limit, strict):
+    def search(name, limit, strict, **_kw):
         if strict:
             return [{'id': 'mbid-other', 'name': 'Some Other Artist', 'score': 30}]
         return [{'id': 'mbid-yab', 'name': 'Дмитрий Яблонский', 'score': 100}]
@@ -244,7 +244,7 @@ def test_yablonsky_reporter_scenario_end_to_end(service):
     'Русская филармония, Дмитрий Яблонский', MB returns artist with
     canonical name in Cyrillic and Latin in aliases. Strict search
     finds nothing; non-strict finds the artist with high MB score."""
-    def search(name, limit, strict):
+    def search(name, limit, strict, **_kw):
         if strict:
             return []
         return [{'id': 'mbid-yab', 'name': 'Дмитрий Яблонский', 'score': 100}]

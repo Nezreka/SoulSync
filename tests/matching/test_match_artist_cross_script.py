@@ -90,7 +90,7 @@ def test_a_lukewarm_cross_script_candidate_is_refused(service):
 
 
 def test_the_alias_index_is_consulted_when_a_strict_search_finds_nothing(service):
-    def _search(name, limit=5, strict=True):
+    def _search(name, limit=5, strict=True, **_kw):
         return [] if strict else [
             {"id": "mbid-sawano", "name": "澤野弘之", "score": 100}]
 
@@ -165,3 +165,46 @@ def test_the_rescue_still_speaks_when_no_name_clears_the_gate():
 
     assert out is not None
     assert out["mbid"] == "mbid-cross"
+
+
+# --- when two candidates both hold something we own ------------------------
+
+
+def test_two_tied_cross_script_candidates_are_refused_rather_than_ordered(service):
+    """Result ORDER must not be the tie-break.
+
+    Both candidates are written in another script, so the ranking above is
+    decided almost entirely by MusicBrainz's name relevance — the one signal
+    this branch exists precisely because it cannot use. And an album title as
+    ordinary as "Home" overlaps several catalogues. Taking the first hit would
+    write a coin flip onto the artist row, where it then feeds the alias
+    bridge for every later verification.
+    """
+    service.mb_client.search_artist.return_value = [
+        {"id": "mbid-first", "name": "米津玄師", "score": 98},
+        {"id": "mbid-second", "name": "澤野弘之", "score": 97},
+    ]
+    _catalogue(service, {"mbid-first": ["Home"], "mbid-second": ["Home"]})
+
+    assert service.match_artist("Sawano Hiroyuki", owned_titles=["Home"]) is None
+    service._save_to_cache.assert_called_once()   # the "no match" row, not a pick
+    assert service._save_to_cache.call_args.args[3] is None
+
+
+def test_the_candidate_with_more_owned_albums_wins_regardless_of_order(service):
+    """A decisive winner is still taken — and it is not the one MusicBrainz
+    happened to rank first."""
+    service.mb_client.search_artist.return_value = [
+        {"id": "mbid-decoy", "name": "米津玄師", "score": 99},
+        {"id": "mbid-sawano", "name": "澤野弘之", "score": 95},
+    ]
+    owned = OWNED + ["Kill la Kill Original Soundtrack"]
+    _catalogue(service, {
+        "mbid-decoy": [OWNED[0]],
+        "mbid-sawano": owned,
+    })
+
+    out = service.match_artist("Sawano Hiroyuki", owned_titles=owned)
+
+    assert out is not None
+    assert out["mbid"] == "mbid-sawano"
