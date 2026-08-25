@@ -17,14 +17,14 @@ up at e.g. ``Surf Curse/Surf Curse - Christine F/Surf Curse - Christine F.flac``
 instead of the album destination.
 
 GitHub issue #500 (@bafoed). Fix: delegate to the per-album planner
-(``core.library_reorganize.preview_album_reorganize`` /
-``reorganize_album``) the per-album reorganize modal already uses. The
+(``core.library_reorganize.preview_album_reorganize``) the per-album
+reorganize modal already uses. The
 planner is DB-driven — it knows the album has multiple tracks
 regardless of how many currently sit in the transfer folder, so the
 album-vs-single classification is structurally correct.
 
 Apply mode delegates to ``core.reorganize_queue`` so the actual file
-move + post-processing + DB update + sidecar handling all flow
+move + DB update + sidecar handling all flow
 through the same code path the per-album modal uses. No second move
 implementation to keep in sync.
 
@@ -33,8 +33,8 @@ Safety design:
 - Job is disabled by default — never auto-runs unless user enables.
 - Only DB-known tracks are considered. Files in transfer with no DB
   entry are handled by the separate ``orphan_file_detector`` job.
-- Albums with no matching metadata source ID are skipped with a
-  clear "needs enrichment first" finding rather than guessed at.
+- The catalogue is the sole path authority; no provider or file tags are
+  consulted while deciding a destination.
 """
 
 import os
@@ -58,16 +58,14 @@ class LibraryReorganizeJob(RepairJob):
         'Any track whose current path doesn\'t match the expected path gets flagged in dry-run '
         'mode or queued for a move in live mode.\n\n'
         'In live mode, moves are dispatched to the same reorganize queue the per-album modal '
-        'uses — file move + post-processing + DB update + sidecar handling all flow through '
+        'uses — file move + DB update + sidecar handling all flow through '
         'one code path.\n\n'
-        'Albums with no matching metadata source ID are skipped — run enrichment first to '
-        'populate at least one of spotify_album_id / itunes_album_id / deezer_id.\n\n'
+        'Destinations come from the library catalogue itself. No metadata provider is called, '
+        'and albums without provider IDs are handled normally.\n\n'
         'Files in the transfer folder that aren\'t tracked in the database are handled by '
         'the separate Orphan File Detector job.\n\n'
-        'Sidecars (.lrc, .jpg, .nfo, cover.jpg, etc) are handled by the underlying '
-        'reorganize queue: per-track sidecars are deleted at the source and album-level '
-        'cover art is re-downloaded fresh at the destination via the same post-processing '
-        'pipeline downloads use.\n\n'
+        'Sidecars (.lrc, .jpg, .nfo, cover.jpg, etc.) move with their tracks and album. '
+        'Existing destination sidecars are never overwritten.\n\n'
         'Settings:\n'
         '- Dry Run: When enabled, only reports what would change without moving files'
     )
@@ -195,40 +193,6 @@ class LibraryReorganizeJob(RepairJob):
                 result.skipped += 1
                 continue
 
-            if status == 'no_source_id':
-                # Defensive. The catalogue planner this job asks for never
-                # returns it — the status belongs to the provider planner, which
-                # needed an album id to fetch a tracklist with. Kept so a caller
-                # that does ask for that planner still gets a readable finding.
-                # Was reached when BOTH the API planner (no source ID) AND the
-                # tag-mode fallback (files missing essential title/artist/album
-                # tags, or not on disk) failed — so no destination can be computed.
-                # One album-level finding rather than N per-track ones (UI clutter).
-                result.skipped += len(tracks) or 1
-                if dry_run and context.create_finding and tracks:
-                    inserted = context.create_finding(
-                        job_id=self.job_id,
-                        finding_type='album_needs_enrichment',
-                        severity='info',
-                        entity_type='album',
-                        entity_id=str(album_id),
-                        file_path=None,
-                        title=f'Cannot place: {album_title}',
-                        description=(
-                            f"Album '{album_title}' by {preview.get('artist', '?')} "
-                            "couldn't be reorganized: it has no metadata source ID "
-                            "AND its files are missing essential tags (title / artist "
-                            "/ album) or aren't on disk. Re-tag the files or run "
-                            "'Fix Unknown Artists', then run this job again."
-                        ),
-                        details={'album_id': str(album_id), 'reason': 'no_source_id'},
-                    )
-                    if inserted:
-                        result.findings_created += 1
-                    else:
-                        result.findings_skipped_dedup += 1
-                continue
-
             # Successful plan — count mismatched tracks
             mismatched = [
                 t for t in tracks
@@ -273,7 +237,6 @@ class LibraryReorganizeJob(RepairJob):
                                     'to_abs': t.get('new_path_abs') or '',
                                     'album_id': str(album_id),
                                     'album_title': album_title,
-                                    'source': preview.get('source'),
                                     'track_id': t.get('track_id'),
                                 },
                             )
@@ -289,15 +252,14 @@ class LibraryReorganizeJob(RepairJob):
                         result.errors += 1
             else:
                 # Apply mode: enqueue the album for the live reorganize
-                # queue worker. The queue handles file move + post-process
-                # + DB update + sidecar via the same code path the per-
+                # queue worker. The queue handles file move + DB update +
+                # sidecars via the same code path the per-
                 # album modal uses — no second move implementation.
                 items_to_enqueue.append({
                     'album_id': str(album_id),
                     'album_title': album_title,
                     'artist_id': str(album_row.get('artist_id') or ''),
                     'artist_name': preview.get('artist') or album_row.get('artist_name') or 'Unknown Artist',
-                    'source': preview.get('source'),
                 })
 
             if context.update_progress and (i + 1) % 25 == 0:

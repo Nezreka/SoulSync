@@ -42,716 +42,9 @@ import shutil
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 
-from core.metadata_service import (
-    ALBUM_SOURCE_ID_COLUMNS,
-    get_album_for_source,
-    get_album_tracks_for_source,
-    get_client_for_source,
-    get_primary_source,
-    get_source_priority,
-)
 from utils.logging_config import get_logger
 
 logger = get_logger("library_reorganize")
-
-
-def _safe_filename(name: str) -> str:
-    """Strip path-illegal characters so we can use the value as a
-    filename component on the staging path."""
-    return ''.join(c for c in (name or 'unknown') if c not in '<>:"/\\|?*').strip() or 'unknown'
-
-
-def _normalize_album_tracks(api_tracks):
-    """Normalize the various provider tracklist shapes (dict-with-`items`,
-    bare list, ``None``) to a single list of item dicts."""
-    if not api_tracks:
-        return []
-    if isinstance(api_tracks, dict):
-        items = api_tracks.get('items') or []
-        return items if items else []
-    if isinstance(api_tracks, list):
-        return api_tracks
-    return []
-
-
-SUPPORTED_SOURCES = ('spotify', 'itunes', 'deezer', 'discogs', 'hydrabase')
-
-# Per-source album-ID column mapping on the `albums` table row.
-# Shared with the re-tag job (core/metadata/registry.py) so "which albums are
-# matched to a source" has one answer.
-_ALBUM_ID_COLUMNS = ALBUM_SOURCE_ID_COLUMNS
-
-# Human-facing label for each source.
-SOURCE_LABELS = {
-    'spotify': 'Spotify',
-    'itunes': 'Apple Music (iTunes)',
-    'deezer': 'Deezer',
-    'discogs': 'Discogs',
-    'hydrabase': 'Hydrabase',
-}
-
-
-def _extract_source_ids(album_data: dict) -> Dict[str, str]:
-    """Pull the per-source album-ID strings off an album row."""
-    return {
-        source: (album_data.get(column) or '')
-        for source, column in _ALBUM_ID_COLUMNS.items()
-    }
-
-
-def available_sources_for_album(album_data: dict) -> List[dict]:
-    """Return the list of metadata sources the user can pick for this
-    album's reorganize. Every entry has both (a) a stored album ID on
-    the local row AND (b) an authenticated / configured client on this
-    SoulSync instance.
-
-    Returns entries in source-priority order (preferred source first).
-    Each entry is ``{'source': str, 'label': str}``. No API calls —
-    purely local inspection.
-    """
-    source_ids = _extract_source_ids(album_data)
-    try:
-        primary = get_primary_source()
-    except Exception:
-        primary = 'deezer'
-
-    out = []
-    for source in get_source_priority(primary):
-        if source not in SUPPORTED_SOURCES:
-            continue
-        if not source_ids.get(source):
-            continue
-        if get_client_for_source(source) is None:
-            continue
-        out.append({
-            'source': source,
-            'label': SOURCE_LABELS.get(source, source),
-        })
-    return out
-
-
-def authed_sources() -> List[dict]:
-    """Return all metadata sources the user has authed/configured on
-    this SoulSync instance. Doesn't require any album-specific stored
-    ID — used by the bulk "Reorganize All" picker where each album
-    has its own ID coverage and we just want to know which sources
-    are reachable. Returned in priority order."""
-    try:
-        primary = get_primary_source()
-    except Exception:
-        primary = 'deezer'
-
-    out = []
-    for source in get_source_priority(primary):
-        if source not in SUPPORTED_SOURCES:
-            continue
-        if get_client_for_source(source) is None:
-            continue
-        out.append({
-            'source': source,
-            'label': SOURCE_LABELS.get(source, source),
-        })
-    return out
-
-
-_UNKNOWN_ARTIST_NAMES = {'unknown artist', 'unknown', ''}
-
-
-def _is_unknown_artist(artist_name: Optional[str]) -> bool:
-    if not artist_name:
-        return True
-    return str(artist_name).strip().lower() in _UNKNOWN_ARTIST_NAMES
-
-
-def _looks_like_album_id_title(album_title: Optional[str]) -> bool:
-    """Pre-#524 manual-import bug left some albums with a numeric
-    album_id stored as `albums.title`. Detect that shape so reorganize
-    can point the user at Unknown Artist Fixer instead of the generic
-    'run enrichment' hint."""
-    if not album_title:
-        return False
-    stripped = str(album_title).strip()
-    return len(stripped) >= 6 and stripped.isdigit()
-
-
-def _unresolvable_reason(album_data: dict, primary_source: str, strict_source: bool) -> str:
-    """Reason text for albums reorganize can't place. Surfaces the
-    Unknown Artist Fixer hint when the row matches the bad-metadata
-    shape (Unknown Artist OR album-id-as-title) — that fixer reads
-    file tags + re-resolves metadata, which reorganize itself doesn't
-    do."""
-    artist = album_data.get('artist_name')
-    title = album_data.get('title')
-    if _is_unknown_artist(artist) or _looks_like_album_id_title(title):
-        return (
-            "Album has placeholder metadata (Unknown Artist or numeric "
-            "title) — run the 'Fix Unknown Artists' repair job to "
-            "recover real artist/album from file tags before reorganize"
-        )
-    if strict_source:
-        return f"Source '{primary_source}' has no usable tracklist for this album"
-    return "No metadata source ID for this album"
-
-
-# #767-2: a walked edition scoring below this against the on-disk files is treated
-# as the WRONG edition (e.g. a 1-track single vs the 10-track deluxe scores 0.1),
-# triggering the alternate-edition search. Matches the resolver's min_score.
-_CANONICAL_FIT_FLOOR = 0.5
-
-
-def _score_edition_items(file_tracks: List[dict], items: List[dict]) -> float:
-    """Score a fetched provider tracklist (raw ``items``) against the on-disk
-    ``file_tracks`` using the canonical scorer. Normalises the provider's varied
-    shapes (``name``/``title``, ``duration_ms``/``duration`` seconds) first."""
-    from core.metadata.canonical_version import score_release_against_files
-    rel = []
-    for it in items or []:
-        dur = it.get('duration_ms')
-        if dur is None:
-            secs = it.get('duration')
-            dur = int(secs * 1000) if isinstance(secs, (int, float)) and secs else None
-        rel.append({'title': it.get('name') or it.get('title') or '', 'duration_ms': dur})
-    return score_release_against_files(file_tracks, rel) if rel else 0.0
-
-
-def _resolve_better_edition(album_data, source_ids, file_tracks, primary_source):
-    """Misfit path: run the canonical resolver WITH alternate-edition expansion and,
-    if it lands on a genuinely different edition than the linked ones, fetch it for
-    organizing. Returns ``(source, album_id, api_album, items, score)`` or ``None``."""
-    from core.metadata.canonical_resolver import (
-        default_fetch_alternates,
-        default_fetch_tracklist,
-        resolve_canonical_for_album,
-    )
-    art_id = str(album_data.get('artist_id') or '')
-    art_name = album_data.get('artist_name') or ''
-    title = album_data.get('title') or ''
-
-    def _alts(source, aid):
-        return default_fetch_alternates(
-            source, aid, artist_id=art_id, artist_name=art_name, album_title=title,
-        )
-
-    try:
-        result = resolve_canonical_for_album(
-            album_source_ids=source_ids,
-            file_tracks=file_tracks,
-            fetch_tracklist=default_fetch_tracklist,
-            fetch_alternates=_alts,
-            source_priority=get_source_priority(primary_source),
-            primary_source=primary_source,
-        )
-    except Exception as e:
-        logger.warning(f"[Reorganize] canonical resolve raised: {e}")
-        return None
-    if not result:
-        return None
-    linked = source_ids.get(result['source'])
-    if str(result['album_id']) == str(linked or ''):
-        return None  # resolver chose a linked edition the walk already considered
-    try:
-        b_album = get_album_for_source(result['source'], result['album_id'])
-        b_items = _normalize_album_tracks(
-            get_album_tracks_for_source(result['source'], result['album_id'])
-        )
-    except Exception as e:
-        logger.warning(f"[Reorganize] alternate edition fetch raised: {e}")
-        return None
-    if not b_album or not b_items:
-        return None
-    return result['source'], result['album_id'], b_album, b_items, result.get('score') or 0.0
-
-
-def _resolve_source(
-    album_data: dict, primary_source: str, strict_source: bool = False,
-    *, file_tracks: Optional[List[dict]] = None, on_better_edition=None,
-):
-    """Walk the configured source priority looking for the first source
-    we have an ID for AND that returns a usable tracklist.
-
-    When ``strict_source`` is True, only the caller-provided
-    ``primary_source`` is tried — no fallback. Used when the user has
-    explicitly picked a source in the reorganize modal: picking Spotify
-    means "use Spotify or fail", not "use Spotify and silently fall
-    back to Deezer".
-
-    When ``file_tracks`` is supplied (and not ``strict_source``), the walked
-    edition is fit-scored against the on-disk files; a clear misfit triggers an
-    alternate-edition search (#767-2). ``on_better_edition(source, album_id,
-    score)`` is invoked to persist the pin when a better edition is chosen.
-
-    Returns ``(source_name, album_meta, tracks_list)`` or ``(None, None, None)``.
-    """
-    source_ids = _extract_source_ids(album_data)
-
-    # #765: if a canonical release was pinned for this album (best-fit to the
-    # user's actual files), prefer it — so reorganize agrees with Track Number
-    # Repair and stops mislabelling standard albums as deluxe (#767-Bug2). Gated
-    # on the album row carrying a canonical, and skipped when the user explicitly
-    # picked a source in the modal (strict_source) — their choice wins. Falls
-    # through to the priority walk if the canonical fetch fails.
-    if not strict_source:
-        c_source = album_data.get('canonical_source')
-        c_id = album_data.get('canonical_album_id')
-        if c_source and c_id:
-            try:
-                api_album = get_album_for_source(c_source, c_id)
-                api_tracks = get_album_tracks_for_source(c_source, c_id)
-                items = _normalize_album_tracks(api_tracks)
-                if items and api_album:
-                    return c_source, api_album, items
-            except Exception as e:
-                logger.warning(f"[Reorganize] canonical {c_source} lookup raised: {e}")
-
-    if strict_source:
-        sources_to_try = [primary_source] if primary_source else []
-    else:
-        sources_to_try = get_source_priority(primary_source)
-
-    walk_source = walk_album = walk_items = None
-    for source in sources_to_try:
-        sid = source_ids.get(source) or ''
-        if not sid:
-            continue
-        try:
-            api_album = get_album_for_source(source, sid)
-            api_tracks = get_album_tracks_for_source(source, sid)
-        except Exception as e:
-            logger.warning(f"[Reorganize] {source} lookup raised: {e}")
-            continue
-        items = _normalize_album_tracks(api_tracks)
-        if not items or not api_album:
-            continue
-        walk_source, walk_album, walk_items = source, api_album, items
-        break
-
-    # #767-2: the walk takes the first source we have an ID for, but that ID can
-    # point at the WRONG edition (a single enriched against the deluxe → it'd file
-    # the track as #2 of a 10-track album). With the on-disk tracklist in hand,
-    # fit-score the walked edition; only a clear misfit looks for a better-fitting
-    # edition. Well-fitting albums keep today's exact behavior + make no extra calls.
-    if not strict_source and file_tracks:
-        walk_fit = _score_edition_items(file_tracks, walk_items) if walk_items else 0.0
-        if walk_fit < _CANONICAL_FIT_FLOOR:
-            better = _resolve_better_edition(
-                album_data, source_ids, file_tracks, primary_source,
-            )
-            if better is not None:
-                b_source, b_id, b_album, b_items, b_score = better
-                if on_better_edition:
-                    try:
-                        on_better_edition(b_source, b_id, b_score)
-                    except Exception as e:
-                        logger.warning(f"[Reorganize] canonical pin persist failed: {e}")
-                logger.info(
-                    "[Reorganize] %s: walked edition fit %.2f below floor — using "
-                    "better-fit %s edition %s (fit %.2f)",
-                    album_data.get('title', '?'), walk_fit, b_source, b_id, b_score,
-                )
-                return b_source, b_album, b_items
-
-    if walk_source:
-        return walk_source, walk_album, walk_items
-    return None, None, None
-
-
-# Tokens that indicate a *different recording* of a track — when one
-# side of a comparison has these and the other doesn't, the two are NOT
-# the same track (e.g. "Bitch Don't Kill My Vibe" vs "Bitch Don't Kill
-# My Vibe (Remix)" are different recordings; the tier 4 substring match
-# would silently merge them otherwise). "Bonus track" is intentionally
-# NOT here — it's a marketing annotation, not a recording difference.
-_VERSION_DIFFERENTIATORS = frozenset({
-    'remix', 'remixed',
-    'live', 'unplugged', 'concert',
-    'acoustic',
-    'demo',
-    'extended', 'edit',
-    'instrumental', 'karaoke',
-    'remaster', 'remastered', 'remastering',
-    'mono', 'stereo',
-    'acapella', 'cappella',
-    'cover',
-    'reprise',
-    'alternate', 'alt',
-    'rehearsal',
-})
-
-
-def _differentiators_in(norm_title: str) -> frozenset:
-    """Return the set of version-differentiator tokens present in a
-    normalized title. Used by the tier-4 matcher to reject substring
-    matches across different recordings of the same song."""
-    if not norm_title:
-        return frozenset()
-    return frozenset(t for t in norm_title.split() if t in _VERSION_DIFFERENTIATORS)
-
-
-# Featured-artist credit: "(feat. X)" / "[ft X]" / a trailing "feat. X". The
-# parenthesised form is stripped wherever it appears; the bare form only when
-# something follows it (so a song literally named "The Feat" is left alone, and
-# "Defeat"/"Lift" never trip the word-boundary). Case-insensitive.
-_FEAT_RE = re.compile(
-    r"""\s*[\(\[]\s*(?:feat|ft|featuring)\b\.?[^)\]]*[\)\]]   # (feat. X) / [ft. X]
-        | \s+(?:feat|ft|featuring)\b\.?\s+\S.*$               # trailing  feat. X ...
-    """,
-    re.IGNORECASE | re.VERBOSE,
-)
-
-# Detection only (does a title carry ANY feat credit?) — word-boundary so
-# "Defeat"/"Lift" never trip it. Used to avoid double-crediting.
-_FEAT_DETECT_RE = re.compile(r"\b(?:feat|ft|featuring)\b", re.IGNORECASE)
-
-
-def _feat_in_title_enabled() -> bool:
-    """Whether the user asked featured artists to live in the track title
-    (Settings → Metadata). Read live so the reorganize honors the same
-    switch the download path does. Isolated in a helper so tests can
-    monkeypatch it without a full config manager."""
-    try:
-        from core.settings import config_manager
-        return bool(config_manager.get("metadata_enhancement.tags.feat_in_title", False))
-    except Exception:
-        return False
-
-
-# A folder the organizer itself writes for one disc of a multi-disc release:
-# "Disc 1" / "CD 1" (the `file_organization.disc_label` setting) and "CD01"
-# (the `$cdnum` template variable). Anchored and numeric so a real album called
-# "Discovery" or an artist called "CD" is never mistaken for one.
-_DISC_FOLDER_RE = re.compile(r'^(disc|disk|cd|volume|vol)\s*\.?\s*\d+$', re.IGNORECASE)
-
-
-def _already_organized_by_disc(tracks) -> bool:
-    """Do the user's files already sit in per-disc folders?
-
-    The single-disc cap below reads the user's layout from their track NUMBERS,
-    which cannot distinguish "a single-disc edition mis-matched against a deluxe"
-    (#1080) from "a multi-disc album that is still downloading". A part-downloaded
-    box set has only disc 1 on disk, uniquely numbered and inside disc 1 — exactly
-    what the cap keys on — so Reorganize proposed moving the album straight back
-    out of the disc folders the download pipeline had just created, and flipped it
-    back again once disc 2 arrived.
-
-    The files settle it. SoulSync only writes a disc folder when the release IS
-    multi-disc, so an album already living in one is organized, not mis-matched,
-    and the setting gating this cap is "preserve my organization".
-    """
-    for track in tracks or []:
-        path = str(track.get('file_path') or '').replace('\\', '/')
-        if not path:
-            continue                      # a missing file carries no evidence
-        parent = os.path.basename(os.path.dirname(path))
-        if parent and _DISC_FOLDER_RE.match(parent):
-            return True
-    return False
-
-
-def _preserve_casing_enabled() -> bool:
-    """Whether the reorganize leaves a title/album alone when the metadata
-    source differs from the user's file only by letter-case (#1078 QT3496:
-    already-organized files were flagged for cosmetic re-casing). Default on.
-    Isolated so tests can monkeypatch without a config manager."""
-    try:
-        from core.settings import config_manager
-        return bool(config_manager.get("library.reorganize_preserve_casing", True))
-    except Exception:
-        return True
-
-
-def _keep_user_year(api_release_date, user_year):
-    """Prefer the user's own album year over the source's original-release
-    year when preserving is on (#1080 QT3496: a file imported as [2023] — a
-    reissue/edition year the user chose — was being 'corrected' to the
-    source's 2020 original). Returns a release_date string the path builder
-    reads for $year; falls back to the source value."""
-    if not _preserve_casing_enabled():
-        return api_release_date
-    uy = str(user_year or "").strip()
-    if len(uy) == 4 and uy.isdigit():
-        src_year = str(api_release_date or "")[:4]
-        if uy != src_year:
-            return uy
-    return api_release_date
-
-
-def _keep_user_casing(source_value, user_value):
-    """Return the USER's string when it matches the source only by case, else
-    the source string. Case-only means identical after casefold — so genuine
-    edits (punctuation, words, feat additions) still adopt the source; only
-    cosmetic capitalization churn is suppressed."""
-    if not _preserve_casing_enabled():
-        return source_value
-    s = str(source_value or "")
-    u = str(user_value or "")
-    if u and s and s != u and s.strip().casefold() == u.strip().casefold():
-        return u
-    return source_value
-
-
-def _extract_feat_credit(title: str) -> str:
-    """The '(feat. X)' credit substring from a title (leading space trimmed),
-    or '' when there's none. Lets us carry a user's own credit forward when
-    the API only knows the primary artist."""
-    if not title:
-        return ''
-    m = _FEAT_RE.search(str(title))
-    return m.group(0).strip() if m else ''
-
-
-def _apply_feat_credit(track_name: str, normalized_artists: list, local_title: str) -> str:
-    """#1078: when feat_in_title is on, make sure the clean title the
-    reorganize builds carries the featured-artist credit — so the FILENAME
-    keeps it too (the tag writer re-adds it for the tag, but the filename is
-    built straight from this clean title and was dropping "(feat. X)").
-
-    Precedence when the API's own track name has no credit:
-      1. featured artists from the API track's artist list (canonical names),
-      2. else the credit already present in the user's file title (the API
-         only knows the primary — don't strip what the user curated).
-    A track name that already carries a credit is left untouched."""
-    name = str(track_name or '')
-    if _FEAT_DETECT_RE.search(name):
-        return name
-    featured = [
-        (a.get('name') if isinstance(a, dict) else str(a))
-        for a in (normalized_artists[1:] if normalized_artists else [])
-    ]
-    featured = [f for f in featured if f]
-    if featured:
-        return f"{name} (feat. {', '.join(featured)})".strip()
-    credit = _extract_feat_credit(local_title)
-    if credit:
-        return f"{name} {credit}".strip()
-    return name
-
-
-def _normalize_title(value) -> str:
-    """Lowercase + strip cosmetic punctuation and treat brackets / dashes
-    / slashes as word separators so the same track named slightly
-    differently across providers and user libraries still matches.
-
-    Examples that should normalize equal:
-
-    - ``Bitch, Don't Kill My Vibe - Remix``  ↔  ``Bitch, Don't Kill My Vibe (Remix)``
-    - ``Don't Stop Believin'``               ↔  ``Don’t Stop Believin’``
-    - ``Swimming Pools (Drank) - Extended Version``
-                                              ↔  ``Swimming Pools (Drank) (Extended Version)``
-    - ``The Chase (feat. Big Artist)``       ↔  ``The Chase``  (#914)
-    """
-    if value is None:
-        return ''
-    out = str(value).strip()
-    # #914: drop featured-artist credits FIRST (while the parens are still here to
-    # bound the group). iTunes appends "(feat. X)" to track titles while a user's
-    # file is often just "The Chase" — the credit is metadata, not the song's
-    # identity, and leaving it in dropped the match ratio below the threshold so
-    # correctly-identified tracks reported as "not in the tracklist".
-    out = _FEAT_RE.sub('', out).lower()
-    # Strip characters that don't carry meaning across providers.
-    for ch in ('"', "'", '‘', '’', '“', '”', '.', ',', '!', '?',
-               '(', ')', '[', ']', '{', '}'):
-        out = out.replace(ch, '')
-    # Treat separators as whitespace so "foo - bar" and "foo (bar)" align.
-    for ch in ('-', '–', '—', ':', '/', '\\'):
-        out = out.replace(ch, ' ')
-    return ' '.join(out.split())
-
-
-# Title-match scoring grid. Each component's weight was picked to
-# satisfy these design rules:
-#
-#   1. EXACT title alone is enough to win.
-#   2. SUBSTRING at the high-confidence floor (≥0.6) is enough to win.
-#   3. SUBSTRING at the lower with-tn-match floor (≥0.3) needs the
-#      track_number bonus to win — track_number provides the missing
-#      confidence.
-#   4. TRACK-NUMBER alone is NOT enough — never falls through to a
-#      blind track-number lookup on multi-disc albums (that's the
-#      bug that mis-routed winecountrygames's bonus tracks).
-#   5. Different version-differentiator tokens (Remix vs no-remix)
-#      hard-reject before scoring (see `_score_candidate`).
-#
-# Worked examples (with threshold = 50):
-#
-#   exact title + tn match               100 + 20 = 120  → match
-#   exact title alone                    100      = 100  → match
-#   substring ratio 1.0  (no tn match)   50 + 40  = 90   → match
-#   substring ratio 0.6  (no tn match)   50 + 0   = 50   → match
-#   substring ratio 0.5  (no tn match)   0        = 0    → no match
-#   substring ratio 0.45 + tn match      40 + 20  = 60   → match
-#   substring ratio 0.28 + tn match      0  + 20  = 20   → no match
-#                                          (Real vs "Real Real Real")
-#   track_number alone (no title signal) 0  + 20  = 20   → no match
-#   different version diffs (any inputs) hard-reject     → 0
-#
-# Weights are deliberately spaced so each gate is well-clear of the
-# threshold; small ratio adjustments don't flip a borderline case
-# unexpectedly.
-
-_MATCH_SCORE_THRESHOLD = 50
-
-_W_EXACT_TITLE = 100
-_W_TRACK_NUMBER = 20
-
-# Standalone substring (no tn match required): floor + scaled bonus.
-# At ratio = floor: contribute base only. At ratio = 1.0: contribute
-# base + range. Linear in between.
-_W_SUBSTRING_BASE_STANDALONE = 50
-_W_SUBSTRING_RATIO_RANGE = 40
-_SUBSTRING_RATIO_FLOOR_STANDALONE = 0.6
-
-# With-tn-match substring: lower floor (0.3) but slightly reduced
-# base (40) so this path never beats a standalone high-ratio match
-# on equal-tn ties.
-_W_SUBSTRING_BASE_WITH_TN = 40
-_SUBSTRING_RATIO_FLOOR_WITH_TN = 0.3
-
-
-def _score_candidate(
-    norm_local: str,
-    local_tn: Optional[int],
-    local_diffs: frozenset,
-    api_norm: str,
-    api_tn: Optional[int],
-) -> int:
-    """Score a single API candidate against the local track. Higher
-    means more confident match; 0 means no usable signal. The orchestrator
-    picks the highest-scoring candidate above
-    :data:`_MATCH_SCORE_THRESHOLD` and treats sub-threshold tracks as
-    unmatched (the "trust the source — if it doesn't have the track,
-    skip it" design policy).
-
-    Components:
-
-    - **Exact normalized-title match** is the strongest signal — usually
-      enough on its own, especially because local titles SoulSync wrote
-      should already match the source's text after normalization.
-    - **Substring containment** with a length-ratio guard handles
-      annotation drift like ``"The Recipe - Bonus Track"`` (local)
-      matching ``"The Recipe"`` (API). The ratio bonus rewards more
-      specific matches, so longer common prefixes win over shorter ones.
-    - **Track-number agreement** is a tiebreaker, never enough alone
-      (track_number-only would mis-route on multi-disc).
-    - **Version-differentiator mismatch** is a hard reject — if local
-      has ``Remix`` and API doesn't (or vice versa), they're different
-      recordings, not annotation drift. Returns 0 unconditionally.
-    """
-    if not norm_local or not api_norm:
-        return 0
-
-    # Hard reject: version differentiators must agree exactly. ``Remix``
-    # vs no-remix means different recordings, regardless of how
-    # otherwise-similar the titles are.
-    if _differentiators_in(api_norm) != local_diffs:
-        return 0
-
-    score = 0
-    tn_match = local_tn is not None and api_tn == local_tn
-
-    if api_norm == norm_local:
-        score += _W_EXACT_TITLE
-    else:
-        if api_norm in norm_local:
-            ratio = len(api_norm) / max(len(norm_local), 1)
-        elif norm_local in api_norm:
-            ratio = len(norm_local) / max(len(api_norm), 1)
-        else:
-            ratio = 0.0
-        if ratio >= _SUBSTRING_RATIO_FLOOR_STANDALONE:
-            # Strong substring — credit regardless of tn agreement.
-            normalized = (
-                (ratio - _SUBSTRING_RATIO_FLOOR_STANDALONE)
-                / (1.0 - _SUBSTRING_RATIO_FLOOR_STANDALONE)
-            )
-            score += _W_SUBSTRING_BASE_STANDALONE + int(normalized * _W_SUBSTRING_RATIO_RANGE)
-        elif tn_match and ratio >= _SUBSTRING_RATIO_FLOOR_WITH_TN:
-            # Weaker substring (e.g., "the recipe" in "the recipe bonus
-            # track" at ratio 0.45) — accept ONLY because track_number
-            # also matches, and at slightly reduced base score.
-            score += _W_SUBSTRING_BASE_WITH_TN
-
-    if tn_match:
-        score += _W_TRACK_NUMBER
-
-    return score
-
-
-def _prenormalize_api_tracks(api_tracks: List[dict]) -> List[tuple]:
-    """Compute ``(item, normalized_title, parsed_track_number)`` once
-    per API track so the matcher doesn't redo this work on every local
-    track. Callers that match many local tracks against the same API
-    list (the orchestrator's per-album loop) should hold this list and
-    pass it to :func:`_find_api_track`.
-
-    For a 17-track local library matched against a 22-track API list,
-    avoiding re-normalization saves 17×22 = 374 normalize calls per
-    album reorganize."""
-    out = []
-    for item in api_tracks:
-        api_norm = _normalize_title(item.get('name') or item.get('title'))
-        try:
-            api_tn = int(item.get('track_number')) if item.get('track_number') is not None else None
-        except (TypeError, ValueError):
-            api_tn = None
-        out.append((item, api_norm, api_tn))
-    return out
-
-
-def _find_api_track(api_tracks, db_title: str, db_track_number) -> Optional[dict]:
-    """Find the API track that corresponds to a given local track row.
-
-    ``api_tracks`` may be either a raw list of API dicts (will be
-    normalized internally) OR a list of pre-normalized 3-tuples from
-    :func:`_prenormalize_api_tracks`. The orchestrator uses the
-    pre-normalized form to avoid O(n*m) normalization calls; tests
-    use the raw list for convenience.
-
-    Local rows carry (title, track_number) but NOT disc_number.
-    Multi-disc albums repeat track_numbers across discs, so a
-    track_number-only join would collapse the mapping. Title is the
-    natural disambiguator (each disc's track 1 has a different title),
-    but local titles drift from API titles in predictable ways:
-    trailing ``- Bonus Track`` annotations, ``- Remix`` vs ``(Remix)``,
-    etc.
-
-    Implementation: each candidate is scored by :func:`_score_candidate`;
-    the highest-scoring one above :data:`_MATCH_SCORE_THRESHOLD` wins.
-    If nothing clears the threshold the source genuinely doesn't have a
-    plausible match and we return ``None`` — the orchestrator surfaces
-    that as ``"not in tracklist, left in place"`` rather than silently
-    mis-routing.
-    """
-    norm_local = _normalize_title(db_title)
-    if not norm_local:
-        return None
-    try:
-        tn = int(db_track_number) if db_track_number is not None else None
-    except (TypeError, ValueError):
-        tn = None
-    local_diffs = _differentiators_in(norm_local)
-
-    # Accept either pre-normalized candidates or raw API dicts.
-    if api_tracks and isinstance(api_tracks[0], tuple):
-        candidates = api_tracks  # type: ignore[assignment]
-    else:
-        candidates = _prenormalize_api_tracks(api_tracks)  # type: ignore[arg-type]
-
-    best_item: Optional[dict] = None
-    best_score = 0
-    best_tn_match = False
-
-    for item, api_norm, api_tn in candidates:
-        score = _score_candidate(norm_local, tn, local_diffs, api_norm, api_tn)
-        if score < _MATCH_SCORE_THRESHOLD:
-            continue
-        tn_match = tn is not None and api_tn == tn
-        if score > best_score or (score == best_score and tn_match and not best_tn_match):
-            best_item = item
-            best_score = score
-            best_tn_match = tn_match
-
-    return best_item
 
 
 def load_album_and_tracks(db, album_id):
@@ -798,113 +91,6 @@ def load_album_and_tracks(db, album_id):
                 conn.close()
             except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
                 pass
-
-
-def _plan_from_tags(
-    album_data: dict,
-    tracks: List[dict],
-    resolve_file_path_fn: Optional[Callable[[Optional[str]], Optional[str]]],
-) -> dict:
-    """Tag-mode planner: build per-track ``api_track`` shapes from each
-    file's own embedded metadata instead of a live source API call.
-
-    Per-track behavior:
-    - File missing on disk → unmatched with reason.
-    - Tags missing essentials (title / artist / album) → unmatched
-      with reason.
-    - Otherwise matched with the per-file extracted ``api_track`` and
-      a per-file ``api_album``. The plan stores the FIRST matched
-      track's album dict on the top-level ``api_album`` field for
-      backward compatibility with downstream callers; downstream
-      consumers that need the per-track album shape read it off
-      ``items[i]['api_album']``.
-
-    Returns the same status / source / api_album / total_discs / items
-    shape as :func:`plan_album_reorganize`. ``source`` is the literal
-    string ``'tags'`` so callers can distinguish from API sources."""
-    if resolve_file_path_fn is None:
-        # Without the file-path resolver we can't read anything off
-        # disk. Return an unmatched plan so callers surface a clear
-        # error instead of silently returning empty.
-        reason = 'Tag-mode reorganize requires the file path resolver.'
-        return {
-            'status': 'no_source_id', 'source': None, 'api_album': None,
-            'total_discs': 1,
-            'items': [{
-                'track': t, 'api_track': None, 'matched': False,
-                'reason': reason,
-            } for t in tracks],
-        }
-
-    from core.library.reorganize_tag_source import read_album_track_from_file
-
-    items: List[dict] = []
-    first_album_meta: Optional[dict] = None
-    max_disc = 1
-
-    for track in tracks:
-        db_path = track.get('file_path')
-        resolved = resolve_file_path_fn(db_path) if db_path else None
-        if not resolved:
-            items.append({
-                'track': track, 'api_track': None, 'api_album': None,
-                'matched': False,
-                'reason': 'File no longer exists on disk for this track.',
-            })
-            continue
-
-        album_meta, track_meta, err = read_album_track_from_file(resolved)
-        if err is not None or track_meta is None or album_meta is None:
-            items.append({
-                'track': track, 'api_track': None, 'api_album': None,
-                'matched': False,
-                'reason': err or 'Could not extract metadata from embedded tags.',
-            })
-            continue
-
-        if first_album_meta is None:
-            first_album_meta = album_meta
-        try:
-            disc = int(track_meta.get('disc_number') or 1)
-        except (TypeError, ValueError):
-            disc = 1
-        if disc > max_disc:
-            max_disc = disc
-        # Respect an explicit `totaldiscs` tag (or "1/2" disc-number
-        # form) so a partial-album reorganize (only disc 1 present
-        # locally) still routes into `Disc 1/` when the file's tags
-        # know there are 2 discs total.
-        try:
-            tagged_total = int(album_meta.get('total_discs') or 0)
-        except (TypeError, ValueError):
-            tagged_total = 0
-        if tagged_total > max_disc:
-            max_disc = tagged_total
-
-        items.append({
-            'track': track,
-            'api_track': track_meta,
-            'api_album': album_meta,
-            'matched': True,
-            'reason': None,
-        })
-
-    if not any(it['matched'] for it in items):
-        return {
-            'status': 'no_source_id',
-            'source': 'tags',
-            'api_album': None,
-            'total_discs': 1,
-            'items': items,
-        }
-
-    return {
-        'status': 'planned',
-        'source': 'tags',
-        'api_album': first_album_meta or {},
-        'total_discs': max_disc,
-        'items': items,
-    }
 
 
 def _plan_from_catalogue(album_data: dict, tracks: List[dict]) -> dict:
@@ -989,44 +175,12 @@ def _plan_from_catalogue(album_data: dict, tracks: List[dict]) -> dict:
 def plan_album_reorganize(
     album_data: dict,
     tracks: List[dict],
-    primary_source: Optional[str] = None,
-    strict_source: bool = False,
-    metadata_source: str = 'catalogue',
-    resolve_file_path_fn: Optional[Callable[[Optional[str]], Optional[str]]] = None,
-    on_better_edition: Optional[Callable[[str, str, float], None]] = None,
 ) -> dict:
-    """Compute the per-track plan for an album reorganize without doing
-    any file IO. Both the actual reorganize orchestrator and the preview
-    endpoint share this so the preview is guaranteed to match what would
-    happen on apply.
+    """Compute the offline, catalogue-driven per-track plan.
 
-    ``metadata_source``:
-        - ``'api'`` (default): query the configured metadata source(s)
-          for the canonical tracklist (existing behavior). Issues an
-          API call.
-        - ``'tags'``: read each file's embedded tags as the source of
-          truth (issue #592). Zero API calls; trusts the user's
-          enriched library.
-
-    When ``metadata_source='tags'``, ``resolve_file_path_fn`` MUST be
-    provided (the planner needs to read the actual files). The
-    ``primary_source`` and ``strict_source`` params are ignored in
-    tag mode.
-
-    Returns:
-        ``{'status': 'planned' | 'no_source_id' | 'no_tracks',
-           'source': str | None,
-           'api_album': dict | None,
-           'total_discs': int,
-           'items': [{'track': dict, 'api_track': dict | None,
-                      'matched': bool, 'reason': str | None}, ...]}``
-
-    Per-track behavior matches the orchestrator exactly:
-    - Match by `(normalized_title, track_number)`, then title alone, then
-      track_number alone.
-    - Tracks with no match are reported with `matched=False` and a reason.
-    - `disc_number` for each track comes from its matched API entry; if
-      unmatched, `api_track is None` and the caller decides what to do.
+    This intentionally has no source/mode argument. Reorganize has one truth:
+    the values held by the library. Provider refresh belongs to Retag and file
+    tags are an output of Retag, not a second path authority.
     """
     if not tracks:
         return {
@@ -1034,95 +188,7 @@ def plan_album_reorganize(
             'total_discs': 1, 'items': [],
         }
 
-    if metadata_source in (None, '', 'catalogue'):
-        return _plan_from_catalogue(album_data, tracks)
-
-    if metadata_source == 'tags':
-        return _plan_from_tags(album_data, tracks, resolve_file_path_fn)
-
-    if primary_source is None:
-        try:
-            primary_source = get_primary_source()
-        except Exception:
-            primary_source = 'deezer'
-
-    # On-disk track shape for the #767-2 fit check (duration stored in ms).
-    file_tracks = [
-        {'duration_ms': t.get('duration') or 0, 'title': t.get('title') or ''}
-        for t in tracks
-    ]
-    source, api_album, api_tracks = _resolve_source(
-        album_data, primary_source, strict_source=strict_source,
-        file_tracks=file_tracks, on_better_edition=on_better_edition,
-    )
-    if not source:
-        reason = _unresolvable_reason(album_data, primary_source, strict_source)
-        return {
-            'status': 'no_source_id', 'source': None, 'api_album': None,
-            'total_discs': 1,
-            'items': [{
-                'track': t, 'api_track': None, 'matched': False,
-                'reason': reason,
-            } for t in tracks],
-        }
-
-    total_discs = max(
-        (int(item.get('disc_number') or 1) for item in api_tracks),
-        default=1,
-    )
-
-    # Pre-normalize once so the matcher doesn't redo the work per track.
-    prenormalized = _prenormalize_api_tracks(api_tracks)
-    items = []
-    for track in tracks:
-        api_track = _find_api_track(prenormalized, track.get('title', ''), track.get('track_number'))
-        if api_track is None:
-            items.append({
-                'track': track, 'api_track': None, 'matched': False,
-                'reason': f"No matching track in {source} tracklist (likely a bonus / non-canonical track)",
-            })
-        else:
-            items.append({
-                'track': track, 'api_track': api_track, 'matched': True,
-                'reason': None,
-            })
-
-    # #1080 (QT3496): a SINGLE-disc user album re-matched against a MULTI-disc
-    # source edition (deluxe / 2-disc) picks up disc-2 track numbers and stamps
-    # a bogus disc prefix ("11" -> "0211"). Read the user's REAL layout from
-    # their own track numbers and, when it's unambiguously single-disc, organize
-    # by that instead of the source's disc structure. Conservative on purpose —
-    # only caps when BOTH hold, so genuine multi-disc is never flattened:
-    #   * the user's track numbers don't repeat  → single disc (a box set
-    #     numbers per-disc, so 1..13 / 1..14 REPEAT → left multi-disc, #1009);
-    #   * every user track fits within the source's disc 1  → a continuously-
-    #     numbered 2-disc set (1..25) spills past disc 1 → left multi-disc.
-    # Gated on the same preserve-my-organization setting as casing/year.
-    if (total_discs > 1 and _preserve_casing_enabled()
-            and not _already_organized_by_disc(tracks)):
-        try:
-            user_nums = [int(t.get('track_number')) for t in tracks
-                         if str(t.get('track_number') or '').strip().isdigit()]
-            api_disc1 = sum(1 for t in api_tracks if int(t.get('disc_number') or 1) == 1)
-            if (user_nums and len(user_nums) == len(set(user_nums))
-                    and api_disc1 and max(user_nums) <= api_disc1):
-                total_discs = 1
-                for item in items:
-                    if item.get('matched') and item.get('api_track'):
-                        # shallow copy — override only the disc, keep name/track/artists
-                        item['api_track'] = {**item['api_track'], 'disc_number': 1}
-        except Exception:
-            # never let the single-disc heuristic break the reorganize — on any
-            # odd data just fall back to the source's disc structure
-            logger.debug("single-disc cap skipped (unexpected track data)", exc_info=True)
-
-    return {
-        'status': 'planned',
-        'source': source,
-        'api_album': api_album,
-        'total_discs': total_discs,
-        'items': items,
-    }
+    return _plan_from_catalogue(album_data, tracks)
 
 
 def _build_post_process_context(
@@ -1131,16 +197,8 @@ def _build_post_process_context(
     artist_name: str,
     album_title: str,
     total_discs: int,
-    local_title: Optional[str] = None,
-    local_year: Optional[str] = None,
 ) -> dict:
-    """Build the same shape `import_album_process` builds so post-process
-    treats this exactly like a fresh download with full Spotify-style
-    metadata in hand.
-
-    ``local_title`` is the user's own current track title — used only to
-    carry a featured-artist credit forward when feat_in_title is on and the
-    API doesn't supply one (#1078)."""
+    """Build the download-shaped context consumed by the shared path builder."""
     track_number = int(api_track.get('track_number') or 1)
     disc_number = int(api_track.get('disc_number') or 1)
     track_artists = api_track.get('artists') or [artist_name]
@@ -1150,17 +208,11 @@ def _build_post_process_context(
 
     api_album_id = api_album.get('id') or api_album.get('album_id') or ''
     api_album_name = api_album.get('name') or api_album.get('title') or album_title
-    # #1078: keep the user's album-folder casing when the source differs only
-    # by case (album_title is the user's own library album name).
-    api_album_name = _keep_user_casing(api_album_name, album_title)
     api_album_release = (
         api_album.get('release_date')
         or api_album.get('releaseDate')
         or ''
     )
-    # #1080: keep the user's own album year ($year) — a reissue/edition year
-    # they imported with, not the source's original-release year.
-    api_album_release = _keep_user_year(api_album_release, local_year)
     api_album_total_tracks = (
         api_album.get('total_tracks')
         or api_album.get('totalTracks')
@@ -1177,18 +229,6 @@ def _build_post_process_context(
                 api_album_image = first.get('url') or ''
 
     track_name = api_track.get('name') or api_track.get('title') or ''
-    # #1078: keep the featured-artist credit on the CLEAN title when the user
-    # asked for feat-in-title. The tag writer re-adds it to the tag, but the
-    # filename is built straight from this clean title and was silently
-    # dropping "(feat. X)" — flagging already-correct files for "correction".
-    if _feat_in_title_enabled():
-        track_name = _apply_feat_credit(track_name, normalized_artists, local_title or '')
-    # #1078: keep the user's own title casing when the source title differs
-    # ONLY by case — no cosmetic rename/re-tag on already-organized files.
-    # Runs AFTER feat so "Song (feat. X)" vs a bare source title stays a real
-    # change; this only collapses pure capitalization differences. Both the
-    # filename and the title tag are built from this string, so they agree.
-    track_name = _keep_user_casing(track_name, local_title or '')
 
     return {
         'spotify_artist': {
@@ -1261,9 +301,6 @@ def preview_album_reorganize(
     transfer_dir: str,
     resolve_file_path_fn: Callable[[Optional[str]], Optional[str]],
     build_final_path_fn: Callable,
-    primary_source: Optional[str] = None,
-    strict_source: bool = False,
-    metadata_source: str = 'catalogue',
 ) -> dict:
     """Compute the planned destination paths for a reorganize WITHOUT
     moving any files. The preview UI uses this to show users what the
@@ -1285,13 +322,10 @@ def preview_album_reorganize(
             web_server. Signature is
             ``(context, spotify_artist, album_info_or_none, file_ext) -> (path, ok)``.
             Injected so this module stays Flask-free.
-        primary_source: Optional override for the configured primary
-            source.
-
     Returns:
         ``{
             'success': bool,
-            'status': str,  # 'planned' | 'no_album' | 'no_tracks' | 'no_source_id'
+            'status': str,  # 'planned' | 'no_album' | 'no_tracks'
             'source': str | None,
             'album': str,
             'artist': str,
@@ -1316,12 +350,7 @@ def preview_album_reorganize(
             'tracks': [],
         }
 
-    plan = plan_album_reorganize(
-        album_data, tracks,
-        primary_source=primary_source, strict_source=strict_source,
-        metadata_source=metadata_source,
-        resolve_file_path_fn=resolve_file_path_fn,
-    )
+    plan = plan_album_reorganize(album_data, tracks)
     artist_name = album_data.get('artist_name') or 'Unknown Artist'
     album_title = album_data.get('title') or 'Unknown Album'
 
@@ -1331,23 +360,6 @@ def preview_album_reorganize(
         'transfer_dir': transfer_dir,
         'source': plan['source'],
     }
-
-    if plan['status'] == 'no_source_id':
-        return {
-            'success': False, 'status': 'no_source_id',
-            **common,
-            'tracks': [{
-                'track_id': t.get('id'),
-                'title': t.get('title', ''),
-                'track_number': t.get('track_number', 0),
-                'current_path': t.get('file_path', ''),
-                'new_path': '',
-                'file_exists': False, 'unchanged': False, 'collision': False,
-                'matched': False,
-                'reason': 'No metadata source ID — run enrichment first',
-                'disc_number': None,
-            } for t in tracks],
-        }
 
     total_discs = plan['total_discs']
     api_album = plan['api_album'] or {}
@@ -1397,16 +409,10 @@ def preview_album_reorganize(
 
         api_track = plan_item['api_track']
         item['disc_number'] = int(api_track.get('disc_number') or 1)
-        # Build the same context the orchestrator builds so the path
-        # builder produces the same destination it would on apply.
-        # Tag-mode plan items carry per-item album metadata; fall back
-        # to the shared api_album in API mode (where every plan item
-        # shares the same one).
-        per_item_album = plan_item.get('api_album') or api_album
+        # Build the download-shaped context consumed by the shared path
+        # builder. The values themselves are all from the catalogue.
         context = _build_post_process_context(
-            per_item_album, api_track, artist_name, album_title, total_discs,
-            local_title=title,
-            local_year=(str(album_data.get('year')) if album_data.get('year') else None),
+            api_album, api_track, artist_name, album_title, total_discs,
         )
         # `_build_final_path_for_track` switches between ALBUM and SINGLE
         # modes based on `album_info.get('is_album')` — must be passed,
@@ -1611,6 +617,71 @@ def _move_track_sidecars(current_abs: str, new_abs: str) -> None:
                 logger.debug("[Reorganize] sidecar %s not moved: %s", src_side, e)
 
 
+def _album_dir_for_track_dir(directory: str) -> str:
+    """Return the album root for a track directory.
+
+    In a ``Disc N`` layout the artwork normally lives one level above the
+    audio. Otherwise the track directory itself is the album root.
+    """
+    directory = os.path.normpath(directory)
+    if _DISC_DIR_RE.match(os.path.basename(directory)):
+        return os.path.dirname(directory)
+    return directory
+
+
+def _tree_has_audio(directory: str) -> bool:
+    """Whether ``directory`` or any descendant still contains audio."""
+    try:
+        for _root, _dirs, files in os.walk(directory):
+            if any(os.path.splitext(name)[1].lower() in _AUDIO_EXTS for name in files):
+                return True
+    except OSError:
+        return True  # uncertainty must preserve data
+    return False
+
+
+def _move_album_sidecars(source_dir: str, destination_dir: str) -> int:
+    """Move cover art and album sidecars after ALL source audio has left.
+
+    Existing destination files are never overwritten. Unrecognised real
+    content (for example a PDF booklet) stays at the source. OS junk stays too;
+    moving ``.DS_Store`` would add no value and can only create collisions.
+    """
+    if not source_dir or not destination_dir:
+        return 0
+    source_dir = os.path.normpath(source_dir)
+    destination_dir = os.path.normpath(destination_dir)
+    if source_dir == destination_dir or _tree_has_audio(source_dir):
+        return 0
+
+    from core.library.residual_files import is_image, is_sidecar
+
+    moved = 0
+    try:
+        names = os.listdir(source_dir)
+    except OSError:
+        return 0
+    for name in names:
+        if not (is_image(name) or is_sidecar(name)):
+            continue
+        source = os.path.join(source_dir, name)
+        destination = os.path.join(destination_dir, name)
+        if not os.path.isfile(source) or os.path.exists(destination):
+            continue
+        try:
+            os.makedirs(destination_dir, exist_ok=True)
+            try:
+                os.rename(source, destination)
+            except OSError as exc:
+                if getattr(exc, 'errno', None) != errno.EXDEV:
+                    raise
+                shutil.move(source, destination)
+            moved += 1
+        except Exception as exc:  # best effort; never risk the audio move
+            logger.debug("[Reorganize] album sidecar %s not moved: %s", source, exc)
+    return moved
+
+
 def reorganize_album_rename_only(
     *,
     album_id: str,
@@ -1621,9 +692,6 @@ def reorganize_album_rename_only(
     update_track_path_fn: Optional[Callable[[object, str], None]] = None,
     cleanup_empty_dir_fn: Optional[Callable[[str], None]] = None,
     on_progress: Optional[Callable[[dict], None]] = None,
-    primary_source: Optional[str] = None,
-    strict_source: bool = False,
-    metadata_source: str = 'catalogue',
     stop_check: Optional[Callable[[], bool]] = None,
     preview_fn: Optional[Callable] = None,
 ) -> dict:
@@ -1657,8 +725,6 @@ def reorganize_album_rename_only(
         album_id=album_id, db=db, transfer_dir=transfer_dir,
         resolve_file_path_fn=resolve_file_path_fn,
         build_final_path_fn=build_final_path_fn,
-        primary_source=primary_source, strict_source=strict_source,
-        metadata_source=metadata_source,
     )
     summary['source'] = preview.get('source')
     if not preview.get('success'):
@@ -1668,6 +734,7 @@ def reorganize_album_rename_only(
     tracks = preview.get('tracks', [])
     summary['total'] = len(tracks)
     src_dirs_touched: Set[str] = set()
+    album_dir_moves: Dict[str, str] = {}
 
     for t in tracks:
         if stop_check and stop_check():
@@ -1738,10 +805,22 @@ def reorganize_album_rename_only(
                 _emit(failed=summary['failed'], errors=list(summary['errors']))
                 continue
         if current_abs:
-            src_dirs_touched.add(os.path.dirname(current_abs))
+            source_track_dir = os.path.dirname(current_abs)
+            destination_track_dir = os.path.dirname(new_abs)
+            src_dirs_touched.add(source_track_dir)
+            album_dir_moves[_album_dir_for_track_dir(source_track_dir)] = (
+                _album_dir_for_track_dir(destination_track_dir)
+            )
         summary['moved'] += 1
         _emit(moved=summary['moved'],
               processed=summary['moved'] + summary['skipped'] + summary['failed'])
+
+    # Only after all successful track moves: carry the album's cover/scan art,
+    # NFO, cue and playlist files. The helper refuses while ANY source audio
+    # remains, so a partial or failed run never splits an album's sidecars away
+    # from tracks that stayed behind.
+    for source_album_dir, destination_album_dir in album_dir_moves.items():
+        _move_album_sidecars(source_album_dir, destination_album_dir)
 
     for src_dir in src_dirs_touched:
         if cleanup_empty_dir_fn:
@@ -1900,5 +979,3 @@ def _move_sibling_to_destination(sibling_src: str, canonical_dst: str) -> Option
             sibling_src, sibling_dst, e,
         )
         return None
-
-

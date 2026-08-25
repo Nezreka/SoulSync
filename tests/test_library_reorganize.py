@@ -323,31 +323,11 @@ def test_scan_skips_tracks_with_missing_files(make_context, monkeypatch):
     assert result.findings_created == 0
 
 
-def test_scan_emits_album_needs_enrichment_when_planner_returns_no_source_id(make_context, monkeypatch):
-    """Pin: planner returns status='no_source_id' → emit ONE
-    album-level finding ('needs enrichment') instead of N per-track
-    'no source' findings (which would clutter the UI)."""
-    db = _FakeDB([_make_album_row(id_='A1', title='Unenriched Album')])
-    _stub_preview(monkeypatch, {
-        'A1': {
-            'success': False, 'status': 'no_source_id',
-            'source': None,
-            'album': 'Unenriched Album', 'artist': 'Some Artist',
-            'tracks': [
-                {'track_id': 't1', 'title': 'Track 1', 'matched': False, 'reason': '...'},
-                {'track_id': 't2', 'title': 'Track 2', 'matched': False, 'reason': '...'},
-            ],
-        },
-    })
-    ctx = make_context(db=db, dry_run=True)
-
-    job = LibraryReorganizeJob()
-    result = job.scan(ctx)
-
-    findings = ctx._captured_findings  # type: ignore[attr-defined]
-    assert result.findings_created == 1
-    assert findings[0]['finding_type'] == 'album_needs_enrichment'
-    assert 'Unenriched Album' in findings[0]['title']
+# The `album_needs_enrichment` dead-end finding this job used to emit for a
+# `no_source_id` plan is gone with the branch that raised it: the planner reads
+# the catalogue, which needs no enrichment to name a file.
+# `test_an_album_with_no_source_id_still_produces_findings` below pins the
+# replacement — such an album now gets real path_mismatch findings.
 
 
 def test_scan_skips_albums_planner_reports_as_no_album(make_context, monkeypatch):
@@ -457,7 +437,9 @@ def test_scan_apply_mode_enqueues_albums_via_reorganize_queue(make_context, monk
     assert len(enqueue_calls) == 1
     queued = enqueue_calls[0]
     assert {q['album_id'] for q in queued} == {'A1', 'A2'}
-    assert {q['source'] for q in queued} == {'spotify', 'deezer'}
+    # No per-item source: a reorganize consults no provider, so there is
+    # nothing about "which source" for the queue to carry.
+    assert all('source' not in q for q in queued)
     assert result.auto_fixed == 2
     # Apply mode does NOT emit findings — it enqueues for actual move.
     assert result.findings_created == 0
@@ -524,7 +506,7 @@ def test_apply_mode_enqueues_without_a_mode_to_carry(make_context, monkeypatch):
 
     assert len(enqueue_calls) == 1
     assert 'metadata_source' not in enqueue_calls[0][0]
-    assert enqueue_calls[0][0]['source'] == 'catalogue'
+    assert 'source' not in enqueue_calls[0][0]
 
 
 def test_scan_only_iterates_albums_for_active_server(make_context, monkeypatch):

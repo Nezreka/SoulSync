@@ -123,8 +123,9 @@ def test_runner_invokes_the_executor_with_injected_deps(monkeypatch, tmp_path):
 
     assert summary['status'] == 'completed'
     assert captured['album_id'] == 'alb-X'
-    assert captured['primary_source'] == 'deezer'
-    assert captured['strict_source'] is True
+    # No source to pass on: the plan comes from the catalogue.
+    assert 'primary_source' not in captured
+    assert 'strict_source' not in captured
     assert callable(captured['build_final_path_fn'])
     assert callable(captured['on_progress'])
     assert callable(captured['stop_check'])
@@ -213,7 +214,7 @@ def test_runner_progress_callback_forwards_to_queue(monkeypatch, tmp_path):
     q = get_queue()
     q.set_runner(runner)
     enq = q.enqueue(album_id='alb-1', album_title='good kid',
-                    artist_id='ar-1', artist_name='Kendrick Lamar', source=None)
+                    artist_id='ar-1', artist_name='Kendrick Lamar')
 
     # Wait for the worker to finish (fake_reorganize_album is fast).
     deadline_passes = 0

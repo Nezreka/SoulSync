@@ -12422,35 +12422,6 @@ def get_tracks_replaygain_batch_status():
 # :mod:`core.library_reorganize`.
 
 
-@app.route('/api/library/reorganize/sources', methods=['GET'])
-def reorganize_sources_global():
-    """List metadata sources the user has authed on this instance.
-    Used by the bulk "Reorganize All" modal where per-album ID coverage
-    varies. No network calls."""
-    try:
-        from core.library_reorganize import authed_sources
-        return jsonify({"success": True, "sources": authed_sources()})
-    except Exception as e:
-        logger.error(f"Reorganize sources (global) error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/library/album/<album_id>/reorganize/sources', methods=['GET'])
-def reorganize_album_sources(album_id):
-    """List metadata sources the user can pick for this album's
-    reorganize — every entry has both a stored album ID on the local
-    row AND an authenticated client. No network calls."""
-    try:
-        from core.library_reorganize import available_sources_for_album, load_album_and_tracks
-        album_data, _tracks = load_album_and_tracks(get_database(), album_id)
-        if album_data is None:
-            return jsonify({"success": False, "error": "Album not found"}), 404
-        return jsonify({"success": True, "sources": available_sources_for_album(album_data)})
-    except Exception as e:
-        logger.error(f"Reorganize sources error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
 @app.route('/api/library/album/<album_id>/reorganize/preview', methods=['POST'])
 def reorganize_album_preview(album_id):
     """Preview file reorganization for an album — returns current vs

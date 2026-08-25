@@ -7,6 +7,7 @@ the preview marked `unchanged` are left alone (the "every file got modified" bug
 import os
 
 from core.library_reorganize import (
+    _move_album_sidecars,
     _rename_track_in_place,
     reorganize_album_rename_only,
 )
@@ -281,3 +282,56 @@ def test_a_sidecar_already_at_the_destination_is_not_clobbered(tmp_path):
 
     assert ok
     assert (dst_dir / "Song - Artist.lrc").read_text() == "already there"
+
+
+# ── album-level artwork follows once the source album is empty ─────────────
+
+def test_album_art_and_album_sidecars_follow_the_album(tmp_path):
+    src = tmp_path / "old album"
+    dst = tmp_path / "new album"
+    src.mkdir(); dst.mkdir()
+    for name in ("cover.jpg", "folder.png", "album.nfo", "playlist.m3u"):
+        (src / name).write_text(name)
+
+    moved = _move_album_sidecars(str(src), str(dst))
+
+    assert moved == 4
+    for name in ("cover.jpg", "folder.png", "album.nfo", "playlist.m3u"):
+        assert (dst / name).read_text() == name
+        assert not (src / name).exists()
+
+
+def test_album_sidecars_wait_until_no_audio_remains(tmp_path):
+    src = tmp_path / "old album"
+    dst = tmp_path / "new album"
+    src.mkdir(); dst.mkdir()
+    (src / "cover.jpg").write_bytes(b"cover")
+    (src / "track-still-here.flac").write_bytes(b"audio")
+
+    assert _move_album_sidecars(str(src), str(dst)) == 0
+    assert (src / "cover.jpg").read_bytes() == b"cover"
+    assert not (dst / "cover.jpg").exists()
+
+
+def test_album_sidecars_never_overwrite_destination_files(tmp_path):
+    src = tmp_path / "old album"
+    dst = tmp_path / "new album"
+    src.mkdir(); dst.mkdir()
+    (src / "cover.jpg").write_bytes(b"old")
+    (dst / "cover.jpg").write_bytes(b"new")
+
+    assert _move_album_sidecars(str(src), str(dst)) == 0
+    assert (src / "cover.jpg").read_bytes() == b"old"
+    assert (dst / "cover.jpg").read_bytes() == b"new"
+
+
+def test_album_sidecar_move_keeps_real_documents_at_source(tmp_path):
+    src = tmp_path / "old album"
+    dst = tmp_path / "new album"
+    src.mkdir(); dst.mkdir()
+    (src / "cover.jpg").write_bytes(b"cover")
+    (src / "booklet.pdf").write_bytes(b"booklet")
+
+    assert _move_album_sidecars(str(src), str(dst)) == 1
+    assert (dst / "cover.jpg").exists()
+    assert (src / "booklet.pdf").read_bytes() == b"booklet"

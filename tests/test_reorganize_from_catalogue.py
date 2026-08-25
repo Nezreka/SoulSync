@@ -34,49 +34,42 @@ def _track(n, title, disc=1, **kw):
     return row
 
 
-def _no_provider(monkeypatch):
-    def _boom(*a, **k):
-        raise AssertionError('the catalogue planner must not consult a provider')
-    monkeypatch.setattr(lr, '_resolve_source', _boom)
+def test_the_provider_planner_no_longer_exists():
+    assert not hasattr(lr, '_resolve_source')
+    assert not hasattr(lr, '_plan_from_tags')
 
 
-def test_an_album_with_no_source_id_is_still_planned(monkeypatch):
-    _no_provider(monkeypatch)
+def test_an_album_with_no_source_id_is_still_planned():
     plan = lr.plan_album_reorganize(_album(), [_track(1, 'One'), _track(2, 'Two')])
     assert plan['status'] == 'planned'
     assert [it['matched'] for it in plan['items']] == [True, True]
 
 
-def test_track_names_come_from_the_library(monkeypatch):
-    _no_provider(monkeypatch)
+def test_track_names_come_from_the_library():
     plan = lr.plan_album_reorganize(_album(), [_track(1, 'My Own Title')])
     assert plan['items'][0]['api_track']['name'] == 'My Own Title'
     assert plan['api_album']['name'] == 'Real Album'
 
 
-def test_disc_count_comes_from_the_catalogue(monkeypatch):
-    _no_provider(monkeypatch)
+def test_disc_count_comes_from_the_catalogue():
     plan = lr.plan_album_reorganize(
         _album(), [_track(1, 'One', disc=1), _track(2, 'Two', disc=2)])
     assert plan['total_discs'] == 2
 
 
-def test_a_track_the_library_cannot_name_is_unmatched(monkeypatch):
-    _no_provider(monkeypatch)
+def test_a_track_the_library_cannot_name_is_unmatched():
     plan = lr.plan_album_reorganize(_album(), [_track(1, ''), _track(2, 'Two')])
     assert plan['items'][0]['matched'] is False
     assert plan['items'][0]['reason']
     assert plan['items'][1]['matched'] is True
 
 
-def test_the_album_keeps_its_own_year(monkeypatch):
+def test_the_album_keeps_its_own_year():
     """#1080 was a patch on the provider planner. Reading the catalogue makes
     the user's own release year the value by construction."""
-    _no_provider(monkeypatch)
     plan = lr.plan_album_reorganize(_album(release_date='1999-01-01'), [_track(1, 'One')])
     assert plan['api_album']['release_date'] == '1999-01-01'
 
 
-def test_an_album_with_no_tracks_is_reported_as_such(monkeypatch):
-    _no_provider(monkeypatch)
+def test_an_album_with_no_tracks_is_reported_as_such():
     assert lr.plan_album_reorganize(_album(), [])['status'] == 'no_tracks'

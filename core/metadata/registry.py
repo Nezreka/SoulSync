@@ -32,6 +32,21 @@ ALBUM_SOURCE_ID_COLUMNS = {
     "musicbrainz": "musicbrainz_release_id",
 }
 
+def extract_album_source_ids(album_row) -> Dict[str, str]:
+    """Pull the per-source album-ID strings off an album row.
+
+    Lived in ``core.library_reorganize`` while the reorganizer was the only
+    caller that needed to know which provider an album is matched to. It plans
+    from the catalogue now and asks no provider anything, so the helper belongs
+    with the column map — where the canonical resolver, which DOES need it, can
+    reach it without importing the reorganizer.
+    """
+    return {
+        source: (album_row.get(column) or '')
+        for source, column in ALBUM_SOURCE_ID_COLUMNS.items()
+    }
+
+
 METADATA_SOURCE_LABELS = {
     "spotify": "Spotify",
     "itunes": "iTunes",

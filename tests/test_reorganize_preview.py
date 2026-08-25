@@ -393,38 +393,3 @@ def test_reorganize_context_no_longer_opts_out_of_an_acceptance_check():
     assert 'is_local_import' not in context
     assert '_skip_quarantine_check' not in context
 
-
-# --- source listing (still used by the bulk paths) -------------------------
-
-def test_available_sources_only_lists_authed_sources_with_stored_ids(monkeypatch):
-    monkeypatch.setattr(library_reorganize, 'get_primary_source', lambda: 'deezer')
-    monkeypatch.setattr(library_reorganize, 'get_source_priority',
-                        lambda p: [p, 'spotify', 'itunes', 'discogs', 'hydrabase'])
-    auth = {'deezer': object(), 'spotify': object()}
-    monkeypatch.setattr(library_reorganize, 'get_client_for_source',
-                        lambda src: auth.get(src))
-
-    album = {
-        'spotify_album_id': 'sp-1',
-        'deezer_id': 'dz-1',
-        'itunes_album_id': 'it-1',  # has ID but user not authed
-        'discogs_id': '',
-        'soul_id': '',
-    }
-
-    sources = library_reorganize.available_sources_for_album(album)
-    assert [s['source'] for s in sources] == ['deezer', 'spotify']
-    assert all('label' in s for s in sources)
-
-
-def test_authed_sources_lists_all_authed_regardless_of_album_ids(monkeypatch):
-    monkeypatch.setattr(library_reorganize, 'get_primary_source', lambda: 'spotify')
-    monkeypatch.setattr(library_reorganize, 'get_source_priority',
-                        lambda p: [p, 'deezer', 'itunes', 'discogs', 'hydrabase'])
-    auth = {'spotify': object(), 'deezer': object(), 'itunes': object()}
-    monkeypatch.setattr(library_reorganize, 'get_client_for_source',
-                        lambda src: auth.get(src))
-
-    sources = library_reorganize.authed_sources()
-    assert [s['source'] for s in sources] == ['spotify', 'deezer', 'itunes']
-    assert all('label' in s for s in sources)

@@ -18,10 +18,10 @@ WHY THIS BITES DIFFERENTLY PER PLATFORM, and why both halves are bad:
 So this is not a cosmetic issue on either kind of filesystem, and a fix that
 only helps one of them is not a fix.
 
-DISTINCT FROM `_keep_user_casing` (core/library_reorganize.py), which stops
-reorganize CHURNING a folder's name when the source's casing differs. That is
-about not renaming; this is about not creating a duplicate. Both can be true
-at once, and the churn fix does not prevent the split.
+Reorganize once had a separate `_keep_user_casing` helper to stop churn while
+comparing provider metadata with a user's local value. That path is gone:
+reorganize reads the catalogue value directly, so there is no second casing to
+reconcile. The case-folding rule here still prevents duplicate directories.
 
 DELIBERATELY NOT A MERGE. This only steers NEW writes to the folder that
 already exists. Two folders that are already split stay split until something

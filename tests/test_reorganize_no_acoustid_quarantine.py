@@ -30,16 +30,8 @@ instead of moving anyone's audio.
 
 from __future__ import annotations
 
-import pytest
-
 from core.imports.pipeline import _should_skip_quarantine_check
 from core.library_reorganize import _build_post_process_context
-
-
-@pytest.fixture(autouse=True)
-def _preserve(monkeypatch):
-    monkeypatch.setattr("core.library_reorganize._preserve_casing_enabled", lambda: True)
-    monkeypatch.setattr("core.library_reorganize._feat_in_title_enabled", lambda: False)
 
 
 def _ctx():
@@ -48,7 +40,7 @@ def _ctx():
          "total_tracks": 45, "images": [{"url": ""}]},
         {"name": "Apetitan", "track_number": 2, "disc_number": 1,
          "artists": [{"name": "Sawano Hiroyuki"}]},
-        "Sawano Hiroyuki", "AoT S2 OST", 2, local_title="Apetitan")
+        "Sawano Hiroyuki", "AoT S2 OST", 2)
 
 
 def test_no_acceptance_check_runs_so_there_is_nothing_to_opt_out_of():

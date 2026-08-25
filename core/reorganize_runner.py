@@ -200,8 +200,6 @@ def build_runner(
             update_track_path_fn=_update_track_path,
             cleanup_empty_dir_fn=_cleanup_empty,
             on_progress=_on_progress,
-            primary_source=item.source,
-            strict_source=bool(item.source),
             stop_check=is_shutting_down_fn,
         )
 
