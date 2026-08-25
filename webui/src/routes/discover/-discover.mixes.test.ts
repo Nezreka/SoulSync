@@ -223,11 +223,11 @@ describe('the mix modal', () => {
   it('leads every mix with Play, then Download + Sync from a syncKey', () => {
     // the play-now bridge (aug 25): listening is always the first offer
     const actions = mixActions(mix({ syncKey: 'hidden_gems' }));
-    expect(actions.map((a) => a.label)).toEqual([
-      MIX_ACTION_PLAY,
-      MIX_ACTION_DOWNLOAD,
-      MIX_ACTION_SYNC,
-    ]);
+    expect(actions.map((a) => a.label)).toEqual(['▶ Play', 'Download', 'Sync']);
+    // the constants pinned separately, so the literals above catch a drift
+    expect(MIX_ACTION_PLAY).toBe('▶ Play');
+    expect(MIX_ACTION_DOWNLOAD).toBe('Download');
+    expect(MIX_ACTION_SYNC).toBe('Sync');
     expect(actions[0].onclick).toBe('play');
     expect(actions[2].primary).toBe(true);
     expect(actions[2].isSync).toBe(true);
@@ -242,21 +242,17 @@ describe('the mix modal', () => {
   it('prepends Play to a mix’s OWN actions', () => {
     const custom = [{ label: 'Custom', onclick: 'x' }];
     const actions = mixActions(mix({ actions: custom, syncKey: 'ignored' }));
-    expect(actions.map((a) => a.label)).toEqual([MIX_ACTION_PLAY, 'Custom']);
+    expect(actions.map((a) => a.label)).toEqual(['▶ Play', 'Custom']);
   });
 
   it('a mix with neither actions nor syncKey is still playable', () => {
     // daily_mix_* used to get NOTHING here. play needs no download key -
     // it resolves against the library - so it is always offered.
-    expect(mixActions(mix({ key: 'daily_mix_0' })).map((a) => a.label)).toEqual([
-      MIX_ACTION_PLAY,
-    ]);
+    expect(mixActions(mix({ key: 'daily_mix_0' })).map((a) => a.label)).toEqual(['▶ Play']);
   });
 
   it('an explicitly EMPTY action list still gets Play', () => {
-    expect(mixActions(mix({ actions: [], syncKey: 'x' })).map((a) => a.label)).toEqual([
-      MIX_ACTION_PLAY,
-    ]);
+    expect(mixActions(mix({ actions: [], syncKey: 'x' })).map((a) => a.label)).toEqual(['▶ Play']);
   });
 });
 

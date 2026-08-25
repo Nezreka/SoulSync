@@ -3,7 +3,7 @@
 import { render, waitFor, fireEvent } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { StationsRow, stationSubtitle } from './stations-row';
+import { StationsRow, fetchStations, stationSubtitle } from './stations-row';
 
 const STATIONS = [
   { artist_id: '7', name: 'bbno$', image_url: 'http://b.jpg', with: ['Yung Gravy', 'Y2K'] },
@@ -57,5 +57,14 @@ describe('stationSubtitle', () => {
   it('joins companions, falls back for loners', () => {
     expect(stationSubtitle(STATIONS[0])).toBe('With Yung Gravy, Y2K and more');
     expect(stationSubtitle(STATIONS[1])).toBe('Artist radio from your library');
+  });
+});
+
+describe('fetchStations', () => {
+  it('unwraps the stations list and treats failure as none', async () => {
+    stubFetch({ success: true, stations: STATIONS });
+    expect(await fetchStations()).toEqual(STATIONS);
+    stubFetch({ success: false });
+    expect(await fetchStations()).toEqual([]);
   });
 });

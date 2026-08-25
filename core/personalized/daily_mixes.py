@@ -26,6 +26,7 @@ from utils.logging_config import get_logger
 logger = get_logger("personalized.daily_mixes")
 
 CURATED_KEY = "daily_mixes_v2"
+PAYLOAD_VERSION = 2
 MAX_MIXES = 6
 MIX_SIZE = 40
 DISCOVERY_PER_MIX = 8
@@ -206,13 +207,17 @@ def _owned_tracks_for(database, artist_names: Sequence[str]) -> Dict[str, List[d
               AND LOWER(ar.name) IN ({placeholders})
             """,
             [_norm(a) for a in artist_names])
+        from core.metadata import normalize_image_url
         for row in cur.fetchall():
             r = dict(row)
+            # library thumbs are media-server-relative (/library/metadata/...)
+            # and render as blank art without the browser-safe conversion
+            cover = normalize_image_url(r["cover"]) if r["cover"] else None
             track = {
                 "name": r["title"],
                 "artists": [{"name": r["artist"]}],
                 "album": {"name": r["album"] or "",
-                          "images": [{"url": r["cover"]}] if r["cover"] else []},
+                          "images": [{"url": cover}] if cover else []},
                 "duration_ms": int((r["duration"] or 0) * 1000),
                 "play_count": r.get("play_count") or 0,
                 "owned": True,
@@ -334,6 +339,9 @@ def generate_daily_mixes(database, profile_id: int = 1, *,
         "mixes": mixes,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "profile_id": profile_id,
+        # payload version: bump to invalidate stored payloads whose SHAPE or
+        # content rules changed (v2 = browser-safe art urls)
+        "v": PAYLOAD_VERSION,
     }
 
 
@@ -349,7 +357,8 @@ def get_or_build_daily_mixes(database, profile_id: int = 1, *,
             stored = database.get_curated_playlist(CURATED_KEY, profile_id)
         except Exception as e:
             logger.debug(f"stored daily mixes unreadable: {e}")
-        if isinstance(stored, dict) and stored.get("mixes"):
+        if (isinstance(stored, dict) and stored.get("mixes")
+                and stored.get("v") == PAYLOAD_VERSION):
             try:
                 age = datetime.now(timezone.utc) - datetime.fromisoformat(
                     stored.get("generated_at", ""))

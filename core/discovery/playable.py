@@ -70,6 +70,9 @@ def resolve_playable_tracks(db, wanted: List[Dict[str, Any]]) -> Dict[str, Any]:
             if not row:
                 continue
             track = dict(row)
+            if track.get("image_url"):
+                from core.metadata import normalize_image_url
+                track["image_url"] = normalize_image_url(track["image_url"]) or track["image_url"]
             # one copy per file - a mix repeating a track should not repeat it
             if track["file_path"] in seen_paths:
                 continue

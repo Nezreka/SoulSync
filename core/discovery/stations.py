@@ -94,6 +94,7 @@ def build_stations(database, profile_id: int = 1,
                 if _norm(sim) != seed and _norm(sim) not in {_norm(b) for b in bucket}:
                     bucket.append(sim)
 
+    from core.metadata import normalize_image_url
     for s in seeds:
         key = _norm(s['name'])
         row = by_name.get(key)
@@ -103,7 +104,9 @@ def build_stations(database, profile_id: int = 1,
         stations.append({
             "artist_id": row["id"],
             "name": row["name"],
-            "image_url": row.get("thumb_url") or "",
+            # media-server-relative thumbs need the browser-safe conversion
+            "image_url": (normalize_image_url(row.get("thumb_url"))
+                          if row.get("thumb_url") else "") or "",
             "with": (withs.get(key) or [])[:WITH_NAMES],
         })
         if len(stations) >= max_stations:
