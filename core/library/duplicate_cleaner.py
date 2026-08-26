@@ -9,7 +9,9 @@ import logging
 
 from core.settings import config_manager
 from core.runtime_state import add_activity_item
+from core.library.duplicate_rules import is_lossy_companion_pair, lossy_companion_exts
 from core.repair_jobs.base import skip_deleted_quarantine
+from database.music_database import get_database
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +138,19 @@ def _run_duplicate_cleaner():
             '.mp3': 4, '.wma': 4    # Lower quality lossy
         }
 
+        # The lossy-copy feature deliberately writes a same-folder,
+        # same-stem MP3/Opus/M4A next to its lossless source.  The catalogue
+        # detector already protects that pair; the filesystem cleaner must
+        # apply the same shared rule instead of quarantining the intended copy.
+        try:
+            database = get_database()
+        except Exception as e:  # noqa: BLE001 - filesystem scan stays usable
+            logger.debug("lossy companion database unavailable: %s", e)
+            database = None
+        companion_exts = lossy_companion_exts(
+            config_manager, database, logger=logger,
+        )
+
         duplicates_found = 0
         deleted_count = 0
         space_freed = 0
@@ -146,9 +161,6 @@ def _run_duplicate_cleaner():
                 if len(file_versions) <= 1:
                     continue
 
-                duplicates_found += len(file_versions) - 1  # Count all but the one we keep
-                logger.warning(f"[Duplicate Cleaner] Found {len(file_versions)} versions of '{filename}' in {directory}")
-
                 # Sort by priority: best format first, then largest size
                 def sort_key(f):
                     priority = format_priority.get(f['extension'], 999)
@@ -157,12 +169,29 @@ def _run_duplicate_cleaner():
 
                 sorted_versions = sorted(file_versions, key=sort_key)
 
-                # Keep the first one (best quality), delete the rest
+                # Keep the first one (best quality).  Configured lossy
+                # companions of that lossless winner are intentional; only
+                # the remaining versions are actionable duplicates.
                 best_version = sorted_versions[0]
+                duplicate_versions = [
+                    version for version in sorted_versions[1:]
+                    if not is_lossy_companion_pair(
+                        best_version['full_path'], version['full_path'],
+                        companion_exts,
+                    )
+                ]
+                if not duplicate_versions:
+                    continue
+
+                duplicates_found += len(duplicate_versions)
+                logger.warning(
+                    f"[Duplicate Cleaner] Found {len(duplicate_versions) + 1} "
+                    f"versions of '{filename}' in {directory}"
+                )
                 logger.warning(f"[Duplicate Cleaner] Keeping: {os.path.basename(best_version['full_path'])} "
                       f"({best_version['extension']}, {best_version['size']} bytes)")
 
-                for duplicate_file in sorted_versions[1:]:
+                for duplicate_file in duplicate_versions:
                     try:
                         # Move to deleted folder with relative path preserved
                         relative_path = os.path.relpath(duplicate_file['full_path'], transfer_folder)
