@@ -4754,9 +4754,26 @@ class RepairWorker:
         delete_original = False
         profile = None
         profile_id = details.get('quality_profile_id') if isinstance(details, dict) else None
+        native_track_id = None
+        if isinstance(details, dict):
+            native_track_id = (details.get('library_v2') or {}).get('track_id')
         try:
-            from core.quality.selection import load_profile_by_id
-            profile = load_profile_by_id(profile_id) if profile_id else None
+            if native_track_id is not None:
+                # Library v2 owns a Track -> Album -> Artist -> Global cascade.
+                # Re-evaluate it at apply time so findings never freeze an old
+                # inherited/default profile (including delete-original policy).
+                from core.library2.quality_eval import effective_track_profile
+
+                conn = self.db._get_connection()
+                try:
+                    profile = effective_track_profile(conn, int(native_track_id))
+                finally:
+                    conn.close()
+            else:
+                from core.quality.selection import load_profile_by_id
+                # A NULL legacy assignment deliberately means "use the current
+                # default". load_profile_by_id(None) performs live resolution.
+                profile = load_profile_by_id(profile_id)
         except Exception as e:
             logger.debug("Could not resolve lossy-converter profile %r: %s", profile_id, e)
         if isinstance(profile, dict) and 'lossy_copy_enabled' in profile:

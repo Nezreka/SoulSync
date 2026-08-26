@@ -49,6 +49,12 @@ def _profile_lossy_settings(context: JobContext, profile_id=None, track_id=None)
     if isinstance(profile, dict) and 'lossy_copy_enabled' in profile:
         return {
             'profile_id': profile.get('id'),
+            # A global/default result is inherited rather than assigned. Keep
+            # that distinction in findings so legacy apply paths also resolve
+            # the then-current default instead of pinning today's row id.
+            'assigned_profile_id': (
+                profile.get('id') if profile.get('explicit', True) else None
+            ),
             'profile_name': profile.get('name') or profile.get('preset') or 'default',
             'enabled': bool(profile.get('lossy_copy_enabled')),
             'codec': str(profile.get('lossy_copy_codec') or 'mp3').lower(),
@@ -58,6 +64,7 @@ def _profile_lossy_settings(context: JobContext, profile_id=None, track_id=None)
     cfg = context.config_manager
     return {
         'profile_id': profile_id,
+        'assigned_profile_id': profile_id,
         'profile_name': 'legacy settings',
         'enabled': bool(cfg and cfg.get('lossy_copy.enabled', False)),
         'codec': str(cfg.get('lossy_copy.codec', 'mp3') if cfg else 'mp3').lower(),
@@ -258,7 +265,7 @@ class LossyConverterJob(RepairJob):
                         'album_thumb_url': album_thumb or None,
                         'artist_thumb_url': artist_thumb or None,
                         'artist_id': artist_id,
-                        'quality_profile_id': policy.get('profile_id'),
+                        'quality_profile_id': policy.get('assigned_profile_id'),
                         'quality_profile_name': policy.get('profile_name'),
                         'delete_original': policy.get('delete_original', False),
                     }

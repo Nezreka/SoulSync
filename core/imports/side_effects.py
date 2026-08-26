@@ -50,6 +50,22 @@ def _stable_soulsync_id(text: str) -> str:
     return str(abs(int(hashlib.md5(text.encode("utf-8", errors="replace")).hexdigest(), 16)) % (10 ** 9))
 
 
+def _retention_provenance_json(context: Dict[str, Any]) -> tuple[str | None, str | None]:
+    """Serialize acquisition/retention truth for either persistence path."""
+    from core.quality.model import AudioQuality
+    from core.quality.retention import quality_json, transforms_json
+
+    acquired_value = context.get("_acquired_audio_quality")
+    try:
+        acquired_quality = AudioQuality.from_dict(acquired_value) if acquired_value else None
+    except (TypeError, ValueError):
+        acquired_quality = None
+    return (
+        quality_json(acquired_quality),
+        transforms_json(context.get("_retention_transforms")),
+    )
+
+
 # Tiny SQL allowlist for the fill-empty helpers — prevents accidental
 # SQL injection through the f-string column-name interpolation. Only
 # columns the soulsync library write path ever updates are listed.
@@ -403,6 +419,7 @@ def record_download_provenance(context: Dict[str, Any],
         audiodb_id = _embedded("AUDIODB_TRACK_ID")
         soul_id = _embedded("SOUL_ID")
         isrc = context.get("_isrc")
+        acquired_quality_json, retention_json = _retention_provenance_json(context)
 
         db = get_database()
         db.record_track_download(
@@ -427,6 +444,8 @@ def record_download_provenance(context: Dict[str, Any],
             audiodb_id=audiodb_id,
             soul_id=soul_id,
             isrc=isrc,
+            acquired_quality_json=acquired_quality_json,
+            retention_json=retention_json,
         )
     except Exception as e:
         logger.debug("record_download_provenance failed: %s", e)

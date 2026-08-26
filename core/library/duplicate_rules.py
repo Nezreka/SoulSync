@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from core.quality.lossless import is_lossless_format
+from core.quality.lossless import is_lossless_audio_path, is_lossless_format
 from core.quality.source_map import format_from_extension
 
 
@@ -70,8 +70,13 @@ def is_lossy_companion_pair(path1: Any, path2: Any,
     s2, e2 = os.path.splitext(b2)
     if s1.lower() != s2.lower():
         return False
-    lossless1 = is_lossless_format(format_from_extension(e1.lstrip(".").lower()))
-    lossless2 = is_lossless_format(format_from_extension(e2.lstrip(".").lower()))
+    # Extension-only classification is insufficient for MP4 containers:
+    # ``.m4a`` may contain either lossy AAC or lossless ALAC.  Both duplicate
+    # callers operate on real files, so use the same codec probe as the import
+    # and converter paths before deciding which side is the source.
+    from core.imports.file_ops import m4a_codec
+    lossless1 = is_lossless_audio_path(p1, probe_codec=m4a_codec)
+    lossless2 = is_lossless_audio_path(p2, probe_codec=m4a_codec)
     if lossless1 == lossless2:
         return False
     lossy_ext = e2 if lossless1 else e1

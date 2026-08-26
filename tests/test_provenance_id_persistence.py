@@ -73,6 +73,8 @@ class TestSchemaMigration:
         assert 'audiodb_id' in cols
         assert 'soul_id' in cols
         assert 'isrc' in cols
+        assert 'acquired_quality_json' in cols
+        assert 'retention_json' in cols
 
     def test_track_downloads_has_external_id_indexes(self, db):
         conn = db._get_connection()
@@ -143,6 +145,25 @@ class TestRecordTrackDownloadPersistsIds:
         cursor = conn.cursor()
         cursor.execute("SELECT spotify_track_id FROM track_downloads WHERE id = ?", (rec_id,))
         assert cursor.fetchone()[0] is None
+
+    def test_persists_acquisition_and_retention_provenance(self, db):
+        rec_id = db.record_track_download(
+            file_path='/lib/Artist/Album/Track.mp3',
+            source_service='soulseek', source_username='user1',
+            source_filename='Track.flac',
+            acquired_quality_json='{"format":"flac","bit_depth":24}',
+            retention_json='[{"type":"lossy_copy","source_replaced":true}]',
+        )
+
+        conn = db._get_connection()
+        row = conn.execute(
+            "SELECT acquired_quality_json, retention_json FROM track_downloads "
+            "WHERE id = ?", (rec_id,),
+        ).fetchone()
+        assert tuple(row) == (
+            '{"format":"flac","bit_depth":24}',
+            '[{"type":"lossy_copy","source_replaced":true}]',
+        )
 
 
 # ---------------------------------------------------------------------------
