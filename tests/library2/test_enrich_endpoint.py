@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 
 import pytest
 
@@ -55,6 +56,7 @@ def api(tmp_path, monkeypatch):
 
     db = FakeDB(db_path)
     calls = []
+    request_thread = threading.get_ident()
 
     def fake_native_enrich(native_conn, entity_type, entity_id, service):
         table = {
@@ -66,11 +68,15 @@ def api(tmp_path, monkeypatch):
             f"SELECT 1 FROM {table} WHERE id=?", (entity_id,)
         ).fetchone() is None:
             raise LookupError(f"Library v2 {entity_type} {entity_id} not found")
-        calls.append({
-            "service": service,
-            "entity_type": entity_type,
-            "entity_id": entity_id,
-        })
+        # Other Library-v2 tests may still be finishing a best-effort
+        # background enrichment while this fixture is active. Record only the
+        # synchronous Flask request under test, never that unrelated worker.
+        if threading.get_ident() == request_thread:
+            calls.append({
+                "service": service,
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+            })
         return {
             "success": True,
             "entity_type": entity_type,

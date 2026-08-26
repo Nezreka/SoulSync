@@ -9,6 +9,7 @@ from core.imports.upgrade_intent import (
     issue_upgrade_intent,
     sanitize_client_import_metadata,
 )
+from core.quality.model import AudioQuality
 
 
 def test_client_json_cannot_mint_upgrade_authority():
@@ -73,9 +74,9 @@ def test_upgrade_transform_returns_exact_lossy_artifact_when_original_deleted(
     monkeypatch.setattr(pipeline, "downsample_hires_flac", lambda *_a, **_k: None)
     monkeypatch.setattr(
         "core.imports.file_ops.probe_audio_quality",
-        lambda _path: type("Q", (), {
-            "format": "flac", "bit_depth": 16, "sample_rate": 44100,
-        })(),
+        lambda _path: AudioQuality(
+            "flac", sample_rate=44100, bit_depth=16,
+        ),
     )
     monkeypatch.setattr(
         "core.quality.lossless.is_lossless_audio_path", lambda _path: True)
@@ -104,9 +105,7 @@ def test_upgrade_transform_returns_exact_lossy_artifact_when_original_deleted(
 def test_upgrade_transform_compares_downsampled_staging_file(tmp_path, monkeypatch):
     source = tmp_path / "incoming.flac"
     source.write_bytes(b"hires")
-    quality = type("Q", (), {
-        "format": "flac", "bit_depth": 24, "sample_rate": 96000,
-    })()
+    quality = AudioQuality("flac", sample_rate=96000, bit_depth=24)
     monkeypatch.setattr(
         "core.imports.file_ops.probe_audio_quality", lambda _path: quality)
 

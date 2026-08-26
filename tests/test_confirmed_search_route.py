@@ -27,6 +27,11 @@ def route_context(monkeypatch):
         ),
     )
     monkeypatch.setattr(web_server, "get_current_profile_id", lambda: 1)
+    monkeypatch.setattr(
+        web_server.get_database(),
+        "quality_profile_exists",
+        lambda profile_id: int(profile_id) == 7,
+    )
     monkeypatch.setattr(web_server, "missing_download_executor", executor)
     monkeypatch.setattr(web_server, "_record_sync_history_start", lambda *args, **kwargs: None)
     web_server.app.config["TESTING"] = True
