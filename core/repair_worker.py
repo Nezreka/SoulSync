@@ -3526,16 +3526,77 @@ class RepairWorker:
             return {'success': False, 'error': str(e)}
 
     def _record_lossy_replacement(self, entity_id, file_path, new_db_path,
-                                  *, resolved=None) -> None:
-        """Blasphemy Mode deleted the original — name the copy that survived it.
+                                  *, resolved=None, file_id=None,
+                                  acquired_quality=None,
+                                  retention_transforms=None,
+                                  primary_manual=False) -> None:
+        """The profile replaced the source — name the derivative that survived.
 
         The old write addressed the legacy row by the finding's entity id,
         which for every finding ``lossy_converter`` can produce is ``lib2:<n>``:
         it matched nothing and reported nothing, so the catalogue kept pointing
         at the FLAC that had just been removed.
         """
-        self._record_renamed_file(
-            _lib2_id(entity_id), file_path, resolved or file_path, new_db_path)
+        from core.quality.model import AudioQuality
+        from core.quality.retention import quality_json, transforms_json
+
+        try:
+            acquired_json = quality_json(
+                AudioQuality.from_dict(acquired_quality)
+                if isinstance(acquired_quality, dict) else acquired_quality
+            )
+        except (AttributeError, TypeError, ValueError):
+            acquired_json = None
+        retention_json = transforms_json(retention_transforms)
+        native_track_id = _lib2_id(entity_id)
+        conn = self.db._get_connection()
+        try:
+            if file_id:
+                cursor = conn.execute(
+                    """UPDATE lib2_track_files
+                          SET path=?, file_state='active', file_role='derivative',
+                              primary_manual=?,
+                              derived_from_file_id=NULL,
+                              acquired_quality_json=COALESCE(?, acquired_quality_json),
+                              retention_json=COALESCE(?, retention_json),
+                              updated_at=CURRENT_TIMESTAMP
+                        WHERE id=?""",
+                    (new_db_path, int(bool(primary_manual)), acquired_json,
+                     retention_json, int(file_id)),
+                )
+            elif native_track_id is not None:
+                cursor = conn.execute(
+                    """UPDATE lib2_track_files
+                          SET path=?, file_state='active', file_role='derivative',
+                              primary_manual=?,
+                              derived_from_file_id=NULL,
+                              acquired_quality_json=COALESCE(?, acquired_quality_json),
+                              retention_json=COALESCE(?, retention_json),
+                              updated_at=CURRENT_TIMESTAMP
+                        WHERE track_id=? AND path IN (?,?)""",
+                    (new_db_path, int(bool(primary_manual)), acquired_json,
+                     retention_json, native_track_id,
+                     file_path, resolved or file_path),
+                )
+            else:
+                cursor = conn.execute(
+                    """UPDATE lib2_track_files
+                          SET path=?, file_state='active', file_role='derivative',
+                              primary_manual=?,
+                              derived_from_file_id=NULL,
+                              acquired_quality_json=COALESCE(?, acquired_quality_json),
+                              retention_json=COALESCE(?, retention_json),
+                              updated_at=CURRENT_TIMESTAMP
+                        WHERE path IN (?,?)""",
+                    (new_db_path, int(bool(primary_manual)), acquired_json,
+                     retention_json,
+                     file_path, resolved or file_path),
+                )
+            if cursor.rowcount != 1:
+                raise RuntimeError("lossy replacement did not resolve exactly one file row")
+            conn.commit()
+        finally:
+            conn.close()
 
     def _record_renamed_file(self, native_track_id, file_path, resolved, new_path,
                              *, file_id=None) -> None:
@@ -4748,6 +4809,44 @@ class RepairWorker:
         acquired_quality = probe_audio_quality(resolved)
 
         out_path = os.path.splitext(resolved)[0] + out_ext
+        source_file_id = (
+            (details.get('library_v2') or {}).get('file_id')
+            or details.get('file_id')
+        )
+        source_was_manual_primary = False
+        if source_file_id:
+            conn = None
+            try:
+                conn = self.db._get_connection()
+                source_row = conn.execute(
+                    "SELECT primary_manual FROM lib2_track_files WHERE id=?",
+                    (int(source_file_id),),
+                ).fetchone()
+                source_was_manual_primary = bool(source_row and source_row[0])
+            except Exception as exc:  # noqa: BLE001 - provenance is optional
+                logger.debug("Could not read source primary provenance: %s", exc)
+            finally:
+                if conn:
+                    conn.close()
+
+        def _lossy_provenance(*, source_replaced: bool) -> dict:
+            output_quality = probe_audio_quality(out_path) if os.path.isfile(out_path) else None
+            return {
+                'file_role': 'derivative',
+                'derived_from_file_id': None if source_replaced else source_file_id,
+                'acquired_quality': (
+                    acquired_quality.to_dict() if acquired_quality is not None else None
+                ),
+                'retention_transforms': [{
+                    'type': 'lossy_copy',
+                    'source_replaced': source_replaced,
+                    'codec': codec,
+                    'bitrate': bitrate,
+                    'output_quality': (
+                        output_quality.to_dict() if output_quality is not None else None
+                    ),
+                }],
+            }
         # Safety invariant: ffmpeg runs with -y, so refuse to convert a file onto
         # itself (an .m4a ALAC source + AAC target shares the .m4a path) — that
         # would destroy the original lossless file (#941).
@@ -4759,7 +4858,8 @@ class RepairWorker:
         if os.path.exists(out_path):
             return {'success': True, 'action': 'already_exists',
                     'message': f'{quality_label} copy already exists',
-                    'output_path': out_path}
+                    'output_path': out_path,
+                    **_lossy_provenance(source_replaced=False)}
 
         import subprocess
         try:
@@ -4855,19 +4955,34 @@ class RepairWorker:
                         # container path this process resolved to something else.
                         new_db_path = os.path.splitext(file_path)[0] + out_ext
                         try:
+                            provenance = _lossy_provenance(source_replaced=True)
                             self._record_lossy_replacement(
-                                entity_id, file_path, new_db_path, resolved=resolved)
+                                entity_id, file_path, new_db_path,
+                                resolved=resolved,
+                                file_id=source_file_id,
+                                acquired_quality=provenance['acquired_quality'],
+                                retention_transforms=provenance['retention_transforms'],
+                                primary_manual=source_was_manual_primary)
                         except Exception as e:
-                            logger.debug("Failed to update DB path after lossy conversion: %s", e)
+                            return {
+                                'success': False,
+                                'error': (
+                                    'Lossy output was created and the original deleted, '
+                                    f'but Library v2 could not be updated: {e}'
+                                ),
+                            }
                         return {'success': True, 'action': 'converted_and_deleted',
                                 'message': f'Converted to {quality_label} and deleted original',
-                                'output_path': out_path}
+                                'output_path': out_path,
+                                'library_v2_source_replaced': True,
+                                **provenance}
                 except Exception as e:
                     logger.debug("Blasphemy mode error: %s", e)
 
             return {'success': True, 'action': 'converted',
                     'message': f'Created {quality_label} copy',
-                    'output_path': out_path}
+                    'output_path': out_path,
+                    **_lossy_provenance(source_replaced=False)}
 
         except subprocess.TimeoutExpired:
             if os.path.exists(out_path):

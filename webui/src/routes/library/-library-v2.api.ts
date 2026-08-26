@@ -1088,6 +1088,11 @@ export interface LibraryV2ArtistTrackFile {
   quality_tier: string | null;
   file_state: string;
   is_primary: boolean;
+  primary_manual?: boolean;
+  file_role?: 'master' | 'derivative' | 'alternate';
+  derived_from_file_id?: number | null;
+  acquired_quality_json?: string | null;
+  retention_json?: string | null;
   added_at: string | null;
 }
 
@@ -1120,6 +1125,13 @@ export async function fetchLibraryV2ArtistTrackFiles(
       has_next: false,
     },
   };
+}
+
+export async function setLibraryV2PrimaryTrackFile(trackId: number, fileId: number): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.post(`library/v2/tracks/${trackId}/files/${fileId}/primary`),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Primary file could not be changed');
 }
 
 export type LibraryV2HistoryCategory =

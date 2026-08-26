@@ -2140,6 +2140,32 @@ def test_track_files_endpoint_404s_for_unknown_artist(api):
     assert resp.status_code == 404
 
 
+def test_track_file_primary_endpoint_persists_manual_choice(api):
+    client, db, ids = api
+    with _conn(db) as conn:
+        lossy_id = conn.execute(
+            """INSERT INTO lib2_track_files(track_id, path, format, bitrate)
+               VALUES(?, '/m/one-dance.mp3', 'mp3', 320)""",
+            (ids["album_track"],),
+        ).lastrowid
+        conn.commit()
+
+    response = client.post(
+        f"/api/library/v2/tracks/{ids['album_track']}/files/{lossy_id}/primary"
+    )
+
+    assert response.status_code == 200
+    with _conn(db) as conn:
+        rows = conn.execute(
+            """SELECT id, is_primary, primary_manual
+                 FROM lib2_track_files WHERE track_id=? ORDER BY id""",
+            (ids["album_track"],),
+        ).fetchall()
+    chosen = next(row for row in rows if row["id"] == lossy_id)
+    assert (chosen["is_primary"], chosen["primary_manual"]) == (1, 1)
+    assert sum(row["is_primary"] for row in rows) == 1
+
+
 def test_file_delete_preview_and_delete_accept_a_file_ids_selection(
         api, tmp_path, monkeypatch):
     """C2 bulk-delete: a caller-selected subset of an artist's files goes

@@ -382,6 +382,73 @@
   text-align: left;
 }
 
+.fileVersionGroupStart td {
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.fileVersionTrack {
+  vertical-align: top;
+  padding-top: 12px;
+}
+
+.fileVersionCount,
+.fileRoleBadge,
+.filePrimaryBadge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  white-space: nowrap;
+  border-radius: 7px;
+  padding: 1px 7px;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.fileVersionCount {
+  margin-left: 7px;
+  color: rgba(255, 255, 255, 0.58);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.fileVersionBadges {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 4px;
+}
+
+.fileRoleBadge {
+  color: rgb(147, 197, 253);
+  background: rgba(59, 130, 246, 0.16);
+  text-transform: capitalize;
+}
+
+.fileRoleBadge[data-role='derivative'] {
+  color: rgb(216, 180, 254);
+  background: rgba(168, 85, 247, 0.16);
+}
+
+.fileRoleBadge[data-role='alternate'] {
+  color: rgb(253, 224, 71);
+  background: rgba(234, 179, 8, 0.15);
+}
+
+.filePrimaryBadge {
+  color: rgb(52, 211, 153);
+  background: rgba(16, 185, 129, 0.16);
+}
+
+.fileVersionPath {
+  display: block;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.42);
+  font-family: monospace;
+  font-size: 10.5px;
+}
+
 .profileCell {
   white-space: nowrap;
 }
@@ -402,6 +469,22 @@
   max-width: 100%;
   align-items: center;
   justify-content: flex-start;
+  gap: 5px;
+}
+
+.retentionQualityBadge {
+  display: inline-flex;
+  align-items: center;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 7px;
+  padding: 1px 7px;
+  color: rgb(216, 180, 254);
+  background: rgba(168, 85, 247, 0.14);
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .qualityProfileBadge.qpDefault {

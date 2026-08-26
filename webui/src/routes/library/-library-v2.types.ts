@@ -266,6 +266,12 @@ export interface LibraryV2TrackFile {
   pipeline_result?: LibraryV2PipelineResult;
   source: string | null;
   file_state: string | null;
+  is_primary?: boolean;
+  primary_manual?: boolean;
+  file_role?: 'master' | 'derivative' | 'alternate';
+  derived_from_file_id?: number | null;
+  acquired_quality_json?: string | null;
+  retention_json?: string | null;
   has_replaygain?: boolean;
   has_lyrics?: boolean;
 }
@@ -444,6 +450,8 @@ export interface LibraryV2Track {
   canonical_track_id: number | null;
   artists: LibraryV2TrackArtist[];
   file: LibraryV2TrackFile | null;
+  /** Number of retained physical versions for this recording. */
+  file_count?: number;
   /** `linked` = the audio is on disk, but under another release that carries
    *  the same recording; `linked_from` names it. */
   file_status: 'present' | 'missing_suspected' | 'missing' | 'duplicate_single' | 'linked';

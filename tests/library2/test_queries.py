@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from core.library2 import queries as Q
 from core.library2.metadata_overrides import clear_field_override, set_field_override
 from core.library2.status import (
@@ -686,6 +688,42 @@ def test_get_album_preserves_unknown_present_file_quality(imported_conn):
     # Fresh installs default to upgrades disabled, so unknown quality remains
     # visible without becoming an automatic replacement candidate.
     assert track["upgrade_candidate"] is False
+
+
+def test_get_album_evaluates_explicit_track_profile_not_album_profile(imported_conn):
+    profile_id = imported_conn.execute(
+        """INSERT INTO quality_profiles(
+               name, ranked_targets, upgrade_policy, upgrade_cutoff_index)
+           VALUES('Track Hi-Res', ?, 'until_cutoff', 0)""",
+        (json.dumps([{
+            "label": "FLAC 24/96", "format": "flac",
+            "bit_depth": 24, "min_sample_rate": 96000,
+        }]),),
+    ).lastrowid
+    track_id = imported_conn.execute(
+        "SELECT id FROM lib2_tracks WHERE legacy_track_id=100"
+    ).fetchone()[0]
+    album_id = imported_conn.execute(
+        "SELECT album_id FROM lib2_tracks WHERE id=?", (track_id,)
+    ).fetchone()[0]
+    imported_conn.execute(
+        """UPDATE lib2_tracks
+              SET quality_profile_id=?, quality_profile_explicit=1 WHERE id=?""",
+        (profile_id, track_id),
+    )
+    imported_conn.execute(
+        """UPDATE lib2_track_files
+              SET format='flac', bit_depth=16, sample_rate=44100
+            WHERE track_id=?""",
+        (track_id,),
+    )
+
+    album = Q.get_album(imported_conn, album_id)
+    track = next(item for item in album["tracks"] if item["id"] == track_id)
+
+    assert track["quality_profile_id"] == profile_id
+    assert track["quality_profile_source"] == "track"
+    assert track["upgrade_candidate"] is True
 
 
 def test_get_album_surfaces_first_missing_scan_without_marking_track_missing(imported_conn):

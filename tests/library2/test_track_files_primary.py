@@ -45,16 +45,14 @@ def _is_primary(conn, file_id):
     ).fetchone()[0])
 
 
-def test_first_file_becomes_primary_and_keeps_it(imported_conn):
+def test_better_later_file_is_automatically_promoted(imported_conn):
     conn = imported_conn
     track = _seed_track(conn)
     first = _add_file(conn, track, "/m/a.mp3", fmt="mp3")
     assert _is_primary(conn, first)
-    # A later (even better) file does not silently steal the flag — upgrades
-    # replace the file through the import pipeline, not by side effect.
     second = _add_file(conn, track, "/m/a.flac", fmt="flac", bit_depth=16)
-    assert _is_primary(conn, first)
-    assert not _is_primary(conn, second)
+    assert not _is_primary(conn, first)
+    assert _is_primary(conn, second)
 
 
 def test_backfill_elects_best_file_not_oldest(imported_conn):
@@ -129,7 +127,7 @@ def test_move_between_tracks_reassigns_primaries(imported_conn):
     assert _is_primary(conn, stays)
 
 
-def test_move_onto_track_with_primary_does_not_steal(imported_conn):
+def test_move_onto_track_re_elects_best_file(imported_conn):
     conn = imported_conn
     src = _seed_track(conn, "Src")
     dst = _seed_track(conn, "Dst")
@@ -137,8 +135,8 @@ def test_move_onto_track_with_primary_does_not_steal(imported_conn):
     existing = _add_file(conn, dst, "/m/f2.mp3", fmt="mp3")
     conn.execute("UPDATE lib2_track_files SET track_id=? WHERE id=?",
                  (dst, incoming))
-    assert _is_primary(conn, existing)
-    assert not _is_primary(conn, incoming)
+    assert not _is_primary(conn, existing)
+    assert _is_primary(conn, incoming)
 
 
 def test_primary_leaving_active_hands_flag_to_active_sibling(imported_conn):
@@ -185,6 +183,11 @@ def test_explicit_set_primary_overrides_strategy(imported_conn):
     assert set_primary_file(conn, track, mp3)
     assert _is_primary(conn, mp3)
     assert not _is_primary(conn, flac)
+    later_hires = _add_file(
+        conn, track, "/m/i-hires.flac", fmt="flac", bit_depth=24, sample_rate=96000
+    )
+    assert _is_primary(conn, mp3)
+    assert not _is_primary(conn, later_hires)
 
 
 def test_set_primary_rejects_foreign_file(imported_conn):
@@ -209,8 +212,8 @@ def test_primary_file_row_returns_primary_not_oldest(imported_conn):
 def test_primary_file_rows_preserves_primary_strategy_for_batch(imported_conn):
     first_track = _seed_track(imported_conn, "First")
     second_track = _seed_track(imported_conn, "Second")
-    first_primary = _add_file(imported_conn, first_track, "/m/first.mp3")
-    _add_file(imported_conn, first_track, "/m/first.flac", fmt="flac")
+    _add_file(imported_conn, first_track, "/m/first.mp3")
+    first_primary = _add_file(imported_conn, first_track, "/m/first.flac", fmt="flac")
     _add_file(imported_conn, second_track, "/m/second.mp3")
     second_primary = _add_file(
         imported_conn,

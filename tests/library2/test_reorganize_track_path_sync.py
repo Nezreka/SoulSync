@@ -64,15 +64,16 @@ def imported_legacy_db(legacy_db):
     return legacy_db
 
 
-def test_native_path_update_changes_only_primary_lib2_file(
+def test_native_path_update_repoints_same_stem_file_versions(
     monkeypatch, tmp_path, imported_legacy_db
 ):
     conn = imported_legacy_db._get_connection()
     try:
-        track_id = conn.execute(
-            "SELECT track_id FROM lib2_track_files WHERE legacy_track_id=100"
-        ).fetchone()["track_id"]
-        secondary_path = "/library/Drake/Views/One Dance instrumental.flac"
+        primary = conn.execute(
+            "SELECT track_id, path FROM lib2_track_files WHERE legacy_track_id=100"
+        ).fetchone()
+        track_id = primary["track_id"]
+        secondary_path = primary["path"].rsplit(".", 1)[0] + ".opus"
         conn.execute(
             """INSERT INTO lib2_track_files(track_id, path, legacy_track_id)
                VALUES (?, ?, NULL)""",
@@ -120,7 +121,7 @@ def test_native_path_update_changes_only_primary_lib2_file(
             "SELECT path FROM lib2_track_files WHERE track_id=? AND legacy_track_id IS NULL",
             (track_id,),
         ).fetchone()
-        assert secondary_row["path"] == secondary_path
+        assert secondary_row["path"] == "/library/Drake/Views/01 One Dance.opus"
     finally:
         conn.close()
 

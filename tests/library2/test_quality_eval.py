@@ -61,6 +61,43 @@ def test_until_cutoff_respects_cutoff_index():
     assert evaluate_file(_mp3(), targets, policy, cutoff)["upgrade_candidate"] is True
 
 
+def test_intentional_hires_downsample_does_not_loop_as_upgrade():
+    targets, policy, cutoff = profile_targets(_profile("until_cutoff", cutoff=0))
+    file_row = {
+        **_flac16(),
+        "acquired_quality_json": json.dumps({
+            "format": "flac", "sample_rate": 96000, "bit_depth": 24,
+            "bitrate": None, "channels": None,
+        }),
+        "retention_json": json.dumps([{
+            "type": "downsample_hires_flac", "source_replaced": True,
+            "target_bit_depth": 16, "target_sample_rate": 44100,
+        }]),
+    }
+
+    assert evaluate_file(file_row, targets, policy, cutoff) == {
+        "meets_profile": True,
+        "upgrade_candidate": False,
+    }
+
+
+def test_intentional_lossy_replacement_uses_acquired_quality_for_cutoff():
+    targets, policy, cutoff = profile_targets(_profile("until_cutoff", cutoff=1))
+    file_row = {
+        **_mp3(),
+        "acquired_quality_json": json.dumps({
+            "format": "flac", "sample_rate": 44100, "bit_depth": 16,
+            "bitrate": None, "channels": None,
+        }),
+        "retention_json": json.dumps([{
+            "type": "lossy_copy", "source_replaced": True,
+            "codec": "mp3", "bitrate": "320",
+        }]),
+    }
+
+    assert evaluate_file(file_row, targets, policy, cutoff)["upgrade_candidate"] is False
+
+
 def test_is_upgrade_policy():
     assert is_upgrade_policy("until_top")
     assert is_upgrade_policy("until_cutoff")

@@ -85,6 +85,83 @@ def test_links_new_album_track_and_file(lib2_enabled, imported_conn):
         "SELECT COUNT(*) c FROM lib2_artists WHERE name='Drake'").fetchone()["c"] == 1
 
 
+def test_retained_master_and_lossy_derivative_are_linked_with_provenance(
+    lib2_enabled, imported_conn, tmp_path, monkeypatch,
+):
+    from core.quality.model import AudioQuality
+
+    master = tmp_path / "Nonstop.flac"
+    derivative = tmp_path / "Nonstop.opus"
+    master.write_bytes(b"master")
+    derivative.write_bytes(b"derivative")
+
+    def quality(path):
+        if str(path).endswith(".flac"):
+            return AudioQuality("flac", sample_rate=96000, bit_depth=24)
+        return AudioQuality("opus", bitrate=256, sample_rate=48000)
+
+    monkeypatch.setattr("core.imports.file_ops.probe_audio_quality", quality)
+    file_id = A.link_download_into_library_v2(_context(
+        _final_processed_path=str(master),
+        _companion_file_paths=[str(derivative)],
+        _acquired_audio_quality=quality(master).to_dict(),
+        _retention_transforms=[{
+            "type": "lossy_copy", "source_replaced": False,
+            "codec": "opus", "bitrate": "256",
+            "output_quality": quality(derivative).to_dict(),
+        }],
+    ))
+
+    rows = imported_conn.execute(
+        """SELECT id, path, is_primary, file_role, derived_from_file_id,
+                  acquired_quality_json, retention_json
+             FROM lib2_track_files
+            WHERE track_id=(SELECT track_id FROM lib2_track_files WHERE id=?)
+              AND path IN (?,?) ORDER BY id""",
+        (file_id, str(master), str(derivative)),
+    ).fetchall()
+    by_path = {row["path"]: row for row in rows}
+    assert by_path[str(master)]["is_primary"] == 1
+    assert by_path[str(master)]["file_role"] == "master"
+    assert by_path[str(derivative)]["is_primary"] == 0
+    assert by_path[str(derivative)]["file_role"] == "derivative"
+    assert by_path[str(derivative)]["derived_from_file_id"] == file_id
+    assert json.loads(by_path[str(master)]["acquired_quality_json"])["bit_depth"] == 24
+    assert json.loads(by_path[str(derivative)]["retention_json"])[0]["type"] == "lossy_copy"
+
+
+def test_downsampled_primary_is_marked_as_destructive_derivative(
+    lib2_enabled, imported_conn, tmp_path, monkeypatch,
+):
+    from core.quality.model import AudioQuality
+
+    retained = tmp_path / "Nonstop.flac"
+    retained.write_bytes(b"cd quality")
+    measured = AudioQuality("flac", sample_rate=44100, bit_depth=16)
+    monkeypatch.setattr("core.imports.file_ops.probe_audio_quality", lambda _path: measured)
+
+    file_id = A.link_download_into_library_v2(_context(
+        _final_processed_path=str(retained),
+        _acquired_audio_quality=AudioQuality(
+            "flac", sample_rate=96000, bit_depth=24,
+        ).to_dict(),
+        _retention_transforms=[{
+            "type": "downsample_hires_flac", "source_replaced": True,
+            "target_bit_depth": 16, "target_sample_rate": 44100,
+            "output_quality": measured.to_dict(),
+        }],
+    ))
+
+    row = imported_conn.execute(
+        """SELECT file_role, acquired_quality_json, retention_json
+             FROM lib2_track_files WHERE id=?""",
+        (file_id,),
+    ).fetchone()
+    assert row["file_role"] == "derivative"
+    assert json.loads(row["acquired_quality_json"])["sample_rate"] == 96000
+    assert json.loads(row["retention_json"])[0]["source_replaced"] is True
+
+
 def _legacy_auto_import_context(*, source, artist, artist_id, album, album_id,
                                 title, track_id, track_number, path):
     """The real producer shape from ``AutoImportWorker._process_matches``.

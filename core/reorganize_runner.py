@@ -146,30 +146,50 @@ def build_runner(
             ).fetchone())
             if has_v2_files:
                 rows = conn.execute(
-                    """SELECT f.id AS file_id, f.track_id, f.path
+                    """SELECT f.id AS file_id, f.track_id, f.path, f.is_primary
                          FROM lib2_track_files f
                         WHERE f.track_id=?
                           AND COALESCE(f.file_state,'active')<>'deleted'
-                          AND f.is_primary=1
                         ORDER BY f.is_primary DESC, f.id""",
                     (int(track_id),),
                 ).fetchall()
-                if rows:
-                    previous_path = rows[0]["path"] if "path" in rows[0].keys() else None
+                primary_rows = [row for row in rows if bool(row["is_primary"])] if rows else []
+                if primary_rows:
+                    previous_path = primary_rows[0]["path"]
                 lib2_links = {
                     "track_ids": sorted({int(row["track_id"]) for row in rows}),
-                    "file_ids": sorted({int(row["file_id"]) for row in rows}),
+                    "file_ids": sorted({int(row["file_id"]) for row in primary_rows}),
                 }
             if len(lib2_links["file_ids"]) != 1:
                 raise RuntimeError(f"track {track_id} has no unambiguous file row")
-            conn.execute(
-                "UPDATE lib2_track_files SET path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (new_path, lib2_links["file_ids"][0]),
-            )
+            old_stem = os.path.splitext(os.path.basename(previous_path or ""))[0]
+            new_stem = os.path.splitext(os.path.basename(new_path))[0]
+            new_dir = os.path.dirname(new_path)
+            repointed_ids = []
+            for row in rows:
+                old_row_path = str(row["path"] or "")
+                row_stem, row_ext = os.path.splitext(os.path.basename(old_row_path))
+                # The filesystem mover carries same-stem audio versions (for
+                # example FLAC + OPUS) alongside the primary. Repoint exactly
+                # those rows in the same transaction; unrelated historical
+                # versions with another stem were not moved and stay put.
+                if int(row["file_id"]) == lib2_links["file_ids"][0]:
+                    row_new_path = new_path
+                elif row_stem == old_stem and row_ext:
+                    row_new_path = os.path.join(new_dir, new_stem + row_ext)
+                else:
+                    continue
+                conn.execute(
+                    """UPDATE lib2_track_files
+                          SET path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                    (row_new_path, int(row["file_id"])),
+                )
+                _repoint_findings(conn, old_row_path, row_new_path)
+                repointed_ids.append(int(row["file_id"]))
+            lib2_links["file_ids"] = sorted(repointed_ids)
             # Findings carry their own path snapshot. Move those snapshots in
             # the same transaction as the native file row so future fixes do
             # not keep retrying a path that the reorganize just removed.
-            _repoint_findings(conn, previous_path, new_path)
             conn.commit()
 
         # A lib2-imported track keeps a legacy_track_id back-reference. Route

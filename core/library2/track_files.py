@@ -7,6 +7,10 @@ quality or state. This module gives the multi-file schema an actual model:
 
 - ``is_primary``: exactly one file per track is the one the app acts on
   (wishlist mirror, quality eval, retag, artwork, duplicate view, move).
+- ``primary_manual``: a deliberate user selection survives later imports;
+  without it the best active file is elected again whenever quality changes.
+- ``file_role``: ``master`` / ``derivative`` / ``alternate`` distinguishes a
+  retained acquisition from a generated output and an independent version.
 - ``file_state``: ``active`` / ``missing_suspected`` / ``missing_confirmed`` /
   ``quarantined`` / ``deleted`` — the lifecycle from ADR-03/P2-02. Non-active
   files stay visible but never win primary selection over an active one.
@@ -44,6 +48,7 @@ logger = get_logger("library2.track_files")
 
 FILE_STATES = ("active", "missing_suspected", "missing_confirmed",
                "quarantined", "deleted")
+FILE_ROLES = ("master", "derivative", "alternate")
 
 # SQL IN-list of lossless formats, derived from the one canonical set the
 # quality engine ranks (flac/alac/wav/dsf) so file election here and the UI
@@ -163,18 +168,58 @@ def set_primary_file(conn, track_id: int, file_id: int) -> bool:
     Returns False when the file doesn't belong to the track. Does not commit.
     """
     owner = conn.execute(
-        "SELECT track_id FROM lib2_track_files WHERE id=?", (int(file_id),)
+        """SELECT track_id FROM lib2_track_files
+            WHERE id=? AND COALESCE(file_state,'active')='active'""",
+        (int(file_id),)
     ).fetchone()
     if not owner or owner[0] != int(track_id):
         return False
     conn.execute(
-        "UPDATE lib2_track_files SET is_primary=0 "
-        "WHERE track_id=? AND is_primary=1 AND id<>?",
+        """UPDATE lib2_track_files
+              SET is_primary=0, primary_manual=0,
+                  updated_at=CURRENT_TIMESTAMP
+            WHERE track_id=? AND id<>?""",
         (int(track_id), int(file_id)))
     conn.execute(
-        "UPDATE lib2_track_files SET is_primary=1, updated_at=CURRENT_TIMESTAMP "
-        "WHERE id=? AND is_primary=0", (int(file_id),))
+        """UPDATE lib2_track_files
+              SET is_primary=1, primary_manual=1,
+                  updated_at=CURRENT_TIMESTAMP
+            WHERE id=?""", (int(file_id),))
     return True
+
+
+def elect_primary_file(conn, track_id: int, *, force: bool = False) -> Optional[int]:
+    """Elect and return one primary file for ``track_id``.
+
+    A live manual selection wins unless ``force`` is requested.  Automatic
+    election otherwise follows :func:`quality_order`.  Does not commit.
+    """
+    manual = "" if force else (
+        "CASE WHEN COALESCE(primary_manual,0)=1 "
+        "AND COALESCE(file_state,'active')='active' THEN 0 ELSE 1 END, "
+    )
+    row = conn.execute(
+        f"""SELECT id FROM lib2_track_files
+             WHERE track_id=?
+             ORDER BY {manual}{quality_order()} LIMIT 1""",
+        (int(track_id),),
+    ).fetchone()
+    conn.execute(
+        "UPDATE lib2_track_files SET is_primary=0 WHERE track_id=?",
+        (int(track_id),),
+    )
+    if not row:
+        return None
+    file_id = int(row[0])
+    if force:
+        conn.execute(
+            "UPDATE lib2_track_files SET primary_manual=0 WHERE track_id=?",
+            (int(track_id),),
+        )
+    conn.execute(
+        "UPDATE lib2_track_files SET is_primary=1 WHERE id=?", (file_id,)
+    )
+    return file_id
 
 
 def set_file_state(conn, file_id: int, state: str) -> bool:
@@ -196,17 +241,11 @@ def set_file_state(conn, file_id: int, state: str) -> bool:
         "WHERE id=?", (state, int(file_id)))
     track_id = row[0]
     if track_id is not None and row[1] and state != "active":
-        replacement = conn.execute(
-            f"""SELECT id FROM lib2_track_files
-                 WHERE track_id=? AND id<>?
-                   AND COALESCE(file_state,'active')='active'
-                 ORDER BY {quality_order()} LIMIT 1""",
-            (track_id, int(file_id))).fetchone()
-        if replacement:
-            conn.execute("UPDATE lib2_track_files SET is_primary=0 WHERE id=?",
-                         (int(file_id),))
-            conn.execute("UPDATE lib2_track_files SET is_primary=1 WHERE id=?",
-                         (replacement[0],))
+        conn.execute(
+            "UPDATE lib2_track_files SET primary_manual=0 WHERE id=?",
+            (int(file_id),),
+        )
+        elect_primary_file(conn, int(track_id))
     return True
 
 
@@ -392,8 +431,22 @@ def backfill_primary_flags(cursor) -> int:
     """
     changed = 0
     cursor.execute(
-        "UPDATE lib2_track_files SET is_primary=0 "
-        "WHERE track_id IS NULL AND is_primary=1")
+        "UPDATE lib2_track_files SET is_primary=0, primary_manual=0 "
+        "WHERE track_id IS NULL AND (is_primary=1 OR primary_manual=1)")
+    changed += cursor.rowcount
+    # A manual choice is meaningful only while that file is usable.  Keep at
+    # most one historical manual flag per track (the newest explicit row wins
+    # if an older buggy version managed to create several).
+    cursor.execute("""
+        UPDATE lib2_track_files SET primary_manual=0
+         WHERE primary_manual=1
+           AND (COALESCE(file_state,'active')<>'active'
+                OR id NOT IN (
+                    SELECT MAX(m.id) FROM lib2_track_files m
+                     WHERE m.primary_manual=1
+                       AND COALESCE(m.file_state,'active')='active'
+                     GROUP BY m.track_id))
+    """)
     changed += cursor.rowcount
     # Older triggers could leave a deleted/missing row primary after a fresh
     # active import arrived.  Active files always own the operative flag.
@@ -408,16 +461,19 @@ def backfill_primary_flags(cursor) -> int:
            )
     """)
     changed += cursor.rowcount
-    # Keep only the best primary where several are flagged.
+    # Keep only the desired primary: a valid manual selection first, otherwise
+    # the documented quality ordering.  This also replaces stale but singular
+    # automatic primaries when a better retained file arrived later.
     cursor.execute(f"""
         UPDATE lib2_track_files SET is_primary=0
          WHERE is_primary=1 AND track_id IS NOT NULL
-           AND id NOT IN (
-               SELECT (SELECT f.id FROM lib2_track_files f
-                        WHERE f.track_id = t.track_id AND f.is_primary=1
-                        ORDER BY {quality_order('f')} LIMIT 1)
-                 FROM (SELECT DISTINCT track_id FROM lib2_track_files
-                        WHERE is_primary=1 AND track_id IS NOT NULL) t)
+           AND id <> (SELECT f.id FROM lib2_track_files f
+                       WHERE f.track_id=lib2_track_files.track_id
+                       ORDER BY CASE
+                           WHEN COALESCE(f.primary_manual,0)=1
+                            AND COALESCE(f.file_state,'active')='active'
+                           THEN 0 ELSE 1 END,
+                           {quality_order('f')} LIMIT 1)
     """)
     changed += cursor.rowcount
     # Elect a primary where none exists.
@@ -426,7 +482,11 @@ def backfill_primary_flags(cursor) -> int:
          WHERE id IN (
                SELECT (SELECT f.id FROM lib2_track_files f
                         WHERE f.track_id = t.track_id
-                        ORDER BY {quality_order('f')} LIMIT 1)
+                        ORDER BY CASE
+                            WHEN COALESCE(f.primary_manual,0)=1
+                             AND COALESCE(f.file_state,'active')='active'
+                            THEN 0 ELSE 1 END,
+                            {quality_order('f')} LIMIT 1)
                  FROM (SELECT DISTINCT track_id FROM lib2_track_files
                         WHERE track_id IS NOT NULL) t
                 WHERE NOT EXISTS (
@@ -437,51 +497,90 @@ def backfill_primary_flags(cursor) -> int:
     return changed
 
 
+def backfill_file_roles(cursor) -> int:
+    """Classify companions created before role/provenance columns existed."""
+    changed = 0
+    cursor.execute("""
+        UPDATE lib2_track_files SET file_role='derivative'
+         WHERE source='companion' AND COALESCE(file_role,'master')<>'derivative'
+    """)
+    changed += cursor.rowcount
+    cursor.execute("""
+        UPDATE lib2_track_files AS child
+           SET derived_from_file_id=(
+               SELECT parent.id FROM lib2_track_files parent
+                WHERE parent.track_id=child.track_id
+                  AND parent.id<>child.id AND parent.is_primary=1
+                LIMIT 1)
+         WHERE child.file_role='derivative'
+           AND child.derived_from_file_id IS NULL
+           AND EXISTS (
+               SELECT 1 FROM lib2_track_files parent
+                WHERE parent.track_id=child.track_id
+                  AND parent.id<>child.id AND parent.is_primary=1)
+    """)
+    changed += cursor.rowcount
+    return changed
+
+
 def install_primary_triggers(cursor) -> None:
     """(Re)install the invariant-keeping triggers. Idempotent.
 
-    - insert: a new file becomes primary iff its track has none yet;
-    - move (track_id update): the row keeps/gets primary on the target only
-      if the target has none, and the source track elects a new primary;
-    - delete: a deleted primary hands the flag to the best remaining sibling.
+    Every mutation that can change the winner re-elects it.  A live
+    ``primary_manual`` row wins; otherwise the documented quality order does.
     """
-    for name in ("insert", "move", "delete"):
+    for name in ("insert", "move", "delete", "quality_state"):
         cursor.execute(
             f"DROP TRIGGER IF EXISTS trg_lib2_track_files_primary_{name}")
-    cursor.execute("""
+    cursor.execute(f"""
         CREATE TRIGGER trg_lib2_track_files_primary_insert
         AFTER INSERT ON lib2_track_files
         FOR EACH ROW
-        WHEN NEW.track_id IS NOT NULL AND NEW.is_primary=0
-         AND NOT EXISTS (SELECT 1 FROM lib2_track_files
-                          WHERE track_id=NEW.track_id AND is_primary=1
-                            AND COALESCE(file_state,'active')='active'
-                            AND id<>NEW.id)
+        WHEN NEW.track_id IS NOT NULL
         BEGIN
+            UPDATE lib2_track_files SET primary_manual=0
+             WHERE track_id=NEW.track_id AND id<>NEW.id
+               AND NEW.primary_manual=1;
             UPDATE lib2_track_files SET is_primary=0
-             WHERE track_id=NEW.track_id AND id<>NEW.id;
-            UPDATE lib2_track_files SET is_primary=1 WHERE id=NEW.id;
+             WHERE track_id=NEW.track_id;
+            UPDATE lib2_track_files SET is_primary=1
+             WHERE id=COALESCE(
+                 (SELECT id FROM lib2_track_files
+                   WHERE track_id=NEW.track_id AND primary_manual=1
+                     AND COALESCE(file_state,'active')='active'
+                   ORDER BY id DESC LIMIT 1),
+                 (SELECT f.id FROM lib2_track_files f
+                   WHERE f.track_id=NEW.track_id
+                   ORDER BY {quality_order('f')} LIMIT 1));
         END
     """)
     cursor.execute(f"""
         CREATE TRIGGER trg_lib2_track_files_primary_move
         AFTER UPDATE OF track_id ON lib2_track_files
         FOR EACH ROW
-        WHEN NEW.track_id IS NOT NULL
+        WHEN OLD.track_id IS NOT NEW.track_id
         BEGIN
-            UPDATE lib2_track_files SET is_primary =
-                CASE WHEN EXISTS (SELECT 1 FROM lib2_track_files
-                                   WHERE track_id=NEW.track_id AND is_primary=1
-                                     AND id<>NEW.id)
-                     THEN 0 ELSE 1 END
-             WHERE id=NEW.id;
+            UPDATE lib2_track_files SET primary_manual=0 WHERE id=NEW.id;
+            UPDATE lib2_track_files SET is_primary=0
+             WHERE track_id=OLD.track_id OR track_id=NEW.track_id;
             UPDATE lib2_track_files SET is_primary=1
-             WHERE OLD.track_id IS NOT NULL AND OLD.track_id<>NEW.track_id
-               AND id=(SELECT id FROM lib2_track_files
-                        WHERE track_id=OLD.track_id
-                        ORDER BY {quality_order()} LIMIT 1)
-               AND NOT EXISTS (SELECT 1 FROM lib2_track_files
-                                WHERE track_id=OLD.track_id AND is_primary=1);
+             WHERE id=COALESCE(
+                 (SELECT id FROM lib2_track_files
+                   WHERE track_id=OLD.track_id AND primary_manual=1
+                     AND COALESCE(file_state,'active')='active'
+                   ORDER BY id DESC LIMIT 1),
+                 (SELECT f.id FROM lib2_track_files f
+                   WHERE f.track_id=OLD.track_id
+                   ORDER BY {quality_order('f')} LIMIT 1));
+            UPDATE lib2_track_files SET is_primary=1
+             WHERE id=COALESCE(
+                 (SELECT id FROM lib2_track_files
+                   WHERE track_id=NEW.track_id AND primary_manual=1
+                     AND COALESCE(file_state,'active')='active'
+                   ORDER BY id DESC LIMIT 1),
+                 (SELECT f.id FROM lib2_track_files f
+                   WHERE f.track_id=NEW.track_id
+                   ORDER BY {quality_order('f')} LIMIT 1));
         END
     """)
     cursor.execute(f"""
@@ -491,16 +590,46 @@ def install_primary_triggers(cursor) -> None:
         WHEN OLD.is_primary=1 AND OLD.track_id IS NOT NULL
         BEGIN
             UPDATE lib2_track_files SET is_primary=1
-             WHERE id=(SELECT id FROM lib2_track_files
-                        WHERE track_id=OLD.track_id
-                        ORDER BY {quality_order()} LIMIT 1);
+             WHERE id=COALESCE(
+                 (SELECT id FROM lib2_track_files
+                   WHERE track_id=OLD.track_id AND primary_manual=1
+                     AND COALESCE(file_state,'active')='active'
+                   ORDER BY id DESC LIMIT 1),
+                 (SELECT f.id FROM lib2_track_files f
+                   WHERE f.track_id=OLD.track_id
+                   ORDER BY {quality_order('f')} LIMIT 1));
+        END
+    """)
+    cursor.execute(f"""
+        CREATE TRIGGER trg_lib2_track_files_primary_quality_state
+        AFTER UPDATE OF file_state, format, bit_depth, sample_rate, bitrate
+        ON lib2_track_files
+        FOR EACH ROW
+        WHEN NEW.track_id IS NOT NULL
+        BEGIN
+            UPDATE lib2_track_files SET primary_manual=0
+             WHERE id=NEW.id AND COALESCE(NEW.file_state,'active')<>'active';
+            UPDATE lib2_track_files SET is_primary=0
+             WHERE track_id=NEW.track_id;
+            UPDATE lib2_track_files SET is_primary=1
+             WHERE id=COALESCE(
+                 (SELECT id FROM lib2_track_files
+                   WHERE track_id=NEW.track_id AND primary_manual=1
+                     AND COALESCE(file_state,'active')='active'
+                   ORDER BY id DESC LIMIT 1),
+                 (SELECT f.id FROM lib2_track_files f
+                   WHERE f.track_id=NEW.track_id
+                   ORDER BY {quality_order('f')} LIMIT 1));
         END
     """)
 
 
 __all__ = [
     "FILE_STATES",
+    "FILE_ROLES",
+    "backfill_file_roles",
     "backfill_primary_flags",
+    "elect_primary_file",
     "install_primary_triggers",
     "primary_file_row",
     "primary_order",

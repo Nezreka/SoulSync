@@ -716,7 +716,9 @@ def list_artist_track_files(conn, artist_id: int, *, search: str = "",
     rows = conn.execute(
         f"""SELECT tf.id AS file_id, tf.track_id, tf.path, tf.size, tf.format,
                    tf.bitrate, tf.sample_rate, tf.bit_depth, tf.quality_tier,
-                   tf.file_state, tf.is_primary, tf.added_at,
+                   tf.file_state, tf.is_primary, tf.primary_manual,
+                   tf.file_role, tf.derived_from_file_id,
+                   tf.acquired_quality_json, tf.retention_json, tf.added_at,
                    t.title AS track_title, t.track_number, t.disc_number,
                    al.id AS album_id, al.title AS album_title
               FROM lib2_track_files tf
@@ -746,6 +748,11 @@ def list_artist_track_files(conn, artist_id: int, *, search: str = "",
             "quality_tier": r["quality_tier"],
             "file_state": r["file_state"],
             "is_primary": bool(r["is_primary"]),
+            "primary_manual": bool(r["primary_manual"]),
+            "file_role": r["file_role"] or "master",
+            "derived_from_file_id": r["derived_from_file_id"],
+            "acquired_quality_json": r["acquired_quality_json"],
+            "retention_json": r["retention_json"],
             "added_at": r["added_at"],
         }
         for r in rows
@@ -1423,6 +1430,12 @@ def _serialize_track(
             "pipeline_result": pipeline_result,
             "source": source,
             "file_state": file_row["file_state"],
+            "is_primary": bool(file_row.get("is_primary")),
+            "primary_manual": bool(file_row.get("primary_manual")),
+            "file_role": file_row.get("file_role") or "master",
+            "derived_from_file_id": file_row.get("derived_from_file_id"),
+            "acquired_quality_json": file_row.get("acquired_quality_json"),
+            "retention_json": file_row.get("retention_json"),
             "has_replaygain": has_rg,
             "has_lyrics": has_lyrics,
         }
@@ -1443,7 +1456,10 @@ def _serialize_track(
         "mood": effective["mood"],
         "isrc": t["isrc"],
         "monitored": wanted,
-        "quality_profile_id": t["quality_profile_id"],
+        "quality_profile_id": (
+            t["quality_profile_id"] if bool(t["quality_profile_explicit"])
+            else (album or {}).get("quality_profile_id")
+        ),
         "quality_profile_source": (
             "track" if bool(t["quality_profile_explicit"])
             else (album or {}).get("quality_profile_source", "global")
@@ -1517,7 +1533,7 @@ def _serialize_tracks(conn, tracks: List[Any], album=None) -> List[Dict[str, Any
         artists,
     )
     media_sources = _media_server_sources_many(conn, "track", track_ids)
-    return [
+    serialized = [
         _serialize_track(
             conn,
             track,
@@ -1533,6 +1549,21 @@ def _serialize_tracks(conn, tracks: List[Any], album=None) -> List[Dict[str, Any
         )
         for track in tracks
     ]
+    marks = ",".join("?" for _ in track_ids)
+    file_counts = {
+        int(row["track_id"]): int(row["file_count"])
+        for row in conn.execute(
+            f"""SELECT track_id, COUNT(*) AS file_count
+                  FROM lib2_track_files
+                 WHERE track_id IN ({marks})
+                   AND COALESCE(file_state,'active')<>'deleted'
+                 GROUP BY track_id""",
+            tuple(track_ids),
+        ).fetchall()
+    }
+    for item in serialized:
+        item["file_count"] = file_counts.get(int(item["id"]), 0) if item.get("id") else 0
+    return serialized
 
 
 def _missing_track_placeholder(track_number: int, *, disc_number: int = 1,
@@ -1618,13 +1649,32 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
     tracks = _serialize_tracks(conn, track_rows, album_for_tracks)
     present_count = sum(1 for t in tracks if t["file_status"] != "missing")
 
-    # Evaluate each present file against the album's quality profile (meets /
-    # upgrade-available), reusing core/quality. Missing rows stay neutral.
+    # Evaluate each present file against its effective Track→Album→Artist→
+    # Global profile.  A track override must affect both the profile shown in
+    # the row and its upgrade badge; evaluating the entire album against the
+    # album profile made those two UI statements contradict each other.
     from core.library2.quality_eval import evaluate_file, profile_targets
-    targets, upgrade_policy, cutoff_index = profile_targets(dict(qp) if qp else None)
+    profile_ids = sorted({
+        int(t["quality_profile_id"])
+        for t in tracks if t.get("quality_profile_id") is not None
+    })
+    profile_rows: Dict[int, Dict[str, Any]] = {}
+    if profile_ids:
+        marks = ",".join("?" for _ in profile_ids)
+        profile_rows = {
+            int(row["id"]): dict(row)
+            for row in conn.execute(
+                f"SELECT * FROM quality_profiles WHERE id IN ({marks})",
+                tuple(profile_ids),
+            ).fetchall()
+        }
     upgrades_available = 0
     for t in tracks:
         if t.get("file") and t["file_status"] != "missing":
+            targets, upgrade_policy, cutoff_index = profile_targets(
+                profile_rows.get(int(t["quality_profile_id"]))
+                if t.get("quality_profile_id") is not None else None
+            )
             ev = evaluate_file(t["file"], targets, upgrade_policy, cutoff_index)
             t["meets_profile"] = ev["meets_profile"]
             candidate = ev["upgrade_candidate"]

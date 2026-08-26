@@ -440,6 +440,8 @@ class _UpgradeSnapshot:
     primary_resolved_path: str | None
     profile: dict
     profile_fingerprint: str
+    acquired_quality_json: str | None = None
+    retention_json: str | None = None
 
 
 def _claim_upgrade_lock(track_id: int) -> threading.Lock:
@@ -485,6 +487,8 @@ def _load_upgrade_snapshot(track_id: int) -> _UpgradeSnapshot:
         primary_id=int(primary["id"]) if primary and primary.get("id") else None,
         primary_path=path,
         primary_resolved_path=resolved,
+        acquired_quality_json=(primary.get("acquired_quality_json") if primary else None),
+        retention_json=(primary.get("retention_json") if primary else None),
         profile=dict(profile),
         profile_fingerprint=_profile_fingerprint(dict(profile)),
     )
@@ -499,6 +503,7 @@ def _decide_snapshot_upgrade(snapshot: _UpgradeSnapshot, incoming_path: str):
         upgrade_complete,
     )
     from core.quality.model import rank_candidate
+    from core.quality.retention import best_quality_for_targets
     from core.quality.selection import targets_from_profile
 
     base = {
@@ -523,7 +528,14 @@ def _decide_snapshot_upgrade(snapshot: _UpgradeSnapshot, incoming_path: str):
     if not targets or not is_upgrade_policy(policy):
         return UpgradeDecision(True, False, "The effective profile no longer requests upgrades", **base)
     _targets, fallback_enabled = targets_from_profile(snapshot.profile)
-    old_rank, old_score = rank_candidate(old_quality, targets)
+    effective_old_quality = best_quality_for_targets(
+        old_quality,
+        targets,
+        acquired_quality_json=snapshot.acquired_quality_json,
+        retention_json=snapshot.retention_json,
+    ) or old_quality
+    base["existing_quality"] = effective_old_quality
+    old_rank, old_score = rank_candidate(effective_old_quality, targets)
     new_rank, new_score = rank_candidate(new_quality, targets)
     if not fallback_enabled and new_rank == len(targets):
         return UpgradeDecision(True, False, "Retained file is outside the strict profile", **base)
@@ -536,18 +548,19 @@ def _decide_snapshot_upgrade(snapshot: _UpgradeSnapshot, incoming_path: str):
             and new_score > old_score + 0.001
             and (
                 new_rank == len(targets)
-                or str(new_quality.format).lower() == str(old_quality.format).lower()
+                or str(new_quality.format).lower() == str(effective_old_quality.format).lower()
             )
         )
     ):
         return UpgradeDecision(
             True, False,
-            f"Retained quality {new_quality.label()} is not better than {old_quality.label()}",
+            f"Retained quality {new_quality.label()} is not better than "
+            f"{effective_old_quality.label()}",
             **base,
         )
     return UpgradeDecision(
         True, True,
-        f"Upgrade {old_quality.label()} → {new_quality.label()}",
+        f"Upgrade {effective_old_quality.label()} → {new_quality.label()}",
         **base,
     )
 
@@ -557,6 +570,8 @@ def _upgrade_snapshot_still_current(snapshot: _UpgradeSnapshot) -> bool:
     return (
         current.primary_id == snapshot.primary_id
         and current.primary_path == snapshot.primary_path
+        and current.acquired_quality_json == snapshot.acquired_quality_json
+        and current.retention_json == snapshot.retention_json
         and current.profile_fingerprint == snapshot.profile_fingerprint
     )
 

@@ -67,7 +67,9 @@ def active_file_subjects(
         )
         rows = conn.execute(
             f"""SELECT f.id AS file_id, f.track_id, f.path, f.original_path,
-                       f.is_primary, f.format, f.size, f.bitrate,
+                       f.is_primary, f.primary_manual, f.file_role,
+                       f.derived_from_file_id, f.acquired_quality_json,
+                       f.retention_json, f.format, f.size, f.bitrate,
                        f.sample_rate, f.bit_depth, f.quality_tier, f.source,
                        f.import_status, f.processing_status,
                        f.verification_status, f.acoustid_status,

@@ -38,6 +38,7 @@ import {
   removeLibraryV2FileRecords,
   runRepairJob,
   searchLibraryV2MatchService,
+  setLibraryV2PrimaryTrackFile,
   startLibraryV2AlbumReplayGain,
   startLibraryV2ScopedSearch,
   updateLibraryV2MetadataOverrides,
@@ -1129,6 +1130,16 @@ describe('library v2 artist track files api (C2 — Manage Track Files)', () => 
     expect(result.files).toHaveLength(1);
     expect(result.files[0]).toMatchObject({ file_id: 1, track_title: 'Nonstop' });
     expect(result.pagination).toMatchObject({ page: 2, total_pages: 2 });
+  });
+
+  it('persists a primary version selection', async () => {
+    server.use(
+      http.post('/api/library/v2/tracks/2/files/9/primary', () =>
+        HttpResponse.json({ success: true, track_id: 2, file_id: 9 }),
+      ),
+    );
+
+    await expect(setLibraryV2PrimaryTrackFile(2, 9)).resolves.toBeUndefined();
   });
 });
 

@@ -67,6 +67,7 @@ def decide_track_upgrade(conn, track_id: int, incoming_path: str) -> UpgradeDeci
     from core.library2.paths import resolve_lib2_path
     from core.library2.track_files import primary_file_row
     from core.quality.model import rank_candidate
+    from core.quality.retention import best_quality_for_targets
 
     track_id = int(track_id)
     profile = effective_track_profile(conn, track_id)
@@ -100,7 +101,14 @@ def decide_track_upgrade(conn, track_id: int, incoming_path: str) -> UpgradeDeci
     if not targets or not is_upgrade_policy(policy):
         return UpgradeDecision(True, False, "The effective profile no longer requests upgrades", **base)
 
-    old_rank, old_score = rank_candidate(old_quality, targets)
+    effective_old_quality = best_quality_for_targets(
+        old_quality,
+        targets,
+        acquired_quality_json=existing.get("acquired_quality_json"),
+        retention_json=existing.get("retention_json"),
+    ) or old_quality
+    base["existing_quality"] = effective_old_quality
+    old_rank, old_score = rank_candidate(effective_old_quality, targets)
     new_rank, new_score = rank_candidate(new_quality, targets)
     if upgrade_complete(old_rank, len(targets), policy, cutoff):
         return UpgradeDecision(True, False, "The existing file already meets the upgrade cutoff", **base)
@@ -117,7 +125,7 @@ def decide_track_upgrade(conn, track_id: int, incoming_path: str) -> UpgradeDeci
             and new_score > old_score + 0.001
             and (
                 new_rank == len(targets)
-                or str(new_quality.format).lower() == str(old_quality.format).lower()
+                or str(new_quality.format).lower() == str(effective_old_quality.format).lower()
             )
         )
     )
@@ -126,13 +134,13 @@ def decide_track_upgrade(conn, track_id: int, incoming_path: str) -> UpgradeDeci
             True,
             False,
             f"Downloaded quality {new_quality.label()} is not better than "
-            f"{old_quality.label()}",
+            f"{effective_old_quality.label()}",
             **base,
         )
     return UpgradeDecision(
         True,
         True,
-        f"Upgrade {old_quality.label()} → {new_quality.label()}",
+        f"Upgrade {effective_old_quality.label()} → {new_quality.label()}",
         **base,
     )
 
@@ -222,12 +230,20 @@ def evaluate_file(file_row: Optional[Dict[str, Any]], targets: List[Any],
                 "upgrade_candidate": False if upgrade_policy == "none" else None}
     try:
         from core.quality.model import rank_candidate
-        idx, _score = rank_candidate(aq, targets)
+        from core.quality.retention import evaluation_qualities
+        qualities = evaluation_qualities(
+            aq,
+            (file_row or {}).get("acquired_quality_json"),
+            (file_row or {}).get("retention_json"),
+        )
+        ranks = [rank_candidate(value, targets)[0] for value in qualities]
     except Exception:
         return {"meets_profile": None, "upgrade_candidate": None}
-    meets = idx < len(targets)
-    upgrade = is_upgrade_policy(upgrade_policy) and not upgrade_complete(
-        idx, len(targets), upgrade_policy, cutoff_index)
+    meets = any(idx < len(targets) for idx in ranks)
+    upgrade = is_upgrade_policy(upgrade_policy) and not any(
+        upgrade_complete(idx, len(targets), upgrade_policy, cutoff_index)
+        for idx in ranks
+    )
     return {"meets_profile": bool(meets), "upgrade_candidate": bool(upgrade)}
 
 

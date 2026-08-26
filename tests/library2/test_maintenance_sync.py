@@ -402,6 +402,13 @@ def test_new_derivative_is_linked_to_same_v2_track(legacy_db, tmp_path):
     _import(legacy_db)
     output = tmp_path / "01.mp3"
     output.write_bytes(b"synthetic derivative")
+    conn = legacy_db._get_connection()
+    try:
+        parent = conn.execute(
+            "SELECT id, track_id FROM lib2_track_files WHERE legacy_track_id=100"
+        ).fetchone()
+    finally:
+        conn.close()
 
     outcome = sync_repair_change(
         legacy_db,
@@ -412,7 +419,19 @@ def test_new_derivative_is_linked_to_same_v2_track(legacy_db, tmp_path):
         entity_type="track",
         entity_id=100,
         file_path="/m/01.flac",
-        result={"output_path": str(output)},
+        result={
+            "output_path": str(output),
+            "file_role": "derivative",
+            "derived_from_file_id": parent["id"],
+            "acquired_quality": {
+                "format": "flac", "sample_rate": 44100, "bit_depth": 16,
+                "bitrate": None,
+            },
+            "retention_transforms": [{
+                "type": "lossy_copy", "source_replaced": False,
+                "codec": "mp3", "bitrate": "320",
+            }],
+        },
     )
 
     assert outcome["reason"] == "synchronized"
@@ -422,7 +441,9 @@ def test_new_derivative_is_linked_to_same_v2_track(legacy_db, tmp_path):
             "SELECT track_id FROM lib2_track_files WHERE legacy_track_id=100"
         ).fetchone()
         derivative = conn.execute(
-            "SELECT track_id, source FROM lib2_track_files WHERE path=?",
+            """SELECT track_id, source, file_role, derived_from_file_id,
+                      acquired_quality_json, retention_json
+                 FROM lib2_track_files WHERE path=?""",
             (str(output),),
         ).fetchone()
     finally:
@@ -430,6 +451,75 @@ def test_new_derivative_is_linked_to_same_v2_track(legacy_db, tmp_path):
     assert derivative is not None
     assert derivative[0] == original[0]
     assert derivative[1] == "repair_job"
+    assert derivative["file_role"] == "derivative"
+    assert derivative["derived_from_file_id"] == parent["id"]
+    assert derivative["acquired_quality_json"]
+    assert derivative["retention_json"]
+
+
+def test_lossy_source_replacement_stays_active_after_maintenance_sync(legacy_db, tmp_path):
+    from core.library2.maintenance_sync import sync_repair_change
+
+    _import(legacy_db)
+    output = tmp_path / "01.mp3"
+    output.write_bytes(b"replacement")
+    conn = legacy_db._get_connection()
+    try:
+        source = conn.execute(
+            "SELECT id, track_id, path FROM lib2_track_files WHERE legacy_track_id=100"
+        ).fetchone()
+        # The fix worker atomically repoints this same logical file row before
+        # the general maintenance convergence callback runs.
+        conn.execute(
+            "UPDATE lib2_track_files SET path=? WHERE id=?",
+            (str(output), source["id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    outcome = sync_repair_change(
+        legacy_db,
+        _Config(True),
+        job_id="lossy_converter",
+        finding_type="missing_lossy_copy",
+        action="converted_and_deleted",
+        entity_type="track",
+        entity_id=f"lib2:{source['track_id']}",
+        file_path=source["path"],
+        details={"library_v2": {
+            "track_id": source["track_id"], "file_id": source["id"],
+        }},
+        result={
+            "output_path": str(output),
+            "library_v2_source_replaced": True,
+            "file_role": "derivative",
+            "acquired_quality": {
+                "format": "flac", "sample_rate": 44100, "bit_depth": 16,
+                "bitrate": None,
+            },
+            "retention_transforms": [{
+                "type": "lossy_copy", "source_replaced": True,
+                "codec": "mp3", "bitrate": "320",
+            }],
+        },
+    )
+
+    assert outcome["reason"] == "synchronized"
+    conn = legacy_db._get_connection()
+    try:
+        rows = conn.execute(
+            """SELECT id, path, file_state, file_role, retention_json
+                 FROM lib2_track_files WHERE track_id=? AND path=?""",
+            (source["track_id"], str(output)),
+        ).fetchall()
+    finally:
+        conn.close()
+    assert len(rows) == 1
+    assert rows[0]["id"] == source["id"]
+    assert rows[0]["file_state"] == "active"
+    assert rows[0]["file_role"] == "derivative"
+    assert rows[0]["retention_json"]
 
 
 def test_cover_fix_invalidates_both_managed_cache_variants(legacy_db):
@@ -939,6 +1029,25 @@ def test_lossy_converter_covers_v2_only_file(legacy_db, tmp_path):
     audio = tmp_path / "v2-lossless.flac"
     audio.write_bytes(b"audio")
     track_id, file_id = _add_v2_only_file(legacy_db, audio, title="Lossless Only")
+    conn = legacy_db._get_connection()
+    try:
+        profile_id = conn.execute(
+            "SELECT quality_profile_id FROM lib2_tracks WHERE id=?", (track_id,)
+        ).fetchone()[0]
+        conn.execute(
+            """UPDATE quality_profiles
+                  SET lossy_copy_enabled=1, lossy_copy_codec='mp3',
+                      lossy_copy_bitrate='320'
+                WHERE id=?""",
+            (profile_id,),
+        )
+        conn.execute(
+            "UPDATE lib2_tracks SET quality_profile_explicit=1 WHERE id=?",
+            (track_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
     findings = []
     context = JobContext(
         db=legacy_db,

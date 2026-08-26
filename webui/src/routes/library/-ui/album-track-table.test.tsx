@@ -393,6 +393,64 @@ describe('library v2 album track table', () => {
     expect(screen.queryByText('900 kbps')).not.toBeInTheDocument();
   });
 
+  it('distinguishes acquired quality from an intentional retained output', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/42', () =>
+        HttpResponse.json({
+          success: true,
+          album: album([
+            track({
+              file_status: 'present',
+              file: trackFile({
+                acquired_quality_json: JSON.stringify({
+                  format: 'flac',
+                  sample_rate: 96_000,
+                  bit_depth: 24,
+                  bitrate: null,
+                }),
+                retention_json: JSON.stringify([
+                  {
+                    type: 'downsample_hires_flac',
+                    source_replaced: true,
+                    target_bit_depth: 16,
+                    target_sample_rate: 44_100,
+                  },
+                ]),
+              }),
+              meets_profile: true,
+              upgrade_candidate: false,
+            }),
+          ]),
+        }),
+      ),
+      http.get('/api/library/v2/albums/42/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [] }),
+      ),
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: { track_table: { columns: { quality: true } } },
+        }),
+      ),
+      http.get('/api/library/v2/albums/42/queue-status', () =>
+        HttpResponse.json({ tracks: {}, albums: {} }),
+      ),
+    );
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('FLAC · 16bit/44.1kHz · 900 kbps')).toBeInTheDocument();
+    const acquired = screen.getByText('acquired FLAC · 24bit · 96kHz');
+    expect(acquired).toHaveAttribute('title', expect.stringContaining('Upgrade cutoff'));
+  });
+
   it('renders one Check column and no separate verification column', async () => {
     server.use(
       http.get('/api/library/v2/albums/42', () =>

@@ -62,6 +62,24 @@ def test_idempotent_rerun():
     assert idx >= 16
 
 
+def test_track_files_schema_carries_version_roles_and_retention_provenance():
+    conn = sqlite3.connect(":memory:")
+    ensure_library_v2_schema(conn)
+
+    columns = {
+        row[1]: row for row in conn.execute("PRAGMA table_info(lib2_track_files)")
+    }
+    assert {
+        "primary_manual",
+        "file_role",
+        "derived_from_file_id",
+        "acquired_quality_json",
+        "retention_json",
+    }.issubset(columns)
+    assert columns["primary_manual"][4] == "0"
+    assert columns["file_role"][4] == "'master'"
+
+
 def test_migrates_old_artist_monitored_default_without_changing_values():
     conn = sqlite3.connect(":memory:")
     ensure_library_v2_schema(conn)

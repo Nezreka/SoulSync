@@ -232,6 +232,11 @@ CREATE TABLE IF NOT EXISTS lib2_track_files (
     metadata_gaps_json TEXT NOT NULL DEFAULT '[]',    -- list of gap descriptors
     content_hash TEXT,                                -- for dedup / single-vs-album
     is_primary INTEGER NOT NULL DEFAULT 0,            -- exactly one per track (ADR-03)
+    primary_manual INTEGER NOT NULL DEFAULT 0,        -- explicit user choice; automatic election must preserve it
+    file_role TEXT NOT NULL DEFAULT 'master',         -- 'master'|'derivative'|'alternate'
+    derived_from_file_id INTEGER,                     -- generated from this retained source file
+    acquired_quality_json TEXT,                       -- quality before configured output transforms
+    retention_json TEXT,                              -- applied retention/output transforms
     file_state TEXT NOT NULL DEFAULT 'active',        -- 'active'|'missing_suspected'|'missing_confirmed'|'quarantined'|'deleted'
     missing_since TIMESTAMP,
     missing_scan_count INTEGER NOT NULL DEFAULT 0,
@@ -239,7 +244,8 @@ CREATE TABLE IF NOT EXISTS lib2_track_files (
     legacy_import_run_id TEXT,                        -- last complete legacy snapshot that saw it
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (track_id) REFERENCES lib2_tracks(id) ON DELETE SET NULL
+    FOREIGN KEY (track_id) REFERENCES lib2_tracks(id) ON DELETE SET NULL,
+    FOREIGN KEY (derived_from_file_id) REFERENCES lib2_track_files(id) ON DELETE SET NULL
 )
 """
 
@@ -408,6 +414,16 @@ _ADDED_COLUMNS = (
     # core/library2/track_files.py.
     ("lib2_track_files", "is_primary",
      "ALTER TABLE lib2_track_files ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0"),
+    ("lib2_track_files", "primary_manual",
+     "ALTER TABLE lib2_track_files ADD COLUMN primary_manual INTEGER NOT NULL DEFAULT 0"),
+    ("lib2_track_files", "file_role",
+     "ALTER TABLE lib2_track_files ADD COLUMN file_role TEXT NOT NULL DEFAULT 'master'"),
+    ("lib2_track_files", "derived_from_file_id",
+     "ALTER TABLE lib2_track_files ADD COLUMN derived_from_file_id INTEGER"),
+    ("lib2_track_files", "acquired_quality_json",
+     "ALTER TABLE lib2_track_files ADD COLUMN acquired_quality_json TEXT"),
+    ("lib2_track_files", "retention_json",
+     "ALTER TABLE lib2_track_files ADD COLUMN retention_json TEXT"),
     ("lib2_track_files", "file_state",
      "ALTER TABLE lib2_track_files ADD COLUMN file_state TEXT NOT NULL DEFAULT 'active'"),
     ("lib2_track_files", "server_source",
@@ -1029,6 +1045,9 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_primary "
             "ON lib2_track_files(track_id, is_primary)")
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_derived_from "
+            "ON lib2_track_files(derived_from_file_id)")
         from core.library2.track_files import install_primary_triggers
         install_primary_triggers(cursor)
     except Exception as e:  # noqa: BLE001
@@ -1250,11 +1269,18 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
 
     if not _stopped():
         try:
-            from core.library2.track_files import backfill_primary_flags
+            from core.library2.track_files import (
+                backfill_file_roles,
+                backfill_primary_flags,
+            )
             changed = backfill_primary_flags(cursor)
             stats["primary_flags"] = changed
             if changed:
                 logger.info("Primary-file backfill adjusted %d file rows", changed)
+            role_changes = backfill_file_roles(cursor)
+            stats["file_roles"] = role_changes
+            if role_changes:
+                logger.info("File-role backfill adjusted %d file rows", role_changes)
             _commit()
         except Exception as e:  # noqa: BLE001
             logger.error("primary-file backfill failed (will retry next start): %s", e)

@@ -4441,6 +4441,33 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         return jsonify({"success": True, "canonical_track_id": canonical_id})
 
+    @app.route(
+        "/api/library/v2/tracks/<int:track_id>/files/<int:file_id>/primary",
+        methods=["POST"],
+    )
+    def lib2_set_primary_track_file(track_id, file_id):
+        """Persist a deliberate primary choice for one physical version."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.track_files import set_primary_file
+
+        conn = _conn()
+        try:
+            if not conn.execute(
+                "SELECT 1 FROM lib2_tracks WHERE id=?", (track_id,)
+            ).fetchone():
+                return jsonify({"success": False, "error": "Track not found"}), 404
+            if not set_primary_file(conn, track_id, file_id):
+                return jsonify({
+                    "success": False,
+                    "error": "File is not an active version of this track",
+                }), 404
+            conn.commit()
+        finally:
+            conn.close()
+        return jsonify({"success": True, "track_id": track_id, "file_id": file_id})
+
     @app.route("/api/library/v2/tracks/<int:track_id>/move-file", methods=["POST"])
     def lib2_move_track_file(track_id):
         """Move this track's file link onto another track (single↔album move).

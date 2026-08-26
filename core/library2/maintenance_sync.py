@@ -462,17 +462,51 @@ def _link_new_output_file(
     existing = conn.execute(
         "SELECT id FROM lib2_track_files WHERE path=?", (output_path,)
     ).fetchone()
+    from core.quality.model import AudioQuality
+    from core.quality.retention import quality_json, transforms_json
+    raw_acquired = result.get("acquired_quality")
+    try:
+        acquired_json = quality_json(
+            AudioQuality.from_dict(raw_acquired)
+            if isinstance(raw_acquired, dict) else raw_acquired
+        )
+    except (AttributeError, TypeError, ValueError):
+        acquired_json = None
+    retention_json = transforms_json(result.get("retention_transforms"))
+    derived_from = result.get("derived_from_file_id")
+    try:
+        derived_from = int(derived_from) if derived_from else None
+    except (TypeError, ValueError):
+        derived_from = None
+    file_role = str(result.get("file_role") or "derivative")
     if existing:
+        conn.execute(
+            """UPDATE lib2_track_files
+                  SET file_state='active', file_role=?,
+                      derived_from_file_id=COALESCE(?, derived_from_file_id),
+                      acquired_quality_json=COALESCE(?, acquired_quality_json),
+                      retention_json=COALESCE(?, retention_json),
+                      updated_at=CURRENT_TIMESTAMP
+                WHERE id=?""",
+            (file_role, derived_from, acquired_json, retention_json,
+             int(existing[0])),
+        )
         return int(existing[0])
     cursor = conn.execute(
         """INSERT INTO lib2_track_files(
-               track_id, path, size, format, import_status, file_state, source)
-           VALUES(?,?,?,?, 'imported', 'active', 'repair_job')""",
+               track_id, path, size, format, import_status, file_state, source,
+               file_role, derived_from_file_id, acquired_quality_json,
+               retention_json)
+           VALUES(?,?,?,?, 'imported', 'active', 'repair_job',?,?,?,?)""",
         (
             links["tracks"][0],
             output_path,
             os.path.getsize(output_path),
             output_path.rsplit(".", 1)[-1].lower() if "." in output_path else None,
+            file_role,
+            derived_from,
+            acquired_json,
+            retention_json,
         ),
     )
     return int(cursor.lastrowid)
@@ -614,7 +648,10 @@ def sync_repair_change(
             return {"enabled": True, "reason": "subject_unlinked", "converged": False}
 
         changed_fields: set[str] = set(effects - {"observe", "none"})
-        deleting = action in _DELETE_ACTIONS or result.get("library_v2_file_deleted") is True
+        deleting = (
+            action in _DELETE_ACTIONS
+            or result.get("library_v2_file_deleted") is True
+        ) and result.get("library_v2_source_replaced") is not True
         # iss29-E03: retire only the files the change actually named, never the
         # album-wide fan-out that `_resolve_links` builds for rescan purposes.
         #

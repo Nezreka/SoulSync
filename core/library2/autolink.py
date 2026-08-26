@@ -539,14 +539,22 @@ def _fallback_identity(context: Dict[str, Any],
     }
 
 
-def _link_companion_file(conn, track_id: int, file_path: str) -> Optional[int]:
+def _link_companion_file(
+    conn,
+    track_id: int,
+    file_path: str,
+    *,
+    derived_from_file_id: Optional[int] = None,
+    acquired_quality_json: Optional[str] = None,
+    retention_json: Optional[str] = None,
+) -> Optional[int]:
     """Record an extra on-disk file that belongs to an already-linked track.
 
-    dd28-40: ``create_lossy_copy`` with ``delete_original=False`` leaves BOTH
-    files on disk but only reports the lossy one as ``_final_processed_path``.
-    Without this the lossless original is invisible to lib2 — the orphan
-    detector flags it, and quality/cutoff evaluation permanently judges the
-    track by its MP3. Idempotent per ``(track_id, path)``; does not commit.
+    A generated lossy companion is a derivative of the retained acquisition,
+    not an unrelated duplicate.  Persisting that relationship is what lets
+    the UI group versions honestly and prevents maintenance from treating it
+    as an upgrade candidate of its own.  Idempotent per ``(track_id, path)``;
+    does not commit.
     """
     if not file_path or not os.path.exists(file_path):
         return None
@@ -555,6 +563,17 @@ def _link_companion_file(conn, track_id: int, file_path: str) -> Optional[int]:
         (track_id, file_path),
     ).fetchone()
     if existing:
+        conn.execute(
+            """UPDATE lib2_track_files
+                  SET file_role='derivative',
+                      derived_from_file_id=COALESCE(?, derived_from_file_id),
+                      acquired_quality_json=COALESCE(?, acquired_quality_json),
+                      retention_json=COALESCE(?, retention_json),
+                      updated_at=CURRENT_TIMESTAMP
+                WHERE id=?""",
+            (derived_from_file_id, acquired_quality_json, retention_json,
+             existing["id"]),
+        )
         return existing["id"]
     fmt = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else None
     bitrate = sample_rate = bit_depth = tier = None
@@ -576,9 +595,12 @@ def _link_companion_file(conn, track_id: int, file_path: str) -> Optional[int]:
         size = None
     cur = conn.execute(
         """INSERT INTO lib2_track_files(track_id, path, size, bitrate, sample_rate,
-               bit_depth, format, quality_tier, source, import_status)
-           VALUES(?,?,?,?,?,?,?,?,'companion', 'imported')""",
-        (track_id, file_path, size, bitrate, sample_rate, bit_depth, fmt, tier),
+               bit_depth, format, quality_tier, source, import_status,
+               file_role, derived_from_file_id, acquired_quality_json,
+               retention_json)
+           VALUES(?,?,?,?,?,?,?,?,'companion','imported','derivative',?,?,?)""",
+        (track_id, file_path, size, bitrate, sample_rate, bit_depth, fmt, tier,
+         derived_from_file_id, acquired_quality_json, retention_json),
     )
     return cur.lastrowid
 
@@ -815,6 +837,31 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
             verification_status = context.get("_verification_status")
             acoustid_status = _acoustid_status_for(context.get("_acoustid_result"))
             pipeline_result_json = _pipeline_result_json(context)
+            from core.quality.model import AudioQuality
+            from core.quality.retention import (
+                ACQUIRED_QUALITY_CONTEXT_KEY,
+                RETENTION_CONTEXT_KEY,
+                quality_json,
+                transforms_json,
+            )
+            raw_acquired = context.get(ACQUIRED_QUALITY_CONTEXT_KEY)
+            try:
+                acquired_quality_json = quality_json(
+                    AudioQuality.from_dict(raw_acquired)
+                    if isinstance(raw_acquired, dict) else raw_acquired
+                )
+            except (AttributeError, TypeError, ValueError):
+                acquired_quality_json = None
+            retention_json = transforms_json(context.get(RETENTION_CONTEXT_KEY))
+            provenance_present = (
+                raw_acquired is not None
+                or isinstance(context.get(RETENTION_CONTEXT_KEY), list)
+            )
+            destructive_retention = any(
+                isinstance(step, dict) and bool(step.get("source_replaced"))
+                for step in (context.get(RETENTION_CONTEXT_KEY) or [])
+            )
+            main_file_role = "derivative" if destructive_retention else "master"
 
             existing = conn.execute(
                 "SELECT id FROM lib2_track_files WHERE track_id=? AND path=?",
@@ -829,9 +876,19 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                            verification_status=COALESCE(?, verification_status),
                            acoustid_status=COALESCE(?, acoustid_status),
                            pipeline_result_json=?,
+                           file_role=CASE WHEN ? THEN ? ELSE file_role END,
+                           derived_from_file_id=CASE WHEN ? THEN NULL
+                                                    ELSE derived_from_file_id END,
+                           acquired_quality_json=CASE WHEN ? THEN ?
+                                                      ELSE acquired_quality_json END,
+                           retention_json=CASE WHEN ? THEN ? ELSE retention_json END,
                            updated_at=CURRENT_TIMESTAMP WHERE id=?""",
                     (size, bitrate, sample_rate, bit_depth, fmt, tier,
                      verification_status, acoustid_status, pipeline_result_json,
+                     provenance_present, main_file_role,
+                     provenance_present,
+                     provenance_present, acquired_quality_json,
+                     provenance_present, retention_json,
                      existing["id"]),
                 )
                 file_id = existing["id"]
@@ -840,18 +897,27 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                     """INSERT INTO lib2_track_files(track_id, path, size, bitrate,
                            sample_rate, bit_depth, format, quality_tier, source,
                            verification_status, acoustid_status, pipeline_result_json,
+                           file_role, acquired_quality_json, retention_json,
                            import_status)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?, 'imported')""",
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'imported')""",
                     (track_id, file_path, size, bitrate, sample_rate, bit_depth,
                      fmt, tier, source,
-                     verification_status, acoustid_status, pipeline_result_json),
+                     verification_status, acoustid_status, pipeline_result_json,
+                     main_file_role, acquired_quality_json, retention_json),
                 )
                 file_id = cur.lastrowid
             # dd28-40: a retained lossless original next to a generated lossy
             # copy is a second file of the SAME track, not an orphan.
             for companion in (context.get("_companion_file_paths") or []):
                 try:
-                    _link_companion_file(conn, track_id, str(companion))
+                    _link_companion_file(
+                        conn,
+                        track_id,
+                        str(companion),
+                        derived_from_file_id=file_id,
+                        acquired_quality_json=acquired_quality_json,
+                        retention_json=retention_json,
+                    )
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("companion file link failed (%s): %s", companion, exc)
             # dd28-08: an upgrade/enhance/redownload writes a NEW path and

@@ -84,6 +84,7 @@ import {
   retryLibraryV2Mirror,
   runRepairJob,
   setLibraryV2Monitored,
+  setLibraryV2PrimaryTrackFile,
   setLibraryV2QualityProfile,
   startLibraryV2AlbumReplayGain,
   startLibraryV2Import,
@@ -410,6 +411,45 @@ function MediaServerRecognitionBadge({ sources }: { sources: string[] | undefine
 }
 
 /** One compact quality badge assembled from the user's enabled details. */
+function retentionQualityInfo(file: LibraryV2TrackFile): { label: string; title: string } | null {
+  if (!file.acquired_quality_json || !file.retention_json) return null;
+  try {
+    const acquired = JSON.parse(file.acquired_quality_json) as {
+      format?: string;
+      bitrate?: number | null;
+      sample_rate?: number | null;
+      bit_depth?: number | null;
+    };
+    const transforms = JSON.parse(file.retention_json) as Array<{
+      type?: string;
+      source_replaced?: boolean;
+    }>;
+    const destructive = transforms.find((step) => step?.source_replaced === true);
+    if (!destructive) return null;
+    const acquiredParts = [
+      acquired.format?.toUpperCase(),
+      acquired.bit_depth ? `${acquired.bit_depth}bit` : null,
+      acquired.sample_rate
+        ? `${Number((acquired.sample_rate / 1000).toFixed(acquired.sample_rate % 1000 === 0 ? 0 : 1))}kHz`
+        : null,
+      acquired.bitrate ? `${bitrateKbps(acquired.bitrate)} kbps` : null,
+    ].filter(Boolean);
+    if (acquiredParts.length === 0) return null;
+    const transformLabel =
+      destructive.type === 'downsample_hires_flac'
+        ? 'downsampled by retention policy'
+        : destructive.type === 'lossy_copy'
+          ? 'converted by retention policy'
+          : 'transformed by retention policy';
+    return {
+      label: `acquired ${acquiredParts.join(' · ')}`,
+      title: `${acquiredParts.join(' · ')} was acquired and intentionally ${transformLabel}. Upgrade cutoff uses the acquired quality, while the main badge shows the file retained on disk.`,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function QualityDisplay({ file }: { file: LibraryV2Track['file'] | null | undefined }) {
   const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
   if (!file) {
@@ -433,10 +473,16 @@ function QualityDisplay({ file }: { file: LibraryV2Track['file'] | null | undefi
     .join(' · ');
 
   if (!qualityBadge) return null;
+  const retention = retentionQualityInfo(file);
 
   return (
     <span className={styles.qualityDisplay}>
       <span className={styles.qualityTag}>{qualityBadge}</span>
+      {retention ? (
+        <span className={styles.retentionQualityBadge} title={retention.title}>
+          {retention.label}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -3353,8 +3399,8 @@ export function MaintenanceModal({
 type ManageTracksTab = 'duplicates' | 'files';
 
 /** Manage Tracks: "Duplicates" (single↔album pairs, unchanged) plus a new
- *  "Files" tab (C2 — Lidarr's "Manage Track Files") listing every physical
- *  file this artist owns for bulk selection + ADR-05 delete. */
+ *  "File versions" tab grouping every physical representation by recording
+ *  for primary selection + ADR-05 delete. */
 function ManageTracksModal({ artistId, onClose }: { artistId: number; onClose: () => void }) {
   const [tab, setTab] = useState<ManageTracksTab>('files');
   return (
@@ -3367,7 +3413,7 @@ function ManageTracksModal({ artistId, onClose }: { artistId: number; onClose: (
             className={`${styles.detailTab} ${tab === t ? styles.detailTabActive : ''}`}
             onClick={() => setTab(t)}
           >
-            {t === 'files' ? 'Files' : 'Duplicates'}
+            {t === 'files' ? 'File versions' : 'Recording duplicates'}
           </button>
         ))}
       </div>
@@ -3528,8 +3574,8 @@ export function ManageTracksDuplicatesTab({ artistId }: { artistId: number }) {
   );
 }
 
-/** C2 (Manage Track Files): flat, paginated, selectable list of every
- *  physical file this artist owns — bulk-delete goes through the same
+/** C2 (Manage Track Files): paginated physical files grouped by recording —
+ *  bulk-delete goes through the same
  *  ADR-05 preview/execute contract as the single-entity delete flow
  *  (`DeleteConfirmModal`), scoped to the checked file ids. */
 export function ArtistFilesTab({ artistId }: { artistId: number }) {
@@ -3539,6 +3585,7 @@ export function ArtistFilesTab({ artistId }: { artistId: number }) {
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [confirming, setConfirming] = useState(false);
+  const [rowError, setRowError] = useState<string | null>(null);
 
   const filesQuery = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'track-files', artistId, search, page],
@@ -3547,6 +3594,26 @@ export function ArtistFilesTab({ artistId }: { artistId: number }) {
   const files = filesQuery.data?.files ?? [];
   const pagination = filesQuery.data?.pagination;
   const allOnPageSelected = files.length > 0 && files.every((f) => selected.has(f.file_id));
+  const groupedFiles = useMemo(() => {
+    const groups = new Map<
+      number,
+      { track: LibraryV2ArtistTrackFile; files: LibraryV2ArtistTrackFile[] }
+    >();
+    for (const file of files) {
+      const group = groups.get(file.track_id);
+      if (group) group.files.push(file);
+      else groups.set(file.track_id, { track: file, files: [file] });
+    }
+    return [...groups.values()];
+  }, [files]);
+  const primaryMutation = useMutation({
+    mutationFn: ({ trackId, fileId }: { trackId: number; fileId: number }) =>
+      setLibraryV2PrimaryTrackFile(trackId, fileId),
+    onMutate: () => setRowError(null),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
+    onError: (error) =>
+      setRowError(error instanceof Error ? error.message : 'Primary file could not be changed'),
+  });
 
   function toggle(fileId: number) {
     setSelected((s) => {
@@ -3582,6 +3649,11 @@ export function ArtistFilesTab({ artistId }: { artistId: number }) {
 
   return (
     <>
+      <p className={styles.qpSubtitle}>
+        Physical versions are grouped by recording. <strong>Master</strong> is a retained source,
+        <strong> derivative</strong> is an intentional output such as MP3/Opus or downsampled FLAC,
+        and <strong>primary</strong> is the version used for quality and playback decisions.
+      </p>
       <input
         className={styles.searchInput}
         type="text"
@@ -3592,6 +3664,7 @@ export function ArtistFilesTab({ artistId }: { artistId: number }) {
           setPage(1);
         }}
       />
+      {rowError ? <div className={styles.searchError}>{rowError}</div> : null}
       {filesQuery.isLoading ? (
         <div className={styles.inlineLoading}>Loading files…</div>
       ) : filesQuery.isError ? (
@@ -3612,31 +3685,77 @@ export function ArtistFilesTab({ artistId }: { artistId: number }) {
                 </th>
                 <th>Track</th>
                 <th>Album</th>
+                <th>Version</th>
                 <th>Quality</th>
                 <th>Size</th>
                 <th>State</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
-              {files.map((f) => (
-                <tr key={f.file_id}>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={selected.has(f.file_id)}
-                      onChange={() => toggle(f.file_id)}
-                    />
-                  </td>
-                  <td>
-                    {f.track_number != null ? `${f.track_number}. ` : ''}
-                    {f.track_title ?? '—'}
-                  </td>
-                  <td className={styles.qualityText}>{f.album_title ?? '—'}</td>
-                  <td className={styles.qualityText}>{qualityText(f)}</td>
-                  <td>{formatFileSize(f.size ?? 0)}</td>
-                  <td className={styles.muted}>{f.file_state}</td>
-                </tr>
-              ))}
+              {groupedFiles.flatMap((group) =>
+                group.files.map((f, index) => (
+                  <tr
+                    key={f.file_id}
+                    className={index === 0 ? styles.fileVersionGroupStart : undefined}
+                  >
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selected.has(f.file_id)}
+                        onChange={() => toggle(f.file_id)}
+                      />
+                    </td>
+                    {index === 0 ? (
+                      <td rowSpan={group.files.length} className={styles.fileVersionTrack}>
+                        {f.track_number != null ? `${f.track_number}. ` : ''}
+                        {f.track_title ?? '—'}
+                        <span className={styles.fileVersionCount}>
+                          {group.files.length} {group.files.length === 1 ? 'version' : 'versions'}
+                        </span>
+                      </td>
+                    ) : null}
+                    {index === 0 ? (
+                      <td rowSpan={group.files.length} className={styles.qualityText}>
+                        {f.album_title ?? '—'}
+                      </td>
+                    ) : null}
+                    <td>
+                      <div className={styles.fileVersionBadges}>
+                        <span className={styles.fileRoleBadge} data-role={f.file_role ?? 'master'}>
+                          {f.file_role ?? 'master'}
+                        </span>
+                        {f.is_primary ? (
+                          <span className={styles.filePrimaryBadge}>
+                            {f.primary_manual ? 'primary · manual' : 'primary'}
+                          </span>
+                        ) : null}
+                      </div>
+                      <span className={styles.fileVersionPath} title={f.path}>
+                        {f.path}
+                      </span>
+                    </td>
+                    <td className={styles.qualityText}>{qualityText(f)}</td>
+                    <td>{formatFileSize(f.size ?? 0)}</td>
+                    <td className={styles.muted}>{f.file_state}</td>
+                    <td className={styles.trackActions}>
+                      {!f.is_primary && f.file_state === 'active' ? (
+                        <button
+                          type="button"
+                          className={styles.toolButton}
+                          data-requires-write=""
+                          disabled={!canWrite || primaryMutation.isPending}
+                          onClick={() =>
+                            primaryMutation.mutate({ trackId: f.track_id, fileId: f.file_id })
+                          }
+                        >
+                          Make primary
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                )),
+              )}
             </tbody>
           </table>
           {pagination && pagination.total_pages > 1 ? (
@@ -9362,6 +9481,9 @@ function TrackRow({
             <span className={styles.trackTitleCell}>
               <span className={missing ? styles.muted : undefined}>{label}</span>
               <InlineFileStatus status={track.file_status} linkedFrom={track.linked_from} />
+              {(track.file_count ?? 0) > 1 ? (
+                <span className={styles.fileVersionCount}>{track.file_count} versions</span>
+              ) : null}
               <QueueStatusBadge status={queueStatus} />
             </span>
           </td>
