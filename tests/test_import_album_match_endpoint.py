@@ -42,7 +42,7 @@ def test_missing_source_logs_warning(import_match_client, caplog):
     fake_payload = {'success': True, 'album': {}, 'matches': [], 'unmatched_files': []}
     with caplog.at_level(logging.WARNING, logger='soulsync'):
         with patch(
-            'web_server.build_album_import_match_payload',
+            'api.import_routes.build_album_import_match_payload',
             return_value=fake_payload,
         ):
             resp = import_match_client.post(
@@ -69,7 +69,7 @@ def test_source_provided_does_not_warn(import_match_client, caplog):
     fake_payload = {'success': True, 'album': {}, 'matches': [], 'unmatched_files': []}
     with caplog.at_level(logging.WARNING, logger='soulsync'):
         with patch(
-            'web_server.build_album_import_match_payload',
+            'api.import_routes.build_album_import_match_payload',
             return_value=fake_payload,
         ):
             resp = import_match_client.post(
@@ -98,7 +98,7 @@ def test_source_passed_through_to_payload_builder(import_match_client):
     but still doing the wrong lookup."""
     fake_payload = {'success': True, 'album': {}, 'matches': [], 'unmatched_files': []}
     with patch(
-        'web_server.build_album_import_match_payload',
+        'api.import_routes.build_album_import_match_payload',
         return_value=fake_payload,
     ) as mock_builder:
         import_match_client.post(

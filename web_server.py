@@ -7916,8 +7916,9 @@ def reidentify_apply():
 
         # 5) Nudge the worker so it doesn't wait for the next timer tick.
         try:
-            if auto_import_worker is not None:
-                auto_import_worker.trigger_scan()
+            from api import import_routes as _imp
+            if _imp.auto_import_worker is not None:
+                _imp.auto_import_worker.trigger_scan()
         except Exception as _e:
             logger.debug("Re-identify: scan nudge failed (worker will catch it on its timer): %s", _e)
 
@@ -22863,214 +22864,8 @@ except Exception as e:
 # IMPORT / STAGING SYSTEM
 # ================================================================================================
 
-def _build_import_route_runtime():
-    return _ImportRouteRuntime(
-        post_process_matched_download=_post_process_matched_download,
-        add_activity_item=add_activity_item,
-        automation_engine=automation_engine,
-        hydrabase_worker=hydrabase_worker,
-        dev_mode_enabled=dev_mode_enabled,
-        import_singles_executor=import_singles_executor,
-        build_album_import_match_payload=build_album_import_match_payload,
-        process_single_import_file=lambda runtime, file_info: _process_single_import_file(file_info),
-        logger=logger,
-    )
-
-
-@app.route('/api/import/staging/files', methods=['GET'])
-def import_staging_files():
-    payload, status = _import_staging_files(_build_import_route_runtime())
-    return jsonify(payload), status
-
-
-@app.route('/api/import/staging/groups', methods=['GET'])
-def import_staging_groups():
-    payload, status = _import_staging_groups(_build_import_route_runtime())
-    return jsonify(payload), status
-
-
-@app.route('/api/import/staging/scan-status', methods=['GET'])
-def import_staging_scan_status():
-    payload, status = _import_staging_scan_status(_build_import_route_runtime())
-    return jsonify(payload), status
-
-
-def _reassign_missing_fields(data):
-    """Which required identifiers a reassign request left out.
-
-    Named explicitly rather than left to degrade: without them the service
-    would answer "Nothing to reassign", which reads like the album is empty
-    instead of like the request was malformed.
-    """
-    return [field for field in ('source', 'local_album_id', 'album_id')
-            if not str(data.get(field) or '').strip()]
-
-
-@app.route('/api/reassign/artists', methods=['GET'])
-@admin_only
-def reassign_search_artists():
-    """Step 1 of an album reassign: find the artist it SHOULD belong to.
-
-    Admin-only, like re-identify: it restages library files."""
-    try:
-        from core.imports.reassign_service import search_artists
-        return jsonify({'success': True, 'artists': search_artists(
-            request.args.get('source', ''), request.args.get('q', ''))})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/reassign/albums', methods=['GET'])
-@admin_only
-def reassign_artist_albums():
-    """Step 2: that artist's releases. Picking from THIS list is what
-    guarantees the target is one the source can answer for."""
-    try:
-        from core.imports.reassign_service import artist_albums
-        return jsonify({'success': True, 'albums': artist_albums(
-            request.args.get('source', ''), request.args.get('artist_id', ''))})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/reassign/preview', methods=['POST'])
-@admin_only
-def reassign_preview():
-    """Step 3: how the local files line up, BEFORE anything is staged."""
-    try:
-        from core.imports.reassign_service import preview_reassign
-        data = request.get_json() or {}
-        missing = _reassign_missing_fields(data)
-        if missing:
-            return jsonify({'success': False,
-                            'error': f"Missing required field(s): {', '.join(missing)}"}), 400
-        payload = preview_reassign(
-            get_database(), data.get('source', ''),
-            data.get('local_album_id'), data.get('album_id', ''))
-        return jsonify(payload), (200 if payload.get('success') else 400)
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/reassign/apply', methods=['POST'])
-@admin_only
-def reassign_apply():
-    """Step 4: stage each file with its hint. The import pipeline re-files
-    them — tags, folder and database rows all come from the same code that
-    handles a fresh download."""
-    try:
-        from core.imports.reassign_service import apply_reassign
-        from core.imports.staging import get_staging_path
-        data = request.get_json() or {}
-        missing = _reassign_missing_fields(data)
-        if missing:
-            return jsonify({'success': False,
-                            'error': f"Missing required field(s): {', '.join(missing)}"}), 400
-        payload = apply_reassign(
-            get_database(),
-            source=data.get('source', ''),
-            local_album_id=data.get('local_album_id'),
-            album_id=data.get('album_id', ''),
-            album_name=data.get('album_name', ''),
-            artist_id=data.get('artist_id'),
-            artist_name=data.get('artist_name', ''),
-            album_type=data.get('album_type'),
-            staging_dir=get_staging_path(),
-            replace=bool(data.get('replace', True)),
-            # Only ever true when the client has shown the user the preview and
-            # they accepted an incomplete mapping.
-            allow_partial=bool(data.get('allow_partial', False)),
-        )
-        return jsonify(payload), (200 if payload.get('success') else 400)
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/import/staging/hints', methods=['GET'])
-def import_staging_hints():
-    payload, status = _import_staging_hints(_build_import_route_runtime())
-    return jsonify(payload), status
-
-
-@app.route('/api/import/search/albums', methods=['GET'])
-def import_search_albums():
-    payload, status = _import_search_albums(
-        _build_import_route_runtime(),
-        request.args.get('q', ''),
-        request.args.get('limit', 12),
-        request.args.get('source', ''),
-    )
-    return jsonify(payload), status
-
-
-@app.route('/api/import/search/sources', methods=['GET'])
-def import_search_sources_route():
-    payload, status = _import_search_sources()
-    return jsonify(payload), status
-
-
-@app.route('/api/import/album/match', methods=['POST'])
-def import_album_match():
-    payload, status = _import_album_match(_build_import_route_runtime(), request.get_json() or {})
-    return jsonify(payload), status
-
-
-@app.route('/api/import/album/process', methods=['POST'])
-def import_album_process():
-    payload, status = _import_album_process(_build_import_route_runtime(), request.get_json() or {})
-    return jsonify(payload), status
-
-
-@app.route('/api/import/search/tracks', methods=['GET'])
-def import_search_tracks():
-    payload, status = _import_search_tracks(
-        _build_import_route_runtime(),
-        request.args.get('q', ''),
-        request.args.get('limit', 10),
-    )
-    return jsonify(payload), status
-
-
-def _process_single_import_file(file_info):
-    return _import_process_single_import_file(_build_import_route_runtime(), file_info)
-
-
-@app.route('/api/import/singles/process', methods=['POST'])
-def import_singles_process():
-    data = request.get_json() or {}
-    payload, status = _import_singles_process(_build_import_route_runtime(), data.get('files', []))
-    return jsonify(payload), status
-
-
-# Auto-Import Worker
-auto_import_worker = None
-try:
-    from core.auto_import_worker import AutoImportWorker
-    _ai_db = get_database()
-    _ai_staging = docker_resolve_path(config_manager.get('import.staging_path', './Staging'))
-    _ai_transfer = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-    auto_import_worker = AutoImportWorker(
-        database=_ai_db,
-        staging_path=_ai_staging,
-        transfer_path=_ai_transfer,
-        process_callback=_post_process_matched_download,
-        config_manager=config_manager,
-        automation_engine=automation_engine,
-    )
-    if config_manager.get('auto_import.enabled', False):
-        auto_import_worker.start()
-        logger.info("Auto-import worker started")
-    else:
-        logger.info("Auto-import worker initialized (disabled)")
-except Exception as _ai_err:
-    logger.error(f"Auto-import worker init failed: {_ai_err}")
-
-
-# /api/auto-import* endpoints: lifted to api/auto_import.py.
-@app.route('/api/import/staging/suggestions', methods=['GET'])
-def import_staging_suggestions():
-    payload, status = _import_staging_suggestions()
-    return jsonify(payload), status
+# ── import/reassign endpoints + the auto-import worker live in
+# api/import_routes.py now
 
 
 # ================================================================================================
@@ -23892,8 +23687,12 @@ from api.quality_profiles import configure as _cfg_qp, create_blueprint as _bp_q
 _cfg_qp(get_database=get_database, add_activity_item=add_activity_item)
 app.register_blueprint(_bp_qp())
 from api.auto_import import configure as _cfg_ai, create_blueprint as _bp_ai
+def _get_auto_import_worker():
+    # the worker handle lives (and is rebound) in api.import_routes
+    from api import import_routes as _imp
+    return _imp.auto_import_worker
 _cfg_ai(get_database=get_database, config_manager=config_manager,
-        _auto_import_worker=lambda: auto_import_worker)
+        _auto_import_worker=_get_auto_import_worker)
 app.register_blueprint(_bp_ai())
 from api.metadata_cache import configure as _cfg_mc, create_blueprint as _bp_mc
 _cfg_mc(get_database=get_database, get_metadata_cache=get_metadata_cache,
@@ -24002,6 +23801,20 @@ from api.labels import configure as _configure_labels_api, create_blueprint as _
 _configure_labels_api(db_getter=get_database, itunes_getter=_get_itunes_client,
                       deezer_getter=_get_deezer_client)
 app.register_blueprint(_create_labels_blueprint())
+
+# import/reassign + the auto-import worker
+from api.import_routes import configure as _cfg_imp, create_blueprint as _bp_imp
+_cfg_imp(
+    get_database=get_database,
+    config_manager=config_manager,
+    docker_resolve_path=docker_resolve_path,
+    import_singles_executor=import_singles_executor,
+    _post_process_matched_download=_post_process_matched_download,
+    automation_engine=automation_engine,
+    _dev_mode_enabled=lambda: dev_mode_enabled,
+    _hydrabase_worker=lambda: hydrabase_worker,
+)
+app.register_blueprint(_bp_imp())
 
 # hydrabase p2p
 from api.hydrabase_routes import configure as _cfg_hb, create_blueprint as _bp_hb
