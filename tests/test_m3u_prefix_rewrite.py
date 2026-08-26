@@ -60,11 +60,12 @@ def test_web_server_writers_use_the_shared_finalizer():
     assert ws.count("_m3u_entry_path(f'{entry_base_path}/{fp}' if entry_base_path else fp)") == 1
     assert ws.count("_m3u_entry_path(f'{entry_base_path}/{file_path}' if entry_base_path else file_path)") == 1
     assert "finalize_m3u_entry" in ws
-    # library export + scan-sync auto-writer pass the mapping through. the
-    # scan-sync site moved with the db-update family (aug 25 lift)
-    dba = (_ROOT.parent / 'api' / 'database_admin.py').read_text(encoding='utf-8')
-    combined = ws.count("rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or ''") \
-        + dba.count("rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or ''")
+    # library export + scan-sync auto-writer pass the mapping through. two
+    # of the three sites moved with the db-update and artist-detail lifts
+    needle = "rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or ''"
+    combined = ws.count(needle)
+    for mod in ('database_admin.py', 'artist_detail.py'):
+        combined += (_ROOT.parent / 'api' / mod).read_text(encoding='utf-8').count(needle)
     assert combined >= 3
 
 
