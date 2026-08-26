@@ -30,7 +30,7 @@ def _native_subject_boundary(monkeypatch):
     def subjects(database, _config_manager, **_kwargs):
         result = []
         for row in database._rows:
-            track_id, title, artist, album, path, album_image, artist_image, artist_id = row
+            track_id, title, artist, album, path, album_image, artist_image, artist_id = row[:8]
             result.append({
                 "file_id": track_id,
                 "track_id": track_id,
@@ -40,6 +40,7 @@ def _native_subject_boundary(monkeypatch):
                 "artist_name": artist,
                 "album_title": album,
                 "path": path,
+                "is_primary": True,
                 "album_image": album_image,
                 "artist_image": artist_image,
                 "track_source_ids": {},
@@ -83,9 +84,9 @@ class _FakeDB:
         return _FakeConn(self._rows)
 
 
-def _row(track_id, title, path):
+def _row(track_id, title, path, profile_id=None):
     # (t.id, t.title, ar.name, al.title, t.file_path, al.thumb_url, ar.thumb_url, ar.id)
-    return (track_id, title, "Artist", "Album", path, None, None, 42)
+    return (track_id, title, "Artist", "Album", path, None, None, 42, profile_id)
 
 
 def _context(rows, tmp_path: Path):
@@ -161,3 +162,31 @@ def test_missing_on_disk_is_counted_and_surfaced_not_silently_dropped(tmp_path: 
     completion = progress_lines[-1]
     assert "could not be located on disk" in completion
     assert "1 tracks" in completion
+
+
+def test_each_track_uses_its_assigned_profile(monkeypatch, tmp_path: Path):
+    flac = tmp_path / "05 - Profile Track.flac"
+    flac.write_bytes(b"x")
+    monkeypatch.setattr(
+        "core.library2.quality_eval.effective_track_profile",
+        lambda _conn, track_id: {
+            "id": 77,
+            "name": "Portable",
+            "lossy_copy_enabled": True,
+            "lossy_copy_codec": "mp3",
+            "lossy_copy_bitrate": "192",
+            "lossy_copy_delete_original": True,
+        },
+    )
+    ctx, findings, _ = _context(
+        [_row(5, "Profile Track", str(flac))], tmp_path)
+
+    result = LossyConverterJob().scan(ctx)
+
+    assert result.findings_created == 1
+    details = findings[0]["details"]
+    assert details["quality_profile_id"] == 77
+    assert details["quality_profile_name"] == "Portable"
+    assert details["codec"] == "mp3"
+    assert details["bitrate"] == "192"
+    assert details["delete_original"] is True

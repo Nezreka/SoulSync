@@ -4685,12 +4685,30 @@ class RepairWorker:
         if not file_path:
             return {'success': False, 'error': 'No file path associated with this finding'}
 
-        # Read fresh from current settings — not from finding details
+        # Read the track's assigned quality profile LIVE. Finding details only
+        # carry its id; codec/bitrate/delete-original may have changed since
+        # the scan. Fall back to legacy globals for old findings/installations.
         codec = 'mp3'
         bitrate = '320'
-        if self._config_manager:
+        delete_original = False
+        profile = None
+        profile_id = details.get('quality_profile_id') if isinstance(details, dict) else None
+        try:
+            from core.quality.selection import load_profile_by_id
+            profile = load_profile_by_id(profile_id) if profile_id else None
+        except Exception as e:
+            logger.debug("Could not resolve lossy-converter profile %r: %s", profile_id, e)
+        if isinstance(profile, dict) and 'lossy_copy_enabled' in profile:
+            if not profile.get('lossy_copy_enabled'):
+                return {'success': False, 'error': 'Lossy Copy is disabled for this track profile'}
+            codec = str(profile.get('lossy_copy_codec') or 'mp3').lower()
+            bitrate = str(profile.get('lossy_copy_bitrate') or '320')
+            delete_original = bool(profile.get('lossy_copy_delete_original'))
+        elif self._config_manager:
             codec = self._config_manager.get('lossy_copy.codec', 'mp3').lower()
             bitrate = self._config_manager.get('lossy_copy.bitrate', '320')
+            delete_original = bool(
+                self._config_manager.get('lossy_copy.delete_original', False))
         # Opus max per-channel bitrate is 256kbps — cap to avoid encoding failures
         if codec == 'opus' and int(bitrate) > 256:
             bitrate = '256'
@@ -4725,6 +4743,9 @@ class RepairWorker:
 
         if not os.path.exists(resolved):
             return {'success': False, 'error': f'Source file not found: {file_path}'}
+
+        from core.imports.file_ops import probe_audio_quality
+        acquired_quality = probe_audio_quality(resolved)
 
         out_path = os.path.splitext(resolved)[0] + out_ext
         # Safety invariant: ffmpeg runs with -y, so refuse to convert a file onto
@@ -4816,13 +4837,6 @@ class RepairWorker:
                                 dest_audio.save()
                 except Exception as e:
                     logger.debug("Failed to embed cover art in lossy copy: %s", e)
-
-            # Blasphemy Mode — uses the job's own setting, not the global lossy_copy one
-            delete_original = False
-            if self._config_manager:
-                job_settings = self._config_manager.get('repair.jobs.lossy_converter.settings', {})
-                if isinstance(job_settings, dict):
-                    delete_original = job_settings.get('delete_original', False)
 
             if delete_original:
                 try:

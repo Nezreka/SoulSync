@@ -18,6 +18,7 @@ from core.imports.file_ops import (
     downsample_hires_flac,
     get_audio_quality_string,
     get_quality_tier_from_extension,
+    probe_audio_quality,
     safe_move_file,
 )
 from core.imports.context import (
@@ -568,6 +569,8 @@ def _prepare_upgrade_artifact(file_path: str, context: dict, profile: dict):
     primary = file_path
     companions: list[str] = []
     before = probe_audio_quality(primary)
+    if before is not None:
+        context['_acquired_audio_quality'] = before.to_dict()
     expects_downsample = bool(
         profile.get("downsample_enabled")
         and before
@@ -581,6 +584,14 @@ def _prepare_upgrade_artifact(file_path: str, context: dict, profile: dict):
     if downsampled:
         primary = downsampled
         context["_quality_fallback_downsample"] = True
+        retained_quality = probe_audio_quality(primary)
+        context.setdefault('_retention_transforms', []).append({
+            'type': 'downsample_hires_flac',
+            'source_replaced': True,
+            'target_bit_depth': 16,
+            'target_sample_rate': 44100,
+            'output_quality': retained_quality.to_dict() if retained_quality else None,
+        })
 
     lossy_enabled = bool(profile.get("lossy_copy_enabled"))
     expects_lossy = lossy_enabled and is_lossless_audio_path(primary)
@@ -594,7 +605,16 @@ def _prepare_upgrade_artifact(file_path: str, context: dict, profile: dict):
         raise RuntimeError("Configured upgrade lossy transform failed; previous file kept")
     if lossy:
         context["_quality_fallback_lossy_copy"] = True
-        if os.path.exists(primary):
+        source_retained = os.path.exists(primary)
+        lossy_quality = probe_audio_quality(lossy)
+        context.setdefault('_retention_transforms', []).append({
+            'type': 'lossy_copy',
+            'source_replaced': not source_retained,
+            'codec': profile.get('lossy_copy_codec'),
+            'bitrate': profile.get('lossy_copy_bitrate'),
+            'output_quality': lossy_quality.to_dict() if lossy_quality else None,
+        })
+        if source_retained:
             companions.append(lossy)
         else:
             primary = lossy
@@ -921,6 +941,60 @@ def _record_completed_import_side_effects(
     emit_track_downloaded(context, automation_engine)
     record_library_history_download(context)
     return True
+
+
+def _apply_profile_output_transforms(final_path: str, context: dict,
+                                     profile: dict) -> str:
+    """Apply downsample/lossy retention while preserving acquisition truth."""
+    acquired_quality = probe_audio_quality(final_path)
+    if acquired_quality is not None:
+        context['_acquired_audio_quality'] = acquired_quality.to_dict()
+
+    downsampled_path = downsample_hires_flac(
+        final_path, context, enabled=profile.get('downsample_enabled'))
+    if downsampled_path:
+        final_path = downsampled_path
+        context['_final_processed_path'] = final_path
+        retained_quality = probe_audio_quality(final_path)
+        context.setdefault('_retention_transforms', []).append({
+            'type': 'downsample_hires_flac',
+            'source_replaced': True,
+            'target_bit_depth': 16,
+            'target_sample_rate': 44100,
+            'output_quality': retained_quality.to_dict() if retained_quality else None,
+        })
+        context['_quality_fallback_downsample'] = True
+
+    _persist_verification_status(context, final_path)
+
+    lossy_path = create_lossy_copy(final_path, settings={
+        'enabled': profile.get('lossy_copy_enabled'),
+        'codec': profile.get('lossy_copy_codec'),
+        'bitrate': profile.get('lossy_copy_bitrate'),
+        'delete_original': profile.get('lossy_copy_delete_original'),
+    } if profile else None)
+    if not lossy_path:
+        return final_path
+
+    source_retained = os.path.isfile(final_path)
+    lossy_quality = probe_audio_quality(lossy_path)
+    context.setdefault('_retention_transforms', []).append({
+        'type': 'lossy_copy',
+        'source_replaced': not source_retained,
+        'codec': profile.get('lossy_copy_codec'),
+        'bitrate': profile.get('lossy_copy_bitrate'),
+        'output_quality': lossy_quality.to_dict() if lossy_quality else None,
+    })
+    context['_quality_fallback_lossy_copy'] = True
+    if source_retained:
+        companions = context.setdefault('_companion_file_paths', [])
+        if lossy_path not in companions:
+            companions.append(lossy_path)
+        context['_final_processed_path'] = final_path
+        return final_path
+
+    context['_final_processed_path'] = lossy_path
+    return lossy_path
 
 
 def post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=None):
@@ -2127,39 +2201,14 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
 
         _qp_post = _resolve_context_quality_profile(context)
         if _upgrade_snapshot is None:
-            downsampled_path = downsample_hires_flac(
-                final_path, context,
-                enabled=_qp_post.get('downsample_enabled'))
-            if downsampled_path:
-                final_path = downsampled_path
-                context['_final_processed_path'] = final_path
-                # Deep-dive A7/C4: record that the quality profile's fallback fired,
-                # so the lib2 autolink callback can surface it on the file row
-                # instead of the fact silently disappearing after this function returns.
-                context['_quality_fallback_downsample'] = True
+            final_path = _apply_profile_output_transforms(
+                final_path, context, _qp_post)
+        else:
+            # Upgrade artifacts were transformed transactionally in staging;
+            # only persist the verification tag after their final move.
+            _persist_verification_status(context, final_path)
 
-        _persist_verification_status(context, final_path)
         _attach_manual_skip_path(context_key, final_path)
-
-        blasphemy_path = None if _upgrade_snapshot is not None else create_lossy_copy(
-            final_path, settings={
-                'enabled': _qp_post.get('lossy_copy_enabled'),
-                'codec': _qp_post.get('lossy_copy_codec'),
-                'bitrate': _qp_post.get('lossy_copy_bitrate'),
-                'delete_original': _qp_post.get('lossy_copy_delete_original'),
-            } if _qp_post else None)
-        if blasphemy_path:
-            context['_final_processed_path'] = blasphemy_path
-            context['_quality_fallback_lossy_copy'] = True
-            # dd28-40: with delete_original=False both files are on disk, but
-            # only the lossy copy was ever handed to lib2 — the retained
-            # lossless file read as an orphan, and every later quality/cutoff
-            # evaluation judged the track by its MP3. Register it as a second
-            # file of the same track; ADR-03's primary election prefers
-            # lossless, so it also becomes the file the app acts on.
-            if os.path.normpath(blasphemy_path) != os.path.normpath(final_path) \
-                    and os.path.exists(final_path):
-                context.setdefault('_companion_file_paths', []).append(final_path)
 
         downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
         cleanup_empty_directories(downloads_path, file_path)

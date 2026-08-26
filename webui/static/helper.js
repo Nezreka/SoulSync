@@ -1868,7 +1868,7 @@ const HELPER_CONTENT = {
     // Library — Lossy Copy
     '#lossy-copy-enabled': {
         title: 'Lossy Copy',
-        description: 'Create a lower-bitrate copy of every downloaded file alongside the original. Useful for syncing to mobile devices or bandwidth-limited streaming.',
+        description: 'Create a lower-bitrate derivative of downloaded lossless audio. If the source is kept, SoulSync treats both files as versions of one track; if it is deleted, the acquired quality is still remembered for upgrade decisions.',
         docsId: 'set-processing'
     },
 

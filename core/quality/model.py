@@ -116,6 +116,29 @@ class AudioQuality:
             br = f" {self.bitrate}kbps" if self.bitrate else ""
             return f"{fmt}{br}"
 
+    def to_dict(self) -> dict:
+        """JSON-safe representation used by acquisition/retention provenance."""
+        return {
+            key: value for key, value in {
+                "format": self.format,
+                "bitrate": self.bitrate,
+                "sample_rate": self.sample_rate,
+                "bit_depth": self.bit_depth,
+            }.items() if value is not None
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict) -> 'AudioQuality':
+        """Rebuild a quality descriptor from persisted provenance."""
+        if not isinstance(value, dict) or not value.get("format"):
+            raise ValueError("audio quality needs a format")
+        return cls(
+            format=str(value["format"]),
+            bitrate=_optional_int(value.get("bitrate")),
+            sample_rate=_optional_int(value.get("sample_rate")),
+            bit_depth=_optional_int(value.get("bit_depth")),
+        )
+
     @classmethod
     def from_slskd_file(cls, file_data: dict, extension: str) -> 'AudioQuality':
         """Build from a raw slskd API file entry.
@@ -140,6 +163,12 @@ class AudioQuality:
     def from_extension_and_bitrate(cls, extension: str, bitrate: Optional[int]) -> 'AudioQuality':
         """Minimal constructor when only format + bitrate are known (torrent, YouTube)."""
         return cls(format=extension.lower().lstrip('.'), bitrate=bitrate)
+
+
+def _optional_int(value) -> Optional[int]:
+    if value in (None, ""):
+        return None
+    return int(value)
 
 
 @dataclass
