@@ -125,13 +125,18 @@ class TestBuildFilenameBuckets:
         buckets = defaultdict(list, song=[track])
         assert self.job._build_filename_buckets(buckets=buckets, found_groups=set()) == {}
 
-    def test_different_extensions_bucket_separately(self):
-        """A .mp3 next to a .flac with the same canonical stem are
-        different files (different formats), not slskd dedup orphans."""
+    def test_different_extensions_bucket_together(self):
+        """A .mp3 next to a .flac with the same canonical stem ARE compared
+        now - 'same track, two formats, one folder' is exactly where tags
+        disagree most (kvkarlsson's flac+ogg rips, aug 25). the pair-level
+        duration sanity check and the lossy-companion guard decide from
+        there."""
         mp3 = _make_track(1, title="Song", file_path="/lib/Song.mp3")
         flac = _make_track(2, title="Song", file_path="/lib/Song_639122324339578022.flac")
         buckets = defaultdict(list, song=[mp3, flac])
-        assert self.job._build_filename_buckets(buckets=buckets, found_groups=set()) == {}
+        grouped = self.job._build_filename_buckets(buckets=buckets, found_groups=set())
+        assert list(grouped.keys()) == ['song']
+        assert len(grouped['song']) == 2
 
     def test_skips_tracks_without_file_path(self):
         """Defensive: DB rows can carry NULL file_path — skip them."""

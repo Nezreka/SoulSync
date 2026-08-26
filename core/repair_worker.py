@@ -1242,8 +1242,11 @@ class RepairWorker:
             params.append(finding_type)
         if q and str(q).strip():
             needle = f"%{str(q).strip()}%"
-            where_parts.append("(title LIKE ? OR file_path LIKE ?)")
-            params.extend([needle, needle])
+            # details_json too: a duplicate group is titled after ONE member,
+            # so the other copies' names lived only in details and the
+            # search box could not see them
+            where_parts.append("(title LIKE ? OR file_path LIKE ? OR details_json LIKE ?)")
+            params.extend([needle, needle, needle])
 
         where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
         return where, params

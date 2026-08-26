@@ -5,6 +5,8 @@ from collections import defaultdict
 from difflib import SequenceMatcher
 
 from core.imports.file_ops import _strip_slskd_dedup_suffix
+from core.quality.lossless import is_lossless_format
+from core.quality.source_map import format_from_extension
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -51,10 +53,11 @@ class DuplicateDetectorJob(RepairJob):
         # job's own help text) on any settings dict missing the key
         ignore_cross_album = settings.get('ignore_cross_album', False)
 
-        # Respect the global "allow duplicate tracks across albums" setting —
-        # if the user explicitly allows duplicates across albums, never flag them
-        if context.config_manager and context.config_manager.get('library.allow_duplicate_tracks', False):
-            ignore_cross_album = True
+        # (a 'library.allow_duplicate_tracks' override used to live here — a
+        # dead key nothing ever writes; the job's own ignore_cross_album
+        # setting is the real control)
+
+        lossy_companion_exts = self._lossy_companion_exts(context)
 
         # Fetch all tracks with artist/album names via JOIN
         tracks = []
@@ -123,6 +126,7 @@ class DuplicateDetectorJob(RepairJob):
             self._scan_bucket(
                 bucket_tracks=bucket_tracks,
                 require_metadata_match=True,
+                lossy_companion_exts=lossy_companion_exts,
                 title_threshold=title_threshold,
                 artist_threshold=artist_threshold,
                 ignore_cross_album=ignore_cross_album,
@@ -156,6 +160,7 @@ class DuplicateDetectorJob(RepairJob):
             self._scan_bucket(
                 bucket_tracks=fname_tracks,
                 require_metadata_match=False,
+                lossy_companion_exts=lossy_companion_exts,
                 title_threshold=title_threshold,
                 artist_threshold=artist_threshold,
                 ignore_cross_album=ignore_cross_album,
@@ -186,6 +191,7 @@ class DuplicateDetectorJob(RepairJob):
         total,
         result,
         context,
+        lossy_companion_exts=frozenset(),
     ) -> None:
         """Compare every pair within a bucket; emit duplicate groups.
 
@@ -229,6 +235,12 @@ class DuplicateDetectorJob(RepairJob):
                 # flagged, so this gate must not be limited to the
                 # title-bucket pass.
                 if ignore_cross_album and t1['album'] and t2['album'] and t1['album'] != t2['album']:
+                    continue
+
+                # a lossless file with its own intentional lossy copy beside
+                # it (the lossy-copy feature) is not a duplicate
+                if _is_lossy_companion_pair(
+                        t1['file_path'], t2['file_path'], lossy_companion_exts):
                     continue
 
                 if require_metadata_match:
@@ -318,6 +330,37 @@ class DuplicateDetectorJob(RepairJob):
         if context.update_progress and processed_holder['count'] % 200 == 0:
             context.update_progress(processed_holder['count'], total)
 
+    _LOSSY_CODEC_EXTS = {'mp3': '.mp3', 'opus': '.opus', 'aac': '.m4a'}
+
+    def _lossy_companion_exts(self, context: JobContext) -> set:
+        """Extensions the lossy-copy feature writes next to lossless
+        sources — from the global toggle and any quality profile that has
+        it on. Empty set when nobody uses the feature, so nothing is ever
+        skipped for users who don't."""
+        exts = set()
+        try:
+            cfg = context.config_manager
+            if cfg and cfg.get('lossy_copy.enabled', False):
+                codec = str(cfg.get('lossy_copy.codec', 'mp3')).lower()
+                exts.add(self._LOSSY_CODEC_EXTS.get(codec, '.mp3'))
+        except Exception as e:
+            logger.debug("lossy companion config read failed: %s", e)
+        try:
+            conn = context.db._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT lossy_copy_codec FROM quality_profiles"
+                    " WHERE lossy_copy_enabled = 1")
+                for (codec,) in cursor.fetchall():
+                    exts.add(self._LOSSY_CODEC_EXTS.get(
+                        str(codec or 'mp3').lower(), '.mp3'))
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug("lossy companion profile read failed: %s", e)
+        return exts
+
     def _build_filename_buckets(self, *, buckets, found_groups):
         """Re-bucket all tracks by canonical filename stem.
 
@@ -339,7 +382,10 @@ class DuplicateDetectorJob(RepairJob):
                 if not stem:
                     continue
                 canonical = _strip_slskd_dedup_suffix(stem)
-                key = (canonical.lower(), ext.lower())
+                # stem only - keying on the extension too made this pass
+                # blind to 'same track, two formats, one folder', which is
+                # exactly where tags disagree most (flac + ogg rips)
+                key = canonical.lower()
                 filename_buckets[key].append(track)
         return {k: v for k, v in filename_buckets.items() if len(v) >= 2}
 
@@ -372,6 +418,30 @@ def _normalize(text: str) -> str:
         return ""
     t = text.lower()
     return ''.join(c for c in t if c.isalnum() or c in '() ').strip()
+
+
+def _is_lossy_companion_pair(path1, path2, companion_exts) -> bool:
+    """True when the pair is a lossless file plus its intentional lossy copy:
+    same folder, same stem, one lossless / one lossy, and the lossy side's
+    extension is one the lossy-copy feature actually writes."""
+    if not companion_exts:
+        return False
+    p1 = str(path1 or '').replace('\\', '/')
+    p2 = str(path2 or '').replace('\\', '/')
+    d1, b1 = os.path.split(p1)
+    d2, b2 = os.path.split(p2)
+    if d1.lower() != d2.lower():
+        return False
+    s1, e1 = os.path.splitext(b1)
+    s2, e2 = os.path.splitext(b2)
+    if s1.lower() != s2.lower():
+        return False
+    lossless1 = is_lossless_format(format_from_extension(e1.lstrip('.').lower()))
+    lossless2 = is_lossless_format(format_from_extension(e2.lstrip('.').lower()))
+    if lossless1 == lossless2:
+        return False
+    lossy_ext = e2 if lossless1 else e1
+    return lossy_ext.lower() in companion_exts
 
 
 def _is_same_physical_file(p1, p2, dur1, dur2) -> bool:
