@@ -115,9 +115,9 @@ def test_no_callback_is_the_normal_case():
 
 @pytest.fixture(scope='module')
 def route():
-    src = read('web_server.py')
+    src = read('api/source_playlists.py')
     i = src.index('def get_deezer_arl_playlist_tracks(')
-    return src[i:src.index('\n@app.route', i)]
+    return src[i:src.index('\n@bp.route', i)]
 
 
 def test_the_route_hands_the_fetch_a_progress_emitter(route):
@@ -191,9 +191,9 @@ def test_the_paste_a_link_tab_listens_too():
 def test_the_public_playlist_route_emits_as_well():
     """Same event, same shape, so the existing core.js bridge and consumers
     work unchanged."""
-    src = read('web_server.py')
+    src = read('api/source_playlists.py')
     i = src.index('def get_deezer_playlist(')
-    route = src[i:src.index('\n@app.route', i)]
+    route = src[i:src.index('\n@bp.route', i)]
     assert 'progress_cb=_emit_progress' in route
     assert f"socketio.emit('{SOCKET_EVENT}'" in route
 
