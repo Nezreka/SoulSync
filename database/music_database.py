@@ -2802,6 +2802,8 @@ class MusicDatabase:
                     track_title TEXT,
                     track_artist TEXT,
                     track_album TEXT,
+                    acquired_quality_json TEXT,
+                    retention_json TEXT,
                     status TEXT DEFAULT 'completed',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -2836,6 +2838,9 @@ class MusicDatabase:
                     added_external = True
             if added_external:
                 logger.info(f"Added external-ID columns to track_downloads: {', '.join(external_id_cols)}")
+            for _col in ('acquired_quality_json', 'retention_json'):
+                if _col not in td_columns:
+                    cursor.execute(f"ALTER TABLE track_downloads ADD COLUMN {_col} TEXT")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_spotify_id ON track_downloads (spotify_track_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_itunes_id ON track_downloads (itunes_track_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_deezer_id ON track_downloads (deezer_track_id)")
@@ -16481,7 +16486,9 @@ class MusicDatabase:
                                musicbrainz_recording_id: Optional[str] = None,
                                audiodb_id: Optional[str] = None,
                                soul_id: Optional[str] = None,
-                               isrc: Optional[str] = None) -> Optional[int]:
+                               isrc: Optional[str] = None,
+                               acquired_quality_json: Optional[str] = None,
+                               retention_json: Optional[str] = None) -> Optional[int]:
         """Record a download with full source provenance. Returns the record ID.
 
         External-ID kwargs (spotify_track_id et al.) capture the metadata-
@@ -16517,13 +16524,15 @@ class MusicDatabase:
                  source_size, audio_quality, track_title, track_artist, track_album, status,
                  bit_depth, sample_rate, bitrate,
                  spotify_track_id, itunes_track_id, deezer_track_id, tidal_track_id,
-                 qobuz_track_id, musicbrainz_recording_id, audiodb_id, soul_id, isrc)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 qobuz_track_id, musicbrainz_recording_id, audiodb_id, soul_id, isrc,
+                 acquired_quality_json, retention_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (track_id, file_path, source_service, source_username, source_filename,
                   source_size, audio_quality, track_title, track_artist, track_album, status,
                   bit_depth, sample_rate, bitrate,
                   spotify_track_id, itunes_track_id, deezer_track_id, tidal_track_id,
-                  qobuz_track_id, musicbrainz_recording_id, audiodb_id, soul_id, isrc))
+                  qobuz_track_id, musicbrainz_recording_id, audiodb_id, soul_id, isrc,
+                  acquired_quality_json, retention_json))
             conn.commit()
             return cursor.lastrowid
         except Exception as e:
@@ -16577,7 +16586,8 @@ class MusicDatabase:
         number of columns updated. Called from
         ``insert_or_update_media_track`` immediately after the row is
         inserted/updated so freshly synced media-server rows pick up
-        whatever IDs SoulSync already knew at download time.
+        whatever identity and retention provenance SoulSync already knew at
+        download time.
         """
         if not track_id or not file_path:
             return 0
@@ -16599,6 +16609,8 @@ class MusicDatabase:
             'audiodb_id': 'audiodb_id',
             'soul_id': 'soul_id',
             'isrc': 'isrc',
+            'acquired_quality_json': 'acquired_quality_json',
+            'retention_json': 'retention_json',
         }
 
         updates: Dict[str, str] = {}

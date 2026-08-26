@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 from types import SimpleNamespace
@@ -792,6 +793,37 @@ def test_provenance_labels_auto_import(monkeypatch):
     }
     side_effects.record_download_provenance(context)
     assert captured.get("source_service") == "auto_import"
+
+
+def test_download_provenance_carries_retention_policy_for_media_server(monkeypatch):
+    """The media-server path returns before the standalone track insert, so
+    track_downloads must carry the transform truth until the server scan adds
+    its tracks row."""
+    captured = {}
+
+    class _DBStub:
+        def record_track_download(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(side_effects, "get_database", lambda: _DBStub())
+    context = {
+        "track_info": {"name": "Portable", "artists": [{"name": "Artist"}]},
+        "_final_processed_path": "/library/Portable.mp3",
+        "_acquired_audio_quality": {
+            "format": "flac", "bit_depth": 24, "sample_rate": 96000,
+        },
+        "_retention_transforms": [{
+            "type": "lossy_copy", "source_replaced": True,
+        }],
+    }
+
+    side_effects.record_download_provenance(context)
+
+    assert json.loads(captured["acquired_quality_json"])["format"] == "flac"
+    assert json.loads(captured["retention_json"])[0] == {
+        "source_replaced": True,
+        "type": "lossy_copy",
+    }
 
 
 def test_is_active_media_server_ready_standalone_always_ready(monkeypatch):
