@@ -155,3 +155,12 @@ def test_the_banner_explains_intuitive_save_behaviour(index_html):
     banner = index_html[start:end]
     assert "Changes autosave to this profile" in banner
     assert "Save Settings saves it too" in banner
+
+
+def test_conversion_copy_distinguishes_acquisition_from_retained_output(
+        settings_js, index_html):
+    assert "One profile, two decisions" in index_html
+    assert "acquired quality is remembered" in index_html
+    assert "lossless + ${codec} companion" in settings_js
+    assert "retain ${codec} only (acquisition remembered)" in settings_js
+    assert "Blasphemy Mode" not in index_html
