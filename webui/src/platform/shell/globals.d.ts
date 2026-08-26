@@ -582,6 +582,49 @@ declare global {
     setDownloadMode?: (which: string) => Promise<void>;
     closeWatchlistHistoryModal?: () => void;
     toggleWatchlistHistoryRun?: (runId: string, btn: HTMLElement) => Promise<void>;
+    /** src/shell ports (aug 26, batch 3): library-globals, track-detail,
+     * manual-library-match, server-activity */
+    artistDetailBackLabels?: Record<string, string>;
+    artistDetailLabelStack?: Array<
+      { type: 'page'; pageId: string } | { type: 'artist'; name: string }
+    >;
+    navigateToArtistDetail?: (
+      artistId: string | number,
+      artistName: string,
+      sourceOverride?: string | null,
+      options?: { skipRouteChange?: boolean },
+    ) => void;
+    playLibraryTrack?: (
+      track: Record<string, unknown>,
+      albumTitle?: string,
+      artistName?: string,
+    ) => Promise<void>;
+    clearArtistDetailPageState?: () => void;
+    openTrackDetail?: (taskId: string) => Promise<void>;
+    closeTrackDetail?: () => void;
+    _mlmClose?: () => void;
+    _mlmSourceDebounce?: (q: string) => void;
+    _mlmLibraryDebounce?: (q: string) => void;
+    _mlmSelectSource?: (idx: number) => void;
+    _mlmSelectLibrary?: (idx: number) => void;
+    _mlmSaveMatch?: () => Promise<void>;
+    _mlmDeleteMatch?: (id: number) => Promise<void>;
+    ServerActivity?: {
+      toggle: () => void;
+      open: () => void;
+      close: () => void;
+      refresh: () => Promise<unknown>;
+      _onSocket: (d: unknown) => void;
+      _wantsLive: () => boolean;
+    };
+    SoulSyncActivitySocket?: {
+      isConnected: () => boolean;
+      subscribe: () => void;
+      unsubscribe: () => void;
+    };
+    SoulSyncVideo?: {
+      openDetail?: (args: { kind: string; id: number | string; source?: string }) => void;
+    };
     SoulSyncIssueDomain?: IssueDomainBridge;
     SoulSyncWorkflowActions?: {
       openDownloadMissingAlbum: (input: DownloadMissingAlbumWorkflowInput) => void | Promise<void>;

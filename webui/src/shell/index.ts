@@ -43,6 +43,28 @@ import {
   switchServiceSwitchTab,
 } from './service-switch';
 import {
+  _handoffLibrarySearchToEnhancedSearch,
+  _updateSidebarLibraryBreadcrumb,
+  clearArtistDetailPageState,
+  navigateToArtistDetail,
+  playLibraryTrack,
+} from './library-globals';
+import {
+  _mlmClose,
+  _mlmDeleteMatch,
+  _mlmLibraryDebounce,
+  _mlmSaveMatch,
+  _mlmSelectLibrary,
+  _mlmSelectSource,
+  _mlmSourceDebounce,
+  openManualLibraryMatchTool,
+} from './manual-library-match';
+import './server-activity';
+import {
+  closeTrackDetail,
+  openTrackDetail,
+} from './track-detail';
+import {
   closeWatchlistHistoryModal,
   openWatchlistHistoryModal,
   toggleWatchlistHistoryRun,
@@ -81,6 +103,25 @@ export const SHELL_WINDOW_EXPORTS = {
   switchServiceSwitchTab,
   setActiveSource,
   setDownloadMode,
+  // library-globals.js (ported aug 26; the state objects self-assign inside)
+  navigateToArtistDetail,
+  playLibraryTrack,
+  clearArtistDetailPageState,
+  _updateSidebarLibraryBreadcrumb,
+  _handoffLibrarySearchToEnhancedSearch,
+  // track-detail.js (ported aug 26)
+  openTrackDetail,
+  closeTrackDetail,
+  // manual-library-match.js (ported aug 26)
+  openManualLibraryMatchTool,
+  _mlmClose,
+  _mlmSourceDebounce,
+  _mlmLibraryDebounce,
+  _mlmSelectSource,
+  _mlmSelectLibrary,
+  _mlmSaveMatch,
+  _mlmDeleteMatch,
+  // server-activity.js (ported aug 26): self-assigns window.ServerActivity
 } as const;
 
 Object.assign(window, SHELL_WINDOW_EXPORTS);

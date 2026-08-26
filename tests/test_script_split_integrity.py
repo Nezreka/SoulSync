@@ -43,8 +43,8 @@ SPLIT_MODULES = [
     "wishlist-tools.js",
     "sync-services.js",
     "api-monitor.js",
-    "library-globals.js",
-    "manual-library-match.js",
+    # library-globals.js + manual-library-match.js ported to typescript
+    # (src/shell, aug 26) - their globals now flow through the shell bundle
     "beatport-ui.js",
     "enrichment.js",
     "stats-automations.js",

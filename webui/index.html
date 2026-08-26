@@ -7628,29 +7628,27 @@
     <script src="{{ url_for('static', filename='settings.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-spotify.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='downloads.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='server-activity.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='track-detail.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='wishlist-tools.js', v=static_v) }}"></script>
     <!-- the SHELL bundle: classic scripts ported to typescript (src/shell/*,
          built by vite.shell.config.ts as a synchronous IIFE). currently:
          blocklist, origin-history, watchlist-history, my-accounts,
-         service-switch. loaded in the slot of the first ported file so the
-         window globals exist by the time anything that calls them runs. -->
+         service-switch, library-globals, track-detail, manual-library-match,
+         server-activity. loaded in the slot of the first ported file so the
+         window globals exist by the time anything that calls them runs.
+         (discover-section-controller.js was deleted outright - its consumer,
+         the vanilla discover page, is long gone.) -->
     <script src="{{ url_for('static', filename='dist/shell.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-listenbrainz.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-lastfm.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-soulsync-discovery.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='api-monitor.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='library-globals.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='manual-library-match.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='beatport-ui.js', v=static_v) }}"></script>
     <!-- Artist Web graph stack (sigma.js): graphology = data model, sigma = WebGL renderer,
          graphology-library = utils incl. forceAtlas2 layout. CDN/UMD (SoulSync is vanilla). -->
     <script defer src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/graphology-library/dist/graphology-library.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/sigma@2.4.0/build/sigma.min.js"></script>
-    <script src="{{ url_for('static', filename='discover-section-controller.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='enrichment.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='enrichment-manager.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='stats-automations.js', v=static_v) }}"></script>

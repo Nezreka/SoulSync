@@ -448,15 +448,16 @@ def test_ui_is_wired():
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent
     idx = (root / "webui" / "index.html").read_text(encoding="utf-8")
-    js = (root / "webui" / "static" / "server-activity.js").read_text(encoding="utf-8")
+    # ported to typescript (src/shell, aug 26); same pins against the TS source
+    js = (root / "webui" / "src" / "shell" / "server-activity.ts").read_text(encoding="utf-8")
     css = (root / "webui" / "static" / "style.css").read_text(encoding="utf-8")
     # app-wide floating button next to the notif bell + the script include
     assert 'id="activity-float-btn"' in idx and "ServerActivity.toggle()" in idx
-    assert "server-activity.js" in idx
+    assert "dist/shell.js" in idx  # the shell bundle carries the port
     # the drawer + poll + endpoints
     assert "/api/server-activity" in js and "/api/server-activity/image" in js
     assert "function card" in js and "function refresh" in js
-    assert "setInterval(refresh, 3000)" in js         # live cadence while open
+    assert "setInterval(() => void refresh(), 3000)" in js  # live cadence while open
     assert "startBadgePoll" in js                     # ambient badge from any page
     # never touches the network-triggering user thumb — initials avatar instead
     assert "function initials" in js
