@@ -462,6 +462,31 @@ def test_opus_quality_chip_estimates_bitrate_when_header_has_none(tmp_path, monk
     assert aq.bitrate == 160
 
 
+def test_probe_audio_quality_reads_explicit_alac_extension(tmp_path, monkeypatch):
+    path = tmp_path / "source.alac"
+    path.write_bytes(b"fake-alac")
+
+    class _Info:
+        codec = "alac"
+        bitrate = 4_608_000
+        sample_rate = 96_000
+        bits_per_sample = 24
+
+    class _MP4:
+        def __init__(self, _path):
+            self.info = _Info()
+
+    monkeypatch.setattr("mutagen.mp4.MP4", _MP4)
+
+    aq = _fo.probe_audio_quality(str(path))
+
+    assert aq is not None
+    assert aq.format == "alac"
+    assert aq.bitrate == 4608
+    assert aq.sample_rate == 96_000
+    assert aq.bit_depth == 24
+
+
 def test_opus_256_estimate_meets_opus_192_target(tmp_path, monkeypatch):
     path = tmp_path / "premium.opus"
     path.write_bytes(b"x" * 64_000)  # 64 KB over 2s ≈ 256 kbps
