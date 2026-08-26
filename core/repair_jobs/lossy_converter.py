@@ -235,7 +235,11 @@ class LossyConverterJob(RepairJob):
                             'album_thumb_url': album_thumb or None,
                             'artist_thumb_url': artist_thumb or None,
                             'artist_id': artist_id,
-                            'quality_profile_id': policy.get('profile_id'),
+                            # Preserve the track's assignment semantics, not
+                            # the concrete default resolved for this scan.
+                            # NULL means "follow the current default" and must
+                            # remain live until the user applies the finding.
+                            'quality_profile_id': profile_id,
                             'quality_profile_name': policy.get('profile_name'),
                             'delete_original': policy.get('delete_original', False),
                         }

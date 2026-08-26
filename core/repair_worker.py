@@ -4942,7 +4942,10 @@ class RepairWorker:
         profile_id = details.get('quality_profile_id') if isinstance(details, dict) else None
         try:
             from core.quality.selection import load_profile_by_id
-            profile = load_profile_by_id(profile_id) if profile_id else None
+            # A NULL assignment deliberately means "use the current default".
+            # load_profile_by_id(None) performs that live resolution, so a
+            # default-profile change between scan and apply is respected.
+            profile = load_profile_by_id(profile_id)
         except Exception as e:
             logger.debug("Could not resolve lossy-converter profile %r: %s", profile_id, e)
         if isinstance(profile, dict) and 'lossy_copy_enabled' in profile:
