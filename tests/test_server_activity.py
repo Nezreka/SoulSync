@@ -488,11 +488,13 @@ def test_ui_is_wired():
 
 
 def test_web_server_registers_the_routes():
+    # the routes moved to api/server_activity.py (aug 25 lift) - same paths,
+    # blueprint decorator
     from pathlib import Path
-    ws = (Path(__file__).resolve().parent.parent / "web_server.py").read_text(encoding="utf-8")
-    assert "@app.route('/api/server-activity')" in ws
-    assert "@app.route('/api/server-activity/image')" in ws
-    assert "@app.route('/api/server-activity/history')" in ws
-    assert "@app.route('/api/server-activity/stop', methods=['POST'])" in ws
-    assert "@app.route('/api/server-activity/stats')" in ws
+    ws = (Path(__file__).resolve().parent.parent / "api" / "server_activity.py").read_text(encoding="utf-8")
+    assert "@bp.route('/api/server-activity')" in ws
+    assert "@bp.route('/api/server-activity/image')" in ws
+    assert "@bp.route('/api/server-activity/history')" in ws
+    assert "@bp.route('/api/server-activity/stop', methods=['POST'])" in ws
+    assert "@bp.route('/api/server-activity/stats')" in ws
     assert "is_admin" in ws.split("stop_server_activity_stream")[1][:400]   # admin-gated
