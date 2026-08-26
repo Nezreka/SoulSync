@@ -439,7 +439,7 @@ class SeasonalDiscoveryService:
     def _get_lastfm_client(self):
         """lastfm client for the tag chain, or None when no key is set."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             api_key = config_manager.get('lastfm.api_key', '')
             if not api_key:
                 return None
