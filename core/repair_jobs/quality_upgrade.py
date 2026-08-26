@@ -46,6 +46,7 @@ from core.library.path_resolver import resolve_library_file_path
 from core.imports.file_ops import probe_audio_quality
 from core.quality.model import rank_candidate
 from core.quality.selection import targets_from_profile, quality_meets_profile, load_profile_by_id
+from core.quality.retention import acquired_quality_from_json, evaluation_qualities
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.quality_upgrade")
@@ -253,6 +254,7 @@ _TRACK_COLS = (
     'id', 'title', 'file_path', 'bitrate', 'duration', 'artist_name', 'album_title',
     'album_id', 'track_number', 'spotify_album_id', 'itunes_album_id', 'deezer_id',
     'musicbrainz_release_id', 'audiodb_id', 'quality_profile_id',
+    'acquired_quality_json', 'retention_json',
 )
 
 # Human-readable note per match tier (search uses a confidence % instead).
@@ -474,7 +476,8 @@ class QualityUpgradeJob(RepairJob):
                 "SELECT t.id, t.title, t.file_path, t.bitrate, t.duration, "
                 "a.name AS artist_name, al.title AS album_title, t.album_id, t.track_number, "
                 "al.spotify_album_id, al.itunes_album_id, al.deezer_id, "
-                "al.musicbrainz_release_id, al.audiodb_id, t.quality_profile_id "
+                "al.musicbrainz_release_id, al.audiodb_id, t.quality_profile_id, "
+                "t.acquired_quality_json, t.retention_json "
                 "FROM tracks t "
                 "JOIN artists a ON t.artist_id = a.id "
                 "JOIN albums al ON t.album_id = al.id "
@@ -725,17 +728,27 @@ class QualityUpgradeJob(RepairJob):
                     context.update_progress(i + 1, total)
                 continue
 
-            if not broken_reason and measured_aq is not None:
+            evaluation_values = evaluation_qualities(
+                measured_aq,
+                row.get('acquired_quality_json'),
+                row.get('retention_json'),
+            )
+            if not broken_reason and evaluation_values:
                 if cutoff_index is not None:
                     # ranking-based: skip only if the file already sits at the
                     # configured cutoff rank or better. Any lower rank triggers
                     # a proposed upgrade.
-                    idx, _ = rank_candidate(measured_aq, targets)
-                    already_best = idx <= cutoff_index
+                    already_best = any(
+                        rank_candidate(value, targets)[0] <= cutoff_index
+                        for value in evaluation_values
+                    )
                 else:
                     # default: skip if the file meets ANY configured target (i.e.
                     # it's not below the acceptable floor).
-                    already_best = quality_meets_profile(measured_aq, targets)
+                    already_best = any(
+                        quality_meets_profile(value, targets)
+                        for value in evaluation_values
+                    )
                 if already_best:
                     result.skipped += 1
                     if context.update_progress and (i + 1) % 25 == 0:
@@ -756,6 +769,8 @@ class QualityUpgradeJob(RepairJob):
                 return result
 
             current_label = measured_aq.label() if measured_aq is not None else 'broken/unreadable'
+            acquired_aq = acquired_quality_from_json(row.get('acquired_quality_json'))
+            acquired_label = acquired_aq.label() if acquired_aq is not None else None
             if broken_reason:
                 current_label = f'{current_label} (broken: {broken_reason})' if measured_aq is not None else f'broken ({broken_reason})'
             if context.report_progress:
@@ -864,6 +879,7 @@ class QualityUpgradeJob(RepairJob):
                             'album_title': album_title,
                             'current_format': current_label,
                             'current_bitrate': bitrate,
+                            'acquired_quality': acquired_label,
                             'quality_profile_id': quality_profile_id,
                             'quality_profile_name': quality_profile_name,
                             'profile_config_fingerprint': config_fingerprint,

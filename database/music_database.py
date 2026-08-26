@@ -426,6 +426,8 @@ class MusicDatabase:
                     bitrate INTEGER,
                     file_size INTEGER,  -- bytes; populated by deep scan from media-server API
                     year INTEGER,  -- per-track release year from file tags (albums.year is canonical)
+                    acquired_quality_json TEXT,  -- quality before intentional downsample/lossy retention
+                    retention_json TEXT,  -- JSON transform provenance for the retained representation
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (album_id) REFERENCES albums (id) ON DELETE CASCADE,
@@ -1763,6 +1765,12 @@ class MusicDatabase:
             if cols and 'quality_profile_id' not in cols:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN quality_profile_id INTEGER DEFAULT NULL")
                 logger.info("Added quality_profile_id column to tracks table (quality-profile pipeline)")
+            if cols and 'acquired_quality_json' not in cols:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN acquired_quality_json TEXT DEFAULT NULL")
+                logger.info("Added acquired_quality_json column to tracks table (retention provenance)")
+            if cols and 'retention_json' not in cols:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN retention_json TEXT DEFAULT NULL")
+                logger.info("Added retention_json column to tracks table (retention provenance)")
         except Exception as e:
             logger.error("Error adding library quality-profile column: %s", e)
 
@@ -20547,4 +20555,3 @@ def close_database():
                 # Ignore threading errors during shutdown
                 logger.debug("db instance close: %s", e)
         _database_instances.clear()
-

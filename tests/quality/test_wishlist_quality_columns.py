@@ -139,3 +139,14 @@ def test_ensure_wishlist_quality_columns_drops_leftover_frozen_columns(db):
         assert "quality_profile_id" in cols_after
     finally:
         conn.close()
+
+
+def test_library_tracks_have_retention_provenance_columns(db):
+    conn = db._get_connection()
+    try:
+        columns = {row[1] for row in conn.execute(
+            "PRAGMA table_info(tracks)").fetchall()}
+    finally:
+        conn.close()
+
+    assert {"acquired_quality_json", "retention_json"} <= columns

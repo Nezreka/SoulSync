@@ -667,18 +667,31 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             # Quality Upgrade Finder passes re-resolve the track against the
             # default profile instead of the one it was actually imported under.
             track_quality_profile_id = track_info.get("quality_profile_id")
+            from core.quality.retention import quality_json, transforms_json
+            from core.quality.model import AudioQuality
+
+            acquired_value = context.get("_acquired_audio_quality")
+            try:
+                acquired_quality = AudioQuality.from_dict(acquired_value) if acquired_value else None
+            except (TypeError, ValueError):
+                acquired_quality = None
+            acquired_quality_json = quality_json(acquired_quality)
+            retention_json = transforms_json(context.get("_retention_transforms"))
+            try:
+                track_columns = {
+                    column[1] for column in cursor.execute(
+                        "PRAGMA table_info(tracks)").fetchall()
+                }
+            except Exception:  # pragma is best-effort for non-SQLite test doubles
+                track_columns = set()
+            has_retention_columns = {
+                "acquired_quality_json", "retention_json"
+            }.issubset(track_columns)
 
             cursor.execute("SELECT id FROM tracks WHERE file_path = ?", (final_path,))
-            if not cursor.fetchone():
-                cursor.execute(
-                    """
-                    INSERT INTO tracks (id, album_id, artist_id, title, track_number,
-                                        duration, file_path, bitrate, file_size, track_artist,
-                                        musicbrainz_recording_id, isrc, quality_profile_id, server_source,
-                                        created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """,
-                    (
+            existing_track = cursor.fetchone()
+            if not existing_track:
+                base_values = (
                         track_id,
                         album_id,
                         artist_id,
@@ -692,8 +705,32 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                         track_mbid,
                         track_isrc,
                         track_quality_profile_id,
-                    ),
                 )
+                if has_retention_columns:
+                    cursor.execute(
+                        """
+                        INSERT INTO tracks (id, album_id, artist_id, title, track_number,
+                                            duration, file_path, bitrate, file_size, track_artist,
+                                            musicbrainz_recording_id, isrc, quality_profile_id,
+                                            acquired_quality_json, retention_json, server_source,
+                                            created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                                'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        """,
+                        base_values + (acquired_quality_json, retention_json),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        INSERT INTO tracks (id, album_id, artist_id, title, track_number,
+                                            duration, file_path, bitrate, file_size, track_artist,
+                                            musicbrainz_recording_id, isrc, quality_profile_id, server_source,
+                                            created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                                'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        """,
+                        base_values,
+                    )
                 track_source_col = source_columns.get("track")
                 if track_source_col and track_source_id:
                     try:
@@ -709,6 +746,18 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                             )
                     except Exception as e:
                         logger.debug("track source-id update failed: %s", e)
+            elif has_retention_columns:
+                # A repeated/import-resume write refreshes transformation
+                # provenance for the existing physical row.  Never retain an
+                # old destructive-policy claim after a clean untransformed
+                # import of that same path.
+                cursor.execute(
+                    """UPDATE tracks
+                          SET acquired_quality_json=?, retention_json=?,
+                              updated_at=CURRENT_TIMESTAMP
+                        WHERE id=?""",
+                    (acquired_quality_json, retention_json, existing_track[0]),
+                )
 
             conn.commit()
             logger.info("[SoulSync Library] Added: %s / %s / %s", artist_name, album_name, track_name)

@@ -28,6 +28,7 @@ from core.repair_jobs.base import skip_deleted_quarantine, JobContext, JobResult
 # monkeypatch them the same way tests/repair_jobs/test_quality_upgrade.py does.
 from core.quality.model import rank_candidate
 from core.quality.selection import targets_from_profile, quality_meets_profile, load_profile_by_id
+from core.quality.retention import acquired_quality_from_json, evaluation_qualities
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.quality_upgrade")
@@ -294,6 +295,13 @@ class QualityUpgradeScannerJob(RepairJob):
         deep_verify = settings.get('deep_audio_verify', False)
         probe_failed = 0
         not_in_library = 0
+        from core.library.duplicate_rules import (
+            is_lossy_companion_file,
+            lossy_companion_exts,
+        )
+        companion_exts = lossy_companion_exts(
+            context.config_manager, context.db, logger=logger,
+        )
         for i, fpath in enumerate(audio_files):
             if context.check_stop():
                 return result
@@ -306,6 +314,12 @@ class QualityUpgradeScannerJob(RepairJob):
             # the library, skip anything with no DB row BEFORE probing — no point
             # reading hundreds of orphan files.
             meta = self._match_db(fpath, db_index)
+            if meta is None and is_lossy_companion_file(fpath, companion_exts):
+                # A deliberately retained lossy derivative belongs to the
+                # lossless track beside it. It is not an orphan quality choice
+                # and must not generate a second, misleading upgrade finding.
+                result.skipped += 1
+                continue
             if library_only and meta is None:
                 not_in_library += 1
                 result.skipped += 1
@@ -364,6 +378,11 @@ class QualityUpgradeScannerJob(RepairJob):
                 logger.debug("Probe failed for %s: %s", fname, e)
                 aq = None
 
+            evaluation_values = evaluation_qualities(
+                aq,
+                meta.get('acquired_quality_json'),
+                meta.get('retention_json'),
+            )
             if broken_reason:
                 issue = 'broken_audio'
                 current_label = aq.label() if aq is not None else 'unknown'
@@ -372,10 +391,14 @@ class QualityUpgradeScannerJob(RepairJob):
                 probe_failed += 1
                 result.skipped += 1
                 continue
-            elif cutoff_index is not None and rank_candidate(aq, targets)[0] > cutoff_index:
+            elif cutoff_index is not None and not any(
+                    rank_candidate(value, targets)[0] <= cutoff_index
+                    for value in evaluation_values):
                 issue = 'below_profile'
                 current_label = aq.label()
-            elif cutoff_index is None and not quality_meets_profile(aq, targets):
+            elif cutoff_index is None and not any(
+                    quality_meets_profile(value, targets)
+                    for value in evaluation_values):
                 issue = 'below_profile'
                 current_label = aq.label()
             else:
@@ -413,6 +436,8 @@ class QualityUpgradeScannerJob(RepairJob):
                 # the new one (same job_id + entity/file_path, any status).
                 self._clear_stale_dismissed_finding(context.db, track_id, fpath)
             if context.create_finding:
+                acquired_aq = acquired_quality_from_json(
+                    meta.get('acquired_quality_json'))
                 inserted = context.create_finding(
                     job_id=self.job_id,
                     finding_type='quality_upgrade',
@@ -430,6 +455,7 @@ class QualityUpgradeScannerJob(RepairJob):
                         'current_bitrate': aq.bitrate if aq is not None else None,
                         'current_sample_rate': aq.sample_rate if aq is not None else None,
                         'current_bit_depth': aq.bit_depth if aq is not None else None,
+                        'acquired_quality': acquired_aq.label() if acquired_aq else None,
                         'target_qualities': target_labels,
                         'expected_title': disp_title,
                         'expected_artist': disp_artist,
@@ -529,7 +555,8 @@ class QualityUpgradeScannerJob(RepairJob):
                        COALESCE(NULLIF(t.track_artist, ''), ar.name) AS artist,
                        t.file_path, t.track_number,
                        al.title AS album_title, al.thumb_url, ar.thumb_url,
-                       t.quality_profile_id, ar.id
+                       t.quality_profile_id, ar.id,
+                       t.acquired_quality_json, t.retention_json
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -550,6 +577,8 @@ class QualityUpgradeScannerJob(RepairJob):
                     'artist_thumb_url': row[7] or None,
                     'quality_profile_id': row[8],
                     'artist_id': row[9],
+                    'acquired_quality_json': row[10],
+                    'retention_json': row[11],
                 }
                 for depth in range(1, min(4, len(parts) + 1)):
                     suffix = '/'.join(parts[-depth:]).lower()

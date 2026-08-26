@@ -15,6 +15,7 @@ from core.repair_jobs.duplicate_detector import (
     _is_lossy_companion_pair,
     _normalize,
 )
+from core.library.duplicate_rules import is_lossy_companion_file
 
 
 def _track(track_id, *, title, artist="Double Duo", album="Crossword Puzzle",
@@ -142,6 +143,16 @@ class TestIsLossyCompanionPair:
     def test_empty_set_short_circuits(self):
         assert not _is_lossy_companion_pair(
             "/a/Song.flac", "/a/Song.mp3", frozenset())
+
+    def test_filesystem_companion_fallback_requires_lossless_sibling(self, tmp_path):
+        flac = tmp_path / "Song.flac"
+        mp3 = tmp_path / "Song.mp3"
+        flac.write_bytes(b"lossless")
+        mp3.write_bytes(b"lossy")
+
+        assert is_lossy_companion_file(mp3, frozenset({".mp3"})) is True
+        flac.unlink()
+        assert is_lossy_companion_file(mp3, frozenset({".mp3"})) is False
 
 
 class TestCompanionExtsResolution:

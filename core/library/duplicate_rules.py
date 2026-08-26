@@ -76,3 +76,34 @@ def is_lossy_companion_pair(path1: Any, path2: Any,
         return False
     lossy_ext = e2 if lossless1 else e1
     return lossy_ext.lower() in companion_exts
+
+
+def is_lossy_companion_file(path: Any,
+                            companion_exts: set[str] | frozenset[str]) -> bool:
+    """Whether ``path`` is a configured lossy output beside a lossless source.
+
+    This is the legacy-filesystem fallback used by scanners that walk files
+    with no catalogue row.  Library v2 can replace it with explicit file-role
+    provenance, but Dev must infer the relationship without deleting or
+    flagging the user's intentional copy.
+    """
+    candidate = os.path.abspath(str(path or ""))
+    stem, ext = os.path.splitext(os.path.basename(candidate))
+    if ext.lower() not in companion_exts:
+        return False
+    folder = os.path.dirname(candidate)
+    try:
+        siblings = os.listdir(folder)
+    except OSError:
+        return False
+    for sibling_name in siblings:
+        sibling_stem, sibling_ext = os.path.splitext(sibling_name)
+        if sibling_stem.lower() != stem.lower() or sibling_ext.lower() == ext.lower():
+            continue
+        sibling_path = os.path.join(folder, sibling_name)
+        if not os.path.isfile(sibling_path):
+            continue
+        sibling_format = format_from_extension(sibling_ext.lstrip(".").lower())
+        if is_lossless_format(sibling_format):
+            return True
+    return False
