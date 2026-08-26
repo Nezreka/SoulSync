@@ -60,8 +60,12 @@ def test_web_server_writers_use_the_shared_finalizer():
     assert ws.count("_m3u_entry_path(f'{entry_base_path}/{fp}' if entry_base_path else fp)") == 1
     assert ws.count("_m3u_entry_path(f'{entry_base_path}/{file_path}' if entry_base_path else file_path)") == 1
     assert "finalize_m3u_entry" in ws
-    # library export + scan-sync auto-writer pass the mapping through
-    assert ws.count("rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or ''") >= 3
+    # library export + scan-sync auto-writer pass the mapping through. the
+    # scan-sync site moved with the db-update family (aug 25 lift)
+    dba = (_ROOT.parent / 'api' / 'database_admin.py').read_text(encoding='utf-8')
+    combined = ws.count("rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or ''") \
+        + dba.count("rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or ''")
+    assert combined >= 3
 
 
 def test_settings_ui_round_trip_wiring():
