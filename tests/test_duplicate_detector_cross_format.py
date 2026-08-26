@@ -140,6 +140,28 @@ class TestIsLossyCompanionPair:
             "C:\\Music\\Album\\Song.FLAC", "C:\\music\\album\\Song.Mp3",
             frozenset({'.mp3'}))
 
+    def test_alac_m4a_is_protected_with_mp3_or_opus(self, monkeypatch):
+        monkeypatch.setattr(
+            "core.imports.file_ops.m4a_codec",
+            lambda path: "alac" if str(path).lower().endswith(".m4a") else None,
+        )
+
+        for lossy_ext in (".mp3", ".opus"):
+            assert _is_lossy_companion_pair(
+                "/music/Album/Song.m4a",
+                f"/music/Album/Song{lossy_ext}",
+                frozenset({lossy_ext}),
+            )
+
+    def test_aac_m4a_is_not_treated_as_lossless_source(self, monkeypatch):
+        monkeypatch.setattr("core.imports.file_ops.m4a_codec", lambda _path: "aac")
+
+        assert not _is_lossy_companion_pair(
+            "/music/Album/Song.m4a",
+            "/music/Album/Song.opus",
+            frozenset({".opus"}),
+        )
+
     def test_empty_set_short_circuits(self):
         assert not _is_lossy_companion_pair(
             "/a/Song.flac", "/a/Song.mp3", frozenset())
