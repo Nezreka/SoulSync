@@ -71,6 +71,9 @@ class LibraryRetagJob(RepairJob):
     default_settings = {}
     auto_fix = False
     supports_file_scope = True
+    # Moves/rewrites real library files, so a LIVE run is refused when the
+    # preflight says this process cannot see the library (upstream 36f13cdd8).
+    writes_library_files = True
 
     def _subjects(self, context: JobContext) -> list:
         from core.library2.maintenance_subjects import active_file_subjects

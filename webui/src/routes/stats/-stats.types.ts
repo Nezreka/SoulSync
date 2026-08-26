@@ -204,6 +204,7 @@ export interface StatsListeningEventsPayload {
   title?: string;
   total?: number;
   limit?: number;
+  has_more?: boolean;
   items?: StatsListeningEventTrack[];
   error?: string;
 }

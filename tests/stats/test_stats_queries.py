@@ -189,6 +189,116 @@ def test_get_recent_tracks_joins_album_art_through_db_track_id(db, fix_url):
     assert rows[0]['artist_db_id'] == aid
 
 
+
+# ---------------------------------------------------------------------------
+# get_listening_events
+# ---------------------------------------------------------------------------
+
+def test_get_listening_events_day_bucket_returns_rows(db):
+    _seed_history(db, "Morning", "Artist", "Album", "2026-08-22 09:00:00")
+    _seed_history(db, "Night", "Artist", "Album", "2026-08-22T22:30:00")
+    _seed_history(db, "Other", "Artist", "Album", "2026-08-23 09:00:00")
+
+    out = queries.get_listening_events(
+        db,
+        None,
+        time_range='all',
+        filter_type='date',
+        date='2026-08-22',
+        limit=10,
+    )
+
+    assert out['total'] == 2
+    assert [item['title'] for item in out['items']] == ["Night", "Morning"]
+
+
+def test_get_listening_events_month_bucket_returns_rows(db):
+    _seed_history(db, "Aug One", "Artist", "Album", "2026-08-01 00:00:00")
+    _seed_history(db, "Aug Two", "Artist", "Album", "2026-08-31 23:59:59")
+    _seed_history(db, "Sep", "Artist", "Album", "2026-09-01 00:00:00")
+
+    out = queries.get_listening_events(
+        db,
+        None,
+        time_range='all',
+        filter_type='date',
+        date='2026-08',
+        limit=10,
+    )
+
+    assert out['total'] == 2
+    assert [item['title'] for item in out['items']] == ["Aug Two", "Aug One"]
+
+
+def test_get_listening_events_weekday_hour_bucket_returns_rows(db):
+    _seed_history(db, "Match New", "Artist", "Album", "2026-08-23 16:30:00")
+    _seed_history(db, "Match Old", "Artist", "Album", "2026-08-16 16:00:00")
+    _seed_history(db, "Wrong Hour", "Artist", "Album", "2026-08-23 15:00:00")
+
+    out = queries.get_listening_events(
+        db,
+        None,
+        time_range='all',
+        filter_type='weekday_hour',
+        weekday=0,
+        hour=16,
+        limit=10,
+    )
+
+    assert out['total'] == 2
+    assert [item['title'] for item in out['items']] == ["Match New", "Match Old"]
+
+
+def test_get_listening_events_caches_repeated_image_normalization(db):
+    artist_id = _seed_artist(db, "Artist")
+    album_id = _seed_album(db, artist_id, "Album", thumb='/library/metadata/1/thumb/1')
+    track_new = _seed_track(db, album_id, artist_id, "Repeat New")
+    track_old = _seed_track(db, album_id, artist_id, "Repeat Old")
+    _seed_history(db, "Repeat New", "Artist", "Album", "2026-08-23 16:30:00", db_track_id=track_new)
+    _seed_history(db, "Repeat Old", "Artist", "Album", "2026-08-23 16:00:00", db_track_id=track_old)
+    calls = []
+
+    def fixer(url):
+        calls.append(url)
+        return f'/api/image-proxy?url={url}'
+
+    out = queries.get_listening_events(
+        db,
+        fixer,
+        time_range='all',
+        filter_type='weekday_hour',
+        weekday=0,
+        hour=16,
+        limit=10,
+    )
+
+    assert out['total'] == 2
+    assert calls == ['/library/metadata/1/thumb/1']
+    assert {item['image_url'] for item in out['items']} == {'/api/image-proxy?url=/library/metadata/1/thumb/1'}
+
+
+def test_listening_history_weekday_hour_index_exists(db):
+    conn = db._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?",
+            ('idx_listening_weekday_hour_played_at',),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row is not None
+
+def test_get_listening_events_rejects_unknown_date_bucket(db):
+    with pytest.raises(ValueError, match='YYYY-MM-DD or YYYY-MM'):
+        queries.get_listening_events(
+            db,
+            None,
+            time_range='all',
+            filter_type='date',
+            date='2026',
+        )
+
 # ---------------------------------------------------------------------------
 # resolve_track
 # ---------------------------------------------------------------------------
@@ -536,3 +646,4 @@ def test_trigger_listening_sync_swallows_worker_errors():
     _time.sleep(0.1)  # give thread time to crash
     # Counter not incremented because exception was raised before increment
     assert _BrokenWorker.stats['polls_completed'] == 0
+

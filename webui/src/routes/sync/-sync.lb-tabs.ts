@@ -192,23 +192,30 @@ export function lbCoverageCounts(input: LbProgressInput): LbCoverageCounts | nul
   if (input.phase === 'fresh') return null;
   if ((input.phase === 'syncing' || input.phase === 'sync_complete') && input.lastSyncProgress) {
     const sp = input.lastSyncProgress;
-    const matched = sp.matched_tracks || sp.spotify_matches || 0;
+    // clamped like the modal line (matchLineNumbers): the match counter can
+    // drift above total (blind +1s racing the poll, unmatch never
+    // decrementing client-side), and after discovery ends no frame corrects
+    // it - an inflated counter must not paint a card at 105%
+    const matchedRaw = sp.matched_tracks || sp.spotify_matches || 0;
     const total = sp.total_tracks || sp.spotify_total || 0;
+    const matched = total > 0 ? Math.min(matchedRaw, total) : matchedRaw;
     const failed = sp.failed_tracks !== undefined ? sp.failed_tracks : Math.max(0, total - matched);
     return {
       total,
       matched,
       failed,
-      percentage: total > 0 ? Math.round((matched / total) * 100) : 0,
+      percentage: total > 0 ? Math.min(100, Math.round((matched / total) * 100)) : 0,
     };
   }
   const total = input.spotifyTotal || 0;
-  const matched = input.spotifyMatches || 0;
+  const matchedRaw = input.spotifyMatches || 0;
+  const matched = total > 0 ? Math.min(matchedRaw, total) : matchedRaw;
   return {
     total,
     matched,
     failed: Math.max(0, total - matched),
-    percentage: total > 0 ? Math.round((matched / total) * 100) : input.discoveryProgress || 0,
+    percentage:
+      total > 0 ? Math.min(100, Math.round((matched / total) * 100)) : input.discoveryProgress || 0,
   };
 }
 

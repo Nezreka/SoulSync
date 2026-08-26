@@ -703,7 +703,11 @@ def test_start_sync_happy_path():
     assert states['h1']['sync_playlist_id'] == 'spotify_public_h1'
     assert states['h1']['sync_progress'] == {}
     # sync infra seeded + worker registered
-    assert infra['sync_states']['spotify_public_h1'] == {"status": "starting", "progress": {}}
+    assert infra['sync_states']['spotify_public_h1'] == {
+        "status": "starting",
+        "playlist_name": "My Mix",
+        "progress": {"playlist_name": "My Mix", "total_tracks": 2, "progress": 0},
+    }
     assert infra['active_sync_workers']['spotify_public_h1'] == 'future:spotify_public_h1'
     # submit got name/tracks/image
     assert submitted == [('spotify_public_h1', 'My Mix', [{'id': 'a'}, {'id': 'b'}], 'cover.jpg')]
@@ -719,6 +723,48 @@ def test_start_sync_allows_resync_phases():
         states = {'pl': {'phase': phase, 'discovery_results': [1]}}
         body, code = start_sync(states, 'pl', **kw)
         assert code == 200, phase
+
+
+def test_start_sync_refuses_while_a_sync_is_in_flight():
+    """user report (aug 25): the discovery modal's Sync This Playlist
+    scheduled a second sync over a running one and overwrote the worker
+    handle. an un-done future for the same sync id must 409 and leave
+    everything untouched."""
+    from core.discovery.endpoints import start_sync
+
+    class _Running:
+        def done(self):
+            return False
+
+    infra = _cancel_infra()
+    kw, submitted, calls = _start_kwargs(infra)
+    states = {'k': {'phase': 'discovered', 'discovery_results': [], 'last_accessed': 0}}
+    running = _Running()
+    infra['active_sync_workers']['tidal_k'] = running
+    body, code = start_sync(states, 'k', **kw)
+    assert code == 409
+    assert 'already in progress' in body['error']
+    assert submitted == []
+    assert calls == []
+    # the in-flight handle is NOT overwritten and the phase is untouched
+    assert infra['active_sync_workers']['tidal_k'] is running
+    assert states['k']['phase'] == 'discovered'
+
+
+def test_start_sync_proceeds_when_the_previous_sync_finished():
+    from core.discovery.endpoints import start_sync
+
+    class _Done:
+        def done(self):
+            return True
+
+    infra = _cancel_infra()
+    kw, submitted, _ = _start_kwargs(infra)
+    states = {'k': {'phase': 'discovered', 'discovery_results': [], 'last_accessed': 0}}
+    infra['active_sync_workers']['tidal_k'] = _Done()
+    body, code = start_sync(states, 'k', **kw)
+    assert code == 200 and body['success'] is True
+    assert len(submitted) == 1
 
 
 def test_start_sync_exception_returns_500():
@@ -1101,3 +1147,4 @@ def test_update_match_no_state_and_no_originals_still_404():
         'identifier': 'gone', 'track_index': 0, 'spotify_track': {'id': 'x'}})
     body, code = update_discovery_match({}, gj, **kw)
     assert code == 404 and body == {'error': 'Discovery state not found'}
+

@@ -1,3 +1,5 @@
+import { browserSafeImageUrl } from '@/platform/artwork-thumb';
+
 /**
  * Recent Releases — the last of the gaps the coverage audit found.
  *
@@ -29,7 +31,9 @@ export interface RecentAlbum {
 }
 
 export function recentAlbumCover(album: RecentAlbum): string {
-  return album.album_cover_url || RECENT_ALBUM_PLACEHOLDER;
+  return album.album_cover_url
+    ? browserSafeImageUrl(album.album_cover_url)
+    : RECENT_ALBUM_PLACEHOLDER;
 }
 
 /**

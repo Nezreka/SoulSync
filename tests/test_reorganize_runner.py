@@ -551,3 +551,44 @@ def test_a_missing_findings_table_does_not_break_the_reorganize(repoint):
 
     assert conn.execute(
         "SELECT path FROM lib2_track_files WHERE track_id = ?", (track_id,)).fetchone()[0] == NEW
+
+
+# ── the catalogue update must never fail silently ────────────────────────────
+#
+# `_finalize_track` (core/library_reorganize.py) decides "the catalogue row now
+# points at the new path" SOLELY by whether this callback raised. On success it
+# goes on to `os.remove` the original. A callback that swallows its errors
+# therefore destroys the user's only copy while the catalogue still names the
+# old path — the track reads as MISSING and the file sits somewhere nothing
+# points at.
+#
+# Reported against a fresh library: songs downloaded, Reorganize run while the
+# import pipeline still held the SQLite write lock, tracks came back missing.
+# The lib2 twin of the guard upstream added on the legacy `tracks` table.
+
+def test_a_catalogue_that_cannot_be_read_raises_instead_of_being_swallowed(repoint):
+    """Any failure to resolve and repoint the file row must reach the caller.
+    Swallowing it makes `_finalize_track` delete the original after a failed
+    update."""
+    update_path, conn = repoint
+    track_id = _add_track(conn)
+    conn.execute("DROP TABLE lib2_track_files")
+    conn.commit()
+
+    with pytest.raises(Exception):
+        update_path(track_id, NEW)
+
+
+def test_an_update_that_matched_no_row_raises(repoint):
+    """A 0-row UPDATE is not an SQLite error — it is silent success. Without an
+    explicit "exactly one file row" check the file is moved and deleted for a
+    track the catalogue never repointed."""
+    update_path, conn = repoint
+    track_id = _add_track(conn)          # this one exists ...
+
+    with pytest.raises(Exception):
+        update_path(track_id + 9999, NEW)   # ... but this one does not
+
+    assert conn.execute(
+        "SELECT path FROM lib2_track_files WHERE track_id = ?",
+        (track_id,)).fetchone()[0] == OLD

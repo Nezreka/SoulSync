@@ -221,3 +221,67 @@ def test_cleanup_called_for_emptied_source_dirs(tmp_path):
         cleanup=lambda d: cleaned.append(d),
     )
     assert str(tmp_path / "old") in cleaned
+
+
+# ── the file and the catalogue must not drift apart ──────────────────────────
+#
+# A rename MOVES the only copy. If the catalogue update then fails, the old
+# "log it and carry on" left the file at a path nothing points at — the track
+# reads as MISSING and gets re-downloaded later. There is no second copy to
+# recover from, so the move must be undone.
+
+def test_a_failed_db_update_rolls_the_file_back(tmp_path):
+    src = tmp_path / "old" / "01 - A.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"a")
+    new = tmp_path / "new" / "A - Artist.flac"
+
+    def _boom(track_id, path):
+        raise RuntimeError("database is locked")
+
+    out = _run([{
+        "track_id": "t1", "title": "A", "matched": True, "unchanged": False,
+        "collision": False, "file_exists": True,
+        "current_path_abs": str(src), "new_path_abs": str(new),
+    }], update=_boom)
+
+    assert src.exists(), "the only copy was left at a path the catalogue never learned"
+    assert not new.exists()
+    assert out["moved"] == 0 and out["failed"] == 1
+    assert "database is locked" in out["errors"][0]["error"]
+
+
+def test_a_successful_db_update_keeps_the_move(tmp_path):
+    src = tmp_path / "old" / "01 - A.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"a")
+    new = tmp_path / "new" / "A - Artist.flac"
+
+    out = _run([{
+        "track_id": "t1", "title": "A", "matched": True, "unchanged": False,
+        "collision": False, "file_exists": True,
+        "current_path_abs": str(src), "new_path_abs": str(new),
+    }], update=lambda *_a: None)
+
+    assert new.exists() and not src.exists()
+    assert out["moved"] == 1 and out["failed"] == 0
+
+
+# ── a track whose file could not be resolved is not a rename candidate ───────
+#
+# The preview sets current_path_abs='' when the stored path resolves to nothing
+# on disk. Feeding that to os.rename fails — but only AFTER os.makedirs has
+# already built the destination tree, littering the library with empty folders
+# (the #767 complaint the preview avoids with create_dirs=False).
+
+def test_an_unresolvable_source_is_skipped_without_creating_folders(tmp_path):
+    new = tmp_path / "new" / "Artist" / "Album" / "01 - A.flac"
+
+    out = _run([{
+        "track_id": "t1", "title": "A", "matched": True, "unchanged": False,
+        "collision": False, "file_exists": False,
+        "current_path_abs": "", "new_path_abs": str(new),
+    }], update=lambda *_a: None)
+
+    assert not new.parent.exists(), "an empty destination tree was created"
+    assert out["moved"] == 0 and out["failed"] == 0 and out["skipped"] == 1

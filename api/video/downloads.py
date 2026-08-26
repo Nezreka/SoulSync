@@ -32,6 +32,14 @@ from utils.logging_config import get_logger
 # up. Long enough to ride out a couple of background searches, short enough that
 # nobody thinks the page hung.
 MANUAL_SEARCH_MAX_WAIT_SECONDS = 12.0
+# What one EXT.to page is allowed to cost, end to end. It is a FlareSolverr budget, not
+# a network timeout: the Cloudflare challenge on ext.to's search page is the wait, and
+# it was measured at 4.5s / 12.6s / 15.3s / 17.6s on consecutive runs. The old 20s
+# ceiling sat inside that spread, so the same search failed or succeeded at random with
+# a bare "500 Server Error" (FlareSolverr's way of saying "challenge timed out"). The
+# homepage that Fresh Releases loads is challenged less and had 25s, which is why only
+# Basic Search looked broken.
+EXTTO_PAGE_TIMEOUT_SECONDS = 40
 
 logger = get_logger("video_api.downloads")
 
@@ -87,6 +95,18 @@ def _external_ids(body) -> dict:
     return {k: v for k, v in ids.items() if v}
 
 
+def _basic_indexer_names(body) -> list:
+    """Optional Basic Search provider filter for Prowlarr-backed torrent sources."""
+    body = body if isinstance(body, dict) else {}
+    key = str(body.get("indexer") or body.get("provider") or "").strip().lower()
+    aliases = {
+        "thepiratebay": ["the pirate bay", "pirate bay", "tpb"],
+        "tpb": ["the pirate bay", "pirate bay", "tpb"],
+        "1337x": ["1337x"],
+    }
+    return aliases.get(key, [])
+
+
 def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None, want_year=None,
                    want_title=None, blocked_users=None, want_date=None, want_absolute=None) -> list:
     """Parse → evaluate → rank a list of raw indexer hits against the quality profile.
@@ -99,7 +119,7 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
     grab of one is a deliberate user override."""
     from core.video.custom_formats import format_score, load_formats
     from core.video.quality_eval import evaluate_release
-    from core.video.release_parse import parse_release
+    from core.video.release_parse import parse_release, search_title
     # Custom formats (P3): loaded once per evaluation batch; scored per hit
     # under THIS profile's overrides. Failure = no formats, never a 500.
     try:
@@ -189,6 +209,30 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
             "download_url": hit.get("download_url"), "magnet_uri": hit.get("magnet_uri"),
             "protocol": hit.get("protocol"),
             "indexer_id": hit.get("indexer_id"), "guid": hit.get("guid"),
+            # Where the release LIVES, for sources whose magnet costs an extra fetch
+            # (EXT.to). Without it every EXT.to hit rendered as "Result only" and had
+            # nothing a grab could resolve from.
+            "info_url": hit.get("info_url"), "magnet_id": hit.get("magnet_id"),
+            # Per-source extras. No source has all of them - an indexer knows the
+            # age and the grab count, Soulseek knows how many peers hold the file
+            # and how contended they are, EXT.to knows what the film IS. The card
+            # shows whichever of them the hit actually carries rather than pretending
+            # every source answers the same questions.
+            # (slots/queue/speed are already projected above for Soulseek)
+            "published_at": hit.get("published_at"), "grabs": hit.get("grabs"),
+            "peer_count": len(hit.get("users") or ()) or None,
+            # Parsed IDENTITY, carried so a manual grab can prefill the identify
+            # modal (Basic Search) instead of making you retype what the release
+            # name already says. `source` above is the release source (WEB/BluRay),
+            # so the release year lives under `year` and the show name under
+            # `search_title` — same field names the Fresh Releases rows use, so one
+            # modal reads both.
+            "search_title": search_title(_parse_text(hit)),
+            "year": parsed.get("year"), "air_date": parsed.get("air_date"),
+            "season": parsed.get("season"), "episode": parsed.get("episode"),
+            "episode_end": parsed.get("episode_end"),
+            "is_season_pack": bool(parsed.get("is_season_pack")),
+            "is_series_pack": bool(parsed.get("is_series_pack")),
         })
     # accepted first, then quality-profile score, then availability, then bigger file.
     results.sort(key=lambda r: (r["accepted"], r["score"], r["_avail"], r["size_bytes"]), reverse=True)
@@ -642,6 +686,104 @@ def register_routes(bp):
                     pid = None
         return profile_by_id(db, pid), pid
 
+    @bp.route("/downloads/fresh-releases", methods=["GET"])
+    def video_downloads_fresh_releases():
+        """The stored Fresh Releases board for Search -> Fresh Releases.
+
+        Reads the LAST SNAPSHOT rather than the network, so opening the tab is
+        instant. The board (and each release's matched detail facts) is produced
+        by the ``video_extto_fresh_refresh`` automation or the tab's Refresh
+        button — both call core.video.extto_board.refresh_board.
+
+        This used to pull the homepage inline on every open, which meant sitting
+        through a Cloudflare challenge to look at a list, and made per-release
+        matching impossible: each release's detail page is its own challenge, and
+        a bad minute on ext.to costs 40 seconds a page.
+
+        Still browse-only. Grabbing goes through the identify modal, which is
+        where the user says what a release actually is.
+        """
+        from . import get_video_db
+        from core.video.extto_board import load_board
+
+        board = load_board(get_video_db())
+        if not board.get("fetched_at"):
+            from core.video.extto_search import is_configured
+            return jsonify({
+                "success": False, "source": "EXT.to", "sections": {}, "fetched_at": None,
+                "error": ("Fresh Releases requires FlareSolverr — set flaresolverr.url."
+                          if not is_configured() else
+                          "No board yet — hit Refresh, or schedule the "
+                          "'Refresh Fresh Releases' automation."),
+            })
+        return jsonify({"success": True, "source": board.get("source") or "EXT.to",
+                        "sections": board.get("sections") or {},
+                        "total": board.get("total") or 0,
+                        "fetched_at": board.get("fetched_at")})
+
+    @bp.route("/downloads/detail", methods=["GET"])
+    def video_downloads_release_detail():
+        """The facts behind ONE Basic Search hit, for its expanded card.
+
+        Cache-first by default: the hourly Fresh Releases refresh has already
+        matched everything recent, so most EXT.to hits are answered instantly with
+        no network at all. ``fetch=1`` allows a live lookup for a miss - that is one
+        Cloudflare-challenged page, so it happens when a card is actually opened,
+        never while drawing a list of 25.
+
+        Only EXT.to can answer this. A Prowlarr indexer states an age and a grab
+        count and nothing else; Soulseek states peers and queues. Their cards are
+        built from what the search already returned, so they never come here.
+        """
+        from . import get_video_db
+        from core.video.extto_detail import fetch_detail, is_extto_url
+
+        url = request.args.get("url") or ""
+        if not is_extto_url(url):
+            return jsonify({"success": False, "error": "Not an EXT.to release page."}), 400
+
+        from core.video.extto_board import _cached_detail
+        cached = _cached_detail(get_video_db(), url)
+        if cached is not None:
+            return jsonify({"success": True, "detail": cached, "cached": True})
+        if request.args.get("fetch") not in ("1", "true", "yes"):
+            return jsonify({"success": False, "pending": True,
+                            "error": "Not matched yet."}), 200
+
+        res = fetch_detail(url)
+        if not res.get("ok"):
+            return jsonify({"success": False, "error": res.get("error")}), 200
+        try:    # remember it, so the board and every later card get it free
+            get_video_db().extto_detail_store(url, res["detail"])
+        except Exception:   # noqa: BLE001 - failing to cache costs a refetch, nothing more
+            logger.exception("could not cache EXT.to detail for %s", url)
+        return jsonify({"success": True, "detail": res["detail"], "cached": False})
+
+    @bp.route("/downloads/fresh-releases/refresh", methods=["POST"])
+    def video_downloads_fresh_releases_refresh():
+        """Refresh the board NOW — the tab's Refresh button.
+
+        Identical work to the hourly automation (same function), so a manual and
+        a scheduled refresh leave identical state. Matched releases are cached by
+        release, so this is only slow when there is genuinely new material.
+        """
+        from . import get_video_db
+        from core.video.extto_board import load_board, refresh_board
+
+        res = refresh_board(get_video_db())
+        if res.get("status") == "skipped" and res.get("reason") == "already_running":
+            return jsonify({"success": False, "running": True,
+                            "error": "A refresh is already running."}), 409
+        if not res.get("ok"):
+            return jsonify({"success": False,
+                            "error": res.get("error") or "The board could not be refreshed."}), 502
+        board = load_board(get_video_db())
+        return jsonify({"success": True, "source": board.get("source") or "EXT.to",
+                        "sections": board.get("sections") or {},
+                        "total": board.get("total") or 0,
+                        "fetched_at": board.get("fetched_at"),
+                        "stats": {k: res.get(k, 0) for k in
+                                  ("rows", "cached", "fetched", "failed", "skipped")}})
     @bp.route("/downloads/search", methods=["POST"])
     def video_downloads_search():
         """Search a scope (movie / episode / season / series) and return candidates
@@ -668,6 +810,15 @@ def register_routes(bp):
             if sres.get("error"):
                 return jsonify({"scope": scope, "results": [], "error": "slskd: " + str(sres["error"])})
             raw, live = sres["hits"], True
+        elif source == "extto":
+            from core.video.extto_search import extto_search
+            eres = extto_search(title, limit=25, timeout=EXTTO_PAGE_TIMEOUT_SECONDS,
+                                 resolve_magnets=False, max_candidates=1)
+            if not eres.get("configured"):
+                return jsonify({"scope": scope, "results": [], "error": "EXT.to requires FlareSolverr — set flaresolverr.url."})
+            if eres.get("error"):
+                return jsonify({"scope": scope, "results": [], "error": "EXT.to: " + str(eres["error"])})
+            raw, live = eres["hits"], True
         elif source in ("torrent", "usenet"):
             from core.video.prowlarr_search import prowlarr_search
             # A person is waiting on this response, so bound the time it will
@@ -678,6 +829,7 @@ def register_routes(bp):
             pres = prowlarr_search(scope, title, year=body.get("year"),
                                    season=want_season, episode=want_episode, source=source,
                                    max_wait_seconds=MANUAL_SEARCH_MAX_WAIT_SECONDS,
+                                   indexer_names=_basic_indexer_names(body),
                                    **_external_ids(body))
             if not pres.get("configured"):
                 return jsonify({"scope": scope, "results": [],
@@ -718,6 +870,16 @@ def register_routes(bp):
             return jsonify({"id": res["id"], "live": True, "complete": False,
                             "poll_ms": search_timeout_ms() + 8000})
         profile, _pid = _profile_for_request(get_video_db(), body)
+        if source == "extto":
+            from core.video.extto_search import extto_search
+            eres = extto_search(title, limit=25, timeout=EXTTO_PAGE_TIMEOUT_SECONDS,
+                                 resolve_magnets=False, max_candidates=1)
+            if not eres.get("configured"):
+                return jsonify({"error": "EXT.to requires FlareSolverr — set flaresolverr.url."})
+            if eres.get("error"):
+                return jsonify({"error": "EXT.to: " + str(eres["error"])})
+            return jsonify({"id": None, "live": True, "complete": True,
+                            "results": _evaluate_hits(eres["hits"], profile, scope, want_season, want_episode, want_year=body.get("year"), want_title=body.get("title"))})
         if source in ("torrent", "usenet"):
             # Prowlarr is synchronous — like the old mock, results come back in one shot
             # (no polling id), so the client renders immediately.
@@ -730,6 +892,7 @@ def register_routes(bp):
             pres = prowlarr_search(scope, title, year=body.get("year"),
                                    season=want_season, episode=want_episode, source=source,
                                    max_wait_seconds=MANUAL_SEARCH_MAX_WAIT_SECONDS,
+                                   indexer_names=_basic_indexer_names(body),
                                    **_external_ids(body))
             if not pres.get("configured"):
                 return jsonify({"error": "Prowlarr isn't configured — set its URL + key on Settings → Downloads."})
@@ -772,8 +935,31 @@ def register_routes(bp):
 
         body = request.get_json(silent=True) or {}
         source = str(body.get("source") or "soulseek").lower()
-        if source not in ("soulseek", "torrent", "usenet"):
+        if source not in ("soulseek", "torrent", "usenet", "extto"):
             return jsonify({"ok": False, "error": "Unsupported download source."}), 400
+        # EXT.to is a place we FIND releases, not a way we download them - its hits are
+        # magnets that go to the torrent client like any prowlarr hit. The row has to say
+        # 'torrent' or everything downstream keys off source and misses it: the monitor
+        # polls slskd instead of the client (0% forever, then "Trying another release"),
+        # the importer deletes the file out from under the seeding torrent, and the
+        # seeding sweep's source='torrent' query never sees the row. EXT.to keeps its
+        # identity in username/indexer_id, same as thepiratebay and 1337x already do.
+        if source == "extto":
+            source = "torrent"
+            body["username"] = body.get("username") or "EXT.to"
+            body["indexer_id"] = body.get("indexer_id") or "extto"
+            # Basic Search lists EXT.to releases WITHOUT magnets on purpose: the search
+            # page carries a per-row torrent id but not the tokens the magnet endpoint
+            # is signed with, so every magnet costs its own Cloudflare-challenged detail
+            # fetch. Resolving 25 to draw a result list would take minutes; the one
+            # release you actually picked is resolved here, once, at grab time.
+            if not body.get("download_url") and body.get("info_url"):
+                from core.video.extto_search import resolve_magnet
+                _res = resolve_magnet(body.get("info_url"), magnet_id=body.get("magnet_id"))
+                if not _res.get("ok"):
+                    return jsonify({"ok": False, "error": _res.get("error")
+                                    or "EXT.to would not hand over a magnet for this release."}), 502
+                body["download_url"] = body["magnet_uri"] = _res["magnet"]
         username, filename = body.get("username"), body.get("filename")
         if source == "soulseek" and (not username or not filename):
             return jsonify({"ok": False, "error": "Missing the release's source info."}), 400
@@ -838,6 +1024,9 @@ def register_routes(bp):
                 return jsonify({"ok": False, "error": res.get("error") or "The download client refused it."}), 502
             dl_id = db.add_video_download({**common, "source": source,
                                            "username": body.get("username"),   # indexer name (display only)
+                                           # the id is the stable key, that's what the seeding
+                                           # sweep looks this tracker's seed goal up by
+                                           "indexer_id": body.get("indexer_id"),
                                            "filename": body.get("release_title") or body.get("title"),
                                            "client_ref": res["ref"],
                                            "candidates": _json.dumps([]), "tried_queries": _json.dumps([]),

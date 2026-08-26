@@ -30,6 +30,9 @@ class LibraryReorganizeJob(RepairJob):
     setting_options = {"dry_run": [True, False]}
     auto_fix = True
     supports_file_scope = True
+    # Moves/rewrites real library files, so a LIVE run is refused when the
+    # preflight says this process cannot see the library (upstream 36f13cdd8).
+    writes_library_files = True
 
     def _dry_run(self, context: JobContext) -> bool:
         if not context.config_manager:

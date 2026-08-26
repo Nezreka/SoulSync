@@ -11,6 +11,7 @@ would wedge retention and fill the disk).
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import time
@@ -95,25 +96,115 @@ def test_name_collision_gets_a_suffix(db, tmp_path, monkeypatch):
 
 
 # ── purge ────────────────────────────────────────────────────────────────────
+def _stamped(days_ago: float) -> str:
+    """The name discard() would have written ``days_ago`` days ago."""
+    when = datetime.datetime.now() - datetime.timedelta(days=days_ago)
+    return when.strftime("%Y%m%d_%H%M%S")
+
+
 def test_purge_removes_only_expired_entries(db, tmp_path):
     trash = tmp_path / "Movies" / "ss_recycle"
-    old = _mkfile(trash / "20260101_000000_old.mkv")
-    fresh = _mkfile(trash / "20260711_000000_fresh.mkv")
-    stale = time.time() - 10 * 86400
-    os.utime(old, (stale, stale))
-    removed = recycle.purge_old(_settings(recycle_keep_days=7), db)
-    assert removed == 1
+    old = _mkfile(trash / (_stamped(10) + "_old.mkv"), b"x" * 2048)
+    fresh = _mkfile(trash / (_stamped(1) + "_fresh.mkv"))
+    removed, freed = recycle.purge_old_detailed(_settings(recycle_keep_days=7), db)
+    assert removed == 1 and freed == 2048          # bytes reclaimed, not just a count
     assert not old.exists() and fresh.exists()
+
+
+def test_age_comes_from_the_name_stamp_not_mtime(db, tmp_path):
+    """The bug this guards: shutil.move keeps the ORIGINAL file's mtime, so a
+    years-old library file landed in the bin already 'expired' and the next
+    purge deleted it instantly. Recycling something old must still buy you the
+    full keep window."""
+    trash = tmp_path / "Movies" / "ss_recycle"
+    f = _mkfile(trash / (_stamped(1) + "_ancient.mkv"))
+    ancient = time.time() - 900 * 86400          # recycled today, made in 2024
+    os.utime(f, (ancient, ancient))
+    assert recycle.purge_old(_settings(recycle_keep_days=7), db) == 0
+    assert f.exists()
+
+
+def test_purge_ignores_files_it_did_not_write(db, tmp_path):
+    """recycle_path can point at a folder holding other things. Only stamped
+    entries are ours; everything else is left alone however old it is."""
+    trash = tmp_path / "Trash"
+    stranger = _mkfile(trash / "someones_movie.mkv")
+    old = time.time() - 400 * 86400
+    os.utime(stranger, (old, old))
+    ours = _mkfile(trash / (_stamped(30) + "_ours.mkv"))
+    removed = recycle.purge_old(_settings(recycle_keep_days=7, recycle_path=str(trash)), db)
+    assert removed == 1
+    assert stranger.exists() and not ours.exists()
+
+
+def test_end_to_end_recycled_file_expires_on_its_own_clock(db, tmp_path, monkeypatch):
+    """discard -> purge with a real move, no utime tricks. A 500-day-old movie
+    recycled today keeps its full 7 days, then goes on day 8."""
+    f = _mkfile(tmp_path / "Movies" / "Heat (1995)" / "Heat.mkv")
+    made = time.time() - 500 * 86400
+    os.utime(f, (made, made))
+    trash_path = recycle.discard(str(f), _settings(), db)["trash_path"]
+    assert os.path.exists(trash_path)                       # survived its own discard purge
+    assert recycle.purge_old(_settings(recycle_keep_days=7), db) == 0
+    assert os.path.exists(trash_path)
+
+    real = time.time
+    monkeypatch.setattr(recycle.time, "time", lambda: real() + 8 * 86400)
+    assert recycle.purge_old(_settings(recycle_keep_days=7), db) == 1
+    assert not os.path.exists(trash_path)
 
 
 def test_discard_triggers_an_opportunistic_purge(db, tmp_path):
     trash = tmp_path / "Movies" / "ss_recycle"
-    old = _mkfile(trash / "20260101_000000_old.mkv")
-    stale = time.time() - 30 * 86400
-    os.utime(old, (stale, stale))
+    old = _mkfile(trash / (_stamped(30) + "_old.mkv"))
     f = _mkfile(tmp_path / "Movies" / "new.mkv")
     assert recycle.discard(str(f), _settings(), db)["ok"]
     assert not old.exists()                       # expired entry swept on the way
+
+
+# ── the scheduled sweep (the opportunistic one is not enough) ────────────────
+def test_a_daily_automation_owns_the_purge():
+    """Without a schedule the bin is only swept when the NEXT file is deleted,
+    so a quiet library never expires anything. That was the reported bug."""
+    from core.automation_engine import SYSTEM_AUTOMATIONS
+    entry = next((a for a in SYSTEM_AUTOMATIONS
+                  if a.get("action_type") == "video_purge_recycle_bin"), None)
+    assert entry is not None, "no scheduled recycle purge"
+    assert entry.get("owned_by") == "video"
+    assert entry.get("trigger_type") in ("daily_time", "schedule")
+
+
+def test_purge_handler_reports_what_it_removed():
+    from core.automation.handlers.video_purge_recycle import auto_video_purge_recycle_bin
+
+    class _Deps:
+        def __init__(self):
+            self.lines = []
+
+        def update_progress(self, _id, **kw):
+            self.lines.append(kw)
+
+    deps = _Deps()
+    res = auto_video_purge_recycle_bin({}, deps, purge=lambda: (3, 5 * 1024 ** 3))
+    assert res["status"] == "completed" and res["removed"] == 3
+    assert res["freed_bytes"] == 5 * 1024 ** 3
+    # a disk-reclaim job has to say how much disk it reclaimed, like the
+    # YouTube retention job does
+    assert any("5.0 GB" in str(k.get("log_line", "")) for k in deps.lines)
+
+
+def test_purge_handler_survives_a_broken_purge():
+    from core.automation.handlers.video_purge_recycle import auto_video_purge_recycle_bin
+
+    class _Deps:
+        def update_progress(self, _id, **kw):
+            pass
+
+    def _boom():
+        raise OSError("network share gone")
+
+    res = auto_video_purge_recycle_bin({}, _Deps(), purge=_boom)
+    assert res["status"] == "error"
 
 
 # ── the wired seams ──────────────────────────────────────────────────────────

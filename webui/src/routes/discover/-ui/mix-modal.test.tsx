@@ -242,14 +242,16 @@ describe('the mix modal', () => {
     expect(screen.getByText('Download')).not.toHaveAttribute('id');
   });
 
-  it("prefers a mix's own actions, and shows none with neither", () => {
+  it("keeps a mix's own actions, always led by Play", () => {
     const { container, rerender } = render(
       <MixModal {...props({ mix: mix({ actions: [{ label: 'Rebuild', onclick: 'x' }] }) })} />,
     );
     expect(screen.getByText('Rebuild')).toBeInTheDocument();
+    expect(screen.getByText('▶ Play')).toBeInTheDocument();
     expect(screen.queryByText('Sync')).toBeNull();
     rerender(<MixModal {...props({ mix: mix({ syncKey: undefined }) })} />);
-    expect(container.querySelectorAll('.mix-modal-actions button')).toHaveLength(1); // close only
+    // play + close: even an action-less mix is listenable now
+    expect(container.querySelectorAll('.mix-modal-actions button')).toHaveLength(2);
   });
 
   it('reports the whole action, so the caller can honour closeFirst', () => {

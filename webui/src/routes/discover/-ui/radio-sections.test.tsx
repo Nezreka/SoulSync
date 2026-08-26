@@ -132,6 +132,50 @@ describe('Last.fm Radio', () => {
     expect(container.querySelector('#lastfm-radio-input')).toBeDisabled();
   });
 
+  it('says a radio is BUILDING while generating — a pick is not silence', () => {
+    const { container } = render(<LastfmRadioSection {...lastfm({ generating: true })} />);
+    const block = container.querySelector('.lastfm-radio-generating');
+    expect(block).not.toBeNull();
+    expect(block!.querySelector('.server-search-spinner')).not.toBeNull();
+    expect(container.querySelector('.lastfm-radio-generating')).toHaveTextContent(
+      'Building your radio',
+    );
+    // and never while idle
+    cleanup();
+    const idle = render(<LastfmRadioSection {...lastfm()} />).container;
+    expect(idle.querySelector('.lastfm-radio-generating')).toBeNull();
+  });
+
+  it('a click OUTSIDE dismisses the open dropdown; inside does not', () => {
+    const p = lastfm({
+      dropdownOpen: true,
+      results: [{ name: 'Xtal', artist: 'Aphex Twin' }],
+      onDismiss: vi.fn(),
+    });
+    const { container } = render(<LastfmRadioSection {...p} />);
+    fireEvent.pointerDown(container.querySelector('#lastfm-radio-input')!);
+    expect(p.onDismiss).not.toHaveBeenCalled();
+    fireEvent.pointerDown(document.body);
+    expect(p.onDismiss).toHaveBeenCalledTimes(1);
+    // dismiss keeps the query — it must NOT route through clear
+    expect(p.onClear).not.toHaveBeenCalled();
+  });
+
+  it('with NO dismiss handler an outside click falls back to clear', () => {
+    const p = lastfm({ dropdownOpen: true, results: [{ name: 'Xtal', artist: 'Aphex Twin' }] });
+    render(<LastfmRadioSection {...p} />);
+    fireEvent.pointerDown(document.body);
+    expect(p.onClear).toHaveBeenCalledTimes(1);
+  });
+
+  it('a CLOSED dropdown listens for nothing outside', () => {
+    const p = lastfm({ onDismiss: vi.fn() });
+    render(<LastfmRadioSection {...p} />);
+    fireEvent.pointerDown(document.body);
+    expect(p.onDismiss).not.toHaveBeenCalled();
+    expect(p.onClear).not.toHaveBeenCalled();
+  });
+
   it('renders generated radios as mix cards', () => {
     const p = lastfm({ mixes: [mix('lastfm_1', 'Radio: Xtal')] });
     const { container } = render(<LastfmRadioSection {...p} />);

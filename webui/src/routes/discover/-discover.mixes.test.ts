@@ -4,6 +4,7 @@ import type { DiscoverMix } from './-discover.mixes';
 
 import {
   MIX_ACTION_DOWNLOAD,
+  MIX_ACTION_PLAY,
   MIX_ACTION_SYNC,
   MIX_COVER_PLACEHOLDER,
   MIX_COVER_TILES,
@@ -55,13 +56,16 @@ describe('the feeder inventory', () => {
     expect(noSync.map((f) => f.key)).toEqual(['daily_mix_*']);
   });
 
-  it('marks daily mixes DEAD — only seven feeders can reach the shelf', () => {
-    // loadPersonalizedDailyMixes (4639) is unreachable: no reachable function
-    // names it, and it is absent from index.html and every other static script.
-    // Listing it as live would "restore" a section users have never seen.
-    expect(YOUR_MIX_FEEDERS.filter((f) => !f.live).map((f) => f.key)).toEqual(['daily_mix_*']);
-    expect(LIVE_MIX_FEEDERS).toHaveLength(7);
-    expect(LIVE_MIX_FEEDERS.every((f) => f.syncKey !== null)).toBe(true);
+  it('every feeder is live now, daily mixes included', () => {
+    // daily_mix_* was dead (its vanilla producer was unreachable) until the
+    // aug 25 rebuild on core/personalized/daily_mixes.py. it is the one
+    // feeder without a syncKey - play + download only, until P5 registers a
+    // sync playlist type for it.
+    expect(YOUR_MIX_FEEDERS.filter((f) => !f.live)).toEqual([]);
+    expect(LIVE_MIX_FEEDERS).toHaveLength(8);
+    expect(LIVE_MIX_FEEDERS.filter((f) => f.syncKey === null).map((f) => f.key)).toEqual([
+      'daily_mix_*',
+    ]);
   });
 
   it('records the two feeders whose titles are built at runtime', () => {
@@ -216,32 +220,39 @@ describe('the mix modal', () => {
     expect(mixStatusBase(mix())).toBe('');
   });
 
-  it('builds Download + Sync from a syncKey', () => {
+  it('leads every mix with Play, then Download + Sync from a syncKey', () => {
+    // the play-now bridge (aug 25): listening is always the first offer
     const actions = mixActions(mix({ syncKey: 'hidden_gems' }));
-    expect(actions.map((a) => a.label)).toEqual([MIX_ACTION_DOWNLOAD, MIX_ACTION_SYNC]);
-    expect(actions[1].primary).toBe(true);
-    expect(actions[1].isSync).toBe(true);
+    expect(actions.map((a) => a.label)).toEqual(['▶ Play', 'Download', 'Sync']);
+    // the constants pinned separately, so the literals above catch a drift
+    expect(MIX_ACTION_PLAY).toBe('▶ Play');
+    expect(MIX_ACTION_DOWNLOAD).toBe('Download');
+    expect(MIX_ACTION_SYNC).toBe('Sync');
+    expect(actions[0].onclick).toBe('play');
+    expect(actions[2].primary).toBe(true);
+    expect(actions[2].isSync).toBe(true);
   });
 
   it('closes this modal before Download opens the next one', () => {
     // The download modal opens beneath this one and would be uninteractable.
-    expect(mixActions(mix({ syncKey: 'x' }))[0].closeFirst).toBe(true);
-    expect(mixActions(mix({ syncKey: 'x' }))[1].closeFirst).toBeUndefined();
+    expect(mixActions(mix({ syncKey: 'x' }))[1].closeFirst).toBe(true);
+    expect(mixActions(mix({ syncKey: 'x' }))[2].closeFirst).toBeUndefined();
   });
 
-  it('prefers a mix’s OWN actions over the built-in pair', () => {
+  it('prepends Play to a mix’s OWN actions', () => {
     const custom = [{ label: 'Custom', onclick: 'x' }];
-    expect(mixActions(mix({ actions: custom, syncKey: 'ignored' }))).toBe(custom);
+    const actions = mixActions(mix({ actions: custom, syncKey: 'ignored' }));
+    expect(actions.map((a) => a.label)).toEqual(['▶ Play', 'Custom']);
   });
 
-  it('gives the daily mixes NO actions, which is the vanilla behaviour', () => {
-    // daily_mix_* has neither `actions` nor `syncKey`. Inventing a Download
-    // button here would call an endpoint with an undefined key.
-    expect(mixActions(mix({ key: 'daily_mix_0' }))).toEqual([]);
+  it('a mix with neither actions nor syncKey is still playable', () => {
+    // daily_mix_* used to get NOTHING here. play needs no download key -
+    // it resolves against the library - so it is always offered.
+    expect(mixActions(mix({ key: 'daily_mix_0' })).map((a) => a.label)).toEqual(['▶ Play']);
   });
 
-  it('respects an explicitly EMPTY action list', () => {
-    expect(mixActions(mix({ actions: [], syncKey: 'x' }))).toEqual([]);
+  it('an explicitly EMPTY action list still gets Play', () => {
+    expect(mixActions(mix({ actions: [], syncKey: 'x' })).map((a) => a.label)).toEqual(['▶ Play']);
   });
 });
 

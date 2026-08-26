@@ -26,6 +26,9 @@ afterEach(() => {
   delete window.openManualLibraryMatchTool;
   delete window.openSyncHistoryModal;
   delete window.openDownloadOriginsModal;
+  // routed tabs are remembered in localStorage now - without this, one
+  // test's opened tab leaks into the next one's initial strip
+  window.localStorage.clear();
 });
 
 describe('the header (2229-2243)', () => {
@@ -139,8 +142,11 @@ describe('the tab strip', () => {
     expect(container.querySelector('#mirrored-tab-content')?.className).toContain('active');
   });
 
-  it('shows a routed tab while it is active, and drops it again after', () => {
-    // A panel with no chip is a room with no door.
+  it('shows a routed tab once opened, and KEEPS it after leaving', () => {
+    // A panel with no chip is a room with no door - and the first cut
+    // re-bricked the door the moment you stepped out: the loaded playlists
+    // survived in localStorage while the only way back vanished ("the
+    // Spotify Link button only shows if I paste a link again", aug 25).
     let open!: (tab: string) => void;
     const { container } = renderShell({
       registerOpenTab: (fn) => {
@@ -159,7 +165,11 @@ describe('the tab strip', () => {
     act(() => {
       open('server');
     });
-    expect(container.querySelectorAll('.sync-tab-button')).toHaveLength(3);
+    // the chip stays; only the highlight moves
+    expect(container.querySelectorAll('.sync-tab-button')).toHaveLength(4);
+    expect(container.querySelector('[data-tab="spotify-public"]')?.className).not.toContain(
+      'active',
+    );
   });
 
   it('keeps a routed panel MOUNTED after its chip disappears', () => {

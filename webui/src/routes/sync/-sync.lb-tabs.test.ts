@@ -150,6 +150,16 @@ describe('the LB card numbers (_refreshOneLbSyncCard 253-283)', () => {
         discoveryProgress: 0,
       }),
     ).toEqual({ total: 10, matched: 7, failed: 3, percentage: 70 });
+    // an inflated counter (unmatch never decrements client-side, and after
+    // discovery no poll frame corrects it) must clamp, never paint 105%
+    expect(
+      lbCoverageCounts({
+        phase: 'discovered',
+        spotifyTotal: 100,
+        spotifyMatches: 105,
+        discoveryProgress: 0,
+      }),
+    ).toEqual({ total: 100, matched: 100, failed: 0, percentage: 100 });
     // Total 0 → the discovery progress stands in for the percent.
     expect(
       lbCoverageCounts({

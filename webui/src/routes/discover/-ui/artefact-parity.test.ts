@@ -70,13 +70,17 @@ const NEW_IDS = [
   'lastfm-radio',
   'listenbrainz',
   'recent-releases',
-  // The four zone anchors upstream's Discover redesign added (3.2.5). They are
-  // scroll targets the page's own zone map jumps to, not vanilla artefacts —
-  // the vanilla had no zones at all.
+  // The four zone anchors upstream's Discover redesign added (3.2.5, regrouped
+  // in 3.3.0). They are scroll targets the page's own zone map jumps to, not
+  // vanilla artefacts — the vanilla had no zones at all.
   'discover-zone-for-you',
   'discover-zone-library',
   'discover-zone-new-missing',
   'discover-zone-tools',
+  // the play-now bridge (aug 25): library radio's discover card
+  'library-radio-section',
+  // recommended stations row (aug 25)
+  'recommended-stations-section',
 ];
 
 /**
@@ -114,10 +118,10 @@ const DELETED_MARKUP_CLASSES = ['artweb-size-btn', 'watch-all-text'];
  * only pass through here on its way to a stylesheet.
  */
 const NEW_CLASSES: string[] = [
-  // Arrived with upstream's Discover redesign (3.2.5) as a modifier on the
-  // styled `.discovery-zone-section` base, and — unlike its sibling modifiers
-  // — carries no rule of its own yet. It leaves this list the moment it gets
-  // one, or the moment it turns out never to need it.
+  // 3.3.0 zone regroup: the tools zone's grid modifier, styled in style.css.
+  // It arrived in 3.2.5 as a modifier on the styled `.discovery-zone-section`
+  // base with no rule of its own; it leaves this list the moment the scan can
+  // see the rule that now exists.
   'discovery-zone-section--map-tools',
 ];
 

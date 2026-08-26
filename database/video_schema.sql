@@ -855,3 +855,19 @@ CREATE INDEX IF NOT EXISTS idx_vissues_profile ON video_issues(profile_id);
 CREATE INDEX IF NOT EXISTS idx_vissues_status  ON video_issues(status);
 CREATE INDEX IF NOT EXISTS idx_vissues_entity  ON video_issues(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_vissues_created ON video_issues(created_at);
+
+-- Fresh Releases match cache — one row per EXT.to release detail page.
+-- The board refresh (the hourly video_extto_fresh_refresh automation, or the
+-- tab's Refresh button — same code either way) enriches every row from its own
+-- detail page, and each of those costs its own Cloudflare challenge. The board
+-- turns over slowly, so a release that was there an hour ago is served from
+-- here for free and only genuinely new ones are fetched. That is what makes an
+-- hourly cadence affordable; without it every run would re-pay for the whole
+-- board. Keyed by detail URL because that is what identifies a release, and it
+-- is what the board rows carry.
+CREATE TABLE IF NOT EXISTS video_extto_cache (
+    url        TEXT PRIMARY KEY,
+    payload    TEXT NOT NULL,                  -- parsed detail facts (JSON)
+    fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_extto_cache_at ON video_extto_cache(fetched_at);

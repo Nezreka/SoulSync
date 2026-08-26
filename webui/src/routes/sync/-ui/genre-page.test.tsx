@@ -82,6 +82,21 @@ describe('the genre page shell', () => {
     expect(onBack).toHaveBeenCalled();
   });
 
+  it('overrides the stylesheet: the page root is inline display:block', () => {
+    // style.css ships `.genre-page-content { display: none }` as the base
+    // state; the vanilla made it visible with an inline style.display
+    // (2772). Lose the inline style and the WHOLE page renders invisible
+    // while its data loads and toasts behind it - which jsdom cannot see,
+    // so this pins the inline style itself.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise(() => {})),
+    );
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={makeEnv()} />);
+    const root = document.querySelector('.genre-page-content') as HTMLElement;
+    expect(root.style.display).toBe('block');
+  });
+
   it('carries the Top 100 button', () => {
     vi.stubGlobal(
       'fetch',

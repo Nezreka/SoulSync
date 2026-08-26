@@ -382,6 +382,8 @@ ACTIONS: list[dict] = [
      ]},
     {"type": "video_clean_youtube_episodes", "label": "Clean Old YouTube Episodes", "icon": "trash", "scope": "video",
      "description": "Delete downloaded YouTube channel episodes that fall outside each channel's keep window (set per channel via its cog → Keep: e.g. last 30 episodes / last 3–6 months). Removes the video + its sidecars but keeps the history record so it's never re-downloaded. No-op for channels left on 'keep everything' (the default). Playlists are excluded. Pair with a daily Schedule.", "available": True},
+    {"type": "video_purge_recycle_bin", "label": "Empty Recycle Bin", "icon": "trash", "scope": "video",
+     "description": "Delete recycled files older than the keep window set in Settings, Library Organization. The bin is where every video delete lands (upgrade replaces, YouTube retention, watched cleanup) so this is what actually reclaims the disk. Age is measured from when the file was recycled, not its original date.", "available": True},
     {"type": "video_add_airing_episodes", "label": "Wishlist Today's Airings", "icon": "calendar", "scope": "video",
      "description": "Sonarr-style: add every episode airing today (for shows you follow) to the wishlist, skipping ones you already own. Also tidies the watchlist by dropping shows that have ended/been canceled.", "available": True,
      "config_fields": [
@@ -410,6 +412,11 @@ ACTIONS: list[dict] = [
      ]},
     {"type": "video_rss_sync", "label": "RSS Sync (Instant Grabs)", "icon": "download", "scope": "video",
      "description": "Sonarr-speed acquisition: every few minutes, pull your indexers' newest releases from Prowlarr (one aggregate call, no searching) and instantly grab any that match your wishlist — a wanted episode lands minutes after it's posted instead of at the next hourly drain. Respects your quality profile, upgrade cutoff, blocklist and download mode (needs torrent/usenet enabled + Prowlarr). Pair with a 15-minute schedule.", "available": True},
+    {"type": "video_extto_fresh_refresh", "label": "Refresh Fresh Releases", "icon": "download", "scope": "video",
+     "description": "Keep Search \u2192 Fresh Releases warm: pull the EXT.to board, match every release against its own detail page (poster, IMDb id + rating, genres, runtime), and store the result so the tab opens instantly instead of waiting on Cloudflare. Matched releases are cached by release, so an hourly run only pays for what is genuinely new \u2014 the first run is the slow one. The Refresh button on the tab does exactly this on demand. Needs FlareSolverr. Pair with an hourly schedule.", "available": True,
+     "config_fields": [
+         {"key": "max_new_details", "type": "number", "label": "Max new releases to match per run", "default": 40, "min": 1}
+     ]},
     {"type": "video_import_lists", "label": "Sync Import Lists", "icon": "list", "scope": "video",
      "description": "Radarr/Sonarr Import Lists: everything on your configured external lists (TMDB lists, TMDB/IMDb charts, IMDb user lists, your Plex account watchlist) enters acquisition automatically — movies wishlist, shows follow with the list's monitor policy. Only NEW list members are added, so removing something you didn't want never boomerangs back. Configure lists on Settings → Downloads. Pair with a 6-hourly schedule.", "available": True},
     {"type": "video_seeding_sweep", "label": "Seeding Sweep", "icon": "download", "scope": "video",
@@ -514,7 +521,10 @@ _CATEGORY_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("Advanced", ("run_script",)),
     # Then keywords, most specific first.
     ("Maintenance", ("repair", "duplicate", "quality", "cleanup", "clean_", "_clean",
-                     "expired", "backup", "cache", "overlays", "plex_images")),
+                     "expired", "backup", "cache", "overlays", "plex_images",
+                     # emptying the recycle bin is cleanup; the EXT.to fresh-board
+                     # refresh is a cache warmer (same family as refresh_beatport_cache)
+                     "recycle", "extto_fresh")),
     ("Wishlist", ("wishlist",)),
     ("Watchlist", ("watchlist",)),
     ("Playlists", ("playlist", "mirrored", "discover", "collections", "personalized")),

@@ -715,8 +715,15 @@ def _write_vorbis(audio, title, artist, album_artist, album, year, genre,
         audio['genre'] = [genre]
         written.append('genre')
     if track_num is not None:
-        trk_str = f"{track_num}/{total_tracks}" if total_tracks else str(track_num)
-        audio['tracknumber'] = [trk_str]
+        # Bare number + separate total: Vorbis does not share ID3's "N/M"
+        # convention, and the combined form displayed literally as "1/1"
+        # (Discord, mrderekibmusic — Picard splits the fields correctly).
+        from core.metadata.track_number_format import format_vorbis_track_fields
+        _num, _total = format_vorbis_track_fields(track_num, total_tracks)
+        audio['tracknumber'] = [_num]
+        if _total is not None:
+            audio['tracktotal'] = [_total]
+            audio['totaltracks'] = [_total]   # legacy readers
         written.append('track_number')
     if disc_num is not None:
         audio['discnumber'] = [str(disc_num)]

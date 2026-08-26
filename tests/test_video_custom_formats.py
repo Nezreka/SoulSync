@@ -156,3 +156,9 @@ def test_settings_ui_has_the_formats_editor():
     assert "QUALITY_URL + '/formats'" in _SETTINGS_JS
     assert "format_scores" in _SETTINGS_JS       # per-profile override column
     assert "renderFormats()" in _SETTINGS_JS
+
+
+def test_settings_ui_labels_every_quality_tier():
+    import core.video.quality_profile as qp
+    for key in qp.TIERS:
+        assert "'%s':" % key in _SETTINGS_JS

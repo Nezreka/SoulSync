@@ -6,6 +6,8 @@
  * end to end before any of this was written.
  */
 
+import { browserSafeImageUrl } from '@/platform/artwork-thumb';
+
 import { YOUR_ALBUMS_PAGE_SIZE } from './-discover.types';
 
 /** Placeholder when an album has no cover — line 1463. */
@@ -66,7 +68,7 @@ export function albumBadge(album: { in_library?: boolean } | null | undefined): 
 
 /** Cover URL with the vanilla's fallback. */
 export function albumCover(album: { image_url?: string } | null | undefined): string {
-  return album?.image_url || ALBUM_COVER_FALLBACK;
+  return album?.image_url ? browserSafeImageUrl(album.image_url) : ALBUM_COVER_FALLBACK;
 }
 
 /** `${total} albums · ${owned} owned · ${missing} missing` — lines 1443-1444. */

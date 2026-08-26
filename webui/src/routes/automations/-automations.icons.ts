@@ -76,12 +76,16 @@ export const AUTOMATION_ICONS: Record<string, string> = {
   video_clean_search_history: '🗑️',
   video_clean_completed_downloads: '✅',
   video_full_cleanup: '🧹',
+  // added with the ext.to fresh releases automation (aug 24) - the vanilla
+  // stats-automations.js map got it, this twin was missed
+  video_extto_fresh_refresh: '✨',
   video_backup_database: '💾',
   video_apply_overlays: '🎨',
   video_clean_plex_images: '🖼️',
   video_sync_collections: '🗂️',
   video_rss_sync: '📡',
   video_seeding_sweep: '🌱',
+  video_purge_recycle_bin: '🗑️',
   video_import_lists: '📥',
   monthly_time: '📅',
   video_batch_complete: '✅',

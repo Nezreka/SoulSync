@@ -181,3 +181,12 @@ def test_an_unverified_row_is_still_promoted_by_a_confirming_scan(scan):
                client=_ConfirmingClient())
 
     assert out.status == "verified"
+
+
+def test_the_tag_still_wins_when_the_catalogue_has_nothing(scan):
+    """The tag travels with the file, so it is authoritative on a row the
+    catalogue never recorded a standing for."""
+    out = scan(db_status=None, tag_status="verified")
+
+    assert out.status == "verified"
+    assert out.tags_written == []

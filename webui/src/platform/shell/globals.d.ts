@@ -133,6 +133,10 @@ declare global {
      *  spans. Shared (survives discover.js's deletion), so the React page
      *  calls it and renders the span block it writes into. */
     startListenBrainzPlaylistSync?: (identifier: string) => void | Promise<void>;
+    /** sync-spotify.js's per-playlist LB sync states — read to tell a
+     * dead Sync (state never hydrated, e.g. a fresh lastfm radio) from a
+     * live one. */
+    listenbrainzPlaylistStates?: Record<string, unknown>;
     /** library.js — artist photo picker, opened from the hero image. */
     openArtistArtPicker?: () => void;
     /** shared-helpers.js / core.js — similar-artists section + its abort. */

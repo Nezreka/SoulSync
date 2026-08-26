@@ -2584,8 +2584,14 @@ class WatchlistScanner:
 
             # Construct MusicMap URL
             from urllib.parse import quote_plus
+            from core.metadata.similar_artists import clean_musicmap_artist_name
 
-            url_artist = quote_plus(artist_name.strip())
+            lookup_artist_name = clean_musicmap_artist_name(artist_name)
+            if not lookup_artist_name:
+                logger.info(f"Skipping MusicMap lookup for unsuitable artist name: {artist_name}")
+                return []
+
+            url_artist = quote_plus(lookup_artist_name)
             musicmap_url = f'https://www.music-map.com/{url_artist}'
 
             # Set headers to mimic a browser
@@ -2609,7 +2615,7 @@ class WatchlistScanner:
 
             # Extract similar artist names
             all_anchors = gnod_map.find_all('a')
-            searched_artist_lower = artist_name.lower().strip()
+            searched_artist_lower = lookup_artist_name.lower().strip()
 
             similar_artist_names = []
             for anchor in all_anchors:
@@ -2634,7 +2640,7 @@ class WatchlistScanner:
             available_sources = []
 
             for source in source_priority:
-                search_results = self._search_artists_for_source(source, artist_name, limit=1)
+                search_results = self._search_artists_for_source(source, lookup_artist_name, limit=1)
                 if search_results:
                     searched_source_ids[source] = self._extract_entity_id(search_results[0])
                     available_sources.append(source)
@@ -3960,6 +3966,17 @@ class WatchlistScanner:
                 # Save with source suffix for multi-source support
                 playlist_key = f'release_radar_{source}'
                 self.database.save_curated_playlist(playlist_key, release_radar_tracks, profile_id=profile_id)
+                # ALSO snapshot the full rows: the id list rehydrates from the
+                # rotating pool and silently shrinks (the "only 5-10 tracks"
+                # reports) - the snapshot can't
+                try:
+                    from core.discovery.curated_full import full_row_from_track_data
+                    self.database.save_curated_playlist(
+                        f'{playlist_key}_full',
+                        [full_row_from_track_data(t, source) for t in top_tracks[:50]],
+                        profile_id=profile_id)
+                except Exception as e:  # noqa: BLE001
+                    logger.debug(f"release radar full snapshot failed: {e}")
                 logger.info(f"Release Radar ({source}) curated: {len(release_radar_tracks)} tracks")
                 # Flag personalized Fresh Tape snapshot as stale so the
                 # pipeline auto-regenerates it on the next run.
@@ -4043,6 +4060,15 @@ class WatchlistScanner:
 
                 playlist_key = f'discovery_weekly_{source}'
                 self.database.save_curated_playlist(playlist_key, discovery_weekly_tracks, profile_id=profile_id)
+                # full-row snapshot, same reason as fresh tape's above
+                try:
+                    from core.discovery.curated_full import full_row_from_pool_track
+                    self.database.save_curated_playlist(
+                        f'{playlist_key}_full',
+                        [full_row_from_pool_track(t) for t in selected_tracks],
+                        profile_id=profile_id)
+                except Exception as e:  # noqa: BLE001
+                    logger.debug(f"discovery weekly full snapshot failed: {e}")
                 logger.info(f"Discovery Weekly ({source}) curated: {len(discovery_weekly_tracks)} tracks")
                 try:
                     _mark_personalized_kinds_stale(

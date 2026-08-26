@@ -3883,6 +3883,25 @@
         el.classList.toggle('chat-attach-status--err', !!isError);
     }
 
+    // Stamp a room-message payload with the SAME envelope tags the composer
+    // sends: channel + thread (SoulSync room only) and avatar. Every send path
+    // must use this — a file share and the GIF picker built their payloads by
+    // hand, skipped the tags, and their messages folded into #general no matter
+    // which channel they were sent from (kvkarlsson's uploads-in-the-wrong-
+    // channel report).
+    function _tagRoomPayload(payload) {
+        payload.room = state.room || '';
+        if (_myAvatar()) payload.avatar = _myAvatar();
+        if (_chanRoom()) {
+            payload.chan = state.channel || CHAT_DEFAULT_CHANNEL;
+            if (state.thread) {
+                payload.thread = state.thread.id;
+                payload.thread_name = state.thread.name || '';
+            }
+        }
+        return payload;
+    }
+
     function _sendFileMessage(meta) {
         var url = String(meta.url || '');
         if (!url) return;
@@ -3895,10 +3914,10 @@
             }
         };
         if (state.view === 'room') {
-            postJSON('/api/chat/room/message', {
-                message: url, room: state.room,
+            postJSON('/api/chat/room/message', _tagRoomPayload({
+                message: url,
                 file: { n: meta.name || 'file', s: meta.size || 0, m: meta.mime || '' },
-            }).then(done);
+            })).then(done);
         } else if (state.pmUser) {
             // PMs are plaintext by design — the recipient gets a usable URL
             postJSON('/api/chat/conversations/' + encodeURIComponent(state.pmUser),
@@ -3996,7 +4015,7 @@
     function sendGif(url) {
         if (!url || !state.canSend || state.view !== 'room') return;
         toggleGifPicker(true);
-        postJSON('/api/chat/room/message', { message: url, room: state.room || '' }).then(function (res) {
+        postJSON('/api/chat/room/message', _tagRoomPayload({ message: url })).then(function (res) {
             if (!res.ok) {
                 if (typeof showToast === 'function') {
                     showToast(res.body && res.body.error || 'GIF not sent', 'error');
@@ -4674,19 +4693,7 @@
             ? '/api/chat/room/message'
             : '/api/chat/conversations/' + encodeURIComponent(state.pmUser);
         var payload = { message: text };
-        if (state.view === 'room') {
-            payload.room = state.room || '';
-            if (_myAvatar()) payload.avatar = _myAvatar();   // rides the envelope
-            // Only the SoulSync room carries channel/thread tags — a message in
-            // any other room stays a plain room message.
-            if (_chanRoom()) {
-                payload.chan = state.channel || CHAT_DEFAULT_CHANNEL;
-                if (state.thread) {
-                    payload.thread = state.thread.id;
-                    payload.thread_name = state.thread.name || '';
-                }
-            }
-        }
+        if (state.view === 'room') _tagRoomPayload(payload);
         var sentReply = null;
         if (state.view === 'room' && state.replyTo) {
             payload.reply = state.replyTo;

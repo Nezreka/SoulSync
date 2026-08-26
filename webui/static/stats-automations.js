@@ -2484,6 +2484,7 @@ const VIDEO_HUB_REFERENCE = {
                 { type: 'video_run_repair_job', label: 'Run Maintenance Job', desc: 'Force-run one (or all enabled) Library Maintenance jobs' },
                 { type: 'video_clean_plex_images', label: 'Clean Up Plex Images', desc: 'Clear stale cached artwork' },
                 { type: 'video_clean_youtube_episodes', label: 'Clean Old YouTube Episodes', desc: 'Per-channel retention windows' },
+                { type: 'video_purge_recycle_bin', label: 'Empty Recycle Bin', desc: 'Delete recycled files past the keep window' },
                 { type: 'video_full_cleanup', label: 'Full Cleanup', desc: 'Queue/import/search-history sweep' },
                 { type: 'video_backup_database', label: 'Backup Database', desc: 'Timestamped video_library.db backup' },
             ]
@@ -2558,6 +2559,7 @@ const _autoIcons = {
     video_process_movie_wishlist: '\uD83C\uDFAC', video_process_episode_wishlist: '\uD83D\uDCFA',
     video_process_youtube_wishlist: '\u2B07\uFE0F',
     video_refresh_airing_schedules: '\uD83D\uDDD3\uFE0F', video_clean_youtube_episodes: '\uD83E\uDDF9',
+    video_purge_recycle_bin: '\uD83D\uDDD1\uFE0F',
     video_reenrich_stale: '\uD83D\uDD04',
     video_clean_search_history: '\uD83D\uDDD1\uFE0F', video_clean_completed_downloads: '\u2705',
     video_full_cleanup: '\uD83E\uDDF9', video_backup_database: '\uD83D\uDCBE',
@@ -2566,6 +2568,7 @@ const _autoIcons = {
     // Arr-parity acquisition automations (P1/P5/P6)
     video_rss_sync: '\uD83D\uDCE1', video_seeding_sweep: '\uD83C\uDF31',
     video_import_lists: '\uD83D\uDCE5',
+    video_extto_fresh_refresh: '\u2728',
     // Video event triggers + maintenance action
     monthly_time: '\uD83D\uDCC5',
     video_batch_complete: '\u2705', video_library_scan_completed: '\uD83D\uDCE1',
@@ -4215,6 +4218,7 @@ function _autoFormatAction(type) {
         video_refresh_airing_schedules: 'Refresh Airing Schedules',
         video_reenrich_stale: 'Refresh Stale Metadata',
         video_clean_youtube_episodes: 'Clean Old YouTube Episodes',
+        video_purge_recycle_bin: 'Empty Recycle Bin',
         video_clean_search_history: 'Clean Search History',
         video_clean_completed_downloads: 'Clean Completed Downloads',
         video_full_cleanup: 'Full Cleanup', video_backup_database: 'Backup Database',
@@ -4223,6 +4227,7 @@ function _autoFormatAction(type) {
         video_rss_sync: 'RSS Release Sync',
         video_seeding_sweep: 'Seeding Goal Sweep',
         video_import_lists: 'Sync Import Lists',
+        video_extto_fresh_refresh: 'Refresh Fresh Releases',
         search_and_download: 'Search & Download',
         seeding_sweep: 'Seeding Sweep',
         deep_scan_library: 'Deep Scan Library',

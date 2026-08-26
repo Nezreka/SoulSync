@@ -1,6 +1,11 @@
 import { apiClient, readJson } from '@/app/api-client';
 
 import type {
+  AdlDeletedList,
+  ClientOverview,
+  ClientSlskdItem,
+  ClientTorrentItem,
+  ClientUsenetItem,
   AdlBatchHistoryEntry,
   AdlDownloadsResponse,
   AdlQuarantineEntry,
@@ -107,15 +112,67 @@ export async function fetchReviewQueueSummary(): Promise<AdlReviewSummary | null
   }
 }
 
-export async function fetchQuarantine(): Promise<AdlQuarantineEntry[]> {
+/**
+ * The list, or the reason it could not be fetched. Failure must be
+ * distinguishable from empty: the server reads one sidecar per entry, so a
+ * big quarantine can outlast ky's 10s default - swallowing that into []
+ * showed "hundreds in the badge, list empty" (user report, aug 25).
+ */
+export async function fetchQuarantine(): Promise<
+  { entries: AdlQuarantineEntry[] } | { error: string }
+> {
   try {
-    const data = await readJson<{ success?: boolean; entries?: AdlQuarantineEntry[] }>(
-      apiClient.get('quarantine/list'),
-    );
-    return data?.success && Array.isArray(data.entries) ? data.entries : [];
-  } catch {
-    return [];
+    const data = await readJson<{
+      success?: boolean;
+      error?: string;
+      entries?: AdlQuarantineEntry[];
+    }>(apiClient.get('quarantine/list', { timeout: 60000 }));
+    if (data?.success && Array.isArray(data.entries)) return { entries: data.entries };
+    return { error: data?.error || 'the server said no' };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+// ── Deleted-files manager (the music recycle bin) ─────────────────────────
+
+export async function fetchDeletedFiles(): Promise<AdlDeletedList | null> {
+  try {
+    const data = await readJson<{ success?: boolean } & Partial<AdlDeletedList>>(
+      apiClient.get('deleted-files'),
+    );
+    if (!data?.success) return null;
+    return {
+      entries: Array.isArray(data.entries) ? data.entries : [],
+      total_size: data.total_size ?? 0,
+      count: data.count ?? 0,
+      keep_days: data.keep_days ?? 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export interface DeletedActionResult extends AdlResult {
+  restored?: string[];
+  purged?: string[];
+  errors?: { id: string; error: string }[];
+}
+
+export function restoreDeletedFiles(ids: string[]): Promise<DeletedActionResult> {
+  return readJson<DeletedActionResult>(apiClient.post('deleted-files/restore', { json: { ids } }));
+}
+
+export function purgeDeletedFiles(ids: string[] | null, all = false): Promise<DeletedActionResult> {
+  return readJson<DeletedActionResult>(
+    apiClient.post('deleted-files/purge', { json: all ? { all: true } : { ids: ids ?? [] } }),
+  );
+}
+
+export function setDeletedRetention(days: number): Promise<AdlResult & { keep_days?: number }> {
+  return readJson<AdlResult & { keep_days?: number }>(
+    apiClient.post('deleted-files/retention', { json: { days } }),
+  );
 }
 
 // ── Downloads mutations ───────────────────────────────────────────────────
@@ -253,4 +310,153 @@ export function quarantineDelete(id: string): Promise<AdlResult> {
 
 export function quarantineClear(): Promise<AdlResult> {
   return readJson<AdlResult>(apiClient.post('quarantine/clear'));
+}
+
+// ── The Clients tab (external download clients) ───────────────────────────
+
+/**
+ * Either the overview or the reason it could not be fetched. The failure
+ * carries its message on purpose: the first version returned null and the
+ * section sat on "loading…" forever with no way to see why.
+ */
+export type ClientFetch<T> =
+  | { ok: true; overview: ClientOverview<T> }
+  | { ok: false; message: string };
+
+async function fetchClientOverview<T>(path: string): Promise<ClientFetch<T>> {
+  try {
+    const data = await readJson<{ success?: boolean; error?: string } & Partial<ClientOverview<T>>>(
+      // 30s: a cold adapter call can sit on a slow client handshake longer
+      // than ky's 10s default.
+      apiClient.get(path, { timeout: 30000 }),
+    );
+    if (!data?.success) return { ok: false, message: data?.error || 'the server said no' };
+    return {
+      ok: true,
+      overview: {
+        configured: Boolean(data.configured),
+        connected: Boolean(data.connected),
+        type: data.type,
+        error: data.error,
+        items: Array.isArray(data.items) ? data.items : [],
+        uploads: Array.isArray(data.uploads) ? data.uploads : undefined,
+        counts: data.counts,
+      },
+    };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export function fetchTorrentClient(): Promise<ClientFetch<ClientTorrentItem>> {
+  return fetchClientOverview('clients/torrent');
+}
+
+export function fetchUsenetClient(): Promise<ClientFetch<ClientUsenetItem>> {
+  return fetchClientOverview('clients/usenet');
+}
+
+export function fetchSlskdClient(): Promise<ClientFetch<ClientSlskdItem>> {
+  return fetchClientOverview('clients/slskd');
+}
+
+export type ClientAction = 'pause' | 'resume' | 'remove';
+
+export function torrentClientAction(
+  id: string,
+  action: ClientAction,
+  deleteFiles = false,
+): Promise<AdlResult> {
+  return readJson<AdlResult>(
+    apiClient.post('clients/torrent/action', {
+      json: { id, action, delete_files: deleteFiles },
+    }),
+  );
+}
+
+export function usenetClientAction(
+  id: string,
+  action: ClientAction,
+  deleteFiles = false,
+): Promise<AdlResult> {
+  return readJson<AdlResult>(
+    apiClient.post('clients/usenet/action', {
+      json: { id, action, delete_files: deleteFiles },
+    }),
+  );
+}
+
+export interface ClientBulkResult extends AdlResult {
+  done?: number;
+  failed?: string[];
+}
+
+export function torrentClientBulk(
+  ids: string[],
+  action: ClientAction,
+  deleteFiles = false,
+): Promise<ClientBulkResult> {
+  return readJson<ClientBulkResult>(
+    apiClient.post('clients/torrent/action', {
+      json: { ids, action, delete_files: deleteFiles },
+      timeout: 60000,
+    }),
+  );
+}
+
+export function usenetClientBulk(
+  ids: string[],
+  action: ClientAction,
+  deleteFiles = false,
+): Promise<ClientBulkResult> {
+  return readJson<ClientBulkResult>(
+    apiClient.post('clients/usenet/action', {
+      json: { ids, action, delete_files: deleteFiles },
+      timeout: 60000,
+    }),
+  );
+}
+
+export function torrentClientAdd(url: string): Promise<AdlResult & { ref?: string }> {
+  return readJson<AdlResult & { ref?: string }>(
+    apiClient.post('clients/torrent/add', { json: { url }, timeout: 60000 }),
+  );
+}
+
+export function usenetClientAdd(url: string): Promise<AdlResult & { ref?: string }> {
+  return readJson<AdlResult & { ref?: string }>(
+    apiClient.post('clients/usenet/add', { json: { url }, timeout: 60000 }),
+  );
+}
+
+export function slskdClearCompleted(): Promise<AdlResult> {
+  return readJson<AdlResult>(apiClient.post('clients/slskd/clear-completed', { timeout: 60000 }));
+}
+
+export interface ClientLinks {
+  slskd: string;
+  torrent: string;
+  usenet: string;
+}
+
+export async function fetchClientLinks(): Promise<ClientLinks | null> {
+  try {
+    const data = await readJson<{ success?: boolean } & Partial<ClientLinks>>(
+      apiClient.get('clients/links'),
+    );
+    if (!data?.success) return null;
+    return { slskd: data.slskd ?? '', torrent: data.torrent ?? '', usenet: data.usenet ?? '' };
+  } catch {
+    return null;
+  }
+}
+
+export function slskdClientCancel(
+  id: string,
+  username: string,
+  remove = false,
+): Promise<AdlResult> {
+  return readJson<AdlResult>(
+    apiClient.post('clients/slskd/action', { json: { id, username, action: 'cancel', remove } }),
+  );
 }

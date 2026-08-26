@@ -256,6 +256,25 @@ def test_findings_can_be_filtered_to_one_type(worker):
     assert 'last_error' in only['items'][0], "the failure reason rides the payload"
 
 
+def test_search_reaches_group_members_in_details(worker):
+    """a duplicate group is titled after ONE member - the other copies live
+    only in details_json. searching for one of THOSE used to come back
+    empty (kvkarlsson, aug 25: 'butterfly' found nothing while the pair sat
+    inside a finding titled after a different track)."""
+    _raise(worker, finding_type='duplicate_tracks', job_id='duplicate_detector',
+           title='Duplicate: Some Other Song by Double Duo',
+           file_path='/music/Some Other Song.flac',
+           details={'tracks': [
+               {'title': 'Some Other Song', 'file_path': '/music/Some Other Song.flac'},
+               {'title': 'A Butterfly, Bee, Mantis, And Grasshopper',
+                'file_path': '/music/01 A Butterfly.ogg'},
+           ]})
+    hit = worker.get_findings(q='butterfly')
+    assert hit['total'] == 1
+    miss = worker.get_findings(q='grasshopper prescription')
+    assert miss['total'] == 0
+
+
 # ── bulk safety ──────────────────────────────────────────────────────────────
 
 def test_bulk_refuses_an_action_that_would_span_types(worker):

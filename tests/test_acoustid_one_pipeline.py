@@ -166,3 +166,29 @@ def test_the_scanner_does_not_carry_its_own_verification_logic():
             f"{owned_by_the_verifier} is the verifier's job; the scan calling it "
             f"is how the two paths drifted apart before"
         )
+
+
+def test_an_unusable_client_stops_the_run_instead_of_flagging_the_library():
+    """`verify_audio_file` answers SKIP when AcoustID is not usable, and a scan
+    persists a SKIP as a completed check. Without a check up front, a missing
+    API key would stamp every row in the library and report a clean run."""
+    job = AcoustIDScannerJob()
+    scanned = []
+    context = SimpleNamespace(
+        db=None, transfer_folder="/music",
+        config_manager=SimpleNamespace(get=lambda key, default=None: default,
+                                       set=lambda *a, **k: None),
+        acoustid_client=SimpleNamespace(
+            is_available=lambda: (False, "no API key configured")),
+        create_finding=lambda **kw: True,
+        report_progress=lambda **kw: None, update_progress=lambda *a, **k: None,
+        check_stop=lambda: False, wait_if_paused=lambda: False,
+        sleep_or_stop=lambda *a, **k: False,
+    )
+    context.db = SimpleNamespace(_get_connection=lambda: scanned.append("db"))
+
+    result = job.scan(context)
+
+    assert result.errors == 1
+    assert result.scanned == 0
+    assert scanned == [], "the run must stop before it reads the catalogue"

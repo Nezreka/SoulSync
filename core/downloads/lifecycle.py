@@ -110,6 +110,16 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
             # above — a row naming a staging path that is about to stop
             # existing. The publish treats a zero for an audio file as a failed
             # publish and rolls the album back.
+            #
+            # Upstream gates this proof on the active media server being
+            # 'soulsync', because there the staged row comes from
+            # record_soulsync_library_entry and a Plex/Navidrome/Jellyfin
+            # install legitimately has none (3934742fd — atomic albums stranded
+            # in staging). That gate does not belong here: the file row this
+            # repoints is written by require_library_v2_registration, which the
+            # import pipeline runs on EVERY install regardless of media server.
+            # A zero is therefore real evidence on this branch, and dropping it
+            # would disable the L2-002 guard rather than fix anything.
             from core.library2.track_files import repoint_file_path
 
             conn = db._get_connection()

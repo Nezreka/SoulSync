@@ -101,3 +101,38 @@ def test_tuple_negative_inputs_safe():
 def test_tuple_string_inputs_coerced():
     assert format_track_number_tuple("6", "13") == (6, 13)
     assert format_track_number_tuple("6", "0") == (6, 0)
+
+
+# ── the Vorbis split (Discord, mrderekibmusic: FLACs tagged "1/1") ───────────
+def test_vorbis_fields_are_split_never_combined():
+    from core.metadata.track_number_format import format_vorbis_track_fields
+    assert format_vorbis_track_fields(1, 1) == ("1", "1")
+    assert format_vorbis_track_fields(6, 13) == ("6", "13")
+    assert format_vorbis_track_fields(6, 0) == ("6", None)     # 0 = unknown, no lie
+    assert format_vorbis_track_fields(6, None) == ("6", None)
+    assert format_vorbis_track_fields(None, 13) == ("1", "13")
+    num, _total = format_vorbis_track_fields(1, 1)
+    assert "/" not in num, "the combined form is ID3's convention, not Vorbis's"
+
+
+def test_the_retag_writer_splits_vorbis_and_keeps_id3_combined(tmp_path):
+    """Both conventions at once: TRCK is DEFINED as 'N/M', TRACKNUMBER is not.
+    The bug was applying ID3's rule to FLAC, where players and taggers show the
+    field as written — track number '1/1'."""
+    from core.tag_writer import _write_vorbis
+
+    class _Fake(dict):
+        pass
+
+    audio = _Fake()
+    _write_vorbis(audio, None, None, None, None, None, None,
+                  track_num=1, total_tracks=1, disc_num=None, bpm=None)
+    assert audio["tracknumber"] == ["1"]
+    assert audio["tracktotal"] == ["1"]
+    assert audio["totaltracks"] == ["1"]
+
+    audio = _Fake()
+    _write_vorbis(audio, None, None, None, None, None, None,
+                  track_num=6, total_tracks=None, disc_num=None, bpm=None)
+    assert audio["tracknumber"] == ["6"]
+    assert "tracktotal" not in audio, "an unknown total must not be written"

@@ -93,7 +93,7 @@ const STATS_CHART_CURSOR = {
 } as const;
 
 const ARTIST_DETAIL_SOURCE = 'library' as const;
-const STATS_DETAIL_QUERY_KEY = ['stats', 'listening-events'] as const;
+const STATS_DETAIL_QUERY_KEY = ['stats-listening-events'] as const;
 
 export function StatsPage() {
   const bridge = useReactPageShell('stats');
@@ -130,6 +130,8 @@ export function StatsPage() {
       return fetchStatsListeningEvents(range, listeningDetailFilter);
     },
     enabled: !!listeningDetailFilter,
+    retry: false,
+    staleTime: 30_000,
   });
 
   useEffect(() => {
@@ -353,6 +355,7 @@ export function StatsPage() {
               <StatsSectionCard title="When You Listen">
                 <StatsListeningClock
                   clock={cachedStats?.clock}
+                  rangeLabel={getStatsRangeLabel(range)}
                   rhythm={cachedStats?.rhythm}
                   onCellSelect={(weekday, hour) =>
                     setListeningDetailFilter({ type: 'weekday_hour', weekday, hour })
@@ -411,7 +414,8 @@ export function StatsPage() {
       {listeningDetailFilter ? (
         <StatsListeningDetailModal
           payload={listeningDetailsQuery.data}
-          loading={listeningDetailsQuery.isPending}
+          filter={listeningDetailFilter}
+          loading={listeningDetailsQuery.isPending && !listeningDetailsQuery.data}
           error={listeningDetailsQuery.error}
           onClose={() => setListeningDetailFilter(null)}
           onPlay={(track) => playStatsTrack(bridge, track)}
@@ -644,10 +648,12 @@ function StatsCardDelta({
 function StatsListeningClock({
   clock,
   onCellSelect,
+  rangeLabel,
   rhythm,
 }: {
   clock: StatsClock | undefined;
   onCellSelect: (weekday: number, hour: number) => void;
+  rangeLabel: string;
   rhythm: StatsRhythm | undefined;
 }) {
   const grid = clock?.grid;
@@ -662,6 +668,13 @@ function StatsListeningClock({
 
   return (
     <div className={styles.statsClock}>
+      <div className={styles.statsClockContext}>
+        <div>
+          <span className={styles.statsClockContextLabel}>Weekly pattern</span>
+          <span className={styles.statsClockContextRange}>in {rangeLabel}</span>
+        </div>
+        <strong>{formatCompactNumber(clock.total)} plays</strong>
+      </div>
       <div className={styles.statsClockGrid}>
         {grid.map((row, weekday) => (
           <div key={weekday} className={styles.statsClockRow}>
@@ -1145,23 +1158,64 @@ function StatsRecentPlays({
   );
 }
 
+function getListeningDetailFallbackTitle(filter: StatsListeningEventsFilter): string {
+  if (filter.type === 'date') return formatDetailDateTitle(filter.date);
+  if (filter.type === 'weekday_hour') {
+    return `${WEEKDAY_LABELS[filter.weekday] ?? 'Selected day'} ${formatHourLabel(filter.hour)}`;
+  }
+  return formatHourLabel(filter.hour);
+}
+
+function formatDetailDateTitle(date: string): string {
+  if (/^\d{4}-\d{2}$/.test(date)) {
+    const parsedMonth = new Date(`${date}-01T00:00:00`);
+    if (!Number.isNaN(parsedMonth.getTime())) {
+      return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(
+        parsedMonth,
+      );
+    }
+  }
+
+  const parsed = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(parsed);
+}
 function StatsListeningDetailModal({
   error,
+  filter,
   loading,
   onClose,
   onPlay,
   payload,
 }: {
   error: unknown;
+  filter: StatsListeningEventsFilter;
   loading: boolean;
   onClose: () => void;
   onPlay: (track: { title: string; artist: string; album: string }) => Promise<void>;
   payload:
-    | { title?: string; total?: number; limit?: number; items?: StatsListeningEventTrack[] }
+    | {
+        title?: string;
+        total?: number;
+        limit?: number;
+        has_more?: boolean;
+        items?: StatsListeningEventTrack[];
+      }
     | undefined;
 }) {
   const tracks = payload?.items ?? [];
   const total = payload?.total ?? 0;
+  const title = payload?.title || getListeningDetailFallbackTitle(filter);
+  const summary = loading
+    ? 'Finding the matching plays...'
+    : payload?.has_more
+      ? `Showing latest ${formatCompactNumber(tracks.length)} plays`
+      : `${formatCompactNumber(total)} ${total === 1 ? 'play' : 'plays'}`;
   return (
     <div className={styles.statsDetailBackdrop} role="presentation" onMouseDown={onClose}>
       <div
@@ -1174,14 +1228,8 @@ function StatsListeningDetailModal({
         <div className={styles.statsDetailHeader}>
           <div>
             <div className={styles.statsDetailEyebrow}>Listening Details</div>
-            <h3>{payload?.title || 'Loading...'}</h3>
-            <p>
-              {loading
-                ? 'Loading plays...'
-                : `${formatCompactNumber(total)} ${total === 1 ? 'play' : 'plays'}${
-                    total > tracks.length ? `, showing latest ${tracks.length}` : ''
-                  }`}
-            </p>
+            <h3>{title}</h3>
+            <p>{summary}</p>
           </div>
           <button
             type="button"
@@ -1231,7 +1279,9 @@ function StatsListeningDetailModal({
                 </div>
                 <div className={styles.statsDetailWhen}>
                   <span>{formatDetailPlayedAt(track.played_at)}</span>
-                  {track.server_source ? <span>{track.server_source}</span> : null}
+                  {track.server_source ? (
+                    <span className={styles.statsDetailSource}>{track.server_source}</span>
+                  ) : null}
                 </div>
                 <button
                   type="button"

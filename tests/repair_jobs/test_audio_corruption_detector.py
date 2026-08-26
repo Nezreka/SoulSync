@@ -10,6 +10,8 @@ Covered:
 
 from __future__ import annotations
 
+import os
+
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -290,3 +292,65 @@ def test_a_file_outside_the_catalogue_is_not_promised_a_re_download(tmp_path, mo
     assert "LOST_SYNC" in f["description"]
     assert "re-download" not in f["description"].lower()
     assert "delete" in f["description"].lower()
+
+
+# ── a file that changed under the decode test is not evidence ────────────────
+#
+# The scan walks the library while the import pipeline is still moving files
+# into it. A cross-device move is copy-then-delete, so `flac -t` reading a
+# half-written FLAC reports exactly what a genuinely damaged one does
+# ("LOST_SYNC after processing N samples"). The finding was then written with a
+# path that no longer existed by the time the user looked at it.
+#
+# The decode verdict only means something if the bytes under it held still.
+
+def test_a_file_that_vanished_during_the_test_is_not_flagged(tmp_path, monkeypatch):
+    gone = tmp_path / "01 - Gone.flac"
+    gone.write_bytes(b"x")
+
+    def _decode(path):
+        os.remove(path)               # the mover finishes mid-test
+        return False, "LOST_SYNC after processing 0 samples"
+
+    monkeypatch.setattr(mod, "_decoder_available", lambda: True)
+    monkeypatch.setattr(mod, "resolve_library_file_path", lambda p, **kw: p)
+    monkeypatch.setattr(mod, "check_flac_integrity", _decode)
+
+    ctx, findings = _context([_row(20, "Gone", str(gone))], tmp_path)
+    result = AudioCorruptionDetectorJob().scan(ctx)
+
+    assert findings == [], "flagged a file that no longer exists"
+    assert result.findings_created == 0 and result.skipped == 1
+
+
+def test_a_file_still_being_written_is_not_flagged(tmp_path, monkeypatch):
+    """Same race, caught by size instead of absence: the copy is still growing."""
+    growing = tmp_path / "02 - Growing.flac"
+    growing.write_bytes(b"x")
+
+    def _decode(path):
+        with open(path, "ab") as fh:
+            fh.write(b"more bytes arriving")
+        return False, "LOST_SYNC after processing 6418432 samples"
+
+    monkeypatch.setattr(mod, "_decoder_available", lambda: True)
+    monkeypatch.setattr(mod, "resolve_library_file_path", lambda p, **kw: p)
+    monkeypatch.setattr(mod, "check_flac_integrity", _decode)
+
+    ctx, findings = _context([_row(21, "Growing", str(growing))], tmp_path)
+    result = AudioCorruptionDetectorJob().scan(ctx)
+
+    assert findings == [], "flagged a file that was still being written"
+    assert result.findings_created == 0 and result.skipped == 1
+
+
+def test_a_file_that_held_still_is_still_flagged(tmp_path, monkeypatch):
+    """The guard must not swallow real corruption."""
+    bad = tmp_path / "03 - Really Bad.flac"
+    bad.write_bytes(b"x")
+    _prep(monkeypatch, {str(bad): (False, "FRAME_CRC_MISMATCH")})
+
+    ctx, findings = _context([_row(22, "Really Bad", str(bad))], tmp_path)
+    result = AudioCorruptionDetectorJob().scan(ctx)
+
+    assert result.findings_created == 1 and len(findings) == 1

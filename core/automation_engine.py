@@ -421,6 +421,19 @@ SYSTEM_AUTOMATIONS = [
         'owned_by': 'video',
     },
     {
+        # Search → Fresh Releases is served from a stored board, so something has to
+        # keep it fresh. Hourly matches the board's own turnover, and because matched
+        # releases are cached by release, the steady-state cost is next to nothing —
+        # only a cold cache is slow. The tab's Refresh button runs the same action.
+        'name': 'Refresh Fresh Releases',              # EXT.to board + per-release match
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'video_extto_fresh_refresh',
+        'action_config': {'max_new_details': 40},
+        'initial_delay': 1920,                         # after Sync Import Lists (1860)
+        'owned_by': 'video',
+    },
+    {
         'name': 'Sync Import Lists',                   # external lists → wishlist/watchlist
         'trigger_type': 'schedule',
         'trigger_config': {'interval': 6, 'unit': 'hours'},
@@ -435,6 +448,16 @@ SYSTEM_AUTOMATIONS = [
         'trigger_type': 'daily_time',
         'trigger_config': {'time': '04:00'},
         'action_type': 'video_clean_youtube_episodes',
+        'owned_by': 'video',
+    },
+    # Recycle bin retention: delete recycled files past recycle_keep_days. Runs after the
+    # YouTube clean so the files that job just recycled are already in the bin. Safe to
+    # seed, it only ever touches entries the recycle bin itself wrote.
+    {
+        'name': 'Empty Recycle Bin',
+        'trigger_type': 'daily_time',
+        'trigger_config': {'time': '04:30'},
+        'action_type': 'video_purge_recycle_bin',
         'owned_by': 'video',
     },
 ]
@@ -651,6 +674,44 @@ class AutomationEngine:
         self._fix_airing_automation_schedule()
         self._fix_deep_scan_schedules()
         self._fix_wishlist_processor_rename()
+        self._fix_orphaned_system_actions()
+
+    def _fix_orphaned_system_actions(self):
+        """Delete system rows whose action_type has NO registered handler.
+
+        A system row is created by this seeder and nothing else, and the API
+        refuses to delete one (403 'System automations cannot be deleted'). So
+        when an action is renamed or dropped, its row is STRANDED: it cannot run,
+        the user cannot remove it, and it reports "No handler for action: <type>"
+        on every fire, forever. _fix_wishlist_processor_rename is a hand-written
+        instance of exactly this; this generalises it so the next rename does not
+        need its own cleanup.
+
+        Deliberately narrow: only a MISSING HANDLER counts as orphaned. A row
+        whose action still exists is a live automation — possibly with a schedule
+        the user tuned — and dropping it out of the spec list is not grounds for
+        deleting it. delete_automation refuses system rows, so is_system is
+        cleared first (same two-step as the rename fix).
+
+        No-ops while the registry is empty, so a startup reorder can never be read
+        as "every automation is orphaned" and wipe the table.
+        """
+        try:
+            known = set(self._action_handlers)
+            if not known:
+                return          # cannot judge yet, so judge nothing
+            for auto in (self.db.get_automations() or []):
+                if not auto.get('is_system'):
+                    continue
+                action = auto.get('action_type') or ''
+                if action in known:
+                    continue
+                self.db.update_automation(auto['id'], is_system=0)
+                if self.db.delete_automation(auto['id']):
+                    logger.info("Removed orphaned system automation %r (action %r has no handler)",
+                                auto.get('name'), action)
+        except Exception:
+            logger.exception("orphaned system automation sweep failed")
 
     def _fix_video_scan_default(self):
         """Remove the obsolete standalone 'Scan Video Library' SYSTEM automation — it's

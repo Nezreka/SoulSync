@@ -131,7 +131,7 @@ export async function fetchStatsListeningEvents(
     searchParams.hour = String(filter.hour);
   }
   const payload = await readJson<StatsListeningEventsPayload>(
-    apiClient.get('stats/listening-events', { searchParams }),
+    apiClient.get('stats/listening-events', { searchParams, timeout: 30_000 }),
   );
   if (!payload.success) {
     throw new Error(payload.error || 'Failed to load listening details');

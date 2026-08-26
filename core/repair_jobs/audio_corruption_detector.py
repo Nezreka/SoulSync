@@ -108,6 +108,15 @@ def check_flac_integrity(path: str) -> Tuple[bool, str]:
     return True, ''
 
 
+def _file_identity(path: str):
+    """``(size, mtime_ns)`` of ``path``, or ``None`` when it is not there."""
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return (stat.st_size, stat.st_mtime_ns)
+
+
 def _decoder_available() -> bool:
     return bool(shutil.which('flac') or shutil.which('ffmpeg'))
 
@@ -246,6 +255,13 @@ class AudioCorruptionDetectorJob(RepairJob):
                     log_line=f'{artist} — {title}', log_type='info')
 
             tested += 1
+            # A decode verdict only means something if the bytes under it held
+            # still. The scan walks the library while the import pipeline is
+            # still moving files into it, and a cross-device move is
+            # copy-then-delete — so `flac -t` reading a half-written FLAC
+            # reports exactly what a genuinely damaged one does. The finding was
+            # then written against a path that had already moved on.
+            identity_before = _file_identity(resolved)
             try:
                 ok, reason = check_flac_integrity(resolved)
             except Exception as e:
@@ -257,6 +273,22 @@ class AudioCorruptionDetectorJob(RepairJob):
                 continue
 
             if ok:
+                if context.update_progress and (i + 1) % 5 == 0:
+                    context.update_progress(i + 1, total)
+                continue
+
+            identity_after = _file_identity(resolved)
+            if identity_after is None or identity_after != identity_before:
+                # Moved, replaced or still growing under the test — not evidence.
+                logger.debug(
+                    "[Corrupt File Detector] %s changed during the decode test "
+                    "(%s -> %s) — not flagging",
+                    os.path.basename(resolved), identity_before, identity_after)
+                result.skipped += 1
+                if context.report_progress:
+                    context.report_progress(
+                        log_line=(f'Skipped {artist} — {title}: the file changed '
+                                  f'while it was being tested'), log_type='info')
                 if context.update_progress and (i + 1) % 5 == 0:
                     context.update_progress(i + 1, total)
                 continue

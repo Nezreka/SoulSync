@@ -6,6 +6,48 @@ import os
 import threading
 from typing import Any, Callable, Dict, List, Optional
 
+from utils.logging_config import get_logger
+
+logger = get_logger("repair_job.base")
+
+# The recoverable quarantine removed duplicates and dead files move into. Dot-
+# prefixed ON PURPOSE: Navidrome, Plex and Jellyfin all skip hidden folders by
+# default, so the quarantine stays out of everyone's library with no per-server
+# setup. The old bare name put deleted tracks straight back on people's media
+# servers (Discord, Jose: "the deleted folder that navidrome still picks up").
+DELETED_QUARANTINE_DIRNAME = '.deleted'
+LEGACY_DELETED_DIRNAME = 'deleted'
+
+
+def deleted_quarantine_root(transfer_folder: str) -> str:
+    """The quarantine folder under ``transfer_folder`` — always the hidden
+    spelling, migrating a legacy bare ``deleted`` folder when one exists.
+
+    The migration is a single ``os.rename``, so every file a user already has in
+    quarantine disappears from their media server the moment any tool touches the
+    quarantine again — no manual cleanup. If both spellings exist (someone made
+    ``.deleted`` by hand next to an old ``deleted``) the legacy folder is left
+    alone rather than merged: both are still recognised by every walker skip, and
+    merging directory trees is how files get clobbered. A failed rename (a media
+    server holding the handle, a read-only mount) falls back to the legacy path so
+    quarantining KEEPS WORKING exactly as before rather than failing the tool.
+    """
+    canonical = os.path.join(transfer_folder, DELETED_QUARANTINE_DIRNAME)
+    legacy = os.path.join(transfer_folder, LEGACY_DELETED_DIRNAME)
+    if os.path.isdir(legacy) and not os.path.exists(canonical):
+        try:
+            os.rename(legacy, canonical)
+            logger.info("Renamed quarantine folder %s -> %s (hidden from media servers)",
+                        legacy, canonical)
+        except OSError as e:
+            logger.warning("Could not rename %s to %s (%s) — using the legacy folder",
+                           legacy, canonical, e)
+            return legacy
+    if os.path.isdir(legacy) and os.path.isdir(canonical):
+        logger.info("Both %s and %s exist — new quarantined files go to the hidden one",
+                    LEGACY_DELETED_DIRNAME, DELETED_QUARANTINE_DIRNAME)
+    return canonical
+
 
 def get_scope_artist(context: Any) -> Optional[str]:
     """The artist a user-triggered run is scoped to, or None for library-wide.
@@ -147,7 +189,11 @@ def is_internal_transfer_dir(path: str, transfer_folder: str) -> bool:
         base = os.path.normpath(os.path.abspath(transfer_folder))
     except (OSError, ValueError):
         return False
-    for name in ('deleted', '.soulsync_atomic_staging'):
+    # both quarantine spellings: '.deleted' is what SoulSync writes now, bare
+    # 'deleted' is what older installs still carry until the rename migration
+    # in deleted_quarantine_root() runs
+    for name in (DELETED_QUARANTINE_DIRNAME, LEGACY_DELETED_DIRNAME,
+                 '.soulsync_atomic_staging'):
         owned = os.path.join(base, name)
         if target == owned or target.startswith(owned + os.sep):
             return True
@@ -299,6 +345,15 @@ class RepairJob(ABC):
     # REFUSED rather than silently widened -- the same fail-closed posture
     # `get_scope_file_paths` already takes for an empty list.
     supports_file_scope: bool = False
+    # True for jobs that MOVE or REWRITE real library files based on catalogue
+    # paths (reorganize, retag, track numbers, unknown-artist moves, artist
+    # splits). When such a job runs LIVE (dry_run off), the worker first proves
+    # it can actually SEE the library: with 'Report Real Path' off in Navidrome
+    # (or a broken Docker mount) the catalogue holds paths that resolve to
+    # nothing — or worse, to the WRONG files via the pattern-probing resolver —
+    # and a live run then rearranges a library it is effectively blind to
+    # (Discord, Jose: good tracks swept into the deleted quarantine).
+    writes_library_files: bool = False
 
     @abstractmethod
     def scan(self, context: JobContext) -> JobResult:

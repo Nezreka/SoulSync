@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { thumb } from './artwork-thumb';
+import { browserSafeImageUrl, imageProxyUrl, thumb } from './artwork-thumb';
 
 /**
  * The rule that keeps this safe to sprinkle across call sites: it only ever
@@ -19,6 +19,23 @@ describe('thumb', () => {
     // change or break the request.
     const cdn = 'https://i.scdn.co/image/ab6761610000e5eb';
     expect(thumb(cdn, 'grid')).toBe(cdn);
+  });
+
+  it('proxies Cover Art Archive URLs when no service worker controls the page', () => {
+    const cover = 'https://coverartarchive.org/release-group/abc/front-250';
+    expect(browserSafeImageUrl(cover, false)).toBe(imageProxyUrl(cover));
+    expect(thumb(cover, 'grid', false)).toBe(imageProxyUrl(cover));
+  });
+
+  it('leaves Cover Art Archive URLs alone once the service worker can handle them', () => {
+    const cover = 'https://coverartarchive.org/release-group/abc/front-250';
+    expect(browserSafeImageUrl(cover, true)).toBe(cover);
+    expect(thumb(cover, 'grid', true)).toBe(cover);
+  });
+
+  it('also proxies archive.org redirect targets without a controller', () => {
+    const cover = 'https://ia800100.us.archive.org/12/items/mbid-a/mbid-a_thumb250.jpg';
+    expect(browserSafeImageUrl(cover, false)).toBe(imageProxyUrl(cover));
   });
 
   it('leaves other local paths alone', () => {

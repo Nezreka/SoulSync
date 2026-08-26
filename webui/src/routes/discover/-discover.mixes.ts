@@ -66,8 +66,10 @@ export const YOUR_MIX_FEEDERS = [
   { key: 'popular_picks', title: 'Popular Picks', syncKey: 'popular_picks', live: true },
   { key: 'hidden_gems', title: 'Hidden Gems', syncKey: 'hidden_gems', live: true },
   { key: 'listening_mix', title: 'Your Listening Mix', syncKey: 'listening_mix', live: true },
-  // variadic, no syncKey — and its only producer is unreachable
-  { key: 'daily_mix_*', title: null, syncKey: null, live: false },
+  // variadic - rebuilt aug 25 on core/personalized/daily_mixes.py (taste
+  // clusters, mostly owned + discovery flavor). play + download; no sync
+  // key yet (sync needs a registered playlist type - P5's job)
+  { key: 'daily_mix_*', title: null, syncKey: null, live: true },
   {
     key: 'discovery_shuffle',
     title: 'Discovery Shuffle',
@@ -199,6 +201,7 @@ export function mixStatusBase(mix: DiscoverMix): string {
   return mix.statusBase || (mix.syncKey ? mix.syncKey.replace(/_/g, '-') : '');
 }
 
+export const MIX_ACTION_PLAY = '▶ Play';
 export const MIX_ACTION_DOWNLOAD = 'Download';
 export const MIX_ACTION_SYNC = 'Sync';
 
@@ -214,9 +217,14 @@ export const MIX_ACTION_SYNC = 'Sync';
  * one, which would otherwise be uninteractable.
  */
 export function mixActions(mix: DiscoverMix): MixAction[] {
-  if (mix.actions) return mix.actions;
-  if (!mix.syncKey) return [];
+  // Every mix can PLAY what the user already owns (resolve-playable +
+  // window.playTrackList) - the one thing no download-only discovery tool
+  // has. Prepended so listening is always the first offer.
+  const play: MixAction = { label: MIX_ACTION_PLAY, onclick: 'play' };
+  if (mix.actions) return [play, ...mix.actions];
+  if (!mix.syncKey) return [play];
   return [
+    play,
     { label: MIX_ACTION_DOWNLOAD, closeFirst: true, onclick: 'download' },
     { label: MIX_ACTION_SYNC, primary: true, isSync: true, onclick: 'sync' },
   ];

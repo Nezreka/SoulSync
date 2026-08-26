@@ -239,6 +239,7 @@ _JOB_MODULES = [
     'core.repair_jobs.monitoring_list_reconcile',
     'core.repair_jobs.expired_download_cleaner',
     'core.repair_jobs.library_reorganize',
+    'core.repair_jobs.library_retag',
     'core.repair_jobs.path_drift_reconcile',
 ]
 

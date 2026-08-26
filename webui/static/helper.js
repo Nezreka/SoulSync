@@ -3451,15 +3451,21 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.2.4': [
-        { date: 'August 2026 · 3.2.4' },
-        { title: 'Prowlarr searches are paced now', desc: 'everything else in soulsync that talks to somebody else\u2019s server is rate limited. prowlarr was the one caller with nothing at all, and it hands every search straight to your indexers. the video wishlist drain was the worst of it: three items at a time, each fanning out several searches at once, and the next one starting the moment one finished. there is a shared budget now, two seconds apart and twenty a minute, both configurable under Settings. RSS is untouched and stays at 15 minutes, it is one aggregate call that searches nothing.', page: 'settings' },
-        { title: 'Big cover art no longer costs the file its tags', desc: 'a FLAC picture block cannot hold more than about 16MB and nothing checked, so an oversized cover killed the whole tag write: the track ended up with no art AND no tags, after a log line saying the art embedded fine. art is resized to fit now, and if it cannot be resized the tags still get written without it.' },
-        { title: 'The enhanced artist view was hiding releases', desc: 'compilations were loaded, sorted into a bucket and then never drawn, so a greatest hits release sitting in your library was invisible on that page. every type gets its own section now. the stats bar and the list underneath it also classified releases differently, so a release could render under EPs while counting as none of the three numbers above it.', page: 'artists' },
-        { title: '"No runs yet" on a playlist that had just run', desc: 'a sync with nothing left to download skipped its own bookkeeping along with the work, so nothing recorded that the run happened: the card had no run to show and stopped opening when clicked. it records a finished run now. the same card was also losing playlists behind recent album downloads, because it asked for the ten most recent syncs and then discarded the album ones.', page: 'dashboard' },
-        { title: 'Album publish order, and the video database start-up', desc: 'albums published in whatever order the filesystem handed the files back, which decides what a failed publish has to roll back. sorted by track number now. and the video database could fail to come up when a restart raced a running worker. thanks nick2000713' },
-        { title: 'Quality profile settings save where you can see them', desc: 'the quality page made it look like your settings saved, but the pencil on the profile row was the real save path. change something, come back, and you saw the old values. the profile you are looking at is the save target now, and Save Settings saves it too. thanks nick2000713', page: 'settings' },
-        { title: 'Earlier versions', desc: '3.2.3 rebuilt the sync page into a playlist library, made downloads narrate what they are doing, and capped soulseek concurrency across all batches. 3.2.2 added album reassignment. 3.2.1 made hand-picked artwork survive a sync. 3.2.0 moved sixteen music pages to React.' },
+    '3.3.1': [
+        { date: 'August 2026 \u00b7 3.3.1' },
+        { title: 'Daily Mixes are real now', desc: 'built from your listening history: your most played artists clustered by who actually sounds like who, each mix weaving owned tracks with a few discovery picks, reshuffled daily. verified against a real library, the clusters come out coherent.', page: 'discover' },
+        { title: 'Recommended Stations, and every mix plays', desc: 'your top artists as one-click radio cards with "With X, Y" companions from the similarity data. every mix modal now leads with a play button that plays your owned tracks instantly, plus a library radio card.', page: 'discover' },
+        { title: 'Last.fm Track Radio works again', desc: 'the dropdown was invisible (css containment clipped it), rows were unstyled, errors looked like no results, one blank row killed the whole search, cards claimed 50 tracks no matter what, and opening a radio with uncached tracks DELETED it. all repaired, with a spinner while your radio builds.', page: 'discover' },
+        { title: 'Seasonal playlists build from your taste', desc: 'summer vibes used to be albums literally named beach. the vibe seasons now blend your most played tracks from those months across every year of listening, your vibe-tagged albums, and seasonal sounding discovery picks. christmas and halloween keep keywords, titles genuinely signal there.', page: 'discover' },
+        { title: 'Release Radar and Discovery Weekly stop shrinking', desc: 'they stored bare track ids and re-resolved them against a rotating pool, so tracks quietly fell out over the week. full snapshots are stored at curation time now. hidden gems is also ranked by your actual genre taste, which it claimed and was not doing.', page: 'discover' },
+        { title: 'A Clients tab on downloads', desc: 'soulseek, torrent and usenet clients in one pane: per-client sub-tabs that admit failure instead of spinning, expandable transfer cards, search, filters, bulk actions, add-torrent and slskd uploads.', page: 'active-downloads' },
+        { title: 'A real music recycle bin', desc: 'anything soulsync removes lands in a hidden .deleted folder with a manifest. browse it from the Deleted tab, restore files to where they lived, purge for good, or set a retention window. dot-prefixed so navidrome stops indexing your deleted files back in.', page: 'active-downloads' },
+        { title: 'The duplicate detector sees cross-format pairs', desc: 'the same track as flac and ogg in one folder was structurally invisible, the filename pass keyed on the extension too. it keys on the stem now, with a guard so intentional lossy copies are never flagged, and the findings search reads whole duplicate groups instead of just the title track.', page: 'tools' },
+        { title: 'AcoustID and MusicBrainz identity hardening', desc: 'a name in another script is not evidence of a wrong download (#1185, thanks nick2000713). aliases resolve from the mbid, a dead fetch is not "no aliases", ambiguous findings let you pick the real recording, and a scan that cannot confirm no longer takes verification away.', page: 'tools' },
+        { title: 'Beatport browsing works behind cloudflare', desc: 'browse by sound and the genre pages route through flaresolverr when blocked, falling back to the plain scraper when you do not run one. the genre deep-dive gets the time a cold build needs.', page: 'discover' },
+        { title: 'Downloads narrate the batch you queued', desc: 'track 3 of 12 for your batch instead of leaked wishlist internals (#1183). the what\u2019s new modal is readable (#1184), vorbis track numbers stop displaying as 1/1, and chat uploads stay in their channel.' },
+        { title: 'Video: Basic Search and Fresh Releases', desc: 'search your configured providers in-app, now including EXT.to through flaresolverr, with grab-anything result cards. fresh releases is its own tab with scheduled refresh and library-matched cards.' },
+        { title: 'Earlier versions', desc: '3.3.0 rebuilt discover as a discovery surface, imported last.fm listening history into stats, and gave the watchlist a proper pass. 3.2.x moved sixteen music pages to react, paced prowlarr, and bounded the artwork cache.' },
     ],
 };
 
@@ -3490,28 +3496,42 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.2.4: manners with your indexers, and files that keep their tags",
-        description: "a fix release, and most of it is things that failed quietly rather than loudly. prowlarr searches are paced now, oversized cover art no longer takes a file\u2019s tags down with it, and the auto-sync page stops telling you a playlist never ran when it just did.",
+        title: "3.3.1: discover learns your taste, downloads get a clients hub",
+        description: "daily mixes and stations built from your actual listening, a last.fm radio repair, seasonal playlists that stop being albums named beach, a clients hub and a real recycle bin on downloads, and a run of reported fixes root-caused instead of patched.",
         features: [
-            "prowlarr searches are paced. everything else in soulsync that talks to somebody else\u2019s server holds a rate limit; prowlarr was the one caller with nothing, and it hands each search straight to your indexers. the video wishlist drain was the loud one, three items at a time each fanning out two or three searches at once and starting the next the moment one finished. one shared budget now for the music and video sides together, two seconds apart and twenty a minute, both configurable, and a 429 puts everyone on a shared cooldown. RSS is deliberately untouched at 15 minutes, it is a single aggregate call that searches nothing",
-            "oversized cover art no longer costs the file its tags. a FLAC picture block cannot exceed about 16MB, nothing checked it, and mutagen only finds out at save time \u2014 so the log said the art embedded fine and then the whole tag write died, leaving the track with no art and no tags. it is resized to fit now, quality first and then dimensions",
-            "the enhanced artist view was hiding releases outright. compilations were fetched, sorted into a bucket and never drawn, so a greatest-hits album in your library could not be seen on that page at all. and the stats bar classified releases differently from the list underneath it, so a release could sit under EPs while counting as none of the three numbers above",
-            "a playlist that had just run said \"no runs yet\" and would not open. the sync step skips when everything already matched, which is right as work, but it skipped recording the run too \u2014 so nothing knew it had happened. it writes a finished run now. the same card was separately losing playlists behind recent album downloads, asking for ten recent syncs and then throwing the album ones away",
-            "album publish order is fixed rather than whatever the filesystem felt like, sorted by track number so a 100-track boxset doesn\u2019t sort 100 in among the ones. it had also been quietly disarming a rollback guard shipped in 3.2.3. thanks nick2000713",
-            "the video database could fail to come up when a restart raced a running worker \u2014 both see a column missing, both add it, and the loser took the whole init down with it. plus eighteen unreliable tests and four lint errors cleared out of CI. thanks nick2000713",
-            "quality profile settings save where you can see them. the page made it look like they saved, but the pencil on the profile row was the real save path, so you changed something, came back, and saw the old values. the profile on screen is the save target now. thanks nick2000713",
+            "daily mixes are real: your most played artists clustered by who actually sounds like who (similarity edges plus shared genres), each mix weaving owned tracks with discovery picks, reshuffled daily. recommended stations puts your top artists one click from radio, and every mix modal leads with a play button that plays owned tracks instantly",
+            "last.fm track radio had rotted end to end \u2014 an invisible dropdown, unstyled rows, errors dressed as no-results, fake track counts, and a cache miss that deleted the playlist it was trying to read. all repaired",
+            "seasonal playlists build from your taste: most played tracks from those months across every year of listening, vibe-tagged albums, seasonal sounding discovery picks. no more shelves of albums literally named beach",
+            "release radar and discovery weekly stop silently shrinking \u2014 full snapshots are stored at curation time instead of bare ids re-resolved against a rotating pool",
+            "downloads: a clients tab with soulseek, torrent and usenet in per-client sub-tabs (expandable cards, search, filters, bulk, add-torrent, uploads), and the deleted quarantine became a browsable recycle bin \u2014 restore, purge, retention, and hidden from media servers so navidrome stops re-indexing your deleted files",
+            "the duplicate detector sees flac+ogg pairs now (the filename pass keyed on the extension, making cross-format dupes structurally invisible), and the findings search reads whole duplicate groups",
+            "acoustid and musicbrainz identity hardening on top of #1185 from nick2000713: aliases resolve from the mbid, a name in another script is not evidence of a wrong download, ambiguous findings let you pick the recording, and a failed scan cannot take verification away",
+            "beatport browsing routes through flaresolverr when cloudflare blocks it, with a clean fallback when you do not run one",
+            "downloads narrate 'track 3 of 12' for the batch you queued (#1183), the what's new modal is readable (#1184), vorbis track numbers stop displaying as 1/1, chat uploads stay in their channel, and staging tags stop being re-read per task (#1181, nstrelow) with path organization unified (#1182, nick2000713)",
+            "video: a basic search tab querying your providers in-app including EXT.to, fresh releases with scheduled refresh and library-matched cards, grab-anything, an acquisition plan in the get modal, and episode scans for quality upgrades",
         ],
-        usage_note: "the prowlarr pacing knobs are under Settings \u2192 Downloads (0 on either disables that half). nothing else needs turning on. if the artist page still counts a single as an album, that release has no type recorded yet \u2014 running enrichment on the artist fills it in.",
+        usage_note: "daily mixes, stations and the seasonal playlists build themselves from your listening \u2014 nothing to configure. the clients tab and the Deleted tab live on the downloads page. flaresolverr is optional and only used when a beatport block is detected.",
     },
     {
-        title: "Earlier in 3.2.3: the sync page grows up",
-        description: "the release before this one, and a big one.",
+        title: "Earlier in 3.3.0: discover rebuilt, your listening history arrives",
+        description: "the release before this one.",
         features: [
-            "the sync page became a playlist library: search it, filter by scheduled or unscheduled, named tabs, and schedule a playlist from its own card without opening a modal. mobile got a real pass",
-            "downloads narrate what they are doing instead of sitting on \"Loading...\" \u2014 the cards, the modal and album releases all say what they are searching and what they found",
-            "soulseek finally honours your concurrency limit: it was enforced per batch and so was the lock guarding it, so three batches each ran their \"one\" download at the same time",
-            "approving a quarantined file makes it stay approved, and the review count updates on its own instead of only when you open the tab",
-            "youtube music at the quality you pay for, and the expired download cleaner keeps anything you favourited",
+            "discover was rebuilt around a hero, a priority queue and grouped recommendation zones instead of one long scroll, with real mobile density work",
+            "last.fm listening history got an importer that survives large backfills \u2014 interrupted pages resume, and a duplicate page is no longer mistaken for the end",
+            "stats charts open the actual tracks behind them, backed by real listening-event queries",
+            "musicbrainz stopped timing out on slow connections: one shared helper, 30 second timeout, retries that keep the one-request-per-second pacing (#1177)",
+            "cleanup stopped making navidrome paths look deleted (#1127), large deezer playlists survive a reverse proxy, and artwork loads without the service worker (#1179)",
+        ],
+    },
+    {
+        title: "Earlier in 3.2.4: manners with your indexers",
+        description: "the release before this one, mostly things that failed quietly.",
+        features: [
+            "prowlarr searches are paced. it was the one caller in the app that talked to somebody else\u2019s server with no rate limit at all, and it hands every search straight to your indexers. one shared budget for the music and video sides, two seconds apart and twenty a minute, both configurable",
+            "oversized cover art no longer costs a file its tags. a FLAC picture block cannot exceed about 16MB and nothing checked, so the whole tag write died and the track ended up with no art AND no tags. it is resized to fit now",
+            "the enhanced artist view stopped hiding releases: compilations were fetched, bucketed and then never drawn, so a greatest-hits album could not be seen on that page at all",
+            "a playlist that had just run stopped saying \"no runs yet\" \u2014 a sync with nothing to download was skipping its own bookkeeping along with the work",
+            "album publish order is fixed rather than filesystem-dependent, and the video database no longer fails to start when a restart races a running worker. thanks nick2000713",
         ],
     },
     {

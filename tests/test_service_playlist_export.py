@@ -3,7 +3,9 @@
 injected so this needs no real DB or live Spotify/Deezer."""
 
 import json
-import web_server as ws
+# _run_service_export moved to api/artist_watchlist.py in the web_server
+# decomposition; the behaviour under test is unchanged.
+import api.artist_watchlist as ws
 
 
 class _FakeDB:
@@ -134,9 +136,10 @@ def test_spotify_export_endpoint_demands_auth_when_no_write_scope(monkeypatch):
     """The export endpoint must return needs_auth (not start a doomed job) when the Spotify
     token lacks write scope — and it must short-circuit BEFORE touching the DB."""
     import types
-    monkeypatch.setattr(ws, 'spotify_client',
-                        types.SimpleNamespace(has_write_scope=lambda: False))
-    resp = ws.app.test_client().post('/api/playlists/5/export/service/spotify')
+    import web_server
+    monkeypatch.setattr(ws, '_spotify_client',
+                        lambda: types.SimpleNamespace(has_write_scope=lambda: False))
+    resp = web_server.app.test_client().post('/api/playlists/5/export/service/spotify')
     data = resp.get_json()
     assert data['needs_auth'] is True
     assert data['auth_url'] == '/auth/spotify/export'
@@ -147,8 +150,9 @@ def test_spotify_export_endpoint_proceeds_when_write_scope_present(monkeypatch):
     """With write scope, the spotify path must NOT short-circuit on needs_auth (it goes on to
     start a job — here it just must not be a needs_auth response)."""
     import types
-    monkeypatch.setattr(ws, 'spotify_client',
-                        types.SimpleNamespace(has_write_scope=lambda: True))
-    resp = ws.app.test_client().post('/api/playlists/999999/export/service/spotify')
+    import web_server
+    monkeypatch.setattr(ws, '_spotify_client',
+                        lambda: types.SimpleNamespace(has_write_scope=lambda: True))
+    resp = web_server.app.test_client().post('/api/playlists/999999/export/service/spotify')
     data = resp.get_json()
     assert not data.get('needs_auth')

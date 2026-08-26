@@ -413,9 +413,18 @@ def get_listening_events(
     if filter_type == 'date':
         if not date:
             raise ValueError('date is required')
-        clauses.append('DATE(lh.played_at) = ?')
-        params.append(date)
-        title = date
+        if _is_month_bucket(date):
+            clauses.append("lh.played_at >= date(? || '-01')")
+            clauses.append("lh.played_at < date(? || '-01', '+1 month')")
+            params.extend([date, date])
+            title = date
+        elif _is_day_bucket(date):
+            clauses.append('lh.played_at >= date(?)')
+            clauses.append("lh.played_at < date(?, '+1 day')")
+            params.extend([date, date])
+            title = date
+        else:
+            raise ValueError('date must be YYYY-MM-DD or YYYY-MM')
     elif filter_type == 'weekday_hour':
         if weekday is None or hour is None:
             raise ValueError('weekday and hour are required')
@@ -447,36 +456,48 @@ def get_listening_events(
         cursor = conn.cursor()
         cursor.execute(
             f"""
-            SELECT COUNT(*)
-            FROM listening_history lh
-            {where}
-            """,
-            params,
-        )
-        total = cursor.fetchone()[0] or 0
-
-        # `db_track_id` names a Library-v2 row (docs §32.3.1): both writers of
-        # this column — the media-server importer and the Last.fm one —
-        # resolve against `lib2_tracks`, so the join follows the catalogue and
-        # not the legacy `tracks`/`albums` pair this arrived against.
-        cursor.execute(
-            f"""
+            WITH picked AS (
+                SELECT lh.id
+                FROM listening_history lh
+                {where}
+                ORDER BY lh.played_at DESC
+                LIMIT ?
+            )
+            -- `db_track_id` names a Library-v2 row (docs §32.3.1): both
+            -- writers of this column — the media-server importer and the
+            -- Last.fm one — resolve against `lib2_tracks`, so the join follows
+            -- the catalogue and not the legacy `tracks`/`albums` pair this
+            -- arrived against. The id is INTEGER here, so it needs no CAST.
             SELECT lh.title, lh.artist, lh.album, lh.played_at, lh.duration_ms,
                    lh.server_source, al.image_url,
                    COALESCE(ar.canonical_artist_id, ar.id), t.id AS db_track_id
-            FROM listening_history lh
+            FROM picked
+            JOIN listening_history lh ON lh.id = picked.id
             LEFT JOIN lib2_tracks t ON t.id = lh.db_track_id
             LEFT JOIN lib2_albums al ON al.id = t.album_id
             LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-            {where}
             ORDER BY lh.played_at DESC
-            LIMIT ?
             """,
-            params + [limit],
+            params + [limit + 1],
         )
         rows = cursor.fetchall()
+        has_more = len(rows) > limit
+        if has_more:
+            rows = rows[:limit]
+        total = len(rows)
     finally:
         conn.close()
+
+    image_url_cache: dict[str, Optional[str]] = {}
+
+    def _normalize_event_image(url: str | None) -> str | None:
+        if not url:
+            return None
+        if not image_url_fixer:
+            return url
+        if url not in image_url_cache:
+            image_url_cache[url] = image_url_fixer(url)
+        return image_url_cache[url]
 
     items = [
         {
@@ -486,14 +507,21 @@ def get_listening_events(
             'played_at': row[3],
             'duration_ms': row[4],
             'server_source': row[5],
-            'image_url': (image_url_fixer(row[6]) if image_url_fixer else row[6]) if row[6] else None,
+            'image_url': _normalize_event_image(row[6]),
             'artist_db_id': row[7],
             'db_track_id': row[8],
         }
         for row in rows
     ]
-    return {'title': title, 'total': total, 'limit': limit, 'items': items}
+    return {'title': title, 'total': total, 'limit': limit, 'has_more': has_more, 'items': items}
 
+
+def _is_day_bucket(value: str) -> bool:
+    return len(value) == 10 and value[4] == '-' and value[7] == '-'
+
+
+def _is_month_bucket(value: str) -> bool:
+    return len(value) == 7 and value[4] == '-'
 
 def resolve_track(database, image_url_fixer: ImageUrlFixer, title: str, artist: str) -> Optional[dict]:
     """Resolve a track by title+artist to its file_path / metadata. Returns None if not found."""
@@ -559,3 +587,4 @@ def get_listening_status(worker) -> dict:
             'stats': {},
         }
     return worker.get_stats()
+

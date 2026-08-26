@@ -38,8 +38,6 @@ def get_video_db():
                 # yield to an install that beat us to it.
                 if _video_db is None:
                     _video_db = db
-                else:
-                    db = _video_db
     return db
 
 

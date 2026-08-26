@@ -141,6 +141,35 @@ describe('useLastfmRadio — search', () => {
     expect(result.current.searching).toBe(false);
   });
 
+  it('a 500 search TOASTS the failure — no longer disguised as no-results', async () => {
+    vi.useFakeTimers();
+    server.use(
+      http.get('/api/lastfm/search/tracks', () =>
+        HttpResponse.json({ error: 'lastfm down' }, { status: 500 }),
+      ),
+    );
+    const { result } = mount();
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    act(() => result.current.setQuery('xtal'));
+    await act(() => vi.advanceTimersByTimeAsync(450));
+    expect(toasts).toEqual([{ message: 'lastfm down', level: 'error' }]);
+    expect(result.current.dropdownOpen).toBe(false);
+    expect(result.current.results).toEqual([]);
+    expect(result.current.searching).toBe(false);
+  });
+
+  it('dismiss closes the dropdown but KEEPS the typed query', async () => {
+    vi.useFakeTimers();
+    const { result } = mount();
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    act(() => result.current.setQuery('xtal'));
+    await act(() => vi.advanceTimersByTimeAsync(450));
+    expect(result.current.dropdownOpen).toBe(true);
+    act(() => result.current.dismiss());
+    expect(result.current.dropdownOpen).toBe(false);
+    expect(result.current.query).toBe('xtal');
+  });
+
   it('NO results hides the dropdown — never an empty row', async () => {
     vi.useFakeTimers();
     stub({ searchResults: [] });
@@ -163,6 +192,38 @@ describe('useLastfmRadio — generate', () => {
     expect(playlistHits).toBe(before + 1);
     expect(result.current.generating).toBe(false);
     expect(toasts).toEqual([]);
+  });
+
+  it('picking confirms the choice in the input, then clears it on success', async () => {
+    const loadStates = vi.fn();
+    window.loadListenBrainzPlaylistsFromBackend = loadStates;
+    try {
+      const { result } = mount();
+      await waitFor(() => expect(result.current.loaded).toBe(true));
+      const pending = act(() => result.current.pick({ name: 'Xtal', artist: 'Aphex Twin' }));
+      await pending;
+      // success: input cleared, LB state map refreshed so the new card's
+      // Sync button has a state to read
+      expect(result.current.query).toBe('');
+      expect(loadStates).toHaveBeenCalledTimes(1);
+    } finally {
+      delete window.loadListenBrainzPlaylistsFromBackend;
+    }
+  });
+
+  it('a FAILED pick leaves the selection label in the input', async () => {
+    stub({ generateOk: false, generateError: 'rate limited' });
+    const loadStates = vi.fn();
+    window.loadListenBrainzPlaylistsFromBackend = loadStates;
+    try {
+      const { result } = mount();
+      await waitFor(() => expect(result.current.loaded).toBe(true));
+      await act(() => result.current.pick({ name: 'Xtal', artist: 'Aphex Twin' }));
+      expect(result.current.query).toBe('Xtal — Aphex Twin');
+      expect(loadStates).not.toHaveBeenCalled();
+    } finally {
+      delete window.loadListenBrainzPlaylistsFromBackend;
+    }
   });
 
   it('a refused generate toasts the SERVER message first, then the fallback', async () => {

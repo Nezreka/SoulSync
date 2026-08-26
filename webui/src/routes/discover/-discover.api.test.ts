@@ -13,6 +13,7 @@ import {
   isSuccess,
   fetchLabelExplorer,
   fetchLbPlaylist,
+  fetchDailyMixes,
   fetchPopularPicks,
   fetchYourAlbums,
   refreshYourAlbums,
@@ -63,6 +64,7 @@ describe('the section reader returns an OUTCOME, not just data', () => {
       ),
     );
     expect((await fetchPopularPicks()).kind).toBe('error');
+    expect((await fetchDailyMixes()).kind).toBe('error');
   });
 
   it('reports OK — not error — for an explicit success:false', async () => {

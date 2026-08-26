@@ -1024,6 +1024,31 @@
   gap: 16px;
 }
 
+.statsClockContext {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px 10px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+}
+
+.statsClockContextLabel {
+  color: rgba(255, 255, 255, 0.82);
+  font-weight: 800;
+}
+
+.statsClockContextRange {
+  margin-left: 5px;
+}
+
+.statsClockContext strong {
+  color: rgb(var(--accent-rgb));
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
 .statsClockGrid {
   display: flex;
   flex-direction: column;
@@ -1268,7 +1293,7 @@
 }
 
 .statsDetailModal {
-  width: min(760px, 100%);
+  width: min(820px, 100%);
   max-height: min(720px, calc(100vh - 48px));
   display: flex;
   flex-direction: column;
@@ -1341,11 +1366,11 @@
 
 .statsDetailRow {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto 32px;
+  grid-template-columns: 46px minmax(0, 1fr) auto 34px;
   align-items: center;
   gap: 12px;
-  min-height: 58px;
-  padding: 8px 10px;
+  min-height: 64px;
+  padding: 9px 10px;
   border-radius: 10px;
 }
 
@@ -1355,8 +1380,8 @@
 
 .statsDetailArt,
 .statsDetailArtFallback {
-  width: 42px;
-  height: 42px;
+  width: 46px;
+  height: 46px;
   border-radius: 7px;
   object-fit: cover;
   flex-shrink: 0;
@@ -1397,15 +1422,29 @@
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 2px;
+  gap: 5px;
   color: rgba(255, 255, 255, 0.4);
   font-size: 11px;
   white-space: nowrap;
 }
 
+.statsDetailSource {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 7px;
+  border: 1px solid rgba(var(--accent-rgb), 0.18);
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.08);
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
 .statsDetailPlay {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border: 0;
   border-radius: 50%;
   background: rgba(var(--accent-rgb), 0.15);

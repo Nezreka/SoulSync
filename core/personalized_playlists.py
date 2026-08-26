@@ -628,13 +628,19 @@ class PersonalizedPlaylistsService:
         logger.info(f"Popular Picks ({active_source}): selected {len(diverse_tracks)} tracks with diversity")
         return diverse_tracks
 
-    def get_hidden_gems(self, limit: int = 50) -> List[Dict]:
+    def get_hidden_gems(self, limit: int = 50, taste_profile: Optional[Dict[str, float]] = None) -> List[Dict]:
         """Get low-popularity (underground/indie) tracks from discovery pool with diversity.
 
         Mirrors Popular Picks' diversity caps (2 per album, 3 per artist)
         since both are curated-feel sections. Popularity threshold is
         source-aware — iTunes/Hydrabase fall back to RANDOM + diversity
         only.
+
+        With a ``taste_profile`` ({genre: 0..1}), candidates are re-ranked by
+        genre affinity BEFORE the diversity cut — "best obscure", not "random
+        obscure". The base fetch stays RANDOM(), so equal-affinity tracks
+        still rotate between visits (the stable sort keeps their random
+        order within each affinity band).
         """
         active_source = self._get_active_source()
         _, hidden_max = self._get_popularity_thresholds(active_source)
@@ -653,7 +659,24 @@ class PersonalizedPlaylistsService:
             extra_params=extra_params,
             order_by="RANDOM()",
             fetch_limit=limit * 3,
+            extra_columns=('artist_genres',),
         )
+
+        if taste_profile:
+            def _affinity(track: Dict) -> float:
+                # _build_track_dict surfaces the extra column as
+                # _artist_genres_raw (raw JSON string), not artist_genres
+                genres = track.get('_artist_genres_raw')
+                if isinstance(genres, str):
+                    try:
+                        genres = json.loads(genres)
+                    except ValueError:
+                        genres = []
+                if not isinstance(genres, list):
+                    genres = []
+                return max((float(taste_profile.get(str(g).lower(), 0.0))
+                            for g in genres), default=0.0)
+            all_tracks.sort(key=_affinity, reverse=True)
 
         diverse_tracks = self._apply_diversity_filter(
             all_tracks,

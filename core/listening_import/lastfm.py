@@ -8,6 +8,7 @@ Stats, discovery, and Year in Listening keep reading one source of truth.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -30,6 +31,12 @@ SOURCE = "lastfm"
 PAGE_LIMIT = 200
 RECENT_OVERLAP_SECONDS = 24 * 60 * 60
 STOP_AFTER_DUPLICATE_PAGES = 3
+TRANSIENT_PAGE_RETRIES = 4
+TRANSIENT_PAGE_RETRY_BASE_SECONDS = 5
+
+
+def _safe_error_message(error: Exception) -> str:
+    return re.sub(r"([?&]api_key=)[^&\s]+", r"\1REDACTED", str(error))
 
 
 class LastFMListeningImportWorker:
@@ -170,7 +177,9 @@ class LastFMListeningImportWorker:
 
         try:
             while not self._cancel.is_set():
-                data = client.get_user_recent_tracks(username, page=page, limit=PAGE_LIMIT, from_ts=from_ts)
+                data = self._get_recent_tracks_page(client, username, page, from_ts)
+                if data is None:
+                    break
                 recent = (data or {}).get("recenttracks") or {}
                 attr = recent.get("@attr") or {}
                 total_pages = _int(attr.get("totalPages"), total_pages or 1)
@@ -207,6 +216,7 @@ class LastFMListeningImportWorker:
                     "inserted": inserted_total,
                     "duplicates": duplicate_total,
                     "progress": _progress(page, total_pages),
+                    "error": None,
                 }
                 if use_incremental:
                     checkpoint.update(
@@ -246,6 +256,7 @@ class LastFMListeningImportWorker:
                 "duplicates": duplicate_total,
                 "duration_seconds": round(time.time() - start_ts, 1),
                 "progress": 100 if status == "complete" else final_progress,
+                "error": None,
             }
             if use_incremental or completed_backfill:
                 final_updates.update(
@@ -282,16 +293,42 @@ class LastFMListeningImportWorker:
                 except Exception as e:
                     logger.warning("Last.fm import finished but stats cache rebuild failed: %s", e)
         except Exception as e:
-            logger.error("Last.fm listening import failed: %s", e, exc_info=True)
+            safe_error = _safe_error_message(e)
+            logger.error("Last.fm listening import failed: %s", safe_error, exc_info=True)
             self._set_state(
                 status="error",
                 phase="Last.fm import failed",
-                error=str(e),
+                error=safe_error,
                 finished_at=_now_iso(),
                 progress=_progress(max(page - 1, 0), total_pages),
                 backfill_complete=backfill_complete if use_incremental else False,
                 backfill_next_page=page if not use_incremental else None,
             )
+
+    def _get_recent_tracks_page(self, client: LastFMClient, username: str, page: int, from_ts: Optional[int]) -> Optional[Dict[str, Any]]:
+        for attempt in range(1, TRANSIENT_PAGE_RETRIES + 1):
+            try:
+                return client.get_user_recent_tracks(username, page=page, limit=PAGE_LIMIT, from_ts=from_ts)
+            except Exception as e:
+                if attempt >= TRANSIENT_PAGE_RETRIES:
+                    raise
+                delay = min(60, TRANSIENT_PAGE_RETRY_BASE_SECONDS * attempt)
+                self._set_state(
+                    status="running",
+                    phase=f"Last.fm API hiccup on page {page}; retrying in {delay}s",
+                    page=page - 1,
+                    error=_safe_error_message(e),
+                )
+                if not self._sleep_retry(delay):
+                    return None
+        return None
+
+    def _sleep_retry(self, seconds: int) -> bool:
+        for _ in range(max(0, seconds)):
+            if self._cancel.is_set():
+                return False
+            time.sleep(1)
+        return not self._cancel.is_set()
 
     def _resolve_username(self, username: Optional[str]) -> str:
         configured = username or self.config_manager.get("lastfm.username", "")
@@ -525,3 +562,4 @@ def _progress(page: int, total_pages: Optional[int]) -> int:
     if not total_pages:
         return 0
     return max(0, min(99, round((page / max(total_pages, 1)) * 100)))
+

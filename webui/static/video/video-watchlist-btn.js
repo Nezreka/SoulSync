@@ -47,10 +47,15 @@
 
     function paint(b, on) {
         b.classList.toggle('active', on);
+        b.classList.toggle('watching', on);          // detail-page text buttons use this visual state
         b.title = on ? 'On watchlist' : 'Add to watchlist';
         b.setAttribute('aria-label', b.title);
         var svg = b.querySelector('svg');
         if (svg) svg.setAttribute('fill', on ? 'currentColor' : 'none');
+        var ic = b.querySelector('.watchlist-icon');
+        if (ic) ic.textContent = on ? '✓' : '＋';
+        var tx = b.querySelector('.watchlist-text');
+        if (tx) tx.textContent = on ? 'In Watchlist' : 'Watchlist';
     }
 
     // Reflect a (kind, id) across EVERY matching button in the DOM — the same

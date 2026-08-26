@@ -198,20 +198,61 @@ function DeadFilePrompt({ resolve }: { resolve: (value: DeadFileFixAction | null
   );
 }
 
-function AcoustidPrompt({ resolve }: { resolve: (value: AcoustidFixAction | null) => void }) {
+function AcoustidPrompt({
+  candidates,
+  resolve,
+}: {
+  candidates?: string[];
+  resolve: (value: string | null) => void;
+}) {
+  // An ambiguous fingerprint names several possible recordings. The finding
+  // carries them, so let the user PICK one — retag/relocate then act on that
+  // choice ('retag:<n>') instead of refusing and pointing at manual tools.
+  const ambiguous = (candidates?.length ?? 0) > 1;
+  const [picked, setPicked] = useState(0);
+  const act = (base: 'retag' | 'relocate') => resolve(ambiguous ? `${base}:${picked}` : base);
   return (
     <PromptOverlay
       maxWidth={460}
       title="AcoustID Mismatch"
-      body="The audio fingerprint doesn't match the expected track. Choose how to fix it."
+      body={
+        ambiguous
+          ? 'The fingerprint matches several recordings. Pick the one this file really is, then choose how to fix it.'
+          : "The audio fingerprint doesn't match the expected track. Choose how to fix it."
+      }
       cancelId="_acid-cancel"
       onCancel={() => resolve(null)}
     >
+      {ambiguous ? (
+        <div style={{ display: 'grid', gap: 6, margin: '0 0 12px', textAlign: 'left' }}>
+          {candidates!.map((label, i) => (
+            <label
+              key={i}
+              style={{
+                display: 'flex',
+                gap: 8,
+                alignItems: 'baseline',
+                cursor: 'pointer',
+                fontSize: 13,
+              }}
+            >
+              <input
+                type="radio"
+                name="_acid-candidate"
+                checked={picked === i}
+                onChange={() => setPicked(i)}
+                data-acid-candidate={i}
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
+      ) : null}
       <div style={ROW_WRAP}>
-        <button id="_acid-retag" type="button" style={INDIGO} onClick={() => resolve('retag')}>
+        <button id="_acid-retag" type="button" style={INDIGO} onClick={() => act('retag')}>
           Retag
         </button>
-        <button id="_acid-relocate" type="button" style={AMBER} onClick={() => resolve('relocate')}>
+        <button id="_acid-relocate" type="button" style={AMBER} onClick={() => act('relocate')}>
           Relocate
         </button>
         <button
@@ -506,7 +547,7 @@ function WitnessMeDialog({
 type PendingPrompt =
   | { kind: 'orphan'; resolve: (value: OrphanFixAction | null) => void }
   | { kind: 'dead'; resolve: (value: DeadFileFixAction | null) => void }
-  | { kind: 'acoustid'; resolve: (value: AcoustidFixAction | null) => void }
+  | { kind: 'acoustid'; candidates?: string[]; resolve: (value: string | null) => void }
   | { kind: 'quality'; resolve: (value: QualityFixAction | null) => void }
   | { kind: 'backfill'; count: number; resolve: (value: BackfillFixAction | null) => void }
   | {
@@ -520,7 +561,7 @@ type PendingPrompt =
 export interface FindingPrompts {
   promptOrphan: () => Promise<OrphanFixAction | null>;
   promptDeadFile: () => Promise<DeadFileFixAction | null>;
-  promptAcoustid: () => Promise<AcoustidFixAction | null>;
+  promptAcoustid: (candidates?: string[]) => Promise<string | null>;
   promptQuality: () => Promise<QualityFixAction | null>;
   promptBackfill: (count: number) => Promise<BackfillFixAction | null>;
   promptRetag: (count: number, manualCount: number) => Promise<RetagFixAction | null>;
@@ -553,9 +594,9 @@ export function useFindingPrompts(): FindingPrompts {
     [],
   );
   const promptAcoustid = useCallback(
-    () =>
-      new Promise<AcoustidFixAction | null>((resolve) => {
-        setPending({ kind: 'acoustid', resolve });
+    (candidates?: string[]) =>
+      new Promise<string | null>((resolve) => {
+        setPending({ kind: 'acoustid', candidates, resolve });
       }),
     [],
   );
@@ -594,7 +635,12 @@ export function useFindingPrompts(): FindingPrompts {
   } else if (pending?.kind === 'dead') {
     promptNode = <DeadFilePrompt resolve={(v) => settle(pending.resolve as never, v)} />;
   } else if (pending?.kind === 'acoustid') {
-    promptNode = <AcoustidPrompt resolve={(v) => settle(pending.resolve as never, v)} />;
+    promptNode = (
+      <AcoustidPrompt
+        candidates={pending.candidates}
+        resolve={(v) => settle(pending.resolve as never, v)}
+      />
+    );
   } else if (pending?.kind === 'quality') {
     promptNode = <QualityPrompt resolve={(v) => settle(pending.resolve as never, v)} />;
   } else if (pending?.kind === 'backfill') {

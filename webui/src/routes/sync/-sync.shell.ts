@@ -98,22 +98,69 @@ export const SYNC_PRIMARY_TAB_IDS: readonly SyncTabId[] = ['mirrored', 'server',
 /**
  * Which chips to render, given what is open.
  *
- * A routed tab appears in the strip WHILE IT IS ACTIVE and drops out when you
- * leave it. Without that, opening Spotify Link from the sheet would leave the
- * strip highlighting nothing and no way back — a panel with no chip is a room
- * with no door. It is appended rather than inserted in place so the three
- * permanent chips never move under the cursor.
+ * A routed tab appears when opened and STAYS for the session (and, via the
+ * localStorage seed below, across reloads). The first cut dropped it the
+ * moment you left — but the playlists a link tab loaded persist in
+ * localStorage, so the cards survived while their only door vanished: the
+ * Spotify Link chip "only shows if I do Add Playlist and paste a link
+ * again" (user report, aug 25). Routed chips are appended after the three
+ * permanent ones, in the order they were opened, so nothing moves under
+ * the cursor.
  */
-export function syncStripTabs(active: string): readonly SyncTab[] {
+export function syncStripTabs(
+  active: string,
+  openedRouted: Iterable<string> = [],
+): readonly SyncTab[] {
   // Ordered by SYNC_PRIMARY_TAB_IDS, not by SYNC_TABS: a filter would hand
   // them back in the old fifteen-tab order (server, beatport, mirrored) and
   // quietly put the library last again, which is the whole thing being fixed.
   const primary = SYNC_PRIMARY_TAB_IDS.map(
     (id) => SYNC_TABS.find((t) => t.id === id) as SyncTab,
   ).filter(Boolean);
-  if (SYNC_PRIMARY_TAB_IDS.includes(active as SyncTabId)) return primary;
-  const routed = SYNC_TABS.find((t) => t.id === active);
-  return routed ? [...primary, routed] : primary;
+  const routedIds: string[] = [];
+  for (const id of openedRouted) {
+    if (!SYNC_PRIMARY_TAB_IDS.includes(id as SyncTabId) && !routedIds.includes(id)) {
+      routedIds.push(id);
+    }
+  }
+  if (!SYNC_PRIMARY_TAB_IDS.includes(active as SyncTabId) && !routedIds.includes(active)) {
+    routedIds.push(active);
+  }
+  const routed = routedIds
+    .map((id) => SYNC_TABS.find((t) => t.id === id))
+    .filter((t): t is SyncTab => Boolean(t));
+  return [...primary, ...routed];
+}
+
+const OPENED_TABS_STORAGE_KEY = 'soulsync-sync-opened-tabs';
+
+/** Routed tabs remembered from earlier visits; [] when storage is empty or
+ * unreadable. Only ids SYNC_TABS still knows survive the round-trip. */
+export function readRememberedRoutedTabs(): SyncTabId[] {
+  try {
+    const raw = window.localStorage.getItem(OPENED_TABS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (id): id is SyncTabId =>
+        typeof id === 'string' &&
+        !SYNC_PRIMARY_TAB_IDS.includes(id as SyncTabId) &&
+        SYNC_TABS.some((t) => t.id === id),
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function rememberRoutedTab(id: string): void {
+  if (SYNC_PRIMARY_TAB_IDS.includes(id as SyncTabId)) return;
+  try {
+    const current = readRememberedRoutedTabs();
+    if (current.includes(id as SyncTabId)) return;
+    window.localStorage.setItem(OPENED_TABS_STORAGE_KEY, JSON.stringify([...current, id]));
+  } catch {
+    // storage unavailable - the chip still lives for this session
+  }
 }
 
 const IDS = new Set<string>(SYNC_TABS.map((t) => t.id));

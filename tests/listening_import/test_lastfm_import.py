@@ -83,6 +83,7 @@ def test_lastfm_backfill_error_does_not_advance_incremental_cursor(tmp_path, mon
             raise RuntimeError("network fell over")
 
     monkeypatch.setattr(lastfm_module, "LastFMClient", FakeClient)
+    monkeypatch.setattr(lastfm_module, "TRANSIENT_PAGE_RETRIES", 1)
 
     worker = LastFMListeningImportWorker(db, _Config())
     state = worker.run_once()
@@ -94,6 +95,66 @@ def test_lastfm_backfill_error_does_not_advance_incremental_cursor(tmp_path, mon
     assert state.get("last_imported_ts", 0) == 0
     assert state["pending_last_imported_ts"] == 300
     assert calls == [{"username": "tester", "page": 1, "from_ts": None}, {"username": "tester", "page": 2, "from_ts": None}]
+
+
+def test_lastfm_retries_transient_page_failure_before_failing_backfill(tmp_path, monkeypatch):
+    import core.listening_import.lastfm as lastfm_module
+
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    calls = []
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        def get_user_recent_tracks(self, username, page=1, limit=200, from_ts=None, to_ts=None, extended=False):
+            calls.append(page)
+            if page == 2 and calls.count(2) == 1:
+                raise RuntimeError("500 Server Error for url: https://ws.audioscrobbler.com/2.0/?api_key=secret-token&page=2")
+            return _recent_tracks_payload(page=page, total_pages=2, uts_values=[300 - page])
+
+    monkeypatch.setattr(lastfm_module, "LastFMClient", FakeClient)
+    monkeypatch.setattr(lastfm_module, "TRANSIENT_PAGE_RETRY_BASE_SECONDS", 0)
+
+    worker = LastFMListeningImportWorker(db, _Config())
+    state = worker.run_once()
+
+    assert calls == [1, 2, 2]
+    assert state["status"] == "complete"
+    assert state["backfill_complete"] is True
+    assert state.get("error") is None
+
+
+def test_lastfm_failed_page_keeps_resume_point_and_redacts_api_key(tmp_path, monkeypatch):
+    import core.listening_import.lastfm as lastfm_module
+
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    calls = []
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        def get_user_recent_tracks(self, username, page=1, limit=200, from_ts=None, to_ts=None, extended=False):
+            calls.append(page)
+            if page == 1:
+                return _recent_tracks_payload(page=1, total_pages=3, uts_values=[300, 299])
+            raise RuntimeError("500 Server Error for url: https://ws.audioscrobbler.com/2.0/?method=user.getRecentTracks&api_key=secret-token&page=2")
+
+    monkeypatch.setattr(lastfm_module, "LastFMClient", FakeClient)
+    monkeypatch.setattr(lastfm_module, "TRANSIENT_PAGE_RETRIES", 2)
+    monkeypatch.setattr(lastfm_module, "TRANSIENT_PAGE_RETRY_BASE_SECONDS", 0)
+
+    worker = LastFMListeningImportWorker(db, _Config())
+    state = worker.run_once()
+
+    assert calls == [1, 2, 2]
+    assert state["status"] == "error"
+    assert state["progress"] < 100
+    assert state["backfill_complete"] is False
+    assert state["backfill_next_page"] == 2
+    assert "secret-token" not in state["error"]
+    assert "api_key=REDACTED" in state["error"]
 
 
 def test_lastfm_backfill_resumes_interrupted_page_instead_of_incremental(tmp_path, monkeypatch):
@@ -246,3 +307,4 @@ def test_lastfm_status_normalizes_false_complete_even_when_backfill_flag_was_set
     assert state["status"] == "partial"
     assert state["progress"] == 1
     assert state["last_success_at"] is None
+
