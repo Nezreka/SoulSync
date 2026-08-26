@@ -335,3 +335,56 @@ def test_album_sidecar_move_keeps_real_documents_at_source(tmp_path):
     assert _move_album_sidecars(str(src), str(dst)) == 1
     assert (dst / "cover.jpg").exists()
     assert (src / "booklet.pdf").read_bytes() == b"booklet"
+
+
+# ── a sibling-format file is part of the track, not a separate move ──
+
+def test_a_sibling_never_overwrites_a_file_already_at_the_destination(tmp_path):
+    """The canonical move refuses a destination that already holds a different
+    file ('destination already exists'). The sibling move used `shutil.move`
+    with no check at all, which on one filesystem is `os.rename` and clobbers.
+    """
+    src = tmp_path / "old" / "01 - Song.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"audio")
+    (tmp_path / "old" / "01 - Song.opus").write_bytes(b"lossy copy")
+    dst_dir = tmp_path / "new"; dst_dir.mkdir()
+    (dst_dir / "Song - Artist.opus").write_bytes(b"someone else")
+
+    ok, _ = _rename_track_in_place(str(src), str(dst_dir / "Song - Artist.flac"))
+
+    assert ok
+    assert (dst_dir / "Song - Artist.opus").read_bytes() == b"someone else"
+    assert (tmp_path / "old" / "01 - Song.opus").read_bytes() == b"lossy copy"
+
+
+def test_a_failed_move_leaves_the_sibling_where_it_was(tmp_path, monkeypatch):
+    """Siblings were carried BEFORE the canonical rename. When that rename then
+    failed the track was reported failed, but the `.opus` was already at the new
+    location while the `.flac` and the catalogue row still named the old one.
+
+    Same rule the sidecar helper states for itself: a failed move must leave the
+    whole track where it was.
+    """
+    src = tmp_path / "old" / "01 - Song.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"audio")
+    sibling = tmp_path / "old" / "01 - Song.opus"
+    sibling.write_bytes(b"lossy copy")
+    dst = tmp_path / "new" / "Song - Artist.flac"
+
+    real_rename = os.rename
+
+    def _rename(a, b, *args, **kwargs):
+        if str(a) == str(src):
+            raise OSError(13, "Permission denied")
+        return real_rename(a, b, *args, **kwargs)
+
+    monkeypatch.setattr(os, "rename", _rename)
+
+    ok, err = _rename_track_in_place(str(src), str(dst))
+
+    assert not ok and err
+    assert src.exists()
+    assert sibling.exists()                       # not carried ahead of the audio
+    assert not (tmp_path / "new" / "Song - Artist.opus").exists()

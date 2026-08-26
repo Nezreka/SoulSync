@@ -190,7 +190,12 @@ _WRITE_KEYS = {
     'title': ('title',),
     'artist': ('track_artist',),
     'album': ('album_title',),
-    'album_artist': ('artist_name',),
+    # BOTH keys, not just `artist_name`. `write_tags_to_file` writes the ARTIST
+    # tag from `track_artist or artist_name`, so a payload carrying only the
+    # album artist puts it in the track's ARTIST tag as well — replacing the
+    # per-track artists on a compilation or a DJ mix, from a finding that said
+    # nothing about them.
+    'album_artist': ('artist_name', 'track_artist'),
     'year': ('year',),
     'genre': ('genres',),
     'track_number': ('track_number', 'track_count'),

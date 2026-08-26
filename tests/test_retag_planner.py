@@ -193,3 +193,30 @@ def test_a_more_specific_file_date_is_preserved():
     plan = rp.plan_track(current, SRC, ALBUM, mode=rp.MODE_OVERWRITE)
     assert 'year' not in plan['changes']
     assert 'year' not in plan['db_data']
+
+
+def test_a_wrong_album_artist_does_not_take_the_track_artist_with_it():
+    """The ARTIST tag and the ALBUM ARTIST tag are written from two db_data keys,
+    and `write_tags_to_file` falls back: `track_artist or artist_name`. So a
+    payload carrying only `artist_name` puts the ALBUM artist into the track's
+    ARTIST tag as well.
+
+    On a compilation or DJ mix whose per-track artists are correct, a finding
+    that shows only "Album Artist" would have replaced every one of them.
+    """
+    album = {'name': 'Real Album', 'artists': [{'name': 'DJ Alpha'}],
+             'year': '2021', 'genres': ['Rock', 'Indie'], 'total_tracks': 10}
+    src = {'name': 'Real Title', 'track_number': 3, 'disc_number': 1,
+           'artists': [{'name': 'Guest Band'}]}
+    current = {'title': 'Real Title', 'artist': 'Guest Band',
+               'album_artist': 'WRONG Artist', 'album': 'Real Album',
+               'year': '2021', 'genre': 'Rock, Indie',
+               'track_number': 3, 'disc_number': 1}
+
+    plan = rp.plan_track(current, src, album, mode=rp.MODE_OVERWRITE)
+
+    assert set(plan['changes']) == {'album_artist'}
+    assert plan['db_data']['artist_name'] == 'DJ Alpha'
+    # what the writer will actually put in ARTIST:
+    written_artist = plan['db_data'].get('track_artist') or plan['db_data'].get('artist_name')
+    assert written_artist == 'Guest Band'

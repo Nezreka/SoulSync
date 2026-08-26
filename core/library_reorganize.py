@@ -120,6 +120,13 @@ def _plan_from_catalogue(album_data: dict, tracks: List[dict]) -> dict:
     rather than being dropped, so the preview can say which one and why.
     """
     artist_name = album_data.get('artist_name') or ''
+    # Whether any of these files ALREADY sits in a `Disc N` folder. The
+    # catalogue only knows the discs whose tracks have been imported, so a
+    # half-downloaded 2-disc album reads as single-disc and the plan would file
+    # it flat — pulling it out of the `Disc 1/` the download put it in, and
+    # pushing it back once disc 2 lands. That flip-flop is the thing this whole
+    # change exists to stop, so the layout on disk gets a say.
+    disc_layout_on_disk = False
     api_album = {
         'id': '',
         'name': album_data.get('title') or '',
@@ -145,6 +152,9 @@ def _plan_from_catalogue(album_data: dict, tracks: List[dict]) -> dict:
             disc = 1
         if disc > max_disc:
             max_disc = disc
+        if not disc_layout_on_disk:
+            parent = os.path.basename(os.path.dirname(track.get('file_path') or ''))
+            disc_layout_on_disk = bool(parent and _DISC_DIR_RE.match(parent))
         try:
             number = int(track.get('track_number') or 0)
         except (TypeError, ValueError):
@@ -162,6 +172,9 @@ def _plan_from_catalogue(album_data: dict, tracks: List[dict]) -> dict:
             'matched': True,
             'reason': None,
         })
+
+    if disc_layout_on_disk and max_disc < 2:
+        max_disc = 2
 
     return {
         'status': 'planned',
@@ -565,10 +578,7 @@ def _rename_track_in_place(current_abs: str, new_abs: str) -> Tuple[bool, Option
         if os.path.exists(new_abs) and not same:
             return False, 'destination already exists'
         os.makedirs(os.path.dirname(new_abs), exist_ok=True)
-        # Carry sibling-format audio to the same destination with the renamed stem —
-        # mirrors _finalize_track so lossy-copy pairs don't get orphaned.
-        for sibling_src in _find_sibling_audio_files(current_abs):
-            _move_sibling_to_destination(sibling_src, new_abs)
+        siblings = _find_sibling_audio_files(current_abs)
         try:
             os.rename(current_abs, new_abs)
         except OSError as e:
@@ -577,7 +587,11 @@ def _rename_track_in_place(current_abs: str, new_abs: str) -> Tuple[bool, Option
             else:
                 raise
         # Only once the audio has landed: a failed move must leave the whole
-        # track — sidecars included — where it was.
+        # track, sidecars and lossy copies included, where it was. Carrying the
+        # siblings first meant a failed rename left the .opus at the new path
+        # while the .flac and the catalogue row still named the old one.
+        for sibling_src in siblings:
+            _move_sibling_to_destination(sibling_src, new_abs)
         _move_track_sidecars(current_abs, new_abs)
         return True, None
     except Exception as e:
@@ -969,6 +983,15 @@ def _move_sibling_to_destination(sibling_src: str, canonical_dst: str) -> Option
     sibling_dst = os.path.join(dst_dir, canonical_stem + sibling_ext)
     if os.path.normpath(sibling_src) == os.path.normpath(sibling_dst):
         return sibling_dst  # already at the right place
+    if os.path.exists(sibling_dst):
+        # The canonical move refuses this outright rather than destroy a file
+        # nobody asked about; `shutil.move` is `os.rename` on one filesystem and
+        # would have overwritten it without a word.
+        logger.warning(
+            "[Reorganize] Left sibling-format file %s alone: %s already exists",
+            sibling_src, sibling_dst,
+        )
+        return None
     try:
         os.makedirs(dst_dir, exist_ok=True)
         shutil.move(sibling_src, sibling_dst)

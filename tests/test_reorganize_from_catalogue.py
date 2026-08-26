@@ -73,3 +73,24 @@ def test_the_album_keeps_its_own_year():
 
 def test_an_album_with_no_tracks_is_reported_as_such():
     assert lr.plan_album_reorganize(_album(), [])['status'] == 'no_tracks'
+
+
+def test_an_album_already_filed_by_disc_keeps_its_disc_folders():
+    """A half-downloaded 2-disc album has only disc-1 rows, so the catalogue's
+    highest disc number is 1 and the plan would file the tracks flat.
+
+    The download that put them there knew better: it asked a provider, got
+    total_discs=2, and wrote `Album/Disc 1/…`. Reorganize would move them out,
+    and back in again once disc 2 arrives — the exact flip-flop this whole
+    change exists to stop. The folder the files are in is evidence about the
+    album that the imported rows do not carry.
+    """
+    tracks = [_track(1, 'One', file_path='/music/Alb/Disc 1/01 - One.flac'),
+              _track(2, 'Two', file_path='/music/Alb/Disc 1/02 - Two.flac')]
+    plan = lr.plan_album_reorganize(_album(), tracks)
+    assert plan['total_discs'] > 1
+
+
+def test_a_flat_album_is_not_given_disc_folders():
+    tracks = [_track(1, 'One', file_path='/music/Alb/01 - One.flac')]
+    assert lr.plan_album_reorganize(_album(), tracks)['total_discs'] == 1
