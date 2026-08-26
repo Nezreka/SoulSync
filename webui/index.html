@@ -7633,7 +7633,11 @@
     <script src="{{ url_for('static', filename='wishlist-tools.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='origin-history.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='watchlist-history.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='blocklist.js', v=static_v) }}"></script>
+    <!-- the SHELL bundle: classic scripts ported to typescript (src/shell/*,
+         built by vite.shell.config.ts as a synchronous IIFE). currently:
+         blocklist. loaded in the slot of the first ported file so its window
+         globals exist exactly when the vanilla originals did. -->
+    <script src="{{ url_for('static', filename='dist/shell.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='service-switch.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='my-accounts.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>

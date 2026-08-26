@@ -548,6 +548,15 @@ declare global {
     discoverMirroredPlaylist?: (playlistId: number) => void | Promise<void>;
     openWatchlistHistoryModal?: () => void;
     openBlocklistModal?: (initialType: string) => void;
+    /** the rest of the blocklist modal surface - lives in src/shell since the
+     * aug 26 TS port; inline onclick handlers in its generated HTML use these. */
+    closeBlocklistModal?: () => void;
+    switchBlocklistTab?: (type: string) => void;
+    onBlocklistSearchInput?: () => void;
+    blockFromSearch?: (payloadEnc: string) => Promise<void>;
+    unblockEntry?: (id: number) => Promise<void>;
+    /** shared-helpers.js html escaper (also re-declared by downloads.js) */
+    escapeHtml?: (text: unknown) => string;
     SoulSyncIssueDomain?: IssueDomainBridge;
     SoulSyncWorkflowActions?: {
       openDownloadMissingAlbum: (input: DownloadMissingAlbumWorkflowInput) => void | Promise<void>;
