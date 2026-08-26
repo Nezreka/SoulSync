@@ -21,7 +21,8 @@ def test_process_route_builds_its_runtime_without_crashing(monkeypatch):
         seen['runtime'] = runtime
         return {"success": True, "message": "stubbed"}, 200
 
-    monkeypatch.setattr(web_server, '_wishlist_process_api', fake_process_api)
+    from api import wishlist_routes
+    monkeypatch.setattr(wishlist_routes, '_wishlist_process_api', fake_process_api)
     client = web_server.app.test_client()
     resp = client.post('/api/wishlist/process')
 

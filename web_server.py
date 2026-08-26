@@ -131,21 +131,8 @@ from core.wishlist.payloads import (
     ensure_wishlist_track_format as _ensure_wishlist_track_format,
     get_track_artist_name as _get_track_artist_name,
 )
-from core.wishlist.routes import (
-    WishlistRouteRuntime as _WishlistRouteRuntime,
-    add_album_track_to_wishlist as _wishlist_add_album_track_to_wishlist,
-    clear_wishlist as _wishlist_clear_wishlist,
-    get_wishlist_count as _wishlist_get_wishlist_count,
-    get_wishlist_cycle as _wishlist_get_wishlist_cycle,
-    get_wishlist_stats as _wishlist_get_wishlist_stats,
-    get_wishlist_tracks as _wishlist_get_wishlist_tracks,
-    process_wishlist_api as _wishlist_process_api,
-    remove_album_from_wishlist as _wishlist_remove_album_from_wishlist,
-    remove_artist_from_wishlist as _wishlist_remove_artist_from_wishlist,
-    remove_batch_from_wishlist as _wishlist_remove_batch_from_wishlist,
-    remove_track_from_wishlist as _wishlist_remove_track_from_wishlist,
-    set_wishlist_cycle as _wishlist_set_wishlist_cycle,
-)
+# the /api/wishlist route handlers (and their core.wishlist.routes imports)
+# live in api/wishlist_routes.py now
 from core.wishlist.processing import (
     add_cancelled_tracks_to_failed_tracks as _add_cancelled_tracks_to_failed_tracks,
     automatic_wishlist_cleanup_after_db_update as _cleanup_wishlist_after_db_update,
@@ -202,6 +189,7 @@ from core.metadata.source import (
     mb_release_detail_cache_lock,
     normalize_album_cache_key,
 )
+from core import runtime_state as _rt_state
 from core.runtime_state import (
     activity_feed,
     activity_feed_lock,
@@ -1252,8 +1240,8 @@ import_singles_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="
 
 # Automatic Wishlist / Watchlist Processing Flags
 # Processing state flags (guards/recovery - timers are now managed by AutomationEngine)
-wishlist_auto_processing = False
-wishlist_auto_processing_timestamp = 0
+# wishlist_auto_processing (+timestamp) moved to core.runtime_state -
+# shared with the downloads pipeline's reset callback
 wishlist_timer_lock = threading.Lock()
 
 watchlist_auto_scanning = False
@@ -16330,7 +16318,6 @@ def check_and_recover_stuck_flags():
     If a flag has been True for more than 2 hours (7200 seconds), reset it.
     This prevents indefinite blocking when processes crash without cleanup.
     """
-    global wishlist_auto_processing, wishlist_auto_processing_timestamp
     global watchlist_auto_scanning, watchlist_auto_scanning_timestamp
 
     import time
@@ -16338,15 +16325,14 @@ def check_and_recover_stuck_flags():
     stuck_timeout = 900  # 15 minutes in seconds (reduced from 2 hours for faster recovery)
 
     def _reset_wishlist_processing_state():
-        global wishlist_auto_processing, wishlist_auto_processing_timestamp
         with wishlist_timer_lock:
-            wishlist_auto_processing = False
-            wishlist_auto_processing_timestamp = 0
+            _rt_state.wishlist_auto_processing = False
+            _rt_state.wishlist_auto_processing_timestamp = 0
 
     # Check wishlist flag
     if _reset_wishlist_flag_if_stuck(
-        wishlist_auto_processing,
-        wishlist_auto_processing_timestamp,
+        _rt_state.wishlist_auto_processing,
+        _rt_state.wishlist_auto_processing_timestamp,
         timeout_seconds=stuck_timeout,
         now=current_time,
         label="Wishlist auto-processing",
@@ -16372,14 +16358,13 @@ def is_wishlist_actually_processing():
     Check if wishlist is truly processing (not just flag stuck).
     Returns True only if flag is set AND timestamp is recent (< 15 minutes).
     """
-    global wishlist_auto_processing, wishlist_auto_processing_timestamp
 
     import time
     current_time = time.time()
 
     return _is_wishlist_actually_processing(
-        wishlist_auto_processing,
-        wishlist_auto_processing_timestamp,
+        _rt_state.wishlist_auto_processing,
+        _rt_state.wishlist_auto_processing_timestamp,
         timeout_seconds=900,
         now=current_time,
         on_stuck=check_and_recover_stuck_flags,
@@ -16410,28 +16395,26 @@ def is_watchlist_actually_scanning():
 
 def _process_wishlist_automatically(automation_id=None, apply_backoff=None):
     """Main automatic processing logic that runs in background thread."""
-    global wishlist_auto_processing, wishlist_auto_processing_timestamp
     from core.wishlist_service import get_wishlist_service
 
     @contextmanager
     def _processing_guard():
-        global wishlist_auto_processing, wishlist_auto_processing_timestamp
 
         with wishlist_timer_lock:
-            if wishlist_auto_processing:
+            if _rt_state.wishlist_auto_processing:
                 yield False
                 return
 
-            wishlist_auto_processing = True
-            wishlist_auto_processing_timestamp = time.time()
-            logger.info(f"[Auto-Wishlist] Flag set at timestamp {wishlist_auto_processing_timestamp}")
+            _rt_state.wishlist_auto_processing = True
+            _rt_state.wishlist_auto_processing_timestamp = time.time()
+            logger.info(f"[Auto-Wishlist] Flag set at timestamp {_rt_state.wishlist_auto_processing_timestamp}")
 
         try:
             yield True
         finally:
             with wishlist_timer_lock:
-                wishlist_auto_processing = False
-                wishlist_auto_processing_timestamp = 0
+                _rt_state.wishlist_auto_processing = False
+                _rt_state.wishlist_auto_processing_timestamp = 0
 
     runtime = _WishlistAutoProcessingRuntime(
         processing_guard=_processing_guard,
@@ -17147,496 +17130,7 @@ def get_database_stats():
         logger.error(f"Error getting database stats: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/wishlist/process', methods=['POST'])
-def process_wishlist_api():
-    """Trigger wishlist processing via API. Processes pending wishlist tracks in the background."""
-    try:
-        # #1134: this passed is_auto_processing_flag=<raw wishlist_auto_processing
-        # lambda> — a kwarg the factory never accepted, so the route 500'd on
-        # every call. The factory's DEFAULT (is_wishlist_actually_processing)
-        # is also the better guard: it verifies the worker is really alive,
-        # while the raw flag goes stale after a crash — the same staleness
-        # that kept the reporter's auto-timer "busy" over a dead batch.
-        runtime = _build_wishlist_route_runtime()
-        payload, status_code = _wishlist_process_api(
-            runtime,
-            start_processing=lambda: _process_wishlist_automatically(),
-        )
-        return jsonify(payload), status_code
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/wishlist/count', methods=['GET'])
-def get_wishlist_count():
-    """Endpoint to get current wishlist count."""
-    try:
-        runtime = _build_wishlist_route_runtime()
-        payload, status_code = _wishlist_get_wishlist_count(runtime)
-        return jsonify(payload), status_code
-    except Exception as e:
-        logger.error(f"Error getting wishlist count: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/wishlist/stats', methods=['GET'])
-def get_wishlist_stats():
-    """
-    Get wishlist statistics broken down by category.
-
-    Returns:
-        {
-            "singles": int,  # Count of singles + EPs
-            "albums": int,   # Count of album tracks
-            "total": int     # Total count
-        }
-    """
-    try:
-        runtime = _build_wishlist_route_runtime(
-            get_next_run_seconds=(
-                automation_engine.get_system_automation_next_run_seconds if automation_engine else None
-            ),
-        )
-        payload, status_code = _wishlist_get_wishlist_stats(runtime)
-        return jsonify(payload), status_code
-    except Exception as e:
-        logger.error(f"Error getting wishlist stats: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/wishlist/cycle', methods=['GET'])
-def get_wishlist_cycle():
-    """
-    Get the current wishlist processing cycle.
-
-    Returns:
-        {"cycle": "albums" | "singles"}
-    """
-    try:
-        runtime = _build_wishlist_route_runtime()
-        payload, status_code = _wishlist_get_wishlist_cycle(runtime)
-        return jsonify(payload), status_code
-    except Exception as e:
-        logger.error(f"Error getting wishlist cycle: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/wishlist/cycle', methods=['POST'])
-def set_wishlist_cycle():
-    """
-    Set the current wishlist processing cycle.
-
-    Body:
-        {"cycle": "albums" | "singles"}
-    """
-    try:
-        data = request.get_json()
-        cycle = data.get('cycle')
-        runtime = _build_wishlist_route_runtime()
-        payload, status_code = _wishlist_set_wishlist_cycle(runtime, cycle)
-        return jsonify(payload), status_code
-
-    except Exception as e:
-        logger.error(f"Error setting wishlist cycle: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/discovery/lookback-period', methods=['GET'])
-def get_discovery_lookback_period():
-    """
-    Get the discovery pool lookback period setting.
-
-    Returns:
-        {"period": "7" | "30" | "90" | "180" | "all"}
-    """
-    try:
-        from database.music_database import MusicDatabase
-        db = MusicDatabase()
-
-        # Get lookback period from metadata table
-        with db._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT value FROM metadata WHERE key = 'discovery_lookback_period'")
-            row = cursor.fetchone()
-
-            if row:
-                period = row['value']
-            else:
-                # Default to 30 days on first access
-                period = '30'
-                cursor.execute("""
-                    INSERT OR REPLACE INTO metadata (key, value, updated_at)
-                    VALUES ('discovery_lookback_period', '30', CURRENT_TIMESTAMP)
-                """)
-                conn.commit()
-
-        return jsonify({"period": period})
-
-    except Exception as e:
-        logger.error(f"Error getting discovery lookback period: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/discovery/lookback-period', methods=['POST'])
-def set_discovery_lookback_period():
-    """
-    Set the discovery pool lookback period setting.
-
-    Body:
-        {"period": "7" | "30" | "90" | "180" | "all"}
-    """
-    try:
-        data = request.get_json()
-        period = data.get('period')
-
-        valid_periods = ['7', '30', '90', '180', 'all']
-        if period not in valid_periods:
-            return jsonify({"error": f"Invalid period. Must be one of: {', '.join(valid_periods)}"}), 400
-
-        from database.music_database import MusicDatabase
-        db = MusicDatabase()
-
-        # Store lookback period in metadata table
-        with db._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO metadata (key, value, updated_at)
-                VALUES ('discovery_lookback_period', ?, CURRENT_TIMESTAMP)
-            """, (period,))
-
-            # Set a one-time rescan cutoff so the next scan cycle uses the new
-            # lookback window for artists that were already scanned under the old setting.
-            # This avoids wiping last_scan_timestamp (which is needed for UI display).
-            if period == 'all':
-                # 'all' means no cutoff — store empty to signal "scan everything"
-                rescan_value = ''
-            else:
-                from datetime import datetime, timedelta, timezone
-                cutoff = datetime.now(timezone.utc) - timedelta(days=int(period))
-                rescan_value = cutoff.isoformat()
-
-            cursor.execute("""
-                INSERT OR REPLACE INTO metadata (key, value, updated_at)
-                VALUES ('watchlist_rescan_cutoff', ?, CURRENT_TIMESTAMP)
-            """, (rescan_value,))
-
-            conn.commit()
-
-        logger.info(f"Discovery lookback period set to: {period}")
-        return jsonify({"success": True, "period": period})
-
-    except Exception as e:
-        logger.error(f"Error setting discovery lookback period: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/discovery/hemisphere', methods=['GET'])
-def get_hemisphere():
-    """Get the hemisphere setting for seasonal content."""
-    try:
-        db = get_database()
-        with db._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT value FROM metadata WHERE key = 'hemisphere'")
-            row = cursor.fetchone()
-            value = 'northern'
-            if row:
-                val = row[0] if isinstance(row, tuple) else row['value']
-                if val in ('northern', 'southern'):
-                    value = val
-        return jsonify({"hemisphere": value})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/discovery/hemisphere', methods=['POST'])
-def set_hemisphere():
-    """Set the hemisphere for seasonal content (northern or southern)."""
-    try:
-        data = request.get_json()
-        hemisphere = data.get('hemisphere', '').lower()
-        if hemisphere not in ('northern', 'southern'):
-            return jsonify({"error": "Must be 'northern' or 'southern'"}), 400
-
-        db = get_database()
-        with db._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO metadata (key, value, updated_at)
-                VALUES ('hemisphere', ?, CURRENT_TIMESTAMP)
-            """, (hemisphere,))
-            conn.commit()
-
-        logger.info("Hemisphere set to: %s", hemisphere)
-        return jsonify({"success": True, "hemisphere": hemisphere})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/wishlist/tracks', methods=['GET'])
-def get_wishlist_tracks():
-    """
-    Endpoint to get wishlist tracks for display in modal.
-    Supports category filtering via query parameter.
-
-    Query Parameters:
-        category (optional): 'singles' or 'albums' - filters tracks by album type
-        limit (optional): Maximum number of tracks to return (for performance)
-    """
-    try:
-        category = request.args.get('category', None)  # None = all tracks
-        limit = request.args.get('limit', type=int, default=None)  # None = no limit
-        runtime = _build_wishlist_route_runtime()
-        payload, status_code = _wishlist_get_wishlist_tracks(runtime, category=category, limit=limit)
-        return jsonify(payload), status_code
-    except Exception as e:
-        logger.error(f"Error getting wishlist tracks: {e}")
-        return jsonify({"error": str(e)}), 500
-
-def _build_wishlist_route_runtime(
-    *,
-    is_actually_processing_fn=None,
-    reset_wishlist_processing_state=None,
-    get_next_run_seconds=None,
-):
-    from database.music_database import MusicDatabase
-
-    return _WishlistRouteRuntime(
-        get_music_database=MusicDatabase,
-        profile_id=get_current_profile_id(),
-        download_batches=download_batches,
-        download_tasks=download_tasks,
-        tasks_lock=tasks_lock,
-        is_wishlist_actually_processing=is_actually_processing_fn or is_wishlist_actually_processing,
-        reset_wishlist_processing_state=reset_wishlist_processing_state or (lambda: None),
-        add_activity_item=add_activity_item,
-        active_server=config_manager.get_active_media_server(),
-        get_next_run_seconds=get_next_run_seconds,
-    )
-
-@app.route('/api/wishlist/download_missing', methods=['POST'])
-def start_wishlist_missing_downloads():
-    """
-    This endpoint fetches wishlist tracks and manages them with batch processing
-    identical to playlist processing, maintaining exactly 3 concurrent downloads.
-    """
-    dl_err = check_download_permission()
-    if dl_err:
-        return dl_err
-    try:
-        # Check if auto-processing is currently running (prevent concurrent wishlist access)
-        if is_wishlist_actually_processing():
-            return jsonify({
-                "error": "Wishlist auto-processing is currently running. Please wait for it to complete.",
-                "retry_after": 30
-            }), 409
-
-        data = request.get_json() or {}
-        from database.music_database import MusicDatabase
-
-        db = MusicDatabase()
-        manual_profile_id = get_current_profile_id()
-        manual_runtime = _WishlistManualDownloadRuntime(
-            get_music_database=lambda: db,
-            download_batches=download_batches,
-            tasks_lock=tasks_lock,
-            missing_download_executor=missing_download_executor,
-            album_bundle_executor=album_bundle_executor,
-            run_full_missing_tracks_process=_run_full_missing_tracks_process,
-            get_batch_max_concurrent=_get_batch_max_concurrent,
-            add_activity_item=add_activity_item,
-            active_server=config_manager.get_active_media_server(),
-            profile_id=manual_profile_id,
-        )
-
-        payload, status_code = _start_manual_wishlist_download_batch(
-            manual_runtime,
-            track_ids=data.get('track_ids'),
-            category=data.get('category'),
-            force_download_all=data.get('force_download_all', False),
-        )
-        return jsonify(payload), status_code
-        
-    except Exception as e:
-        logger.error(f"Error starting wishlist download process: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/wishlist/clear', methods=['POST'])
-def clear_wishlist():
-    """Endpoint to clear all tracks from the wishlist.
-    Also cancels any active wishlist download batch so cleared tracks don't keep downloading."""
-    try:
-        def _reset_wishlist_processing_state():
-            global wishlist_auto_processing, wishlist_auto_processing_timestamp
-            with wishlist_timer_lock:
-                wishlist_auto_processing = False
-                wishlist_auto_processing_timestamp = 0
-
-        runtime = _build_wishlist_route_runtime(
-            reset_wishlist_processing_state=_reset_wishlist_processing_state,
-        )
-        payload, status_code = _wishlist_clear_wishlist(runtime)
-        return jsonify(payload), status_code
-    except Exception as e:
-        logger.error(f"Error clearing wishlist: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/wishlist/cleanup', methods=['POST'])
-def cleanup_wishlist():
-    """Endpoint to remove tracks from wishlist that already exist in the database."""
-    try:
-        from core.wishlist_service import get_wishlist_service
-        from database.music_database import MusicDatabase
-        
-        wishlist_service = get_wishlist_service()
-        db = MusicDatabase()
-        active_server = config_manager.get_active_media_server()
-        payload, status_code = _cleanup_wishlist_against_library(
-            wishlist_service,
-            db,
-            get_current_profile_id(),
-            active_server,
-        )
-        return jsonify(payload), status_code
-        
-    except Exception as e:
-        logger.error(f"Error in wishlist cleanup: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/wishlist/remove-track', methods=['POST'])
-def remove_track_from_wishlist():
-    """Endpoint to remove a single track from the wishlist."""
-    try:
-        data = request.get_json()
-        spotify_track_id = data.get('spotify_track_id')
-        runtime = _build_wishlist_route_runtime()
-        payload, status_code = _wishlist_remove_track_from_wishlist(runtime, spotify_track_id)
-        return jsonify(payload), status_code
-    except Exception as e:
-        logger.error(f"Error removing track from wishlist: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/wishlist/remove-album', methods=['POST'])
-def remove_album_from_wishlist():
-    """Endpoint to remove all tracks from an album from the wishlist."""
-    try:
-        data = request.get_json()
-        album_id = data.get('album_id')
-        album_name_filter = data.get('album_name')
-        runtime = _build_wishlist_route_runtime()
-        payload, status_code = _wishlist_remove_album_from_wishlist(
-            runtime,
-            album_id=album_id,
-            album_name_filter=album_name_filter,
-        )
-        return jsonify(payload), status_code
-    except Exception as e:
-        logger.error(f"Error removing album from wishlist: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/wishlist/remove-artist', methods=['POST'])
-def remove_artist_from_wishlist():
-    """Remove every wishlist track by one artist (#1065 — one click instead
-    of unchecking a whole discography album by album)."""
-    try:
-        data = request.get_json() or {}
-        runtime = _build_wishlist_route_runtime()
-        payload, status_code = _wishlist_remove_artist_from_wishlist(
-            runtime, artist_name=data.get('artist_name'))
-        return jsonify(payload), status_code
-    except Exception as e:
-        logger.error(f"Error removing artist from wishlist: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/wishlist/remove-batch', methods=['POST'])
-def remove_batch_from_wishlist():
-    """Endpoint to remove multiple tracks from the wishlist."""
-    try:
-        data = request.get_json()
-        spotify_track_ids = data.get('spotify_track_ids', [])
-        runtime = _build_wishlist_route_runtime()
-        payload, status_code = _wishlist_remove_batch_from_wishlist(runtime, spotify_track_ids)
-        return jsonify(payload), status_code
-    except Exception as e:
-        logger.error(f"Error batch removing from wishlist: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/wishlist/ignore-list', methods=['GET'])
-def get_wishlist_ignore_list():
-    """#874: active (non-expired) wishlist ignore entries for this profile."""
-    try:
-        from core.wishlist_service import get_wishlist_service
-        runtime = _build_wishlist_route_runtime()
-        entries = get_wishlist_service().database.get_wishlist_ignore(profile_id=runtime.profile_id)
-        from core.wishlist.ignore import IGNORE_TTL_DAYS
-        return jsonify({"success": True, "entries": entries, "ttl_days": IGNORE_TTL_DAYS})
-    except Exception as e:
-        logger.error(f"Error reading wishlist ignore-list: {e}")
-        return jsonify({"success": False, "error": str(e), "entries": []}), 500
-
-@app.route('/api/wishlist/ignore-list/remove', methods=['POST'])
-def remove_from_wishlist_ignore_list():
-    """#874: un-ignore a track so it can be auto-acquired again."""
-    try:
-        data = request.get_json() or {}
-        track_id = data.get('track_id') or data.get('spotify_track_id')
-        if not track_id:
-            return jsonify({"success": False, "error": "No track_id provided"}), 400
-        from core.wishlist_service import get_wishlist_service
-        runtime = _build_wishlist_route_runtime()
-        ok = get_wishlist_service().database.remove_from_wishlist_ignore(
-            track_id, profile_id=runtime.profile_id)
-        return jsonify({"success": True, "removed": ok})
-    except Exception as e:
-        logger.error(f"Error removing from wishlist ignore-list: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/wishlist/ignore-list/clear', methods=['POST'])
-def clear_wishlist_ignore_list():
-    """#874: clear the entire wishlist ignore-list for this profile."""
-    try:
-        from core.wishlist_service import get_wishlist_service
-        runtime = _build_wishlist_route_runtime()
-        count = get_wishlist_service().database.clear_wishlist_ignore(profile_id=runtime.profile_id)
-        return jsonify({"success": True, "cleared": count})
-    except Exception as e:
-        logger.error(f"Error clearing wishlist ignore-list: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/add-album-to-wishlist', methods=['POST'])
-def add_album_track_to_wishlist():
-    """Endpoint to add a single track from an album to the wishlist."""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"success": False, "error": "No data provided"}), 400
-
-        track = data.get('track')
-        artist = data.get('artist')
-        album = data.get('album')
-        source_type = data.get('source_type', 'album')
-        source_context = data.get('source_context', {})
-
-        # The Quality Profile the user picked in the shared acquisition dialog.
-        # Before P1-01 this field did not exist and every manual Search /
-        # Discover / Library add silently used the global default.
-        quality_profile_id, error = _parse_requested_quality_profile_id(data)
-        if error:
-            return error
-
-        runtime = _build_wishlist_route_runtime()
-        payload, status_code = _wishlist_add_album_track_to_wishlist(
-            runtime,
-            track=track,
-            artist=artist,
-            album=album,
-            source_type=source_type,
-            source_context=source_context,
-            quality_profile_id=quality_profile_id,
-        )
-        return jsonify(payload), status_code
-    except Exception as e:
-        logger.error(f"Error adding track to wishlist: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"success": False, "error": str(e)}), 500
+# ── wishlist endpoints live in api/wishlist_routes.py now ────────────────────
 
 @app.route('/api/database/update', methods=['POST'])
 @admin_only
@@ -18401,8 +17895,6 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
     Process failed tracks to wishlist for auto-initiated batches and handle auto-processing completion.
     This extends the standard processing with automatic scheduling of the next cycle.
     """
-    global wishlist_auto_processing
-    global wishlist_auto_processing_timestamp
     
     try:
         logger.info(f"[Auto-Wishlist] Processing completion for auto-initiated batch {batch_id}")
@@ -18410,10 +17902,9 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
         completion_summary = _process_failed_tracks_to_wishlist_exact(batch_id)
 
         def _reset_auto_processing_state():
-            global wishlist_auto_processing, wishlist_auto_processing_timestamp
             with wishlist_timer_lock:
-                wishlist_auto_processing = False
-                wishlist_auto_processing_timestamp = 0
+                _rt_state.wishlist_auto_processing = False
+                _rt_state.wishlist_auto_processing_timestamp = 0
 
         from database.music_database import MusicDatabase
 
@@ -18435,8 +17926,8 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
 
         # Ensure auto-processing flag is reset even on error and reset timestamp
         with wishlist_timer_lock:
-            wishlist_auto_processing = False
-            wishlist_auto_processing_timestamp = 0
+            _rt_state.wishlist_auto_processing = False
+            _rt_state.wishlist_auto_processing_timestamp = 0
 
         return {'tracks_added': 0, 'errors': 1, 'total_failed': 0}
 
@@ -18453,10 +17944,9 @@ from core.downloads import master as _downloads_master
 def _build_master_deps():
     """Build the MasterDeps bundle from web_server.py globals on each call."""
     def _reset_wishlist_auto_processing():
-        global wishlist_auto_processing, wishlist_auto_processing_timestamp
         with wishlist_timer_lock:
-            wishlist_auto_processing = False
-            wishlist_auto_processing_timestamp = 0
+            _rt_state.wishlist_auto_processing = False
+            _rt_state.wishlist_auto_processing_timestamp = 0
 
     return _downloads_master.MasterDeps(
         config_manager=config_manager,
@@ -19154,7 +18644,7 @@ def get_active_processes():
 
                     # Add current auto-processing state for frontend awareness
                     with wishlist_timer_lock:
-                        process_info["auto_processing_active"] = wishlist_auto_processing
+                        process_info["auto_processing_active"] = _rt_state.wishlist_auto_processing
                 
                 active_processes.append(process_info)
     
@@ -19737,10 +19227,9 @@ def cancel_batch(batch_id):
             if playlist_id == 'wishlist':
                 auto_initiated = download_batches[batch_id].get('auto_initiated', False)
                 if auto_initiated:
-                    global wishlist_auto_processing, wishlist_auto_processing_timestamp
                     with wishlist_timer_lock:
-                        wishlist_auto_processing = False
-                        wishlist_auto_processing_timestamp = 0
+                        _rt_state.wishlist_auto_processing = False
+                        _rt_state.wishlist_auto_processing_timestamp = 0
                     logger.warning("[Wishlist Cancel] Reset wishlist auto-processing flag for cancelled auto-batch")
                 else:
                     logger.warning("ℹ️ [Wishlist Cancel] Manual wishlist batch cancelled (no flag reset needed)")
@@ -30779,6 +30268,23 @@ from api.labels import configure as _configure_labels_api, create_blueprint as _
 _configure_labels_api(db_getter=get_database, itunes_getter=_get_itunes_client,
                       deezer_getter=_get_deezer_client)
 app.register_blueprint(_create_labels_blueprint())
+
+# wishlist endpoints
+from api.wishlist_routes import configure as _cfg_wl, create_blueprint as _bp_wl
+_cfg_wl(
+    album_bundle_executor=album_bundle_executor,
+    missing_download_executor=missing_download_executor,
+    wishlist_timer_lock=wishlist_timer_lock,
+    check_download_permission=check_download_permission,
+    is_wishlist_actually_processing=is_wishlist_actually_processing,
+    _get_batch_max_concurrent=_get_batch_max_concurrent,
+    _parse_requested_quality_profile_id=_parse_requested_quality_profile_id,
+    _process_wishlist_automatically=_process_wishlist_automatically,
+    _run_full_missing_tracks_process=_run_full_missing_tracks_process,
+    automation_engine=automation_engine,
+    get_database=get_database,
+)
+app.register_blueprint(_bp_wl())
 
 # per-source playlist systems (tidal/deezer/qobuz/spotify-public/itunes-link/
 # youtube + the shared discovery/sync spine). rebindables go in as getters -
