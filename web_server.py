@@ -1266,8 +1266,7 @@ _status_cache_timestamps: dict[str, float] = {
 STATUS_CACHE_TTL = 120
 
 dev_mode_enabled = False
-_hydrabase_ws = None
-_hydrabase_lock = threading.Lock()
+# _hydrabase_ws + _hydrabase_lock live in api/hydrabase_routes.py now
 
 
 # --- Automation Engine ---
@@ -3659,210 +3658,13 @@ def handle_dev_mode():
 
 # ── Hydrabase Comparison Store ──
 import collections as _collections
-_hydrabase_comparisons = _collections.OrderedDict()
-_COMPARISON_MAX_ENTRIES = 50
-_comparison_lock = threading.Lock()
-
-def _is_hydrabase_active():
-    """Check if Hydrabase is connected and enabled for metadata use."""
-    try:
-        from core.metadata.registry import is_hydrabase_enabled
-        return is_hydrabase_enabled()
-    except Exception:
-        return False
-
-def _run_background_comparison(query, hydrabase_counts=None):
-    """Run Spotify + fallback source searches in background and store for comparison.
-
-    Args:
-        query: Search query string.
-        hydrabase_counts: Optional pre-computed dict {'tracks': N, 'artists': N, 'albums': N}
-                          from the primary search to avoid redundant Hydrabase round-trips.
-    """
-    def _worker():
-        try:
-            result = {'timestamp': time.time(), 'query': query}
-
-            # Use pre-computed counts if available, otherwise fetch from Hydrabase
-            if hydrabase_counts is not None:
-                hydra_data = hydrabase_counts
-            else:
-                hydra_data = {'tracks': 0, 'artists': 0, 'albums': 0}
-                if _is_hydrabase_active():
-                    raw_t = hydrabase_client.search_raw(query, 'track')
-                    raw_ar = hydrabase_client.search_raw(query, 'artists')
-                    raw_al = hydrabase_client.search_raw(query, 'album')
-                    hydra_data = {
-                        'tracks': len(raw_t) if raw_t else 0,
-                        'artists': len(raw_ar) if raw_ar else 0,
-                        'albums': len(raw_al) if raw_al else 0
-                    }
-            result['hydrabase'] = hydra_data
-
-            # Spotify results
-            spotify_data = {'tracks': 0, 'artists': 0, 'albums': 0}
-            if spotify_client and spotify_client.is_authenticated():
-                try:
-                    s_tracks = spotify_client.search_tracks(query, limit=10)
-                    s_artists = spotify_client.search_artists(query, limit=10)
-                    s_albums = spotify_client.search_albums(query, limit=10)
-                    spotify_data = {
-                        'tracks': len(s_tracks),
-                        'artists': len(s_artists),
-                        'albums': len(s_albums)
-                    }
-                except Exception as e:
-                    logger.debug(f"Comparison Spotify search failed: {e}")
-            result['spotify'] = spotify_data
-
-            # Fallback metadata source results (iTunes or Deezer)
-            fallback_source = _get_metadata_fallback_source()
-            fallback_data = {'tracks': 0, 'artists': 0, 'albums': 0}
-            try:
-                fallback_client = _get_metadata_fallback_client()
-                f_tracks = fallback_client.search_tracks(query, limit=10)
-                f_artists = fallback_client.search_artists(query, limit=10)
-                f_albums = fallback_client.search_albums(query, limit=10)
-                fallback_data = {
-                    'tracks': len(f_tracks),
-                    'artists': len(f_artists),
-                    'albums': len(f_albums)
-                }
-            except Exception as e:
-                logger.debug(f"Comparison {fallback_source} search failed: {e}")
-            result['fallback'] = fallback_data
-            result['fallback_source'] = fallback_source
-
-            with _comparison_lock:
-                _hydrabase_comparisons[query] = result
-                while len(_hydrabase_comparisons) > _COMPARISON_MAX_ENTRIES:
-                    _hydrabase_comparisons.popitem(last=False)
-
-            logger.info(f"Background comparison stored for '{query}': H={hydra_data}, S={spotify_data}, {fallback_source.capitalize()}={fallback_data}")
-
-        except Exception as e:
-            logger.error(f"Background comparison failed for '{query}': {e}")
-
-    threading.Thread(target=_worker, daemon=True).start()
-
-@app.route('/api/hydrabase/connect', methods=['POST'])
-def hydrabase_connect():
-    """Connect to a Hydrabase instance via WebSocket."""
-    global _hydrabase_ws
-    data = request.get_json()
-    url = data.get('url', '').strip()
-    api_key = data.get('api_key', '').strip()
-    if not url or not api_key:
-        return jsonify({"success": False, "error": "URL and API key required"}), 400
-    try:
-        import websocket
-        with _hydrabase_lock:
-            # Close existing connection if any
-            if _hydrabase_ws:
-                try:
-                    _hydrabase_ws.close()
-                except Exception as _e:
-                    logger.debug("hydrabase connect-existing close: %s", _e)
-            ws = websocket.create_connection(
-                url,
-                header={"x-api-key": api_key},
-                timeout=10
-            )
-            _hydrabase_ws = ws
-        # Save credentials for auto-reconnect
-        config_manager.set('hydrabase.url', url)
-        config_manager.set('hydrabase.api_key', api_key)
-        config_manager.set('hydrabase.auto_connect', True)
-        logger.info(f"[Hydrabase] Connected to {url}")
-        return jsonify({"success": True, "message": "Connected"})
-    except Exception as e:
-        logger.error(f"[Hydrabase] Connection failed: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/hydrabase/disconnect', methods=['POST'])
-def hydrabase_disconnect():
-    """Disconnect from Hydrabase and disable dev mode."""
-    global _hydrabase_ws, dev_mode_enabled
-    with _hydrabase_lock:
-        if _hydrabase_ws:
-            try:
-                _hydrabase_ws.close()
-            except Exception as e:
-                logger.debug("hydrabase disconnect close: %s", e)
-            _hydrabase_ws = None
-    config_manager.set('hydrabase.auto_connect', False)
-    # Only disable dev mode if not using Hydrabase as a regular fallback source
-    if _get_metadata_fallback_source() != 'hydrabase':
-        dev_mode_enabled = False
-    logger.info("[Hydrabase] Disconnected")
-    return jsonify({"success": True})
-
-@app.route('/api/hydrabase/status')
-def hydrabase_status():
-    """Check if connected to Hydrabase."""
-    try:
-        connected = _hydrabase_ws is not None and _hydrabase_ws.connected
-    except Exception:
-        connected = False
-    try:
-        hydra_config = config_manager.get_hydrabase_config()
-    except AttributeError:
-        hydra_config = {}
-    peer_count = None
-    try:
-        if hydrabase_client and hydrabase_client.last_peer_count is not None:
-            peer_count = hydrabase_client.last_peer_count
-    except NameError:
-        pass
-    return jsonify({
-        "connected": connected,
-        "saved_url": hydra_config.get('url', ''),
-        "saved_api_key": hydra_config.get('api_key', ''),
-        "auto_connect": hydra_config.get('auto_connect', False),
-        "peer_count": peer_count
-    })
-
-@app.route('/api/hydrabase/comparisons')
-def hydrabase_comparisons():
-    """Get recent comparison results (Hydrabase vs Spotify vs fallback source)."""
-    if not dev_mode_enabled:
-        return jsonify({"success": False, "error": "Dev mode not active"}), 403
-    with _comparison_lock:
-        items = list(reversed(_hydrabase_comparisons.values()))
-    return jsonify({"success": True, "comparisons": items})
-
-@app.route('/api/hydrabase/send', methods=['POST'])
-def hydrabase_send():
-    """Send a raw JSON payload to Hydrabase and return the response."""
-    global _hydrabase_ws
-    if not dev_mode_enabled:
-        return jsonify({"success": False, "error": "Dev mode not active"}), 403
-    if not _hydrabase_ws or not _hydrabase_ws.connected:
-        return jsonify({"success": False, "error": "Not connected to Hydrabase"}), 400
-    data = request.get_json()
-    payload = data.get('payload')
-    if not payload:
-        return jsonify({"success": False, "error": "No payload provided"}), 400
-    try:
-        message = json.dumps(payload) if isinstance(payload, dict) else str(payload)
-        with _hydrabase_lock:
-            _hydrabase_ws.send(message)
-            response = _hydrabase_ws.recv()
-        try:
-            result = json.loads(response)
-        except json.JSONDecodeError:
-            result = response
-        logger.info("[Hydrabase] Sent payload — got response")
-        return jsonify({"success": True, "data": result})
-    except Exception as e:
-        logger.error(f"[Hydrabase] Send failed: {e}")
-        with _hydrabase_lock:
-            try:
-                _hydrabase_ws.close()
-            except Exception as _e:
-                logger.debug("hydrabase send close: %s", _e)
-            _hydrabase_ws = None
-        return jsonify({"success": False, "error": str(e)}), 500
+# ── hydrabase endpoints live in api/hydrabase_routes.py now ─────────────────
+# the is-active gate + comparison runner are imported back: the search deps,
+# automation wiring and three matching sites still call them by name.
+from api.hydrabase_routes import (  # noqa: E402
+    _is_hydrabase_active,
+    _run_background_comparison,
+)
 
 @app.route('/api/prowlarr/indexers', methods=['GET'])
 def prowlarr_indexers_endpoint():
@@ -22685,7 +22487,10 @@ hydrabase_worker = None
 hydrabase_client = None
 try:
     def _get_hydrabase_ws_and_lock():
-        return (_hydrabase_ws, _hydrabase_lock)
+        # module-attribute reads: the routes rebind the ws inside
+        # api.hydrabase_routes, so a snapshot here would go stale
+        from api import hydrabase_routes as _hb
+        return (_hb._hydrabase_ws, _hb._hydrabase_lock)
     hydrabase_worker = HydrabaseWorker(get_ws_and_lock=_get_hydrabase_ws_and_lock)
     hydrabase_worker.start()
     hydrabase_client = HydrabaseClient(get_ws_and_lock=_get_hydrabase_ws_and_lock)
@@ -22828,7 +22633,8 @@ try:
             header={"x-api-key": _hydra_cfg['api_key']},
             timeout=10
         )
-        _hydrabase_ws = _auto_ws
+        from api import hydrabase_routes as _hb
+        _hb._hydrabase_ws = _auto_ws
         # Don't auto-enable dev mode — user must explicitly activate dev mode
         # Auto-connect just establishes the WebSocket for fallback/search tab use
         logger.info(f"Hydrabase auto-connected to {_hydra_cfg['url']}")
@@ -23339,7 +23145,7 @@ def _build_watchlist_count_payload(profile_id=1):
 
 def _hydrabase_reconnect_loop():
     """Background thread that monitors Hydrabase connection and auto-reconnects if needed."""
-    global _hydrabase_ws
+    from api import hydrabase_routes as _hb
     _consecutive_failures = 0
 
     while not globals().get('IS_SHUTTING_DOWN', False):
@@ -23353,7 +23159,7 @@ def _hydrabase_reconnect_loop():
 
             # Check if already connected
             try:
-                if _hydrabase_ws is not None and _hydrabase_ws.connected:
+                if _hb._hydrabase_ws is not None and _hb._hydrabase_ws.connected:
                     _consecutive_failures = 0
                     continue
             except Exception as e:
@@ -23367,10 +23173,10 @@ def _hydrabase_reconnect_loop():
 
             import websocket
             try:
-                with _hydrabase_lock:
-                    if _hydrabase_ws:
+                with _hb._hydrabase_lock:
+                    if _hb._hydrabase_ws:
                         try:
-                            _hydrabase_ws.close()
+                            _hb._hydrabase_ws.close()
                         except Exception as e:
                             logger.debug("hydrabase reconnect close: %s", e)
                     ws = websocket.create_connection(
@@ -23378,7 +23184,7 @@ def _hydrabase_reconnect_loop():
                         header={"x-api-key": hydra_cfg['api_key']},
                         timeout=10
                     )
-                    _hydrabase_ws = ws
+                    _hb._hydrabase_ws = ws
                 _consecutive_failures = 0
                 logger.info(f"[Hydrabase] Auto-reconnected to {hydra_cfg['url']}")
             except Exception as e:
@@ -24196,6 +24002,19 @@ from api.labels import configure as _configure_labels_api, create_blueprint as _
 _configure_labels_api(db_getter=get_database, itunes_getter=_get_itunes_client,
                       deezer_getter=_get_deezer_client)
 app.register_blueprint(_create_labels_blueprint())
+
+# hydrabase p2p
+from api.hydrabase_routes import configure as _cfg_hb, create_blueprint as _bp_hb
+def _set_dev_mode_impl(value):
+    global dev_mode_enabled
+    dev_mode_enabled = value
+_cfg_hb(
+    _hydrabase_client=lambda: hydrabase_client,
+    _dev_mode_enabled=lambda: dev_mode_enabled,
+    _set_dev_mode=_set_dev_mode_impl,
+    _spotify_client=lambda: spotify_client,
+)
+app.register_blueprint(_bp_hb())
 
 # artist detail family
 from api.artist_detail import configure as _cfg_ad, create_blueprint as _bp_ad
