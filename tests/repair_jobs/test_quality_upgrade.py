@@ -767,6 +767,56 @@ def _setup_scanner_common(monkeypatch, tmp_path, targets, aq):
     monkeypatch.setattr('core.imports.file_ops.probe_audio_quality', lambda path: aq)
 
 
+def test_scanner_skips_catalogued_lossy_companion(monkeypatch, tmp_path):
+    """Navidrome/Jellyfin may index both the source and its retained copy."""
+    from core.quality.model import AudioQuality, QualityTarget
+
+    flac = tmp_path / "song.flac"
+    mp3 = tmp_path / "song.mp3"
+    flac.write_bytes(b"lossless")
+    mp3.write_bytes(b"lossy")
+    target = QualityTarget(label="FLAC", format="flac")
+    profile = {
+        "id": 20,
+        "name": "Lossless with portable copy",
+        "ranked_targets": [target.to_dict()],
+    }
+    monkeypatch.setattr(qs, "targets_from_profile", lambda _profile: ([target], False))
+    monkeypatch.setattr(
+        qs.QualityUpgradeScannerJob,
+        "_collect_music_dirs",
+        lambda self, context: [str(tmp_path)],
+    )
+    monkeypatch.setattr(
+        qs.QualityUpgradeScannerJob,
+        "_build_db_suffix_index",
+        lambda self, context: {
+            "song.flac": {"track_id": 1, "title": "Song", "quality_profile_id": 20},
+            "song.mp3": {"track_id": 2, "title": "Song", "quality_profile_id": 20},
+        },
+    )
+    monkeypatch.setattr(
+        "core.library.duplicate_rules.lossy_companion_exts",
+        lambda *_args, **_kwargs: {".mp3"},
+    )
+    monkeypatch.setattr(
+        "core.imports.file_ops.probe_audio_quality",
+        lambda path: AudioQuality(
+            format="flac" if str(path).endswith(".flac") else "mp3",
+            bitrate=320,
+        ),
+    )
+    monkeypatch.setattr("core.imports.silence.detect_broken_audio", lambda _path: None)
+    findings = []
+
+    result = qs.QualityUpgradeScannerJob().scan(
+        _scanner_ctx(_ScannerFakeDB(profile), tmp_path, findings))
+
+    assert findings == []
+    assert result.scanned == 1
+    assert result.skipped == 1
+
+
 def test_scanner_dismissed_finding_stays_dismissed_when_config_unchanged(monkeypatch, tmp_path):
     """A track dismissed under the SAME profile/cutoff must not resurrect a
     finding on every re-run just because it still measures below profile."""

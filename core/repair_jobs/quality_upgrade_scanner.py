@@ -314,10 +314,11 @@ class QualityUpgradeScannerJob(RepairJob):
             # the library, skip anything with no DB row BEFORE probing — no point
             # reading hundreds of orphan files.
             meta = self._match_db(fpath, db_index)
-            if meta is None and is_lossy_companion_file(fpath, companion_exts):
+            if is_lossy_companion_file(fpath, companion_exts):
                 # A deliberately retained lossy derivative belongs to the
-                # lossless track beside it. It is not an orphan quality choice
-                # and must not generate a second, misleading upgrade finding.
+                # lossless track beside it. Media servers may catalogue both
+                # representations, so this applies regardless of whether the
+                # derivative itself has a DB row.
                 result.skipped += 1
                 continue
             if library_only and meta is None:
