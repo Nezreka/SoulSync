@@ -200,6 +200,7 @@
                 '<div class="vgm-body">' +
                     '<div class="vgm-ratings" data-vgm-ratings hidden></div>' +
                     '<p class="vgm-overview" data-vgm-overview>Loading details…</p>' +
+                    '<div class="vgm-plan" data-vgm-plan hidden></div>' +
                     '<div class="vgm-owned" data-vgm-owned hidden></div>' +
                     '<div class="vgm-next" data-vgm-next hidden></div>' +
                     '<div class="vgm-eps" data-vgm-eps hidden></div>' +
@@ -211,9 +212,9 @@
                 '</div>' +
                 '<div class="vgm-actions">' +
                     '<span class="vgm-sel-count" data-vgm-count></span>' +
-                    '<button class="discog-cancel-btn" type="button" data-vgm-open>Full page &rarr;</button>' +
+                    '<button class="discog-cancel-btn" type="button" data-vgm-open>Details &rarr;</button>' +
                     '<button class="discog-cancel-btn vgm-download-btn" type="button" data-vgm-download>' +
-                        '<span class="vgm-download-ic">⤓</span> Download</button>' +
+                        '<span class="vgm-download-ic">⤓</span> Choose release</button>' +
                     '<button class="discog-submit-btn" type="button" data-vgm-wishlist>' +
                         '<span class="discog-submit-icon">⬇</span>' +
                         '<span class="discog-submit-text" data-vgm-add-label>+ Add to Wishlist</span>' +
@@ -319,7 +320,9 @@
 
     function updateFooter() {
         if (!modalEl) return;
-        var n = modalState ? modalState.sel.size : 0;
+        var n = (modalState && modalState.sel) ? modalState.sel.size : 0;
+        var planSel = modalEl.querySelector('[data-vgm-plan-selected]');
+        if (planSel) planSel.textContent = n;
         var cnt = modalEl.querySelector('[data-vgm-count]');
         var add = modalEl.querySelector('[data-vgm-wishlist]');
         var addLbl = modalEl.querySelector('[data-vgm-add-label]');   // set label only (keep the icon)
@@ -592,6 +595,7 @@
         }
 
         renderRatings(d);   // IMDb / Rotten Tomatoes / Metacritic chips (both kinds)
+        renderPlan(d, o);
         var libId = (o.source === 'library') ? parseInt(o.id, 10) : (d.library_id || null);
         if (o.kind === 'show') {
             modalState = modalState || { kind: 'show', sel: new Set(), epMeta: {} };
@@ -634,6 +638,49 @@
         if (o && o.startDownload && o.kind === 'show') enterDownload(modalEl, o);
     }
 
+    function renderPlan(d, o) {
+        var box = modalEl && modalEl.querySelector('[data-vgm-plan]'); if (!box) return;
+        function metric(label, value, cls) {
+            return '<span class="vgm-plan-metric ' + (cls || '') + '">' +
+                '<span class="vgm-plan-num">' + value + '</span>' +
+                '<span class="vgm-plan-label">' + esc(label) + '</span></span>';
+        }
+        if (o.kind === 'movie') {
+            var owned = !!d.owned;
+            var f = d.file || {};
+            var bits = [resLabel(f.resolution), f.quality].filter(Boolean).join(' · ');
+            box.innerHTML = '<div class="vgm-plan-copy">' +
+                '<span class="vgm-plan-k">' + (owned ? 'Library copy' : 'Ready to get') + '</span>' +
+                '<span class="vgm-plan-v">' + (owned ? ('Re-download or search for an upgrade' + (bits ? ' · ' + esc(bits) : '')) : 'Add it to the wishlist or open the download picker') + '</span>' +
+                '</div>' + metric(owned ? 'owned' : 'wanted', owned ? '✓' : '+', owned ? 'vgm-plan-ok' : 'vgm-plan-want');
+            box.hidden = false;
+            return;
+        }
+        if (o.kind !== 'show' || !d.seasons || !d.seasons.length) { box.hidden = true; return; }
+        var today = isoToday(), missing = 0, ownedCount = 0, upcoming = 0, lazy = 0;
+        (d.seasons || []).forEach(function (s) {
+            var eps = s.episodes || [];
+            if (!eps.length && (s.episode_total || 0) > 0) { lazy += s.episode_total; return; }
+            eps.forEach(function (e) {
+                var st = epState(e, today);
+                if (st === 'owned') ownedCount++;
+                else if (st === 'upcoming') upcoming++;
+                else missing++;
+            });
+        });
+        var selected = modalState && modalState.sel ? modalState.sel.size : missing;
+        var copy = lazy ? 'Expand seasons to load exact episodes' : (missing ? 'Missing aired episodes are preselected' : 'You already have the aired catalog');
+        box.innerHTML = '<div class="vgm-plan-copy">' +
+            '<span class="vgm-plan-k">Acquisition plan</span>' +
+            '<span class="vgm-plan-v">' + esc(copy) + '</span>' +
+            '</div><div class="vgm-plan-metrics">' +
+            metric('selected', '<span data-vgm-plan-selected>' + selected + '</span>', 'vgm-plan-want') +
+            metric('missing', missing + (lazy ? '+' : ''), 'vgm-plan-missing') +
+            metric('owned', ownedCount, 'vgm-plan-ok') +
+            (upcoming ? metric('upcoming', upcoming, 'vgm-plan-soon') : '') +
+            '</div>';
+        box.hidden = false;
+    }
     // Ratings strip: branded chips for whichever scores the payload carries.
     function renderRatings(d) {
         var box = modalEl && modalEl.querySelector('[data-vgm-ratings]'); if (!box) return;

@@ -7,13 +7,18 @@ the (later-phase) engine tries in turn.
 
 Pure normalize here (no DB, no network) so it's unit-tested in isolation. Stored in
 video.db's ``video_settings`` (``download_mode`` + ``hybrid_order`` JSON). Isolated:
-imports only json/typing, and the music side never imports it.
+imports only json/typing plus the equally-pure core.downloads.seed_rules, and the
+music side never imports it. Keep it that way — importing core.torrent_clients here
+instead ran that package's __init__ and dragged in all four client adapters plus the
+config manager, 479 modules to normalise a settings dict.
 """
 
 from __future__ import annotations
 
 import json
 from typing import Any
+
+from core.downloads import seed_rules
 
 SOURCES = ("soulseek", "torrent", "usenet")
 MODES = SOURCES + ("hybrid",)
@@ -73,6 +78,9 @@ def load(db) -> dict:
         # Who enforces the goal: "soulsync" (sweep polls + removes) or "client"
         # (write the ratio/time limit into the torrent client, arr-style).
         "seed_mode": _norm_seed_mode(db.get_setting("seed_mode")),
+        # per indexer overrides, arr style. blank field on a rule = inherit the
+        # global goal above, so a tracker can set just a ratio.
+        "seed_overrides": seed_rules.normalize_overrides(db.get_setting("seed_overrides")),
     }
 
 
@@ -91,6 +99,8 @@ def save(db, body: Any) -> dict:
         db.set_setting("seed_remove_data", "1" if body.get("seed_remove_data") else "0")
     if "seed_mode" in body:
         db.set_setting("seed_mode", _norm_seed_mode(body.get("seed_mode")))
+    if "seed_overrides" in body:
+        db.set_setting("seed_overrides", seed_rules.dumps(body.get("seed_overrides")))
     return load(db)
 
 

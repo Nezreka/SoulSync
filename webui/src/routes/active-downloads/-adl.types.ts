@@ -45,6 +45,13 @@ export interface AdlDownload {
   playlist_id: string;
   track_index: number;
   batch_total: number;
+  /**
+   * 1-based position within the batch queue - the DISPLAY ordinal.
+   * track_index is an identity (original playlist/wishlist position, used
+   * for cancel addressing) and must never be shown as a position: #1183
+   * had a 2-track album sub-batch printing "Track 4930 of 2".
+   */
+  batch_position?: number | null;
   timestamp: number;
   priority: number;
   quality: string;
@@ -234,9 +241,94 @@ export const ADL_FILTERS = [
   { value: 'failed', label: 'Failed' },
 ] as const;
 
-export type AdlFilter = (typeof ADL_FILTERS)[number]['value'] | 'unverified';
+export type AdlFilter = (typeof ADL_FILTERS)[number]['value'] | 'unverified' | 'clients';
 
-export type AdlSubView = 'unverified' | 'quarantine';
+/* ── The Clients tab: external download clients, adapter-uniform rows ────── */
+
+export interface ClientTorrentItem {
+  id: string;
+  name: string;
+  state: string;
+  progress: number;
+  size: number;
+  downloaded: number;
+  download_speed: number;
+  upload_speed: number;
+  seeders?: number;
+  peers?: number;
+  eta?: number | null;
+  ratio?: number | null;
+  seeding_time?: number | null;
+  save_path?: string | null;
+  content_path?: string | null;
+  error?: string | null;
+  /** present when SoulSync itself dispatched this item. */
+  soulsync?: { kind?: string; title?: string };
+}
+
+export interface ClientUsenetItem {
+  id: string;
+  name: string;
+  state: string;
+  progress: number;
+  size: number;
+  downloaded: number;
+  download_speed: number;
+  eta?: number | null;
+  save_path?: string | null;
+  incomplete_path?: string | null;
+  category?: string | null;
+  error?: string | null;
+  soulsync?: { kind?: string; title?: string };
+}
+
+export interface ClientSlskdItem {
+  id: string;
+  filename: string;
+  username: string;
+  state: string;
+  progress: number;
+  size: number;
+  transferred: number;
+  speed: number;
+  time_remaining?: number | null;
+  file_path?: string | null;
+  soulsync?: { kind?: string; title?: string };
+}
+
+export interface ClientOverview<T> {
+  configured: boolean;
+  connected: boolean;
+  type?: string;
+  error?: string;
+  items: T[];
+  /** slskd only: who is pulling FROM this install. */
+  uploads?: ClientSlskdItem[];
+  /** slskd only: how many completed transfers the server trimmed away. */
+  counts?: { downloads_completed?: number; uploads_completed?: number };
+}
+
+export type AdlSubView = 'unverified' | 'quarantine' | 'deleted';
+
+/** One file in the <transfer>/.deleted quarantine - the music recycle bin. */
+export interface AdlDeletedEntry {
+  id: string;
+  name: string;
+  rel: string;
+  size: number;
+  /** null for files quarantined before the manifest existed. */
+  deleted_at: string | null;
+  /** 'repair' | 'duplicate-cleaner' | null when unknown. */
+  source: string | null;
+  original_path: string;
+}
+
+export interface AdlDeletedList {
+  entries: AdlDeletedEntry[];
+  total_size: number;
+  count: number;
+  keep_days: number;
+}
 
 /**
  * Which statuses each FILTER pill accepts.

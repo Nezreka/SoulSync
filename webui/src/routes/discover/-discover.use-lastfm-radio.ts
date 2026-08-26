@@ -4,6 +4,7 @@ import type { LastfmTrackResult } from './-discover.lastfm-radio';
 import type { DiscoverMix } from './-discover.mixes';
 
 import {
+  lastfmSelectionLabel,
   LASTFM_CONFIGURED_URL,
   LASTFM_GENERATE_ERROR,
   LASTFM_GENERATE_FAILED,
@@ -59,6 +60,8 @@ export interface LastfmRadioController {
   loaded: boolean;
   pick: (track: LastfmTrackResult) => Promise<void>;
   clear: () => void;
+  /** close the dropdown but KEEP the typed query - outside clicks. */
+  dismiss: () => void;
 }
 
 export function useLastfmRadio(onToast: (toast: LastfmToast) => void): LastfmRadioController {
@@ -139,9 +142,21 @@ export function useLastfmRadio(onToast: (toast: LastfmToast) => void): LastfmRad
       void (async () => {
         try {
           const res = await fetch(lastfmSearchUrl(q));
-          const data = (await res.json()) as { results?: LastfmTrackResult[] };
+          const data = (await res.json()) as {
+            results?: LastfmTrackResult[];
+            error?: string;
+          };
           if (searchGen.current !== gen) return;
-          if (!lastfmHasResults(data)) {
+          if (!res.ok) {
+            // a server error used to be indistinguishable from "no results" -
+            // the dropdown just hid. say what actually happened.
+            toastRef.current({
+              message: data.error || 'Last.fm search failed',
+              level: 'error',
+            });
+            setDropdownOpen(false);
+            setResults([]);
+          } else if (!lastfmHasResults(data)) {
             // No results → the dropdown HIDES (3260), no empty row.
             setDropdownOpen(false);
             setResults([]);
@@ -166,12 +181,17 @@ export function useLastfmRadio(onToast: (toast: LastfmToast) => void): LastfmRad
     if (timer.current) clearTimeout(timer.current);
   }, []);
 
+  const dismiss = useCallback(() => {
+    setDropdownOpen(false);
+  }, []);
+
   const pick = useCallback(
     async (track: LastfmTrackResult) => {
       const name = track.name ?? '';
       const artist = track.artist ?? '';
-      // 3290-3293: close, lock the input, generate immediately.
+      // 3290-3293: close, confirm the pick in the input, lock it, generate.
       setDropdownOpen(false);
+      setQueryState(lastfmSelectionLabel(name, artist));
       setGenerating(true);
       try {
         const res = await fetch(LASTFM_RADIO_GENERATE_URL, {
@@ -185,6 +205,10 @@ export function useLastfmRadio(onToast: (toast: LastfmToast) => void): LastfmRad
           return;
         }
         await loadPlaylists();
+        // the vanilla refreshed the LB state map after building the radio -
+        // without it, the new card's Sync button no-ops on a missing state
+        void window.loadListenBrainzPlaylistsFromBackend?.();
+        setQueryState('');
       } catch {
         toastRef.current({ message: LASTFM_GENERATE_ERROR, level: 'error' });
       } finally {
@@ -206,5 +230,6 @@ export function useLastfmRadio(onToast: (toast: LastfmToast) => void): LastfmRad
     loaded,
     pick,
     clear,
+    dismiss,
   };
 }

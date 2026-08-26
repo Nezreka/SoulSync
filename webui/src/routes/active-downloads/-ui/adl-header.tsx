@@ -107,6 +107,16 @@ export function AdlHeader({
                 queue looked the same as an empty one until you clicked it. */}
             {reviewCount ? <span className="adl-pill-badge">{reviewCount}</span> : null}
           </button>
+          <button
+            type="button"
+            className={`adl-pill${filter === 'clients' ? ' active' : ''}`}
+            data-filter="clients"
+            aria-pressed={filter === 'clients'}
+            title="Your external download clients — slskd, torrent, usenet — in one pane"
+            onClick={() => onFilter('clients')}
+          >
+            ⛓ Clients
+          </button>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span className="adl-count" id="adl-count">

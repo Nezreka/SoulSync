@@ -52,6 +52,21 @@ def test_modal_exposes_close():
 
 # --- movie detail page: live download chip --------------------------------
 
+
+
+def test_get_modal_footer_keeps_decision_actions_visible():
+    assert 'Choose release' in _GETMODAL
+    assert '>Details &rarr;</button>' in _GETMODAL
+    assert 'position: sticky; bottom: 0;' in _CSS
+    assert '.vgm-sel-count' in _CSS
+def test_get_modal_surfaces_acquisition_plan():
+    assert 'data-vgm-plan' in _GETMODAL
+    assert 'function renderPlan(' in _GETMODAL
+    assert 'data-vgm-plan-selected' in _GETMODAL
+    assert '(modalState && modalState.sel) ? modalState.sel.size : 0' in _GETMODAL
+    assert 'Acquisition plan' in _GETMODAL
+    assert '.vgm-plan' in _CSS
+    assert '.vgm-plan-metric' in _CSS
 def test_detail_page_watches_movie_download():
     assert 'function watchMovieDownload(' in _DETAIL
     assert '/api/video/downloads/status?media_id=' in _DETAIL
@@ -71,8 +86,13 @@ def test_detail_watch_started_for_library_movies():
 def test_result_cards_are_flat_brutalist_three_line():
     # 3 hard lines: [QUALITY] + title, an UPPERCASE spec line, then verdict + GET.
     assert 'vdl-r-l1' in _VIEW and 'vdl-r-q' in _VIEW and 'vdl-r-title' in _VIEW
+    assert 'vdl-res--best' in _VIEW and 'vdl-r-best' in _VIEW
+    assert 'vdl-r-note--warn' in _VIEW
     assert 'vdl-r-l2' in _VIEW and 'vdl-r-l3' in _VIEW and 'vdl-r-verdict' in _VIEW
     assert '.vdl-r-q' in _CSS and '.vdl-r-l2' in _CSS and '.vdl-r-verdict' in _CSS
+    assert '.vdl-res--best' in _CSS and '.vdl-r-note' in _CSS
+    assert 'vdl-r-formats' in _VIEW and 'format_score' in _VIEW and 'r.formats' in _VIEW
+    assert '.vdl-r-formats' in _CSS
     # the cinematic pill/badge language was redesigned out
     assert 'vdl-info-tags' not in _VIEW and 'vdl-tag' not in _VIEW
     assert 'vdl-q-res' not in _VIEW and 'vdl-flag' not in _VIEW

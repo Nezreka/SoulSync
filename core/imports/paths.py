@@ -110,12 +110,53 @@ def _get_album_tracks_for_source(source: str, album_id: str):
 
 
 def docker_resolve_path(path_str: str) -> str:
-    """Resolve Docker-hosted Windows paths into container paths."""
+    """Resolve a configured folder to the canonical absolute path this process
+    can use: Docker-hosted Windows drives mapped, ``~`` expanded, made absolute.
+
+    Every caller of this hands the result to the filesystem, and several of them
+    also STORE it or compare it against a stored value. Returning a relative root
+    verbatim (``./Transfer`` is the shipped default) meant the same folder was
+    spelled three different ways depending on which code path produced it, and no
+    two of them compared equal. Absolutising here is what makes "the path in the
+    catalogue", "the path on disk" and "the path in a root comparison" one string.
+
+    An empty value stays empty: ``os.path.abspath('')`` is the CWD, which would
+    turn "this folder is not configured" into the application directory.
+    """
+    if not path_str:
+        return path_str
     if os.path.exists("/.dockerenv") and len(path_str) >= 3 and path_str[1] == ":" and path_str[0].isalpha():
         drive_letter = path_str[0].lower()
         rest_of_path = path_str[2:].replace("\\", "/")
         return f"/host/mnt/{drive_letter}{rest_of_path}"
-    return path_str
+    return os.path.abspath(os.path.expanduser(path_str))
+
+
+def config_root_path(path_str: Any, default: str = "") -> str:
+    """Canonical absolute form of a CONFIGURED root folder.
+
+    Every root in Settings (music library, downloads, import, music videos,
+    playlists) may be written relative — ``./Transfer`` is the shipped default
+    and what the settings page shows. :func:`docker_resolve_path` only maps
+    Windows drive letters, so that value used to reach the filesystem verbatim
+    and one folder ended up with three spellings that never compared equal:
+
+      * ``./Transfer/Artist/…``   — the album path builder (raw string)
+      * ``Transfer/Artist/…``     — the single/simple builder (``Path()`` eats
+        the leading ``./``)
+      * ``/app/Transfer/Artist/…``— anything that realpath()s, e.g. the repair
+        filesystem scan
+
+    The first two were written into the catalogue, so a stored path depended on
+    the process CWD, and every ``startswith(root)`` check silently missed.
+    Resolving once, here, is what makes "the path in the catalogue", "the path
+    on disk" and "the path in a root comparison" the same string. A root the
+    user already gave in full comes back unchanged apart from normalisation.
+    """
+    raw = str(path_str if path_str not in (None, "") else (default or "")).strip()
+    if not raw:
+        return ""
+    return docker_resolve_path(raw)
 
 
 def build_simple_download_destination(context, file_path: str):
@@ -125,7 +166,8 @@ def build_simple_download_destination(context, file_path: str):
     if not isinstance(search_result, dict):
         search_result = {}
 
-    transfer_dir = Path(docker_resolve_path(_get_config_manager().get("soulseek.transfer_path", "./Transfer")))
+    transfer_dir = Path(config_root_path(
+        _get_config_manager().get("soulseek.transfer_path", "./Transfer"), "./Transfer"))
     album_name = None
     original_filename = search_result.get("filename", "")
     if "/" in original_filename or "\\" in original_filename:
@@ -336,8 +378,60 @@ def apply_path_template(template: str, context: dict) -> str:
     return _replace_template_variables(template, context)
 
 
+# A folder segment that carried nothing but a disc label ("Disc $discnum") has
+# to disappear on a single-disc album — leaving a literal "Disc" folder behind
+# would silently collapse every disc of a release into one directory.
+_DANGLING_DISC_LABEL_RE = re.compile(
+    r"^(disc|disk|cd|volume|vol)\s*[.\-\u2013\u2014:]?\s*$", re.IGNORECASE)
+
+
+def template_uses_disc_variable(template: str) -> bool:
+    """Does ``template`` place the disc anywhere, in any of its spellings?
+
+    Must be asked of the RAW template. ``${disc}``, ``${discnum}`` and ``$cdnum``
+    are substituted globally, before the rendered path is split into segments, so
+    a per-segment look for "$disc" sees only the bare forms and misses the rest.
+    """
+    return any(token in (template or "")
+               for token in ("$disc", "$cdnum", "${disc", "${cdnum"))
+
+
+def _clean_folder_segment(part: str, disc_value: str, disc_value_raw: str,
+                          template_has_disc: bool = False) -> str:
+    """Resolve one FOLDER segment of a rendered path template.
+
+    ``$quality`` is the one variable the settings page documents as
+    filename-only, and it is stripped here. ``$disc`` and ``$discnum`` used to
+    be stripped alongside it, undocumented — so a user asking for a disc folder
+    got the folder silently deleted from their path, while ``$cdnum`` and the
+    ``${...}`` bracket forms (substituted globally, before the path is split)
+    worked. Same family of variables, three different behaviours. They now
+    substitute here exactly as they do in the filename, and resolve to the empty
+    string on a single-disc album — the ``$cdnum`` rule all along (#981).
+
+    ``$cdnum`` is already gone by this point; the replace is kept as a no-op
+    guard so a future change to the global pass cannot leak a raw token into a
+    directory name.
+    """
+    had_disc_var = template_has_disc or "$discnum" in part or "$disc" in part
+    part = part.replace("$quality", "")
+    part = part.replace("$discnum", disc_value_raw)
+    part = part.replace("$disc", disc_value)
+    part = part.replace("$cdnum", "")
+    part = re.sub(r"\s*\[\s*\]", "", part)
+    part = re.sub(r"\s*\(\s*\)", "", part)
+    part = re.sub(r"\s*\{\s*\}", "", part)
+    part = re.sub(r"\s*-\s*$", "", part)
+    part = re.sub(r"^\s*-\s*", "", part)
+    part = re.sub(r"\s+", " ", part).strip()
+    if had_disc_var and not disc_value_raw and _DANGLING_DISC_LABEL_RE.match(part):
+        return ""
+    return part
+
+
 def get_file_path_from_template_raw(template: str, context: dict) -> tuple[str, str]:
     """Build file path using a user-provided template string directly."""
+    _template_has_disc = template_uses_disc_variable(template)
     full_path = apply_path_template(template, context)
 
     quality_value = context.get("quality", "")
@@ -354,16 +448,8 @@ def get_file_path_from_template_raw(template: str, context: dict) -> tuple[str, 
 
         cleaned_folders = []
         for part in folder_parts:
-            part = part.replace("$quality", "")
-            part = part.replace("$discnum", "")
-            part = part.replace("$disc", "")
-            part = part.replace("$cdnum", "")
-            part = re.sub(r"\s*\[\s*\]", "", part)
-            part = re.sub(r"\s*\(\s*\)", "", part)
-            part = re.sub(r"\s*\{\s*\}", "", part)
-            part = re.sub(r"\s*-\s*$", "", part)
-            part = re.sub(r"^\s*-\s*", "", part)
-            part = re.sub(r"\s+", " ", part).strip()
+            part = _clean_folder_segment(part, disc_value, disc_value_raw,
+                                         _template_has_disc)
             if part:
                 cleaned_folders.append(part)
 
@@ -422,6 +508,7 @@ def get_file_path_from_template(context: dict, template_type: str = "album_path"
         }
         template = default_templates.get(template_type, "$artist/$album/$track - $title")
 
+    _template_has_disc = template_uses_disc_variable(template)
     full_path = apply_path_template(template, context)
 
     path_parts = full_path.split("/")
@@ -442,16 +529,8 @@ def get_file_path_from_template(context: dict, template_type: str = "album_path"
 
         cleaned_folders = []
         for part in folder_parts:
-            part = part.replace("$quality", "")
-            part = part.replace("$discnum", "")
-            part = part.replace("$disc", "")
-            part = part.replace("$cdnum", "")
-            part = re.sub(r"\s*\[\s*\]", "", part)
-            part = re.sub(r"\s*\(\s*\)", "", part)
-            part = re.sub(r"\s*\{\s*\}", "", part)
-            part = re.sub(r"\s*-\s*$", "", part)
-            part = re.sub(r"^\s*-\s*", "", part)
-            part = re.sub(r"\s+", " ", part).strip()
+            part = _clean_folder_segment(part, disc_value, disc_value_raw,
+                                         _template_has_disc)
             if part:
                 cleaned_folders.append(part)
 
@@ -568,7 +647,7 @@ def _configured_root_dirs() -> set[str]:
         raw.extend(music_paths)
         for value in raw:
             if isinstance(value, str) and value.strip():
-                roots.add(os.path.normpath(docker_resolve_path(value)))
+                roots.add(config_root_path(value))
     except Exception as exc:  # noqa: BLE001 - a missing config must not block the upgrade
         logger.debug("[Enhance] could not read the configured roots: %s", exc)
     return roots
@@ -588,7 +667,8 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         if create_dirs:
             _real_makedirs(path, exist_ok=True)
 
-    transfer_dir = docker_resolve_path(_get_config_manager().get("soulseek.transfer_path", "./Transfer"))
+    transfer_dir = config_root_path(
+        _get_config_manager().get("soulseek.transfer_path", "./Transfer"), "./Transfer")
     context = normalize_import_context(context)
     track_info = get_import_track_info(context)
     original_search = get_import_original_search(context)
@@ -691,12 +771,29 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             "_artists_list": _album_artists_for_collab if _album_artists_for_collab else _artists,
             "_itunes_artist_id": _itunes_aid,
         }
-        total_discs = _coerce_int(album_context.get("total_discs", 1) if album_context else 1, 1)
+        # A caller that KNOWS the disc count is authoritative: re-deriving it from
+        # a live provider tracklist made the destination depend on whether that
+        # lookup happened to succeed, so a cache miss or an offline provider filed
+        # two tracks of one album in two folders (Album/01.flac vs
+        # Album/Disc 1/01.flac).
+        #
+        # "Knows" has to be stated, not inferred from the value. Almost every
+        # context builder writes `.get("total_discs", 1)` (core/downloads/
+        # candidates.py, staging.py, master.py) and a Spotify album object carries
+        # no disc count at all, so a bare 1 means "nobody told me". Reading that as
+        # a declaration would silence the #981 lookup for playlist and wishlist
+        # downloads and file a disc-1 track of a real 2-disc release flat.
+        _declared_total_discs = bool(
+            album_context.get("total_discs_declared")) if album_context else False
+        total_discs = _coerce_int(
+            album_context.get("total_discs") if album_context else None, 1)
 
         if total_discs <= 1 and album_context and album_context.get("id"):
             if disc_number > 1:
+                # A track that is itself on disc 2+ proves the release is
+                # multi-disc whatever the caller said.
                 total_discs = disc_number
-            else:
+            elif not _declared_total_discs:
                 try:
                     _album_tracks = _get_album_tracks_for_source(source, str(album_context["id"]))
                     if _album_tracks:

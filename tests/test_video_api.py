@@ -659,7 +659,7 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
             "download_mode": "soulseek", "hybrid_order": ["soulseek"],
             # seeding lifecycle (arr-parity P5) rides the same config payload
             "seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True,
-            "seed_mode": "soulsync"}
+            "seed_mode": "soulsync", "seed_overrides": {}}
         # Round-trips: libraries → video.db, the INPUT folder → the SHARED music key.
         client.post("/api/video/downloads/config",
                     json={"download_path": " /mnt/v/dl ", "movies_path": "/media/movies",
@@ -670,7 +670,7 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
             "tv_path": "/media/tv", "youtube_path": "/media/yt",
             "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"],
             "seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True,
-            "seed_mode": "soulsync"}
+            "seed_mode": "soulsync", "seed_overrides": {}}
         # The input folder is the SHARED soulseek.download_path (so music sees it too);
         # it is NOT stored in video.db.
         assert fake.get("soulseek.download_path") == "/mnt/v/dl"
@@ -1108,6 +1108,37 @@ def test_wishlist_backfill_art_endpoint(tmp_path, monkeypatch):
     assert client.post("/api/video/wishlist/backfill-art").get_json()["success"] is True
     season = db.query_wishlist("show")["items"][0]["seasons"][0]
     assert season["poster_url"] == "/s1.jpg" and season["episodes"][0]["still_url"] == "/s.jpg"
+
+
+
+
+def test_watchlist_monitor_expansion_uses_resolved_library_id(tmp_path, monkeypatch):
+    client, vapi = _make_client(tmp_path)
+    db = vapi._video_db
+    conn = db._get_connection()
+    conn.execute("INSERT INTO shows (id, server_source, title, tmdb_id, status) "
+                 "VALUES (5, 'plex', 'Owned Show', 4242, 'Returning Series')")
+    conn.commit(); conn.close()
+
+    import api.video.watchlist as watchlist_api
+    import core.video.enrichment.engine as eng_mod
+    import core.video.monitor_policy as monitor_policy
+    monkeypatch.setattr(watchlist_api, "_server", lambda: "plex")
+    monkeypatch.setattr(eng_mod, "get_video_enrichment_engine", lambda: object())
+    monkeypatch.setattr(monitor_policy, "episodes_for_policy", lambda *a: [
+        {"season_number": 1, "episode_number": 1, "title": "Pilot", "air_date": "2026-06-01"}])
+
+    res = client.post("/api/video/watchlist/add", json={
+        "kind": "show", "tmdb_id": 4242, "title": "Owned Show", "monitor": "pilot"}).get_json()
+    assert res["success"] is True and res["wished"] == 1
+
+    conn = db._get_connection()
+    try:
+        row = conn.execute("SELECT library_id FROM video_wishlist WHERE kind='episode' "
+                           "AND tmdb_id=4242 AND season_number=1 AND episode_number=1").fetchone()
+    finally:
+        conn.close()
+    assert row["library_id"] == 5
 
 
 # ── YouTube channels ─────────────────────────────────────────────────────────

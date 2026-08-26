@@ -708,7 +708,8 @@ class ListenBrainzManager:
                     INSERT INTO listenbrainz_playlists
                     (playlist_mbid, title, creator, playlist_type, track_count, annotation_data, profile_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (playlist_mbid, title, 'Last.fm', 'lastfm_radio', track_count, '{}', self.profile_id))
+                """, (playlist_mbid, title, 'Last.fm', 'lastfm_radio', track_count,
+                      json.dumps({'track_count': track_count}), self.profile_id))
                 playlist_id = cursor.lastrowid
                 logger.info(f"Saved new Last.fm radio playlist '{title}' ({track_count} tracks)")
 

@@ -41,6 +41,7 @@ from core.automation.handlers.video_auto_wishlist_airing import auto_video_add_a
 from core.automation.handlers.video_refresh_airing_schedules import auto_video_refresh_airing_schedules
 from core.automation.handlers.video_reenrich_stale import auto_video_reenrich_stale
 from core.automation.handlers.video_clean_youtube import auto_video_clean_youtube_episodes
+from core.automation.handlers.video_purge_recycle import auto_video_purge_recycle_bin
 from core.automation.handlers.video_scan_watchlist_people import auto_video_scan_watchlist_people
 from core.automation.handlers.video_scan_watchlist_studios import auto_video_scan_watchlist_studios
 from core.automation.handlers.video_scan_watchlist_channels import auto_video_scan_watchlist_channels
@@ -48,6 +49,7 @@ from core.automation.handlers.video_process_youtube_wishlist import auto_video_p
 from core.automation.handlers.video_scan_watchlist_playlists import auto_video_scan_watchlist_playlists
 from core.automation.handlers.video_process_wishlist import auto_video_process_wishlist, is_running
 from core.automation.handlers.video_rss_sync import auto_video_rss_sync
+from core.automation.handlers.video_extto_fresh import auto_video_extto_fresh_refresh
 from core.automation.handlers.video_import_lists import auto_video_import_lists
 from core.automation.handlers.video_seeding_sweep import auto_video_seeding_sweep
 from core.automation.handlers.seeding_sweep import auto_seeding_sweep
@@ -294,6 +296,12 @@ def register_all(deps: AutomationDeps) -> None:
         'video_clean_youtube_episodes',
         lambda config: auto_video_clean_youtube_episodes(config, deps),
     )
+    # recycle bin retention. used to only run as a side effect of the next
+    # delete, so keep-days did nothing on a quiet library.
+    engine.register_action_handler(
+        'video_purge_recycle_bin',
+        lambda config: auto_video_purge_recycle_bin(config, deps),
+    )
     # ── Watchlist → Wishlist pipeline ─────────────────────────────────────────
     # Stage 1 — SCANS that fill the wishlist from what you follow.
     # People: wishlist every un-owned movie followed actors/directors made (catalog + upcoming).
@@ -339,6 +347,14 @@ def register_all(deps: AutomationDeps) -> None:
         'video_rss_sync',
         lambda config: auto_video_rss_sync(config, deps),
         lambda: __import__('core.video.rss_sync', fromlist=['is_running']).is_running(),
+    )
+    # Fresh Releases: pull the EXT.to board + match each release against its
+    # detail page, cached by release so an hourly run mostly costs nothing. The
+    # tab's Refresh button runs the identical code.
+    engine.register_action_handler(
+        'video_extto_fresh_refresh',
+        lambda config: auto_video_extto_fresh_refresh(config, deps),
+        lambda: __import__('core.video.extto_board', fromlist=['is_running']).is_running(),
     )
     # Seeding lifecycle: release completed torrent grabs once ratio/time goals
     # are met (off until goals are set on Settings → Downloads).

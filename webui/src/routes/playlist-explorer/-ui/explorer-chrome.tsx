@@ -22,6 +22,7 @@ export function ExplorerActionBar({
   return (
     <div className="explorer-action-bar" id="explorer-action-bar" style={{ display: 'flex' }}>
       <div className="explorer-action-left">
+        <span className="explorer-action-eyebrow">Selection</span>
         <span className="explorer-selection-count" id="explorer-selection-count">
           {explorerSelectionLabel(selectedCount)}
         </span>
@@ -83,6 +84,7 @@ export interface ExplorerProgressProps {
 export function ExplorerProgress({ percent, text }: ExplorerProgressProps) {
   return (
     <div className="explorer-progress" id="explorer-progress" style={{ display: 'flex' }}>
+      <span className="explorer-progress-pct">{Math.round(percent)}%</span>
       <div className="explorer-progress-bar">
         <div
           className="explorer-progress-fill"

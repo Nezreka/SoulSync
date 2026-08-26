@@ -602,23 +602,38 @@
         meta.push(r.username ? r.username + (r.peers > 1 ? ' (' + r.peers + ')' : '') : (r.seeders || 0) + ' SEED');
         if (r.group) meta.push(r.group);
         meta.push(r.size_gb + ' GB');
+        var formatNames = Array.isArray(r.formats) ? r.formats.filter(Boolean) : [];
+        var formatNote = formatNames.length
+            ? '<div class="vdl-r-formats" title="' + esc(formatNames.join(', ')) + '">' +
+                '<span>Formats</span> ' + esc(formatNames.join(' · ')) +
+                (r.format_score ? ' <b>' + (r.format_score > 0 ? '+' : '') + esc(r.format_score) + '</b>' : '') +
+              '</div>'
+            : (r.format_score ? '<div class="vdl-r-formats"><span>Format score</span> ' +
+                (r.format_score > 0 ? '+' : '') + esc(r.format_score) + '</div>' : '');
+        var isBest = i === 0 && r.accepted;
         var verdict = r.accepted
             ? '<span class="vdl-r-verdict vdl-r-verdict--ok">&#10003; MEETS PROFILE</span>'
             : '<span class="vdl-r-verdict vdl-r-verdict--no" title="' + esc(r.rejected || '') + '">&#10007; ' + esc((r.rejected || 'FILTERED').toUpperCase()) + '</span>';
+        var note = !r.accepted && r.rejected
+            ? '<div class="vdl-r-note vdl-r-note--warn">Reason · ' + esc(r.rejected) + '</div>'
+            : (isBest ? '<div class="vdl-r-note vdl-r-note--best">Best ranked match for this source</div>' : '');
         // Manual pick = the user overrides the quality profile. Auto-grab still only
         // takes accepted releases; here we let them GET a below-profile one anyway.
         var grab = r.username
             ? '<button class="vdl-res-grab' + (r.accepted ? '' : ' vdl-res-grab--override') + '" type="button" data-vdl-grab="' + i +
                 '" title="' + (r.accepted ? 'Download this release' : 'Below your quality profile — download anyway') + '">[ GET ]</button>'
             : '';
-        return '<div class="vdl-res' + (r.accepted ? ' vdl-res--ok' : ' vdl-res--rejected') + '" data-vdl-card="' + i + '">' +
+        return '<div class="vdl-res' + (r.accepted ? ' vdl-res--ok' : ' vdl-res--rejected') + (isBest ? ' vdl-res--best' : '') + '" data-vdl-card="' + i + '">' +
             '<div class="vdl-res-main">' +
                 '<div class="vdl-r-l1">' +
                     '<span class="vdl-r-q vdl-r-q--' + resKind(r.resolution) + '">' + esc(RES_LABEL[r.resolution] || r.resolution || '?') + '</span>' +
                     '<span class="vdl-r-title" title="' + esc(r.title) + '">' + esc(r.title) + '</span>' +
+                    (isBest ? '<span class="vdl-r-best">Best match</span>' : '') +
                 '</div>' +
                 '<div class="vdl-r-l2">' + esc(meta.filter(Boolean).join('  ·  ')) + '</div>' +
+                formatNote +
                 '<div class="vdl-r-l3">' + verdict + grab + '</div>' +
+                note +
             '</div>' +
         '</div>';
     }

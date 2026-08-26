@@ -771,11 +771,22 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
     """
     items = []
     live_identities = set()
+    # per-batch task_id -> 1-based position in the batch queue, built lazily.
+    # task['track_index'] is an IDENTITY (the original playlist/wishlist
+    # position, what cancel addresses tasks by) - it is NOT an ordinal. a
+    # wishlist album sub-batch of 2 tracks carries wishlist-wide indexes
+    # like 4929, and cancels prune the queue, so "Track {index} of {len}"
+    # printed nonsense (#1183: "Track 4930 of 2").
+    batch_positions = {}
     with tasks_lock:
         for task_id, task in download_tasks.items():
             track_info = task.get('track_info') or {}
             batch_id = task.get('batch_id', '')
             batch = download_batches.get(batch_id, {})
+            if batch_id and batch_id not in batch_positions:
+                batch_positions[batch_id] = {
+                    tid: i + 1 for i, tid in enumerate(batch.get('queue', []))
+                }
 
             # Extract track metadata — handle all format variations
             title = ''
@@ -862,6 +873,9 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                 # the frontend doesn't need a second lookup.
                 'playlist_id': batch.get('playlist_id', ''),
                 'track_index': task.get('track_index', 0),
+                # the display ordinal - position within the batch queue, or
+                # None when the task somehow isn't in its batch's queue
+                'batch_position': batch_positions.get(batch_id, {}).get(task_id),
                 'batch_total': len(batch.get('queue', [])),
                 'timestamp': task.get('status_change_time', 0),
                 'priority': _STATUS_PRIORITY.get(status, 9),

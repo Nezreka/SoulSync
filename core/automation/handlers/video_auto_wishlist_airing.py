@@ -86,6 +86,21 @@ def _show_poster_url(library_id: Any) -> Optional[str]:
     return ('/api/video/poster/show/%s' % library_id) if library_id is not None else None
 
 
+def _default_unowned_follows() -> List[Dict[str, Any]]:
+    """Followed shows with no library row. followed_shows() resolves library_id
+    off the tmdb id too, so anything still None really isn't in the library."""
+    from api.video import get_video_db
+    return [r for r in (get_video_db().followed_shows() or [])
+            if r.get('library_id') is None and r.get('tmdb_id')]
+
+
+def _default_tmdb_airings(tmdb_id: Any, start: str, end: str) -> Dict[str, Any]:
+    """{"poster_url", "episodes"} for an unowned followed show."""
+    from core.video.enrichment.engine import get_video_enrichment_engine
+    from core.video.monitor_policy import episodes_airing_between
+    return episodes_airing_between(get_video_enrichment_engine(), tmdb_id, start, end)
+
+
 def _default_season_meta(tmdb_id: Any, season_number: Any):
     """The SAME TMDB season fetch the show modal uses for a manual add — so auto-added
     episodes carry identical stills / overviews / season posters, not the patchy values
@@ -182,6 +197,8 @@ def auto_video_add_airing_episodes(
     remove_show: Optional[Callable[[Any], None]] = None,
     get_bookmark: Optional[Callable[[], Optional[str]]] = None,
     set_bookmark: Optional[Callable[[str], None]] = None,
+    unowned_follows: Optional[Callable[[], List[Dict[str, Any]]]] = None,
+    tmdb_airings: Optional[Callable[[Any, str, str], Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Add today's airing (unowned, followed-show) episodes to the video wishlist, and
     first tidy the watchlist by dropping shows that have ended / been canceled.
@@ -194,6 +211,8 @@ def auto_video_add_airing_episodes(
     today_fn = today_fn or (lambda: date.today().isoformat())
     get_bookmark = get_bookmark or _default_get_bookmark
     set_bookmark = set_bookmark or _default_set_bookmark
+    unowned_follows = unowned_follows or _default_unowned_follows
+    tmdb_airings = tmdb_airings or _default_tmdb_airings
     automation_id = config.get('_automation_id')
     prune_ended = config.get('prune_ended', True)
     try:
@@ -253,10 +272,48 @@ def auto_video_add_airing_episodes(
                 'season_poster_url': poster,
             })
 
+        # Second pass: shows you follow but do NOT own. The calendar only knows
+        # library shows, so without this a tmdb-only follow never acquired
+        # anything, ever. Ask TMDB directly for what aired in the window.
+        try:
+            unowned = unowned_follows() or []
+        except Exception:   # noqa: BLE001 - the calendar pass must still land
+            unowned = []
+        if unowned:
+            deps.update_progress(
+                automation_id, phase='Checking followed shows you don\'t own yet…', progress=55,
+                log_line='Looking up %d followed show(s) that are not in your library' % len(unowned),
+                log_type='info')
+        # dedup on the tmdb id ALONE. the calendar keys off shows.title and this
+        # pass off video_watchlist.title, and those drift the moment someone
+        # renames a show in the Manage panel — a title-keyed check would then
+        # look the show up twice and add it twice.
+        covered = {tid for (tid, _t) in by_show}
+        for show in unowned:
+            tid = show.get('tmdb_id')
+            title = show.get('title') or tid
+            if tid in covered:
+                continue                      # already covered by the calendar pass
+            try:
+                res = tmdb_airings(tid, window_start, today) or {}
+            except Exception:   # noqa: BLE001 - one bad lookup can't sink the run
+                deps.update_progress(automation_id, log_type='warning',
+                                     log_line="Couldn't check %s on TMDB" % title)
+                continue
+            eps = res.get('episodes') or []
+            if eps:
+                # No library_id (it isn't owned), so no /api/video/poster/show/<id>
+                # proxy either. Carry TMDB's own poster instead — a wishlist row
+                # with a null poster_url renders as an initials orb that reads as
+                # "not matched", which is the exact symptom 94e06f2d fixed.
+                covered.add(tid)
+                by_show[(tid, title)] = {'library_id': None, 'eps': eps,
+                                         'poster_url': res.get('poster_url')}
+
         added = 0
         for (tid, title), grp in by_show.items():
-            added += int(add_episodes(tid, title, grp['eps'], grp['library_id'],
-                                      _show_poster_url(grp['library_id'])) or 0)
+            poster = _show_poster_url(grp['library_id']) or grp.get('poster_url')
+            added += int(add_episodes(tid, title, grp['eps'], grp['library_id'], poster) or 0)
         shows = len(by_show)
 
         # Advance the bookmark ONLY on success — a failed run must re-cover its

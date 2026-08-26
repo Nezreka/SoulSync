@@ -114,23 +114,46 @@ def build_runner(
             logger.debug("[Reorganize] Could not re-point findings: %s", e)
 
     def _update_track_path(track_id, new_path):
-        try:
-            db = get_database()
-            with db._get_connection() as conn:
-                # Read the old path BEFORE overwriting it — it is the only key
-                # the findings rows can be matched on.
-                row = conn.execute(
-                    "SELECT file_path FROM tracks WHERE id = ?", (str(track_id),)
-                ).fetchone()
-                old_path = row[0] if row else None
-                conn.execute(
-                    "UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (new_path, str(track_id)),
+        """Repoint the catalogue at ``new_path``.
+
+        This MUST raise when the catalogue was not updated. ``_finalize_track``
+        detects a failed path update SOLELY by catching an exception out of this
+        callback, and on success it goes on to ``os.remove`` the original.
+        Swallowing the error here therefore deleted the user's only copy while
+        the catalogue still pointed at the old path — reported as "moved", read
+        by the library as MISSING, and re-downloaded later as if it had never
+        been there.
+
+        The realistic trigger is the SQLite write lock being held elsewhere (an
+        import commit, ``recompute_wanted``): the connection raises ``database
+        is locked``, the whole transaction rolls back, and the file is destroyed
+        anyway. Reported against a fresh library — songs downloaded, Reorganize
+        run straight afterwards, tracks came back missing.
+
+        A 0-row UPDATE is NOT an SQLite error — it is silent success — so the
+        rowcount is checked explicitly: an id the catalogue does not know has to
+        fail just as loudly as a locked database.
+        """
+        db = get_database()
+        with db._get_connection() as conn:
+            # Read the old path BEFORE overwriting it — it is the only key
+            # the findings rows can be matched on.
+            row = conn.execute(
+                "SELECT file_path FROM tracks WHERE id = ?", (str(track_id),)
+            ).fetchone()
+            old_path = row[0] if row else None
+            cursor = conn.execute(
+                "UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (new_path, str(track_id)),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError(
+                    f"track {track_id} was not repointed — the UPDATE matched "
+                    f"{cursor.rowcount} rows, so the catalogue still names the "
+                    f"old path"
                 )
-                _repoint_findings(conn, old_path, new_path)
-                conn.commit()
-        except Exception as db_err:
-            logger.warning(f"[Reorganize] DB path update failed for {track_id}: {db_err}")
+            _repoint_findings(conn, old_path, new_path)
+            conn.commit()
 
     def runner(item):
         # Read config per-run so the user changing their download path

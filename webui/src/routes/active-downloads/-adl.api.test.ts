@@ -103,19 +103,22 @@ describe('the reads never throw', () => {
     await expect(fetchBatchHistory()).resolves.toEqual([]);
   });
 
-  it('fetchQuarantine returns [] on failure', async () => {
+  it('fetchQuarantine carries the failure instead of faking empty', async () => {
+    // "hundreds in the badge, list empty" (aug 25): a failed list fetch must
+    // be distinguishable from a genuinely empty quarantine
     server.use(http.get('/api/quarantine/list', () => HttpResponse.error()));
-    await expect(fetchQuarantine()).resolves.toEqual([]);
+    const result = await fetchQuarantine();
+    expect('error' in result).toBe(true);
   });
 
   it('fetchQuarantine rejects a non-array entries field', async () => {
-    // A string here would otherwise be spread into per-character "entries".
     server.use(
       http.get('/api/quarantine/list', () =>
-        HttpResponse.json({ success: true, entries: 'not an array' }),
+        HttpResponse.json({ success: true, entries: 'nope' }),
       ),
     );
-    await expect(fetchQuarantine()).resolves.toEqual([]);
+    const result = await fetchQuarantine();
+    expect('error' in result).toBe(true);
   });
 });
 

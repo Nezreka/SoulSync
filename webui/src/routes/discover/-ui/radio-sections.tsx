@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { LastfmTrackResult } from '../-discover.lastfm-radio';
 import type { LbTabId } from '../-discover.listenbrainz';
@@ -37,6 +37,7 @@ export interface LastfmRadioSectionProps {
   onQueryChange: (query: string) => void;
   onPick: (track: LastfmTrackResult) => void;
   onClear: () => void;
+  onDismiss?: () => void;
   onOpenMix: (key: string) => void;
 }
 
@@ -51,8 +52,21 @@ export function LastfmRadioSection({
   onQueryChange,
   onPick,
   onClear,
+  onDismiss,
   onOpenMix,
 }: LastfmRadioSectionProps) {
+  // the vanilla closed the dropdown on any outside click (3387-3394); the
+  // port only had Escape, leaving an open panel floating over the page
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) (onDismiss ?? onClear)();
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [dropdownOpen, onClear, onDismiss]);
+
   return (
     <DiscoverSection
       id="lastfm-radio"
@@ -67,7 +81,7 @@ export function LastfmRadioSection({
     >
       <div className="lastfm-radio-search" id="lastfm-radio-search-section">
         <div className="lastfm-radio-search-row">
-          <div className="lastfm-radio-input-wrap">
+          <div className="lastfm-radio-input-wrap" ref={wrapRef}>
             <input
               type="text"
               id="lastfm-radio-input"
@@ -90,9 +104,11 @@ export function LastfmRadioSection({
                     />
                   </div>
                 ) : (
-                  results.map((track) => (
+                  // index in the key: last.fm returns the same name+artist
+                  // for different releases, and duplicate keys shuffle rows
+                  results.map((track, index) => (
                     <LastfmResultRow
-                      key={`${track.name ?? ''}:${track.artist ?? ''}`}
+                      key={`${index}:${track.name ?? ''}:${track.artist ?? ''}`}
                       track={track}
                       onPick={onPick}
                     />
@@ -104,6 +120,15 @@ export function LastfmRadioSection({
         </div>
       </div>
 
+      {generating ? (
+        // the vanilla's spinner block (style.css has carried its classes all
+        // along); without it a pick looked like nothing happening for up to
+        // ten seconds of last.fm round trip
+        <div className="lastfm-radio-generating">
+          <div className="server-search-spinner" style={{ width: 16, height: 16 }} />
+          <span>Building your radio…</span>
+        </div>
+      ) : null}
       <div id="lastfm-radio-playlists" className="discover-mixes-grid">
         {mixes.map((mix) => (
           <DiscoverMixCard key={mix.key} mix={mix} onOpen={onOpenMix} />

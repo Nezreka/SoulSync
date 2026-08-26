@@ -120,3 +120,67 @@ def test_unconfigured_returns_not_configured(monkeypatch):
     _patch(monkeypatch, {}, configured=False)
     out = ps.prowlarr_search("movie", "X", source="torrent")
     assert out["configured"] is False and out["hits"] == []
+
+
+def test_provider_name_filter_resolves_matching_indexer(monkeypatch):
+    good = [_R(title="g", size=1, seeders=3, leechers=0, grabs=0, indexer_name="1337x", indexer_id=7,
+               protocol="torrent", magnet_uri="magnet:g", download_url=None, guid="g")]
+    calls = []
+
+    class _Client:
+        def is_configured(self):
+            return True
+
+        def _get_indexers_sync(self):
+            return [_R(id=7, name="1337x", protocol="torrent", enable=True),
+                    _R(id=8, name="NZB Geek", protocol="usenet", enable=True)]
+
+        def _search_sync(self, q, cats, ids, limit, search_type="search", extra_params=None,
+                         max_wait_seconds=None):
+            calls.append(ids)
+            return list(good)
+
+    monkeypatch.setattr(ps, "_client", lambda: _Client())
+    monkeypatch.setattr(ps, "_indexer_ids", lambda: [])
+    out = ps.prowlarr_search("movie", "X", source="torrent", indexer_names=["1337x"])
+    assert out["hits"][0]["indexer_id"] == 7
+    assert calls and all(ids == [7] for ids in calls)
+
+
+def test_provider_name_filter_reports_missing_indexer(monkeypatch):
+    class _Client:
+        def is_configured(self):
+            return True
+
+        def _get_indexers_sync(self):
+            return [_R(id=8, name="NZB Geek", protocol="usenet", enable=True)]
+
+    monkeypatch.setattr(ps, "_client", lambda: _Client())
+    out = ps.prowlarr_search("movie", "X", source="torrent", indexer_names=["1337x"])
+    assert out["configured"] is True and out["hits"] == []
+    assert "No enabled Prowlarr indexer matches" in out["error"]
+
+
+def test_provider_name_filter_uses_plain_tracker_search_categories(monkeypatch):
+    good = [_R(title="g", size=1, seeders=3, leechers=0, grabs=0, indexer_name="The Pirate Bay", indexer_id=1,
+               protocol="torrent", magnet_uri="magnet:g", download_url=None, guid="g")]
+    calls = []
+
+    class _Client:
+        def is_configured(self):
+            return True
+
+        def _get_indexers_sync(self):
+            return [_R(id=1, name="The Pirate Bay", protocol="torrent", enable=True)]
+
+        def _search_sync(self, q, cats, ids, limit, search_type="search", extra_params=None,
+                         max_wait_seconds=None):
+            calls.append({"cats": cats, "ids": ids, "type": search_type})
+            return list(good)
+
+    monkeypatch.setattr(ps, "_client", lambda: _Client())
+    monkeypatch.setattr(ps, "_indexer_ids", lambda: [])
+    out = ps.prowlarr_search("movie", "Interstellar", source="torrent", indexer_names=["the pirate bay"])
+    assert out["hits"][0]["username"] == "The Pirate Bay"
+    assert calls and all(c["ids"] == [1] for c in calls)
+    assert all(c["cats"] == [] for c in calls)

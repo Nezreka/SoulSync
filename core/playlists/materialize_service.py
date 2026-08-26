@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
-from core.imports.paths import docker_resolve_path
+from core.imports.paths import config_root_path
 from core.playlists.materialize import (
     RebuildSummary,
     normalize_mode,
@@ -72,7 +72,8 @@ def materialize_playlist_from_batch(batch: dict, download_tasks: dict, config_ma
         return None
     name = batch.get("playlist_name") or "Unknown Playlist"
     real_paths = collect_batch_real_paths(batch, download_tasks, config_manager=config_manager)
-    root = docker_resolve_path(config_manager.get("playlists.materialize_path", "./Playlists"))
+    root = config_root_path(config_manager.get("playlists.materialize_path", "./Playlists"),
+                            "./Playlists")
     mode = normalize_mode(config_manager.get("playlists.materialize_mode", "symlink"))
     return rebuild_playlist_folder(root, name, real_paths, mode)
 
@@ -160,7 +161,8 @@ def _rebuild_one_from_db(db, config_manager, playlist: dict):
     from core.library.path_resolver import resolve_library_file_path
     from core.playlists.item_naming import render_playlist_item_name
 
-    root = docker_resolve_path(config_manager.get("playlists.materialize_path", "./Playlists"))
+    root = config_root_path(config_manager.get("playlists.materialize_path", "./Playlists"),
+                            "./Playlists")
     mode = normalize_mode(config_manager.get("playlists.materialize_mode", "symlink"))
     item_template = ((config_manager.get("file_organization.templates", {}) or {})
                      .get("playlist_item", "") or "").strip()

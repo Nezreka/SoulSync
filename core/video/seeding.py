@@ -27,9 +27,16 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from core.downloads import seed_rules
+
 from utils.logging_config import get_logger
 
 logger = get_logger("video.seeding")
+
+# How many awaiting rows to read, and how many of those we'll actually poll the
+# client about in one pass. The gap between them is headroom for exempt rows.
+MAX_ROWS_PER_SWEEP = 1000
+MAX_POLLS_PER_SWEEP = 100
 
 _running = False
 _lock = threading.Lock()
@@ -53,11 +60,26 @@ def _completed_age_hours(dl: Dict[str, Any], now: Optional[datetime] = None) -> 
     return max(0.0, (now - ts).total_seconds() / 3600.0)
 
 
+def is_pack(dl: Dict[str, Any]) -> bool:
+    """True for a season pack grab. Sonarr keeps packs seeding longer than
+    single episodes, so they get their own goal.
+
+    Delegates to season_pack.is_pack_download rather than re-deciding it here.
+    A second definition drifted immediately: it missed scope 'pack' and wrongly
+    counted scope 'show', which the real one settles off ``kind`` instead."""
+    from core.video.season_pack import is_pack_download
+    return bool(is_pack_download(dl or {}))
+
+
+def goal_for(dl: Dict[str, Any], cfg: Dict[str, Any]):
+    """The (ratio, hours) goal this grab is judged against. Pure."""
+    return seed_rules.effective_goal(cfg, (dl or {}).get("indexer_id"), is_pack=is_pack(dl))
+
+
 def goals_met(status: Any, dl: Dict[str, Any], cfg: Dict[str, Any],
               now: Optional[datetime] = None) -> Optional[str]:
     """Why this torrent may be released, or None to keep seeding. Pure."""
-    ratio_goal = float(cfg.get("seed_ratio_goal") or 0)
-    time_goal_h = int(cfg.get("seed_time_goal_hours") or 0)
+    ratio_goal, time_goal_h = goal_for(dl, cfg)
     if ratio_goal and getattr(status, "ratio", None) is not None \
             and status.ratio >= ratio_goal:
         return "ratio %.2f reached the %.2f goal" % (status.ratio, ratio_goal)
@@ -97,7 +119,9 @@ def _sweep_inner() -> Dict[str, Any]:
     from core.video.client_download import _get_status
     db = get_video_db()
     cfg = download_config.load(db)
-    if not cfg.get("seed_ratio_goal") and not cfg.get("seed_time_goal_hours"):
+    # a user who set rules on one tracker and left the globals blank still
+    # wants a sweep. checking only the globals meant it never ran for them.
+    if not seed_rules.any_goal_set(cfg):
         return {"status": "skipped", "reason": "no_goals_set",
                 "checked": 0, "released": 0, "seeding": 0}
 
@@ -114,18 +138,36 @@ def _sweep_inner() -> Dict[str, Any]:
         adapter = get_active_adapter()
         push_seed_goal = _psg
 
-    rows = db.torrents_awaiting_seed_release()
-    released = seeding = 0
+    # Fetch wide, poll narrow. An exempt row (its indexer has no goal) is never
+    # released, so it sits at the front of an `ORDER BY id LIMIT n` window
+    # forever — collect enough of them and no newer torrent is ever swept
+    # again. Exempt rows are free to skip, so only the ones we actually poll
+    # count against the budget.
+    rows = db.torrents_awaiting_seed_release(limit=MAX_ROWS_PER_SWEEP)
+    released = seeding = exempt = deferred = 0
+    polled = 0
     for dl in rows:
         ref = str(dl["client_ref"])
 
-        if client_mode and push_seed_goal(adapter, ref, cfg.get("seed_ratio_goal"),
-                                          cfg.get("seed_time_goal_hours")):
+        row_ratio, row_hours = goal_for(dl, cfg)
+        if client_mode and push_seed_goal(adapter, ref, row_ratio, row_hours):
             db.update_video_download(dl["id"], seed_released=1)
             released += 1
             logger.info("seeding: handed '%s' to the torrent client (client mode)", dl.get("title"))
             continue
         # soulsync mode, OR client-mode push failed → SoulSync polls + removes.
+
+        if not row_ratio and not row_hours:
+            # this tracker is exempt (or nothing applies to it). leave it
+            # seeding forever, that is what "no goal" means. costs no client
+            # call, so it doesn't spend the poll budget.
+            exempt += 1
+            continue
+
+        if polled >= MAX_POLLS_PER_SWEEP:
+            deferred += 1
+            continue
+        polled += 1
 
         status = _get_status("torrent", ref)
         if status is None:
@@ -144,8 +186,17 @@ def _sweep_inner() -> Dict[str, Any]:
             logger.info("seeding: released '%s' — %s", dl.get("title"), reason)
         else:
             seeding += 1   # removal failed → try again next sweep
-    return {"status": "completed", "checked": len(rows),
-            "released": released, "seeding": seeding}
+    if deferred:
+        # never let a bounded pass read as "checked everything"
+        logger.info("seeding: %d torrent(s) deferred to the next sweep (polled %d)",
+                    deferred, polled)
+    out = {"status": "completed", "checked": len(rows),
+           "released": released, "seeding": seeding + exempt}
+    if exempt:
+        out["exempt"] = exempt
+    if deferred:
+        out["deferred"] = deferred
+    return out
 
 
 def _remove(ref: str, delete_files: bool) -> bool:

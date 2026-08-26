@@ -404,3 +404,26 @@ def test_frontend_save_wiring():
     # only audio cards get the save chip
     card = js[js.index("function _fileCardHtml"):js.index("function renderGroups")]
     assert "isAudio\n" in card or "(isAudio" in card
+
+
+def test_every_room_send_path_carries_the_channel_envelope():
+    """A file share and the GIF picker built their payloads by hand and skipped
+    the channel/thread tags the composer sends — so an upload posted in #help
+    folded into #general for everyone (untagged messages fall back to the
+    default channel by design, so they can never be swallowed entirely). One
+    tagger now stamps every room send; this pins each path to it."""
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "webui" / "static" / "chat.js"
+          ).read_text(encoding="utf-8")
+    assert "function _tagRoomPayload" in js
+    tagger = js.split("function _tagRoomPayload")[1].split("function _sendFileMessage")[0]
+    assert "payload.chan" in tagger and "payload.thread" in tagger
+
+    # the three room send paths, each through the tagger
+    file_send = js.split("function _sendFileMessage")[1].split("\n    function ")[0]
+    assert "_tagRoomPayload({" in file_send, "file shares post untagged again"
+    gif_send = js.split("function sendGif")[1].split("\n    function ")[0]
+    assert "_tagRoomPayload({" in gif_send, "GIFs post untagged again"
+    # the composer path delegates rather than duplicating the tag logic
+    assert js.count("payload.chan = state.channel") == 1, \
+        "channel tagging exists in more than one place — the copies WILL drift"

@@ -44,6 +44,16 @@ RESOLVED_RECURRENCE_GRACE_DAYS = 7
 # bulk run takes when nobody chose anything — not by its worst-case action.
 # The UI never one-clicks these: they go through the preview + confirm path,
 # and "Fix all safe" skips them entirely.
+# Finding types whose subject IS a path that is not there. The sweep below runs
+# right after the scan that raised them, scoped to that same job, so without this
+# exclusion both would be retired the instant they were created and their jobs
+# would report "N findings created" over an empty list.
+#
+#   dead_file    names the missing file of a track that still has a catalogue row
+#   empty_folder names a directory that is empty by definition
+_ABSENCE_IS_THE_FINDING = frozenset({'dead_file', 'empty_folder'})
+
+
 DESTRUCTIVE_FINDING_TYPES = frozenset({
     'orphan_file',            # default 'staging' MOVES the file; 'delete' removes it
     'dead_file',              # 'remove' drops the library row + file
@@ -935,8 +945,23 @@ class RepairWorker:
         run_status = 'completed'
         run_error = None
 
+        # The dialog Boulder promised on Discord, enforced where it protects
+        # every caller (UI, automations, Run Now alike): a job that moves or
+        # rewrites library files may not run LIVE against a library this
+        # process cannot see. Dry runs still work — findings are reviewable.
+        if getattr(job, 'writes_library_files', False) and self._job_runs_live(job):
+            ok, detail = self.library_visibility_preflight()
+            if not ok:
+                logger.error("%s refused to run live: %s", job.display_name, detail)
+                _report_progress(phase='Refused — library not visible',
+                                 log_line=detail, log_type='error')
+                result.errors += 1
+                run_status = 'failed'
+                run_error = detail[:500]
+
         try:
-            result = job.scan(context)
+            if run_status != 'failed':
+                result = job.scan(context)
         except Exception as e:
             logger.error("Job %s failed: %s", job_id, e, exc_info=True)
             result.errors += 1
@@ -947,6 +972,12 @@ class RepairWorker:
         # so history can say "you stopped this" instead of implying a crash.
         if run_status == 'completed' and self._cancel_current_job.is_set():
             run_status = 'cancelled'
+
+        # A completed sweep is the moment we know the library's real state, so
+        # it is also the moment to close findings whose file has since gone.
+        # Skipped after a failure or a user stop: a partial view is not evidence.
+        if run_status == 'completed':
+            self.retire_vanished_findings(job_id)
 
         duration = time.time() - start_time
 
@@ -1211,8 +1242,11 @@ class RepairWorker:
             params.append(finding_type)
         if q and str(q).strip():
             needle = f"%{str(q).strip()}%"
-            where_parts.append("(title LIKE ? OR file_path LIKE ?)")
-            params.extend([needle, needle])
+            # details_json too: a duplicate group is titled after ONE member,
+            # so the other copies' names lived only in details and the
+            # search box could not see them
+            where_parts.append("(title LIKE ? OR file_path LIKE ? OR details_json LIKE ?)")
+            params.extend([needle, needle, needle])
 
         where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
         return where, params
@@ -1406,6 +1440,135 @@ class RepairWorker:
         finally:
             if conn:
                 conn.close()
+
+    def library_visibility_preflight(self, sample_size: int = 200) -> tuple:
+        """Can this process actually SEE the library the catalogue describes?
+
+        Samples stored track paths and resolves them the same way every repair
+        job does. When almost none resolve, the catalogue and the filesystem are
+        different worlds — Navidrome with "Report Real Path" off, or a Docker
+        mount that isn't there — and a LIVE file-writing job must not run: it
+        would rearrange (or quarantine) a library it is blind to. Same idea as
+        the dead-file cleaner's mass-false-positive guard, applied BEFORE a job
+        that moves files instead of after one that only reports.
+
+        Returns ``(ok, detail)``. Errs on the side of running: an unreadable DB
+        or a tiny library never blocks a job the user asked for.
+        """
+        try:
+            conn = self.db._get_connection()
+            try:
+                rows = conn.execute(
+                    "SELECT file_path FROM tracks WHERE file_path IS NOT NULL "
+                    "AND file_path != '' ORDER BY RANDOM() LIMIT ?",
+                    (int(sample_size),)).fetchall()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug("Visibility preflight skipped (db read failed): %s", e)
+            return True, ''
+        # Below this size a poor resolve rate can be real (a hand-broken library),
+        # and the stakes are small anyway. Mirrors the dead-file cleaner's floor.
+        if len(rows) < 25:
+            return True, ''
+        download_folder = None
+        if self._config_manager:
+            download_folder = self._config_manager.get('soulseek.download_path', '')
+        resolved = 0
+        for row in rows:
+            raw = row['file_path'] if not isinstance(row, tuple) else row[0]
+            hit = _resolve_file_path(raw, self.transfer_folder, download_folder,
+                                     config_manager=self._config_manager)
+            if hit and os.path.exists(hit):
+                resolved += 1
+        fraction = resolved / len(rows)
+        if fraction >= 0.5:
+            return True, ''
+        from core.repair_jobs.dead_file_cleaner import _path_mapping_hint
+        return False, (
+            f"Refused to run live: only {resolved} of {len(rows)} sampled tracks "
+            f"resolve to files on disk, so SoulSync cannot see the library the "
+            f"catalogue describes and a live run would move or rewrite the wrong "
+            f"files. Fix the path mapping, run a deep scan, then try again. "
+            f"{_path_mapping_hint(self._config_manager)}"
+        )
+
+    def _job_runs_live(self, job) -> bool:
+        """Whether this job's next run will WRITE (its dry_run setting is off)."""
+        try:
+            cfg = self.get_job_config(job.job_id) or {}
+            return not (cfg.get('settings') or {}).get('dry_run', True)
+        except Exception:
+            return False
+
+    def retire_vanished_findings(self, job_id: str) -> int:
+        """Close this job's pending findings whose file is no longer on disk.
+
+        A finding carries its own snapshot of a path, and nothing ever closed one
+        after the file moved, was replaced or was deleted. The stale snapshot
+        stayed in the list with a Fix button that could only fail — reported as
+        Corrupt Audio findings naming files that no longer existed by the time
+        the user looked.
+
+        The trap a sweep like this has to avoid is retiring findings because THIS
+        process cannot see the library. A Docker install whose catalogue holds
+        the media server's paths ("/music/…") resolves nothing locally, and a
+        naive "the file is not there" test would wipe every finding it has. So a
+        finding is retired only when its CONTAINING FOLDER is right there and the
+        file is not: the folder is the proof that we are looking at the real
+        library and the file really did go away.
+
+        Returns the number retired. Best-effort — a maintenance sweep must never
+        be the reason a scan reports failure.
+        """
+        conn = None
+        retired = 0
+        try:
+            conn = self.db._get_connection()
+            marks = ','.join('?' for _ in _ABSENCE_IS_THE_FINDING)
+            rows = conn.execute(
+                "SELECT id, file_path FROM repair_findings "
+                "WHERE job_id = ? AND status = 'pending' "
+                "AND file_path IS NOT NULL AND file_path <> '' "
+                f"AND finding_type NOT IN ({marks})",
+                (job_id, *sorted(_ABSENCE_IS_THE_FINDING)),
+            ).fetchall()
+            download_folder = None
+            if self._config_manager:
+                download_folder = self._config_manager.get('soulseek.download_path', '')
+            gone = []
+            for row in rows:
+                raw = row['file_path'] if not isinstance(row, tuple) else row[1]
+                finding_id = row['id'] if not isinstance(row, tuple) else row[0]
+                resolved = _resolve_file_path(
+                    raw, self.transfer_folder, download_folder,
+                    config_manager=self._config_manager) or raw
+                if os.path.exists(resolved):
+                    # exists(), not isfile(): a finding may legitimately name a
+                    # DIRECTORY, and isfile() of one is False.
+                    continue
+                parent = os.path.dirname(resolved)
+                if not parent or not os.path.isdir(parent):
+                    continue      # the library itself is out of reach from here
+                gone.append(finding_id)
+            for finding_id in gone:
+                conn.execute(
+                    "UPDATE repair_findings SET status = 'resolved', "
+                    "user_action = 'obsolete', resolved_at = CURRENT_TIMESTAMP, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (finding_id,),
+                )
+                retired += 1
+            if retired:
+                conn.commit()
+                logger.info("[%s] Retired %d finding(s) whose file is gone",
+                            job_id, retired)
+        except Exception as e:
+            logger.debug("Vanished-findings sweep skipped for %s: %s", job_id, e)
+        finally:
+            if conn:
+                conn.close()
+        return retired
 
     def resolve_finding(self, finding_id: int, action: str = None) -> bool:
         """Resolve a finding with an optional action."""
@@ -3111,7 +3274,8 @@ class RepairWorker:
         if self._config_manager:
             download_folder = self._config_manager.get('soulseek.download_path', '')
         transfer_norm = os.path.normpath(self.transfer_folder)
-        deleted_root = os.path.join(self.transfer_folder, 'deleted')
+        from core.repair_jobs.base import deleted_quarantine_root
+        deleted_root = deleted_quarantine_root(self.transfer_folder)
         files_deleted = 0
         files_failed = 0
         db_remove_ids = []
@@ -3148,6 +3312,10 @@ class RepairWorker:
                 dest = self._quarantine_dest(resolved, deleted_root)
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 shutil.move(resolved, dest)
+                # remember where it came from so the deleted-files manager can
+                # restore it and retention can age it
+                from core.library.deleted_quarantine import record_deleted_entry
+                record_deleted_entry(deleted_root, dest, resolved, 'repair')
                 files_deleted += 1
                 db_remove_ids.append(tid)
             except OSError as e:
@@ -3491,6 +3659,29 @@ class RepairWorker:
         return {'success': True, 'action': 'fixed_unknown_artist',
                 'message': f'Fixed: {corrected_artist} - {corrected_title}'}
 
+    @staticmethod
+    def _acoustid_candidate(details, idx):
+        """``(title, artist)`` of candidate ``idx`` on an acoustid finding, or None.
+
+        New findings carry structured ``candidates_detail``; findings written
+        before that only have the display labels ('"Title" by Artist'), which
+        parse back losslessly because the title is always quoted whole.
+        """
+        detail = details.get('candidates_detail') or []
+        if 0 <= idx < len(detail):
+            entry = detail[idx] or {}
+            title = (entry.get('title') or '').strip()
+            artist = (entry.get('artist') or '').strip()
+            if title:
+                return title, artist
+        labels = details.get('candidates') or []
+        if 0 <= idx < len(labels):
+            import re as _re
+            m = _re.match(r'^"(?P<title>.*)" by (?P<artist>.*)$', str(labels[idx]))
+            if m and m.group('title').strip():
+                return m.group('title').strip(), m.group('artist').strip()
+        return None
+
     def _fix_acoustid_mismatch(self, entity_type, entity_id, file_path, details):
         """Fix an AcoustID mismatch. Actions:
            'retag' (default): Update DB title/artist to match the actual audio content
@@ -3500,14 +3691,35 @@ class RepairWorker:
         fix_action = details.get('_fix_action', 'retag')
         track_id = entity_id
 
+        # 'retag:<n>' / 'relocate:<n>' — the user PICKED candidate n of an
+        # ambiguous fingerprint in the fix dialog (Discord request: the finding
+        # names the possible recordings, so let me choose one instead of only
+        # offering manual/redownload/delete). Same composite-string convention
+        # the duplicate keeper uses ('track-42').
+        _chosen = None
+        if isinstance(fix_action, str) and ':' in fix_action:
+            _base, _, _idx = fix_action.partition(':')
+            if _base in ('retag', 'relocate') and _idx.isdigit():
+                fix_action = _base
+                _chosen = self._acoustid_candidate(details, int(_idx))
+                if _chosen is None:
+                    return {'success': False,
+                            'error': 'That candidate is not on this finding any more — '
+                                     'refresh and pick again.'}
+                # From here the ordinary retag/relocate path runs with the
+                # user's chosen recording as the answer.
+                details = dict(details)
+                details['acoustid_title'] = _chosen[0]
+                details['acoustid_artist'] = _chosen[1]
+
         # #1132: an ambiguous fingerprint has no single answer — its
         # `acoustid_title`/`acoustid_artist` are one arbitrary pick from several
         # equally-scored recordings. Both the retag and relocate paths below
         # WRITE those values (into the DB, and into the file's tags), which is
         # how a wrong suggestion becomes wrong data. Deleting or re-downloading
         # is still fine: those act on "this file is wrong", which the scan did
-        # establish.
-        if details.get('ambiguous') and fix_action in ('retag', 'relocate'):
+        # establish. A user's explicit pick above IS the single answer.
+        if details.get('ambiguous') and _chosen is None and fix_action in ('retag', 'relocate'):
             cands = details.get('candidates') or []
             return {
                 'success': False,
@@ -3515,7 +3727,7 @@ class RepairWorker:
                     'This fingerprint matches several different recordings, so there '
                     'is no single correct title to apply'
                     + (' (%s)' % '; '.join(cands[:3]) if cands else '')
-                    + '. Pick the right track manually, or use Re-download / Delete.'
+                    + '. Pick one of them in the fix dialog, or use Re-download / Delete.'
                 ),
             }
 
@@ -5597,12 +5809,16 @@ class RepairWorker:
     # ------------------------------------------------------------------
     @staticmethod
     def _resolve_path(path_str: str) -> str:
-        """Resolve Docker path mapping if running in a container."""
-        if os.path.exists('/.dockerenv') and len(path_str) >= 3 and path_str[1] == ':' and path_str[0].isalpha():
-            drive_letter = path_str[0].lower()
-            rest_of_path = path_str[2:].replace('\\', '/')
-            return f"/host/mnt/{drive_letter}{rest_of_path}"
-        return path_str
+        """Canonical absolute form of a configured folder (Docker mapping included).
+
+        Roots are routinely configured relative ("./Transfer" is the shipped
+        default). Returning them verbatim made every root comparison in the
+        repair jobs a string compare between "./Transfer/…" and the realpath'd
+        "/app/Transfer/…" of the very same file — which never matched.
+        """
+        from core.imports.paths import config_root_path
+
+        return config_root_path(path_str) or path_str
 
     def _get_transfer_path_from_db(self) -> str:
         """Read transfer path directly from the database app_config."""

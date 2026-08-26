@@ -322,6 +322,13 @@ class SeasonalDiscoveryService:
             config = SEASONAL_CONFIG[season_key]
             logger.info(f"Populating seasonal content for: {config['name']} (source: {source})")
 
+            # vibe seasons build from the user's taste, not from albums that
+            # happen to be NAMED "beach"
+            from core.seasonal_vibes import VIBE_SEASONS
+            if season_key in VIBE_SEASONS:
+                self._populate_vibe_season(season_key, config, source)
+                return
+
             # Clear existing seasonal content for this season + source only
             self._clear_seasonal_content(season_key, source)
 
@@ -364,6 +371,83 @@ class SeasonalDiscoveryService:
             logger.error(f"Error populating seasonal content for {season_key}: {e}")
             import traceback
             traceback.print_exc()
+
+    def _populate_vibe_season(self, season_key: str, config: Dict, source: str):
+        """taste-aware population for summer/spring/autumn/valentines.
+
+        three db legs (rewind, vibe-tagged albums, pool picks) plus an
+        optional lastfm tag chain when a key is configured. same storage as
+        the keyword flow, so curation and the endpoints need no changes.
+        """
+        from core.seasonal_vibes import (
+            lastfm_tag_tracks,
+            real_months_for,
+            rewind_tracks,
+            vibe_library_albums,
+            vibe_owned_tracks,
+            vibe_pool_tracks,
+        )
+
+        self._clear_seasonal_content(season_key, source)
+
+        # valentines is calendar-fixed; the true seasons shift for the
+        # southern hemisphere
+        holiday = season_key == 'valentines'
+        months = real_months_for(config['active_months'], self._get_hemisphere(), holiday)
+
+        tracks_found = 0
+        albums_found = 0
+
+        rewind = rewind_tracks(self.database, months, limit=90)
+        for track in rewind:
+            if self._add_seasonal_track(season_key, track, source):
+                tracks_found += 1
+        logger.info(f"{season_key}: {len(rewind)} rewind tracks from listening history")
+
+        owned = vibe_owned_tracks(self.database, season_key, limit=40)
+        for track in owned:
+            if self._add_seasonal_track(season_key, track, source):
+                tracks_found += 1
+        logger.info(f"{season_key}: {len(owned)} owned vibe-album tracks")
+
+        pool_picks = vibe_pool_tracks(self.database, season_key, source, limit=50)
+        for track in pool_picks:
+            if self._add_seasonal_track(season_key, track, source):
+                tracks_found += 1
+        logger.info(f"{season_key}: {len(pool_picks)} vibe-tagged pool tracks")
+
+        lastfm_client = self._get_lastfm_client()
+        if lastfm_client:
+            tag_rows = lastfm_tag_tracks(self.database, lastfm_client, season_key, limit=20)
+            for track in tag_rows:
+                if self._add_seasonal_track(season_key, track, source):
+                    tracks_found += 1
+            logger.info(f"{season_key}: {len(tag_rows)} lastfm tag-chain tracks")
+
+        albums = vibe_library_albums(self.database, season_key, months, source, limit=40)
+        for album in albums:
+            if self._add_seasonal_album(season_key, album, source):
+                albums_found += 1
+        logger.info(f"{season_key}: {len(albums)} vibe albums for the shelf")
+
+        self._update_seasonal_metadata(season_key, albums_found, tracks_found, source)
+        logger.info(
+            f"Vibe season populated for {config['name']} ({source}): "
+            f"{albums_found} albums, {tracks_found} tracks"
+        )
+
+    def _get_lastfm_client(self):
+        """lastfm client for the tag chain, or None when no key is set."""
+        try:
+            from core.settings import config_manager
+            api_key = config_manager.get('lastfm.api_key', '')
+            if not api_key:
+                return None
+            from core.lastfm_client import LastFMClient
+            return LastFMClient(api_key=api_key)
+        except Exception as e:
+            logger.debug(f"lastfm client unavailable: {e}")
+            return None
 
     def _search_discovery_pool_seasonal(self, season_key: str, source: str = 'spotify') -> List[Dict]:
         """Search discovery pool for tracks matching seasonal keywords, filtered by source"""
@@ -765,8 +849,13 @@ class SeasonalDiscoveryService:
                 rows = cursor.fetchall()
                 all_tracks.extend([dict(row) for row in rows])
 
-            # Get tracks from seasonal albums (filtered by source)
-            seasonal_albums = self.get_seasonal_albums(season_key, limit=50, source=source)
+            # Get tracks from seasonal albums (filtered by source).
+            # vibe seasons skip this: their albums are a shelf, and expanding
+            # them would drown the rewind tracks in full album pulls.
+            from core.seasonal_vibes import VIBE_SEASONS
+            seasonal_albums = []
+            if season_key not in VIBE_SEASONS:
+                seasonal_albums = self.get_seasonal_albums(season_key, limit=50, source=source)
 
             use_spotify = (source == 'spotify') and self.spotify_client and self.spotify_client.is_spotify_authenticated()
             if not use_spotify:
@@ -861,6 +950,13 @@ class SeasonalDiscoveryService:
             curated_tracks.extend(popular[:int(playlist_size * 0.6)])
             curated_tracks.extend(mid_tier[:int(playlist_size * 0.3)])
             curated_tracks.extend(deep_cuts[:int(playlist_size * 0.1)])
+
+            # backfill from whatever is left when a tier ran thin, so a
+            # 50-slot playlist is not 35 tracks because deep cuts were empty
+            if len(curated_tracks) < playlist_size:
+                picked = {id(t) for t in curated_tracks}
+                leftovers = [t for t in popular + mid_tier + deep_cuts if id(t) not in picked]
+                curated_tracks.extend(leftovers[:playlist_size - len(curated_tracks)])
 
             # Shuffle final selection
             random.shuffle(curated_tracks)

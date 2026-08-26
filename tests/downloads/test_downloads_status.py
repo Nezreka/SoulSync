@@ -628,6 +628,42 @@ def test_unified_response_album_dict_extracted_to_name():
     assert out['downloads'][0]['artwork'] == 'http://thumb.jpg'
 
 
+def test_unified_response_position_comes_from_the_batch_queue_not_track_index():
+    """#1183: track_index is an identity (original wishlist/playlist position,
+    what cancel addresses), not an ordinal. a 2-track album sub-batch carrying
+    wishlist-wide indexes rendered "Track 4930 of 2"."""
+    deps, _ = _build_deps()
+    download_batches['b1'] = {'queue': ['t_a', 't_b'], 'playlist_name': 'They Live OST'}
+    download_tasks['t_a'] = {
+        'track_index': 4929, 'status': 'downloading', 'batch_id': 'b1',
+        'track_info': {'name': 'Bonus Track'},
+    }
+    download_tasks['t_b'] = {
+        'track_index': 4938, 'status': 'queued', 'batch_id': 'b1',
+        'track_info': {'name': 'Wake Up'},
+    }
+    out = st.build_unified_downloads_response(100, deps)
+    by_title = {d['title']: d for d in out['downloads']}
+    assert by_title['Bonus Track']['batch_position'] == 1
+    assert by_title['Wake Up']['batch_position'] == 2
+    assert by_title['Bonus Track']['batch_total'] == 2
+    # the identity still rides along for cancel addressing
+    assert by_title['Bonus Track']['track_index'] == 4929
+
+
+def test_unified_response_position_is_none_when_task_missing_from_queue():
+    """a pruned queue (cancel rewrites it) must yield no position rather
+    than a wrong one."""
+    deps, _ = _build_deps()
+    download_batches['b1'] = {'queue': ['t_other']}
+    download_tasks['t_a'] = {
+        'track_index': 7, 'status': 'queued', 'batch_id': 'b1',
+        'track_info': {'name': 'X'},
+    }
+    out = st.build_unified_downloads_response(100, deps)
+    assert out['downloads'][0]['batch_position'] is None
+
+
 def test_unified_response_completed_task_progress_is_100():
     deps, _ = _build_deps()
     download_tasks['t1'] = {

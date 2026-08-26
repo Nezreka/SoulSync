@@ -5,6 +5,8 @@ import type { WebLens } from '../-discover.artist-web';
 import type { CacheItem } from '../-discover.cache-sections';
 import type { DiscoverSectionId } from '../-discover.layout';
 import type { DiscoverMix, MixAction } from '../-discover.mixes';
+import { playMixNow } from '../-discover.playable';
+import { StationsRow } from './stations-row';
 import type { RecentAlbum } from '../-discover.recent-releases';
 import type { RecommendedArtist } from '../-discover.recommended';
 import type { SeasonData, SeasonalAlbum } from '../-discover.seasonal';
@@ -402,6 +404,9 @@ export function DiscoverPage() {
     const due = [
       ...(mosaicsWanted.lb ? lb.mixes : []),
       ...(mosaicsWanted.decades ? mixes.decadeMixes : []),
+      // lastfm radios are few (one per generated radio) and were never
+      // hydrated at all - every card wore four placeholder tiles forever
+      ...lastfm.mixes,
     ];
     for (const mix of due) {
       if (mix.tracks?.length || lbCoversRef.current[mix.key]) continue;
@@ -412,7 +417,7 @@ export function DiscoverPage() {
         .then((tracks) => setLbCovers((prev) => ({ ...prev, [mix.key]: tracks })))
         .catch(() => {});
     }
-  }, [lb.mixes, mixes.decadeMixes, lbLazy, mosaicsWanted]);
+  }, [lb.mixes, mixes.decadeMixes, lastfm.mixes, lbLazy, mosaicsWanted]);
   const decadeMixesHydrated = useMemo(
     () =>
       mixes.decadeMixes.map((mix) =>
@@ -430,6 +435,15 @@ export function DiscoverPage() {
           : mix,
       ),
     [lb.mixes, lbCovers],
+  );
+  const lastfmMixesHydrated = useMemo(
+    () =>
+      lastfm.mixes.map((mix) =>
+        !mix.tracks?.length && lbCovers[mix.key]?.length
+          ? { ...mix, tracks: lbCovers[mix.key] }
+          : mix,
+      ),
+    [lastfm.mixes, lbCovers],
   );
 
   /** Convert + hand to the SHARED downloads.js modal (11129-11160). */
@@ -449,6 +463,17 @@ export function DiscoverPage() {
       const mix = modal.mix;
       if (!mix) return;
       const [verb, ...rest] = action.onclick.split(':');
+      if (verb === 'play') {
+        // resolve against the library and play what's owned RIGHT NOW; the
+        // rest stays a download away. LB/lastfm cards load tracks lazily -
+        // with nothing loaded yet there is nothing resolvable, and
+        // playMixNow's empty answer says so honestly.
+        void (async () => {
+          const outcome = await playMixNow(modal.tracks ?? [], mix.title);
+          if (outcome === 'played') modal.close();
+        })();
+        return;
+      }
       if (verb === 'lb-download') {
         // The FULL discovery flow (state check, rehydrate, seed + poll + the
         // sync-services discovery modal), verbatim in the core.js bridge —
@@ -468,7 +493,17 @@ export function DiscoverPage() {
         // sync-services.js owns the WHOLE LB sync — fetch, virtual playlist,
         // polling — and writes into the -sync-total/-sync-matched spans the
         // modal's override renders (3592-3616). It survives PR2.
-        void window.startListenBrainzPlaylistSync?.(rest.join(':'));
+        //
+        // A playlist whose state never left 'fresh' (a just-generated lastfm
+        // radio) has no frontend sync state, and startListenBrainzPlaylistSync
+        // console.errors and returns - a silently dead button. Say what to do.
+        const lbId = rest.join(':');
+        const states = window.listenbrainzPlaylistStates;
+        if (states && !states[lbId]) {
+          toast('Run Download first — sync needs its discovery results', 'info');
+          return;
+        }
+        void window.startListenBrainzPlaylistSync?.(lbId);
         return;
       }
       const type = mix.syncKey ?? mix.key;
@@ -769,12 +804,13 @@ export function DiscoverPage() {
             results={lastfm.results}
             dropdownOpen={lastfm.dropdownOpen}
             searching={lastfm.searching}
-            mixes={lastfm.mixes}
+            mixes={lastfmMixesHydrated}
             loaded={lastfm.loaded}
             generating={lastfm.generating}
             onQueryChange={lastfm.setQuery}
             onPick={(t) => void lastfm.pick(t)}
             onClear={lastfm.clear}
+            onDismiss={lastfm.dismiss}
             onOpenMix={modal.open}
           />
         );
@@ -995,8 +1031,9 @@ export function DiscoverPage() {
             tone="for-you"
             metric={`${personalSignalCount} signals`}
           >
+            {renderZoneSections(['your-mixes-section'])}
+            <StationsRow />
             {renderZoneSections([
-              'your-mixes-section',
               'adv-wave',
               'listening-recs-section',
               'recommended-artists-section',
@@ -1048,6 +1085,24 @@ export function DiscoverPage() {
                   onOpenExplorer={() => setExplorerPromptOpen(true)}
                 />
                 <ArtistWebHub onOpenLens={(lens) => setWebRequest({ lens })} />
+              </div>
+            </div>
+            <div className="discovery-zone-section" id="library-radio-section">
+              <div className="discover-library-radio-card">
+                <div className="discover-library-radio-copy">
+                  <div className="discover-library-radio-title">📻 Library Radio</div>
+                  <div className="discover-library-radio-sub">
+                    Endless smart shuffle of your whole collection — play-count
+                    weighted, refills itself by similarity.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="modal-btn modal-btn-primary"
+                  onClick={() => void window.startLibraryRadio?.()}
+                >
+                  ▶ Start radio
+                </button>
               </div>
             </div>
             {renderZoneSections([

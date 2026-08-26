@@ -65,7 +65,11 @@ export interface GenrePageProps {
 
 export function GenrePage({ genre, onBack, env }: GenrePageProps) {
   return (
-    <div className="genre-page-content">
+    // The stylesheet's base state for .genre-page-content is display:none -
+    // the vanilla flipped it visible with an INLINE style.display='block'
+    // (2772), never a class. Without this the whole genre page renders
+    // invisible while its data loads and toasts behind it.
+    <div className="genre-page-content" style={{ display: 'block' }}>
       <div className="genre-page-header">
         <button type="button" className="genre-back-button" id="genre-back-button" onClick={onBack}>
           <span className="back-icon">←</span> Back to Genres

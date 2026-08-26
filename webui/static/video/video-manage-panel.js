@@ -449,8 +449,8 @@
         var d = state.data, vals = currentValues(), changes = {};
         Object.keys(vals).forEach(function (f) {
             if (f === 'genres') {
-                var was = (d.genres || []).slice().sort().join(' ');
-                var now = vals.genres.slice().sort().join(' ');
+                var was = (d.genres || []).slice().sort().join('\u0000');
+                var now = vals.genres.slice().sort().join('\u0000');
                 if (was !== now) changes.genres = vals.genres;
             } else if (f === 'year') {
                 var wasY = d.year == null ? '' : String(d.year);

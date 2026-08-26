@@ -65,7 +65,21 @@ const KNOWN_IDS = new Set<string>([
  * domId="lastfm-radio-section"); it appears here because the scan reads
  * component SOURCE and cannot tell a prop from an attribute.
  */
-const NEW_IDS = ['build-a-playlist', 'lastfm-radio', 'listenbrainz', 'recent-releases'];
+const NEW_IDS = [
+  'build-a-playlist',
+  'lastfm-radio',
+  'listenbrainz',
+  'recent-releases',
+  // the 3.3.0 zone regroup: anchors for the four recommendation zones
+  'discover-zone-for-you',
+  'discover-zone-library',
+  'discover-zone-new-missing',
+  'discover-zone-tools',
+  // the play-now bridge (aug 25): library radio's discover card
+  'library-radio-section',
+  // recommended stations row (aug 25)
+  'recommended-stations-section',
+];
 
 /**
  * Artefacts whose ONLY vanilla home was the index.html discover markup, which
@@ -101,7 +115,10 @@ const DELETED_MARKUP_CLASSES = ['artweb-size-btn', 'watch-all-text'];
  * them KNOWN_CLASSES, which is this list's designed end state: a name may
  * only pass through here on its way to a stylesheet.
  */
-const NEW_CLASSES: string[] = [];
+const NEW_CLASSES: string[] = [
+  // 3.3.0 zone regroup: the tools zone's grid modifier, styled in style.css
+  'discovery-zone-section--map-tools',
+];
 
 function componentFiles(): string[] {
   return readdirSync(UI)

@@ -29,6 +29,8 @@ import {
   SYNC_DEFAULT_TAB,
   SYNC_HEADER_ACTIONS,
   SYNC_TABS,
+  readRememberedRoutedTabs,
+  rememberRoutedTab,
   syncStripTabs,
   normalizeSyncTab,
   type SyncTabId,
@@ -123,7 +125,11 @@ export function SyncShell({
   const [tab, setTab] = useState<SyncTabId>(SYNC_DEFAULT_TAB);
   // Which panels have ever been opened. See the header note: the vanilla's
   // one-shot load flags mean a tab keeps what it loaded after you leave it.
-  const [opened, setOpened] = useState<Set<SyncTabId>>(() => new Set([SYNC_DEFAULT_TAB]));
+  // Seeded with routed tabs remembered from earlier visits, so a link tab's
+  // chip survives a reload the way its cached playlists already did.
+  const [opened, setOpened] = useState<Set<SyncTabId>>(
+    () => new Set([SYNC_DEFAULT_TAB, ...readRememberedRoutedTabs()]),
+  );
 
   // Both props live in refs so `open` can be STABLE. A host that writes
   // `onTabChange={() => …}` inline hands a new function every render, and an
@@ -139,6 +145,7 @@ export function SyncShell({
     onTabChangeRef.current?.();
     setTab(id);
     setOpened((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+    rememberRoutedTab(id);
   }, []);
 
   useEffect(() => {
@@ -213,7 +220,7 @@ export function SyncShell({
       >
         <div className="sync-main-panel">
           <div className="sync-tabs" role="tablist">
-            {syncStripTabs(tab).map((t) => (
+            {syncStripTabs(tab, opened).map((t) => (
               <Fragment key={t.id}>
                 <button
                   type="button"

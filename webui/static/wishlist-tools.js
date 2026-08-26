@@ -5143,7 +5143,7 @@ const TOOL_HELP_CONTENT = {
             </ol>
 
             <h4>Where do deleted files go?</h4>
-            <p>Removed files are moved to <code>Transfer/deleted/</code> folder (not permanently deleted). You can review and recover them if needed.</p>
+            <p>Removed files are moved to <code>Transfer/.deleted/</code> folder (not permanently deleted). You can review and recover them if needed.</p>
 
             <h4>Safety Features</h4>
             <ul>
@@ -5938,7 +5938,7 @@ const TOOL_HELP_CONTENT = {
             <p>Scans your output folder for duplicate audio files (same filename, different format) and removes the lower-quality version. For example, if you have both <code>Song.flac</code> and <code>Song.mp3</code>, the MP3 is removed.</p>
 
             <h4>Safety</h4>
-            <p>Removed files are moved to a <code>deleted/</code> subfolder, not permanently deleted. You can recover them if needed.</p>
+            <p>Removed files are moved to a hidden <code>.deleted/</code> subfolder your media server ignores, not permanently deleted. You can recover them if needed.</p>
         `
     },
     'auto-clear_quarantine': {

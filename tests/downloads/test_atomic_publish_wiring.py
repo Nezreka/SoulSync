@@ -328,3 +328,46 @@ def test_rollback_repoints_a_real_sqlite_row(monkeypatch, tmp_path):
 
     assert stored == one, "the library row followed the file back to staging"
     assert os.path.isfile(stored), "no row may point at a file that is not there"
+
+
+def _real_db_batch(monkeypatch, tmp_path, server):
+    """A staged one-track batch over a REAL sqlite db, with the active media
+    server pinned — the axis the rowcount guard's meaning turns on."""
+    import database.music_database as mdb_mod
+    from pathlib import Path
+    from core.settings import config_manager
+
+    db = mdb_mod.MusicDatabase(database_path=str(tmp_path / "music.db"))
+    monkeypatch.setattr(mdb_mod, "MusicDatabase", lambda *a, **k: db)
+    monkeypatch.setattr(config_manager, "get_active_media_server", lambda: server)
+
+    batch = {"is_album_download": True}
+    transfer = _wire(monkeypatch, tmp_path, flag=True, batch=batch)
+    final = os.path.join(transfer, "Artist", "Album", "01.flac")
+    staged = pl._maybe_stage_album_track({"batch_id": "B"}, final)
+    Path(staged).parent.mkdir(parents=True, exist_ok=True)
+    Path(staged).write_bytes(b"AUDIO")
+    return batch, staged, final
+
+
+def test_a_media_server_install_publishes_with_no_track_rows(monkeypatch, tmp_path):
+    """The Lil-Uzi-Chimp bug (Docker + Navidrome): rows with a staged path are
+    only ever written by record_soulsync_library_entry, which is gated on the
+    active server being 'soulsync' — on a Plex/Navidrome/Jellyfin install there
+    is legitimately NO row until the server scans the PUBLISHED files. The
+    rowcount guard read that 0 as 'the library would dangle' and rolled every
+    atomic album back into .soulsync_atomic_staging, forever."""
+    batch, staged, final = _real_db_batch(monkeypatch, tmp_path, "navidrome")
+    assert lc._publish_atomic_album("B", batch) is True
+    assert os.path.isfile(final), "the album never left staging"
+    assert not os.path.isfile(staged)
+
+
+def test_a_soulsync_install_still_fails_on_a_dangling_row_count(monkeypatch, tmp_path):
+    """...but where the rows ARE ours (active server 'soulsync'), a zero count is
+    still the proof of a dangle the guard was built for, and the publish must
+    keep rolling back rather than strand the library on a staging path."""
+    batch, staged, final = _real_db_batch(monkeypatch, tmp_path, "soulsync")
+    assert lc._publish_atomic_album("B", batch) is False
+    assert os.path.isfile(staged), "the failed publish must keep the staged copy"
+    assert not os.path.isfile(final)

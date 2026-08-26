@@ -273,6 +273,9 @@ def build_download_record(item: Dict[str, Any], best: Dict[str, Any], candidates
                 "tried_files": json.dumps([best.get("filename")])}
     # torrent / usenet — tracked by the client ref the grab returned; no Soulseek requery pool.
     return {**common, "source": source, "username": best.get("username"),   # indexer (display)
+            # keep the indexer ID too, not just its name. the seeding sweep needs a
+            # stable key to look up that tracker's own seed goal.
+            "indexer_id": best.get("indexer_id"),
             "filename": best.get("title") or best.get("filename"), "client_ref": best.get("_client_ref"),
             "candidates": json.dumps([]), "tried_queries": json.dumps([]), "tried_files": json.dumps([])}
 

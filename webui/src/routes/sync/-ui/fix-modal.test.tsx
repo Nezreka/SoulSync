@@ -213,7 +213,11 @@ describe('the fix reducers', () => {
       images: [{ url: 'http://img/x' }],
     });
     expect(next.spotifyMatches).toBe(2);
-    expect(next.discoveryProgress).toBe(50); // 2/4, the vanilla repaint formula
+    // discoveryProgress is the SCAN percent and stays untouched now - the
+    // vanilla overwrote it with an unclamped match ratio here, which is how
+    // a fix during discovery printed "105/100, over 100%" (aug 25). the
+    // matched percent is derived at display time by matchLineNumbers.
+    expect(next.discoveryProgress).toBe((base as { discoveryProgress?: number }).discoveryProgress);
     // Re-fixing an already-found row does NOT bump the counter (478/524).
     const again = applyFixedMatch(next, SYNC_SOURCES.tidal, 1, { id: 'sp10', name: 'Other' });
     expect(again.spotifyMatches).toBe(2);

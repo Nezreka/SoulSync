@@ -6,7 +6,7 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
   SYNC_DEFAULT_TAB,
@@ -14,6 +14,8 @@ import {
   SYNC_PRIMARY_TAB_IDS,
   SYNC_TABS,
   normalizeSyncTab,
+  readRememberedRoutedTabs,
+  rememberRoutedTab,
   syncStripTabs,
 } from './-sync.shell';
 
@@ -178,5 +180,38 @@ describe('the strip (syncStripTabs)', () => {
     for (const t of stripped) {
       expect(syncStripTabs(t.id).map((x) => x.id)).toContain(t.id);
     }
+  });
+});
+
+describe('remembered routed tabs (the sticky Spotify Link chip)', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('round-trips an opened routed tab through storage', () => {
+    rememberRoutedTab('spotify-public');
+    expect(readRememberedRoutedTabs()).toEqual(['spotify-public']);
+    // remembering twice does not duplicate
+    rememberRoutedTab('spotify-public');
+    expect(readRememberedRoutedTabs()).toEqual(['spotify-public']);
+  });
+
+  it('never remembers a primary tab and drops unknown ids on read', () => {
+    rememberRoutedTab('mirrored');
+    window.localStorage.setItem(
+      'soulsync-sync-opened-tabs',
+      JSON.stringify(['spotify-public', 'not-a-tab', 42]),
+    );
+    expect(readRememberedRoutedTabs()).toEqual(['spotify-public']);
+  });
+
+  it('unreadable storage reads as nothing remembered', () => {
+    window.localStorage.setItem('soulsync-sync-opened-tabs', '{broken');
+    expect(readRememberedRoutedTabs()).toEqual([]);
+  });
+
+  it('the strip shows every opened routed tab, not just the active one', () => {
+    const tabs = syncStripTabs('mirrored', ['spotify-public']).map((t) => t.id);
+    expect(tabs).toEqual(['mirrored', 'server', 'beatport', 'spotify-public']);
   });
 });

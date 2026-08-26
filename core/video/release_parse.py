@@ -273,5 +273,21 @@ def titles_match(release_name: Any, want_title: Any) -> bool:
     return not saw_any
 
 
+def search_title(release_name: Any) -> str:
+    """The title to PREFILL a metadata search with, from a raw release name.
+
+    extract_title plus a trailing-punctuation trim, because a cut that lands right
+    after a separator ("Silo S03E08 ..." -> "Silo", but "The.Bear.S03..." -> "The.Bear.")
+    leaves a dot/dash the metadata search then treats as part of the name. Falls back
+    to the raw name when nothing can be isolated, so the box is never empty.
+
+    Shared by the Fresh Releases and Basic Search identify modals so the same release
+    prefills the same way in both.
+    """
+    value = extract_title(release_name) or str(release_name or "")
+    value = re.sub(r"[\s(\[{._-]+$", "", value).strip()
+    return value or str(release_name or "")
+
+
 __all__ = ["parse_release", "extract_title", "normalize_title",
-           "acceptable_titles", "titles_match", "has_absolute_episode"]
+           "acceptable_titles", "titles_match", "has_absolute_episode", "search_title"]

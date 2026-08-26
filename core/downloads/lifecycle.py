@@ -103,8 +103,20 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
             The count is the publish's proof that the library knows where the
             file went; an audio file that repoints nothing leaves the library
             pointing at a staging path this publish is about to remove. None
-            means the driver could not tell us, which is "unknown", not "zero" —
-            an unknown must not fail a publish that may well have worked."""
+            means the count carries no meaning — "unknown", not "zero" — and an
+            unknown must not fail a publish that may well have worked.
+
+            THAT PROOF ONLY EXISTS ON A 'soulsync' SERVER. Rows with a staged
+            path are written by record_soulsync_library_entry, which is gated on
+            the active media server being soulsync — on a Plex/Navidrome/Jellyfin
+            install there is legitimately NO row until the server scans the
+            PUBLISHED files. Reading that 0 as a failure made every atomic album
+            publish on a media-server install roll itself back and strand the
+            album in .soulsync_atomic_staging forever (Lil-Uzi-Chimp, Docker +
+            Navidrome: two direct albums landed, the one staged album stuck).
+            The UPDATE still runs — a row from an earlier soulsync-mode session
+            deserves repointing — but its count is only evidence where the rows
+            are ours to expect."""
             conn = db._get_connection()
             try:
                 cur = conn.cursor()
@@ -112,9 +124,15 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
                             (final_path, staged_path))
                 conn.commit()
                 rowcount = getattr(cur, 'rowcount', None)
-                return int(rowcount) if isinstance(rowcount, int) else None
             finally:
                 conn.close()
+            try:
+                from core.settings import config_manager as _cm
+                if _cm.get_active_media_server() != 'soulsync':
+                    return None
+            except Exception:   # noqa: BLE001 - can't tell whose rows these are → unknown
+                return None
+            return int(rowcount) if isinstance(rowcount, int) else None
 
         result = publish_album_batch(staging_root, transfer_dir, safe_move_file, _db_update)
 

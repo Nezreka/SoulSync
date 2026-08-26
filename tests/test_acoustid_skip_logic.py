@@ -153,20 +153,31 @@ def test_minor_punctuation_difference_passes_outright(verifier):
     assert result != VerificationResult.FAIL
 
 
-def test_low_fingerprint_score_never_skipped(verifier):
-    """Below the 0.95 confidence floor, the skip exemption should
-    never fire — even for plausibly-real language/script cases. We
-    don't have enough signal to be sure the audio matches."""
+def test_cross_script_title_below_the_old_floor_is_not_a_failure(verifier):
+    """A cross-script TITLE is unreadable at every fingerprint score.
+
+    This used to assert FAIL: the language/script exemption was gated on
+    ``best_score >= 0.95``, so an ordinary 0.90 match on a Japanese-titled
+    track was quarantined. That gate answered the wrong question — the
+    fingerprint's confidence says nothing about whether romaji and kanji can
+    be string-compared, and they cannot at any score. With the artist
+    agreeing and the title incomparable, nothing here is evidence the file is
+    wrong, so the verdict is SKIP (unconfirmed) rather than FAIL
+    (quarantine). The English-vs-English over-skip this module exists to
+    prevent is unaffected — see the Kendrick tests above and
+    ``test_high_score_but_artist_mismatch_no_longer_skipped`` below, which
+    both still FAIL.
+    """
     _stub_lookup(verifier, recordings=[
         {'title': '残酷な天使のテーゼ', 'artist': 'Yoko Takahashi'},
-    ], best_score=0.80)  # below 0.95 floor
+    ], best_score=0.80)
 
     result, _msg = verifier.verify_audio_file(
         '/fake/path.flac',
         'Zankoku na Tenshi no Theze',
         'Yoko Takahashi',
     )
-    assert result == VerificationResult.FAIL
+    assert result == VerificationResult.SKIP
 
 
 def test_high_score_but_artist_mismatch_no_longer_skipped(verifier):
@@ -185,13 +196,15 @@ def test_high_score_but_artist_mismatch_no_longer_skipped(verifier):
     assert result == VerificationResult.FAIL
 
 
-def test_low_fingerprint_score_never_skipped_same_script_artist(verifier):
-    """#797 guard — the #607 protection for a SAME-SCRIPT artist (Latin
-    'Yoko Takahashi' on both sides) with only a cross-script TITLE must
-    stay FAIL below the 0.95 floor. The #797 relaxation is keyed on the
-    ARTIST spanning scripts, which this case is NOT, so nothing changes
-    here. (Duplicates test_low_fingerprint_score_never_skipped's intent
-    explicitly against the new code path.)"""
+def test_cross_script_title_with_same_script_artist_is_not_a_failure(verifier):
+    """The #797 relaxation was keyed on the ARTIST spanning scripts, which
+    left the far more common shape unprotected: a Japanese TITLE under an
+    artist already written in Latin ('Yoko Takahashi', 'YOASOBI', 'Ado').
+    Then the only incomparable dimension is the title, the artist agrees at
+    100%, and the old code still quarantined the file below 0.95. The rule is
+    per-dimension now, so this case is covered by the same reasoning as the
+    #797 one below.
+    """
     _stub_lookup(verifier, recordings=[
         {'title': '残酷な天使のテーゼ', 'artist': 'Yoko Takahashi'},
     ], best_score=0.85)
@@ -201,7 +214,7 @@ def test_low_fingerprint_score_never_skipped_same_script_artist(verifier):
         'Zankoku na Tenshi no Theze',
         'Yoko Takahashi',
     )
-    assert result == VerificationResult.FAIL
+    assert result == VerificationResult.SKIP
 
 
 # ---------------------------------------------------------------------------

@@ -43,6 +43,7 @@ import { useGapFill } from '../-artist-detail.use-gap-fill';
 import { clearVanillaArtist, syncVanillaArtist } from '../-artist-detail.vanilla-state';
 import { ArtistDetailBackButton } from './artist-detail-back-button';
 import { ArtistHero } from './artist-hero';
+import { ArtistVideosSection } from './artist-videos-section';
 import { DiscographyFilters } from './discography-filters';
 import { DiscographySection } from './discography-section';
 import { EnhancedView } from './enhanced-view';
@@ -407,6 +408,7 @@ export function ArtistDetailPage() {
                   onOpen={openRelease}
                 />
               ))}
+              <ArtistVideosSection artistName={payload.artist?.name} />
             </div>
           )}
 

@@ -78,7 +78,7 @@ const SELF = resolve(process.cwd(), 'src/test/constant-assertions.test.ts');
  * you to lower it — which keeps the figure honest instead of quietly stale.
  * Converting them to literals is tracked separately rather than done blind.
  */
-const REMAINING_WEAK = 49;
+const REMAINING_WEAK = 47;
 
 /** Matchers whose argument is the EXPECTED value. */
 const MATCHERS = [

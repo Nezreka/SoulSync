@@ -61,8 +61,11 @@ def _run_duplicate_cleaner():
             logger.warning(f"[Duplicate Cleaner] Transfer folder not found: {transfer_folder}")
             return
 
-        # Create deleted folder if it doesn't exist
-        deleted_folder = os.path.join(transfer_folder, 'deleted')
+        # Create the quarantine if it doesn't exist — hidden ('.deleted') so media
+        # servers don't index what this tool just removed; migrates a legacy
+        # bare 'deleted' folder on the way through.
+        from core.repair_jobs.base import deleted_quarantine_root
+        deleted_folder = deleted_quarantine_root(transfer_folder)
         os.makedirs(deleted_folder, exist_ok=True)
         logger.warning(f"[Duplicate Cleaner] Deleted folder: {deleted_folder}")
 
@@ -170,6 +173,12 @@ def _run_duplicate_cleaner():
 
                         # Move the file
                         shutil.move(duplicate_file['full_path'], deleted_path)
+
+                        # remember where it came from so the deleted-files
+                        # manager can restore it and retention can age it
+                        from core.library.deleted_quarantine import record_deleted_entry
+                        record_deleted_entry(deleted_folder, deleted_path,
+                                             duplicate_file['full_path'], 'duplicate-cleaner')
 
                         # Track stats
                         deleted_count += 1

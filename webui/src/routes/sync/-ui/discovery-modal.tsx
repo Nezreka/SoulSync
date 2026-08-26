@@ -54,6 +54,7 @@ import {
   modalDescription,
   modalSourceLabel,
   modalTitle,
+  matchLineNumbers,
   progressLineText,
   seededProgress,
 } from '../-sync.modal-core';
@@ -441,7 +442,11 @@ export function DiscoveryModal(props: DiscoveryModalProps) {
             </div>
             <div className="progress-text">
               {showLine && total > 0
-                ? progressLineText(seeded.matches, total, seeded.progress)
+                ? progressLineText(
+                    matchLineNumbers(seeded.matches, total).matches,
+                    total,
+                    matchLineNumbers(seeded.matches, total).percent,
+                  )
                 : initialProgressText(state.phase)}
             </div>
           </div>

@@ -1,6 +1,24 @@
 from types import SimpleNamespace
 
+import pytest
+
 from core.repair_jobs.acoustid_scanner import AcoustIDScannerJob
+
+
+@pytest.fixture(autouse=True)
+def _no_live_alias_lookup(monkeypatch):
+    """Keep the alias chain off the network and off the real library database.
+
+    `_resolve_expected_artist_aliases` builds a MusicBrainzService over
+    `get_database()` — the process-wide, CONFIGURED library database — and then
+    queries MusicBrainz over HTTP. Reached from a unit test that means a live
+    request and a schema migration against whatever database this machine is
+    pointed at. Tests that are about the alias bridge override this with the
+    list they mean.
+    """
+    monkeypatch.setattr(
+        "core.acoustid_verification._resolve_expected_artist_aliases",
+        lambda name: [])
 
 
 class _FakeCursor:
@@ -59,11 +77,12 @@ def _make_context(rows):
 def test_load_db_tracks_skips_null_ids_and_normalizes_track_ids():
     job = AcoustIDScannerJob()
     context = _make_context([
-        # 12 columns: id, title, artist (COALESCE'd), file_path, track_number,
+        # 13 columns: id, title, artist (COALESCE'd), file_path, track_number,
         # album_title, album_thumb, artist_thumb, track_artist (raw, may be ''),
-        # album_artist, duration_ms (issue #587 — duration guard), artist_row_id.
-        (None, "Broken Track", "Artist", "/music/broken.flac", 1, "Album", None, None, "", "Artist", 180000, 7),
-        (42, "Good Track", "Artist", "/music/good.flac", 2, "Album", "album-thumb", "artist-thumb", "", "Artist", 240000, 7),
+        # album_artist, duration_ms (issue #587 — duration guard), artist_row_id,
+        # verification_status (the catalogue's record of the file's standing).
+        (None, "Broken Track", "Artist", "/music/broken.flac", 1, "Album", None, None, "", "Artist", 180000, 7, None),
+        (42, "Good Track", "Artist", "/music/good.flac", 2, "Album", "album-thumb", "artist-thumb", "", "Artist", 240000, 7, "verified"),
     ])
 
     tracks = job._load_db_tracks(context)
@@ -72,16 +91,17 @@ def test_load_db_tracks_skips_null_ids_and_normalizes_track_ids():
     assert tracks["42"]["title"] == "Good Track"
     assert tracks["42"]["artist"] == "Artist"
     assert tracks["42"]["duration_ms"] == 240000
+    assert tracks["42"]["db_verification_status"] == "verified"
 
 
 def test_scan_handles_mixed_track_id_types(monkeypatch):
     job = AcoustIDScannerJob()
     context = _make_context([
-        # 11 columns: id, title, artist (COALESCE'd), file_path, track_number,
+        # 13 columns: id, title, artist (COALESCE'd), file_path, track_number,
         # album_title, album_thumb, artist_thumb, track_artist (raw, may be ''),
-        # album_artist, duration_ms.
-        (None, "Broken Track", "Artist", "/music/broken.flac", 1, "Album", None, None, "", "Artist", 180000, 7),
-        (42, "Good Track", "Artist", "/music/good.flac", 2, "Album", "album-thumb", "artist-thumb", "", "Artist", 240000, 7),
+        # album_artist, duration_ms, artist_row_id, verification_status.
+        (None, "Broken Track", "Artist", "/music/broken.flac", 1, "Album", None, None, "", "Artist", 180000, 7, None),
+        (42, "Good Track", "Artist", "/music/good.flac", 2, "Album", "album-thumb", "artist-thumb", "", "Artist", 240000, 7, None),
     ])
 
     monkeypatch.setattr(job, "_resolve_path", lambda file_path, _context: file_path)
@@ -287,7 +307,8 @@ def _make_real_db_context(tmp_path):
             file_path TEXT,
             track_number INTEGER,
             track_artist TEXT,
-            duration INTEGER
+            duration INTEGER,
+            verification_status TEXT
         );
     """)
     conn.commit()
@@ -799,9 +820,11 @@ def test_scanner_does_not_flag_cross_script_when_alias_bridges(monkeypatch):
     unified verification core recognises the match, so the library scan must NOT
     create a false 'Wrong download' finding (it did before, stripping all
     non-ASCII and never consulting aliases)."""
-    import core.repair_jobs.acoustid_scanner as scanner_mod
-    monkeypatch.setattr(scanner_mod, "_resolve_expected_artist_aliases",
-                        lambda name: ["澤野弘之"], raising=False)
+    # Alias resolution lives in the shared verifier the scan routes through;
+    # the real one opens a database connection and calls MusicBrainz.
+    monkeypatch.setattr(
+        "core.acoustid_verification._resolve_expected_artist_aliases",
+        lambda name: ["澤野弘之"])
     job = AcoustIDScannerJob()
     captured = []
     context = _make_finding_capturing_context(
@@ -827,9 +850,6 @@ def test_scanner_does_not_flag_cross_script_when_alias_bridges(monkeypatch):
 def _force_imported_scan(monkeypatch):
     """Drive a scan over a force-imported file whose fingerprint clearly
     mismatches. Returns the captured findings."""
-    import core.repair_jobs.acoustid_scanner as scanner_mod
-    monkeypatch.setattr(scanner_mod, "_resolve_expected_artist_aliases",
-                        lambda name: [], raising=False)
     monkeypatch.setattr(
         'core.tag_writer.read_file_tags',
         lambda fpath: {'artist': None, 'verification_status': 'force_imported'},
@@ -868,9 +888,9 @@ def test_force_imported_mismatch_is_reported_as_informational(monkeypatch):
 
 
 def test_human_verified_files_are_never_scanned(monkeypatch):
-    import core.repair_jobs.acoustid_scanner as scanner_mod
-    monkeypatch.setattr(scanner_mod, "_resolve_expected_artist_aliases",
-                        lambda name: [], raising=False)
+    monkeypatch.setattr(
+        "core.acoustid_verification._resolve_expected_artist_aliases",
+        lambda name: [])
     monkeypatch.setattr('core.tag_writer.read_file_tags',
                         lambda fpath: {'artist': None, 'verification_status': 'human_verified'})
     job = AcoustIDScannerJob()
@@ -897,9 +917,6 @@ def _run_persistence_scan(monkeypatch, *, file_status, aid_artist, expected_arti
     """Drive one _scan_file call and return (status_updates, tag_writes) where
     status_updates is the list of (query, params) UPDATEs the scanner ran.
     ``lib_rows`` seeds the library_history match SELECT (#934)."""
-    import core.repair_jobs.acoustid_scanner as scanner_mod
-    monkeypatch.setattr(scanner_mod, "_resolve_expected_artist_aliases",
-                        lambda name: [], raising=False)
     monkeypatch.setattr(
         'core.tag_writer.read_file_tags',
         lambda fpath: {'artist': None, 'verification_status': file_status})

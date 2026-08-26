@@ -89,7 +89,10 @@ def test_core_tags_survive_when_art_step_raises_on_artless_file(flac_path):
     assert f.get("title") == ["Yellow"]          # ...but core tags persisted
     assert f.get("artist") == ["Coldplay"]
     assert f.get("album") == ["Parachutes"]      # the tag Rockbox buckets on
-    assert f.get("tracknumber") == ["1/9"]
+    # bare number + separate total: Vorbis has no ID3-style "N/M" convention,
+    # and the combined form displayed literally as "1/9" (mrderekibmusic)
+    assert f.get("tracknumber") == ["1"]
+    assert f.get("tracktotal") == ["9"]
 
 
 def test_core_tags_written_on_happy_path_artless_file(flac_path):

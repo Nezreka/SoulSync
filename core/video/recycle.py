@@ -4,9 +4,13 @@ Every path that destroys a user's media file (upgrade-replace, YouTube
 retention, dismissed imports — and future watched-cleanup / duplicate deletes)
 routes through :func:`discard`. With ``recycle_deletes`` on (the default) the
 file moves into an ``ss_recycle`` folder — the video sibling of the music
-side's ``ss_quarantine`` convention — named ``<YYYYMMDD_HHMMSS>_<original>``,
-and entries older than ``recycle_keep_days`` are purged opportunistically on
-each discard.
+side's ``ss_quarantine`` convention — named ``<YYYYMMDD_HHMMSS>_<original>``.
+
+Entries older than ``recycle_keep_days`` are purged by the daily "Empty Recycle
+Bin" automation, plus opportunistically on each discard. the automation is the
+one that matters: the opportunistic pass only fires when something ELSE gets
+deleted, so on a quiet library nothing ever expired. age is read off the name
+stamp, never mtime, because moving a file keeps its original mtime.
 
 Trash location: ``recycle_path`` when set; otherwise ``<library root>/ss_recycle``
 for whichever configured library root (movies/tv/youtube) contains the file.
@@ -21,6 +25,7 @@ delete → retry later / non-fatal" behaviour. discard never half-deletes.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import time
 from datetime import datetime
@@ -113,30 +118,77 @@ def _unlink(path: str) -> Dict[str, Any]:
         return {"ok": False, "recycled": False, "trash_path": None}
 
 
+# entries are named "<YYYYMMDD_HHMMSS>_<original>" (plus "(n)_" on a same-second
+# collision). that stamp is the only honest record of when a file was recycled.
+_STAMP_RE = re.compile(r"^(\d{8})_(\d{6})_")
+
+
+def _stamp_epoch(name: str):
+    m = _STAMP_RE.match(str(name or ""))
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S").timestamp()
+    except ValueError:
+        return None
+
+
+def entry_age_seconds(name: str, now=None):
+    """How long ago this entry was recycled, or None if it isn't ours.
+
+    Age comes from the name stamp, NOT mtime. shutil.move keeps the original
+    file's mtime, so a movie from 2019 lands in the bin already older than any
+    keep window and the next purge deletes it on the spot. that gave the
+    recycle bin a zero second undo window for exactly the files people most
+    want back. no stamp means something else put the file there, so leave it
+    alone.
+    """
+    t = _stamp_epoch(name)
+    if t is None:
+        return None
+    return max(0.0, (time.time() if now is None else now) - t)
+
+
 def purge_old(settings: Dict[str, Any], db, roots_hint=None) -> int:
-    """Unlink trash entries older than ``recycle_keep_days``. Returns count."""
+    """Unlink trash entries older than ``recycle_keep_days``. Returns the count."""
+    return purge_old_detailed(settings, db, roots_hint)[0]
+
+
+def purge_old_detailed(settings: Dict[str, Any], db, roots_hint=None):
+    """Same sweep, as ``(count, bytes_freed)``. The bytes are what anyone
+    emptying a bin actually wants to see."""
     keep_days = int((settings or {}).get("recycle_keep_days") or 7)
-    cutoff = time.time() - keep_days * 86400
+    now = time.time()
     dirs = list(roots_hint or [])
     if not dirs:
         override = str((settings or {}).get("recycle_path") or "").strip()
         dirs = [override] if override else [
             os.path.join(r, TRASH_DIRNAME) for r in _library_roots(db)]
     removed = 0
+    freed = 0
     for d in dirs:
         if not d or not os.path.isdir(d):
             continue
         for name in os.listdir(d):
             fp = os.path.join(d, name)
+            # only ever touch entries discard() wrote (they carry the stamp
+            # prefix). someone can point recycle_path at a folder that holds
+            # other stuff, and this used to delete by mtime alone.
+            age = entry_age_seconds(name, now=now)
+            if age is None or age < keep_days * 86400:
+                continue
             try:
-                if os.path.isfile(fp) and os.path.getmtime(fp) < cutoff:
+                if os.path.isfile(fp):
+                    size = os.path.getsize(fp)
                     os.remove(fp)
                     removed += 1
+                    freed += size
             except OSError:   # noqa: PERF203 - per-file resilience
                 logger.exception("recycle purge: could not remove %s", fp)
     if removed:
-        logger.info("recycle purge: removed %d expired file(s)", removed)
-    return removed
+        logger.info("recycle purge: removed %d expired file(s), freed %.1f GB",
+                    removed, freed / 1024 ** 3)
+    return removed, freed
 
 
 def discarder(db, settings: Dict[str, Any]) -> Callable[[str], Dict[str, Any]]:

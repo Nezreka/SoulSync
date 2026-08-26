@@ -76,7 +76,9 @@ EXPECTED_ACTION_NAMES = frozenset({
     'video_rss_sync',
     'video_seeding_sweep',
     'video_import_lists',
+    'video_extto_fresh_refresh',
     'video_clean_youtube_episodes',
+    'video_purge_recycle_bin',
     'video_clean_search_history',
     'video_clean_completed_downloads',
     'video_full_cleanup',
@@ -106,6 +108,7 @@ EXPECTED_GUARDED_ACTIONS = frozenset({
     'video_rss_sync',
     'video_seeding_sweep',
     'video_import_lists',
+    'video_extto_fresh_refresh',
     'video_apply_overlays',
     'video_clean_plex_images',
 })

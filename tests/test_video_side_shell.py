@@ -434,8 +434,11 @@ def test_video_detail_module_referenced_and_isolated():
 def test_search_subpage_and_module():
     assert 'data-video-subpage="video-search"' in _INDEX
     assert "data-video-search-input" in _INDEX and "data-video-search-results" in _INDEX
+    assert 'data-vsr-tab="enhanced"' in _INDEX and 'data-vsr-tab="basic"' in _INDEX and 'data-vsr-tab="fresh"' in _INDEX
+    assert "data-vsr-basic-form" in _INDEX and "data-vsr-basic-sources" in _INDEX and "Sourced from EXT.to" in _INDEX
     assert "video/video-search.js" in _INDEX
     src = (_ROOT / "webui" / "static" / "video" / "video-search.js").read_text(encoding="utf-8")
+    assert "data-vsr-basic-source" in src
     assert "(function" in src and "})();" in src
     assert _window_isolated(src)                         # no music globals leaked in
     assert "/api/video/search" in src

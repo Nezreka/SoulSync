@@ -203,7 +203,9 @@ class TestSummaryEndpointWiring:
     def _handler():
         import ast
 
-        with open("web_server.py", encoding="utf-8") as f:
+        # the review-queue endpoints were lifted out of web_server (aug 25) -
+        # the handler lives in api/quarantine.py now
+        with open("api/quarantine.py", encoding="utf-8") as f:
             tree = ast.parse(f.read())
         for node in tree.body:
             if isinstance(node, ast.FunctionDef) and node.name == "review_queue_summary":
