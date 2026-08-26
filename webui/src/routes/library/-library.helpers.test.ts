@@ -23,10 +23,10 @@ describe('brand logos match the vanilla source', () => {
   // helper restates them. SoulID's was never a constant at all: it was an
   // inline literal in library.js's artist-detail badge builder, which the
   // cleanup deleted along with the rest of the vanilla page — so the same
-  // brand's declaration in service-switch.js stands in for it. All three files
-  // are vanilla source; between them every logo still has a second declaration
-  // to disagree with.
-  const vanilla = ['static/core.js', 'static/service-switch.js']
+  // brand's declaration in service-switch stands in for it (now the TS port,
+  // src/shell/service-switch.ts, since the aug 26 migration). Between the two
+  // files every logo still has a second declaration to disagree with.
+  const vanilla = ['static/core.js', 'src/shell/service-switch.ts']
     .map((file) => readFileSync(resolve(process.cwd(), file), 'utf8'))
     .join('\n');
 

@@ -557,6 +557,31 @@ declare global {
     unblockEntry?: (id: number) => Promise<void>;
     /** shared-helpers.js html escaper (also re-declared by downloads.js) */
     escapeHtml?: (text: unknown) => string;
+    /** init.js - the active profile, or null before profiles load */
+    getCurrentProfileContext?: () => ShellProfileContext | null;
+    /** shared-helpers.js - refresh the sidebar service dots */
+    fetchAndUpdateServiceStatus?: () => void;
+    /** src/shell ports (aug 26): origin-history, watchlist-history (already
+     * declared piecemeal below where react used them), my-accounts,
+     * service-switch - inline onclick handlers in their generated markup */
+    closeDownloadOriginsModal?: () => void;
+    switchDownloadOriginTab?: (tab: string) => void;
+    toggleOriginGroup?: (btn: HTMLElement) => void;
+    toggleOriginEntry?: (id: number, on: boolean) => void;
+    toggleAllOriginEntries?: (on: boolean) => void;
+    deleteSelectedOriginEntries?: (singleId?: number) => Promise<void>;
+    openMyAccountsModal?: () => void;
+    closeMyAccountsModal?: () => void;
+    connectMyAccount?: (serviceId: string) => void;
+    saveMyAccountToken?: (serviceId: string) => Promise<void>;
+    disconnectMyAccount?: (serviceId: string) => Promise<void>;
+    openServiceSwitchModal?: (tab?: string) => void;
+    closeServiceSwitchModal?: () => void;
+    switchServiceSwitchTab?: (tab: string) => void;
+    setActiveSource?: (kind: string, id: string) => Promise<void>;
+    setDownloadMode?: (which: string) => Promise<void>;
+    closeWatchlistHistoryModal?: () => void;
+    toggleWatchlistHistoryRun?: (runId: string, btn: HTMLElement) => Promise<void>;
     SoulSyncIssueDomain?: IssueDomainBridge;
     SoulSyncWorkflowActions?: {
       openDownloadMissingAlbum: (input: DownloadMissingAlbumWorkflowInput) => void | Promise<void>;

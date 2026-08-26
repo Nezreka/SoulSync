@@ -47,8 +47,7 @@ interface BlocklistListResponse {
   entries?: BlocklistEntry[];
 }
 
-const _esc = (text: unknown): string => window.escapeHtml?.(String(text ?? '')) ?? String(text ?? '');
-const _toast = (message: string, kind: string): void => window.showToast?.(message, kind);
+import { escapeHtml as _esc, toast as _toast } from './html';
 
 let _blEntityType: BlocklistEntityType = 'artist'; // active tab
 let _blSearchSeq = 0; // guards against out-of-order search results

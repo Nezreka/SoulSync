@@ -19,6 +19,34 @@ import {
   switchBlocklistTab,
   unblockEntry,
 } from './blocklist';
+import {
+  connectMyAccount,
+  closeMyAccountsModal,
+  disconnectMyAccount,
+  openMyAccountsModal,
+  saveMyAccountToken,
+} from './my-accounts';
+import {
+  closeDownloadOriginsModal,
+  deleteSelectedOriginEntries,
+  openDownloadOriginsModal,
+  switchDownloadOriginTab,
+  toggleAllOriginEntries,
+  toggleOriginEntry,
+  toggleOriginGroup,
+} from './origin-history';
+import {
+  closeServiceSwitchModal,
+  openServiceSwitchModal,
+  setActiveSource,
+  setDownloadMode,
+  switchServiceSwitchTab,
+} from './service-switch';
+import {
+  closeWatchlistHistoryModal,
+  openWatchlistHistoryModal,
+  toggleWatchlistHistoryRun,
+} from './watchlist-history';
 
 /** every name the rest of the app may reach through window. */
 export const SHELL_WINDOW_EXPORTS = {
@@ -29,6 +57,30 @@ export const SHELL_WINDOW_EXPORTS = {
   onBlocklistSearchInput,
   blockFromSearch,
   unblockEntry,
+  // origin-history.js (ported aug 26)
+  openDownloadOriginsModal,
+  closeDownloadOriginsModal,
+  switchDownloadOriginTab,
+  toggleOriginGroup,
+  toggleOriginEntry,
+  toggleAllOriginEntries,
+  deleteSelectedOriginEntries,
+  // watchlist-history.js (ported aug 26)
+  openWatchlistHistoryModal,
+  closeWatchlistHistoryModal,
+  toggleWatchlistHistoryRun,
+  // my-accounts.js (ported aug 26)
+  openMyAccountsModal,
+  closeMyAccountsModal,
+  connectMyAccount,
+  saveMyAccountToken,
+  disconnectMyAccount,
+  // service-switch.js (ported aug 26)
+  openServiceSwitchModal,
+  closeServiceSwitchModal,
+  switchServiceSwitchTab,
+  setActiveSource,
+  setDownloadMode,
 } as const;
 
 Object.assign(window, SHELL_WINDOW_EXPORTS);
