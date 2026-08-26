@@ -233,6 +233,42 @@ def test_the_album_position_becomes_the_home_of_a_singles_file(catalogue):
     assert ids["ost_track"] not in owners
 
 
+def test_rehome_moves_all_versions_and_elects_the_best_primary(catalogue):
+    """Re-homing a recording must not make whichever row moved last primary."""
+    from core.library2.recording_links import prefer_album_home
+
+    conn, ids = catalogue
+    master_id = conn.execute(
+        "SELECT id FROM lib2_track_files WHERE track_id=?",
+        (ids["single_track"],),
+    ).fetchone()[0]
+    conn.execute(
+        "UPDATE lib2_track_files SET format='flac', bit_depth=24,"
+        " sample_rate=96000, bitrate=3000 WHERE id=?", (master_id,),
+    )
+    derivative_id = conn.execute(
+        "INSERT INTO lib2_track_files(track_id,path,format,bitrate,file_role,"
+        " derived_from_file_id,import_status,file_state)"
+        " VALUES(?,?,'opus',192,'derivative',?,'imported','active')",
+        (ids["single_track"],
+         "Sawano Hiroyuki/Vogel Im Kafig/01-07 - Vogel Im Kafig.opus",
+         master_id),
+    ).lastrowid
+
+    stats = prefer_album_home(conn)
+
+    assert stats["rehomed"] == 2
+    rows = conn.execute(
+        "SELECT id,track_id,is_primary FROM lib2_track_files"
+        " WHERE id IN (?,?) ORDER BY id", (master_id, derivative_id),
+    ).fetchall()
+    assert {(row[0], row[1]) for row in rows} == {
+        (master_id, ids["ost_track"]),
+        (derivative_id, ids["ost_track"]),
+    }
+    assert [row[0] for row in rows if row[2] == 1] == [master_id]
+
+
 def test_two_real_copies_are_a_duplicate_finding_not_a_rehome(imported_conn):
     """``Moonlight`` is on disk twice. Re-pointing one at the other's position
     would silently orphan a file the user still has."""

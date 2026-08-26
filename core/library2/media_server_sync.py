@@ -32,6 +32,7 @@ from core.library2.media_mappings import (
     resolve_mapping,
     upsert_mapping,
 )
+from core.library2.track_files import elect_primary_file
 
 logger = get_logger("library2.media_server_sync")
 
@@ -330,7 +331,13 @@ def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
 
 def _upsert_file(cursor, track_id: int, path: str, size, bitrate,
                  server_source=None, source=None) -> None:
-    """The track's file row. One primary per track (ADR-03)."""
+    """Refresh a file row, then apply ADR-03's shared primary election.
+
+    A media-server observation must not silently override a manual selection
+    or promote a lower-quality derivative merely because it was observed
+    last.  Inserts/updates already participate through schema triggers; the
+    explicit election here also converges databases created before them.
+    """
     row = cursor.execute(
         "SELECT id FROM lib2_track_files WHERE track_id=? AND path=?",
         (track_id, path)).fetchone()
@@ -342,25 +349,23 @@ def _upsert_file(cursor, track_id: int, path: str, size, bitrate,
             "       format=COALESCE(format, ?), file_state='active',"
             "       server_source=COALESCE(?, server_source),"
             "       source=COALESCE(source, ?),"
-            "       is_primary=1, updated_at=CURRENT_TIMESTAMP"
+            "       updated_at=CURRENT_TIMESTAMP"
             " WHERE id=?",
             (size, bitrate, fmt, server_source, source, int(row[0])))
-        primary_id = int(row[0])
+        observed_id = int(row[0])
     else:
-        primary_id = int(cursor.execute(
+        observed_id = int(cursor.execute(
             "INSERT INTO lib2_track_files(track_id, path, size, bitrate, format,"
-            " server_source, source, is_primary, file_state, import_status)"
-            " VALUES(?,?,?,?,?,?,?,1,'active','imported')",
+            " server_source, source, file_state, import_status)"
+            " VALUES(?,?,?,?,?,?,?,'active','imported')",
             (track_id, path, size, bitrate, fmt, server_source, source)).lastrowid)
     cursor.execute(
         "UPDATE lib2_track_files SET file_state=CASE WHEN source IS NULL "
         "AND legacy_track_id IS NULL THEN 'deleted' ELSE file_state END,"
-        " server_source=NULL, is_primary=0, updated_at=CURRENT_TIMESTAMP"
+        " server_source=NULL, updated_at=CURRENT_TIMESTAMP"
         " WHERE track_id=? AND id<>? AND server_source=?",
-        (track_id, primary_id, server_source))
-    cursor.execute(
-        "UPDATE lib2_track_files SET is_primary=0 WHERE track_id=? AND id<>?",
-        (track_id, primary_id))
+        (track_id, observed_id, server_source))
+    elect_primary_file(cursor, track_id)
 
 
 __all__ = [

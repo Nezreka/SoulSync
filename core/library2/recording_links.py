@@ -227,7 +227,7 @@ def prefer_album_home(conn: Any) -> Dict[str, int]:
     for file_id, move in moves.items():
         conn.execute(
             "UPDATE lib2_track_files"
-            "   SET track_id=?, is_primary=1, updated_at=CURRENT_TIMESTAMP"
+            "   SET track_id=?, updated_at=CURRENT_TIMESTAMP"
             " WHERE id=?",
             (move["to_track_id"], file_id),
         )

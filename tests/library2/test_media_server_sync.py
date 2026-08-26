@@ -7,9 +7,11 @@ import sqlite3
 import pytest
 
 from core.library2.media_server_sync import (
-    resolve_album, resolve_artist, upsert_album, upsert_artist, upsert_track,
+    _upsert_file, resolve_album, resolve_artist, upsert_album, upsert_artist,
+    upsert_track,
 )
 from core.library2.schema import ensure_library_v2_schema
+from core.library2.track_files import set_primary_file
 
 
 @pytest.fixture()
@@ -208,6 +210,52 @@ def test_pipeline_file_has_ownership_provenance(cur):
     assert tuple(cur.execute(
         "SELECT source,file_state FROM lib2_track_files WHERE track_id=?", (track,)
     ).fetchone()) == ("import", "active")
+
+
+def test_file_observation_uses_quality_election_instead_of_last_seen(cur):
+    _artist_id, _album_id, track_id, master_id = _imported(cur)
+    cur.execute(
+        "UPDATE lib2_track_files SET format='flac', bit_depth=24,"
+        " sample_rate=96000, bitrate=3000 WHERE id=?", (master_id,),
+    )
+
+    _upsert_file(
+        cur, track_id, "/music/song.opus", 1024, 192,
+        server_source="soulsync", source="companion",
+    )
+
+    primary = cur.execute(
+        "SELECT path FROM lib2_track_files WHERE track_id=? AND is_primary=1",
+        (track_id,),
+    ).fetchone()
+    assert primary[0] == "/music/song.flac"
+
+
+def test_file_observation_preserves_manual_primary(cur):
+    _artist_id, _album_id, track_id, master_id = _imported(cur)
+    cur.execute(
+        "UPDATE lib2_track_files SET format='flac', bitrate=3000 WHERE id=?",
+        (master_id,),
+    )
+    _upsert_file(
+        cur, track_id, "/music/song.opus", 1024, 192,
+        server_source="soulsync", source="companion",
+    )
+    derivative_id = cur.execute(
+        "SELECT id FROM lib2_track_files WHERE path='/music/song.opus'"
+    ).fetchone()[0]
+    assert set_primary_file(cur, track_id, derivative_id)
+
+    _upsert_file(
+        cur, track_id, "/music/song.flac", 5000, 3000,
+        server_source="soulsync", source="import",
+    )
+
+    primary = cur.execute(
+        "SELECT id,primary_manual FROM lib2_track_files"
+        " WHERE track_id=? AND is_primary=1", (track_id,),
+    ).fetchone()
+    assert tuple(primary) == (derivative_id, 1)
 
 
 def test_pipeline_primary_artist_corrections_replace_junctions(cur):
