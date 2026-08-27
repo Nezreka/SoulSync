@@ -3251,8 +3251,27 @@ export function MaintenanceModal({
       .then(awaitMaintenanceResult)
       .then((r) => {
         setReconcile('done');
+        // The repair half of this pass is what the user notices — identities
+        // taken back from guests who inherited them, guest rows that only a
+        // browsed release ever credited, and provider "no photo" placeholders
+        // stored as portraits. Reporting only the match counts made a run that
+        // fixed dozens of rows look like it had done nothing.
+        const repaired = [
+          Number(r.identities_released ?? 0) > 0
+            ? `${r.identities_released} borrowed identities released`
+            : null,
+          Number(r.browse_only_pruned ?? 0) > 0
+            ? `${r.browse_only_pruned} browse-only artists removed`
+            : null,
+          Number(r.placeholder_images_cleared ?? 0) > 0
+            ? `${r.placeholder_images_cleared} placeholder photos cleared`
+            : null,
+        ].filter(Boolean);
         setReconcileResult(
-          `Scanned ${r.scanned ?? 0} · matched ${r.matched ?? 0} · split ${r.split ?? 0} · still unmatched ${r.unmatched ?? 0}`,
+          [
+            `Scanned ${r.scanned ?? 0} · matched ${r.matched ?? 0} · split ${r.split ?? 0} · still unmatched ${r.unmatched ?? 0}`,
+            ...repaired,
+          ].join(' · '),
         );
         void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
       })
@@ -3313,7 +3332,9 @@ export function MaintenanceModal({
               </span>
               <span className={styles.qpDesc}>
                 Resolve provider identities and split genuine collaboration names into their real
-                artists.
+                artists. Also takes back identities a guest inherited from the release they appear
+                on, removes artists that only a browsed release ever credited, and drops provider
+                “no photo” placeholders stored as portraits.
                 {reconcileResult ? ` — ${reconcileResult}` : ''}
               </span>
             </button>
