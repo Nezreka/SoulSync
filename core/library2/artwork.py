@@ -18,6 +18,7 @@ server. Never raises — callers get ``None``/placeholder behaviour on failure.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import socket
@@ -744,6 +745,75 @@ _background_guard = threading.Lock()
 # scheduled-or-running entities, new requests fall back to the placeholder
 # contract instead of queuing (dropped, not queued without bound).
 _MAX_BACKGROUND_QUEUE = 500
+
+
+def drop_borrowed_album_cover_portraits(database, conn) -> list:
+    """Delete cached artist portraits that are really a foreign album's cover.
+
+    Narrowing the fallback to releases an artist FRONTS does not un-cache what
+    the old rule already produced, and nothing else has a reason to touch those
+    rows — 2 Chainz's portrait stayed byte-identical to the cover of "Peace Is
+    The Mission (Extended)", a release he only guests on, because his provider
+    id is legitimately his own.
+
+    Byte equality with a cached album cover is the exact test: that is what the
+    fallback did, so it is what it left behind. A cover cached for a release
+    the artist does front is left alone — a weak portrait, but his.
+
+    Returns the artist ids whose cached image was dropped; the next render
+    rebuilds them under the current rule.
+    """
+    directory = artwork_dir(database)
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return []
+
+    def _digest(path) -> Optional[str]:
+        try:
+            return hashlib.md5(path.read_bytes()).hexdigest()  # noqa: S324
+        except OSError:
+            return None
+
+    albums_by_digest: Dict[str, set] = {}
+    artists: Dict[int, str] = {}
+    for entry in entries:
+        name = entry.name
+        if not name.endswith(".jpg") or name.endswith("_t.jpg"):
+            continue
+        kind, _, rest = name[:-4].partition("_")
+        if not rest.isdigit():
+            continue
+        digest = _digest(entry)
+        if digest is None:
+            continue
+        if kind == "album":
+            albums_by_digest.setdefault(digest, set()).add(int(rest))
+        elif kind == "artist":
+            artists[int(rest)] = digest
+
+    dropped = []
+    for artist_id, digest in sorted(artists.items()):
+        album_ids = albums_by_digest.get(digest)
+        if not album_ids:
+            continue
+        marks = ",".join("?" for _ in album_ids)
+        fronted = conn.execute(
+            f"""SELECT 1 FROM lib2_albums al
+                 WHERE al.id IN ({marks})
+                   AND (al.primary_artist_id = ?
+                        OR al.id IN (SELECT album_id FROM lib2_album_artists
+                                      WHERE artist_id = ? AND role = 'primary'))
+                 LIMIT 1""",
+            (*sorted(album_ids), artist_id, artist_id),
+        ).fetchone()
+        if fronted is not None:
+            continue
+        if invalidate_artwork(database, "artist", artist_id):
+            dropped.append(artist_id)
+    if dropped:
+        logger.info("dropped %d borrowed album-cover portraits", len(dropped))
+    return dropped
 
 
 def shutdown_background_executor() -> None:

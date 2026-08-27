@@ -97,3 +97,70 @@ def test_stored_placeholder_photos_are_cleared_but_a_locked_one_is_kept(imported
     assert imported_conn.execute(
         "SELECT image_url FROM lib2_artists WHERE id=?", (real,)
     ).fetchone()["image_url"] == "https://i.scdn.co/image/real.jpg"
+
+
+DEEZER_BLANK = (
+    "https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg"
+)
+DEEZER_REAL = (
+    "https://cdn-images.dzcdn.net/images/artist/"
+    "e8a10a0d4addf3eff1d8295d9a066c28/1000x1000-000000-80-0-0.jpg"
+)
+
+
+def test_deezer_blank_avatar_is_recognised_by_its_empty_asset_hash():
+    """Deezer answers an artist with no photo with a URL whose asset hash is
+    simply MISSING — `/images/artist//…` — and serves a grey silhouette for it.
+    Verified live: api.deezer.com/artist/5541359 (40 Thevz) returns exactly this
+    as `picture_xl`, which is how that silhouette became his portrait again the
+    moment the Last.fm star was cleared.
+    """
+    assert is_placeholder_artist_image(DEEZER_BLANK) is True
+    assert is_placeholder_artist_image(DEEZER_REAL) is False
+    # The same shape for the other entities Deezer serves this way.
+    assert is_placeholder_artist_image(
+        "https://cdn-images.dzcdn.net/images/cover//500x500-000000-80-0-0.jpg"
+    ) is True
+
+
+def test_a_portrait_borrowed_from_a_foreign_album_cover_is_dropped(
+    imported_conn, tmp_path,
+):
+    """Restricting the fallback does not un-cache what it already produced.
+
+    2 Chainz's cached portrait stayed byte-identical to the cover of "Peace Is
+    The Mission (Extended)" — a release he guests on — because nothing in the
+    repair pass had a reason to touch his row: his provider id is his own.
+    """
+    host = _artist(imported_conn, "Major Lazer")
+    guest = _artist(imported_conn, "2 Chainz")
+    album_id = int(imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, origin) "
+        "VALUES(?, 'Peace Is The Mission (Extended)', 'library')",
+        (host,),
+    ).lastrowid)
+    for artist_id, role in ((host, "primary"), (guest, "featured")):
+        imported_conn.execute(
+            "INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?,?,?)",
+            (album_id, artist_id, role),
+        )
+
+    class _DB:
+        database_path = ":memory:"
+    db = _DB()
+    cover = b"\xff\xd8cover-bytes"
+    for name in (f"album_{album_id}.jpg", f"artist_{host}.jpg", f"artist_{guest}.jpg"):
+        (tmp_path / name).write_bytes(cover)
+    (tmp_path / f"artist_{guest}_t.jpg").write_bytes(cover)
+    import core.library2.artwork as A
+    original_dir = A.artwork_dir
+    A.artwork_dir = lambda _db: tmp_path
+    try:
+        dropped = A.drop_borrowed_album_cover_portraits(db, imported_conn)
+    finally:
+        A.artwork_dir = original_dir
+
+    assert dropped == [guest]
+    assert not (tmp_path / f"artist_{guest}.jpg").exists()
+    # The host fronts the release — a cover is a weak portrait but it is HIS.
+    assert (tmp_path / f"artist_{host}.jpg").exists()

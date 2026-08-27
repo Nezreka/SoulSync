@@ -31,13 +31,21 @@ _PLACEHOLDER_IMAGE_MARKERS = (
     "2a96cbd8b46e442fc41c2b86b821562f",
 )
 
+# Deezer does not use a magic asset id: when an artist has no photo it returns
+# the normal CDN URL with the asset hash simply MISSING —
+# ``/images/artist//1000x1000-000000-80-0-0.jpg`` — and serves a grey
+# silhouette for it. Verified live against api.deezer.com/artist/5541359.
+_EMPTY_ASSET_PATH = re.compile(r"/images/[a-z]+//")
+
 
 def is_placeholder_artist_image(url: Any) -> bool:
     """True when ``url`` is a provider's stand-in for "no photo at all"."""
     text = str(url or "").strip().lower()
     if not text:
         return False
-    return any(marker in text for marker in _PLACEHOLDER_IMAGE_MARKERS)
+    if any(marker in text for marker in _PLACEHOLDER_IMAGE_MARKERS):
+        return True
+    return _EMPTY_ASSET_PATH.search(text) is not None
 
 
 def _real_artist_image(url: Optional[str]) -> Optional[str]:

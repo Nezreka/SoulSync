@@ -3343,7 +3343,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             try:
                 conn = db._get_connection()
                 try:
-                    from core.library2.artwork import invalidate_artwork
+                    from core.library2.artwork import (
+                        drop_borrowed_album_cover_portraits,
+                        invalidate_artwork,
+                    )
                     from core.library2.native_enrich import (
                         reconcile_unmapped_native_artists,
                     )
@@ -3369,6 +3372,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                 "could not drop cached artwork for artist %s: %s",
                                 artist_id, exc,
                             )
+                    # Narrowing the cover fallback does not un-cache what the old
+                    # rule already produced, and those rows have no other reason
+                    # to be touched.
+                    try:
+                        stats["borrowed_portraits_dropped"] = len(
+                            drop_borrowed_album_cover_portraits(db, conn)
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("borrowed-portrait sweep failed: %s", exc)
                     _job_registry.update(job_id, result=stats)
                 finally:
                     conn.close()

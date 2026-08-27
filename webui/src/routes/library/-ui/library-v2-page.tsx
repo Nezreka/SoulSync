@@ -3266,6 +3266,9 @@ export function MaintenanceModal({
           Number(r.placeholder_images_cleared ?? 0) > 0
             ? `${r.placeholder_images_cleared} placeholder photos cleared`
             : null,
+          Number(r.borrowed_portraits_dropped ?? 0) > 0
+            ? `${r.borrowed_portraits_dropped} borrowed portraits dropped`
+            : null,
         ].filter(Boolean);
         setReconcileResult(
           [
