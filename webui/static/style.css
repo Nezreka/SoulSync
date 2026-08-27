@@ -65130,9 +65130,9 @@ body.max-performance #page-particles-canvas {
 
 .adl-layout {
     /* outer gutter comes from .page (40px) — consistent with the other
-       full-width exception pages (library, etc.). single column since the
-       side panel died: batches are groups in the main list now. */
-    max-width: 1100px;
+       full-width exception pages (library, etc.). wide: the group grid
+       below spends the horizontal room a 1100px column left empty. */
+    max-width: 1720px;
     margin: 0 auto;
 }
 
@@ -65241,8 +65241,9 @@ body.max-performance #page-particles-canvas {
     border: none;
     background: transparent;
     color: rgba(255, 255, 255, 0.55);
-    font-size: 0.88rem;
-    font-weight: 600;
+    font-size: 0.9rem;
+    font-weight: 650;
+    letter-spacing: 0.005em;
     cursor: pointer;
     transition: color 0.2s ease;
 }
@@ -65315,6 +65316,7 @@ body.max-performance #page-particles-canvas {
     background: rgba(var(--accent-rgb), 0.15);
     border-color: rgba(var(--accent-rgb), 0.25);
     color: rgb(var(--accent-light-rgb));
+    box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.12);
 }
 
 .adl-clear-btn {
@@ -65378,6 +65380,64 @@ body.max-performance #page-particles-canvas {
     gap: 10px;
 }
 
+/* the Downloads view only: batch groups flow into columns on wide screens
+   instead of stacking into one long scroll. review/quarantine/deleted keep
+   the plain column above. min() guards the phone case where 560px would
+   overflow the container. */
+.adl-list.adl-group-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(560px, 100%), 1fr));
+    gap: 12px;
+    align-items: start;
+}
+
+/* the tail sections and the empty state always span the full row */
+.adl-group-grid .adl-earlier,
+.adl-group-grid .adl-batch-history-section,
+.adl-group-grid .adl-empty-hero {
+    grid-column: 1 / -1;
+}
+
+/* one folded bucket line: "6 queued · next: BLUE" / "3 done" */
+.adl-bucket-fold {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    padding: 7px 12px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.76rem;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.adl-bucket-fold:hover {
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.adl-bucket-fold-chevron {
+    display: inline-flex;
+    color: rgba(255, 255, 255, 0.35);
+    transition: transform 0.2s ease;
+}
+
+.adl-bucket-fold.open .adl-bucket-fold-chevron {
+    transform: rotate(90deg);
+}
+
+.adl-bucket-fold-preview {
+    color: rgba(255, 255, 255, 0.4);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .adl-empty {
     text-align: center;
     padding: 64px 20px;
@@ -65391,9 +65451,17 @@ body.max-performance #page-particles-canvas {
 }
 
 .adl-empty-icon {
-    color: rgb(var(--accent-rgb));
-    opacity: 0.4;
-    margin-bottom: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+    background: rgba(var(--accent-rgb), 0.07);
+    color: rgb(var(--accent-light-rgb));
+    opacity: 0.85;
+    margin-bottom: 14px;
 }
 
 .adl-empty-title {
@@ -65444,16 +65512,51 @@ body.max-performance #page-particles-canvas {
    batch's real rows nested under it. One rendering of the truth. */
 
 .adl-group {
+    position: relative;
     background: rgba(255, 255, 255, 0.014);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 14px;
     overflow: hidden;
-    transition: border-color 0.2s ease, opacity 0.4s ease;
+    /* a whisper of top light so the card reads as a surface, not a hole */
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045), 0 4px 18px rgba(0, 0, 0, 0.22);
+    transition: border-color 0.2s ease, opacity 0.4s ease, box-shadow 0.2s ease;
+}
+
+.adl-group:hover {
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* the batch's own album art as a blurred wash behind the card. it has to
+   stay a WASH: at the first attempt a bright cover put a recognizable face
+   behind the rows. heavy blur, low opacity, and a mask that concentrates
+   the color at the header and lets the row area fall back to the surface. */
+.adl-group-backdrop {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center 30%;
+    filter: blur(95px) saturate(1.8);
+    /* oversized so the blur has no vignetted edges inside the card, and
+       scaled far enough that a face can never survive as a face */
+    transform: scale(2.2);
+    opacity: 0.09;
+    pointer-events: none;
+    -webkit-mask-image: linear-gradient(to bottom, black, rgba(0, 0, 0, 0.25) 60%, transparent);
+    mask-image: linear-gradient(to bottom, black, rgba(0, 0, 0, 0.25) 60%, transparent);
+}
+
+.adl-group > :not(.adl-group-backdrop) {
+    position: relative;
 }
 
 .adl-group.active-glow {
-    border-color: rgba(var(--accent-rgb), 0.22);
-    box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.07);
+    border-color: rgba(var(--accent-rgb), 0.28);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 0 22px rgba(var(--accent-rgb), 0.1),
+        0 4px 18px rgba(0, 0, 0, 0.22);
+}
+
+.adl-group.active-glow .adl-group-backdrop {
+    opacity: 0.13;
 }
 
 .adl-group.filtered {
@@ -65487,12 +65590,14 @@ body.max-performance #page-particles-canvas {
 }
 
 .adl-group-thumb {
-    width: 44px;
-    height: 44px;
-    border-radius: 9px;
+    width: 46px;
+    height: 46px;
+    border-radius: 10px;
     object-fit: cover;
     flex-shrink: 0;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+    outline: 1px solid rgba(255, 255, 255, 0.09);
+    outline-offset: -1px;
 }
 
 .adl-group-thumb-fallback {
@@ -65516,8 +65621,9 @@ body.max-performance #page-particles-canvas {
 }
 
 .adl-group-name {
-    font-size: 0.95rem;
-    font-weight: 650;
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
     color: #fff;
     white-space: nowrap;
     overflow: hidden;
@@ -65662,6 +65768,70 @@ body.max-performance #page-particles-canvas {
     gap: 3px;
 }
 
+/* one folded album line in the Earlier tail */
+.adl-earlier-album {
+    background: rgba(255, 255, 255, 0.014);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.adl-earlier-album-header {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    padding: 8px 14px;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 0.8rem;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.adl-earlier-album-header:hover {
+    background: rgba(255, 255, 255, 0.035);
+}
+
+.adl-earlier-album-header.open .adl-bucket-fold-chevron {
+    transform: rotate(90deg);
+}
+
+.adl-earlier-album-thumb {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    object-fit: cover;
+    flex-shrink: 0;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.adl-earlier-album-name {
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.adl-earlier-album-artist {
+    color: rgba(255, 255, 255, 0.5);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 1;
+}
+
+.adl-earlier-album-summary {
+    margin-left: auto;
+    color: rgba(255, 255, 255, 0.55);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
 .adl-earlier-more {
     align-self: center;
     margin-top: 6px;
@@ -65702,10 +65872,16 @@ body.max-performance #page-particles-canvas {
 
 /* rows inside a group: the group carries the box, rows go frameless */
 .adl-row-compact {
-    padding: 7px 10px;
+    padding: 6px 10px;
     background: transparent;
     border-color: transparent;
     border-radius: 8px;
+}
+
+.adl-row-compact .adl-row-art {
+    width: 34px;
+    height: 34px;
+    border-radius: 7px;
 }
 
 .adl-row-compact:hover {

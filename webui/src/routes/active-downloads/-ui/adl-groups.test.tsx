@@ -55,6 +55,7 @@ const groupProps = (over: Record<string, unknown> = {}) => ({
   batch: batch(),
   rows: [row()],
   allBatchRows: [row()],
+  bucketed: true,
   filtered: false,
   opacity: 1,
   samples: [],
@@ -134,16 +135,111 @@ describe('AdlGroup', () => {
   });
 });
 
-describe('AdlEarlierGroup', () => {
-  const many = Array.from({ length: EARLIER_FOLD + 5 }, (_, i) =>
-    row({ task_id: `h${i}`, batch_id: '', status: 'completed' }),
-  );
+describe('bucketed group rows', () => {
+  const mixed = [
+    row({ task_id: 'a1', status: 'downloading', title: 'Moving' }),
+    row({ task_id: 'f1', status: 'failed', title: 'Broke' }),
+    row({ task_id: 'q1', status: 'queued', title: 'Next Up' }),
+    row({ task_id: 'q2', status: 'queued', title: 'After That' }),
+    row({ task_id: 'c1', status: 'completed', title: 'Finished' }),
+    row({ task_id: 'c2', status: 'completed', title: 'Also Done' }),
+    row({ task_id: 'x1', status: 'cancelled', title: 'Bailed' }),
+  ];
 
-  it('folds past the cap and expands on demand', () => {
+  it('shows moving + broken rows in full and folds queued/done to one line each', () => {
+    const { container } = render(
+      <AdlGroup {...groupProps({ rows: mixed, allBatchRows: mixed })} />,
+    );
+    const titles = [...container.querySelectorAll('.adl-row-title')].map((t) => t.textContent);
+    // in-flight first, then the broken ones (cancelled folds into broken)
+    expect(titles).toEqual(['Moving', 'Broke', 'Bailed']);
+    const folds = [...container.querySelectorAll('.adl-bucket-fold')].map((f) => f.textContent);
+    expect(folds[0]).toContain('2 queued');
+    expect(folds[0]).toContain('next: Next Up');
+    expect(folds[1]).toContain('2 done');
+  });
+
+  it('expands a fold in place and collapses it again', () => {
+    const { container } = render(
+      <AdlGroup {...groupProps({ rows: mixed, allBatchRows: mixed })} />,
+    );
+    const queuedFold = container.querySelector('.adl-bucket-fold') as HTMLElement;
+    fireEvent.click(queuedFold);
+    let titles = [...container.querySelectorAll('.adl-row-title')].map((t) => t.textContent);
+    expect(titles).toContain('Next Up');
+    expect(titles).toContain('After That');
+    // done stays folded independently
+    expect(titles).not.toContain('Finished');
+    fireEvent.click(queuedFold);
+    titles = [...container.querySelectorAll('.adl-row-title')].map((t) => t.textContent);
+    expect(titles).toEqual(['Moving', 'Broke', 'Bailed']);
+  });
+
+  it('renders every row plainly when bucketing is off (status/batch filter)', () => {
+    const { container } = render(
+      <AdlGroup {...groupProps({ rows: mixed, allBatchRows: mixed, bucketed: false })} />,
+    );
+    expect(container.querySelectorAll('.adl-bucket-fold')).toHaveLength(0);
+    expect(container.querySelectorAll('.adl-row')).toHaveLength(mixed.length);
+  });
+});
+
+describe('AdlEarlierGroup', () => {
+  it('folds a same-album history run into one line and expands in place', () => {
+    const albumRun = Array.from({ length: 5 }, (_, i) =>
+      row({
+        task_id: `h${i}`,
+        batch_id: '',
+        status: i === 4 ? 'failed' : 'completed',
+        artist: 'Fontaines D.C.',
+        album: 'Romance (Deluxe Edition)',
+        title: `Track ${i}`,
+      }),
+    );
+    const single = row({
+      task_id: 's1',
+      batch_id: '',
+      status: 'completed',
+      album: 'One-Off',
+      title: 'Lone Single',
+    });
+    const { container } = render(
+      <AdlEarlierGroup rows={[...albumRun, single]} onCancelRow={vi.fn()} />,
+    );
+    // the run is one line; the singleton stays a plain row
+    const header = container.querySelector('.adl-earlier-album-header') as HTMLElement;
+    expect(header.textContent).toContain('Romance (Deluxe Edition)');
+    expect(header.textContent).toContain('4 done · 1 failed');
+    expect([...container.querySelectorAll('.adl-row-title')].map((t) => t.textContent)).toEqual([
+      'Lone Single',
+    ]);
+
+    fireEvent.click(header);
+    expect(container.querySelectorAll('.adl-earlier-album .adl-row')).toHaveLength(5);
+    fireEvent.click(header);
+    expect(container.querySelectorAll('.adl-earlier-album .adl-row')).toHaveLength(0);
+  });
+
+  it('keeps batchless in-flight rows plain and on top, never inside a fold', () => {
+    const rows = [
+      row({ task_id: 'l1', batch_id: '', status: 'downloading', album: 'Some Album' }),
+      row({ task_id: 'h1', batch_id: '', status: 'completed', album: 'Some Album' }),
+      row({ task_id: 'h2', batch_id: '', status: 'completed', album: 'Some Album' }),
+    ];
+    const { container } = render(<AdlEarlierGroup rows={rows} onCancelRow={vi.fn()} />);
+    // the live row renders in full; the two settled ones fold
+    expect(container.querySelectorAll(':scope > .adl-earlier > .adl-row')).toHaveLength(1);
+    expect(container.querySelector('.adl-earlier-album-summary')?.textContent).toBe('2 done');
+  });
+
+  it('folds past the item cap counting albums as one item', () => {
+    const many = Array.from({ length: EARLIER_FOLD + 5 }, (_, i) =>
+      row({ task_id: `h${i}`, batch_id: '', album: `Album ${i}`, status: 'completed' }),
+    );
     const { container } = render(<AdlEarlierGroup rows={many} onCancelRow={vi.fn()} />);
     expect(container.querySelectorAll('.adl-row')).toHaveLength(EARLIER_FOLD);
     const more = container.querySelector('.adl-earlier-more') as HTMLElement;
-    expect(more.textContent).toBe(`Show all ${many.length}`);
+    expect(more.textContent).toBe('Show 5 more');
     fireEvent.click(more);
     expect(container.querySelectorAll('.adl-row')).toHaveLength(many.length);
   });

@@ -12,7 +12,7 @@ import {
   progressSegments,
   statLine,
 } from '../-adl.batch';
-import { batchColorIndex, batchEta } from '../-adl.helpers';
+import { batchColorIndex, batchEta, statusClass } from '../-adl.helpers';
 import { AdlRow } from './adl-row';
 
 function PhaseIcon({ icon }: { icon: 'spinner' | 'check' | 'hourglass' | null }) {
@@ -62,12 +62,117 @@ export function BatchThumb({
   );
 }
 
+/** One folded bucket line: "6 queued · next: BLUE" / "3 done". */
+function BucketFold({
+  count,
+  noun,
+  preview,
+  open,
+  onToggle,
+}: {
+  count: number;
+  noun: string;
+  preview?: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button type="button" className={`adl-bucket-fold${open ? ' open' : ''}`} onClick={onToggle}>
+      <span className="adl-bucket-fold-chevron" aria-hidden="true">
+        <svg
+          width="11"
+          height="11"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.4"
+        >
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+      </span>
+      {count} {noun}
+      {!open && preview ? (
+        <span className="adl-bucket-fold-preview"> · next: {preview}</span>
+      ) : null}
+    </button>
+  );
+}
+
+/**
+ * What a mid-flight batch actually shows: the rows that are MOVING and the
+ * rows that BROKE, in full. The queue and the done pile are facts, not
+ * events — they fold to one line each. This is what turned a 12-track sync
+ * from a screen and a half of rows into five lines (Boulder, Aug 27:
+ * "so much scrolling").
+ */
+function BucketedRows({
+  rows,
+  openBuckets,
+  onToggleBucket,
+  onCancelRow,
+}: {
+  rows: AdlDownload[];
+  openBuckets: ReadonlySet<string>;
+  onToggleBucket: (key: string) => void;
+  onCancelRow: (dl: AdlDownload) => void | Promise<void>;
+}) {
+  const inFlight = rows.filter((dl) => statusClass(dl.status) === 'active');
+  const broken = rows.filter((dl) => ['failed', 'cancelled'].includes(statusClass(dl.status)));
+  const queued = rows.filter((dl) => statusClass(dl.status) === 'queued');
+  const done = rows.filter((dl) => statusClass(dl.status) === 'completed');
+
+  return (
+    <>
+      {inFlight.map((dl) => (
+        <AdlRow key={dl.task_id} dl={dl} compact onCancel={onCancelRow} />
+      ))}
+      {broken.map((dl) => (
+        <AdlRow key={dl.task_id} dl={dl} compact onCancel={onCancelRow} />
+      ))}
+      {queued.length > 0 ? (
+        <>
+          <BucketFold
+            count={queued.length}
+            noun="queued"
+            preview={queued[0]?.title}
+            open={openBuckets.has('queued')}
+            onToggle={() => onToggleBucket('queued')}
+          />
+          {openBuckets.has('queued')
+            ? queued.map((dl) => <AdlRow key={dl.task_id} dl={dl} compact onCancel={onCancelRow} />)
+            : null}
+        </>
+      ) : null}
+      {done.length > 0 ? (
+        <>
+          <BucketFold
+            count={done.length}
+            noun="done"
+            open={openBuckets.has('done')}
+            onToggle={() => onToggleBucket('done')}
+          />
+          {openBuckets.has('done')
+            ? done.map((dl) => <AdlRow key={dl.task_id} dl={dl} compact onCancel={onCancelRow} />)
+            : null}
+        </>
+      ) : null}
+    </>
+  );
+}
+
 export interface AdlGroupProps {
   batch: AdlBatch;
   /** The batch's rows AFTER the page's status filter. */
   rows: AdlDownload[];
   /** The batch's FULL row set — artwork lookup and the trimmed count. */
   allBatchRows: AdlDownload[];
+  /**
+   * When true, queued and done rows fold into one-line summaries and only
+   * in-flight + failed rows render in full. Off under a status filter (the
+   * chip asked for exactly those rows) and under a batch filter (the user
+   * asked for the whole batch).
+   */
+  bucketed: boolean;
   filtered: boolean;
   opacity: number;
   samples: RateSample[];
@@ -90,6 +195,7 @@ export function AdlGroup({
   batch,
   rows,
   allBatchRows,
+  bucketed,
   filtered,
   opacity,
   samples,
@@ -101,6 +207,15 @@ export function AdlGroup({
   const terminal = isTerminalPhase(batch.phase);
   const [openOverride, setOpenOverride] = useState<boolean | null>(null);
   const open = openOverride ?? !terminal;
+  /** Which folded buckets ('queued' / 'done') the user has expanded. */
+  const [openBuckets, setOpenBuckets] = useState<ReadonlySet<string>>(new Set());
+  const toggleBucket = (key: string) =>
+    setOpenBuckets((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   const colorIdx = batchColorIndex(batch.batch_id);
   const phase = phaseDisplay(batch);
@@ -108,6 +223,8 @@ export function AdlGroup({
   const stats = statLine(batch);
   const eta = batchEta(batch, samples, Date.now());
   const active = isBatchActive(batch);
+
+  const art = allBatchRows.find((t) => t.artwork)?.artwork ?? null;
 
   const classes = ['adl-group', `phase-${batch.phase}`];
   if (open) classes.push('open');
@@ -124,6 +241,11 @@ export function AdlGroup({
       style={opacity < 1 ? { opacity } : undefined}
       data-batch-id={batch.batch_id}
     >
+      {/* the album art, blurred to a wash behind the card — the page owns
+          real artwork, so the chrome doesn't have to invent color */}
+      {art ? (
+        <div className="adl-group-backdrop" style={{ backgroundImage: `url(${art})` }} />
+      ) : null}
       <div
         className="adl-group-header"
         role="button"
@@ -143,11 +265,7 @@ export function AdlGroup({
             style={{ background: `rgba(var(--batch-color-${colorIdx}), 0.6)` }}
           />
         ) : null}
-        <BatchThumb
-          batch={batch}
-          artwork={allBatchRows.find((t) => t.artwork)?.artwork ?? null}
-          colorIdx={colorIdx}
-        />
+        <BatchThumb batch={batch} artwork={art} colorIdx={colorIdx} />
         <div className="adl-group-info">
           <div className="adl-group-name-line">
             <span
@@ -242,9 +360,16 @@ export function AdlGroup({
 
       {open ? (
         <div className="adl-group-rows">
-          {rows.map((dl) => (
-            <AdlRow key={dl.task_id} dl={dl} compact onCancel={onCancelRow} />
-          ))}
+          {bucketed ? (
+            <BucketedRows
+              rows={rows}
+              openBuckets={openBuckets}
+              onToggleBucket={toggleBucket}
+              onCancelRow={onCancelRow}
+            />
+          ) : (
+            rows.map((dl) => <AdlRow key={dl.task_id} dl={dl} compact onCancel={onCancelRow} />)
+          )}
           {rows.length === 0 && batch.phase === 'album_downloading' ? (
             <div className="adl-group-note">
               Downloading one release first. Track matching starts after staging.
@@ -264,14 +389,31 @@ export function AdlGroup({
   );
 }
 
-/** How many "earlier" rows show before the fold. */
+/** How many "earlier" items (rows or album folds) show before the fold. */
 export const EARLIER_FOLD = 12;
+
+/** "12 done" / "10 done · 2 failed" for one folded album line. */
+function earlierAlbumSummary(rows: AdlDownload[]): string {
+  const done = rows.filter((dl) => statusClass(dl.status) === 'completed').length;
+  const failed = rows.length - done;
+  const parts: string[] = [];
+  if (done) parts.push(`${done} done`);
+  if (failed) parts.push(`${failed} failed`);
+  return parts.join(' · ');
+}
+
+type EarlierItem =
+  | { kind: 'row'; row: AdlDownload }
+  | { kind: 'album'; key: string; name: string; artist: string; rows: AdlDownload[] };
 
 /**
  * Rows with no live batch: aged-out history plus anything batchless.
  *
- * Folded past EARLIER_FOLD because this tail is where 300-row payloads live —
- * thirty-seven identical completed rows were the old page's wall of noise.
+ * Two folds keep this tail short. Same-album history runs collapse to one
+ * line each — Boulder's real install had twelve identical Romance (Deluxe
+ * Edition) rows stacked full height (Aug 27 screenshot). And past
+ * EARLIER_FOLD items the whole section folds, because this is where
+ * 300-row payloads live.
  */
 export function AdlEarlierGroup({
   rows,
@@ -281,17 +423,95 @@ export function AdlEarlierGroup({
   onCancelRow: (dl: AdlDownload) => void | Promise<void>;
 }) {
   const [showAll, setShowAll] = useState(false);
+  const [openAlbums, setOpenAlbums] = useState<ReadonlySet<string>>(new Set());
   if (rows.length === 0) return null;
-  const shown = showAll ? rows : rows.slice(0, EARLIER_FOLD);
+
+  const toggleAlbum = (name: string) =>
+    setOpenAlbums((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+
+  // a batchless row that is still moving is not history — it stays a plain
+  // row on top and never hides inside an album fold
+  const live = rows.filter((dl) => ['active', 'queued'].includes(statusClass(dl.status)));
+  const settled = rows.filter((dl) => !['active', 'queued'].includes(statusClass(dl.status)));
+
+  const grouped: EarlierItem[] = [];
+  const byKey = new Map<string, Extract<EarlierItem, { kind: 'album' }>>();
+  for (const row of settled) {
+    // group by the ALBUM, not the batch name — history rows carry the
+    // download source as their batch name, and "Soulseek · 45 done" says
+    // nothing. the album run is the unit a human recognizes.
+    const key = row.album ? `${row.artist}|${row.album}` : '';
+    if (!key) {
+      grouped.push({ kind: 'row', row });
+      continue;
+    }
+    let album = byKey.get(key);
+    if (!album) {
+      album = { kind: 'album', key, name: row.album, artist: row.artist || '', rows: [] };
+      byKey.set(key, album);
+      grouped.push(album);
+    }
+    album.rows.push(row);
+  }
+  // an album of one is just a row
+  const items: EarlierItem[] = grouped.map((item) =>
+    item.kind === 'album' && item.rows.length === 1 ? { kind: 'row', row: item.rows[0] } : item,
+  );
+
+  const shown = showAll ? items : items.slice(0, EARLIER_FOLD);
+  const hidden = items.length - shown.length;
+
   return (
     <div className="adl-earlier">
       <div className="adl-section-header">Earlier ({rows.length})</div>
-      {shown.map((dl) => (
+      {live.map((dl) => (
         <AdlRow key={dl.task_id} dl={dl} onCancel={onCancelRow} />
       ))}
-      {rows.length > EARLIER_FOLD ? (
+      {shown.map((item) =>
+        item.kind === 'row' ? (
+          <AdlRow key={item.row.task_id} dl={item.row} onCancel={onCancelRow} />
+        ) : (
+          <div className="adl-earlier-album" key={item.key}>
+            <button
+              type="button"
+              className={`adl-earlier-album-header${openAlbums.has(item.key) ? ' open' : ''}`}
+              onClick={() => toggleAlbum(item.key)}
+            >
+              <span className="adl-bucket-fold-chevron" aria-hidden="true">
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                >
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </span>
+              {item.rows[0].artwork ? (
+                <img className="adl-earlier-album-thumb" src={item.rows[0].artwork} alt="" />
+              ) : null}
+              <span className="adl-earlier-album-name">{item.name}</span>
+              {item.artist ? <span className="adl-earlier-album-artist">{item.artist}</span> : null}
+              <span className="adl-earlier-album-summary">{earlierAlbumSummary(item.rows)}</span>
+            </button>
+            {openAlbums.has(item.key)
+              ? item.rows.map((dl) => (
+                  <AdlRow key={dl.task_id} dl={dl} compact onCancel={onCancelRow} />
+                ))
+              : null}
+          </div>
+        ),
+      )}
+      {hidden > 0 || showAll ? (
         <button type="button" className="adl-earlier-more" onClick={() => setShowAll((v) => !v)}>
-          {showAll ? 'Show fewer' : `Show all ${rows.length}`}
+          {showAll ? 'Show fewer' : `Show ${hidden} more`}
         </button>
       ) : null}
     </div>
@@ -466,7 +686,7 @@ export function AdlGroupedList({
 
   if (batches.length === 0 && rows.length === 0) {
     return (
-      <div className="adl-list" id="adl-list">
+      <div className="adl-list adl-group-grid" id="adl-list">
         <AdlDownloadsEmpty onNavigate={onNavigate} />
         <AdlRecentHistory history={history} onOpenFullHistory={onOpenFullHistory} />
       </div>
@@ -474,13 +694,14 @@ export function AdlGroupedList({
   }
 
   return (
-    <div className="adl-list" id="adl-list">
+    <div className="adl-list adl-group-grid" id="adl-list">
       {shownBatches.map((batch) => (
         <AdlGroup
           key={batch.batch_id}
           batch={batch}
           rows={rows.filter((dl) => dl.batch_id === batch.batch_id)}
           allBatchRows={allRows.filter((dl) => dl.batch_id === batch.batch_id)}
+          bucketed={!statusFiltered && !filterBatchId}
           filtered={filterBatchId === batch.batch_id}
           opacity={batchOpacity(batch.batch_id, batch.phase)}
           samples={samplesFor(batch.batch_id)}
