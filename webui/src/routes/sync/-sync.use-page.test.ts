@@ -158,9 +158,9 @@ describe('sidebar visibility', () => {
 });
 
 describe('what it assembles', () => {
-  it('builds nine verticals and ONE pipeline controller', () => {
+  it('builds ten verticals and ONE pipeline controller', () => {
     const { result } = renderHook(() => useSyncPage());
-    expect(Object.keys(result.current.verticals)).toHaveLength(9);
+    expect(Object.keys(result.current.verticals)).toHaveLength(10);
     expect(typeof result.current.pipeline.run).toBe('function');
     expect(typeof result.current.pipeline.resume).toBe('function');
   });

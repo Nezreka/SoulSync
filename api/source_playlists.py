@@ -86,6 +86,7 @@ _spotify_enrichment_worker = None
 _tidal_enrichment_worker = None
 _dev_mode_enabled = None
 _get_automation_deps = None
+_ytmusic_auth_headers = None
 
 
 def configure(**deps):
@@ -4634,6 +4635,401 @@ def update_youtube_playlist_phase(url_hash):
 def convert_youtube_results_to_spotify_tracks(discovery_results):
     """Convert YouTube discovery results to Spotify tracks format for sync"""
     return convert_results_to_spotify_tracks(discovery_results, "YouTube")
+
+
+# ===================================================================
+# YOUTUBE MUSIC (ACCOUNT) API ENDPOINTS
+# ===================================================================
+#
+# Distinct from the /api/youtube/* family above: that one parses a PASTED
+# playlist URL. This one lists the SIGNED-IN account's own library playlists
+# (core.ytmusic_library) and fetches individual playlists by id
+# (core.youtube_music_meta.fetch_ytmusic_playlist)
+
+# Global state for the YouTube Music management (persistent across page reloads)
+ytmusic_discovery_states = {}  # Key: YT Music playlist id ('LM' for Liked Music), Value: persistent playlist state
+ytmusic_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="ytmusic_discovery")
+
+
+@bp.route('/api/ytmusic/playlists', methods=['GET'])
+def get_ytmusic_playlists():
+    """List the signed-in YouTube Music account's own library playlists, Liked Music first."""
+    from core.ytmusic_library import fetch_library_playlists, fetch_liked_music_row, library_playlists_to_rows
+    auth = _ytmusic_auth_headers()
+    if not auth:
+        return jsonify({"error": "YouTube Music not authenticated. Settings → Downloads → Download Source: YouTube Only → Paste cookies.txt → Save."}), 401
+    try:
+        rows = library_playlists_to_rows(fetch_library_playlists(auth))
+        liked_row = fetch_liked_music_row(auth)
+        if liked_row:
+            rows.insert(0, liked_row)
+
+        playlist_data = [{
+            "id": row["id"],
+            "name": row["name"],
+            "owner": row.get("owner") or "Unknown",
+            "track_count": row.get("track_count", 0),
+            "image_url": row.get("image_url"),
+            "description": row.get("description") or "",
+            "tracks": [],
+        } for row in rows]
+
+        logger.info(f"Loaded {len(playlist_data)} YouTube Music playlists")
+        return jsonify(playlist_data)
+    except Exception as e:
+        logger.error(f"Error getting YouTube Music playlists: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/ytmusic/playlist/<playlist_id>', methods=['GET'])
+def get_ytmusic_playlist_tracks(playlist_id):
+    """Fetch full track details for a specific YouTube Music playlist."""
+    from core.youtube_music_meta import fetch_ytmusic_playlist
+    from core.ytmusic_library import ytmusic_playlist_url
+    auth = _ytmusic_auth_headers()
+    if not auth:
+        return jsonify({"error": "YouTube Music not authenticated."}), 401
+    try:
+        data = fetch_ytmusic_playlist(ytmusic_playlist_url(playlist_id), auth)
+        if not data:
+            return jsonify({"error": "Playlist not found or unable to access. This may be due to privacy settings or account restrictions."}), 404
+        if not data.get('tracks'):
+            return jsonify({"error": "This playlist appears to have no tracks or they cannot be accessed"}), 403
+
+        playlist_dict = {
+            'id': data.get('id', playlist_id),
+            'name': data.get('name', 'YouTube Music Playlist'),
+            'description': '',
+            'owner': 'You',
+            'track_count': data.get('track_count', len(data['tracks'])),
+            'image_url': data.get('image_url'),
+            'tracks': data['tracks'],
+        }
+        logger.info(f"Loaded {len(data['tracks'])} tracks from YouTube Music playlist: {playlist_dict['name']}")
+        return jsonify(playlist_dict)
+    except Exception as e:
+        logger.error(f"Error getting YouTube Music playlist tracks: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/ytmusic/discovery/start/<playlist_id>', methods=['POST'])
+def start_ytmusic_discovery(playlist_id):
+    """Start Spotify discovery process for a YouTube Music playlist"""
+    from core.youtube_music_meta import fetch_ytmusic_playlist
+    from core.ytmusic_library import ytmusic_playlist_url
+    try:
+        auth = _ytmusic_auth_headers()
+        if not auth:
+            return jsonify({"error": "YouTube Music not authenticated."}), 401
+
+        # Fetch this single playlist fresh — no need to re-fetch the whole library.
+        target_playlist = fetch_ytmusic_playlist(ytmusic_playlist_url(playlist_id), auth)
+
+        if not target_playlist:
+            return jsonify({"error": "YouTube Music playlist not found"}), 404
+
+        if not target_playlist.get('tracks'):
+            return jsonify({"error": "Playlist has no tracks"}), 400
+
+        if playlist_id in ytmusic_discovery_states:
+            state = ytmusic_discovery_states[playlist_id]
+            if state['phase'] == 'discovering':
+                return jsonify({"error": "Discovery already in progress"}), 400
+            state['playlist'] = target_playlist
+            state['phase'] = 'discovering'
+            state['status'] = 'discovering'
+            state['discovery_progress'] = 0
+            state['spotify_matches'] = 0
+            state['spotify_total'] = len(target_playlist['tracks'])
+            state['discovery_results'] = []
+            state['last_accessed'] = time.time()
+        else:
+            state = {
+                'playlist': target_playlist,
+                'phase': 'discovering',  # discovering -> discovered -> syncing -> sync_complete -> downloading -> download_complete
+                'status': 'discovering',
+                'discovery_progress': 0,
+                'spotify_matches': 0,
+                'spotify_total': len(target_playlist['tracks']),
+                'discovery_results': [],
+                'sync_playlist_id': None,
+                'converted_spotify_playlist_id': None,
+                'download_process_id': None,
+                'created_at': time.time(),
+                'last_accessed': time.time(),
+                'discovery_future': None,
+                'sync_progress': {}
+            }
+            ytmusic_discovery_states[playlist_id] = state
+
+        add_activity_item("", "YouTube Music Discovery Started", f"'{target_playlist['name']}' - {len(target_playlist['tracks'])} tracks", "Now")
+
+        future = ytmusic_discovery_executor.submit(_run_ytmusic_discovery_worker, playlist_id)
+        state['discovery_future'] = future
+
+        logger.info(f"Started Spotify discovery for YouTube Music playlist: {target_playlist['name']}")
+        return jsonify({"success": True, "message": "Discovery started"})
+
+    except Exception as e:
+        logger.error(f"Error starting YouTube Music discovery: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/ytmusic/discovery/status/<playlist_id>', methods=['GET'])
+def get_ytmusic_discovery_status(playlist_id):
+    """Get real-time discovery status for a YouTube Music playlist"""
+    return _get_source_discovery_status(ytmusic_discovery_states, playlist_id, "YouTube Music discovery not found", "YouTube Music")
+
+
+@bp.route('/api/ytmusic/discovery/update_match', methods=['POST'])
+def update_ytmusic_discovery_match():
+    """Update a YouTube Music discovery result with manually selected Spotify track."""
+    try:
+        data = request.get_json()
+        identifier = data.get('identifier')  # playlist_id (bare or mirrored_<id>)
+        track_index = data.get('track_index')
+        spotify_track = data.get('spotify_track')
+
+        if not identifier or track_index is None or not spotify_track:
+            return jsonify({'error': 'Missing required fields'}), 400
+
+        state = ytmusic_discovery_states.get(identifier)
+
+        if not state:
+            return jsonify({'error': 'Discovery state not found'}), 404
+
+        if track_index >= len(state['discovery_results']):
+            return jsonify({'error': 'Invalid track index'}), 400
+
+        result = state['discovery_results'][track_index]
+        old_status = result.get('status')
+
+        result['status'] = 'Found'
+        result['status_class'] = 'found'
+        result['spotify_track'] = spotify_track['name']
+        result['spotify_artist'] = _join_artist_names(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else _extract_artist_name(spotify_track['artists'])
+        result['spotify_album'] = spotify_track['album']
+        result['spotify_id'] = spotify_track['id']
+
+        duration_ms = spotify_track.get('duration_ms', 0)
+        if duration_ms:
+            minutes = duration_ms // 60000
+            seconds = (duration_ms % 60000) // 1000
+            result['duration'] = f"{minutes}:{seconds:02d}"
+        else:
+            result['duration'] = '0:00'
+
+        result['spotify_data'] = _build_fix_modal_spotify_data(spotify_track)
+        result['wing_it_fallback'] = False
+        result['manual_match'] = True
+
+        if old_status != 'found' and old_status != 'Found':
+            state['spotify_matches'] = state.get('spotify_matches', 0) + 1
+
+        logger.info(f"Manual match updated: ytmusic - {identifier} - track {track_index}")
+        logger.info(f"   → {result['spotify_artist']} - {result['spotify_track']}")
+
+        from core.discovery.manual_match import derive_manual_match_provider
+        match_source = derive_manual_match_provider(
+            spotify_track, _get_active_discovery_source()
+        )
+        matched_data = None
+
+        try:
+            original_track = result.get('youtube_track', {})
+            original_name = original_track.get('name', spotify_track['name'])
+            original_artists = original_track.get('artists', [])
+            if original_artists:
+                original_artist = original_artists[0] if isinstance(original_artists[0], str) else original_artists[0].get('name', '')
+            else:
+                original_artist = ''
+
+            cache_key = _get_discovery_cache_key(original_name, original_artist)
+            artists_list = spotify_track['artists']
+            if isinstance(artists_list, list):
+                artists_list = [a if isinstance(a, str) else a.get('name', '') for a in artists_list]
+            image_url = spotify_track.get('image_url') or ''
+            album_raw = spotify_track.get('album', '')
+            if isinstance(album_raw, dict):
+                album_obj = dict(album_raw)
+                if image_url and not album_obj.get('image_url'):
+                    album_obj['image_url'] = image_url
+                if image_url and not album_obj.get('images'):
+                    album_obj['images'] = [{'url': image_url}]
+            else:
+                album_obj = {'name': album_raw or ''}
+                if image_url:
+                    album_obj['image_url'] = image_url
+                    album_obj['images'] = [{'url': image_url}]
+
+            matched_data = {
+                'id': spotify_track['id'],
+                'name': spotify_track['name'],
+                'artists': artists_list,
+                'album': album_obj,
+                'duration_ms': spotify_track.get('duration_ms', 0),
+                'image_url': image_url,
+                'source': match_source,
+            }
+            cache_db = get_database()
+            cache_db.save_discovery_cache_match(
+                cache_key[0], cache_key[1], _get_active_discovery_source(), 1.0, matched_data,
+                original_name, original_artist
+            )
+            logger.info(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
+        except Exception as cache_err:
+            logger.error(f"Error saving manual fix to discovery cache: {cache_err}")
+
+        if matched_data is not None and identifier.startswith('mirrored_'):
+            try:
+                tracks = state['playlist']['tracks']
+                if track_index < len(tracks):
+                    db_track_id = tracks[track_index].get('db_track_id')
+                    if db_track_id:
+                        db = get_database()
+                        extra_data = {
+                            'discovered': True,
+                            'provider': match_source,
+                            'confidence': 1.0,
+                            'matched_data': matched_data,
+                            'manual_match': True,
+                            'wing_it_fallback': False,
+                            'unmatched_by_user': False,
+                        }
+                        db.update_mirrored_track_extra_data(db_track_id, extra_data)
+                        result['matched_data'] = matched_data
+                        logger.info(f"Persisted manual fix to DB for track {db_track_id}")
+            except Exception as wb_err:
+                logger.error(f"Error persisting manual fix to DB: {wb_err}")
+
+        return jsonify({'success': True, 'result': result})
+
+    except Exception as e:
+        logger.error(f"Error updating YouTube Music discovery match: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/ytmusic/playlists/states', methods=['GET'])
+def get_ytmusic_playlist_states():
+    """Get all stored YouTube Music discovery states for frontend hydration"""
+    return _get_source_playlist_states(ytmusic_discovery_states, "YouTube Music", "YouTube Music")
+
+
+@bp.route('/api/ytmusic/state/<playlist_id>', methods=['GET'])
+def get_ytmusic_playlist_state(playlist_id):
+    """Get specific YouTube Music playlist state (detailed version of the status endpoint)"""
+    try:
+        if playlist_id not in ytmusic_discovery_states:
+            return jsonify({"error": "YouTube Music playlist not found"}), 404
+
+        state = ytmusic_discovery_states[playlist_id]
+        state['last_accessed'] = time.time()
+
+        response = {
+            'playlist_id': playlist_id,
+            'playlist': state['playlist'],
+            'phase': state['phase'],
+            'status': state['status'],
+            'discovery_progress': state['discovery_progress'],
+            'spotify_matches': state['spotify_matches'],
+            'spotify_total': state['spotify_total'],
+            'discovery_results': state['discovery_results'],
+            'sync_playlist_id': state.get('sync_playlist_id'),
+            'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
+            'download_process_id': state.get('download_process_id'),
+            'sync_progress': state.get('sync_progress', {}),
+            'created_at': state['created_at'],
+            'last_accessed': state['last_accessed']
+        }
+
+        return jsonify(response)
+
+    except Exception as e:
+        logger.error(f"Error getting YouTube Music playlist state: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/ytmusic/reset/<playlist_id>', methods=['POST'])
+def reset_ytmusic_playlist(playlist_id):
+    """Reset YouTube Music playlist to fresh phase (clear discovery/sync data)"""
+    return _reset_source_playlist(ytmusic_discovery_states, playlist_id, "YouTube Music", "YouTube Music playlist not found")
+
+
+@bp.route('/api/ytmusic/delete/<playlist_id>', methods=['POST'])
+def delete_ytmusic_playlist(playlist_id):
+    """Delete YouTube Music playlist state completely"""
+    return _delete_source_playlist(ytmusic_discovery_states, playlist_id, "YouTube Music", "YouTube Music playlist not found")
+
+
+@bp.route('/api/ytmusic/update_phase/<playlist_id>', methods=['POST'])
+def update_ytmusic_playlist_phase(playlist_id):
+    """Update YouTube Music playlist phase (used when modal closes to reset from download_complete to discovered)"""
+    return _update_source_playlist_phase(ytmusic_discovery_states, playlist_id, "YouTube Music playlist not found", "YouTube Music", _PHASE_LIST, False)
+
+
+def _build_ytmusic_discovery_deps():
+    """Build the YoutubeDiscoveryDeps bundle pointed at ytmusic_discovery_states."""
+    return _discovery_youtube.YoutubeDiscoveryDeps(
+        youtube_playlist_states=ytmusic_discovery_states,
+        spotify_client=_spotify_client(),
+        matching_engine=_matching_engine(),
+        pause_enrichment_workers=_pause_enrichment_workers,
+        resume_enrichment_workers=_resume_enrichment_workers,
+        get_active_discovery_source=_get_active_discovery_source,
+        get_metadata_fallback_client=_get_metadata_fallback_client,
+        get_discovery_cache_key=_get_discovery_cache_key,
+        validate_discovery_cache_artist=_validate_discovery_cache_artist,
+        extract_artist_name=_extract_artist_name,
+        spotify_rate_limited=_spotify_rate_limited,
+        discovery_score_candidates=_discovery_score_candidates,
+        get_metadata_cache=get_metadata_cache,
+        build_discovery_wing_it_stub=_build_discovery_wing_it_stub,
+        get_database=get_database,
+        add_activity_item=add_activity_item,
+        # No per-video artist recovery here: fetch_ytmusic_playlist already
+        # gets a real artist from the catalog API, unlike yt-dlp's flat
+        # extraction (which is what recover_youtube_artist works around).
+        recover_youtube_artist=None,
+    )
+
+
+def _run_ytmusic_discovery_worker(playlist_id):
+    return _discovery_youtube.run_youtube_discovery_worker(playlist_id, _build_ytmusic_discovery_deps())
+
+
+def convert_ytmusic_results_to_spotify_tracks(discovery_results):
+    """Convert YouTube Music discovery results to Spotify tracks format for sync"""
+    return convert_results_to_spotify_tracks(discovery_results, "YouTube Music")
+
+
+@bp.route('/api/ytmusic/sync/start/<playlist_id>', methods=['POST'])
+def start_ytmusic_sync(playlist_id):
+    """Start sync process for a YouTube Music playlist using discovered Spotify tracks"""
+    # Unlike start_youtube_sync, mirrored playlists never reach this endpoint:
+    # the frontend's 'mirrored' vertical routes every mirrored sync through
+    # /api/youtube/* regardless of the original source, and
+    # api/mirrored_playlists.py only ever registers into
+    # youtube_playlist_states — so no mirrored_<id> pipeline-collision guard
+    # is needed here.
+    return _start_source_sync(
+        ytmusic_discovery_states, playlist_id, sync_id_prefix="ytmusic",
+        not_found_message="YouTube Music playlist not found",
+        not_ready_message="YouTube Music playlist not ready for sync",
+        convert_fn=convert_ytmusic_results_to_spotify_tracks,
+        name_getter=_pl_name_strict, image_getter=_pl_image_dict,
+        activity_label="YouTube Music", error_label="YouTube Music")
+
+
+@bp.route('/api/ytmusic/sync/status/<playlist_id>', methods=['GET'])
+def get_ytmusic_sync_status(playlist_id):
+    """Get sync status for a YouTube Music playlist"""
+    return _get_source_sync_status(ytmusic_discovery_states, playlist_id, "YouTube Music playlist not found", "YouTube Music", "YouTube Music playlist", _pl_name_safe)
+
+
+@bp.route('/api/ytmusic/sync/cancel/<playlist_id>', methods=['POST'])
+def cancel_ytmusic_sync(playlist_id):
+    """Cancel sync for a YouTube Music playlist"""
+    return _cancel_source_sync(ytmusic_discovery_states, playlist_id, "YouTube Music", "YouTube Music playlist not found")
 
 
 # Add these new endpoints to the end of web_server.py

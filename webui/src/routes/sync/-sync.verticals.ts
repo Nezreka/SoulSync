@@ -1,20 +1,23 @@
 /**
- * The nine source verticals, built from ONE table rather than nine hand-written
+ * The ten source verticals, built from ONE table rather than ten hand-written
  * hook calls.
  *
  * kettui's fourth observation is that similar things get reimplemented per
- * feature instead of sharing an abstraction, and nine near-identical
+ * feature instead of sharing an abstraction, and ten near-identical
  * `useSourceVertical(SYNC_SOURCES.x, …)` calls at a page's top level is exactly
- * that shape: nine places to forget an option, nine places to update when the
- * vertical contract changes, and no way to tell that a tenth source was added
- * and missed. The registry below is the abstraction — the table is the source
- * of truth and the page reads a map out of it.
+ * that shape: ten places to forget an option, ten places to update when the
+ * vertical contract changes, and no way to tell that an eleventh source was
+ * added and missed. The registry below is the abstraction — the table is the
+ * source of truth and the page reads a map out of it.
  *
- * NINE, not fifteen: several tabs share a vertical. Last.fm Radio rides
+ * TEN, not sixteen: several tabs share a vertical. Last.fm Radio rides
  * ListenBrainz's machinery (same MB-track shape), Deezer-link rides Deezer's,
- * and the three URL-import tabs each have their own. The tab count and the
- * vertical count are different numbers and conflating them is how a tab ends
- * up with a vertical that belongs to something else.
+ * and the three URL-import tabs each have their own. `ytmusic` is the one
+ * exception in the other direction — it's its OWN vertical (a real account
+ * with real discovery/sync state) even though it shares youtube's worker and
+ * result shape; see `-sync.sources.ts`. The tab count and the vertical count
+ * are different numbers and conflating them is how a tab ends up with a
+ * vertical that belongs to something else.
  *
  * HOOK ORDER IS SAFE because `SYNC_VERTICAL_IDS` is a frozen module constant:
  * the same ids in the same order on every render, which is all the rules of
@@ -38,6 +41,7 @@ export const SYNC_VERTICAL_IDS = [
   'qobuz',
   'deezer',
   'youtube',
+  'ytmusic',
   'beatport',
   'spotify_public',
   'itunes_link',

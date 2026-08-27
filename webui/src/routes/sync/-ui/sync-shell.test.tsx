@@ -136,6 +136,26 @@ describe('the tab strip', () => {
     expect(btns.map((b) => b.getAttribute('data-tab'))).toEqual(['mirrored', 'server', 'beatport']);
   });
 
+  it('opens YouTube Music as a routed tab, same as the other sources', () => {
+    // ytmusic has no permanent chip (like spotify-public, tidal, etc.) — it
+    // is reached through Add playlist / the account-listing flow, which
+    // opens it by id exactly like the other routed sources.
+    let open!: (tab: string) => void;
+    const { container } = renderShell({
+      registerOpenTab: (fn) => {
+        open = fn as (tab: string) => void;
+      },
+    });
+    act(() => {
+      open('ytmusic');
+    });
+    const withRouted = Array.from(container.querySelectorAll('.sync-tab-button')).map((b) =>
+      b.getAttribute('data-tab'),
+    );
+    expect(withRouted).toEqual(['mirrored', 'server', 'beatport', 'ytmusic']);
+    expect(container.querySelector('[data-tab="ytmusic"]')?.className).toContain('active');
+  });
+
   it('opens on Mirrored — the library, not a source directory', () => {
     const { container } = renderShell();
     expect(container.querySelector('[data-tab="mirrored"]')?.className).toContain('active');

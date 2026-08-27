@@ -51,6 +51,7 @@ export function modalTitle(source: SyncSourceId, fakeHash: string): string {
     beatport: '🎵 Beatport Chart Discovery',
     listenbrainz: '🎵 ListenBrainz Playlist Discovery',
     youtube: '🎵 YouTube Playlist Discovery',
+    ytmusic: '🎵 YouTube Music Playlist Discovery',
     mirrored: '🎵 Mirrored Playlist Discovery',
   };
   return titles[source];
@@ -80,6 +81,7 @@ export function modalSourceLabel(
     beatport: 'Beatport',
     listenbrainz: 'LB',
     youtube: 'YT',
+    ytmusic: 'YT Music',
     mirrored: 'Source',
   };
   return labels[source];
@@ -98,6 +100,7 @@ export function descriptionSourceWord(source: SyncSourceId, fakeHash: string): s
     beatport: 'Beatport',
     listenbrainz: 'ListenBrainz',
     youtube: 'YouTube',
+    ytmusic: 'YouTube Music',
     mirrored: 'mirrored',
   };
   return words[source];

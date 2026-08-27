@@ -1,5 +1,5 @@
 /**
- * The sync page's chrome — header, the fifteen-tab strip, and the panel
+ * The sync page's chrome — header, the sixteen-tab strip, and the panel
  * switch. index.html 2226-2295 plus the tab handler at sync-services.js
  * 3694-3803.
  *

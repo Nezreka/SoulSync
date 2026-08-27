@@ -191,6 +191,21 @@ def test_auth_headers_drop_non_essential_cookies():
     assert "bulky-unrelated-value" not in cookie
 
 
+def test_auth_headers_keep_sidts_rotating_tokens():
+    # Regression for the "Sign in to listen to your liked tracks" bug:
+    # SAPISIDHASH alone verifies fine and generic library calls work, but
+    # Liked Music (list=LM) serves the signed-out view without these two
+    # (sigma67/ytmusicapi#962).
+    jar = (
+        _JAR
+        + ".google.de\tTRUE\t/\tTRUE\t1799999999\t__Secure-1PSIDTS\tsidts-1p\n"
+        + ".google.de\tTRUE\t/\tTRUE\t1799999999\t__Secure-3PSIDTS\tsidts-3p\n"
+    )
+    cookie = ytmusic_auth_headers(parse_netscape_cookies(jar))["Cookie"]
+    assert "__Secure-1PSIDTS=sidts-1p" in cookie
+    assert "__Secure-3PSIDTS=sidts-3p" in cookie
+
+
 def test_sapisid_aliases_are_accepted_in_priority_order():
     for name in ("__Secure-3PAPISID", "__Secure-1PAPISID", "SAPISID"):
         headers = ytmusic_auth_headers({name: "v"}, timestamp=1)

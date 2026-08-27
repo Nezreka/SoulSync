@@ -37,10 +37,14 @@ _SAPISID_NAMES = ("__Secure-3PAPISID", "__Secure-1PAPISID", "SAPISID")
 # A browser export can carry 90 KB+ of cookies across every Google property,
 # and YouTube rejects a request whose headers are that large (HTTP 413). Only
 # these actually matter for auth.
+#
+# __Secure-1PSIDTS / __Secure-3PSIDTS are rotating session-refresh tokens
+# Google now binds the SID/SAPISID family to.
 _ESSENTIAL_COOKIES = frozenset({
     "APISID", "HSID", "SSID", "SID", "SAPISID",
     "__Secure-1PAPISID", "__Secure-3PAPISID",
     "__Secure-1PSID", "__Secure-3PSID",
+    "__Secure-1PSIDTS", "__Secure-3PSIDTS",
     "LOGIN_INFO", "PREF", "SOCS", "VISITOR_INFO1_LIVE", "YSC",
 })
 
