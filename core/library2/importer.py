@@ -2341,10 +2341,19 @@ def reconcile_import_monitoring(cursor, *, profile_id: int = 1,
         # A non-legacy parent rule is deliberate state and survives re-import.
         if album["provenance"] not in (None, PROVENANCE_LEGACY):
             continue
+        # The expectation may only come from a source that actually KNOWS the
+        # release's size — the provider tracklist or the media server's count.
+        # Falling back to `known_tracks` made the test vacuous
+        # (`known_tracks >= known_tracks` is always true), so a release whose
+        # tracklist had never been fetched passed as complete on the strength
+        # of the rows it happened to have: a single with one file off disk was
+        # flagged as a complete single, and only revealed itself as a two-track
+        # release when somebody opened it. 368 releases on the production
+        # library were monitored on that non-evidence. Unknown size is not
+        # completeness; it is unknown.
         expected = max(
             int(album["expected_track_count"] or 0),
             int(album["track_count"] or 0),
-            int(album["known_tracks"] or 0),
         )
         monitored = bool(
             expected > 0

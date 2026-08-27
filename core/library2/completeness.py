@@ -765,14 +765,32 @@ def resolve_tracklist(config_manager, conn, album_id: int) -> Optional[List[dict
 
 
 def _partial_album_rows(conn, *, cached: Optional[bool] = None) -> List[Any]:
-    """Albums whose expected provider track count is larger than known track rows."""
+    """Albums whose expected provider track count is larger than known track rows,
+    plus the ones whose size nothing has ever established.
+
+    ``expected_track_count > known`` cannot select a row where the expectation
+    is NULL — ``NULL > n`` is NULL — so a release nobody ever asked the provider
+    about could never enter the precache. It sat at ``tracklist_status='idle'``
+    indefinitely and only revealed its real tracklist when a user opened it,
+    which is why a single that turned out to have two tracks looked like a
+    one-track single until the click. An unknown size is not completeness; it is
+    the thing this pass exists to resolve.
+
+    Scoped to library releases: a discography row exists to be browsed, its size
+    being unknown is not a gap in anyone's library, and resolving every one of
+    them is a provider-call storm for nothing.
+    """
     count_sql = "(SELECT COUNT(*) FROM lib2_tracks t WHERE t.album_id = al.id)"
+    unverified_sql = (
+        "(COALESCE(al.origin, 'library') = 'library' "
+        " AND al.expected_track_count IS NULL)"
+    )
     clauses = []
     if cached is True:
         clauses.append(f"al.expected_track_count IS NOT NULL AND al.expected_track_count <> {count_sql}")
         clauses.append("al.tracklist_json IS NOT NULL AND al.tracklist_json <> ''")
     else:
-        clauses.append(f"al.expected_track_count > {count_sql}")
+        clauses.append(f"(al.expected_track_count > {count_sql} OR {unverified_sql})")
     if cached is False:
         clauses.append("(al.tracklist_json IS NULL OR al.tracklist_json = '')")
     return conn.execute(
