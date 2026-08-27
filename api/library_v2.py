@@ -3343,6 +3343,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             try:
                 conn = db._get_connection()
                 try:
+                    from core.library2.artwork import invalidate_artwork
                     from core.library2.native_enrich import (
                         reconcile_unmapped_native_artists,
                     )
@@ -3356,6 +3357,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
                     stats = reconcile_unmapped_native_artists(conn, progress=_progress)
                     conn.commit()
+                    # A row whose borrowed identity was taken back still has the
+                    # owner's photo sitting in the artwork cache — that is the
+                    # part the user actually sees. Drop it so the next render
+                    # rebuilds from whatever the row resolved to on its own.
+                    for artist_id in stats.pop("released_artist_ids", []) or []:
+                        try:
+                            invalidate_artwork(db, "artist", int(artist_id))
+                        except Exception as exc:  # noqa: BLE001
+                            logger.debug(
+                                "could not drop cached artwork for artist %s: %s",
+                                artist_id, exc,
+                            )
                     _job_registry.update(job_id, result=stats)
                 finally:
                     conn.close()

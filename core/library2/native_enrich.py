@@ -215,10 +215,40 @@ def _persist_identity(
     )
 
 
+def identity_is_free(conn, artist_id: int, source: str, provider_id: str) -> bool:
+    """Is ``provider_id`` unclaimed by any artist outside this alias group?
+
+    Two catalogue rows are two artists. Whatever a resolver claims, one
+    provider identity may not end up on both — that fan-out is what put one
+    artist's photo, genres and whole discography on a dozen unrelated pages.
+    Alias members legitimately share their canonical row's identity (§40), so
+    the group is resolved before the test.
+    """
+    namespace = str(source or "").strip().lower()
+    identifier = str(provider_id or "").strip()
+    if not namespace or not identifier:
+        return False
+    from core.library2.artist_aliases import resolve_alias_group
+    group = resolve_alias_group(conn, int(artist_id)) or [int(artist_id)]
+    group = set(group) | {int(artist_id)}
+    if namespace == "spotify":
+        where = "spotify_id = ?"
+    elif namespace == "musicbrainz":
+        where = "musicbrainz_id = ?"
+    else:
+        where = f"TRIM(CAST(json_extract(external_ids, '$.{namespace}') AS TEXT)) = ?"
+    placeholders = ",".join("?" for _ in group)
+    row = conn.execute(
+        f"SELECT 1 FROM lib2_artists WHERE {where} "
+        f"  AND id NOT IN ({placeholders}) LIMIT 1",
+        (identifier, *sorted(group)),
+    ).fetchone()
+    return row is None
+
+
 def _artist_catalog_anchors(conn, artist_id: int) -> Dict[str, tuple]:
     """``source -> ('album'|'track', provider_id)`` for every strong provider
-    id already confirmed on this artist's own catalog rows (primary or
-    credited via the junction tables).
+    id already confirmed on a catalog row this artist is the PRIMARY of.
 
     These ids came from a real album/track match, not a name guess, so they
     are strong anchors (Guide §2.5, issues.md §16 Finding 1). Album anchors
@@ -226,6 +256,15 @@ def _artist_catalog_anchors(conn, artist_id: int) -> Dict[str, tuple]:
     ``get_album_for_source`` is supported uniformly across every registered
     provider, while single-track fetch isn't (album rows are checked first
     and a source is never overwritten once found).
+
+    A FEATURED credit is deliberately not an anchor. The resolvers behind
+    these ids (``get_album_artist_identity_for_source`` /
+    ``get_track_artist_identity_for_source``) answer with the release's
+    *primary* artist — that is their contract — so anchoring a guest on a
+    release they merely appear on resolves to somebody else every time. On the
+    production library that handed twelve guests of one Major Lazer release
+    his Spotify id, artwork, genres and discography, and ten more Sawano
+    Hiroyuki's. A guest has no anchor; the name search is the honest answer.
     """
     anchors: Dict[str, tuple] = {}
 
@@ -246,7 +285,8 @@ def _artist_catalog_anchors(conn, artist_id: int) -> Dict[str, tuple]:
     album_rows = conn.execute(
         "SELECT DISTINCT al.spotify_id, al.musicbrainz_id, al.external_ids "
         "FROM lib2_albums al WHERE al.primary_artist_id=? "
-        "   OR al.id IN (SELECT album_id FROM lib2_album_artists WHERE artist_id=?)",
+        "   OR al.id IN (SELECT album_id FROM lib2_album_artists "
+        "                 WHERE artist_id=? AND role='primary')",
         (artist_id, artist_id),
     ).fetchall()
     for row in album_rows:
@@ -256,7 +296,8 @@ def _artist_catalog_anchors(conn, artist_id: int) -> Dict[str, tuple]:
         "SELECT DISTINCT t.spotify_id, t.musicbrainz_id, t.external_ids "
         "FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id "
         "WHERE al.primary_artist_id=? "
-        "   OR t.id IN (SELECT track_id FROM lib2_track_artists WHERE artist_id=?)",
+        "   OR t.id IN (SELECT track_id FROM lib2_track_artists "
+        "                WHERE artist_id=? AND role='primary')",
         (artist_id, artist_id),
     ).fetchall()
     for row in track_rows:
@@ -345,6 +386,12 @@ def resolve_and_enrich_native_artist(
             resolved_id = str((identity or {}).get("artist_id") or "").strip()
             if not identity or not resolved_id:
                 continue
+            if not identity_is_free(conn, int(artist_id), source, resolved_id):
+                logger.debug(
+                    "artist %s: anchor %s/%s is already another artist's identity",
+                    artist_id, source, resolved_id,
+                )
+                continue
             resolved_anchors.append((source, resolved_id, identity))
 
         # Re-read rather than reusing the row fetched before the provider walk:
@@ -393,6 +440,12 @@ def resolve_and_enrich_native_artist(
         return {
             "success": False, "attempted": True, "artist_id": int(artist_id),
             "reason": "not_found",
+        }
+    if not identity_is_free(conn, int(artist_id), source, provider_id):
+        return {
+            "success": False, "attempted": True, "artist_id": int(artist_id),
+            "reason": "identity_taken", "source": source,
+            "provider_id": provider_id,
         }
 
     _persist_identity(
@@ -1229,6 +1282,127 @@ def _pending_unmapped_artists(
     return pending
 
 
+def _artist_is_a_release_primary(conn, artist_id: int) -> bool:
+    """Does this artist front at least one release in the catalogue?
+
+    That is the evidence that an anchor could legitimately have produced its
+    identity. A row that only ever appears as a guest never had a claim to one.
+    """
+    row = conn.execute(
+        "SELECT 1 FROM lib2_albums WHERE primary_artist_id=? "
+        " UNION ALL "
+        "SELECT 1 FROM lib2_album_artists WHERE artist_id=? AND role='primary' "
+        "LIMIT 1",
+        (int(artist_id), int(artist_id)),
+    ).fetchone()
+    return row is not None
+
+
+def _clear_borrowed_identity(conn, artist_id: int, namespace: str,
+                             owner_row: Any) -> None:
+    """Drop one borrowed provider id, and the artwork/genres that came with it.
+
+    ``_persist_identity`` writes the id, the image and the genres of the same
+    provider answer in one statement, so a borrowed row whose image and genres
+    are byte-identical to the owner's got them from that same wrong answer.
+    Anything that differs was written by something else and is left alone.
+    """
+    assignments = ["updated_at=CURRENT_TIMESTAMP"]
+    params: List[Any] = []
+    if namespace == "spotify":
+        assignments.append("spotify_id=NULL")
+    elif namespace == "musicbrainz":
+        assignments.append("musicbrainz_id=NULL")
+    else:
+        assignments.append("external_ids=json_remove(external_ids, ?)")
+        params.append(f"$.{namespace}")
+    row = conn.execute(
+        "SELECT image_url, genres, art_locked FROM lib2_artists WHERE id=?",
+        (int(artist_id),),
+    ).fetchone()
+    if row is not None:
+        if (not row["art_locked"] and row["image_url"]
+                and row["image_url"] == owner_row["image_url"]):
+            assignments.append("image_url=NULL")
+        if row["genres"] and row["genres"] == owner_row["genres"]:
+            assignments.append("genres='[]'")
+    params.append(int(artist_id))
+    conn.execute(
+        f"UPDATE lib2_artists SET {', '.join(assignments)} WHERE id=?", params
+    )
+
+
+def release_borrowed_artist_identities(conn) -> Dict[str, Any]:
+    """Take back provider identities that ended up on more than one artist.
+
+    The backlog healer for the featured-credit anchor defect: whichever member
+    of a sharing group actually fronts a release keeps the id; every guest that
+    merely inherited it is cleared, so the next reconcile pass resolves it by
+    name instead. A group where nothing in the catalogue names an owner (two
+    co-composers of one soundtrack, neither the primary of any release) is
+    reported and left untouched — guessing there would only move the error.
+
+    Returns ``{"released", "ambiguous", "artist_ids"}``; ``artist_ids`` are the
+    rows whose identity was taken back, so the caller can drop their cached
+    artwork.
+    """
+    from core.library2.artist_aliases import resolve_alias_group
+
+    holders: Dict[tuple, List[int]] = {}
+    rows = conn.execute(
+        "SELECT id, spotify_id, musicbrainz_id, external_ids, image_url, genres "
+        "FROM lib2_artists"
+    ).fetchall()
+    by_id = {int(row["id"]): row for row in rows}
+    for row in rows:
+        identity: Dict[str, str] = {}
+        if row["spotify_id"]:
+            identity["spotify"] = str(row["spotify_id"]).strip()
+        if row["musicbrainz_id"]:
+            identity["musicbrainz"] = str(row["musicbrainz_id"]).strip()
+        try:
+            extra = json.loads(row["external_ids"] or "{}")
+        except (TypeError, ValueError):
+            extra = {}
+        if isinstance(extra, dict):
+            for namespace, value in extra.items():
+                key = str(namespace).strip().lower()
+                text = str(value or "").strip()
+                if key and text:
+                    identity.setdefault(key, text)
+        for namespace, value in identity.items():
+            if value:
+                holders.setdefault((namespace, value), []).append(int(row["id"]))
+
+    stats: Dict[str, Any] = {"released": 0, "ambiguous": 0, "artist_ids": []}
+    for (namespace, value), artist_ids in holders.items():
+        if len(artist_ids) < 2:
+            continue
+        # §40 alias members legitimately share their canonical row's identity.
+        groups = {frozenset(resolve_alias_group(conn, aid) or [aid]) | {aid}
+                  for aid in artist_ids}
+        if len(groups) < 2:
+            continue
+        owners = [aid for aid in artist_ids
+                  if _artist_is_a_release_primary(conn, aid)]
+        if len(owners) != 1:
+            stats["ambiguous"] += 1
+            logger.info(
+                "borrowed identity %s/%s shared by %s and no catalogue owner",
+                namespace, value, artist_ids,
+            )
+            continue
+        owner_row = by_id[owners[0]]
+        for aid in artist_ids:
+            if aid == owners[0]:
+                continue
+            _clear_borrowed_identity(conn, aid, namespace, owner_row)
+            stats["released"] += 1
+            if aid not in stats["artist_ids"]:
+                stats["artist_ids"].append(aid)
+    return stats
+
+
 def reconcile_unmapped_native_artists(
     conn,
     *,
@@ -1252,9 +1426,20 @@ def reconcile_unmapped_native_artists(
     if resolver is None:
         resolver = default_artist_resolver
 
+    # Take back borrowed identities FIRST: a row cleared here has no provider
+    # id any more, so it joins this same run's pending set and gets resolved by
+    # name instead of keeping the guest-anchor answer forever.
+    released = release_borrowed_artist_identities(conn)
+    conn.commit()
+
     artists = _pending_unmapped_artists(conn, limit, cooldown_hours=cooldown_hours)
     total = len(artists)
-    stats = {"scanned": 0, "matched": 0, "split": 0, "unmatched": 0, "errors": 0}
+    stats = {
+        "scanned": 0, "matched": 0, "split": 0, "unmatched": 0, "errors": 0,
+        "identities_released": released["released"],
+        "identities_ambiguous": released["ambiguous"],
+        "released_artist_ids": released["artist_ids"],
+    }
     for index, art in enumerate(artists):
         artist_id = art["id"]
         try:
@@ -1428,6 +1613,8 @@ __all__ = [
     "enrich_native_entity_for_service",
     "resolve_and_enrich_native_artist",
     "reconcile_unmapped_native_artists",
+    "release_borrowed_artist_identities",
+    "identity_is_free",
     "smart_split_combined_artist",
     "enrich_native_artist_artwork",
     "default_artist_resolver",

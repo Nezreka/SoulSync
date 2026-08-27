@@ -841,23 +841,71 @@ def test_resolve_uses_track_anchor_when_no_album_anchor_exists(imported_conn):
     assert result["provider_id"] == "SP-FROM-TRACK"
 
 
-def test_resolve_finds_anchor_via_featured_credit_not_just_primary_artist(imported_conn):
+def test_resolve_ignores_anchors_of_releases_the_artist_is_only_featured_on(
+    imported_conn,
+):
+    """A featured credit is NOT an anchor.
+
+    ``get_album_artist_identity_for_source`` answers with the album's PRIMARY
+    artist — that is its whole contract. Anchoring a guest on a release they
+    merely appear on therefore resolves to somebody else every single time: on
+    the production library twelve guests of one Major Lazer release ended up
+    holding Major Lazer's Spotify id, artwork and discography, and ten more
+    held Sawano Hiroyuki's. Only a primary credit may anchor.
+    """
     primary = _insert_native_artist(imported_conn, "Main Act")
     featured = _insert_native_artist(imported_conn, "Guest Verse")
-    _insert_album(
+    album_id = _insert_album(
         imported_conn, primary, "Collab Album",
         spotify_id="SP-COLLAB", featured_artist_id=featured,
     )
-
-    def anchor_resolver(source, kind, provider_id):
-        return {"source": "spotify", "artist_id": "SP-GUEST", "name": "Guest Verse"}
-
-    result = NE.resolve_and_enrich_native_artist(
-        imported_conn, featured, resolver=_refusing_resolver, anchor_resolver=anchor_resolver,
+    _insert_track(
+        imported_conn, album_id, "Collab Song",
+        spotify_id="SP-COLLAB-TRACK", featured_artist_id=featured,
     )
 
+    # The anchor loop swallows exceptions on purpose (one bad source must not
+    # abort the rest), so record the calls instead of raising inside it.
+    anchor_calls = []
+
+    def anchor_resolver(source, kind, provider_id):
+        anchor_calls.append((source, kind, provider_id))
+        return {"source": "spotify", "artist_id": "SP-MAIN-ACT", "name": "Main Act"}
+
+    def name_resolver(name):
+        assert name == "Guest Verse"
+        return {"source": "spotify", "artist_id": "SP-REAL-GUEST", "name": name}
+
+    result = NE.resolve_and_enrich_native_artist(
+        imported_conn, featured, resolver=name_resolver, anchor_resolver=anchor_resolver,
+    )
+
+    assert anchor_calls == []
     assert result["success"] is True
-    assert result["provider_id"] == "SP-GUEST"
+    assert result["provider_id"] == "SP-REAL-GUEST"
+
+
+def test_resolve_refuses_an_identity_another_artist_already_holds(imported_conn):
+    """Two catalogue rows are two artists. Whatever a resolver claims, the same
+    provider identity may not be stamped onto both — that fan-out is precisely
+    what put one artist's photo and discography on a dozen unrelated pages."""
+    owner = _insert_native_artist(imported_conn, "Major Lazer")
+    imported_conn.execute(
+        "UPDATE lib2_artists SET spotify_id='SP-TAKEN' WHERE id=?", (owner,))
+    other = _insert_native_artist(imported_conn, "DJ Snake")
+
+    def name_resolver(name):
+        return {"source": "spotify", "artist_id": "SP-TAKEN", "name": name}
+
+    result = NE.resolve_and_enrich_native_artist(
+        imported_conn, other, resolver=name_resolver,
+        anchor_resolver=lambda *a: None,
+    )
+
+    assert result["success"] is False
+    assert imported_conn.execute(
+        "SELECT spotify_id FROM lib2_artists WHERE id=?", (other,)
+    ).fetchone()["spotify_id"] is None
 
 
 def test_resolve_falls_back_to_name_search_without_any_anchor(imported_conn):
@@ -1326,3 +1374,59 @@ def test_musicbrainz_album_enrichment_is_untouched(imported_conn, monkeypatch):
     )
 
     assert result["provider_id"] == "MB-RELEASE"
+
+
+def test_release_borrowed_identities_clears_guests_and_keeps_the_owner(imported_conn):
+    """Backlog healer for rows that already hold somebody else's identity."""
+    owner = _insert_native_artist(imported_conn, "Major Lazer")
+    imported_conn.execute(
+        "UPDATE lib2_artists SET spotify_id='SP-ML', image_url='http://img/ml.jpg', "
+        "genres='[\"moombahton\"]' WHERE id=?",
+        (owner,),
+    )
+    _insert_album(imported_conn, owner, "Peace Is The Mission", spotify_id="SP-PITM")
+    guests = []
+    for name in ("DJ Snake", "MØ"):
+        gid = _insert_native_artist(imported_conn, name)
+        imported_conn.execute(
+            "UPDATE lib2_artists SET spotify_id='SP-ML', image_url='http://img/ml.jpg', "
+            "genres='[\"moombahton\"]' WHERE id=?",
+            (gid,),
+        )
+        guests.append(gid)
+
+    stats = NE.release_borrowed_artist_identities(imported_conn)
+
+    assert stats["released"] == 2
+    assert sorted(stats["artist_ids"]) == sorted(guests)
+    assert imported_conn.execute(
+        "SELECT spotify_id, image_url, genres FROM lib2_artists WHERE id=?", (owner,)
+    ).fetchone()["spotify_id"] == "SP-ML"
+    for gid in guests:
+        row = imported_conn.execute(
+            "SELECT spotify_id, image_url, genres FROM lib2_artists WHERE id=?", (gid,)
+        ).fetchone()
+        assert row["spotify_id"] is None
+        # the artwork and genres arrived with the borrowed identity, byte for
+        # byte — they go with it.
+        assert row["image_url"] is None
+        assert row["genres"] == "[]"
+
+
+def test_release_borrowed_identities_leaves_ambiguous_groups_alone(imported_conn):
+    """Two co-composers of one soundtrack, neither the primary of any release:
+    nothing in the catalogue says which one owns the id, so neither is touched
+    and the group is reported instead."""
+    first = _insert_native_artist(imported_conn, "Marcin Przybyłowicz")
+    second = _insert_native_artist(imported_conn, "Paul Leonard-Morgan")
+    for aid in (first, second):
+        imported_conn.execute(
+            "UPDATE lib2_artists SET spotify_id='SP-WITCHER' WHERE id=?", (aid,))
+
+    stats = NE.release_borrowed_artist_identities(imported_conn)
+
+    assert stats["released"] == 0
+    assert stats["ambiguous"] == 1
+    assert imported_conn.execute(
+        "SELECT COUNT(*) FROM lib2_artists WHERE spotify_id='SP-WITCHER'"
+    ).fetchone()[0] == 2
