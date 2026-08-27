@@ -685,14 +685,21 @@ def _build_artwork_unlocked(database, conn, config_manager, kind: str, entity_id
             except Exception as e:  # noqa: BLE001
                 logger.debug("provider image download failed: %s", e)
 
+        # Only a release this artist FRONTS. A cover is a poor portrait at the
+        # best of times; the cover of somebody else's record is simply a
+        # picture of somebody else — that fallback put "Peace Is The Mission
+        # (Extended)" on the artist pages of 2 Chainz, DJ Snake and Dillon
+        # Francis, who are guests on it. A guest with no provider photo gets
+        # the placeholder, which is the honest answer.
         album = conn.execute(
             """
-            SELECT al.id FROM lib2_album_artists aa
-            JOIN lib2_albums al ON al.id = aa.album_id
-            WHERE aa.artist_id = ?
+            SELECT al.id FROM lib2_albums al
+            WHERE al.primary_artist_id = ?
+               OR al.id IN (SELECT album_id FROM lib2_album_artists
+                             WHERE artist_id = ? AND role = 'primary')
             ORDER BY (al.album_type <> 'single') DESC, al.year DESC LIMIT 1
             """,
-            (entity_id,),
+            (entity_id, entity_id),
         ).fetchone()
         if album:
             if not data:

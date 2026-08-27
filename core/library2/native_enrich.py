@@ -1403,6 +1403,34 @@ def release_borrowed_artist_identities(conn) -> Dict[str, Any]:
     return stats
 
 
+def clear_placeholder_artist_images(conn) -> Dict[str, Any]:
+    """Drop stored artist photos that are really a provider's "no photo" asset.
+
+    Last.fm hands out one generic grey star for every artist it cannot picture,
+    and it is a perfectly valid image URL — so it was stored, cached and served
+    as a portrait for seven different artists. Clearing it lets the next lookup
+    try again and, failing that, show the placeholder the UI has for exactly
+    this. An artwork lock means the user chose the picture; that is never
+    touched.
+    """
+    from core.metadata.artist_image import is_placeholder_artist_image
+
+    rows = conn.execute(
+        "SELECT id, image_url FROM lib2_artists "
+        " WHERE image_url IS NOT NULL AND image_url <> '' "
+        "   AND COALESCE(art_locked, 0) = 0"
+    ).fetchall()
+    artist_ids = [int(row["id"]) for row in rows
+                  if is_placeholder_artist_image(row["image_url"])]
+    for artist_id in artist_ids:
+        conn.execute(
+            "UPDATE lib2_artists SET image_url=NULL, updated_at=CURRENT_TIMESTAMP "
+            "WHERE id=?",
+            (artist_id,),
+        )
+    return {"cleared": len(artist_ids), "artist_ids": artist_ids}
+
+
 def prune_browse_only_artists(conn) -> Dict[str, Any]:
     """Remove artists that only ever existed because a browse-only release
     credited them.
@@ -1501,6 +1529,7 @@ def reconcile_unmapped_native_artists(
     # name instead of keeping the guest-anchor answer forever.
     released = release_borrowed_artist_identities(conn)
     pruned = prune_browse_only_artists(conn)
+    placeholders = clear_placeholder_artist_images(conn)
     conn.commit()
 
     artists = _pending_unmapped_artists(conn, limit, cooldown_hours=cooldown_hours)
@@ -1509,8 +1538,9 @@ def reconcile_unmapped_native_artists(
         "scanned": 0, "matched": 0, "split": 0, "unmatched": 0, "errors": 0,
         "identities_released": released["released"],
         "identities_ambiguous": released["ambiguous"],
-        "released_artist_ids": released["artist_ids"],
+        "released_artist_ids": released["artist_ids"] + placeholders["artist_ids"],
         "browse_only_pruned": pruned["pruned"],
+        "placeholder_images_cleared": placeholders["cleared"],
     }
     for index, art in enumerate(artists):
         artist_id = art["id"]
@@ -1687,6 +1717,7 @@ __all__ = [
     "reconcile_unmapped_native_artists",
     "release_borrowed_artist_identities",
     "prune_browse_only_artists",
+    "clear_placeholder_artist_images",
     "identity_is_free",
     "smart_split_combined_artist",
     "enrich_native_artist_artwork",
