@@ -25,6 +25,7 @@ interface Props {
   isMusicBrainz: boolean;
   isSourceArtist: boolean;
   onOpen: (release: DiscographyRelease) => void;
+  onPlay: (release: DiscographyRelease) => void | Promise<void>;
 }
 
 /**
@@ -43,6 +44,7 @@ export function DiscographySection({
   isMusicBrainz,
   isSourceArtist,
   onOpen,
+  onPlay,
 }: Props) {
   const counts = sectionCounts(releases, isMusicBrainz, filters);
   if (isSectionHidden(bucket, counts, filters)) return null;
@@ -84,6 +86,7 @@ export function DiscographySection({
             isMusicBrainz={isMusicBrainz}
             isSourceArtist={isSourceArtist}
             onOpen={onOpen}
+            onPlay={onPlay}
           />
         ))}
       </div>

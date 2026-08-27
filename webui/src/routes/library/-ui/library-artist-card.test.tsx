@@ -220,3 +220,50 @@ describe('LibraryArtistCard link', () => {
     expect(document.querySelector('.library-artist-stat')).toBeNull();
   });
 });
+
+describe('LibraryArtistCard play action', () => {
+  it('plays top tracks without following the artist link', () => {
+    const onPlay = vi.fn();
+    render(
+      <LibraryArtistCard
+        artist={{ id: 1, name: 'Aphex Twin' }}
+        index={0}
+        href="/artist-detail/library/1"
+        onPlay={onPlay}
+      />,
+    );
+
+    const button = document.querySelector('.library-artist-play-btn') as HTMLElement;
+    expect(button.getAttribute('aria-label')).toBe('Play top tracks by Aphex Twin');
+    expect(fireEvent.click(button)).toBe(false);
+    expect(onPlay).toHaveBeenCalledTimes(1);
+  });
+
+  it('is keyboard accessible and inert while the list is loading', () => {
+    const onPlay = vi.fn();
+    const { rerender } = render(
+      <LibraryArtistCard
+        artist={{ id: 1, name: 'Aphex Twin' }}
+        index={0}
+        href="/artist-detail/library/1"
+        onPlay={onPlay}
+      />,
+    );
+    fireEvent.keyDown(document.querySelector('.library-artist-play-btn')!, { key: 'Enter' });
+    expect(onPlay).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <LibraryArtistCard
+        artist={{ id: 1, name: 'Aphex Twin' }}
+        index={0}
+        href="/artist-detail/library/1"
+        onPlay={onPlay}
+        playPending
+      />,
+    );
+    const button = document.querySelector('.library-artist-play-btn') as HTMLElement;
+    expect(button.textContent).toBe('…');
+    fireEvent.click(button);
+    expect(onPlay).toHaveBeenCalledTimes(1);
+  });
+});

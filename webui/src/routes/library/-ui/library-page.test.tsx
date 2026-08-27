@@ -48,20 +48,30 @@ function stubFetch(artists: LibraryArtist[], total = artists.length, pages = 1) 
           headers: { 'Content-Type': 'application/json' },
         });
       }
-      const body = url.includes('/api/library/artists')
-        ? {
-            success: true,
-            artists,
-            pagination: {
-              page: Number(new URL(url, 'http://x').searchParams.get('page') ?? 1),
-              limit: 75,
-              total_count: total,
-              total_pages: pages,
-              has_prev: Number(new URL(url, 'http://x').searchParams.get('page') ?? 1) > 1,
-              has_next: Number(new URL(url, 'http://x').searchParams.get('page') ?? 1) < pages,
-            },
-          }
-        : {};
+      const body =
+        url.includes('/api/artist/') && url.includes('/top-tracks')
+          ? {
+              success: true,
+              source: 'spotify',
+              tracks: [
+                { id: 'sp-1', name: 'Xtal', artists: [{ name: 'Aphex Twin' }] },
+                { id: 'sp-2', name: 'Tha', artists: [{ name: 'Aphex Twin' }] },
+              ],
+            }
+          : url.includes('/api/library/artists')
+            ? {
+                success: true,
+                artists,
+                pagination: {
+                  page: Number(new URL(url, 'http://x').searchParams.get('page') ?? 1),
+                  limit: 75,
+                  total_count: total,
+                  total_pages: pages,
+                  has_prev: Number(new URL(url, 'http://x').searchParams.get('page') ?? 1) > 1,
+                  has_next: Number(new URL(url, 'http://x').searchParams.get('page') ?? 1) < pages,
+                },
+              }
+            : {};
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -96,6 +106,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   delete window.SoulSyncWebShellBridge;
   delete window.showLibraryDownloadsSection;
+  delete window.playTrackList;
 });
 
 describe('LibraryPage rendering', () => {
@@ -130,6 +141,23 @@ describe('LibraryPage rendering', () => {
     fireEvent.click(document.querySelector('.library-radio-btn')!);
     expect(window.startLibraryRadio).toHaveBeenCalled();
     delete window.startLibraryRadio;
+  });
+
+  it("plays an artist's ranked top tracks in provider order", async () => {
+    window.playTrackList = vi.fn();
+    renderPage();
+    await screen.findByText('Aphex Twin');
+
+    fireEvent.click(document.querySelector('.library-artist-play-btn')!);
+
+    await waitFor(() => expect(window.playTrackList).toHaveBeenCalledTimes(1));
+    expect(window.playTrackList).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({ title: 'Xtal', artist: 'Aphex Twin' }),
+        expect.objectContaining({ title: 'Tha', artist: 'Aphex Twin' }),
+      ],
+      'Aphex Twin — Top Tracks',
+    );
   });
 });
 

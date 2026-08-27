@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 import type { DiscographyRelease } from '../-artist-detail.types';
 
 import {
@@ -17,6 +19,8 @@ interface Props {
   isMusicBrainz: boolean;
   isSourceArtist: boolean;
   onOpen: (release: DiscographyRelease) => void;
+  /** Resolve the release tracklist and replace the player queue with it. */
+  onPlay: (release: DiscographyRelease) => void | Promise<void>;
 }
 
 /**
@@ -28,7 +32,8 @@ interface Props {
  * both select on them, and dropping them would change the page's appearance
  * without changing any behaviour a test would notice.
  */
-export function ReleaseCard({ release, isMusicBrainz, isSourceArtist, onOpen }: Props) {
+export function ReleaseCard({ release, isMusicBrainz, isSourceArtist, onOpen, onPlay }: Props) {
+  const [playPending, setPlayPending] = useState(false);
   const flags = releaseFlags(release, isMusicBrainz);
   const overlay = completionOverlay(release, isSourceArtist);
   const year = releaseYearText(release);
@@ -54,6 +59,26 @@ export function ReleaseCard({ release, isMusicBrainz, isSourceArtist, onOpen }: 
       {/* data-bg-src, not a style: an IntersectionObserver swaps it in, so a
           75-card grid does not fetch 75 images up front. */}
       <div className="album-card-image" data-bg-src={bg ?? undefined} />
+
+      <button
+        type="button"
+        className="release-card-play-btn"
+        aria-label={`Play ${release.title || 'album'}`}
+        title={`Play ${release.title || 'album'}`}
+        disabled={playPending}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (playPending) return;
+          setPlayPending(true);
+          try {
+            void Promise.resolve(onPlay(release)).finally(() => setPlayPending(false));
+          } catch {
+            setPlayPending(false);
+          }
+        }}
+      >
+        {playPending ? '…' : '▶'}
+      </button>
 
       {overlay ? (
         <div className={`completion-overlay ${overlay.className}`}>

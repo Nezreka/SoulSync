@@ -19,6 +19,7 @@ function renderSection(
       isMusicBrainz={opts.mb ?? false}
       isSourceArtist={false}
       onOpen={vi.fn()}
+      onPlay={vi.fn()}
     />,
   );
 }
@@ -157,6 +158,7 @@ describe('lazy artwork loading', () => {
         isMusicBrainz={false}
         isSourceArtist={false}
         onOpen={vi.fn()}
+        onPlay={vi.fn()}
       />,
     );
 
