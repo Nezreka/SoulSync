@@ -1430,3 +1430,128 @@ def test_release_borrowed_identities_leaves_ambiguous_groups_alone(imported_conn
     assert imported_conn.execute(
         "SELECT COUNT(*) FROM lib2_artists WHERE spotify_id='SP-WITCHER'"
     ).fetchone()[0] == 2
+
+
+def _browse_only_artist(conn, name):
+    """An artist that exists only because a browse-only release credited it."""
+    aid = _insert_native_artist(conn, name)
+    owner = _insert_native_artist(conn, f"{name} Host")
+    album_id = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, origin, monitored) "
+        "VALUES(?, ?, 'discography', 0)",
+        (owner, f"{name} Host Record"),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?,?,'featured')",
+        (album_id, aid),
+    )
+    return aid, album_id
+
+
+def test_prune_removes_artists_that_only_browse_only_releases_credited(imported_conn):
+    """82 of 380 artists on the production library existed for this reason
+    alone — listed as library artists with a necessarily empty My Library."""
+    ghost, _album = _browse_only_artist(imported_conn, "Ghost Guest")
+
+    stats = NE.prune_browse_only_artists(imported_conn)
+
+    assert stats["pruned"] == 1
+    assert stats["artist_ids"] == [ghost]
+    assert imported_conn.execute(
+        "SELECT COUNT(*) FROM lib2_artists WHERE id=?", (ghost,)
+    ).fetchone()[0] == 0
+
+
+def test_prune_keeps_a_guest_on_a_release_the_user_actually_has(imported_conn):
+    guest, album_id = _browse_only_artist(imported_conn, "Real Guest")
+    imported_conn.execute(
+        "UPDATE lib2_albums SET origin='library' WHERE id=?", (album_id,))
+
+    assert NE.prune_browse_only_artists(imported_conn)["pruned"] == 0
+    assert imported_conn.execute(
+        "SELECT COUNT(*) FROM lib2_artists WHERE id=?", (guest,)
+    ).fetchone()[0] == 1
+
+
+def test_prune_keeps_a_guest_on_a_release_the_user_wants(imported_conn):
+    guest, album_id = _browse_only_artist(imported_conn, "Wanted Guest")
+    imported_conn.execute(
+        "UPDATE lib2_albums SET monitored=1 WHERE id=?", (album_id,))
+
+    assert NE.prune_browse_only_artists(imported_conn)["pruned"] == 0
+    assert imported_conn.execute(
+        "SELECT COUNT(*) FROM lib2_artists WHERE id=?", (guest,)
+    ).fetchone()[0] == 1
+
+
+def test_prune_keeps_monitored_art_locked_and_user_touched_rows(imported_conn):
+    monitored, _ = _browse_only_artist(imported_conn, "Monitored Guest")
+    imported_conn.execute(
+        "UPDATE lib2_artists SET monitored=1 WHERE id=?", (monitored,))
+    locked, _ = _browse_only_artist(imported_conn, "Art Locked Guest")
+    imported_conn.execute(
+        "UPDATE lib2_artists SET art_locked=1 WHERE id=?", (locked,))
+
+    assert NE.prune_browse_only_artists(imported_conn)["pruned"] == 0
+
+
+def test_prune_keeps_an_artist_that_fronts_anything_and_one_with_a_file(imported_conn):
+    fronts = _insert_native_artist(imported_conn, "Fronts A Record")
+    imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, origin, monitored) "
+        "VALUES(?, 'Their Own Record', 'discography', 0)",
+        (fronts,),
+    )
+    owning, album_id = _browse_only_artist(imported_conn, "Owns A File")
+    track_id = imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Guest Spot')",
+        (album_id,),
+    ).lastrowid
+    imported_conn.execute(
+        "INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+        "VALUES(?,?,'featured',1)", (track_id, owning))
+    imported_conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path) VALUES(?, '/m/guest.flac')",
+        (track_id,))
+
+    assert NE.prune_browse_only_artists(imported_conn)["pruned"] == 0
+
+
+def test_prune_never_touches_an_artist_with_no_credits_at_all(imported_conn):
+    """A watchlisted or freshly created artist has an empty page too, but it is
+    there because somebody asked for it — not because a browse-only tracklist
+    mentioned it."""
+    lonely = _insert_native_artist(imported_conn, "Nothing Yet")
+
+    assert NE.prune_browse_only_artists(imported_conn)["pruned"] == 0
+    assert imported_conn.execute(
+        "SELECT COUNT(*) FROM lib2_artists WHERE id=?", (lonely,)
+    ).fetchone()[0] == 1
+
+
+def test_prune_removes_the_lead_of_a_browse_only_single(imported_conn):
+    """Position 0 of any credit list is stored as ``role='primary'``, so
+    fronting a browse-only TRACK cannot be a reason to keep a row: the lead of
+    a single that only surfaced through a guest's discography is the same
+    ghost as the guest."""
+    host = _insert_native_artist(imported_conn, "Featured Host")
+    lead = _insert_native_artist(imported_conn, "Single Lead")
+    album_id = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, origin, monitored) "
+        "VALUES(?, 'Their Single (feat. Featured Host)', 'discography', 0)",
+        (host,),
+    ).lastrowid
+    track_id = imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, monitored) VALUES(?, 'Their Single', 0)",
+        (album_id,),
+    ).lastrowid
+    imported_conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?,?,'featured')",
+        (album_id, lead))
+    imported_conn.execute(
+        "INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+        "VALUES(?,?,'primary',0)", (track_id, lead))
+
+    stats = NE.prune_browse_only_artists(imported_conn)
+
+    assert lead in stats["artist_ids"]

@@ -936,3 +936,81 @@ def test_positional_fallback_never_claims_an_owned_track_with_another_title(
     assert imported_conn.execute(
         "SELECT COUNT(*) FROM lib2_tracks WHERE album_id=? AND title LIKE 'Blaze%'",
         (album_id,)).fetchone()[0] == 1
+
+
+def _artist_names(conn):
+    return {r["name"] for r in conn.execute("SELECT name FROM lib2_artists")}
+
+
+def test_browse_only_discography_credits_do_not_mint_artists(imported_conn):
+    """Materializing the tracklist of a release the user neither owns nor wants
+    must not add its guests to the library.
+
+    A discography sync fetches an artist's whole back catalogue; resolving
+    those tracklists created a full lib2_artists row for every name credited on
+    every release. On the production library that was 82 of 380 artists (22%) —
+    each one listed as a library artist whose "My Library" is empty, because
+    there is nothing of theirs to show.
+    """
+    artist_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'"
+    ).fetchone()[0]
+    album_id = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, origin, monitored) "
+        "VALUES(?, 'Someone Elses Record', 'discography', 0)",
+        (artist_id,),
+    ).lastrowid
+    before = _artist_names(imported_conn)
+
+    _persist_tracklist_tracks(imported_conn, album_id, [{
+        "track_number": 1, "title": "Not Mine", "provider": "spotify",
+        "artist_credits": [{"name": "Browse Only Guest", "id": "sp-guest"}],
+    }])
+
+    assert _artist_names(imported_conn) == before
+
+
+def test_wanted_discography_credits_still_mint_artists(imported_conn):
+    """Monitoring a release IS intent to own it — its credits belong in the
+    library like any owned release's."""
+    artist_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'"
+    ).fetchone()[0]
+    album_id = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, origin, monitored) "
+        "VALUES(?, 'Wanted Record', 'discography', 1)",
+        (artist_id,),
+    ).lastrowid
+
+    _persist_tracklist_tracks(imported_conn, album_id, [{
+        "track_number": 1, "title": "Wanted Song", "provider": "spotify",
+        "artist_credits": [{"name": "Wanted Guest", "id": "sp-wanted"}],
+    }])
+
+    assert "Wanted Guest" in _artist_names(imported_conn)
+
+
+def test_browse_only_credits_still_link_artists_that_already_exist(imported_conn):
+    """Not minting is not the same as not crediting: a guest the library
+    already knows keeps getting their appearances recorded."""
+    artist_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'"
+    ).fetchone()[0]
+    known_id = imported_conn.execute(
+        "INSERT INTO lib2_artists(name, name_key, sort_name) VALUES('Known Guest','known guest','Known Guest')"
+    ).lastrowid
+    album_id = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, origin, monitored) "
+        "VALUES(?, 'Browsed Record', 'discography', 0)",
+        (artist_id,),
+    ).lastrowid
+
+    _persist_tracklist_tracks(imported_conn, album_id, [{
+        "track_number": 1, "title": "Guest Spot", "provider": "spotify",
+        "artist_credits": [{"name": "Known Guest", "id": "sp-known"}],
+    }])
+
+    assert imported_conn.execute(
+        "SELECT 1 FROM lib2_album_artists WHERE album_id=? AND artist_id=?",
+        (album_id, known_id),
+    ).fetchone() is not None

@@ -1403,6 +1403,76 @@ def release_borrowed_artist_identities(conn) -> Dict[str, Any]:
     return stats
 
 
+def prune_browse_only_artists(conn) -> Dict[str, Any]:
+    """Remove artists that only ever existed because a browse-only release
+    credited them.
+
+    A discography sync pulls an artist's whole back catalogue so it can be
+    browsed; resolving those tracklists minted a full artist row for every name
+    credited on every one of them. On the production library that was 82 of 380
+    artists (22%), each listed as a library artist whose "My Library" is
+    necessarily empty — there is nothing of theirs to show, and never was.
+
+    Only rows with nothing but a name and browse-only credits go: not
+    monitored, never fronting a RELEASE, no link to anything the user owns or
+    wants, no file anywhere, no artwork lock and no metadata override. A row
+    with NO credits at all is left alone — a watchlisted or hand-created artist
+    has an empty page too, but somebody asked for it.
+
+    Fronting a *track* deliberately does not count. Position 0 of every credit
+    list is written as ``role='primary'``, so the lead of any browse-only
+    single would qualify — and that is the same ghost: three such rows survived
+    an earlier cut of this query on the production library purely because the
+    single they lead happens to be filed under the guest whose discography
+    surfaced it.
+    """
+    rows = conn.execute(
+        """
+        SELECT a.id
+          FROM lib2_artists a
+         WHERE COALESCE(a.monitored, 0) = 0
+           AND COALESCE(a.art_locked, 0) = 0
+           AND a.canonical_artist_id IS NULL
+           AND NOT EXISTS (SELECT 1 FROM lib2_artists m
+                            WHERE m.canonical_artist_id = a.id)
+           AND NOT EXISTS (SELECT 1 FROM lib2_albums al
+                            WHERE al.primary_artist_id = a.id)
+           AND NOT EXISTS (SELECT 1 FROM lib2_album_artists aa
+                            WHERE aa.artist_id = a.id AND aa.role = 'primary')
+           AND NOT EXISTS (SELECT 1 FROM lib2_metadata_overrides o
+                            WHERE o.entity_type = 'artist' AND o.entity_id = a.id)
+           AND NOT EXISTS (
+                 SELECT 1 FROM lib2_track_artists ta
+                   JOIN lib2_track_files f ON f.track_id = ta.track_id
+                  WHERE ta.artist_id = a.id
+                    AND COALESCE(f.file_state, 'active') <> 'deleted')
+           AND NOT EXISTS (
+                 SELECT 1 FROM lib2_album_artists aa2
+                   JOIN lib2_albums al2 ON al2.id = aa2.album_id
+                  WHERE aa2.artist_id = a.id
+                    AND (al2.origin <> 'discography' OR al2.monitored = 1))
+           AND NOT EXISTS (
+                 SELECT 1 FROM lib2_track_artists ta2
+                   JOIN lib2_tracks t2 ON t2.id = ta2.track_id
+                   JOIN lib2_albums al3 ON al3.id = t2.album_id
+                  WHERE ta2.artist_id = a.id
+                    AND (al3.origin <> 'discography' OR al3.monitored = 1
+                         OR COALESCE(t2.monitored, 0) = 1))
+           AND (
+                 EXISTS (SELECT 1 FROM lib2_album_artists aa3 WHERE aa3.artist_id = a.id)
+              OR EXISTS (SELECT 1 FROM lib2_track_artists ta3 WHERE ta3.artist_id = a.id)
+           )
+         ORDER BY a.id
+        """
+    ).fetchall()
+    artist_ids = [int(row["id"]) for row in rows]
+    for artist_id in artist_ids:
+        conn.execute("DELETE FROM lib2_artists WHERE id=?", (artist_id,))
+    if artist_ids:
+        logger.info("pruned %d browse-only artist rows", len(artist_ids))
+    return {"pruned": len(artist_ids), "artist_ids": artist_ids}
+
+
 def reconcile_unmapped_native_artists(
     conn,
     *,
@@ -1430,6 +1500,7 @@ def reconcile_unmapped_native_artists(
     # id any more, so it joins this same run's pending set and gets resolved by
     # name instead of keeping the guest-anchor answer forever.
     released = release_borrowed_artist_identities(conn)
+    pruned = prune_browse_only_artists(conn)
     conn.commit()
 
     artists = _pending_unmapped_artists(conn, limit, cooldown_hours=cooldown_hours)
@@ -1439,6 +1510,7 @@ def reconcile_unmapped_native_artists(
         "identities_released": released["released"],
         "identities_ambiguous": released["ambiguous"],
         "released_artist_ids": released["artist_ids"],
+        "browse_only_pruned": pruned["pruned"],
     }
     for index, art in enumerate(artists):
         artist_id = art["id"]
@@ -1614,6 +1686,7 @@ __all__ = [
     "resolve_and_enrich_native_artist",
     "reconcile_unmapped_native_artists",
     "release_borrowed_artist_identities",
+    "prune_browse_only_artists",
     "identity_is_free",
     "smart_split_combined_artist",
     "enrich_native_artist_artwork",

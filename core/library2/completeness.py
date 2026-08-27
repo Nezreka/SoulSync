@@ -76,6 +76,29 @@ def _track_artist_credits(raw: Any) -> List[Tuple[str, Optional[str]]]:
     return credits
 
 
+def _credits_may_mint_artists(album_row: Any) -> bool:
+    """May this release's credits create artists the library does not have yet?
+
+    Only for a release the user owns or has asked for. A discography sync pulls
+    an artist's entire back catalogue purely so it can be browsed, and
+    resolving those tracklists used to mint a full artist row for every name
+    credited on every one of them: on the production library 82 of 380 artists
+    (22%) existed for no other reason, each listed as a library artist whose
+    "My Library" is necessarily empty. Credits to artists the library already
+    knows are still recorded either way — this governs creation, not linking.
+    """
+    try:
+        origin = str(album_row["origin"] or "library")
+    except (IndexError, KeyError, TypeError):
+        origin = "library"
+    if origin != "discography":
+        return True
+    try:
+        return bool(album_row["monitored"])
+    except (IndexError, KeyError, TypeError):
+        return True
+
+
 def _entry_credit_source(entry: Mapping[str, Any]) -> Optional[str]:
     """Which provider namespace this entry's credit ids belong to.
 
@@ -94,8 +117,13 @@ def _entry_credit_source(entry: Mapping[str, Any]) -> Optional[str]:
 def _persist_track_artist_credits(
     conn, track_id: int, album_id: int, album_primary_artist_id: int,
     raw_artists: Any, *, credit_source: Optional[str] = None,
+    may_create_artists: bool = True,
 ) -> None:
-    """Persist per-track credits and make their album appearance reachable."""
+    """Persist per-track credits and make their album appearance reachable.
+
+    ``may_create_artists=False`` records the credits of artists the library
+    already knows but mints no new rows — see :func:`_credits_may_mint_artists`.
+    """
     names = _track_artist_credits(raw_artists)
     if not names:
         conn.execute(
@@ -121,6 +149,7 @@ def _persist_track_artist_credits(
     for position, (name, provider_id) in enumerate(names):
         artist_id = find_or_create_artist(
             conn, name, spotify_id=provider_id, source=credit_source,
+            create=may_create_artists,
         )
         if artist_id is None:
             continue
@@ -390,7 +419,8 @@ def _persist_tracklist_tracks(
     is not evidence of a shorter album, and neither is an empty answer.
     """
     al = conn.execute(
-        "SELECT primary_artist_id, monitored, quality_profile_id, expected_track_count FROM lib2_albums WHERE id=?",
+        "SELECT primary_artist_id, monitored, quality_profile_id, "
+        "       expected_track_count, origin FROM lib2_albums WHERE id=?",
         (album_id,),
     ).fetchone()
     if not al:
@@ -563,6 +593,7 @@ def _persist_tracklist_tracks(
             al["primary_artist_id"],
             entry.get("artist_credits") or entry.get("artists"),
             credit_source=_entry_credit_source(entry),
+            may_create_artists=_credits_may_mint_artists(al),
         )
     changed = created + _trim_excess_fileless_tracks(
         conn, album_id, expected, protect_ids=touched_ids
