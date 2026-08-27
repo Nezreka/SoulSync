@@ -18,7 +18,7 @@ from utils.logging_config import get_logger
 
 
 DISCOGRAPHY_PARSER_VERSION = "library2-discography/3"
-TRACKLIST_PARSER_VERSION = "library2-tracklist/3"
+TRACKLIST_PARSER_VERSION = "library2-tracklist/4"
 ARTWORK_PARSER_VERSION = "library2-artwork/1"
 logger = get_logger("library2.provider_adapters")
 
@@ -83,22 +83,6 @@ def _artist_credits(value: Any) -> Tuple[ProviderArtistCredit, ...]:
                 provider_id=str(provider_id).strip() if provider_id else None,
             ))
     return tuple(credits)
-
-
-def _artist_names(value: Any) -> Tuple[str, ...]:
-    return tuple(credit.name for credit in _artist_credits(value))
-
-
-def _item_artist_names(item: Mapping[str, Any]) -> Tuple[str, ...]:
-    for key in ("artists", "contributors", "artist-credit"):
-        names = _artist_names(item.get(key))
-        if names:
-            return names
-    for key in ("artist", "artist_name", "artistName"):
-        names = _artist_names(item.get(key))
-        if names:
-            return names
-    return ()
 
 
 def _item_artist_credits(item: Mapping[str, Any]) -> Tuple[ProviderArtistCredit, ...]:
@@ -207,7 +191,12 @@ class TracklistTrack:
     provider_id: Optional[str]
     isrc: Optional[str] = None
     musicbrainz_id: Optional[str] = None
-    artists: Tuple[str, ...] = ()
+    artist_credits: Tuple[ProviderArtistCredit, ...] = ()
+
+    @property
+    def artists(self) -> Tuple[str, ...]:
+        """Credited names only — what compatibility consumers still read."""
+        return tuple(credit.name for credit in self.artist_credits)
 
     @classmethod
     def from_item(cls, item: Mapping[str, Any], *, provider: str) -> Optional["TracklistTrack"]:
@@ -244,7 +233,11 @@ class TracklistTrack:
             provider_id=provider_id,
             isrc=isrc,
             musicbrainz_id=musicbrainz_id,
-            artists=_item_artist_names(item),
+            # Keep each credit's OWN provider identity. Reducing this to names
+            # left every guest on a release id-less, and the unmapped-artist
+            # reconciler then resolved them through the album anchor — i.e. to
+            # the album's PRIMARY artist, handing a dozen guests one identity.
+            artist_credits=_item_artist_credits(item),
         )
 
     def to_payload(self) -> Dict[str, Any]:
@@ -253,8 +246,15 @@ class TracklistTrack:
             "disc_number": self.disc_number,
             "title": self.title,
         }
-        if self.artists:
+        if self.artist_credits:
             payload["artists"] = list(self.artists)
+            payload["artist_credits"] = [
+                credit.to_payload() for credit in self.artist_credits
+            ]
+            # The namespace the credit ids belong to. Without it a consumer
+            # cannot tell a Deezer artist id from a Spotify one and would file
+            # it in the wrong column.
+            payload["provider"] = self.provider
         if self.duration_ms is not None:
             payload["duration_ms"] = self.duration_ms
         if self.provider_id:

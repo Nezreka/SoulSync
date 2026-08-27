@@ -805,3 +805,70 @@ def test_the_download_knob_can_raise_the_precache_pool_but_not_throttle_it():
     explicit.get = MagicMock(
         side_effect=lambda key, d=None: 1 if key == "library_v2.precache_workers" else d)
     assert _precache_max_workers(explicit) == 1
+
+
+def test_persist_tracklist_tracks_gives_each_credit_its_own_provider_id(imported_conn):
+    """Each credited artist is created with the id the provider gave for THAT
+    artist — not left id-less for the reconciler to guess from the album."""
+    views_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'"
+    ).fetchone()[0]
+
+    _persist_tracklist_tracks(imported_conn, views_id, [{
+        "track_number": 9,
+        "title": "Provider Collab",
+        "provider": "spotify",
+        "artist_credits": [
+            {"name": "Drake", "id": "sp-drake"},
+            {"name": "Guest Artist", "id": "sp-guest"},
+        ],
+    }])
+
+    guest = imported_conn.execute(
+        "SELECT spotify_id FROM lib2_artists WHERE name='Guest Artist'"
+    ).fetchone()
+    assert guest is not None
+    assert guest["spotify_id"] == "sp-guest"
+
+
+def test_persist_tracklist_credits_keep_non_spotify_ids_out_of_the_spotify_column(
+    imported_conn,
+):
+    views_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'"
+    ).fetchone()[0]
+
+    _persist_tracklist_tracks(imported_conn, views_id, [{
+        "track_number": 11,
+        "title": "Deezer Collab",
+        "provider": "deezer",
+        "artist_credits": [
+            {"name": "Deezer Lead", "id": "12345"},
+            {"name": "Deezer Guest", "id": "67890"},
+        ],
+    }])
+
+    row = imported_conn.execute(
+        "SELECT spotify_id, external_ids FROM lib2_artists WHERE name='Deezer Guest'"
+    ).fetchone()
+    assert row is not None
+    assert row["spotify_id"] is None
+    assert json.loads(row["external_ids"]) == {"deezer": "67890"}
+
+
+def test_persist_tracklist_tracks_still_accepts_plain_name_credits(imported_conn):
+    """Caches written by the previous parser hold names only — they must keep
+    working, just without identities."""
+    views_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'"
+    ).fetchone()[0]
+
+    _persist_tracklist_tracks(imported_conn, views_id, [{
+        "track_number": 12,
+        "title": "Legacy Cache Collab",
+        "artists": ["Drake", "Old Cache Guest"],
+    }])
+
+    assert imported_conn.execute(
+        "SELECT 1 FROM lib2_artists WHERE name='Old Cache Guest'"
+    ).fetchone() is not None

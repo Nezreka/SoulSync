@@ -17,7 +17,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-from core.library2.provider_ids import parse_external_ids
+from core.library2.provider_ids import parse_external_ids, provider_only
 from utils.logging_config import get_logger
 
 logger = get_logger("library2.completeness")
@@ -37,8 +37,15 @@ def _json_object(raw: Any) -> Dict[str, str]:
     }
 
 
-def _track_artist_names(raw: Any) -> List[str]:
-    """Normalize the explicit artist list retained by the provider adapter."""
+def _track_artist_credits(raw: Any) -> List[Tuple[str, Optional[str]]]:
+    """``(name, provider_id)`` per credit, in the order the provider credited.
+
+    ``provider_id`` is ``None`` for caches written by an earlier parser, which
+    stored names only. That is exactly the state this function exists to stop
+    producing: an id-less credit becomes an id-less artist row, and the
+    unmapped-artist reconciler then infers one from the album anchor — which
+    resolves to the album's PRIMARY artist, not to the guest.
+    """
     if not raw:
         return []
     if isinstance(raw, (str, bytes, Mapping)):
@@ -48,30 +55,48 @@ def _track_artist_names(raw: Any) -> List[str]:
     except TypeError:
         entries = [raw]
 
-    names = []
+    credits: List[Tuple[str, Optional[str]]] = []
     seen = set()
     for entry in entries:
+        provider_id = None
         if isinstance(entry, Mapping):
             nested = entry.get("artist")
             if isinstance(nested, Mapping):
                 entry = nested
             name = entry.get("name") or entry.get("artist_name")
+            provider_id = entry.get("id") or entry.get("artist_id")
         else:
             name = entry
         text = str(name or "").strip()
         key = text.casefold()
         if text and key != "unknown artist" and key not in seen:
             seen.add(key)
-            names.append(text)
-    return names
+            identifier = str(provider_id).strip() if provider_id else None
+            credits.append((text, identifier or None))
+    return credits
+
+
+def _entry_credit_source(entry: Mapping[str, Any]) -> Optional[str]:
+    """Which provider namespace this entry's credit ids belong to.
+
+    The parser stamps ``provider`` onto every entry it writes; older cached
+    entries only carry ``external_ids``, whose single provider key says the
+    same thing.
+    """
+    provider = str(entry.get("provider") or "").strip().lower()
+    if provider:
+        return provider
+    for source in provider_only(parse_external_ids(entry.get("external_ids"))):
+        return source
+    return None
 
 
 def _persist_track_artist_credits(
     conn, track_id: int, album_id: int, album_primary_artist_id: int,
-    raw_artists: Any,
+    raw_artists: Any, *, credit_source: Optional[str] = None,
 ) -> None:
     """Persist per-track credits and make their album appearance reachable."""
-    names = _track_artist_names(raw_artists)
+    names = _track_artist_credits(raw_artists)
     if not names:
         conn.execute(
             "INSERT OR IGNORE INTO lib2_track_artists"
@@ -93,8 +118,10 @@ def _persist_track_artist_credits(
         conn.execute("DELETE FROM lib2_track_artists WHERE track_id=?", (track_id,))
 
     from core.library2.autolink import find_or_create_artist
-    for position, name in enumerate(names):
-        artist_id = find_or_create_artist(conn, name)
+    for position, (name, provider_id) in enumerate(names):
+        artist_id = find_or_create_artist(
+            conn, name, spotify_id=provider_id, source=credit_source,
+        )
         if artist_id is None:
             continue
         conn.execute(
@@ -511,7 +538,8 @@ def _persist_tracklist_tracks(
             track_id,
             album_id,
             al["primary_artist_id"],
-            entry.get("artists"),
+            entry.get("artist_credits") or entry.get("artists"),
+            credit_source=_entry_credit_source(entry),
         )
     changed = created + _trim_excess_fileless_tracks(
         conn, album_id, expected, protect_ids=touched_ids

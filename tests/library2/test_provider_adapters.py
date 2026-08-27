@@ -470,3 +470,46 @@ def test_library_artwork_crosses_typed_boundary_with_effective_metadata(
     assert calls[1][1]["artist_name"] == "Artist Corrected"
     assert calls[1][1]["album_title"] == "Album Corrected"
     assert calls[1][1]["source_ids"]["itunes"] == "it-album"
+
+
+def test_tracklist_keeps_the_provider_id_of_every_artist_credit(monkeypatch):
+    """A featured credit must arrive with its OWN provider identity.
+
+    Dropping it is what made every credit on an album id-less, so the
+    unmapped-artist reconciler later had to guess — and guessed via the album
+    anchor, which resolves to the album's PRIMARY artist. That is how a dozen
+    guests on one Major Lazer release all ended up holding Major Lazer's
+    Spotify id, artwork and discography.
+    """
+    class Spotify:
+        def get_album_tracks(self, album_id, allow_fallback=False):
+            return {"items": [{
+                "id": "sp-track",
+                "name": "Collab Track",
+                "track_number": 1,
+                "artists": [
+                    {"id": "artist-a", "name": "Artist A"},
+                    {"id": "artist-b", "name": "Artist B"},
+                ],
+            }]}
+
+    monkeypatch.setattr(
+        "core.metadata.registry.get_client_for_source",
+        lambda source: Spotify() if source == "spotify" else None,
+    )
+
+    result = fetch_album_tracklist(
+        "Collab Album", "Artist A", source_album_ids={"spotify": "sp-collab"},
+    )
+
+    assert result is not None
+    payload = result.track_payloads()[0]
+    # The name list stays for compatibility consumers…
+    assert payload["artists"] == ["Artist A", "Artist B"]
+    # …and the identities travel alongside it, namespaced by the provider that
+    # actually answered.
+    assert payload["artist_credits"] == [
+        {"name": "Artist A", "id": "artist-a"},
+        {"name": "Artist B", "id": "artist-b"},
+    ]
+    assert payload["provider"] == "spotify"
