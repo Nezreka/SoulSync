@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AdlDownload } from '../-adl.types';
 
 import { AdlHeader } from './adl-header';
-import { AdlList, ADL_EMPTY_TEXT, BatchFilterBanner } from './adl-list';
+import { BatchFilterBanner } from './adl-list';
 import { AdlRow } from './adl-row';
 
 afterEach(cleanup);
@@ -287,51 +287,6 @@ describe('AdlRow', () => {
   });
 });
 
-describe('AdlList', () => {
-  it('shows the empty message with nothing to list', () => {
-    const { container } = render(<AdlList rows={[]} filter="all" onCancel={vi.fn()} />);
-    expect(container.querySelector('#adl-empty')?.textContent).toBe(ADL_EMPTY_TEXT);
-  });
-
-  it('groups into sections with counts under the all filter', () => {
-    const { container } = render(
-      <AdlList
-        rows={[
-          row({ task_id: 'a', status: 'downloading' }),
-          row({ task_id: 'b', status: 'queued' }),
-          row({ task_id: 'c', status: 'completed' }),
-          row({ task_id: 'd', status: 'cancelled' }),
-        ]}
-        filter="all"
-        onCancel={vi.fn()}
-      />,
-    );
-    const headers = [...container.querySelectorAll('.adl-section-header')].map(
-      (h) => h.textContent,
-    );
-    // Cancelled belongs to Failed, which is why that header reads (1).
-    expect(headers).toEqual(['Active (1)', 'Queued (1)', 'Completed (1)', 'Failed (1)']);
-  });
-
-  it('drops the headers under a specific filter', () => {
-    // Every row is already that kind — a header would just repeat the pill.
-    const { container } = render(
-      <AdlList rows={[row({ status: 'completed' })]} filter="completed" onCancel={vi.fn()} />,
-    );
-    expect(container.querySelectorAll('.adl-section-header')).toHaveLength(0);
-    expect(container.querySelectorAll('.adl-row')).toHaveLength(1);
-  });
-
-  it('omits sections that have no rows', () => {
-    const { container } = render(
-      <AdlList rows={[row({ status: 'downloading' })]} filter="all" onCancel={vi.fn()} />,
-    );
-    expect(
-      [...container.querySelectorAll('.adl-section-header')].map((h) => h.textContent),
-    ).toEqual(['Active (1)']);
-  });
-});
-
 describe('BatchFilterBanner', () => {
   it('names the batch and clears on click', () => {
     const onClear = vi.fn();
@@ -346,40 +301,67 @@ describe('BatchFilterBanner', () => {
 });
 
 describe('AdlHeader', () => {
-  const counts = { active: 0, queued: 0, total: 0, completedOrFailed: 0 };
+  const counts = { active: 0, queued: 0, failed: 0, total: 0, completedOrFailed: 0 };
   const props = {
     filter: 'all' as const,
     counts,
     hasRunningWork: false,
     acoustidEnabled: true,
     reviewCount: null,
+    speedText: '',
+    etaText: '',
     onFilter: vi.fn(),
     onCancelAll: vi.fn(),
     onClearCompleted: vi.fn(),
     cancelAllPending: false,
   };
 
-  it('renders seven pills and marks the active one', () => {
+  it('splits navigation: three view tabs, five status chips', () => {
     const { container } = render(<AdlHeader {...props} filter="queued" />);
-    const pills = [...container.querySelectorAll('.adl-pill')];
-    expect(pills).toHaveLength(7);
-    expect(pills.map((p) => p.getAttribute('data-filter'))).toEqual([
+    const tabs = [...container.querySelectorAll('.adl-view-tab')];
+    expect(tabs.map((t) => t.textContent)).toEqual(['Downloads', 'Review', 'Clients']);
+    const chips = [...container.querySelectorAll('.adl-status-chips .adl-pill')];
+    expect(chips.map((p) => p.getAttribute('data-filter'))).toEqual([
       'all',
       'active',
       'queued',
       'completed',
       'failed',
-      'unverified',
-      'clients',
     ]);
     expect(container.querySelector('.adl-pill.active')?.getAttribute('data-filter')).toBe('queued');
+    // a status filter is still the Downloads view
+    expect(container.querySelector('.adl-view-tab.active')?.textContent).toBe('Downloads');
   });
 
-  it('drops zero counts but always shows the total', () => {
+  it('hides the status chips outside the Downloads view', () => {
+    const review = render(<AdlHeader {...props} filter="unverified" />);
+    expect(review.container.querySelector('.adl-status-chips')).toBeNull();
+    expect(review.container.querySelector('.adl-view-tab.active')?.textContent).toBe('Review');
+    cleanup();
+    const clients = render(<AdlHeader {...props} filter="clients" />);
+    expect(clients.container.querySelector('.adl-status-chips')).toBeNull();
+    expect(clients.container.querySelector('.adl-view-tab.active')?.textContent).toBe('Clients');
+  });
+
+  it('renders the four hero stats with live sub-line only while active', () => {
     const { container } = render(
-      <AdlHeader {...props} counts={{ active: 2, queued: 0, total: 9, completedOrFailed: 0 }} />,
+      <AdlHeader
+        {...props}
+        counts={{ active: 2, queued: 3, failed: 1, total: 9, completedOrFailed: 4 }}
+        speedText="1.2 MB/s"
+        etaText="~4m left"
+      />,
     );
-    expect(container.querySelector('#adl-count')?.textContent).toBe('2 active / 9 total');
+    const nums = [...container.querySelectorAll('.adl-stat-num')].map((n) => n.textContent);
+    expect(nums).toEqual(['2', '3', '1', '9']);
+    expect(container.querySelector('.adl-stat-sub')?.textContent).toBe('1.2 MB/s · ~4m left');
+    expect(container.querySelector('.adl-stat-bad')).not.toBeNull();
+
+    cleanup();
+    const idle = render(<AdlHeader {...props} speedText="1.2 MB/s" />);
+    // zero active downloads: a speed line would be a lie
+    expect(idle.container.querySelector('.adl-stat-sub')).toBeNull();
+    expect(idle.container.querySelector('.adl-stat-bad')).toBeNull();
   });
 
   it('shows Cancel All only when there is running work', () => {
@@ -398,17 +380,18 @@ describe('AdlHeader', () => {
     expect(has.container.querySelector('#adl-clear-btn')).not.toBeNull();
   });
 
-  it('relabels the review pill when there can be no unverified queue', () => {
+  it('relabels the review tab when there can be no unverified queue', () => {
     // The vanilla rewrote the button's textContent after the config fetch;
     // here it is derived, so it can never get out of step with the data.
-    const on = render(<AdlHeader {...props} acoustidEnabled />);
+    const on = render(<AdlHeader {...props} acoustidEnabled reviewCount={4} />);
     const enabled = on.container.querySelector('[data-filter="unverified"]') as HTMLElement;
-    expect(enabled.textContent).toBe('⚠ Unverified/Quarantine');
+    expect(enabled.textContent).toBe('Review4');
+    expect(enabled.querySelector('.adl-pill-badge')?.textContent).toBe('4');
 
     cleanup();
     const off = render(<AdlHeader {...props} acoustidEnabled={false} />);
     const disabled = off.container.querySelector('[data-filter="unverified"]') as HTMLElement;
-    expect(disabled.textContent).toBe('🛡 Quarantine');
+    expect(disabled.textContent).toBe('Quarantine');
     expect(disabled.getAttribute('title')).toContain('require-verified');
   });
 

@@ -5,6 +5,7 @@ import type { AdlDownload, AdlTaskDetail } from '../-adl.types';
 import { fetchTaskDetail } from '../-adl.api';
 import {
   batchColorIndex,
+  formatSpeed,
   liveDetailLines,
   qualityChipTitle,
   showQualityChip,
@@ -58,7 +59,7 @@ function RetryChip({ dl }: { dl: AdlDownload }) {
         className="adl-retry-info"
         title={`Retry engine: trying the next-best candidate (attempt ${dl.retry_info}${because})`}
       >
-        🔁 {dl.retry_info}
+        🔁 retry {dl.retry_info}
         {acoustidTriggered ? ' 🛡' : ''}
       </span>
     </>
@@ -145,9 +146,11 @@ export interface AdlRowProps {
   onRowAudit?: (dl: AdlDownload) => void;
   /** The review action strip, supplied by the unverified view. */
   actions?: React.ReactNode;
+  /** Group rows: tighter padding, no batch line (the group header carries it). */
+  compact?: boolean;
 }
 
-export function AdlRow({ dl, onCancel, onRowAudit, actions }: AdlRowProps) {
+export function AdlRow({ dl, onCancel, onRowAudit, actions, compact }: AdlRowProps) {
   const cls = statusClass(dl.status);
   const label = statusLabel(dl.status);
   const badge = verificationBadge(dl);
@@ -211,9 +214,14 @@ export function AdlRow({ dl, onCancel, onRowAudit, actions }: AdlRowProps) {
     Boolean(dl.playlist_id) &&
     dl.track_index !== undefined;
 
+  // The one signal a downloads page owes you: the bar rides the row's bottom
+  // edge, and the speed comes from the live narration when the engine has it.
+  const downloading = dl.status === 'downloading' && (dl.progress || 0) > 0;
+  const speed = downloading ? formatSpeed(dl.live_detail?.speed) : '';
+
   return (
     <div
-      className={`adl-row adl-row-${cls}`}
+      className={`adl-row adl-row-${cls}${compact ? ' adl-row-compact' : ''}`}
       data-task-id={dl.task_id}
       data-batch-id={dl.batch_id || ''}
       {...(onRowAudit
@@ -242,7 +250,8 @@ export function AdlRow({ dl, onCancel, onRowAudit, actions }: AdlRowProps) {
       <div className="adl-row-info">
         <div className="adl-row-title">{dl.title || 'Unknown Track'}</div>
         {meta ? <div className="adl-row-meta">{meta}</div> : null}
-        {dl.batch_name || dl.download_source ? (
+        {/* Inside a group the header already says which batch this is. */}
+        {!compact && (dl.batch_name || dl.download_source) ? (
           <div className="adl-row-batch">
             {dl.batch_name}
             {position ? ` · Track ${position}` : ''}
@@ -263,6 +272,8 @@ export function AdlRow({ dl, onCancel, onRowAudit, actions }: AdlRowProps) {
         <span className={`adl-status-dot ${cls}`} />
         {label.spinner ? <span className="adl-spinner" /> : null}
         {label.text}
+        {downloading ? ` ${Math.round(dl.progress || 0)}%` : ''}
+        {speed ? <span className="adl-row-speed">{speed}</span> : null}
         {badge ? (
           <>
             {' '}
@@ -281,6 +292,22 @@ export function AdlRow({ dl, onCancel, onRowAudit, actions }: AdlRowProps) {
         ) : null}
         <RetryChip dl={dl} />
       </div>
+
+      {/* the expandable rows never said so — a chevron is the affordance */}
+      {!onRowAudit ? (
+        <span className={`adl-row-chevron${open ? ' open' : ''}`} aria-hidden="true">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </span>
+      ) : null}
 
       {actions}
 
@@ -327,6 +354,12 @@ export function AdlRow({ dl, onCancel, onRowAudit, actions }: AdlRowProps) {
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
         </button>
+      ) : null}
+
+      {downloading ? (
+        <div className="adl-row-progress" aria-hidden="true">
+          <div className="adl-row-progress-fill" style={{ width: `${dl.progress || 0}%` }} />
+        </div>
       ) : null}
     </div>
   );

@@ -245,7 +245,8 @@ describe('AdlQuarantineRow', () => {
       <AdlQuarantineRow entry={entry()} open={false} onToggle={vi.fn()} handlers={handlers()} />,
     );
     const approve = full.container.querySelector('.verif-act-ok') as HTMLElement;
-    expect(approve.textContent).toBe('✔');
+    // labeled since the redesign: glyph + the word
+    expect(approve.textContent).toBe('✔Approve');
     expect(approve.getAttribute('title')).toContain('re-import this exact file');
 
     cleanup();
@@ -258,7 +259,7 @@ describe('AdlQuarantineRow', () => {
       />,
     );
     const recover = legacy.container.querySelector('.verif-act-ok') as HTMLElement;
-    expect(recover.textContent).toBe('⤴');
+    expect(recover.textContent).toBe('⤴Recover');
     expect(recover.getAttribute('title')).toContain('Recover to Staging');
   });
 
@@ -345,6 +346,9 @@ describe('AdlReviewBanner', () => {
     onQuarantineApproveAll: vi.fn(),
     onQuarantineClearAll: vi.fn(),
     deletedCount: 4,
+    selectedCount: 0,
+    onApproveSelected: vi.fn(),
+    onDeleteSelected: vi.fn(),
     onRestoreAllDeleted: vi.fn(),
     onEmptyDeleted: vi.fn(),
   };
@@ -384,6 +388,33 @@ describe('AdlReviewBanner', () => {
     const quar = render(<AdlReviewBanner {...props} subView="quarantine" />);
     expect(quar.container.textContent).not.toContain('Clean orphaned');
     expect(quar.container.textContent).toContain('🗑 Clear all');
+  });
+
+  it('narrows the bulk buttons to the selection when rows are checked', () => {
+    const onApproveSelected = vi.fn();
+    const { container } = render(
+      <AdlReviewBanner {...props} selectedCount={2} onApproveSelected={onApproveSelected} />,
+    );
+    expect(container.textContent).toContain('✔ Approve selected (2)');
+    expect(container.textContent).toContain('🗑 Delete selected (2)');
+    expect(container.textContent).not.toContain('Approve all');
+    fireEvent.click(
+      [...container.querySelectorAll('.adl-filter-banner-clear')].find((b) =>
+        b.textContent?.includes('Approve selected'),
+      ) as HTMLElement,
+    );
+    expect(onApproveSelected).toHaveBeenCalled();
+  });
+
+  it('hides bulk buttons over an empty view — a promise the click cannot keep', () => {
+    const unv = render(<AdlReviewBanner {...props} unverifiedCount={0} />);
+    expect(unv.container.textContent).not.toContain('Approve all');
+    cleanup();
+    const quar = render(<AdlReviewBanner {...props} subView="quarantine" quarantineCount={0} />);
+    expect(quar.container.textContent).not.toContain('Approve all');
+    cleanup();
+    const del = render(<AdlReviewBanner {...props} subView="deleted" deletedCount={0} />);
+    expect(del.container.textContent).not.toContain('Empty bin');
   });
 
   it('routes each bulk button to its own handler', () => {

@@ -113,9 +113,7 @@ describe('the reads never throw', () => {
 
   it('fetchQuarantine rejects a non-array entries field', async () => {
     server.use(
-      http.get('/api/quarantine/list', () =>
-        HttpResponse.json({ success: true, entries: 'nope' }),
-      ),
+      http.get('/api/quarantine/list', () => HttpResponse.json({ success: true, entries: 'nope' })),
     );
     const result = await fetchQuarantine();
     expect('error' in result).toBe(true);

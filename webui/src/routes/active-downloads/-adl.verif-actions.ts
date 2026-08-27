@@ -391,7 +391,6 @@ export async function clearAllQuarantine(
   onDone();
 }
 
-
 /* ── The deleted-files (recycle bin) actions ─────────────────────────────── */
 
 /**
@@ -450,10 +449,7 @@ export async function restoreAllDeleted(entries: AdlDeletedEntry[], onDone: () =
   });
   if (!confirmed) return;
   try {
-    reportDeletedResult(
-      await restoreDeletedFiles(entries.map((e) => e.id)),
-      'Restored',
-    );
+    reportDeletedResult(await restoreDeletedFiles(entries.map((e) => e.id)), 'Restored');
   } catch {
     toast('Restore failed', 'error');
   }

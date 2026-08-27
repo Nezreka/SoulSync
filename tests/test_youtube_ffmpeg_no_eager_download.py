@@ -82,10 +82,17 @@ def test_check_ffmpeg_returns_false_when_download_disabled_and_missing(
     monkeypatch.setattr('shutil.which', lambda _: None)
 
     # Force the tools/ dir to a fresh empty tmp path so the "already
-    # present in tools" branch can't fire by accident.
+    # present in tools" branch can't fire by accident. The old version of
+    # this patch was an identity lambda — a no-op — so the test silently
+    # depended on the repo's tools/ being empty, and failed the day a live
+    # rig server auto-downloaded ffmpeg into it (aug 26). _check_ffmpeg
+    # derives tools_dir as Path(__file__).parent.parent / 'tools', so this
+    # fake makes that land inside the empty tmp workspace.
+    # tools_dir.mkdir(exist_ok=True) needs its parent to exist
+    (tmp_path / 'iso').mkdir()
     monkeypatch.setattr(
         'core.youtube_client.Path',
-        lambda *a, **k: Path(*a, **k),
+        lambda *a, **k: tmp_path / 'iso' / 'x' / 'marker',
     )
 
     # Trap urlretrieve so a regression that ignored the gate would

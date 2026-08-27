@@ -163,10 +163,7 @@ export function restoreDeletedFiles(ids: string[]): Promise<DeletedActionResult>
   return readJson<DeletedActionResult>(apiClient.post('deleted-files/restore', { json: { ids } }));
 }
 
-export function purgeDeletedFiles(
-  ids: string[] | null,
-  all = false,
-): Promise<DeletedActionResult> {
+export function purgeDeletedFiles(ids: string[] | null, all = false): Promise<DeletedActionResult> {
   return readJson<DeletedActionResult>(
     apiClient.post('deleted-files/purge', { json: all ? { all: true } : { ids: ids ?? [] } }),
   );
@@ -328,9 +325,7 @@ export type ClientFetch<T> =
 
 async function fetchClientOverview<T>(path: string): Promise<ClientFetch<T>> {
   try {
-    const data = await readJson<
-      { success?: boolean; error?: string } & Partial<ClientOverview<T>>
-    >(
+    const data = await readJson<{ success?: boolean; error?: string } & Partial<ClientOverview<T>>>(
       // 30s: a cold adapter call can sit on a slow client handshake longer
       // than ky's 10s default.
       apiClient.get(path, { timeout: 30000 }),
@@ -435,9 +430,7 @@ export function usenetClientAdd(url: string): Promise<AdlResult & { ref?: string
 }
 
 export function slskdClearCompleted(): Promise<AdlResult> {
-  return readJson<AdlResult>(
-    apiClient.post('clients/slskd/clear-completed', { timeout: 60000 }),
-  );
+  return readJson<AdlResult>(apiClient.post('clients/slskd/clear-completed', { timeout: 60000 }));
 }
 
 export interface ClientLinks {
