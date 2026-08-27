@@ -447,6 +447,22 @@ describe('row actions', () => {
     expect(window.addToQueue).toHaveBeenCalled();
   });
 
+  it('queues an expected-missing track for automatic download', () => {
+    renderTable();
+    click('.enhanced-queue-btn', 2);
+    expect(window.addToQueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Ageispolis',
+        artist: 'Aphex Twin',
+        source: 'spotify',
+        track_id: 's3',
+        file_path: '',
+        is_library: false,
+        playback_status: 'missing',
+      }),
+    );
+  });
+
   it('wires each admin action to its own handler', () => {
     // Write-tags is no longer a window bridge: ✎ opens the local tag preview
     // modal (showTagPreview's port), which fetches the diff on mount.

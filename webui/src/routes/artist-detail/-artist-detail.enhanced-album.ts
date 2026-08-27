@@ -739,13 +739,22 @@ export function queueTrackPayload(
   album: EnhancedAlbum,
   artist: Record<string, unknown> | undefined,
 ) {
+  const sourceTrack =
+    ((track as unknown as { _sourceTrack?: Record<string, unknown> })._sourceTrack as
+      | Record<string, unknown>
+      | undefined) || {};
+  const filePath = track.file_path || '';
   return {
+    ...sourceTrack,
     title: track.title || 'Unknown Track',
+    name: track.title || 'Unknown Track',
     artist: String(artist?.name || '') || 'Unknown Artist',
+    artists: track.artists || sourceTrack.artists || [{ name: String(artist?.name || '') }],
     album: album.title || 'Unknown Album',
-    file_path: track.file_path,
-    filename: track.file_path,
-    is_library: true,
+    file_path: filePath,
+    filename: filePath,
+    is_library: Boolean(filePath),
+    playback_status: filePath ? 'ready' : 'missing',
     image_url: album.thumb_url || artist?.thumb_url || null,
     id: track.id,
     artist_id: artist?.id ?? null,

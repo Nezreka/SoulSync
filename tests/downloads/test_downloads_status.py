@@ -182,6 +182,26 @@ def test_tasks_sorted_by_track_index():
     assert [t['track_index'] for t in out['tasks']] == [0, 1, 2]
 
 
+def test_completed_task_exposes_only_its_verified_final_file_path():
+    deps, _ = _build_deps()
+    download_tasks['done'] = {
+        'track_index': 0,
+        'status': 'completed',
+        'track_info': {'name': 'Ready'},
+        'final_file_path': '/music/Ready.flac',
+    }
+    download_tasks['working'] = {
+        'track_index': 1,
+        'status': 'post_processing',
+        'track_info': {'name': 'Working'},
+        'final_file_path': '/staging/Working.flac',
+    }
+    batch = {'phase': 'downloading', 'queue': ['done', 'working']}
+    out = st.build_batch_status_data('b1', batch, {}, deps)
+    assert out['tasks'][0]['final_file_path'] == '/music/Ready.flac'
+    assert out['tasks'][1]['final_file_path'] is None
+
+
 def test_missing_task_in_queue_is_skipped():
     deps, _ = _build_deps()
     download_tasks['t1'] = {'track_index': 0, 'status': 'queued', 'track_info': {}}

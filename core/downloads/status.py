@@ -394,6 +394,14 @@ def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: d
                 # 'verified' / 'unverified' / 'force_imported' — set by the
                 # import pipeline once post-processing finishes.
                 'verification_status': task.get('verification_status'),
+                # Authenticated playback-queue polling needs the verified,
+                # imported file before it can turn a missing queue row into a
+                # playable library row. Never expose a staging path.
+                'final_file_path': (
+                    task.get('final_file_path')
+                    if task.get('status') == 'completed'
+                    else None
+                ),
                 # "2/5" while the quarantine-retry engine walks candidates.
                 'retry_info': task.get('retry_info'),
                 'retry_trigger': task.get('retry_trigger'),
