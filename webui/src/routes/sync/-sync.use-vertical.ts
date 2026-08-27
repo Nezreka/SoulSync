@@ -220,6 +220,27 @@ export function useSourceVertical(
 
   /* ── The HTTP backstop ──────────────────────────────────────────────────── */
 
+  /**
+   * A dead poll must not leave the state saying "discovering" (#TheHomeGuy).
+   *
+   * The status endpoint 404s the moment its in-memory entry is gone (a server
+   * restart is enough — mirrored states live only in youtube_playlist_states).
+   * The poller stopped on that error but left phase 'discovering', and the
+   * card's reopen path early-returns for any non-'fresh' phase, so the modal
+   * reopened onto a permanently frozen "Starting discovery..." with no results
+   * and no way back short of a page reload. Reverting to 'fresh' is what
+   * startDiscovery already does when the START call fails; this is the same
+   * rule applied to the poll. Only a state still claiming to discover is
+   * touched — a finished 'discovered' state whose later poll errored keeps
+   * its results.
+   */
+  const unwedge = useCallback(
+    (sourceId: string) => {
+      patch(sourceId, (s) => (s.phase === 'discovering' ? { ...s, phase: 'fresh' } : s));
+    },
+    [patch],
+  );
+
   const startDiscoveryPoll = useCallback(
     (sourceId: string) => {
       stopDiscoveryPoll(sourceId);
@@ -230,6 +251,7 @@ export function useSourceVertical(
           const status = await fetchSourceDiscoveryStatus(config, sourceId);
           if (status.error) {
             stopDiscoveryPoll(sourceId);
+            unwedge(sourceId);
             return;
           }
           patch(sourceId, (s) => applyDiscovery(s, config, status));
@@ -242,10 +264,11 @@ export function useSourceVertical(
           }
         } catch {
           stopDiscoveryPoll(sourceId);
+          unwedge(sourceId);
         }
       }, config.discovery.pollMs);
     },
-    [announceComplete, config, patch, stopDiscoveryPoll],
+    [announceComplete, config, patch, stopDiscoveryPoll, unwedge],
   );
 
   const startSyncPoll = useCallback(

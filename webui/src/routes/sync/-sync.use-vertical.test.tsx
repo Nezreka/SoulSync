@@ -496,3 +496,67 @@ describe('resetDiscovery — the 🔄 Rediscover hard reset (10785 / 10837)', ()
     expect(spy).toHaveBeenCalledWith('Discovery complete!', 'success');
   });
 });
+
+describe('a dead poll must never leave the state wedged (TheHomeGuy, mirrored)', () => {
+  it('reverts to fresh when the status endpoint 404s mid-discovery', async () => {
+    // The mirrored state lives only in the in-memory youtube_playlist_states,
+    // so a server restart makes /status 404. The poller stopped but LEFT phase
+    // 'discovering', and the card's reopen path early-returns on any non-fresh
+    // phase — the modal was frozen on "Starting discovery..." with no results
+    // and no way back short of a page reload.
+    const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.mirrored));
+    act(() => result.current.seed('mirrored_45', { name: 'Driving Music', track_count: 12 }));
+
+    responder = () => ({ ok: true });
+    await act(async () => {
+      await result.current.startDiscovery('mirrored_45');
+    });
+    expect(result.current.states['mirrored_45'].phase).toBe('discovering');
+
+    responder = () => ({ error: 'Playlist not found' });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SYNC_SOURCES.mirrored.discovery.pollMs + 10);
+    });
+    expect(result.current.states['mirrored_45'].phase).toBe('fresh');
+  });
+
+  it('reverts when the status fetch throws outright', async () => {
+    const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.mirrored));
+    act(() => result.current.seed('mirrored_9', { name: 'X', track_count: 3 }));
+    responder = () => ({ ok: true });
+    await act(async () => {
+      await result.current.startDiscovery('mirrored_9');
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('network down');
+      }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SYNC_SOURCES.mirrored.discovery.pollMs + 10);
+    });
+    expect(result.current.states['mirrored_9'].phase).toBe('fresh');
+  });
+
+  it('leaves a finished discovery alone when a later poll errors', async () => {
+    // Only a state still CLAIMING to discover is reverted — results that
+    // already landed must survive a flaky poll.
+    const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.mirrored));
+    act(() =>
+      result.current.hydrate('mirrored_7', {
+        playlist: { name: 'Done', track_count: 2 },
+        phase: 'discovered',
+        results: [{ index: 0 }],
+        discovery_progress: 100,
+      }),
+    );
+    act(() => result.current.resumeDiscovery('mirrored_7'));
+    responder = () => ({ error: 'Playlist not found' });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SYNC_SOURCES.mirrored.discovery.pollMs + 10);
+    });
+    expect(result.current.states['mirrored_7'].phase).toBe('discovered');
+  });
+});
