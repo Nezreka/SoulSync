@@ -27,6 +27,25 @@ from typing import Any, Dict, Optional
 # browser name. Anything else non-empty is treated as a browser for cookiesfrombrowser.
 PASTE_MODE = "custom"
 
+# Netscape cookies.txt convention: an HttpOnly cookie's domain field is prefixed
+# with this marker instead of being left plain. These are exactly the
+# session-identity cookies (SID, __Secure-1PSID, HSID, SSID, the SIDTS tokens)
+# that actually authenticate a request — treating the whole line as a comment
+# silently drops the cookies needed to look signed in.
+_HTTPONLY_PREFIX = "#HttpOnly_"
+
+
+def _cookie_line_fields(raw: str) -> Optional[list]:
+    """Split one cookies.txt line into its tab-separated fields, or ``None``
+    for a blank line or a genuine comment. Strips ``_HTTPONLY_PREFIX`` first."""
+    line = raw.rstrip("\n")
+    stripped = line.lstrip()
+    if stripped.startswith(_HTTPONLY_PREFIX):
+        line = stripped[len(_HTTPONLY_PREFIX):]
+    elif not line or stripped.startswith("#"):
+        return None
+    return line.split("\t")
+
 # ytmusicapi speaks to the same YouTube backend but wants HEADERS, not a cookie
 # file, so the pasted cookies.txt has to be projected into them (below).
 
@@ -92,10 +111,8 @@ def looks_like_cookiefile(content: Any) -> bool:
     if not content or not isinstance(content, str):
         return False
     for raw in content.splitlines():
-        line = raw.rstrip("\n")
-        if not line or line.lstrip().startswith("#"):
-            continue
-        if len(line.split("\t")) >= 6:
+        fields = _cookie_line_fields(raw)
+        if fields is not None and len(fields) >= 6:
             return True
     return False
 
@@ -138,11 +155,8 @@ def parse_netscape_cookies(content: Any) -> Dict[str, str]:
     if not content or not isinstance(content, str):
         return cookies
     for raw in content.splitlines():
-        line = raw.rstrip("\n")
-        if not line or line.lstrip().startswith("#"):
-            continue
-        fields = line.split("\t")
-        if len(fields) < 7:
+        fields = _cookie_line_fields(raw)
+        if fields is None or len(fields) < 7:
             continue
         name, value = fields[5].strip(), fields[6].strip()
         if name:
