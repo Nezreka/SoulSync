@@ -570,6 +570,22 @@
             if (counts.failed) parts.push(counts.failed + ' failed');
             sub.textContent = parts.join('  ·  ');
         }
+        // the stat hero (music-page parity): big numbers + combined live speed
+        Object.keys(counts).forEach(function (k) {
+            var el = document.querySelector('[data-vdpg-stat="' + k + '"] .adl-stat-num');
+            if (el && String(counts[k]) !== el.textContent) el.textContent = String(counts[k]);
+            var stat = document.querySelector('[data-vdpg-stat="' + k + '"]');
+            if (stat && k === 'active') stat.classList.toggle('adl-stat-live', counts.active > 0);
+            if (stat && k === 'failed') stat.classList.toggle('adl-stat-bad', counts.failed > 0);
+        });
+        var speedEl = document.querySelector('[data-vdpg-speed]');
+        if (speedEl) {
+            var bps = 0;
+            list.forEach(function (d) { if (d.status === 'downloading') bps += Number(d.speed_bps) || 0; });
+            var sp = bps > 0 ? fmtSpeed(bps) : '';
+            speedEl.textContent = sp;
+            speedEl.hidden = !sp;
+        }
 
         // Group same-show+season episode batches (≥2) into one parent card; keep
         // everything else standalone. Server order preserved — a group sits where its
@@ -645,6 +661,23 @@
         }
     }
 
+    var _view = 'downloads';
+    function setView(v) {
+        _view = v;
+        Array.prototype.forEach.call(document.querySelectorAll('[data-vdpg-view]'), function (b) {
+            b.classList.toggle('active', b.getAttribute('data-vdpg-view') === v);
+        });
+        var list = document.querySelector('[data-vdpg-list]');
+        // style.display, not [hidden]: .adl-list is display:flex and CSS wins
+        if (list) list.style.display = v === 'downloads' ? '' : 'none';
+        var chips = document.querySelector('[data-vdpg-pills]');
+        if (chips) chips.style.display = v === 'downloads' ? '' : 'none';
+        Array.prototype.forEach.call(document.querySelectorAll('[data-vdpg-pane]'), function (p) {
+            p.hidden = p.getAttribute('data-vdpg-pane') !== v;
+        });
+        if (window.VideoDownloadsTabs) window.VideoDownloadsTabs.onView(v);
+    }
+
     function setFilter(f) {
         _filter = f;
         Array.prototype.forEach.call(document.querySelectorAll('[data-vdpg-filter]'), function (b) {
@@ -679,7 +712,10 @@
             '<div class="vdpg-skel-lines"><div class="vdpg-skel-line"></div><div class="vdpg-skel-line vdpg-skel-line--short"></div></div></div>');
         host.appendChild(sk);
     }
-    function start() { wire(); showSkeleton(); if (_timer) clearTimeout(_timer); poll(); }
+    function start() {
+        wire(); showSkeleton(); if (_timer) clearTimeout(_timer); poll();
+        if (window.VideoDownloadsTabs) window.VideoDownloadsTabs.refreshBadge();
+    }
     function stop() { if (_timer) { clearTimeout(_timer); _timer = null; } }
 
     function wire() {
@@ -715,6 +751,12 @@
         var pills = document.querySelector('[data-vdpg-pills]');
         if (pills) pills.addEventListener('click', function (e) {
             var b = e.target.closest('[data-vdpg-filter]'); if (b) setFilter(b.getAttribute('data-vdpg-filter'));
+        });
+        // view switch: Downloads | Review | Clients (music-page parity). the
+        // status chips belong to the Downloads view only.
+        var views = document.querySelector('[data-vdpg-views]');
+        if (views) views.addEventListener('click', function (e) {
+            var b = e.target.closest('[data-vdpg-view]'); if (b) setView(b.getAttribute('data-vdpg-view'));
         });
         var list = document.querySelector('[data-vdpg-list]');
         if (list) list.addEventListener('click', function (e) {

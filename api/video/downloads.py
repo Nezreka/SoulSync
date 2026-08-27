@@ -382,6 +382,67 @@ def register_routes(bp):
             return jsonify({"success": False, "error": "A rename run is already in progress."}), 409
         return jsonify({"success": True, **res})
 
+    # ── the recycle bin, browsable (Aug 27 — parity with the music side's
+    #    deleted-files manager: list / restore / purge / bulk) ──
+    @bp.route("/downloads/recycle", methods=["GET"])
+    def video_downloads_recycle():
+        from core.video import recycle as _recycle
+        from core.video.organization import load as _org_load
+
+        from . import get_video_db
+        db = get_video_db()
+        settings = _org_load(db)
+        items = _recycle.list_entries(settings, db)
+        return jsonify({
+            "success": True,
+            "items": items,
+            "total_size": sum(i.get("size") or 0 for i in items),
+            "keep_days": int(settings.get("recycle_keep_days") or 7),
+            "recycle_enabled": bool(settings.get("recycle_deletes", True)),
+        })
+
+    @bp.route("/downloads/recycle/restore", methods=["POST"])
+    def video_downloads_recycle_restore():
+        """Body: {trash_dir, name} for one entry, or {all: true}."""
+        from core.video import recycle as _recycle
+        from core.video.organization import load as _org_load
+
+        from . import get_video_db
+        db = get_video_db()
+        settings = _org_load(db)
+        body = request.get_json(silent=True) or {}
+        if body.get("all"):
+            restored = 0
+            failed = 0
+            for entry in _recycle.list_entries(settings, db):
+                res = _recycle.restore_entry(entry["trash_dir"], entry["name"], settings, db)
+                if res.get("success"):
+                    restored += 1
+                else:
+                    failed += 1
+            return jsonify({"success": failed == 0, "restored": restored, "failed": failed})
+        res = _recycle.restore_entry(body.get("trash_dir"), body.get("name"), settings, db)
+        return jsonify(res), (200 if res.get("success") else 400)
+
+    @bp.route("/downloads/recycle/purge", methods=["POST"])
+    def video_downloads_recycle_purge():
+        """Body: {trash_dir, name} for one entry, or {all: true} to empty."""
+        from core.video import recycle as _recycle
+        from core.video.organization import load as _org_load
+
+        from . import get_video_db
+        db = get_video_db()
+        settings = _org_load(db)
+        body = request.get_json(silent=True) or {}
+        if body.get("all"):
+            purged = 0
+            for entry in _recycle.list_entries(settings, db):
+                if _recycle.purge_entry(entry["trash_dir"], entry["name"], settings, db).get("success"):
+                    purged += 1
+            return jsonify({"success": True, "purged": purged})
+        res = _recycle.purge_entry(body.get("trash_dir"), body.get("name"), settings, db)
+        return jsonify(res), (200 if res.get("success") else 400)
+
     @bp.route("/downloads/blocklist", methods=["GET"])
     def video_downloads_blocklist():
         """The release blocklist — exact remote files that will never be re-picked."""
