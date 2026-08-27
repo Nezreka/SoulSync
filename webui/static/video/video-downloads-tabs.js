@@ -207,6 +207,12 @@
 
     function clientsHost() { return document.querySelector('[data-vdpg-pane="clients"]'); }
 
+    /** Same on-page test the downloads poller uses. */
+    function onDownloadsPage() {
+        return document.body.getAttribute('data-side') === 'video' &&
+            !!document.querySelector('[data-video-subpage="video-downloads"]:not([hidden])');
+    }
+
     function healthOf(d) {
         if (!d) return 'unknown';
         if (d.configured === false) return 'off';
@@ -317,7 +323,15 @@
             } else if (view === 'clients') {
                 loadClients();
                 _ctimer = setInterval(function () {
+                    // hidden tab OR navigated away entirely: the page's own
+                    // poller has this discipline and this one didn't, so the
+                    // clients pane kept hitting /api/clients every 10s forever
+                    // once you left the downloads page (perf sweep rule).
                     if (document.hidden) return;
+                    if (!onDownloadsPage()) {
+                        clearInterval(_ctimer); _ctimer = null;
+                        return;
+                    }
                     loadClients();
                 }, 10000);
             }

@@ -171,6 +171,7 @@ def purge_old_detailed(settings: Dict[str, Any], db, roots_hint=None):
     for d in dirs:
         if not d or not os.path.isdir(d):
             continue
+        dropped = []
         for name in os.listdir(d):
             fp = os.path.join(d, name)
             # only ever touch entries discard() wrote (they carry the stamp
@@ -185,8 +186,18 @@ def purge_old_detailed(settings: Dict[str, Any], db, roots_hint=None):
                     os.remove(fp)
                     removed += 1
                     freed += size
+                    dropped.append(name)
             except OSError:   # noqa: PERF203 - per-file resilience
                 logger.exception("recycle purge: could not remove %s", fp)
+        # the manifest row outlives the file it describes unless we say
+        # otherwise, so an install that purges for years grows a sidecar full
+        # of entries for files that are long gone
+        if dropped:
+            data = _manifest_read(d)
+            if any(name in data for name in dropped):
+                for name in dropped:
+                    data.pop(name, None)
+                _manifest_write(d, data)
     if removed:
         logger.info("recycle purge: removed %d expired file(s), freed %.1f GB",
                     removed, freed / 1024 ** 3)

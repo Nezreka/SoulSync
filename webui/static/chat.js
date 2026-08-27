@@ -22,6 +22,11 @@
         timer: null,
         lastStamp: null,         // newest message timestamp we've rendered
         stickBottom: true,       // autoscroll unless the user scrolled up
+        failStreak: 0,           // consecutive failed polls (see pollProblem)
+        renderedOk: false,       // this VIEW has painted real content since
+                                 // it was opened — the hiccup gate. never
+                                 // state.msgs: that is the ROOM store and a
+                                 // DM would read the room's leftovers.
         started: false,
         ssOnly: false,           // room filter: show only SoulSync-app messages
         protocolLog: [],         // recent machine-coordination events (bounded)
@@ -4049,6 +4054,40 @@
         renderUsers(null);
     }
 
+    // One slow slskd answer used to WIPE a working chat with the full error
+    // screen until the next good poll — on a busy install that read as "chat
+    // is unavailable more often than it's available" (#1194, wishx). A poll
+    // failure over a rendered room now keeps the room and shows a quiet
+    // reconnecting pill; the full problem screen is reserved for a cold load
+    // or three misses in a row (a real outage, not a hiccup).
+    function pollProblem(msg, hasContent) {
+        state.failStreak += 1;
+        if (!hasContent || state.failStreak >= 3) {
+            _reconnectPill(false);
+            renderProblem(msg);
+            return;
+        }
+        _reconnectPill(true);
+    }
+
+    function pollRecovered() {
+        state.failStreak = 0;
+        _reconnectPill(false);
+    }
+
+    function _reconnectPill(show) {
+        var pill = q('[data-chat-reconnect]');
+        if (!show) { if (pill) pill.remove(); return; }
+        if (pill) return;
+        var head = q('[data-chat-messages]');
+        if (!head || !head.parentNode) return;
+        pill = document.createElement('div');
+        pill.setAttribute('data-chat-reconnect', '');
+        pill.className = 'chat-reconnect-pill';
+        pill.textContent = 'connection hiccup — retrying…';
+        head.parentNode.insertBefore(pill, head);
+    }
+
     // Auto-join is off: the user left the room and stays out until THEY say
     // otherwise. Join flips the setting back on; the next poll joins + renders.
     function renderJoinGate() {
@@ -4461,11 +4500,12 @@
         if (state.view === 'room') {
             work = getJSON('/api/chat/room?room=' + encodeURIComponent(state.room || '')).then(function (res) {
                 if (!res.ok) {
-                    renderProblem(res.body && res.body.error
+                    pollProblem(res.body && res.body.error
                         ? res.body.error
-                        : 'Chat is unavailable right now.');
+                        : 'Chat is unavailable right now.', state.renderedOk);
                     return;
                 }
+                pollRecovered();
                 state.canSend = !!res.body.can_send;
                 // auto-join OFF → the server no longer joins for us; show the
                 // join gate instead of the room (popwaffle9000's leave fix).
@@ -4477,6 +4517,7 @@
                 mergeMessages(res.body.messages);
                 _clearTypingFor(res.body.messages);
                 renderMessages(state.msgs);
+                state.renderedOk = true;
                 renderUsers(res.body.users);
                 _ingestProtocol(res.body.protocol);
                 _sendJoinBeacon();
@@ -4486,12 +4527,15 @@
             work = getJSON('/api/chat/conversations/' + encodeURIComponent(state.pmUser))
                 .then(function (res) {
                     if (!res.ok) {
-                        renderProblem(res.body && res.body.error || 'Conversation unavailable.');
+                        pollProblem(res.body && res.body.error || 'Conversation unavailable.',
+                            state.renderedOk);
                         return;
                     }
+                    pollRecovered();
                     state.canSend = !!res.body.can_send;
                     renderHead(); renderComposer();
                     renderMessages(res.body.messages);
+                    state.renderedOk = true;
                     renderUsers(null);
                 });
         }
@@ -4531,7 +4575,7 @@
         state.pingArmed = false;                   // ...and archive mentions aren't new pings
         renderTyping();
         renderBusUI();
-        state.msgs = []; state.loadingOlder = false; state.historyDone = false;
+        state.msgs = []; state.loadingOlder = false; state.historyDone = false; state.renderedOk = false;
         cancelReply();
         cancelEdit();
         try {
@@ -4654,7 +4698,7 @@
     function openPm(username) {
         if (!username) return;
         state.view = 'pm'; state.pmUser = username; state.lastStamp = null; state.stickBottom = true;
-        state.searchMode = false;
+        state.searchMode = false; state.renderedOk = false;
         state.renderedCount = 0; hideJumpPill(); state.newMarker = null;
         cancelReply();
         cancelEdit();

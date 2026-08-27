@@ -1032,21 +1032,28 @@ class RepairWorker:
             remaining -= chunk
         return self._stop_event.is_set()
 
-    def run_job_now(self, job_id: str):
+    def run_job_now(self, job_id: str) -> bool:
         """Queue a job for immediate execution by the main worker loop.
 
         Uses a thread-safe queue instead of spawning a separate thread
         to avoid race conditions with the main loop's _run_job().
+
+        Returns True when the job is queued (or already waiting) — the same
+        contract as the video worker's run_job_now. This never returned
+        ANYTHING, so the quality-check automation read None as "library
+        worker unavailable" on every run while the scan it triggered ran
+        fine behind its back (#1192).
         """
         self._ensure_jobs_loaded()
         if job_id not in self._jobs:
             logger.warning("Unknown job: %s", job_id)
-            return
+            return False
 
         with self._force_run_lock:
             if job_id not in self._force_run_queue:
                 self._force_run_queue.append(job_id)
                 logger.info("Job %s queued for immediate run", job_id)
+        return True
 
     def _update_progress(self, scanned: int, total: int):
         """Callback for jobs to report progress."""

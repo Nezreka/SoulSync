@@ -375,3 +375,40 @@ def test_bin_api_routes_exist_and_the_page_wires_the_tabs():
     assert 'data-vdpg-view="review"' in _INDEX and 'data-vdpg-view="clients"' in _INDEX
     assert "data-vdpg-pane" in _INDEX
     assert "video-downloads-tabs.js" in _INDEX            # the script actually loads
+
+
+def test_purge_drops_the_manifest_rows_of_the_files_it_deleted(db, tmp_path, monkeypatch):
+    """A manifest row outlives its file unless the purge says otherwise — an
+    install purging for years would grow a sidecar full of ghosts."""
+    import json as _json
+    f = _mkfile(tmp_path / "Movies" / "E" / "e.mkv")
+    res = recycle.discard(str(f), _settings(), db)
+    trash = Path(res["trash_path"]).parent
+    name = Path(res["trash_path"]).name
+    manifest_path = trash / ".soulsync_recycle.json"
+    assert name in _json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    # Age it past the keep window. The patch must stay FAITHFUL: the real
+    # entry_age_seconds returns None for anything without our stamp prefix,
+    # which is exactly what keeps the purge from eating the manifest (and any
+    # foreign file in an override folder). A blanket "everything is old" patch
+    # deleted the sidecar and the test caught it.
+    real_age = recycle.entry_age_seconds
+    monkeypatch.setattr(
+        recycle, "entry_age_seconds",
+        lambda n, now=None: None if real_age(n) is None else 99 * 86400)
+    removed, _freed = recycle.purge_old_detailed(_settings(recycle_keep_days=7), db)
+    assert removed == 1
+    assert not Path(res["trash_path"]).exists()
+    assert _json.loads(manifest_path.read_text(encoding="utf-8")) == {}
+
+
+def test_the_clients_pane_stops_polling_when_you_leave_the_page():
+    """The page's own poller checks _onPage(); the clients pane's 10s timer
+    did not, so it kept hitting /api/clients forever after navigation."""
+    js = (_ROOT / "webui" / "static" / "video" / "video-downloads-tabs.js").read_text(encoding="utf-8")
+    tick = js.split("_ctimer = setInterval(", 1)[1].split("}, 10000)", 1)[0]
+    assert "document.hidden" in tick
+    assert "onDownloadsPage()" in tick
+    assert "clearInterval(_ctimer)" in tick
+    assert 'data-video-subpage="video-downloads"' in js

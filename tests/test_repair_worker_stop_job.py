@@ -70,3 +70,26 @@ def test_enabling_a_job_does_not_stop_it():
     w._current_job_id = 'lyrics_filler'
     w.set_job_enabled('lyrics_filler', True)
     assert _should_stop(w) is False
+
+
+# ── run_job_now returns whether it actually queued (#1192) ────────────────────
+# the quality-check automation reads this return; it was None on EVERY path,
+# so the automation reported "library worker unavailable" 1,689 runs in a row
+# while the scan it triggered ran fine. the handler tests never caught it
+# because they stubbed the seam with a lambda that returned True.
+
+def test_run_job_now_reports_queued_truthfully():
+    w = _worker()
+    w._jobs = {'quality_upgrade': object()}      # registry loaded, job known
+    assert w.run_job_now('quality_upgrade') is True
+    assert w._force_run_queue == ['quality_upgrade']
+    # asking again while queued is still a successful trigger, not a dupe
+    assert w.run_job_now('quality_upgrade') is True
+    assert w._force_run_queue == ['quality_upgrade']
+
+
+def test_run_job_now_refuses_an_unknown_job():
+    w = _worker()
+    w._jobs = {'quality_upgrade': object()}
+    assert w.run_job_now('not_a_job') is False
+    assert w._force_run_queue == []
