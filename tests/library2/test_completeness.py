@@ -872,3 +872,67 @@ def test_persist_tracklist_tracks_still_accepts_plain_name_credits(imported_conn
     assert imported_conn.execute(
         "SELECT 1 FROM lib2_artists WHERE name='Old Cache Guest'"
     ).fetchone() is not None
+
+
+def test_positional_fallback_never_claims_an_owned_track_with_another_title(
+    imported_conn,
+):
+    """A downloaded file whose track number belongs to a DIFFERENT edition must
+    not be overwritten by whatever the provider has at that slot.
+
+    Production case: the only owned file of "Peace Is The Mission (Extended)"
+    was ``04 - Lean On.flac``, but slot 4 of that edition is "Blaze Up the Fire
+    (feat. Chronixx)". The positional fallback claimed the row with no title
+    check at all, so (a) Chronixx was credited on "Lean On", (b) the real slot
+    5 could no longer heal that row by title and inserted a duplicate "Lean On",
+    and (c) "Blaze Up the Fire" never became a missing-track row.
+    """
+    artist_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'"
+    ).fetchone()[0]
+    album_id = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, origin, expected_track_count) "
+        "VALUES(?, 'Peace Is The Mission (Extended)', 'library', 5)",
+        (artist_id,),
+    ).lastrowid
+    owned_id = imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, monitored) "
+        "VALUES(?, 'Lean On', 4, 1, 1)",
+        (album_id,),
+    ).lastrowid
+    imported_conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path) VALUES(?, '/m/04 - Lean On.flac')",
+        (owned_id,),
+    )
+
+    _persist_tracklist_tracks(imported_conn, album_id, [
+        {"track_number": 4, "title": "Blaze Up the Fire (feat. Chronixx)",
+         "provider": "spotify",
+         "artist_credits": [{"name": "Major Lazer", "id": "sp-ml"},
+                            {"name": "Chronixx", "id": "sp-chronixx"}]},
+        {"track_number": 5, "title": "Lean On", "provider": "spotify",
+         "artist_credits": [{"name": "Major Lazer", "id": "sp-ml"},
+                            {"name": "DJ Snake", "id": "sp-djsnake"}]},
+    ])
+
+    # (a) the owned row keeps its identity and gets the credits of ITS song
+    credits = [r["name"] for r in imported_conn.execute(
+        """SELECT ar.name FROM lib2_track_artists ta
+             JOIN lib2_artists ar ON ar.id=ta.artist_id
+            WHERE ta.track_id=? ORDER BY ta.position""",
+        (owned_id,))]
+    assert "Chronixx" not in credits
+    assert credits == ["Major Lazer", "DJ Snake"]
+    # (b) it is healed to the number the provider actually gives it, in place —
+    #     no second "Lean On" row
+    rows = imported_conn.execute(
+        "SELECT id, title, track_number FROM lib2_tracks WHERE album_id=? "
+        "ORDER BY track_number", (album_id,)).fetchall()
+    assert [(r["title"], r["track_number"]) for r in rows] == [
+        ("Blaze Up the Fire (feat. Chronixx)", 4), ("Lean On", 5),
+    ]
+    assert rows[1]["id"] == owned_id
+    # (c) the provider track that really sits at slot 4 exists as its own row
+    assert imported_conn.execute(
+        "SELECT COUNT(*) FROM lib2_tracks WHERE album_id=? AND title LIKE 'Blaze%'",
+        (album_id,)).fetchone()[0] == 1

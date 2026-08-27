@@ -427,6 +427,28 @@ def _persist_tracklist_tracks(
     inferred_disc = 1
     previous_number: Optional[int] = None
 
+    # Reserve every exact title match BEFORE any positional claim (§16.3 heal,
+    # hoisted out of the loop below).
+    #
+    # A title match is the stronger claim on a local row, but it used to be
+    # evaluated per entry, so an earlier entry's (disc, number) fallback could
+    # take a row a later entry would have matched exactly. Production case: the
+    # one owned file of "Peace Is The Mission (Extended)" was `04 - Lean On`,
+    # while slot 4 of that edition is "Blaze Up the Fire (feat. Chronixx)".
+    # The positional claim consumed the row, so the file got that other song's
+    # provider ids and artist credits (Chronixx landed on "Lean On"), the real
+    # slot 5 had to insert a duplicate "Lean On", and "Blaze Up the Fire" never
+    # became a missing row at all. Reserving up front removes the ordering.
+    reserved: Dict[int, int] = {}
+    for idx, entry in enumerate(entries):
+        entry_title = str(entry.get("title") or "").strip()
+        if not entry_title:
+            continue
+        reservation = _unique_untouched_title_match(
+            conn, album_id, entry_title, set(reserved.values()))
+        if reservation is not None:
+            reserved[idx] = reservation
+
     created = 0
     touched_ids: set = set()
     for idx, entry in enumerate(entries):
@@ -464,11 +486,12 @@ def _persist_tracklist_tracks(
         # duplicate rows — which is exactly why "Update Discography" never
         # repaired it. Matching on the stable title lets a correctly-fetched
         # tracklist rewrite the numbers IN PLACE.
-        heal_id = _unique_untouched_title_match(conn, album_id, title, touched_ids)
+        heal_id = reserved.get(idx)
         existing = None if heal_id is not None else conn.execute(
             """SELECT id FROM lib2_tracks
-               WHERE album_id=? AND COALESCE(disc_number, 1)=? AND track_number=?""",
-            (album_id, disc, number),
+               WHERE album_id=? AND COALESCE(disc_number, 1)=? AND track_number=?
+                 AND id NOT IN (SELECT value FROM json_each(?))""",
+            (album_id, disc, number, json.dumps(sorted(reserved.values()))),
         ).fetchone()
         if heal_id is not None:
             conn.execute(
