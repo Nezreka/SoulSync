@@ -12526,6 +12526,69 @@ class MusicDatabase:
             logger.error(f"Error updating wishlist retry status: {e}")
             return False
     
+    def reset_wishlist_retry_backoff(self, spotify_track_ids: Optional[List[str]] = None,
+                                     profile_id: Optional[int] = None) -> int:
+        """Clear the retry clock on failing wishlist tracks. Returns rows changed.
+
+        The progressive backoff (4h → 24h → 7d) is anchored on retry_count and
+        last_attempted, both stamped by update_wishlist_retry after every failed
+        cycle. When a whole run fails for an EXTERNAL reason — slskd down, no
+        candidates returned — hundreds of tracks get stamped together and then
+        sit out the next 24 hours or 7 days in lockstep, long after the source
+        came back (#1196: 634 of 674 stuck at retry 3-4). Nothing ever cleared
+        these counters short of the track succeeding, so "the source recovered"
+        was not a state the wishlist could act on.
+
+        Only rows that actually carry a failure are touched, so a successful
+        track's history is left alone, and the count returned is the honest
+        number of tracks unstuck.
+        """
+        try:
+            ids = [str(t) for t in (spotify_track_ids or []) if t]
+            if spotify_track_ids is not None and not ids:
+                return 0
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                # The CLOCK, not the failure: every wishlist row carries a
+                # failure_reason (it is why the track is on the list), so that
+                # column identifies nothing. retry_count / last_attempted are
+                # what the backoff actually reads, so they are what "has
+                # something to unstick" means — and it keeps the returned count
+                # honest instead of reporting untouched rows as cleared.
+                clauses = ["(retry_count > 0 OR last_attempted IS NOT NULL)"]
+                params: List[Any] = []
+                if profile_id is not None:
+                    clauses.append("profile_id = ?")
+                    params.append(profile_id)
+                if ids:
+                    # chunked: sqlite caps host parameters (999 by default) and a
+                    # wishlist this feature exists for is bigger than that
+                    changed = 0
+                    for start in range(0, len(ids), 500):
+                        chunk = ids[start:start + 500]
+                        placeholders = ",".join("?" for _ in chunk)
+                        cursor.execute(
+                            f"""UPDATE wishlist_tracks
+                                SET retry_count = 0, last_attempted = NULL
+                                WHERE {' AND '.join(clauses)}
+                                  AND spotify_track_id IN ({placeholders})""",
+                            (*params, *chunk),
+                        )
+                        changed += cursor.rowcount
+                    conn.commit()
+                    return changed
+                cursor.execute(
+                    f"""UPDATE wishlist_tracks
+                        SET retry_count = 0, last_attempted = NULL
+                        WHERE {' AND '.join(clauses)}""",
+                    tuple(params),
+                )
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error resetting wishlist retry backoff: {e}")
+            return 0
+
     def get_wishlist_count(self, profile_id: int = 1, category: Optional[str] = None) -> int:
         """Get the total number of tracks in the wishlist for the given profile,
         optionally filtered by category ('singles' or 'albums')."""

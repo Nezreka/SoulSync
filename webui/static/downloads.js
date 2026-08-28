@@ -4756,7 +4756,13 @@ function _taskClampPct(value, fallback = 0) {
     let pct = Number(value);
     if (!Number.isFinite(pct)) pct = Number(fallback);
     if (!Number.isFinite(pct)) pct = 0;
-    if (pct > 0 && pct <= 1) pct *= 100;
+    // Tolerate a 0-1 FRACTION, but never mistake an honest 1% for one (#1197).
+    // `pct <= 1` meant a scan sitting at exactly 1 percent — the value every
+    // long job reports for a while — was multiplied to 100, so the card read
+    // "100%" while the counts underneath said 2,347 / 157,122. it corrected
+    // itself at 2%, which is why it looked like another automation finishing
+    // had caused it. an integer 1 is one percent; only a real fraction is <1.
+    if (pct > 0 && pct < 1) pct *= 100;
     return Math.max(0, Math.min(100, Math.round(pct)));
 }
 
