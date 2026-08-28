@@ -15347,6 +15347,13 @@ class MusicDatabase:
                 albums = []
                 for album_row in album_rows:
                     album_data = dict(album_row)
+                    # discogs_id is stored type-tagged ('m12345'/'r12345') so
+                    # DiscogsClient can route master vs release lookups; strip
+                    # it here so the API response (and the "View on Discogs"
+                    # link it feeds) never leaks that internal tag.
+                    if album_data.get('discogs_id'):
+                        from core.discogs_client import _untag_discogs_album_id
+                        album_data['discogs_id'] = _untag_discogs_album_id(album_data['discogs_id'])
                     # Parse album genres
                     if album_data.get('genres'):
                         try:

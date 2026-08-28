@@ -21,6 +21,7 @@ from core.discogs_client import (
     _discogs_album_endpoints,
     _discogs_album_kind,
     _tag_discogs_album_id,
+    _untag_discogs_album_id,
 )
 
 
@@ -73,6 +74,59 @@ def test_tagging():
     assert _tag_discogs_album_id('123', 'release') == 'r123'
     assert _tag_discogs_album_id('', 'release') == ''
     assert _tag_discogs_album_id(None, 'master') == ''
+
+
+# ---------------------------------------------------------------------------
+# _untag_discogs_album_id — inverse of _tag_discogs_album_id, display-only.
+#
+# The tag is meant to stay an internal routing detail (see the module
+# docstring above), but nothing stripped it back off before a tagged id
+# reached a public-facing field: the "View on Discogs" link built from a
+# card's `id` (artist-detail discography grid) and the `albums.discogs_id`
+# DB column read straight back out by `get_artist_full_detail` both leaked
+# the tag verbatim, producing a 404 (e.g. discogs.com/release/r5743831
+# instead of .../release/5743831). This helper untags a value ONLY at
+# those display/serialization boundaries — never at the point the tag is
+# created, and never fed back into `_discogs_album_endpoints` for a fresh
+# lookup, so the routing this whole module exists for is unaffected.
+# ---------------------------------------------------------------------------
+
+def test_untag_round_trips_with_tag():
+    assert _untag_discogs_album_id(_tag_discogs_album_id('5743831', 'release')) == '5743831'
+    assert _untag_discogs_album_id(_tag_discogs_album_id('777', 'master')) == '777'
+
+
+def test_untag_release_and_master():
+    assert _untag_discogs_album_id('r5743831') == '5743831'
+    assert _untag_discogs_album_id('m12345') == '12345'
+
+
+def test_untag_empty_and_none():
+    assert _untag_discogs_album_id('') == ''
+    assert _untag_discogs_album_id(None) == ''
+
+
+def test_untag_already_untagged_id_is_inert():
+    # A legacy bare id (pre-#848) has nothing to strip.
+    assert _untag_discogs_album_id('12345') == '12345'
+
+
+def test_untag_never_mangles_a_non_discogs_id():
+    # Guards against this helper ever being misapplied to a value that
+    # merely happens to start with 'm' or 'r' but isn't a tagged Discogs id.
+    assert _untag_discogs_album_id('musicbrainz-abc-123') == 'musicbrainz-abc-123'
+    assert _untag_discogs_album_id('rq-99') == 'rq-99'
+
+
+def test_untagged_id_still_routes_correctly_if_ever_refed_into_endpoints():
+    # Belt-and-suspenders: even if an untagged id somehow reached the
+    # routing function, its own documented legacy-bare-id fallback
+    # (release-first, then master) means it still resolves rather than
+    # breaking outright.
+    tagged = _tag_discogs_album_id('5743831', 'release')
+    untagged = _untag_discogs_album_id(tagged)
+    assert _discogs_album_endpoints(tagged) == ['/releases/5743831']
+    assert _discogs_album_endpoints(untagged) == ['/releases/5743831', '/masters/5743831']
 
 
 # ---------------------------------------------------------------------------

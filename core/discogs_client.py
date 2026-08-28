@@ -107,6 +107,23 @@ def _tag_discogs_album_id(raw_id: Any, kind: str) -> str:
     return f"{'m' if kind == 'master' else 'r'}{s}"
 
 
+def _untag_discogs_album_id(tagged_id: Any) -> str:
+    """Inverse of _tag_discogs_album_id: ``'m12345'``/``'r12345'`` -> ``'12345'``.
+
+    Display-only. Never feed the result back into _discogs_album_endpoints()
+    for a fresh lookup if you can help it -- the tag exists so that function
+    doesn't have to guess between /masters/ and /releases/. It does tolerate
+    an untagged ID via its own legacy fallback (release-first, then master),
+    so this is safe for values that only ever reach the API through it, but
+    the point of this helper is to strip the tag for values that never should
+    have carried it out of the backend in the first place (API responses,
+    public-facing links)."""
+    s = str(tagged_id or '').strip()
+    if s[:1] in ('m', 'r') and s[1:].isdigit():
+        return s[1:]
+    return s
+
+
 def _discogs_album_endpoints(album_id: Any) -> List[str]:
     """Map a (possibly tagged) album ID to the API path(s) to try, in order.
 
