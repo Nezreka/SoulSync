@@ -161,8 +161,13 @@ def _engine_progress_pct(record: Any) -> float:
         progress = float(progress)
     except (TypeError, ValueError):
         return 0
-    if progress <= 1.0:
-        progress *= 100
+    # NO unit guessing. Every download client reports 0-100 (soulseek's
+    # percentComplete, deezer/tidal's own * 100, lidarr's 5.0/95.0, and amazon
+    # since it was normalised). The old `if progress <= 1.0: progress *= 100`
+    # existed only for amazon's 0-1 fraction and could not tell that 1.0 from
+    # a real one percent — so every other engine's opening 1% was inflated:
+    # 0.5% rendered 50%, 1.0% rendered 100%, on a row that now carries a
+    # visible bar and a number. Same family as #1197.
     return progress
 
 

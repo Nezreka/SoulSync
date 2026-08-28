@@ -31046,16 +31046,48 @@ div.artist-hero-badge {
     transition: max-height 0.4s ease;
 }
 .artist-hero-bio.expanded {
-    max-height: 500px;
+    /* was 500px — a long biography simply clipped again at the taller cap,
+       with no toggle in sight. expanded means expanded. */
+    max-height: none;
 }
+
+/* The collapsed box fades its last line so the clip reads as "there is more"
+   rather than as a sentence that just stops. */
+.artist-hero-bio.has-more:not(.expanded)::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 3.2em;
+    pointer-events: none;
+    background: linear-gradient(to bottom, rgba(18, 20, 26, 0), rgba(18, 20, 26, 0.92));
+    border-radius: 0 0 10px 10px;
+}
+
+/* PINNED, not in flow. The toggle used to be a plain block after the text
+   inside a `max-height: 8em; overflow: hidden` box — so on any bio long
+   enough to need it, the toggle was pushed past the clip and became
+   invisible. That is #1200: no way to read on, no scroll, no pop-out. */
 .artist-hero-bio-toggle {
+    position: absolute;
+    right: 16px;
+    bottom: 8px;
+    z-index: 1;
+    border: none;
+    background: transparent;
     color: rgb(var(--accent-rgb));
     cursor: pointer;
     font-size: 0.82em;
     font-weight: 600;
+    padding: 4px 0;
+    font-family: inherit;
+}
+.artist-hero-bio.expanded .artist-hero-bio-toggle {
+    /* nothing to fade past once open — sit under the text in flow */
+    position: static;
     display: block;
     margin-top: 8px;
-    padding: 4px 0;
 }
 .artist-hero-bio-toggle:hover {
     text-decoration: underline;

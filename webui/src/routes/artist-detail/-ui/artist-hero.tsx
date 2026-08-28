@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { StreamCounts } from '../-artist-detail.completion';
 import type { ArtistInfo, Discography, DiscographyBucket } from '../-artist-detail.types';
@@ -139,6 +139,24 @@ export function ArtistHero({
   const chips = buildGenreChips(artist);
   const bio = cleanArtistBio(artist.lastfm_bio);
   const [bioExpanded, setBioExpanded] = useState(false);
+  const bioRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * Has the bio been MEASURED to fit inside the collapsed box?
+   *
+   * The toggle used to render unconditionally inside a box with
+   * `max-height: 8em; overflow: hidden`, so on a long bio — every bio worth
+   * reading — it sat below the clip and was invisible, leaving no way to read
+   * on, scroll, or pop it out (#1200, wishx). It is pinned to the box now, so
+   * it also has to know when there is nothing to reveal.
+   *
+   * The polarity is deliberate and FAIL-SAFE: show the toggle unless we have
+   * positively measured that the text fits. Asking "does it overflow?" and
+   * defaulting to false hides the toggle wherever measurement is unavailable
+   * (jsdom, a pre-font-load paint, no ResizeObserver) — which recreates the
+   * exact bug being fixed. This way a short bio may briefly carry a redundant
+   * "Read more"; the other way a long one loses its only way out.
+   */
+  const [bioFits, setBioFits] = useState(false);
   const [pickingPhoto, setPickingPhoto] = useState(false);
   /** null = unknown (check pending/failed); the vanilla left the default label. */
   const [watching, setWatching] = useState<boolean | null>(null);
@@ -148,6 +166,40 @@ export function ArtistHero({
       hero img src in place (openArtistArtPicker apply, library.js:1966-1971). */
   const [appliedPhoto, setAppliedPhoto] = useState<string | null>(null);
   const hasReleases = totalReleaseCount(discography) > 0;
+
+  /**
+   * Measure the collapsed bio so the toggle only offers what it can deliver.
+   *
+   * Re-measured on bio change AND on resize: the box is a fixed 8em tall but
+   * its WIDTH is fluid, so the same text wraps to more lines in a narrow
+   * column and a bio that fit at 1920 overflows on a laptop.
+   */
+  useEffect(() => {
+    const el = bioRef.current;
+    if (!el || !bio) {
+      setBioFits(false);
+      return;
+    }
+    const measure = () => {
+      const node = bioRef.current;
+      if (!node) return;
+      // measure the COLLAPSED height — while expanded the box grew to fit,
+      // so scrollHeight equals clientHeight and would report "it fits", then
+      // hide the Show less button the reader needs to get back.
+      const wasExpanded = node.classList.contains('expanded');
+      if (wasExpanded) node.classList.remove('expanded');
+      const { scrollHeight, clientHeight } = node;
+      if (wasExpanded) node.classList.add('expanded');
+      // an environment that cannot measure reports 0/0 — that is "unknown",
+      // never "it fits".
+      setBioFits(clientHeight > 0 && scrollHeight - clientHeight <= 4);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [bio]);
 
   /** The watchlist is keyed on the CANONICAL Spotify identity where one exists.
    *
@@ -368,13 +420,24 @@ export function ArtistHero({
 
           {bio ? (
             <div
-              className={`artist-hero-bio${bioExpanded ? ' expanded' : ''}`}
+              ref={bioRef}
+              className={
+                `artist-hero-bio${bioExpanded ? ' expanded' : ''}` +
+                (bioFits ? '' : ' has-more')
+              }
               id="artist-hero-bio"
             >
               <span className="bio-text">{bio}</span>
-              <span className="artist-hero-bio-toggle" onClick={() => setBioExpanded((v) => !v)}>
-                {bioExpanded ? 'Show less' : 'Read more'}
-              </span>
+              {!bioFits || bioExpanded ? (
+                <button
+                  type="button"
+                  className="artist-hero-bio-toggle"
+                  aria-expanded={bioExpanded}
+                  onClick={() => setBioExpanded((v) => !v)}
+                >
+                  {bioExpanded ? 'Show less' : 'Read more'}
+                </button>
+              ) : null}
             </div>
           ) : null}
 

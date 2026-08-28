@@ -177,6 +177,19 @@ describe('genres and bio', () => {
     expect(document.querySelector('.artist-hero-bio-toggle')?.textContent).toBe('Show less');
   });
 
+  it('keeps the toggle reachable when the environment cannot measure (#1200)', () => {
+    // wishx: four lines of bio, no way to read on — the toggle rendered
+    // INSIDE a `max-height: 8em; overflow: hidden` box, below the clip, so it
+    // was invisible on exactly the bios that needed it. it is pinned now, and
+    // only hidden when the bio is MEASURED to fit. jsdom reports 0/0 for
+    // layout, which must read as "unknown" and keep the toggle — never as
+    // "it fits".
+    renderHero({ name: 'A', lastfm_bio: 'A long band history that would wrap.' });
+    const box = document.querySelector('.artist-hero-bio') as HTMLElement;
+    expect(box.className).toContain('has-more');
+    expect(document.querySelector('.artist-hero-bio-toggle')).not.toBeNull();
+  });
+
   it('omits the bio block entirely when only a link remains', () => {
     renderHero({ name: 'A', lastfm_bio: '<a href="x">Read more on Last.fm</a>' });
     expect(document.getElementById('artist-hero-bio')).toBeNull();
@@ -373,9 +386,12 @@ describe('artist format tags', () => {
       completed: true,
     });
     const info = document.querySelector('.artist-info') as HTMLElement;
-    const order = [...info.children].map((n) => n.className);
-    expect(order.indexOf('artist-formats')).toBe(order.indexOf('artist-genres-container') + 1);
-    expect(order.indexOf('artist-hero-bio')).toBe(order.indexOf('artist-formats') + 1);
+    // by CLASS, not by exact className string: the bio carries state classes
+    // (has-more / expanded) and an exact-match index silently returned -1.
+    const order = [...info.children];
+    const at = (cls: string) => order.findIndex((n) => n.classList.contains(cls));
+    expect(at('artist-formats')).toBe(at('artist-genres-container') + 1);
+    expect(at('artist-hero-bio')).toBe(at('artist-formats') + 1);
   });
 });
 
