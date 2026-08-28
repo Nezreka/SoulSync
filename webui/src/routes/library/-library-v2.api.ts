@@ -2005,6 +2005,7 @@ export function invalidateLibraryV2(queryClient: QueryClient) {
 
 export interface SourceSearchResult {
   result_type: 'track' | 'album';
+  source?: string;
   username: string;
   filename: string;
   size: number;
@@ -2016,6 +2017,9 @@ export interface SourceSearchResult {
   artist?: string | null;
   title?: string | null;
   album?: string | null;
+  release_title?: string | null;
+  matched_album_title?: string | null;
+  matched_track_title?: string | null;
   track_count?: number | null;
   free_upload_slots?: number | null;
   queue_length?: number | null;
@@ -2033,6 +2037,7 @@ export interface SourceSearchResult {
     seeders?: number;
     leechers?: number;
     publish_date?: string | null;
+    release_title?: string | null;
   } | null;
 }
 

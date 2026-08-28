@@ -13,6 +13,7 @@ from core.library2.queue_status import get_queue_status
 from core.runtime_state import (
     download_tasks,
     matched_downloads_context,
+    processed_download_ids,
 )
 
 flask = pytest.importorskip("flask")
@@ -25,9 +26,11 @@ def _clean_runtime_state():
     next (see soulsync-pytest-full-suite-and-isolation-quirks)."""
     download_tasks.clear()
     matched_downloads_context.clear()
+    processed_download_ids.clear()
     yield
     download_tasks.clear()
     matched_downloads_context.clear()
+    processed_download_ids.clear()
 
 
 def _make_context_key(username, filename):
@@ -158,6 +161,32 @@ class TestGetQueueStatus:
         result = get_queue_status([20], **_deps(live))
 
         assert result["tracks"][20] == {"status": "downloading", "progress_pct": 77}
+
+    @pytest.mark.parametrize("state", [
+        "Completed, Succeeded", "Completed, Errored", "Failed", "Cancelled", "Aborted",
+    ])
+    def test_terminal_live_transfer_does_not_reappear_as_queued(self, state):
+        """Regression: a retained completed client row is terminal, not queued."""
+        matched_downloads_context["ctx1"] = {
+            "lib2_entity": {"track_id": 20, "album_id": 6},
+            "search_result": {"username": "hifi", "filename": "track.flac"},
+        }
+        live = {_make_context_key("hifi", "track.flac"): {
+            "state": state, "percentComplete": 100,
+        }}
+
+        result = get_queue_status([20], **_deps(live))
+
+        assert result == {"tracks": {}, "albums": {}}
+
+    def test_processed_manual_context_is_hidden_during_cleanup_overlap(self):
+        matched_downloads_context["ctx1"] = {
+            "lib2_entity": {"track_id": 20, "album_id": 6},
+            "search_result": {"username": "bob", "filename": "track.mp3"},
+        }
+        processed_download_ids.add("ctx1")
+
+        assert get_queue_status([20], **_deps()) == {"tracks": {}, "albums": {}}
 
     def test_batch_task_takes_priority_over_shadow_manual_context(self):
         """Some manual grabs also get a correlated download_tasks entry

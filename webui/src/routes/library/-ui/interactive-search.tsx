@@ -3,11 +3,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { DialogFrame, DialogHeader } from '@/components/dialog';
 
-import type { LibraryV2QualityProfile, LibraryV2RankedTarget } from '../-library-v2.types';
+import type {
+  LibraryV2QualityProfile,
+  LibraryV2QueueStatusEntry,
+  LibraryV2RankedTarget,
+} from '../-library-v2.types';
 
 import { bitrateKbps } from '../-bitrate';
 import {
   fetchLibraryV2AlbumHistory,
+  fetchLibraryV2QueueStatus,
   fetchLibraryV2TrackHistory,
   LIBRARY_V2_QUERY_KEY,
   libraryV2QualityProfilesQueryOptions,
@@ -97,7 +102,7 @@ function ageDays(publishDate?: string | null): number {
   return (Date.now() - then) / 86_400_000;
 }
 
-type SortKey = 'source' | 'title' | 'quality' | 'size' | 'age' | 'availability';
+type SortKey = 'source' | 'title' | 'quality' | 'size' | 'age' | 'availability' | 'grabs';
 
 function sortValue(r: SourceSearchResult, key: SortKey): number | string {
   switch (key) {
@@ -113,10 +118,11 @@ function sortValue(r: SourceSearchResult, key: SortKey): number | string {
       return ageDays(effMeta(r).publish_date);
     case 'availability': {
       const meta = effMeta(r);
-      if (meta.grabs != null) return meta.grabs;
       if (meta.seeders != null) return meta.seeders;
       return (r.free_upload_slots ?? 0) * 100 - (r.queue_length ?? 0);
     }
+    case 'grabs':
+      return effMeta(r).grabs ?? 0;
   }
 }
 
@@ -137,6 +143,8 @@ function baseName(path: string): string {
 }
 
 function resultTitle(r: SourceSearchResult): string {
+  const rawRelease = r.release_title ?? effMeta(r).release_title;
+  if (rawRelease) return rawRelease;
   if (r.result_type === 'album') return r.album_title || baseName(r.album_path ?? '') || '—';
   return r.title ?? baseName(r.filename);
 }
@@ -187,10 +195,13 @@ function resultKey(r: SourceSearchResult): string {
 
 const SOURCE_LABELS: Record<string, string> = {
   usenet: 'Usenet',
+  torrent: 'Torrent',
+  soulseek: 'Soulseek',
   hifi: 'HiFi',
   tidal: 'Tidal',
   qobuz: 'Qobuz',
   youtube: 'YouTube',
+  deezer: 'Deezer',
   deezer_dl: 'Deezer',
   soundcloud: 'SoundCloud',
   amazon: 'Amazon',
@@ -199,16 +210,17 @@ const SOURCE_LABELS: Record<string, string> = {
 
 /** The download source (Soulseek / Usenet / HiFi / …) for the Source column. */
 function sourceLabel(r: SourceSearchResult): string {
-  const u = (r.username ?? '').toLowerCase();
-  return SOURCE_LABELS[u] ?? 'Soulseek';
+  const source = (r.source ?? r.username ?? '').toLowerCase();
+  return SOURCE_LABELS[source] ?? 'Soulseek';
 }
 
 /** Coarse source family for badge coloring (usenet/torrent/streaming/p2p). */
 function sourceTone(r: SourceSearchResult): 'usenet' | 'torrent' | 'stream' | 'p2p' {
-  const u = (r.username ?? '').toLowerCase();
-  if (u === 'usenet') return 'usenet';
-  if (u === 'torrent') return 'torrent';
-  return SOURCE_LABELS[u] ? 'stream' : 'p2p';
+  const source = (r.source ?? r.username ?? '').toLowerCase();
+  if (source === 'usenet') return 'usenet';
+  if (source === 'torrent') return 'torrent';
+  if (source !== 'soulseek' && SOURCE_LABELS[source]) return 'stream';
+  return 'p2p';
 }
 
 /** Source metadata (indexer/grabs) — album results carry it on their first track. */
@@ -224,34 +236,101 @@ function effMeta(r: SourceSearchResult): NonNullable<SourceSearchResult['_source
 function sourceDetail(r: SourceSearchResult): string {
   const meta = effMeta(r);
   if (meta.indexer) return meta.indexer;
-  const u = (r.username ?? '').toLowerCase();
-  return SOURCE_LABELS[u] ? '' : (r.username ?? '');
+  const source = (r.source ?? '').toLowerCase();
+  return source === 'soulseek' || !source ? (r.username ?? '') : '';
 }
 
-/** Source-appropriate availability metric (peers don't apply to Usenet, grabs
- *  don't apply to Soulseek), so each source shows what's meaningful for it. */
-function availabilityCell(r: SourceSearchResult): string {
-  const u = (r.username ?? '').toLowerCase();
+function peerCell(r: SourceSearchResult): string {
+  const source = (r.source ?? r.username ?? '').toLowerCase();
   const meta = effMeta(r);
-  if (u === 'usenet') {
-    const parts: string[] = [];
-    if (meta.grabs != null) parts.push(`${meta.grabs} grabs`);
-    if (meta.seeders != null) parts.push(`${meta.seeders} seeders`);
-    return parts.join(' · ') || '—';
+  if (source === 'torrent') {
+    if (meta.seeders == null) return '—';
+    return meta.leechers != null
+      ? `${meta.seeders} seeders · ${meta.leechers} leechers`
+      : `${meta.seeders} seeders`;
   }
-  if (SOURCE_LABELS[u]) return 'instant'; // streaming sources (HiFi/Tidal/…)
+  if (source === 'usenet') return '—';
+  if (source !== 'soulseek' && SOURCE_LABELS[source]) return 'instant';
   // Soulseek peer: free slots + queue length.
   const slots = r.free_upload_slots ?? 0;
   const queue = r.queue_length ?? 0;
   return queue ? `${slots} slots · ${queue} queued` : `${slots} slots`;
 }
 
-type GrabState = 'pending' | 'verifying' | 'done' | 'error';
+function grabsCell(r: SourceSearchResult): string {
+  const grabs = effMeta(r).grabs;
+  return grabs == null ? '—' : grabs.toLocaleString();
+}
+
+type GrabState =
+  | 'pending'
+  | 'searching'
+  | 'queued'
+  | 'downloading'
+  | 'processing'
+  | 'verifying'
+  | 'done'
+  | 'started'
+  | 'error';
+
+interface SourceSearchProgress {
+  displayName: string;
+  phase: 'searching' | 'complete' | 'error';
+  resultCount: number;
+  elapsedMs?: number;
+  message?: string;
+}
+
+type GrabLiveStatus = { state: GrabState; progress?: number };
+type SearchColumn = 'artist' | 'size' | 'age' | 'peers' | 'grabs';
+type SearchColumnVisibility = Record<SearchColumn, boolean>;
+
+const SEARCH_COLUMNS_KEY = 'soulsync.libraryV2.interactiveSearch.columns.v1';
+const DEFAULT_SEARCH_COLUMNS: SearchColumnVisibility = {
+  artist: true,
+  size: true,
+  age: true,
+  peers: true,
+  grabs: true,
+};
+
+function loadSearchColumns(): SearchColumnVisibility {
+  try {
+    const stored = JSON.parse(
+      localStorage.getItem(SEARCH_COLUMNS_KEY) ?? '{}',
+    ) as Partial<SearchColumnVisibility>;
+    return { ...DEFAULT_SEARCH_COLUMNS, ...stored };
+  } catch {
+    return DEFAULT_SEARCH_COLUMNS;
+  }
+}
+
+function firstQueueEntry(entries: Record<number, LibraryV2QueueStatusEntry>) {
+  return Object.values(entries)[0];
+}
+
+function queueGrabStatus(entry: LibraryV2QueueStatusEntry): GrabLiveStatus {
+  return { state: entry.status, progress: entry.progress_pct };
+}
+
+function grabLabel(status?: GrabLiveStatus): string {
+  if (!status) return 'Download';
+  if (status.state === 'downloading') return `Downloading ${status.progress ?? 0}%`;
+  return {
+    pending: 'Starting…',
+    searching: 'Searching…',
+    queued: 'Queued',
+    processing: 'Processing…',
+    verifying: 'Verifying…',
+    done: 'Imported ✓',
+    started: 'Started ✓',
+    error: 'Retry',
+  }[status.state];
+}
 
 /** dd28-06: one source that failed while others succeeded. Kept separately
  *  from `error` because it must not replace the results that DID arrive. */
 interface SourceFailure {
-  name: string;
   displayName: string;
   message: string;
 }
@@ -290,8 +369,7 @@ export function classifyGrabOutcome(
   return { status: 'pending' };
 }
 
-const GRAB_OUTCOME_POLL_INTERVAL_MS = 4_000;
-const GRAB_OUTCOME_MAX_POLLS = 30; // ~2 minutes — a best-effort window, not a guarantee
+const GRAB_OUTCOME_POLL_INTERVAL_MS = 2_000;
 
 export function sortSourceSearchResults(
   results: SourceSearchResult[],
@@ -414,11 +492,13 @@ export function InteractiveSearchModal({
   const [error, setError] = useState<string | null>(null);
   // dd28-06: per-source failures that did NOT blank the whole result set.
   const [sourceFailures, setSourceFailures] = useState<SourceFailure[]>([]);
-  const [grabbed, setGrabbed] = useState<Record<string, GrabState>>({});
+  const [sourceProgress, setSourceProgress] = useState<Record<string, SourceSearchProgress>>({});
+  const [grabbed, setGrabbed] = useState<Record<string, GrabLiveStatus>>({});
   const [grabErrors, setGrabErrors] = useState<Record<string, string>>({});
   const [qualityCheck, setQualityCheck] = useState(true);
   const [acoustidCheck, setAcoustidCheck] = useState(true);
   const [cutoffOnly, setCutoffOnly] = useState(false);
+  const [columns, setColumns] = useState<SearchColumnVisibility>(loadSearchColumns);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'quality', dir: -1 });
   // Stops in-flight outcome polls from touching state after the modal closes
   // (the user is done watching, and the component is about to unmount).
@@ -444,6 +524,22 @@ export function InteractiveSearchModal({
         : sorted,
     [sorted, cutoffOnly, effectiveProfile],
   );
+  const progressItems = useMemo(() => Object.entries(sourceProgress), [sourceProgress]);
+  const showPeers =
+    columns.peers &&
+    filtered.some((r) => {
+      const source = (r.source ?? r.username ?? '').toLowerCase();
+      return source === 'torrent' || source === 'soulseek' || !SOURCE_LABELS[source];
+    });
+  const showGrabs = columns.grabs && filtered.some((r) => effMeta(r).grabs != null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SEARCH_COLUMNS_KEY, JSON.stringify(columns));
+    } catch {
+      // Ignore unavailable preference storage.
+    }
+  }, [columns]);
 
   function toggleSort(key: SortKey) {
     setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: -1 }));
@@ -495,66 +591,88 @@ export function InteractiveSearchModal({
     if (!q.trim()) {
       setResults([]);
       setSourceFailures([]);
+      setSourceProgress({});
       setLoading(false);
       setError('Enter something to search for — this entity has no usable title.');
       return;
     }
     const sources = [...activeSources];
+    const targets =
+      sources.length > 0 ? sources : [{ name: '__current__', display_name: 'Current source' }];
     setLoading(true);
     setError(null);
     setResults([]);
     setSourceFailures([]);
-    try {
-      if (sources.length <= 1) {
-        const all = await searchSources(q, sources[0]?.name, entity);
-        if (runSequence === runSequenceRef.current) setResults(all);
-        return;
-      }
+    setSourceProgress(
+      Object.fromEntries(
+        targets.map((source) => [
+          source.name,
+          {
+            displayName: source.display_name,
+            phase: 'searching' as const,
+            resultCount: 0,
+          },
+        ]),
+      ),
+    );
 
-      // Render each source as soon as it answers. A slow/disconnected source
-      // must not hide fast Usenet/Soulseek results for its full 90s timeout
-      // (iss27-14).
-      const merged: SourceSearchResult[] = [];
-      const failed: SourceFailure[] = [];
-      await Promise.all(
-        sources.map(async (source) => {
-          try {
-            const sourceResults = await searchSources(q, source.name, entity);
-            merged.push(...sourceResults);
-            if (runSequence === runSequenceRef.current && sourceResults.length > 0) {
-              setResults((current) => [...current, ...sourceResults]);
-            }
-          } catch (caught) {
-            failed.push({
-              name: source.name,
-              displayName: source.display_name,
-              message:
-                caught instanceof Error && caught.name === 'TimeoutError'
-                  ? 'timed out'
-                  : caught instanceof Error
-                    ? caught.message
-                    : 'failed',
-            });
+    const merged: SourceSearchResult[] = [];
+    const failed: SourceFailure[] = [];
+    await Promise.all(
+      targets.map(async (source) => {
+        const sourceStartedAt = Date.now();
+        try {
+          const sourceResults = await searchSources(
+            q,
+            source.name === '__current__' ? undefined : source.name,
+            entity,
+          );
+          merged.push(...sourceResults);
+          if (runSequence !== runSequenceRef.current) return;
+          if (sourceResults.length > 0) {
+            setResults((current) => [...current, ...sourceResults]);
           }
-        }),
-      );
-      // dd28-06: a per-source failure used to be reported only when EVERY
-      // source came back empty. With Soulseek answering, a Usenet timeout or
-      // 500 was invisible — so "Usenet never finds anything" looked like a
-      // property of Usenet rather than a broken call. Surface the failures
-      // regardless; they are a warning next to the results, not an error
-      // replacing them.
-      if (runSequence === runSequenceRef.current) setSourceFailures(failed);
-      if (merged.length === 0 && failed.length > 0) {
-        throw new Error(`Search failed for ${failed.map((f) => f.displayName).join(', ')}`);
-      }
-    } catch (e) {
-      if (runSequence === runSequenceRef.current) {
-        setError(e instanceof Error ? e.message : 'Search failed');
-      }
-    } finally {
-      if (runSequence === runSequenceRef.current) setLoading(false);
+          setSourceProgress((current) => ({
+            ...current,
+            [source.name]: {
+              displayName: source.display_name,
+              phase: 'complete',
+              resultCount: sourceResults.length,
+              elapsedMs: Date.now() - sourceStartedAt,
+            },
+          }));
+        } catch (caught) {
+          const message =
+            caught instanceof Error && caught.name === 'TimeoutError'
+              ? 'timed out'
+              : caught instanceof Error
+                ? caught.message
+                : 'failed';
+          failed.push({
+            displayName: source.display_name,
+            message,
+          });
+          if (runSequence !== runSequenceRef.current) return;
+          setSourceProgress((current) => ({
+            ...current,
+            [source.name]: {
+              displayName: source.display_name,
+              phase: 'error',
+              resultCount: 0,
+              elapsedMs: Date.now() - sourceStartedAt,
+              message,
+            },
+          }));
+        }
+      }),
+    );
+
+    if (runSequence !== runSequenceRef.current) return;
+    setSourceFailures(failed);
+    if (merged.length === 0 && failed.length > 0) {
+      setError(`Search failed for ${failed.map((failure) => failure.displayName).join(', ')}`);
     }
+    setLoading(false);
   }
 
   // Auto-run once with the prefilled context query — deferred until the
@@ -589,7 +707,7 @@ export function InteractiveSearchModal({
     // Must match the key the row renders with (resultKey) — album results
     // have no filename, so a filename-based key would never update the button.
     const key = resultKey(r);
-    setGrabbed((g) => ({ ...g, [key]: 'pending' }));
+    setGrabbed((g) => ({ ...g, [key]: { state: 'pending' } }));
     setGrabErrors((errors) => {
       const next = { ...errors };
       delete next[key];
@@ -600,16 +718,15 @@ export function InteractiveSearchModal({
       await startSourceDownload(r, { qualityCheck, skipAcoustid: !acoustidCheck }, entity);
       // Dispatch succeeded — that only means the download STARTED. Only a
       // grab naming a library entity can be watched through to its real
-      // outcome (quarantine, import) via that entity's pipeline history;
-      // anything else has nothing to poll and is "done" once dispatched.
+      // outcome (quarantine, import) via that entity's pipeline history.
       if (entity?.trackId || entity?.albumId) {
-        setGrabbed((g) => ({ ...g, [key]: 'verifying' }));
+        setGrabbed((g) => ({ ...g, [key]: { state: 'verifying' } }));
         void watchGrabOutcome(entity, sinceMs, key);
       } else {
-        setGrabbed((g) => ({ ...g, [key]: 'done' }));
+        setGrabbed((g) => ({ ...g, [key]: { state: 'started' } }));
       }
     } catch (caught) {
-      setGrabbed((g) => ({ ...g, [key]: 'error' }));
+      setGrabbed((g) => ({ ...g, [key]: { state: 'error' } }));
       setGrabErrors((errors) => ({
         ...errors,
         [key]:
@@ -619,7 +736,7 @@ export function InteractiveSearchModal({
   }
 
   /** Polls the grabbed entity's merged pipeline history until a terminal
-   *  outcome shows up (or the window times out) — surfaces a quarantine/
+   *  outcome shows up or the modal closes — surfaces a quarantine/
    *  failure right in this modal instead of leaving a stale "Grabbed ✓" up
    *  when the file never actually made it into the library. */
   async function watchGrabOutcome(entity: Lib2EntityRef, sinceMs: number, key: string) {
@@ -629,24 +746,40 @@ export function InteractiveSearchModal({
         ? () => fetchLibraryV2AlbumHistory(entity.albumId!)
         : null;
     if (!fetchHistory) return;
-    for (let attempt = 0; attempt < GRAB_OUTCOME_MAX_POLLS; attempt += 1) {
+    while (!cancelledRef.current) {
       await new Promise((resolve) => setTimeout(resolve, GRAB_OUTCOME_POLL_INTERVAL_MS));
       if (cancelledRef.current) return;
-      let history: LibraryV2HistoryEntry[];
+      let history: LibraryV2HistoryEntry[] = [];
       try {
-        history = await fetchHistory();
+        const queueScope = entity.trackId
+          ? { kind: 'tracks' as const, id: entity.trackId }
+          : { kind: 'albums' as const, id: entity.albumId! };
+        const [historyResult, queueResult] = await Promise.allSettled([
+          fetchHistory(),
+          fetchLibraryV2QueueStatus(queueScope.kind, queueScope.id),
+        ]);
+        if (historyResult.status === 'fulfilled') history = historyResult.value;
+        if (queueResult.status === 'fulfilled') {
+          const queueEntry = entity.trackId
+            ? queueResult.value.tracks[entity.trackId]
+            : firstQueueEntry(queueResult.value.tracks);
+          setGrabbed((current) => ({
+            ...current,
+            [key]: queueEntry ? queueGrabStatus(queueEntry) : { state: 'verifying' },
+          }));
+        }
       } catch {
         continue; // transient — history is a best-effort signal, keep trying
       }
       if (cancelledRef.current) return;
       const outcome = classifyGrabOutcome(history, sinceMs);
       if (outcome.status === 'failed') {
-        setGrabbed((g) => ({ ...g, [key]: 'error' }));
+        setGrabbed((g) => ({ ...g, [key]: { state: 'error' } }));
         setGrabErrors((errors) => ({ ...errors, [key]: outcome.message }));
         return;
       }
       if (outcome.status === 'imported') {
-        setGrabbed((g) => ({ ...g, [key]: 'done' }));
+        setGrabbed((g) => ({ ...g, [key]: { state: 'done', progress: 100 } }));
         // Autolink has committed the new file before the imported history
         // event is written. Refresh active album/artist queries immediately;
         // otherwise the table can keep showing "Missing" until a manual
@@ -654,13 +787,6 @@ export function InteractiveSearchModal({
         void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
         return;
       }
-    }
-    // Timed out with no terminal signal — likely still downloading (a large
-    // Usenet grab can outlast this window). Leave it as a plain "Grabbed ✓"
-    // rather than stalling the button forever; the track/album row's own
-    // live queue badge (docs §73) covers longer-running progress.
-    if (!cancelledRef.current) {
-      setGrabbed((g) => ({ ...g, [key]: 'done' }));
     }
   }
 
@@ -673,228 +799,297 @@ export function InteractiveSearchModal({
       }}
       className={`${styles.modal} ${styles.modalWide}`}
     >
-      <DialogHeader title="Interactive Search" closeLabel="Close" />
-
-      <div className={styles.searchBar}>
-        <input
-          ref={searchInputRef}
-          className={styles.searchInput}
-          aria-label="Search query"
-          value={query}
-          placeholder="Search query…"
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') void run(query);
-          }}
-        />
-        <button
-          type="button"
-          className={styles.btnPrimary}
-          disabled={loading}
-          onClick={() => void run(query)}
-        >
-          {loading ? 'Searching…' : 'Search'}
-        </button>
-      </div>
-
-      {allSources.length > 1 ? (
-        <div className={styles.sourceChips} role="group" aria-label="Download sources">
+      <DialogHeader title="Interactive Search" closeLabel="Close interactive search">
+        <span className={styles.searchHeaderMeta}>
+          Search clients run independently; results and download state update live.
+        </span>
+      </DialogHeader>
+      <div className={styles.searchModalBody}>
+        <div className={styles.searchBar}>
+          <input
+            ref={searchInputRef}
+            className={styles.searchInput}
+            aria-label="Search query"
+            value={query}
+            placeholder="Search query…"
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void run(query);
+            }}
+          />
           <button
             type="button"
-            className={styles.sourceChip}
-            aria-pressed={selectedSources.size === 0}
-            disabled={loading || searchSourcesQuery.isLoading}
-            onClick={() => setSelectedSources(new Set())}
+            className={styles.btnPrimary}
+            disabled={loading}
+            onClick={() => void run(query)}
           >
-            All sources
+            {loading ? 'Searching…' : 'Search'}
           </button>
-          {allSources.map((source) => (
+        </div>
+
+        {allSources.length > 1 ? (
+          <div className={styles.sourceChips} role="group" aria-label="Download sources">
             <button
-              key={source.name}
               type="button"
               className={styles.sourceChip}
-              aria-pressed={selectedSources.has(source.name)}
+              aria-pressed={selectedSources.size === 0}
               disabled={loading || searchSourcesQuery.isLoading}
-              onClick={() => toggleSource(source.name)}
+              onClick={() => setSelectedSources(new Set())}
             >
-              {source.display_name}
+              All sources
             </button>
-          ))}
-        </div>
-      ) : null}
+            {allSources.map((source) => (
+              <button
+                key={source.name}
+                type="button"
+                className={styles.sourceChip}
+                aria-pressed={selectedSources.has(source.name)}
+                disabled={loading || searchSourcesQuery.isLoading}
+                onClick={() => toggleSource(source.name)}
+              >
+                {source.display_name}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
-      <div className={styles.searchOptions}>
-        <label className={styles.toggleOption}>
-          <input
-            type="checkbox"
-            className={styles.toggleInput}
-            checked={qualityCheck}
-            onChange={(e) => setQualityCheck(e.target.checked)}
-          />
-          <span className={styles.toggleSwitch} aria-hidden="true" />
-          Quality check
-        </label>
-        <label className={styles.toggleOption}>
-          <input
-            type="checkbox"
-            className={styles.toggleInput}
-            checked={acoustidCheck}
-            onChange={(e) => setAcoustidCheck(e.target.checked)}
-          />
-          <span className={styles.toggleSwitch} aria-hidden="true" />
-          AcoustID check
-        </label>
-        <span className={styles.optionHint}>applied to grabs from this window</span>
-        {canFilterByCutoff ? (
+        {progressItems.length > 0 ? (
+          <div
+            className={styles.sourceProgressGrid}
+            aria-label="Search client status"
+            aria-live="polite"
+          >
+            {progressItems.map(([name, item]) => (
+              <div key={name} className={styles.sourceProgressItem} data-phase={item.phase}>
+                <span className={styles.sourceProgressDot} aria-hidden="true" />
+                <span className={styles.sourceProgressName}>{item.displayName}</span>
+                <span className={styles.sourceProgressState}>
+                  {item.phase === 'searching'
+                    ? 'Searching…'
+                    : item.phase === 'error'
+                      ? `Failed · ${item.message}`
+                      : `Finished · ${item.resultCount} result${item.resultCount === 1 ? '' : 's'} · ${((item.elapsedMs ?? 0) / 1000).toFixed(1)}s`}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        <div className={styles.searchOptions}>
           <label className={styles.toggleOption}>
             <input
               type="checkbox"
               className={styles.toggleInput}
-              checked={cutoffOnly}
-              onChange={(e) => setCutoffOnly(e.target.checked)}
+              checked={qualityCheck}
+              onChange={(e) => setQualityCheck(e.target.checked)}
             />
             <span className={styles.toggleSwitch} aria-hidden="true" />
-            Only show results meeting cutoff
+            Quality check
           </label>
-        ) : null}
-      </div>
-
-      {error ? <div className={styles.searchError}>{error}</div> : null}
-      {!error && sourceFailures.length > 0 ? (
-        <div className={styles.searchWarning} role="status">
-          {sourceFailures.length === 1
-            ? `${sourceFailures[0].displayName} could not be searched (${sourceFailures[0].message}) — these results are from the other sources only.`
-            : `${sourceFailures.map((f) => `${f.displayName} (${f.message})`).join(', ')} could not be searched — these results are from the other sources only.`}
+          <label className={styles.toggleOption}>
+            <input
+              type="checkbox"
+              className={styles.toggleInput}
+              checked={acoustidCheck}
+              onChange={(e) => setAcoustidCheck(e.target.checked)}
+            />
+            <span className={styles.toggleSwitch} aria-hidden="true" />
+            AcoustID check
+          </label>
+          <span className={styles.optionHint}>applied to grabs from this window</span>
+          {canFilterByCutoff ? (
+            <label className={styles.toggleOption}>
+              <input
+                type="checkbox"
+                className={styles.toggleInput}
+                checked={cutoffOnly}
+                onChange={(e) => setCutoffOnly(e.target.checked)}
+              />
+              <span className={styles.toggleSwitch} aria-hidden="true" />
+              Only show results meeting cutoff
+            </label>
+          ) : null}
         </div>
-      ) : null}
 
-      <div className={styles.resultsWrap}>
-        {loading && results.length === 0 ? (
-          <div className={styles.inlineLoading}>
-            {activeSources.length === 1
-              ? `Searching ${activeSources[0].display_name}…`
-              : activeSources.length > 1
-                ? `Searching ${activeSources.map((s) => s.display_name).join(', ')}…`
-                : 'Searching…'}
+        {error ? <div className={styles.searchError}>{error}</div> : null}
+        {!error && sourceFailures.length > 0 ? (
+          <div className={styles.searchWarning} role="status">
+            {sourceFailures.length === 1
+              ? `${sourceFailures[0].displayName} could not be searched (${sourceFailures[0].message}) — these results are from the other sources only.`
+              : `${sourceFailures.map((f) => `${f.displayName} (${f.message})`).join(', ')} could not be searched — these results are from the other sources only.`}
           </div>
-        ) : results.length === 0 ? (
-          <div className={styles.inlineLoading}>
-            {error ? 'Search failed.' : 'No results — refine the query and search again.'}
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className={styles.inlineLoading}>
-            No results meet{' '}
-            {effectiveProfile?.name ? `"${effectiveProfile.name}"'s` : "the profile's"} cutoff —
-            turn off the filter to see them all.
-          </div>
-        ) : (
-          <>
-            {loading ? (
-              <div className={styles.inlineLoading} role="status">
-                Showing available results while the remaining sources are still searching…
-              </div>
-            ) : null}
-            <table className={styles.trackTable}>
-              <thead>
-                <tr>
-                  <SortTh label="Source" k="source" className={styles.isSource} />
-                  <SortTh label="Title" k="title" />
-                  <th className={styles.isArtist}>Artist</th>
-                  <SortTh label="Quality" k="quality" className={styles.isQuality} />
-                  <SortTh label="Size" k="size" className={styles.colNum} />
-                  <SortTh label="Age" k="age" className={styles.colNum} />
-                  <SortTh label="Availability" k="availability" className={styles.isAvail} />
-                  <th className={styles.isGrab}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((r, i) => {
-                  const key = resultKey(r);
-                  const state = grabbed[key];
-                  const isAlbum = r.result_type === 'album';
-                  const wrongScope = Boolean(entity?.trackId && isAlbum);
-                  return (
-                    <tr key={`${key}-${i}`}>
-                      <td>
-                        <span className={styles.sourceBadge} data-tone={sourceTone(r)}>
-                          {sourceLabel(r)}
-                        </span>
-                        {sourceDetail(r) ? (
-                          <span className={styles.sourceDetail}>{sourceDetail(r)}</span>
-                        ) : null}
-                      </td>
-                      <td title={r.filename}>
-                        <span className={styles.isTitle}>{resultTitle(r)}</span>
-                        {isAlbum ? (
-                          <span className={styles.albumResultBadge}>
-                            album · {r.track_count ?? r.tracks?.length ?? '?'} tracks
+        ) : null}
+
+        <div className={styles.searchResultsToolbar}>
+          <span>
+            {filtered.length} of {results.length} results
+          </span>
+          <details className={styles.columnPicker}>
+            <summary>Columns</summary>
+            <div className={styles.columnMenu}>
+              {(
+                [
+                  ['artist', 'Artist'],
+                  ['size', 'Size'],
+                  ['age', 'Age'],
+                  ['peers', 'Peers / seeders'],
+                  ['grabs', 'Grabs'],
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key}>
+                  <input
+                    type="checkbox"
+                    checked={columns[key]}
+                    onChange={(e) =>
+                      setColumns((current) => ({ ...current, [key]: e.target.checked }))
+                    }
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </details>
+        </div>
+
+        <div className={styles.resultsWrap}>
+          {loading && results.length === 0 ? (
+            <div className={styles.inlineLoading}>
+              {activeSources.length === 1
+                ? `Searching ${activeSources[0].display_name}…`
+                : activeSources.length > 1
+                  ? `Searching ${activeSources.map((s) => s.display_name).join(', ')}…`
+                  : 'Searching…'}
+            </div>
+          ) : results.length === 0 ? (
+            <div className={styles.inlineLoading}>
+              {error ? 'Search failed.' : 'No results — refine the query and search again.'}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className={styles.inlineLoading}>
+              No results meet{' '}
+              {effectiveProfile?.name ? `"${effectiveProfile.name}"'s` : "the profile's"} cutoff —
+              turn off the filter to see them all.
+            </div>
+          ) : (
+            <>
+              {loading ? (
+                <div className={styles.inlineLoading} role="status">
+                  Showing available results while the remaining sources are still searching…
+                </div>
+              ) : null}
+              <table className={`${styles.trackTable} ${styles.searchResultsTable}`}>
+                <thead>
+                  <tr>
+                    <SortTh label="Source" k="source" className={styles.isSource} />
+                    <SortTh label="Release" k="title" />
+                    {columns.artist ? <th className={styles.isArtist}>Artist</th> : null}
+                    <SortTh label="Quality" k="quality" className={styles.isQuality} />
+                    {columns.size ? (
+                      <SortTh label="Size" k="size" className={styles.colNum} />
+                    ) : null}
+                    {columns.age ? <SortTh label="Age" k="age" className={styles.colNum} /> : null}
+                    {showPeers ? (
+                      <SortTh label="Peers" k="availability" className={styles.isAvail} />
+                    ) : null}
+                    {showGrabs ? (
+                      <SortTh label="Grabs" k="grabs" className={styles.isGrabs} />
+                    ) : null}
+                    <th className={styles.isGrab}>Download</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((r, i) => {
+                    const key = resultKey(r);
+                    const live = grabbed[key];
+                    const isAlbum = r.result_type === 'album';
+                    const wrongScope = Boolean(entity?.trackId && isAlbum);
+                    return (
+                      <tr key={`${key}-${i}`}>
+                        <td>
+                          <span className={styles.sourceBadge} data-tone={sourceTone(r)}>
+                            {sourceLabel(r)}
                           </span>
-                        ) : null}
-                      </td>
-                      <td>{r.artist ?? '—'}</td>
-                      <td className={styles.qualityText}>
-                        <span className={styles.qualityCellRow}>
-                          {resultQuality(r)}
-                          <ProfileBadge result={r} profile={effectiveProfile} />
-                        </span>
-                      </td>
-                      <td className={styles.colNum}>{fmtBytes(resultSize(r))}</td>
-                      <td className={styles.colNum} title={effMeta(r).publish_date ?? undefined}>
-                        {ageText(effMeta(r).publish_date)}
-                      </td>
-                      <td className={styles.isAvailCell}>{availabilityCell(r)}</td>
-                      <td>
-                        <span className={styles.grabAction}>
-                          <button
-                            type="button"
-                            className={styles.toolButton}
-                            data-requires-write=""
-                            title={
-                              wrongScope
-                                ? 'An album result cannot be attached to one library track'
-                                : undefined
-                            }
-                            disabled={
-                              !canWrite ||
-                              wrongScope ||
-                              state === 'pending' ||
-                              state === 'done' ||
-                              state === 'verifying'
-                            }
-                            onClick={() => void grab(r)}
-                          >
-                            {wrongScope
-                              ? 'Album result'
-                              : state === 'done'
-                                ? 'Grabbed ✓'
-                                : state === 'pending'
-                                  ? '…'
-                                  : state === 'verifying'
-                                    ? 'Verifying…'
-                                    : state === 'error'
-                                      ? 'Retry'
-                                      : 'Download'}
-                          </button>
-                          {state === 'error' ? (
-                            <span className={styles.grabError} role="alert">
-                              {grabErrors[key] ?? 'Download failed'}
+                          {sourceDetail(r) ? (
+                            <span className={styles.sourceDetail}>{sourceDetail(r)}</span>
+                          ) : null}
+                        </td>
+                        <td title={resultTitle(r)}>
+                          <span className={styles.isTitle}>{resultTitle(r)}</span>
+                          {r.matched_track_title || r.matched_album_title ? (
+                            <span className={styles.releaseMatch}>
+                              Matched to {r.matched_track_title ?? r.matched_album_title}
                             </span>
                           ) : null}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </>
-        )}
-      </div>
+                          {isAlbum ? (
+                            <span className={styles.albumResultBadge}>
+                              album · {r.track_count ?? r.tracks?.length ?? '?'} tracks
+                            </span>
+                          ) : null}
+                        </td>
+                        {columns.artist ? <td>{r.artist ?? '—'}</td> : null}
+                        <td className={styles.qualityText}>
+                          <span className={styles.qualityCellRow}>
+                            {resultQuality(r)}
+                            <ProfileBadge result={r} profile={effectiveProfile} />
+                          </span>
+                        </td>
+                        {columns.size ? (
+                          <td className={styles.colNum}>{fmtBytes(resultSize(r))}</td>
+                        ) : null}
+                        {columns.age ? (
+                          <td
+                            className={styles.colNum}
+                            title={effMeta(r).publish_date ?? undefined}
+                          >
+                            {ageText(effMeta(r).publish_date)}
+                          </td>
+                        ) : null}
+                        {showPeers ? <td className={styles.isAvailCell}>{peerCell(r)}</td> : null}
+                        {showGrabs ? <td className={styles.isAvailCell}>{grabsCell(r)}</td> : null}
+                        <td>
+                          <span className={styles.grabAction}>
+                            <button
+                              type="button"
+                              className={styles.toolButton}
+                              data-requires-write=""
+                              title={
+                                wrongScope
+                                  ? 'An album result cannot be attached to one library track'
+                                  : undefined
+                              }
+                              disabled={
+                                !canWrite || wrongScope || Boolean(live && live.state !== 'error')
+                              }
+                              onClick={() => void grab(r)}
+                            >
+                              {wrongScope ? 'Album result' : grabLabel(live)}
+                            </button>
+                            {live?.state === 'downloading' ? (
+                              <span className={styles.grabProgress} aria-hidden="true">
+                                <span style={{ width: `${live.progress ?? 0}%` }} />
+                              </span>
+                            ) : null}
+                            {live?.state === 'error' ? (
+                              <span className={styles.grabError} role="alert">
+                                {grabErrors[key] ?? 'Download failed'}
+                              </span>
+                            ) : null}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
 
-      <div className={styles.modalFootNote}>
-        Downloads run through the normal SoulSync pipeline (staging → processing → tagging) and are
-        linked into the v2 library automatically once the file lands — no manual “Refresh &amp;
-        Scan” needed.
+        <div className={styles.modalFootNote}>
+          Downloads run through the normal SoulSync pipeline (staging → processing → tagging) and
+          are linked into the v2 library automatically once the file lands — no manual “Refresh
+          &amp; Scan” needed.
+        </div>
       </div>
     </DialogFrame>
   );

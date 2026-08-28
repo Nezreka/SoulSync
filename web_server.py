@@ -5827,7 +5827,9 @@ def search_music():
         with candidate_binding(get_current_profile_id(),
                                lib2_track_id=(_lib2_ctx or {}).get('track_id'),
                                lib2_album_id=(_lib2_ctx or {}).get('album_id')):
-            results = _search_basic.run_basic_search(query, download_orchestrator, run_async, source=requested_source)
+            results = _search_basic.run_basic_search(
+                query, download_orchestrator, run_async,
+                source=requested_source, entity_context=_lib2_ctx)
         add_activity_item("", "Search Complete", f"'{query}' - {len(results)} results", "Now")
         return jsonify({"results": results})
     except ValueError as ve:

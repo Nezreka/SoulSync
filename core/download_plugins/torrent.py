@@ -268,6 +268,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                     'grabs': result.grabs,
                     'publish_date': result.publish_date,
                     'protocol': 'torrent',
+                    'release_title': result.title,
                 },
             )
             tracks.append(tr)

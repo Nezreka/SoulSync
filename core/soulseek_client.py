@@ -378,8 +378,8 @@ class SoulseekClient(DownloadSourcePlugin):
                     free_upload_slots=response_data.get('freeUploadSlots', 0),
                     upload_speed=response_data.get('uploadSpeed', 0),
                     queue_length=response_data.get('queueLength', 0),
-                    sample_rate=slskd_attrs.get(4),
-                    bit_depth=slskd_attrs.get(5),
+                    sample_rate=file_data.get('sampleRate') or slskd_attrs.get(4),
+                    bit_depth=file_data.get('bitDepth') or slskd_attrs.get(5),
                 )
 
                 all_tracks.append(track)
@@ -1129,8 +1129,8 @@ class SoulseekClient(DownloadSourcePlugin):
                 bitrate=file_data.get('bitRate') or slskd_attrs.get(0),
                 duration=duration_ms, quality=quality,
                 free_upload_slots=free_slots, upload_speed=upload_speed, queue_length=queue_length,
-                sample_rate=slskd_attrs.get(4),
-                bit_depth=slskd_attrs.get(5),
+                sample_rate=file_data.get('sampleRate') or slskd_attrs.get(4),
+                bit_depth=file_data.get('bitDepth') or slskd_attrs.get(5),
             ))
         return results
 

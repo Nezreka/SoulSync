@@ -22,6 +22,7 @@ from core.runtime_state import (
     download_tasks,
     matched_context_lock,
     matched_downloads_context,
+    processed_download_ids,
     tasks_lock,
 )
 
@@ -50,7 +51,7 @@ def _safe_int(value: Any) -> Optional[int]:
         return None
 
 
-def _classify_live_state(state: Optional[str]) -> str:
+def _classify_live_state(state: Optional[str]) -> Optional[str]:
     """Best-effort bucket for a raw slskd/streaming transfer state string.
 
     Manual grabs (the only caller of this) never go through a 'searching'
@@ -58,8 +59,15 @@ def _classify_live_state(state: Optional[str]) -> str:
     clearly in-progress falls back to 'queued', not 'searching'.
     """
     s = (state or "").lower()
-    if "progress" in s or "downloading" in s:
+    if any(word in s for word in (
+        "completed", "succeeded", "errored", "failed", "cancel", "aborted",
+        "rejected", "timedout",
+    )):
+        return None
+    if "progress" in s or "downloading" in s or "grabbing" in s:
         return "downloading"
+    if "processing" in s or "extracting" in s or "importing" in s:
+        return "processing"
     return "queued"
 
 
@@ -143,8 +151,8 @@ def get_queue_status(
         _record(track_id, raw_album_id, bucket, progress_pct)
 
     with matched_context_lock:
-        contexts_snapshot = list(matched_downloads_context.values())
-    for context in contexts_snapshot:
+        contexts_snapshot = list(matched_downloads_context.items())
+    for context_key, context in contexts_snapshot:
         lib2_entity = context.get("lib2_entity") or {}
         track_id = _safe_int(lib2_entity.get("track_id"))
         if track_id is None:
@@ -154,14 +162,21 @@ def get_queue_status(
         if track_id not in wanted or track_id in tracks or track_id in terminal_track_ids:
             continue
 
+        if context_key in processed_download_ids:
+            continue
+
         search_result = context.get("search_result") or {}
         live_info = _live_lookup(search_result.get("username"), search_result.get("filename"))
         bucket = "queued"
         progress_pct = 0
         if live_info:
             bucket = _classify_live_state(live_info.get("state"))
+            if bucket is None:
+                continue
             if bucket == "downloading":
                 progress_pct = int(live_info.get("percentComplete") or 0)
+            elif bucket == "processing":
+                progress_pct = 95
 
         _record(track_id, lib2_entity.get("album_id"), bucket, progress_pct)
 

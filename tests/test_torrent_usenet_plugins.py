@@ -443,6 +443,7 @@ def test_usenet_project_encodes_token_in_filename() -> None:
     # Artist + title should be parsed out, not auto-extracted from filename.
     assert tracks[0].artist == 'Some Artist'
     assert tracks[0].title == 'Some Album'
+    assert tracks[0]._source_metadata['release_title'] == 'Some Artist - Some Album'
 
 
 def test_usenet_project_falls_back_to_placeholder_when_title_lacks_dash() -> None:

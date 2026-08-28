@@ -419,6 +419,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                     'grabs': result.grabs,
                     'publish_date': result.publish_date,
                     'protocol': 'usenet',
+                    'release_title': result.title,
                 },
             )
             tracks.append(tr)

@@ -2251,11 +2251,27 @@ button.statusWarn:disabled {
 
 /* --- interactive search modal --- */
 .modalWide {
-  width: min(1500px, 97vw);
-  height: 90vh;
+  width: min(1780px, calc(100vw - 24px));
+  height: min(94vh, 1050px);
+  max-height: 94vh;
   display: flex;
   flex-direction: column;
-  max-height: 90vh;
+  padding: 0;
+  border-radius: 22px;
+  overflow: hidden;
+}
+
+.searchHeaderMeta {
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 12.5px;
+}
+
+.searchModalBody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px 18px;
 }
 
 .isSource {
@@ -2270,8 +2286,11 @@ button.statusWarn:disabled {
 .isAvail {
   width: 170px;
 }
+.isGrabs {
+  width: 82px;
+}
 .isGrab {
-  width: 110px;
+  width: 145px;
 }
 .isAvailCell {
   white-space: nowrap;
@@ -2293,8 +2312,33 @@ button.statusWarn:disabled {
   overflow-wrap: anywhere;
 }
 
+.grabProgress {
+  width: 100%;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.grabProgress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: rgb(var(--accent-rgb));
+  transition: width 0.25s ease;
+}
+
 .isTitle {
+  display: block;
   font-weight: 500;
+}
+
+.releaseMatch,
+.albumResultBadge {
+  display: block;
+  margin-top: 3px;
+  color: rgba(255, 255, 255, 0.38);
+  font-size: 10.5px;
 }
 
 .searchBar {
@@ -2302,6 +2346,10 @@ button.statusWarn:disabled {
   gap: 8px;
   margin-bottom: 8px;
   flex-wrap: wrap;
+}
+
+.searchBar .btnPrimary {
+  min-width: 110px;
 }
 
 .searchOptions {
@@ -2433,6 +2481,64 @@ button.statusWarn:disabled {
   cursor: default;
 }
 
+.sourceProgressGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+  gap: 7px;
+  margin-bottom: 10px;
+}
+
+.sourceProgressItem {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 8px auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.025);
+  font-size: 11.5px;
+}
+
+.sourceProgressDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgb(74, 222, 128);
+}
+
+.sourceProgressItem[data-phase='searching'] .sourceProgressDot {
+  background: rgb(var(--accent-rgb));
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.14);
+  animation: searchPulse 1.2s ease-in-out infinite;
+}
+
+.sourceProgressItem[data-phase='error'] .sourceProgressDot {
+  background: rgb(248, 113, 113);
+}
+
+.sourceProgressName {
+  color: rgba(255, 255, 255, 0.86);
+  font-weight: 600;
+}
+
+.sourceProgressState {
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+@keyframes searchPulse {
+  50% {
+    opacity: 0.4;
+    transform: scale(0.82);
+  }
+}
+
 .sourceBadge {
   display: inline-block;
   font-size: 11px;
@@ -2500,9 +2606,65 @@ button.statusWarn:disabled {
 }
 
 .sourceDetail {
-  margin-left: 6px;
+  display: block;
+  margin-top: 4px;
   font-size: 11px;
   color: rgba(255, 255, 255, 0.4);
+}
+
+.searchResultsToolbar {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 11.5px;
+}
+
+.columnPicker {
+  position: relative;
+  z-index: 4;
+}
+
+.columnPicker summary {
+  padding: 5px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  color: rgba(255, 255, 255, 0.68);
+  cursor: pointer;
+  list-style: none;
+}
+
+.columnPicker summary::after {
+  content: ' ⌄';
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.columnMenu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 5px);
+  width: 185px;
+  display: grid;
+  gap: 8px;
+  padding: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: #1c1c1c;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+}
+
+.columnMenu label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+}
+
+.columnMenu input {
+  accent-color: rgb(var(--accent-rgb));
 }
 
 .searchError {
@@ -2523,8 +2685,9 @@ button.statusWarn:disabled {
   flex: 1;
   overflow: auto;
   border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 8px;
+  border-radius: 12px;
   min-height: 120px;
+  background: rgba(0, 0, 0, 0.16);
 }
 
 .resultsWrap .trackTable th {
@@ -2534,11 +2697,46 @@ button.statusWarn:disabled {
   z-index: 1;
 }
 
+.searchResultsTable {
+  min-width: 1120px;
+  table-layout: auto;
+}
+
+.searchResultsTable th:nth-child(2),
+.searchResultsTable td:nth-child(2) {
+  min-width: 330px;
+}
+
+.searchResultsTable td {
+  max-width: none;
+}
+
 .modalFootNote {
   margin-top: 10px;
   font-size: 11.5px;
   color: rgba(255, 255, 255, 0.4);
   line-height: 1.4;
+}
+
+@media (max-width: 700px) {
+  .modalWide {
+    width: calc(100vw - 12px);
+    height: calc(100vh - 12px);
+    max-height: none;
+    border-radius: 15px;
+  }
+  .searchModalBody {
+    padding: 12px;
+  }
+  .sourceProgressGrid {
+    grid-template-columns: 1fr;
+  }
+  .searchOptions {
+    gap: 10px;
+  }
+  .optionHint {
+    width: 100%;
+  }
 }
 
 /* --- source-info popover (download provenance) --- */

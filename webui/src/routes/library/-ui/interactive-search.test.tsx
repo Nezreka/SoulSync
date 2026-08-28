@@ -157,6 +157,50 @@ describe('library v2 interactive grab', () => {
     ]);
   });
 
+  it('keeps Prowlarr release/context fields separate and never shows seeders for Usenet', async () => {
+    server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({
+          mode: 'usenet',
+          sources: [{ name: 'usenet', display_name: 'Usenet' }],
+        }),
+      ),
+      http.post('/api/search', () =>
+        HttpResponse.json({
+          results: [
+            {
+              result_type: 'track',
+              source: 'usenet',
+              username: 'usenet',
+              filename: 'opaque',
+              release_title: 'TEAM-WEB-Various.Artists-Compilation-FLAC-2026',
+              artist: 'Real Artist',
+              matched_album_title: 'Real Album',
+              size: 4096,
+              _source_metadata: { protocol: 'usenet', indexer: 'NZBGeek', grabs: 42, seeders: 999 },
+            },
+          ],
+        }),
+      ),
+    );
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <InteractiveSearchModal canWrite initialQuery="Real Artist Real Album" onClose={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText('TEAM-WEB-Various.Artists-Compilation-FLAC-2026');
+    expect(screen.getByText('Real Artist')).toBeInTheDocument();
+    expect(screen.getByText('Matched to Real Album')).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Peers' })).not.toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Grabs' })).toBeInTheDocument();
+    expect(screen.queryByText(/999 seeders/i)).not.toBeInTheDocument();
+    const grabs = screen.getByRole('checkbox', { name: 'Grabs' });
+    fireEvent.click(grabs);
+    expect(screen.queryByRole('columnheader', { name: 'Grabs' })).not.toBeInTheDocument();
+    fireEvent.click(grabs); // restore persisted preference for following tests
+  });
+
   it('shows the candidate download error and retries the same result', async () => {
     let attempts = 0;
     const submitted: unknown[] = [];
@@ -213,7 +257,7 @@ describe('library v2 interactive grab', () => {
     fireEvent.click(retry);
 
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'Grabbed ✓' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Started ✓' })).toBeDisabled();
     expect(attempts).toBe(2);
     expect(submitted[1]).toEqual(submitted[0]);
   });
@@ -444,6 +488,9 @@ describe('library v2 interactive grab', () => {
 
     expect(await screen.findByText('Fast Usenet result')).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent(/remaining sources are still searching/i);
+    const clientStatus = screen.getByLabelText('Search client status');
+    expect(clientStatus).toHaveTextContent(/Usenet.*Finished/);
+    expect(clientStatus).toHaveTextContent(/Soulseek.*Searching/);
     expect(screen.queryByText('Slow Soulseek result')).not.toBeInTheDocument();
 
     releaseSlow();
@@ -619,6 +666,55 @@ describe('library v2 interactive grab', () => {
     confirmSpy.mockRestore();
   });
 
+  it('shows the selected client download progress after dispatch', async () => {
+    server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({ mode: 'hifi', sources: [{ name: 'hifi', display_name: 'HiFi' }] }),
+      ),
+      http.post('/api/search', () =>
+        HttpResponse.json({
+          results: [
+            {
+              result_type: 'track',
+              source: 'hifi',
+              username: 'hifi',
+              filename: 'Track.flac',
+              title: 'Track',
+              artist: 'Artist',
+              quality: 'flac',
+              size: 4096,
+            },
+          ],
+        }),
+      ),
+      http.post('/api/download', () => HttpResponse.json({ success: true })),
+      http.get('/api/library/v2/tracks/42/queue-status', () =>
+        HttpResponse.json({
+          tracks: { 42: { status: 'downloading', progress_pct: 37 } },
+          albums: { 12: 1 },
+        }),
+      ),
+      http.get('/api/library/v2/tracks/42/history', () =>
+        HttpResponse.json({ success: true, history: [] }),
+      ),
+    );
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <InteractiveSearchModal
+          canWrite
+          initialQuery="Artist Track"
+          entity={{ trackId: 42, albumId: 12 }}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Download' }));
+    expect(
+      await screen.findByRole('button', { name: 'Downloading 37%' }, { timeout: 5000 }),
+    ).toBeDisabled();
+  }, 7000);
+
   it('surfaces a quarantine outcome that lands after the grab dispatch resolves', async () => {
     server.use(
       http.get('/api/search/sources', () =>
@@ -643,6 +739,9 @@ describe('library v2 interactive grab', () => {
         }),
       ),
       http.post('/api/download', () => HttpResponse.json({ success: true })),
+      http.get('/api/library/v2/tracks/42/queue-status', () =>
+        HttpResponse.json({ tracks: {}, albums: {} }),
+      ),
       http.get('/api/library/v2/tracks/42/history', () =>
         HttpResponse.json({
           success: true,
@@ -709,6 +808,9 @@ describe('library v2 interactive grab', () => {
         }),
       ),
       http.post('/api/download', () => HttpResponse.json({ success: true })),
+      http.get('/api/library/v2/tracks/42/queue-status', () =>
+        HttpResponse.json({ tracks: {}, albums: {} }),
+      ),
       http.get('/api/library/v2/tracks/42/history', () =>
         HttpResponse.json({
           success: true,
@@ -742,7 +844,7 @@ describe('library v2 interactive grab', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Download' }));
     expect(
-      await screen.findByRole('button', { name: 'Grabbed ✓' }, { timeout: 8000 }),
+      await screen.findByRole('button', { name: 'Imported ✓' }, { timeout: 8000 }),
     ).toBeDisabled();
     expect(queryClient.getQueryState(staleAlbumKey)?.isInvalidated).toBe(true);
   }, 10_000);
