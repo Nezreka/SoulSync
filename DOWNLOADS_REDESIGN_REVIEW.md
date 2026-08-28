@@ -1,6 +1,6 @@
 # downloads page, full visual + ux review
 
-date: aug 26. method: booted a review server on :8010 against a copy of the live db, seeded 22 tasks across 3 batches covering every state (downloading, searching, processing, queued, completed, failed with error text, cancelled, retry chip, verified/unverified/quarantined), then screenshotted every tab, sub-view and viewport (1920 / 1366 / 390) with playwright. shots live in `webui/dlshots/`. code read: all of `webui/src/routes/active-downloads/` plus the `.adl-*` blocks in `style.css` (~65100-66200) and `mobile.css` (~3607-3646).
+date: aug 26. method: booted a review server on :8010 against a copy of the live db, seeded 22 tasks across 3 batches covering every state (downloading, searching, processing, queued, completed, failed with error text, cancelled, retry chip, verified/unverified/quarantined), then screenshotted every tab, sub-view and viewport (1920 / 1366 / 390) with playwright. screenshots were working artifacts and are not kept in the repo — the rig that makes them is described above and in the downloads-page memory note. code read: all of `webui/src/routes/active-downloads/` plus the `.adl-*` blocks in `style.css` (~65100-66200) and `mobile.css` (~3607-3646).
 
 verdict up front: the bones are genuinely good. batch color rails, phase narration, the review pipeline, per-row audit, the clients hub, none of that needs functional touch. what's wrong is that the page has no visual hierarchy, no progress feedback where it matters, three generations of pill bars stacked on top of each other, and it literally breaks at 1366px. every fix below is presentation, the engine underneath stays.
 
@@ -124,7 +124,7 @@ one line: keep the engine, rebuild the shell around batch grouping, a real view 
 
 everything functional maps 1:1: filter-to-batch becomes the group header filter icon, batch modal opens from the group header name, audit/expand/cancel/retry chips all keep their seats. nothing is lost, it just stops being flat.
 
-## 12. shot index (webui/dlshots/)
+## 12. shot index (regenerate with the rig — see the method line at the top)
 
 - `desktop-01-default-all` full page, the repetition problem
 - `desktop-02-filter-*` per-status filters, failed shows error contrast
