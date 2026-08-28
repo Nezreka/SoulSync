@@ -31,46 +31,45 @@ import os
 import re
 from typing import Iterable, Optional, Set, Tuple
 
+from core.quality.lossless import LOSSLESS_FORMATS
 from core.quality.model import AudioQuality
+from core.quality.source_map import (
+    AUDIO_EXTENSIONS as SOURCE_AUDIO_EXTENSIONS,
+    format_from_extension,
+)
 
 from utils.logging_config import get_logger
 
 logger = get_logger("quality.release_format")
 
-# Extension -> canonical format name. Matches the vocabulary QualityTarget
-# uses ('flac', 'mp3', 'aac', ...) so a profile's targets can be compared
-# directly against what a release contains.
-_EXT_FORMAT = {
-    '.flac': 'flac',
-    '.wav': 'wav',
-    '.aiff': 'aiff',
-    '.aif': 'aiff',
-    '.alac': 'alac',
-    '.ape': 'ape',
-    '.wv': 'wavpack',
-    '.mp3': 'mp3',
-    '.m4a': 'aac',
-    '.mp4': 'aac',
-    '.aac': 'aac',
-    '.ogg': 'ogg',
-    '.oga': 'ogg',
-    '.opus': 'opus',
-    '.wma': 'wma',
-}
-
-LOSSLESS_FORMATS = frozenset({'flac', 'wav', 'aiff', 'alac', 'ape', 'wavpack'})
-
-AUDIO_EXTENSIONS = frozenset(_EXT_FORMAT)
+# Re-export the shared extension set for callers that historically imported it
+# here, but classify through source_map. That module is the canonical vocabulary
+# used by QualityTarget, file probing, and every other source adapter: notably
+# AIFF is the ``wav`` PCM tier and DSF/DFF are the ``dsf`` DSD tier.
+AUDIO_EXTENSIONS = frozenset(SOURCE_AUDIO_EXTENSIONS)
 
 # Title markers, longest/most specific first. Order matters: '24bit' implies
 # lossless, and a title saying both FLAC and MP3 is a mixed release, which we
 # want to notice rather than resolve to whichever matched first.
 _TITLE_MARKERS = (
+    ('dsd1024', 'dsf'),
+    ('dsd512', 'dsf'),
+    ('dsd256', 'dsf'),
+    ('dsd128', 'dsf'),
+    ('dsd64', 'dsf'),
+    ('dsdiff', 'dsf'),
+    ('dsf', 'dsf'),
+    ('dff', 'dsf'),
+    ('dsd', 'dsf'),
     ('flac', 'flac'),
     ('alac', 'alac'),
+    ('aiff', 'wav'),
+    ('aifc', 'wav'),
+    ('aif', 'wav'),
+    ('wave', 'wav'),
+    ('wav', 'wav'),
     ('wavpack', 'wavpack'),
     ('ape', 'ape'),
-    ('aiff', 'aiff'),
     ('opus', 'opus'),
     ('m4a', 'aac'),
     ('aac', 'aac'),
@@ -215,6 +214,7 @@ def audio_quality_from_release(
     them.
     """
     quality = audio_quality_from_release_title(title)
+    title_formats = formats_in_title(title)
     has_mp3_category = False
     has_lossless_category = False
     for raw in categories or ():
@@ -232,9 +232,9 @@ def audio_quality_from_release(
         return quality
 
     if has_mp3_category:
-        if quality.format == 'unknown':
+        if not title_formats:
             quality.format = 'mp3'
-        elif quality.format != 'mp3':
+        elif title_formats != {'mp3'}:
             quality.format = 'unknown'
     elif has_lossless_category and quality.format in _LOSSY_FORMATS:
         quality.format = 'unknown'
@@ -254,8 +254,8 @@ def formats_in_files(file_names: Iterable[str]) -> Set[str]:
     formats: Set[str] = set()
     for name in file_names or ():
         ext = os.path.splitext(str(name or ''))[1].lower()
-        fmt = _EXT_FORMAT.get(ext)
-        if fmt:
+        fmt = format_from_extension(ext)
+        if fmt != 'unknown':
             formats.add(fmt)
     return formats
 
@@ -287,6 +287,7 @@ def evaluate_release(
     title: str = '',
     file_names: Optional[Iterable[str]] = None,
     *,
+    categories: Optional[Iterable[int]] = None,
     allow_mixed: bool = False,
 ) -> Tuple[bool, str]:
     """``(accepted, reason)`` for one release against a profile's formats.
@@ -309,8 +310,39 @@ def evaluate_release(
         source = 'file list'
         found = file_formats
     else:
-        source = 'title'
-        found = formats_in_title(title)
+        category_values = tuple(categories or ())
+        title_formats = formats_in_title(title)
+        category_ids = set()
+        for raw in category_values:
+            try:
+                category_ids.add(int(raw))
+            except (TypeError, ValueError):
+                continue
+
+        has_mp3_category = 3010 in category_ids
+        has_lossless_category = 3040 in category_ids
+        source = 'title/category' if category_ids else 'title'
+
+        # Exact Audio/MP3 is structured codec evidence. Preserve it through
+        # this strict decision boundary instead of recognizing it in search,
+        # then throwing it away immediately before grab. A conflicting title
+        # becomes a mixed/contradictory set and is therefore never silently
+        # trusted by either a strict MP3 or strict lossless profile.
+        if has_mp3_category and has_lossless_category:
+            found = set()
+        elif has_mp3_category:
+            found = title_formats | {'mp3'}
+        elif has_lossless_category and title_formats & _LOSSY_FORMATS:
+            # Audio/Lossless identifies a family rather than a codec, so it
+            # cannot fill a bare title. It can still disprove a lossy title.
+            found = set()
+        else:
+            quality = audio_quality_from_release(title, category_values)
+            found = (
+                {quality.format}
+                if quality.format != 'unknown'
+                else title_formats
+            )
 
     if not found:
         return False, (

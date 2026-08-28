@@ -230,7 +230,9 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             # comes back on grab. Indexer URLs can carry API keys / signed
             # params, so only an opaque server-side token travels (P0-03).
             token = get_candidate_store().put(
-                _encode_candidate(download_url, result.magnet_uri))
+                _encode_candidate(download_url, result.magnet_uri),
+                metadata={'categories': list(result.categories or [])},
+            )
             filename = f"{token}{_FILENAME_SEP}{result.title}"
             audio_quality = audio_quality_from_release(
                 result.title,
@@ -270,6 +272,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                     'publish_date': result.publish_date,
                     'protocol': 'torrent',
                     'release_title': result.title,
+                    'categories': list(result.categories or []),
                 },
             )
             tracks.append(tr)
@@ -306,7 +309,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             return None
         # Only a token from OUR candidate store is accepted — a raw URL from
         # the client is a trust-boundary violation, not a fallback (P0-03).
-        candidate = get_candidate_store().resolve(token)
+        candidate, candidate_metadata = get_candidate_store().resolve_with_metadata(token)
         if not candidate:
             logger.error("Torrent download: unknown or expired candidate for %r "
                          "— re-run the search", display_name)
@@ -324,7 +327,11 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         # sees no change whatsoever.
         allowed_formats = profile_allowed_formats(quality_profile_id)
         if allowed_formats:
-            ok, why = evaluate_release(allowed_formats, display_name)
+            ok, why = evaluate_release(
+                allowed_formats,
+                display_name,
+                categories=candidate_metadata.get('categories'),
+            )
             if not ok:
                 logger.info("Torrent declined %r on the quality profile: %s",
                             display_name, why)
@@ -351,7 +358,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         thread = threading.Thread(
             target=self._download_thread,
             args=(download_id, download_url, display_name, fallback_magnet,
-                  allowed_formats),
+                  allowed_formats, candidate_metadata.get('categories')),
             daemon=True,
             name=f'torrent-dl-{download_id[:8]}',
         )
@@ -360,7 +367,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
 
     def _download_thread(self, download_id: str, download_url: str, display_name: str,
                          fallback_magnet: Optional[str] = None,
-                         allowed_formats=None) -> None:
+                         allowed_formats=None, categories=None) -> None:
         """Background worker: hand the URL to the active adapter,
         poll until done, then walk the resulting directory."""
         adapter = get_active_torrent_adapter()
@@ -377,7 +384,12 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             def _verify(names):
                 if not allowed_formats:
                     return True, ''
-                return evaluate_release(allowed_formats, display_name, file_names=names)
+                return evaluate_release(
+                    allowed_formats,
+                    display_name,
+                    file_names=names,
+                    categories=categories,
+                )
 
             torrent_hash = run_async(add_torrent_smart(
                 adapter, download_url, fallback_magnet=fallback_magnet,
@@ -787,7 +799,11 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 if not allowed_formats:
                     return True, ''
                 return evaluate_release(
-                    allowed_formats, picked.title, file_names=names)
+                    allowed_formats,
+                    picked.title,
+                    file_names=names,
+                    categories=getattr(picked, 'categories', None),
+                )
 
             torrent_id = run_async(add_torrent_smart(
                 adapter, download_url, fallback_magnet=picked.magnet_uri,

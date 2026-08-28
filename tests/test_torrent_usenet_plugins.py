@@ -207,6 +207,9 @@ def test_torrent_project_results_encodes_token_and_title_in_filename() -> None:
     assert get_candidate_store().is_token(token)
     from core.download_plugins.torrent import _decode_candidate
     assert _decode_candidate(get_candidate_store().resolve(token))[0] == 'https://x/y.torrent'
+    assert get_candidate_store().resolve_with_metadata(token)[1] == {
+        'categories': [3040],
+    }
     assert display == 'Danny Brown - Atrocity Exhibition [FLAC]'
 
 
@@ -247,6 +250,7 @@ def test_torrent_project_results_carries_rich_title_quality() -> None:
     assert tracks[0].sample_rate == 96_000
     assert tracks[0].bit_depth == 24
     assert tracks[0]._source_metadata['release_title'].endswith('[FLAC 24-96]')
+    assert tracks[0]._source_metadata['categories'] == [3040]
 
 
 # ---------------------------------------------------------------------------
@@ -450,6 +454,9 @@ def test_usenet_project_encodes_token_in_filename() -> None:
     token, display = _decode_filename(tracks[0].filename)
     assert 'https://x/y.nzb' not in tracks[0].filename
     assert get_candidate_store().resolve(token) == 'https://x/y.nzb'
+    assert get_candidate_store().resolve_with_metadata(token)[1] == {
+        'categories': [3010],
+    }
     assert display == 'Some Artist - Some Album'
     # Artist + title should be parsed out, not auto-extracted from filename.
     assert tracks[0].artist == 'Some Artist'
@@ -458,6 +465,7 @@ def test_usenet_project_encodes_token_in_filename() -> None:
     # the title is bare; bitrate remains unknown until title/file says it.
     assert tracks[0].quality == 'mp3'
     assert tracks[0].bitrate is None
+    assert tracks[0]._source_metadata['categories'] == [3010]
 
 
 def test_usenet_project_results_carries_lossy_bitrate() -> None:
@@ -491,6 +499,24 @@ def test_usenet_download_uses_the_assigned_profile_before_grab() -> None:
 
     assert result is None
     policy.assert_called_once_with(88)
+
+
+def test_usenet_download_honors_category_quality_for_a_bare_title() -> None:
+    plugin = UsenetDownloadPlugin()
+    plugin.is_configured = lambda: True
+    tracks, _albums = plugin._project_results([_make_usenet_result()])
+
+    with patch(
+        'core.download_plugins.usenet.profile_allowed_formats',
+        return_value={'mp3'},
+    ), patch.object(plugin, '_download_thread', lambda *args, **kwargs: None):
+        result = _run(plugin.download(
+            'usenet',
+            tracks[0].filename,
+            quality_profile_id=89,
+        ))
+
+    assert result is not None
 
 
 def test_usenet_finalize_picks_first_audio_file(tmp_path: Path) -> None:

@@ -291,6 +291,7 @@ def pick_best_album_release(candidates, quality_guess,
             ok, why = evaluate_release(
                 allowed_formats, c.title or '',
                 file_names=getattr(c, 'file_names', None),
+                categories=getattr(c, 'categories', None),
                 allow_mixed=allow_mixed,
             )
             if ok:

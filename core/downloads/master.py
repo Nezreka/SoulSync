@@ -249,17 +249,6 @@ def _score_album_folder(album_result: Any, album_context: dict, artist_context: 
     return max(0.0, min(score, 1.0))
 
 
-def _resolve_soulseek_client(download_orchestrator: Any) -> Any:
-    if hasattr(download_orchestrator, 'client'):
-        try:
-            client = download_orchestrator.client('soulseek')
-            if client:
-                return client
-        except Exception as exc:
-            logger.debug("Soulseek client lookup through orchestrator failed: %s", exc)
-    return getattr(download_orchestrator, 'soulseek', download_orchestrator)
-
-
 def _resolve_album_bundle_sources(config_manager: Any) -> list[str]:
     """Return the ordered album-bundle prefix for this batch.
 
@@ -935,35 +924,95 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
         _bundle_state = _BatchStateAccessImpl()
         _album_bundle_sources = _resolve_album_bundle_sources(deps.config_manager)
         _album_bundle_staged = batch_private_album_bundle
-        for _album_bundle_source in _album_bundle_sources:
-            # Soulseek gets the richer folder preflight below. Torrent and
-            # Usenet can be attempted here in their configured order; a
-            # fallback-eligible miss proceeds to the next consecutive release
-            # source, while a terminal plugin failure still stops the batch.
-            if _album_bundle_source == 'soulseek' or _album_bundle_staged:
-                break
-            if _album_bundle_dispatch.try_dispatch(
-                batch_id=batch_id,
-                is_album=batch_is_album,
-                album_context=batch_album_context,
-                artist_context=batch_artist_context,
-                config_get=deps.config_manager.get,
-                plugin_resolver=deps.download_orchestrator.client,
-                state=_bundle_state,
-                source_override=_album_bundle_source,
-                plugin_kwargs=(
-                    {'quality_profile_id': batch_quality_profile_id}
-                    if batch_quality_profile_id is not None else None
-                ),
-            ):
-                return
 
-            with tasks_lock:
-                _bundle_row = download_batches.get(batch_id) or {}
-                _album_bundle_staged = bool(
-                    _bundle_row.get('album_bundle_private_staging')
-                    and _bundle_row.get('album_bundle_state') == 'staged'
+        def _configured_bundle_plugin(source):
+            """Resolve one release source without turning missing setup into
+            a terminal album failure.
+
+            Torrent/Usenet are registered even when Prowlarr or their download
+            client has not been configured. Their bundle methods quite rightly
+            report that as a failure when called directly, but in a hybrid
+            chain an unavailable source means "skip this source", not "abort
+            the album and discard every configured fallback after it".
+            """
+            try:
+                plugin = deps.download_orchestrator.client(source)
+            except Exception as exc:
+                logger.warning(
+                    "[Album Bundle] Could not resolve %s; skipping it: %s",
+                    source, exc,
                 )
+                return None
+            if plugin is None:
+                logger.info("[Album Bundle] %s is unavailable; skipping it", source)
+                return None
+            configured = getattr(plugin, 'is_configured', None)
+            if callable(configured):
+                try:
+                    if not configured():
+                        logger.info(
+                            "[Album Bundle] %s is not configured; skipping it",
+                            source,
+                        )
+                        return None
+                except Exception as exc:
+                    logger.warning(
+                        "[Album Bundle] Could not verify %s configuration; "
+                        "skipping it: %s", source, exc,
+                    )
+                    return None
+            return plugin
+
+        def _dispatch_bundle_sources(sources):
+            """Try an ordered segment. Return True only for a terminal result."""
+            nonlocal _album_bundle_staged
+            for source in sources:
+                if _album_bundle_staged:
+                    break
+                plugin = _configured_bundle_plugin(source)
+                if plugin is None:
+                    continue
+                if _album_bundle_dispatch.try_dispatch(
+                    batch_id=batch_id,
+                    is_album=batch_is_album,
+                    album_context=batch_album_context,
+                    artist_context=batch_artist_context,
+                    config_get=deps.config_manager.get,
+                    plugin_resolver=lambda _name, _plugin=plugin: _plugin,
+                    state=_bundle_state,
+                    source_override=source,
+                    plugin_kwargs=(
+                        {'quality_profile_id': batch_quality_profile_id}
+                        if batch_quality_profile_id is not None else None
+                    ),
+                ):
+                    return True
+
+                with tasks_lock:
+                    _bundle_row = download_batches.get(batch_id) or {}
+                    _album_bundle_staged = bool(
+                        _bundle_row.get('album_bundle_private_staging')
+                        and _bundle_row.get('album_bundle_state') == 'staged'
+                    )
+            return False
+
+        # Soulseek has a richer folder preflight, so split the consecutive
+        # release prefix around it. Crucially, the suffix is retained: if
+        # Soulseek has no suitable folder/release, a later Usenet source still
+        # gets its configured turn.
+        try:
+            _soulseek_bundle_index = _album_bundle_sources.index('soulseek')
+        except ValueError:
+            _soulseek_bundle_index = None
+        if _soulseek_bundle_index is None:
+            _pre_soulseek_sources = _album_bundle_sources
+            _post_soulseek_sources = []
+        else:
+            _pre_soulseek_sources = _album_bundle_sources[:_soulseek_bundle_index]
+            _post_soulseek_sources = _album_bundle_sources[_soulseek_bundle_index + 1:]
+
+        if _dispatch_bundle_sources(_pre_soulseek_sources):
+            return
 
         # A successful Torrent/Usenet bundle owns the batch. Refresh this
         # local value after dispatch; the copy read before network I/O is stale.
@@ -973,8 +1022,13 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
         # Only run pre-flight when Soulseek is the download source (or hybrid with soulseek)
         preflight_source = None
         preflight_tracks = None
+        _soulseek_bundle_plugin = (
+            _configured_bundle_plugin('soulseek')
+            if _soulseek_bundle_index is not None and not batch_private_album_bundle
+            else None
+        )
         soulseek_is_source = (
-            'soulseek' in _album_bundle_sources
+            _soulseek_bundle_plugin is not None
             and not batch_private_album_bundle
         )
         if (batch_is_album and batch_album_context and batch_artist_context
@@ -987,7 +1041,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     _sr.info(f"[Album Pre-flight] Searching for '{artist_name} {album_name}'")
                     logger.info(f"[Album Pre-flight] Searching Soulseek for complete album: '{artist_name} - {album_name}'")
 
-                    slsk = _resolve_soulseek_client(deps.download_orchestrator)
+                    slsk = _soulseek_bundle_plugin
 
                     # Try multiple query variations (banned keywords in artist/album name can return 0 results)
                     album_queries = [f"{artist_name} {album_name}"]
@@ -1111,7 +1165,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 album_context=batch_album_context,
                 artist_context=batch_artist_context,
                 config_get=deps.config_manager.get,
-                plugin_resolver=deps.download_orchestrator.client,
+                plugin_resolver=lambda _name: _soulseek_bundle_plugin,
                 state=_bundle_state,
                 source_override=_album_bundle_source,
                 plugin_kwargs={
@@ -1129,6 +1183,20 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 } or None,
             ):
                 return
+
+            with tasks_lock:
+                _bundle_row = download_batches.get(batch_id) or {}
+                _album_bundle_staged = bool(
+                    _bundle_row.get('album_bundle_private_staging')
+                    and _bundle_row.get('album_bundle_state') == 'staged'
+                )
+
+        if not _album_bundle_staged and _dispatch_bundle_sources(_post_soulseek_sources):
+            return
+
+        # Soulseek or a source after it may have staged the release. Refresh
+        # the local copy before deciding whether to preload Soulseek reuse.
+        batch_private_album_bundle = _album_bundle_staged
 
         with tasks_lock:
             if batch_id not in download_batches: return

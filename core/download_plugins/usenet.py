@@ -127,7 +127,10 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             # The filename crosses to the browser in search responses and
             # comes back on grab. Prowlarr NZB URLs can carry API keys /
             # signed params, so only an opaque server token travels (P0-03).
-            token = get_candidate_store().put(result.download_url)
+            token = get_candidate_store().put(
+                result.download_url,
+                metadata={'categories': list(result.categories or [])},
+            )
             filename = f"{token}{_FILENAME_SEP}{result.title}"
             audio_quality = audio_quality_from_release(
                 result.title,
@@ -163,6 +166,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                     'publish_date': result.publish_date,
                     'protocol': 'usenet',
                     'release_title': result.title,
+                    'categories': list(result.categories or []),
                 },
             )
             tracks.append(tr)
@@ -199,7 +203,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             return None
         # Only a token from OUR candidate store is accepted — a raw URL from
         # the client is a trust-boundary violation, not a fallback (P0-03).
-        nzb_url = get_candidate_store().resolve(token)
+        nzb_url, candidate_metadata = get_candidate_store().resolve_with_metadata(token)
         if not nzb_url:
             logger.error("Usenet download: unknown or expired candidate for %r "
                          "— re-run the search", display_name)
@@ -210,7 +214,11 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         # default for interactive/manual grabs.
         allowed_formats = profile_allowed_formats(quality_profile_id)
         if allowed_formats:
-            ok, why = evaluate_release(allowed_formats, display_name)
+            ok, why = evaluate_release(
+                allowed_formats,
+                display_name,
+                categories=candidate_metadata.get('categories'),
+            )
             if not ok:
                 logger.info("Usenet declined %r on the quality profile: %s",
                             display_name, why)

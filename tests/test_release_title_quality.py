@@ -17,6 +17,9 @@ from core.quality.release_format import (
         ('Artist - Album [MP3 320]', 'mp3', 320, None, None),
         ('Artist - Album AAC 256kbps', 'aac', 256, None, None),
         ('Artist - Album [V0]', 'mp3', None, None, None),
+        ('Artist - Album [WAV 24-96]', 'wav', None, 96_000, 24),
+        ('Artist - Album [AIFF]', 'wav', None, None, None),
+        ('Artist - Album [DSD256]', 'dsf', None, None, None),
     ],
 )
 def test_release_title_quality_matrix(title, fmt, bitrate, sample_rate, bit_depth):
@@ -59,5 +62,14 @@ def test_lossless_category_keeps_a_named_lossless_codec():
 
 def test_title_category_conflict_stays_unknown():
     quality = audio_quality_from_release('Artist - Album [FLAC]', [3010])
+
+    assert quality.format == 'unknown'
+
+
+def test_exact_category_does_not_hide_a_mixed_release_title():
+    quality = audio_quality_from_release(
+        'Artist - Album [FLAC + MP3]',
+        [3010],
+    )
 
     assert quality.format == 'unknown'

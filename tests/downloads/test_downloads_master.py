@@ -151,6 +151,14 @@ class _FakeAlbumBundleSoulseek:
         return self.outcome
 
 
+class _UnconfiguredAlbumBundlePlugin(_FakeAlbumBundleSoulseek):
+    def is_configured(self):
+        return False
+
+    def download_album_to_staging(self, *args, **kwargs):
+        raise AssertionError("an unconfigured album source must be skipped")
+
+
 class _FakePreflightAlbumBundleSoulseek(_FakeSoulseek):
     def __init__(self, *args, outcome=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -973,6 +981,113 @@ def test_hybrid_album_bundle_falls_through_torrent_to_usenet(monkeypatch):
     assert batch['album_bundle_private_staging'] is True
     assert batch['album_bundle_state'] == 'staged'
     assert batch['album_bundle_error'] is None
+
+
+def test_hybrid_album_bundle_skips_unconfigured_middle_source(monkeypatch):
+    """A registered client without setup cannot terminate later fallbacks."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    torrent = _FakeAlbumBundleSoulseek({
+        'success': False,
+        'fallback': True,
+        'error': 'No torrent release',
+    })
+    usenet = _UnconfiguredAlbumBundlePlugin()
+    soulseek = _FakePreflightAlbumBundleSoulseek()
+    deps = _build_deps(
+        config=_FakeConfig({
+            'download_source.mode': 'hybrid',
+            'download_source.hybrid_order': ['torrent', 'usenet', 'soulseek'],
+        }),
+        soulseek=_FakePluginWrapper({
+            'torrent': torrent,
+            'usenet': usenet,
+            'soulseek': soulseek,
+        }),
+    )
+    _seed_batch(
+        'B27-unconfigured',
+        is_album_download=True,
+        album_context={'name': 'Test Album', 'total_tracks': 1},
+        artist_context={'name': 'Artist'},
+    )
+
+    mw.run_full_missing_tracks_process(
+        'B27-unconfigured',
+        'album:1',
+        [{'name': 'T1', 'artists': ['Artist'], 'track_number': 1}],
+        deps,
+    )
+
+    assert len(torrent.calls) == 1
+    assert usenet.calls == []
+    assert len(soulseek.calls) == 1
+    batch = download_batches['B27-unconfigured']
+    assert batch['album_bundle_source'] == 'soulseek'
+    assert batch['album_bundle_state'] == 'staged'
+
+
+@pytest.mark.parametrize(
+    'batch_id,order',
+    [
+        ('B27-soulseek-suffix', ['torrent', 'soulseek', 'usenet']),
+        ('B27-soulseek-first-suffix', ['soulseek', 'usenet']),
+    ],
+)
+def test_hybrid_album_bundle_continues_after_soulseek_fallback(
+    monkeypatch, batch_id, order,
+):
+    """Soulseek preflight must not discard the release-source suffix."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    torrent = _FakeAlbumBundleSoulseek({
+        'success': False,
+        'fallback': True,
+        'error': 'No torrent release',
+    })
+    soulseek = _FakePreflightAlbumBundleSoulseek(outcome={
+        'success': False,
+        'fallback': True,
+        'error': 'No complete Soulseek folder',
+    })
+    usenet = _FakeAlbumBundleSoulseek({
+        'success': True,
+        'files': ['/tmp/a.flac'],
+    })
+    deps = _build_deps(
+        config=_FakeConfig({
+            'download_source.mode': 'hybrid',
+            'download_source.hybrid_order': order,
+        }),
+        soulseek=_FakePluginWrapper({
+            'torrent': torrent,
+            'soulseek': soulseek,
+            'usenet': usenet,
+        }),
+    )
+    _seed_batch(
+        batch_id,
+        is_album_download=True,
+        album_context={'name': 'Test Album', 'total_tracks': 1},
+        artist_context={'name': 'Artist'},
+    )
+
+    mw.run_full_missing_tracks_process(
+        batch_id,
+        'album:1',
+        [{'name': 'T1', 'artists': ['Artist'], 'track_number': 1}],
+        deps,
+    )
+
+    assert len(torrent.calls) == (1 if 'torrent' in order else 0)
+    assert len(soulseek.calls) == 1
+    assert len(usenet.calls) == 1
+    batch = download_batches[batch_id]
+    assert batch['album_bundle_source'] == 'usenet'
+    assert batch['album_bundle_state'] == 'staged'
+    assert batch['album_bundle_private_staging'] is True
 
 
 def test_hybrid_album_bundle_does_not_skip_over_per_track_source(monkeypatch):
