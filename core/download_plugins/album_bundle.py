@@ -201,11 +201,30 @@ def profile_allowed_formats(quality_profile_id=None):
         return None
 
 
+def profile_quality_targets(quality_profile_id=None):
+    """Return ``(ranked targets, fallback_enabled)`` for an album grab.
+
+    ``profile_allowed_formats`` is intentionally only a strict format veto;
+    it cannot express MP3-first ladders or distinguish FLAC 16/44 from
+    FLAC 24/96.  Album release selection needs the complete target objects as
+    well.  Resolution fails open so a transient DB problem never disables an
+    otherwise usable download source.
+    """
+    try:
+        from core.quality.selection import load_profile_by_id, targets_from_profile
+        return targets_from_profile(load_profile_by_id(quality_profile_id))
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Could not resolve profile quality targets: %s", exc)
+        return [], True
+
+
 def pick_best_album_release(candidates, quality_guess,
                             album_name: str = "",
                             min_seeders: int = 0,
                             allowed_formats=None,
-                            allow_mixed: bool = False) -> Optional[object]:
+                            allow_mixed: bool = False,
+                            quality_targets=None,
+                            fallback_enabled: bool = True) -> Optional[object]:
     """Pick the single best torrent / NZB for an album-bundle download.
 
     Heuristic, in priority order:
@@ -233,11 +252,13 @@ def pick_best_album_release(candidates, quality_guess,
        are dead. ``min_seeders=0`` disables it.
     1. Reasonable album-ish size (40 MB – 3 GB) — drops single-track
        releases that snuck in and quarantines suspicious giants.
-    2. Higher seeders > lower (dead torrents = dead downloads).
-       Usenet releases use ``grabs`` as a popularity proxy when
-       seeders is None.
-    3. Higher quality (FLAC > AAC > MP3) inferred from title.
-    4. Larger size as tiebreaker (often = higher bitrate).
+    2. When ranked targets are supplied, the best target any available
+       release satisfies wins. Exact bitrate / sample-rate / bit-depth
+       constraints are honored; with fallback disabled an unproven release is
+       refused before it reaches the client.
+    3. Within that quality bucket, higher measured quality wins, followed by
+       seeders (or Usenet grabs) and size. Without ranked targets the legacy
+       seeders-first heuristic is retained.
     """
     if not candidates:
         return None
@@ -311,6 +332,73 @@ def pick_best_album_release(candidates, quality_guess,
     pool = sized or list(candidates)
     if not pool:
         return None
+
+    # A profile ladder is an ordering, not merely a set of permitted codecs.
+    # The old hardcoded FLAC>AAC>MP3 score contradicted MP3-first profiles and
+    # could not distinguish any lossless resolution. Parse every remaining
+    # release into the same AudioQuality model used by Soulseek/streaming.
+    if quality_targets:
+        from core.quality.model import rank_candidate
+        from core.quality.release_format import (
+            audio_quality_from_release,
+            formats_in_files,
+        )
+
+        quality_rows = []
+        for candidate in pool:
+            aq = audio_quality_from_release(
+                candidate.title or '',
+                getattr(candidate, 'categories', None),
+            )
+            file_formats = formats_in_files(
+                getattr(candidate, 'file_names', None) or ()
+            )
+            if len(file_formats) == 1:
+                # A torrent file list is stronger evidence than its title.
+                aq.format = next(iter(file_formats))
+            elif len(file_formats) > 1:
+                aq.format = 'unknown'
+            quality_rows.append((rank_candidate(aq, quality_targets), aq, candidate))
+
+        best_target = min(
+            (rank[0] for rank, _aq, _candidate in quality_rows),
+            default=len(quality_targets),
+        )
+        if best_target < len(quality_targets):
+            quality_rows = [
+                row for row in quality_rows if row[0][0] == best_target
+            ]
+        elif not fallback_enabled:
+            logger.warning(
+                "[Album Bundle] No candidate for '%s' satisfies the profile's "
+                "full quality targets; refusing an unproven release",
+                album_name or '?',
+            )
+            return None
+
+        preferred_formats = {
+            str(target.format).lower()
+            for target in quality_targets
+            if getattr(target, 'format', None)
+        }
+
+        def _profile_score(row) -> tuple:
+            _rank, aq, candidate = row
+            availability = (
+                candidate.seeders
+                if candidate.seeders is not None
+                else (candidate.grabs or 0)
+            )
+            # If no real target matched and fallback is enabled, formats the
+            # user named still outrank unrelated formats — same rule as
+            # filter_and_rank's fallback path.
+            preferred = (
+                True if best_target < len(quality_targets)
+                else aq.format.lower() in preferred_formats
+            )
+            return (preferred, aq.tier_score(), availability, candidate.size or 0)
+
+        return max(quality_rows, key=_profile_score)[2]
 
     def _score(c) -> tuple:
         seeders = c.seeders if c.seeders is not None else (c.grabs or 0)

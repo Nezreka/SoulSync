@@ -260,6 +260,7 @@ def get_valid_candidates(results, spotify_track, query, profile_id=None):
         if scored:
             if any(getattr(r, 'username', None) == 'youtube' for r in scored):
                 scored = _filter_youtube_by_quality(scored, profile_id)
+            scored = _filter_prowlarr_by_quality(scored, profile_id)
             accepted.extend(scored)
         elif any(getattr(r, 'username', None) == 'youtube' for r in streaming):
             # YouTube artist data is unreliable; Tidal/Qobuz/etc. do not fall through.
@@ -277,6 +278,63 @@ def get_valid_candidates(results, spotify_track, query, profile_id=None):
     if p2p:
         accepted.extend(_match_filename_candidates(p2p, spotify_track, profile_id))
     return accepted
+
+
+def _filter_prowlarr_by_quality(candidates, profile_id=None):
+    """Apply the item's quality ladder to torrent/Usenet search hits.
+
+    Those sources enter the structured-metadata matching lane because their
+    release title is already split into artist/title.  That lane historically
+    skipped quality filtering for every non-YouTube source on the assumption
+    that the source handled it internally.  Prowlarr does not: its search API
+    exposes a release title, not normalized audio properties.  The projection
+    now parses those properties, and this is where they become an actual
+    profile decision before any torrent/NZB is grabbed.
+
+    Other streaming candidates are preserved unchanged.  A DB/profile read
+    failure is also non-fatal; the post-download quality guard remains the
+    final authority.
+    """
+    rows = list(candidates or [])
+    prowlarr = [
+        row for row in rows
+        if getattr(row, 'username', None) in ('torrent', 'usenet')
+    ]
+    if not prowlarr:
+        return rows
+
+    try:
+        from core.quality.selection import (
+            load_profile_by_id,
+            rank_with_targets,
+            targets_from_profile,
+        )
+
+        profile = load_profile_by_id(profile_id)
+        targets, fallback_enabled = targets_from_profile(profile)
+        ranked, _ = rank_with_targets(
+            prowlarr,
+            targets,
+            fallback_enabled=fallback_enabled,
+        )
+    except Exception as exc:  # noqa: BLE001 - never turn config I/O into no hits
+        logger.debug("Prowlarr quality filtering unavailable: %s", exc)
+        return rows
+
+    kept_ids = {id(row) for row in ranked}
+    filtered = [
+        row for row in rows
+        if getattr(row, 'username', None) not in ('torrent', 'usenet')
+        or id(row) in kept_ids
+    ]
+    if len(ranked) != len(prowlarr):
+        logger.info(
+            "Prowlarr quality filter: kept %d/%d release(s) for %s",
+            len(ranked),
+            len(prowlarr),
+            f"item profile {profile_id}" if profile_id else "app default",
+        )
+    return filtered
 
 
 def _score_streaming_candidates(results, spotify_track):

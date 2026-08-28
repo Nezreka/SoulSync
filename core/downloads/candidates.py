@@ -428,7 +428,17 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
 
             # Initiate download
             logger.info(f"[Modal Worker] Starting download: {username} / {os.path.basename(filename)}")
-            download_id = deps.run_async(deps.download_orchestrator.download(username, filename, size))
+            _download_kwargs = {}
+            if track_info.get('quality_profile_id') is not None:
+                _download_kwargs['quality_profile_id'] = track_info['quality_profile_id']
+            download_id = deps.run_async(
+                deps.download_orchestrator.download(
+                    username,
+                    filename,
+                    size,
+                    **_download_kwargs,
+                )
+            )
 
             if download_id:
                 # Store context for post-processing with complete Spotify metadata (GUI PARITY)

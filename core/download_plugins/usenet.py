@@ -28,6 +28,7 @@ from core.download_plugins.album_bundle import (
     incomplete_path_stability_check,
     pick_best_album_release,
     profile_allowed_formats,
+    profile_quality_targets,
     poll_album_download,
     resolve_reported_save_path,
     snapshot_incomplete_path,
@@ -52,6 +53,10 @@ from core.prowlarr_client import (
     DEFAULT_MUSIC_CATEGORIES,
     ProwlarrClient,
     ProwlarrSearchResult,
+)
+from core.quality.release_format import (
+    audio_quality_from_release,
+    evaluate_release,
 )
 from core.usenet_clients import get_active_adapter as get_active_usenet_adapter
 from utils.async_helpers import run_async
@@ -124,13 +129,17 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             # signed params, so only an opaque server token travels (P0-03).
             token = get_candidate_store().put(result.download_url)
             filename = f"{token}{_FILENAME_SEP}{result.title}"
-            quality = _guess_quality_from_title(result.title)
+            audio_quality = audio_quality_from_release(
+                result.title,
+                result.categories,
+            )
+            quality = audio_quality.format
             parsed_artist, parsed_title = _parse_release_title(result.title)
             tr = TrackResult(
                 username='usenet',
                 filename=filename,
                 size=result.size,
-                bitrate=None,
+                bitrate=audio_quality.bitrate,
                 duration=None,
                 quality=quality,
                 # Usenet doesn't expose per-uploader concurrency the way
@@ -138,6 +147,8 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 free_upload_slots=1,
                 upload_speed=0,
                 queue_length=0,
+                sample_rate=audio_quality.sample_rate,
+                bit_depth=audio_quality.bit_depth,
                 # Pre-fill artist + title so TrackResult.__post_init__
                 # doesn't auto-parse the filename — same URL-in-filename
                 # gotcha as the torrent plugin.
@@ -149,7 +160,9 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                     'indexer': result.indexer_name,
                     'indexer_id': result.indexer_id,
                     'grabs': result.grabs,
+                    'publish_date': result.publish_date,
                     'protocol': 'usenet',
+                    'release_title': result.title,
                 },
             )
             tracks.append(tr)
@@ -175,6 +188,8 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         username: str,
         filename: str,
         file_size: int = 0,
+        *,
+        quality_profile_id=None,
     ) -> Optional[str]:
         if not self.is_configured():
             return None
@@ -189,6 +204,17 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             logger.error("Usenet download: unknown or expired candidate for %r "
                          "— re-run the search", display_name)
             return None
+
+        # Same pre-grab veto as torrents.  The per-item profile id is passed
+        # from the task context; omitting it intentionally resolves the app
+        # default for interactive/manual grabs.
+        allowed_formats = profile_allowed_formats(quality_profile_id)
+        if allowed_formats:
+            ok, why = evaluate_release(allowed_formats, display_name)
+            if not ok:
+                logger.info("Usenet declined %r on the quality profile: %s",
+                            display_name, why)
+                return None
 
         download_id = str(uuid.uuid4())
         with self._lock:
@@ -546,9 +572,12 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         # profile veto, so a lossy NZB is not the thing that satisfies a
         # lossless-only profile after the torrent path correctly refused.
         allowed_formats = profile_allowed_formats(quality_profile_id)
+        quality_targets, fallback_enabled = profile_quality_targets(quality_profile_id)
         picked = pick_best_album_release(
             candidates, _guess_quality_from_title, album_name=album_name,
             allowed_formats=allowed_formats,
+            quality_targets=quality_targets,
+            fallback_enabled=fallback_enabled,
         )
         if picked is None:
             # No candidate matched the requested album (or none passed filtering).
@@ -626,4 +655,3 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         result['success'] = True
         result['files'] = copied
         return result
-

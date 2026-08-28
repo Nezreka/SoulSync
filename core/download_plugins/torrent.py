@@ -65,6 +65,7 @@ from core.download_plugins.album_bundle import (
     get_poll_timeout,
     pick_best_album_release,
     profile_allowed_formats,
+    profile_quality_targets,
     poll_album_download,
     resolve_reported_save_path,
 )
@@ -89,7 +90,11 @@ from core.torrent_clients import get_active_adapter as get_active_torrent_adapte
 from utils.async_helpers import run_async
 from utils.logging_config import get_logger
 
-from core.quality.release_format import evaluate_release
+from core.quality.release_format import (
+    audio_quality_from_release,
+    audio_quality_from_release_title,
+    evaluate_release,
+)
 
 logger = get_logger("download_plugins.torrent")
 
@@ -227,13 +232,17 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             token = get_candidate_store().put(
                 _encode_candidate(download_url, result.magnet_uri))
             filename = f"{token}{_FILENAME_SEP}{result.title}"
-            quality = _guess_quality_from_title(result.title)
+            audio_quality = audio_quality_from_release(
+                result.title,
+                result.categories,
+            )
+            quality = audio_quality.format
             parsed_artist, parsed_title = _parse_release_title(result.title)
             tr = TrackResult(
                 username='torrent',
                 filename=filename,
                 size=result.size,
-                bitrate=None,
+                bitrate=audio_quality.bitrate,
                 duration=None,
                 quality=quality,
                 # Torrent results don't have per-uploader slot / queue
@@ -242,6 +251,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 free_upload_slots=max(1, result.seeders or 0),
                 upload_speed=0,
                 queue_length=0,
+                sample_rate=audio_quality.sample_rate,
+                bit_depth=audio_quality.bit_depth,
                 # Pre-fill artist + title so TrackResult.__post_init__
                 # doesn't auto-parse the filename — our filename starts
                 # with the indexer download URL, which would otherwise
@@ -256,7 +267,9 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                     'seeders': result.seeders,
                     'leechers': result.leechers,
                     'grabs': result.grabs,
+                    'publish_date': result.publish_date,
                     'protocol': 'torrent',
+                    'release_title': result.title,
                 },
             )
             tracks.append(tr)
@@ -282,6 +295,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         username: str,
         filename: str,
         file_size: int = 0,
+        *,
+        quality_profile_id=None,
     ) -> Optional[str]:
         if not self.is_configured():
             return None
@@ -307,7 +322,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         # Only ever fires for a profile that names formats AND disables
         # fallback. A user who allows lossy has allowed_formats=None here and
         # sees no change whatsoever.
-        allowed_formats = profile_allowed_formats()
+        allowed_formats = profile_allowed_formats(quality_profile_id)
         if allowed_formats:
             ok, why = evaluate_release(allowed_formats, display_name)
             if not ok:
@@ -723,10 +738,13 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         # already means "FLAC only" to the import guard; this side just never
         # asked.
         allowed_formats = profile_allowed_formats(quality_profile_id)
+        quality_targets, fallback_enabled = profile_quality_targets(quality_profile_id)
         picked = pick_best_album_release(
             candidates, _guess_quality_from_title, album_name=album_name,
             min_seeders=get_min_seeders(),
             allowed_formats=allowed_formats,
+            quality_targets=quality_targets,
+            fallback_enabled=fallback_enabled,
         )
         if picked is None:
             # No candidate matched the requested album, or none had a live
@@ -1033,21 +1051,12 @@ def _parse_release_title(title: str) -> Tuple[str, str]:
 
 
 def _guess_quality_from_title(title: str) -> str:
-    """Read the quality hint from a release title — most music
-    torrents put the encoding right in the name (FLAC, MP3 320,
-    etc.). Falls back to ``'mp3'`` so quality_score doesn't crash."""
-    if not title:
-        return 'mp3'
-    lower = title.lower()
-    if 'flac' in lower:
-        return 'flac'
-    if re.search(r'\b24[\s-]?bit\b', lower) or 'hi-?res' in lower:
-        return 'flac'
-    if 'aac' in lower:
-        return 'aac'
-    if 'ogg' in lower:
-        return 'ogg'
-    return 'mp3'
+    """Compatibility wrapper around the shared rich title parser.
+
+    Unknown titles stay ``unknown``.  Calling them MP3 made the UI and quality
+    profile believe Prowlarr supplied information that its API never sent.
+    """
+    return audio_quality_from_release_title(title).format
 
 
 async def prowlarr_search_with_variants(
@@ -1091,6 +1100,11 @@ async def prowlarr_search_with_variants(
     # request, which is exactly today's behaviour.
     try:
         fan_out_ids = await prowlarr.resolve_search_indexers(indexer_ids, protocol)
+        # ``search_each_indexer`` dedupes too, but the failure accounting below
+        # compares counts. Keep both sides on the same concrete set so an
+        # allowlist like ``1,1`` cannot disguise that indexer 1 was the only
+        # indexer and it failed.
+        fan_out_ids = list(dict.fromkeys(int(value) for value in fan_out_ids))
     except Exception as exc:                            # noqa: BLE001
         # Resolving the ids is an optimisation, never a precondition. A failure
         # here must not become a failure to search at all.
@@ -1107,18 +1121,22 @@ async def prowlarr_search_with_variants(
                     categories=categories,
                     timeout=timeout,
                 )
-                if failures and not results:
+                if failures and len(failures) >= len(fan_out_ids) and not results:
                     # EVERY indexer failed. Raising preserves dd28-02: a
-                    # transport failure must not masquerade as zero hits.
+                    # transport failure must not masquerade as zero hits. A
+                    # responsive indexer returning zero is still a successful
+                    # search; one other broken indexer must not turn that
+                    # honest empty answer into a failure for the whole wave.
                     raise ProwlarrSearchError('; '.join(failures))
                 if failures:
                     # Some worked. Name the ones that did not — the aggregated
                     # request could never tell you which indexer was the
                     # problem, which the report asks for.
                     logger.warning(
-                        "Prowlarr %s search: %d indexer(s) failed but %d result(s) "
-                        "came back from the rest — %s",
-                        protocol, len(failures), len(results), '; '.join(failures),
+                        "Prowlarr %s search: %d/%d indexer(s) failed; responsive "
+                        "indexers returned %d result(s) — %s",
+                        protocol, len(failures), len(fan_out_ids), len(results),
+                        '; '.join(failures),
                     )
             else:
                 results = await prowlarr.search(

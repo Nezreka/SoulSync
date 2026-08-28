@@ -60,10 +60,12 @@ class _FakeSoulseek:
     def __init__(self, download_id="dl-1"):
         self._download_id = download_id
         self.download_calls = []
+        self.download_profile_calls = []
         self.cancel_calls = []
 
-    async def download(self, username, filename, size):
+    async def download(self, username, filename, size, *, quality_profile_id=None):
         self.download_calls.append((username, filename, size))
+        self.download_profile_calls.append(quality_profile_id)
         return self._download_id
 
     async def cancel_download(self, download_id, username, remove=True):
@@ -143,6 +145,22 @@ def test_first_candidate_starts_download_and_returns_true():
     assert deps.download_orchestrator.download_calls == [("user1", "best.flac", 1000)]
     assert download_tasks["t1"]["download_id"] == "dl-1"
     assert "user1::best.flac" in matched_downloads_context
+
+
+def test_item_quality_profile_reaches_download_dispatch():
+    deps = _build_deps()
+    _seed_task("t-profile", track_info={'quality_profile_id': 42})
+
+    result = dc.attempt_download_with_candidates(
+        "t-profile",
+        [_Candidate(username='usenet', filename='release.nzb')],
+        _Track(),
+        batch_id="b1",
+        deps=deps,
+    )
+
+    assert result is True
+    assert deps.download_orchestrator.download_profile_calls == [42]
 
 
 def test_candidates_tried_in_confidence_order():

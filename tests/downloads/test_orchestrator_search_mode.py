@@ -47,7 +47,7 @@ def _hybrid_orch():
 
 
 def test_priority_mode_uses_search_with_fallback(monkeypatch):
-    monkeypatch.setattr(orch_mod, 'load_search_mode', lambda: 'priority')
+    monkeypatch.setattr(orch_mod, 'load_search_mode', lambda profile_id=None: 'priority')
     orch = _hybrid_orch()
 
     tracks, _ = _run(orch.search('q'))
@@ -57,10 +57,27 @@ def test_priority_mode_uses_search_with_fallback(monkeypatch):
 
 
 def test_best_quality_mode_uses_search_all_sources(monkeypatch):
-    monkeypatch.setattr(orch_mod, 'load_search_mode', lambda: 'best_quality')
+    monkeypatch.setattr(orch_mod, 'load_search_mode', lambda profile_id=None: 'best_quality')
     orch = _hybrid_orch()
 
     tracks, _ = _run(orch.search('q'))
 
+    assert orch.engine.calls == [('all', ('soulseek', 'hifi'))]
+    assert tracks == ['pool']
+
+
+def test_item_profile_decides_search_mode(monkeypatch):
+    seen = []
+
+    def _mode(profile_id=None):
+        seen.append(profile_id)
+        return 'best_quality' if profile_id == 42 else 'priority'
+
+    monkeypatch.setattr(orch_mod, 'load_search_mode', _mode)
+    orch = _hybrid_orch()
+
+    tracks, _ = _run(orch.search('q', quality_profile_id=42))
+
+    assert seen == [42]
     assert orch.engine.calls == [('all', ('soulseek', 'hifi'))]
     assert tracks == ['pool']

@@ -67,9 +67,9 @@ def test_guess_quality_from_title() -> None:
     assert _guess_quality_from_title('Album [MP3 320]') == 'mp3'
     assert _guess_quality_from_title('Album [AAC 256]') == 'aac'
     assert _guess_quality_from_title('Album [OGG]') == 'ogg'
-    # Default fallback so quality_score doesn't crash on bare titles.
-    assert _guess_quality_from_title('Just A Title') == 'mp3'
-    assert _guess_quality_from_title('') == 'mp3'
+    # Prowlarr did not supply a codec here; do not invent MP3.
+    assert _guess_quality_from_title('Just A Title') == 'unknown'
+    assert _guess_quality_from_title('') == 'unknown'
 
 
 def test_parse_release_title_splits_artist_dash_title() -> None:
@@ -233,6 +233,20 @@ def test_torrent_project_results_neutralizes_soulseek_specific_fields() -> None:
     # usable. free_upload_slots floors at 1 to avoid the 0-slot
     # penalty applied to dead Soulseek peers.
     assert tracks[0].free_upload_slots >= 1
+
+
+def test_torrent_project_results_carries_rich_title_quality() -> None:
+    plugin = TorrentDownloadPlugin()
+    tracks, _ = plugin._project_results([
+        _make_torrent_result(
+            title='Danny Brown - Atrocity Exhibition [FLAC 24-96]',
+        )
+    ])
+
+    assert tracks[0].quality == 'flac'
+    assert tracks[0].sample_rate == 96_000
+    assert tracks[0].bit_depth == 24
+    assert tracks[0]._source_metadata['release_title'].endswith('[FLAC 24-96]')
 
 
 # ---------------------------------------------------------------------------
@@ -440,6 +454,43 @@ def test_usenet_project_encodes_token_in_filename() -> None:
     # Artist + title should be parsed out, not auto-extracted from filename.
     assert tracks[0].artist == 'Some Artist'
     assert tracks[0].title == 'Some Album'
+    # The helper's category is Audio/MP3, structured quality evidence even when
+    # the title is bare; bitrate remains unknown until title/file says it.
+    assert tracks[0].quality == 'mp3'
+    assert tracks[0].bitrate is None
+
+
+def test_usenet_project_results_carries_lossy_bitrate() -> None:
+    plugin = UsenetDownloadPlugin()
+    tracks, _ = plugin._project_results([
+        _make_usenet_result(title='Some Artist - Some Album [MP3 320]')
+    ])
+
+    assert tracks[0].quality == 'mp3'
+    assert tracks[0].bitrate == 320
+    assert tracks[0]._source_metadata['release_title'].endswith('[MP3 320]')
+
+
+def test_usenet_download_uses_the_assigned_profile_before_grab() -> None:
+    from core.download_plugins.candidate_store import get_candidate_store
+
+    plugin = UsenetDownloadPlugin()
+    plugin.is_configured = lambda: True
+    token = get_candidate_store().put('https://x/release.nzb')
+    filename = f'{token}{_FILENAME_SEP}Artist - Album [MP3 320]'
+
+    with patch(
+        'core.download_plugins.usenet.profile_allowed_formats',
+        return_value={'flac'},
+    ) as policy:
+        result = _run(plugin.download(
+            'usenet',
+            filename,
+            quality_profile_id=88,
+        ))
+
+    assert result is None
+    policy.assert_called_once_with(88)
 
 
 def test_usenet_finalize_picks_first_audio_file(tmp_path: Path) -> None:

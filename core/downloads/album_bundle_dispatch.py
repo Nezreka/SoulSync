@@ -8,8 +8,8 @@ The gate fires only when ALL conditions hold:
 
 - Batch is an album-context download (``is_album_download`` flag).
 - Active download source is ``torrent``, ``usenet``, or ``soulseek``.
-  In hybrid mode the caller may pass the first configured source as a
-  source override; later hybrid sources stay per-track to preserve fallback.
+  In hybrid mode the caller may pass one source from the consecutive
+  release-capable prefix as an override; the caller preserves source order.
 - Both album-name and artist-name are populated in batch context.
 - The resolved plugin exposes ``download_album_to_staging``.
 
@@ -155,6 +155,14 @@ def try_dispatch(
         'album_bundle_source': mode,
         'album_bundle_staging_path': staging_dir,
         'album_bundle_private_staging': True,
+        'album_bundle_partial': False,
+        'album_bundle_expected_count': None,
+        'album_bundle_completed_count': None,
+        # A previous source in a hybrid album-bundle prefix may have returned
+        # a fallback-eligible miss. Do not leave its error/progress attached to
+        # the next source's live attempt.
+        'album_bundle_error': None,
+        **{f'album_bundle_{key}': None for key in _MIRRORED_KEYS},
     })
 
     def _emit(payload):

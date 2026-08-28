@@ -31,6 +31,8 @@ import os
 import re
 from typing import Iterable, Optional, Set, Tuple
 
+from core.quality.model import AudioQuality
+
 from utils.logging_config import get_logger
 
 logger = get_logger("quality.release_format")
@@ -84,8 +86,45 @@ _TITLE_MARKERS = (
 _LOSSLESS_HINT = re.compile(
     r'\b(?:lossless|24[\s\-_]?bit|hi[\s\-_]?res|hires|web[\s\-_]?flac)\b', re.I)
 
-# Bare bitrates: "V0", "320", "320kbps", "V2" all mean lossy MP3.
-_LOSSY_HINT = re.compile(r'\b(?:v0|v2|320|256|192|128)\s*(?:kbps|k)?\b', re.I)
+# A bitrate is only evidence when it is labelled, is a well-known VBR preset,
+# or is enclosed as a release tag.  Treating every bare ``192`` as MP3 turns
+# catalogue numbers (and similarly-shaped title fragments) into invented
+# quality metadata.  Lidarr follows the same important rule at the decision
+# boundary: unknown stays unknown instead of being promoted to a lossy codec.
+_LOSSY_HINT = re.compile(
+    r'(?:\b(?:v0|v2)\b|'
+    r'\b(?:96|128|160|192|224|256|320|500)\s*(?:kbps|kb/s|kbit/s)\b|'
+    r'[\[(]\s*(?:96|128|160|192|224|256|320|500)\s*[\])])',
+    re.I,
+)
+
+_BIT_DEPTH = re.compile(r'\b(16|24|32)\s*(?:-|_)?\s*bit\b', re.I)
+_DEPTH_RATE_PAIR = re.compile(
+    r'\b(16|24|32)\s*[-_/]\s*'
+    r'(44(?:\.1)?|48|88(?:\.2)?|96|176(?:\.4)?|192|352(?:\.8)?|384)\b',
+    re.I,
+)
+_SAMPLE_RATE_KHZ = re.compile(
+    r'\b(44(?:\.1)?|48|88(?:\.2)?|96|176(?:\.4)?|192|352(?:\.8)?|384)'
+    r'\s*k(?:hz)?\b',
+    re.I,
+)
+_SAMPLE_RATE_HZ = re.compile(
+    r'\b(44100|48000|88200|96000|176400|192000|352800|384000)\s*hz\b',
+    re.I,
+)
+_LABELLED_BITRATE = re.compile(
+    r'\b(\d{2,4})\s*(?:kbps|kb/s|kbit/s)\b', re.I,
+)
+_LOSSY_FORMATS = frozenset({'mp3', 'aac', 'ogg', 'opus', 'wma'})
+_LOSSY_BARE_BITRATE = re.compile(
+    r'\b(?:mp3|aac|ogg|opus|wma)\s*[-_/ ]*'
+    r'(96|128|160|192|224|256|320|500)\b|'
+    r'\b(96|128|160|192|224|256|320|500)\s*[-_/ ]*'
+    r'(?:mp3|aac|ogg|opus|wma)\b|'
+    r'[\[(]\s*(96|128|160|192|224|256|320|500)\s*[\])]',
+    re.I,
+)
 
 
 def formats_in_title(title: str) -> Set[str]:
@@ -94,7 +133,11 @@ def formats_in_title(title: str) -> Set[str]:
     if not title:
         return set()
     lower = str(title).lower()
-    found = {fmt for marker, fmt in _TITLE_MARKERS if marker in lower}
+    found = {
+        fmt
+        for marker, fmt in _TITLE_MARKERS
+        if re.search(rf'(?<![a-z0-9]){re.escape(marker)}(?![a-z0-9])', lower)
+    }
     if not found and _LOSSLESS_HINT.search(lower):
         # A lossless claim with no codec named. Treated as FLAC because that
         # is what it means on every music tracker in practice, and because
@@ -103,6 +146,103 @@ def formats_in_title(title: str) -> Set[str]:
     if not found and _LOSSY_HINT.search(lower):
         found.add('mp3')
     return found
+
+
+def audio_quality_from_release_title(title: str) -> AudioQuality:
+    """Parse the quality Prowlarr actually exposes: the release title.
+
+    Prowlarr's public search resource does not contain normalized music codec,
+    bitrate, sample-rate, or bit-depth fields.  Music indexers conventionally
+    encode those values in titles (``FLAC 24-96``, ``MP3 320kbps``), so this is
+    the source-boundary adapter for torrent and Usenet results.
+
+    Parsing is deliberately conservative.  A bare title is ``unknown`` and a
+    mixed ``FLAC + MP3`` title is also ``unknown``: choosing one codec would be
+    a claim the indexer did not make.  The post-download probe remains the
+    authority; these values exist so search/profile ranking can make the best
+    decision possible before a grab.
+    """
+    raw = str(title or '')
+    formats = formats_in_title(raw)
+    fmt = next(iter(formats)) if len(formats) == 1 else 'unknown'
+
+    pair = _DEPTH_RATE_PAIR.search(raw)
+    depth_match = _BIT_DEPTH.search(raw)
+    bit_depth = int(pair.group(1)) if pair else (
+        int(depth_match.group(1)) if depth_match else None
+    )
+
+    sample_rate = None
+    if pair:
+        sample_rate = _khz_to_hz(pair.group(2))
+    else:
+        khz = _SAMPLE_RATE_KHZ.search(raw)
+        hz = _SAMPLE_RATE_HZ.search(raw)
+        if khz:
+            sample_rate = _khz_to_hz(khz.group(1))
+        elif hz:
+            sample_rate = int(hz.group(1))
+
+    bitrate = None
+    labelled = _LABELLED_BITRATE.search(raw)
+    if labelled:
+        bitrate = int(labelled.group(1))
+    elif fmt in _LOSSY_FORMATS:
+        bare = _LOSSY_BARE_BITRATE.search(raw)
+        if bare:
+            bitrate = int(next(value for value in bare.groups() if value))
+
+    return AudioQuality(
+        format=fmt,
+        bitrate=bitrate,
+        sample_rate=sample_rate,
+        bit_depth=bit_depth,
+    )
+
+
+def audio_quality_from_release(
+    title: str,
+    categories: Optional[Iterable[int]] = None,
+) -> AudioQuality:
+    """Combine title hints with Prowlarr/Newznab's audio leaf category.
+
+    ``3010`` is Audio/MP3 and can therefore fill an unknown codec. ``3040`` is
+    only Audio/Lossless: it must NOT be promoted to FLAC because the payload may
+    instead be ALAC, APE, WavPack, WAV, etc. Parent ``3000`` and Other/Foreign
+    carry no codec information. A category/title contradiction becomes
+    ``unknown`` instead of arbitrarily trusting one side. Resolution and
+    bitrate still come only from the title because categories do not encode
+    them.
+    """
+    quality = audio_quality_from_release_title(title)
+    has_mp3_category = False
+    has_lossless_category = False
+    for raw in categories or ():
+        try:
+            category_id = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if category_id == 3010:
+            has_mp3_category = True
+        elif category_id == 3040:
+            has_lossless_category = True
+
+    if has_mp3_category and has_lossless_category:
+        quality.format = 'unknown'
+        return quality
+
+    if has_mp3_category:
+        if quality.format == 'unknown':
+            quality.format = 'mp3'
+        elif quality.format != 'mp3':
+            quality.format = 'unknown'
+    elif has_lossless_category and quality.format in _LOSSY_FORMATS:
+        quality.format = 'unknown'
+    return quality
+
+
+def _khz_to_hz(value: str) -> int:
+    return int(round(float(value) * 1000))
 
 
 def formats_in_files(file_names: Iterable[str]) -> Set[str]:

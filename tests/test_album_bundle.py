@@ -36,6 +36,7 @@ from core.download_plugins.album_bundle import (
     resolve_reported_save_path,
     unique_staging_path,
 )
+from core.quality.model import QualityTarget
 
 
 # Minimal release-result shim — duck-types the fields the picker reads.
@@ -80,6 +81,66 @@ def test_picker_prefers_flac_when_tied_on_seeders() -> None:
     flac = _Release(title='Album [FLAC]', size=400_000_000, seeders=50)
     mp3 = _Release(title='Album [MP3]', size=130_000_000, seeders=50)
     assert pick_best_album_release([flac, mp3], _flac_quality_guess) is flac
+
+
+def test_profile_ladder_beats_hardcoded_codec_and_seed_order() -> None:
+    """A space-saving MP3-first profile must not be silently rewritten as
+    FLAC-first by the album picker, even when FLAC is more popular."""
+    flac = _Release(title='Album [FLAC 24-96]', size=500_000_000, seeders=900)
+    mp3 = _Release(title='Album [MP3 320]', size=140_000_000, seeders=3)
+
+    picked = pick_best_album_release(
+        [flac, mp3],
+        _flac_quality_guess,
+        quality_targets=[
+            QualityTarget(format='mp3', min_bitrate=320),
+            QualityTarget(format='flac'),
+        ],
+        fallback_enabled=False,
+    )
+
+    assert picked is mp3
+
+
+def test_lossless_resolution_is_ranked_before_usenet_popularity() -> None:
+    cd = _Release(
+        title='Album [FLAC 16bit 44.1kHz]',
+        size=400_000_000,
+        grabs=5_000,
+    )
+    hires = _Release(
+        title='Album [FLAC 24-96]',
+        size=900_000_000,
+        grabs=5,
+    )
+
+    picked = pick_best_album_release(
+        [cd, hires],
+        _flac_quality_guess,
+        quality_targets=[
+            QualityTarget(format='flac', bit_depth=24, min_sample_rate=96_000),
+            QualityTarget(format='flac', bit_depth=16),
+        ],
+        fallback_enabled=False,
+    )
+
+    assert picked is hires
+
+
+def test_strict_hires_profile_rejects_generic_flac_claim() -> None:
+    generic = _Release(title='Album [FLAC]', size=400_000_000, grabs=500)
+
+    picked = pick_best_album_release(
+        [generic],
+        _flac_quality_guess,
+        allowed_formats={'flac'},
+        quality_targets=[
+            QualityTarget(format='flac', bit_depth=24, min_sample_rate=96_000),
+        ],
+        fallback_enabled=False,
+    )
+
+    assert picked is None
 
 
 def test_picker_uses_grabs_when_seeders_is_none() -> None:

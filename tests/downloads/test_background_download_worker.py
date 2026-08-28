@@ -12,6 +12,7 @@ import threading
 import time
 
 from core.download_engine import DownloadEngine
+from core.quality.source_map import quality_profile_context
 
 
 # ---------------------------------------------------------------------------
@@ -34,6 +35,34 @@ def test_dispatch_returns_uuid_download_id():
     )
     assert len(download_id) == 36  # UUID4
     assert download_id.count('-') == 4
+
+
+def test_dispatch_copies_quality_profile_context_into_worker_thread():
+    """The source chooses its real tier inside the background implementation,
+    after the orchestrator call has returned. That thread must still see the
+    originating item's profile rather than the process-wide default."""
+    from core.quality.source_map import _ACTIVE_QUALITY_PROFILE_ID
+
+    engine = DownloadEngine()
+    observed = []
+    finished = threading.Event()
+
+    def impl(download_id, target_id, display_name):
+        observed.append(_ACTIVE_QUALITY_PROFILE_ID.get())
+        finished.set()
+        return '/tmp/file.flac'
+
+    with quality_profile_context(72):
+        engine.worker.dispatch(
+            source_name='tidal',
+            target_id='track',
+            display_name='Song',
+            original_filename='track||Song',
+            impl_callable=impl,
+        )
+
+    assert finished.wait(timeout=1.0)
+    assert observed == [72]
 
 
 def test_dispatch_inserts_initial_record_with_canonical_state():

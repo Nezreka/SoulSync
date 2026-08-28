@@ -931,6 +931,115 @@ def test_hybrid_first_torrent_uses_album_bundle_before_per_track(monkeypatch):
     assert download_batches['B27']['album_bundle_source'] == 'torrent'
 
 
+def test_hybrid_album_bundle_falls_through_torrent_to_usenet(monkeypatch):
+    """Consecutive release sources are real fallbacks, not a dead-end prefix."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    torrent = _FakeAlbumBundleSoulseek({
+        'success': False,
+        'fallback': True,
+        'error': 'No torrent release matched the profile',
+    })
+    usenet = _FakeAlbumBundleSoulseek({
+        'success': True,
+        'files': ['/tmp/a.flac'],
+    })
+    deps = _build_deps(
+        config=_FakeConfig({
+            'download_source.mode': 'hybrid',
+            'download_source.hybrid_order': ['torrent', 'usenet', 'soulseek'],
+        }),
+        soulseek=_FakePluginWrapper({'torrent': torrent, 'usenet': usenet}),
+    )
+    _seed_batch(
+        'B27-fallback',
+        is_album_download=True,
+        album_context={'name': 'Test Album', 'total_tracks': 1},
+        artist_context={'name': 'Artist'},
+    )
+
+    mw.run_full_missing_tracks_process(
+        'B27-fallback',
+        'album:1',
+        [{'name': 'T1', 'artists': ['Artist'], 'track_number': 1}],
+        deps,
+    )
+
+    assert len(torrent.calls) == 1
+    assert len(usenet.calls) == 1
+    batch = download_batches['B27-fallback']
+    assert batch['album_bundle_source'] == 'usenet'
+    assert batch['album_bundle_private_staging'] is True
+    assert batch['album_bundle_state'] == 'staged'
+    assert batch['album_bundle_error'] is None
+
+
+def test_hybrid_album_bundle_does_not_skip_over_per_track_source(monkeypatch):
+    """A later Usenet source cannot jump ahead of a configured streaming tier."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    torrent = _FakeAlbumBundleSoulseek({
+        'success': False,
+        'fallback': True,
+        'error': 'No torrent release',
+    })
+    usenet = _FakeAlbumBundleSoulseek()
+    deps = _build_deps(
+        config=_FakeConfig({
+            'download_source.mode': 'hybrid',
+            'download_source.hybrid_order': ['torrent', 'hifi', 'usenet'],
+        }),
+        soulseek=_FakePluginWrapper({'torrent': torrent, 'usenet': usenet}),
+    )
+    _seed_batch(
+        'B27-priority',
+        is_album_download=True,
+        album_context={'name': 'Test Album', 'total_tracks': 1},
+        artist_context={'name': 'Artist'},
+    )
+
+    mw.run_full_missing_tracks_process(
+        'B27-priority',
+        'album:1',
+        [{'name': 'T1', 'artists': ['Artist'], 'track_number': 1}],
+        deps,
+    )
+
+    assert len(torrent.calls) == 1
+    assert usenet.calls == []
+    assert download_batches['B27-priority']['album_bundle_state'] == 'fallback'
+
+
+def test_album_bundle_receives_batch_quality_profile(monkeypatch):
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    plugin = _FakeAlbumBundleSoulseek()
+    deps = _build_deps(
+        config=_FakeConfig({'download_source.mode': 'usenet'}),
+        soulseek=_FakePluginWrapper({'usenet': plugin}),
+    )
+    _seed_batch(
+        'B-quality',
+        is_album_download=True,
+        album_context={'name': 'Test Album', 'total_tracks': 1},
+        artist_context={'name': 'Artist'},
+        quality_profile_id=37,
+    )
+    tracks = [{
+        'name': 'T1',
+        'artists': ['Artist'],
+        'track_number': 1,
+        'quality_profile_id': 37,
+    }]
+
+    mw.run_full_missing_tracks_process('B-quality', 'album:1', tracks, deps)
+
+    assert plugin.calls[0][3] == {'quality_profile_id': 37}
+
+
 def test_album_bundle_fallback_clears_private_staging(monkeypatch):
     db = _FakeDB()
     monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)

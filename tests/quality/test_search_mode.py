@@ -35,6 +35,19 @@ def test_unknown_value_falls_back_to_priority(monkeypatch):
     assert selection.load_search_mode() == "priority"
 
 
+def test_specific_profile_controls_search_mode(monkeypatch):
+    seen = []
+
+    def _profile(profile_id):
+        seen.append(profile_id)
+        return {"version": 3, "search_mode": "best_quality"}
+
+    monkeypatch.setattr(selection, "load_profile_by_id", _profile)
+
+    assert selection.load_search_mode(27) == "best_quality"
+    assert seen == [27]
+
+
 # ── rank_candidates_by_quality toggle ───────────────────────────────────────
 # Opt-in: order the priority-mode download walk by ranked-target quality
 # instead of confidence-first. Default OFF = byte-for-byte old behaviour.

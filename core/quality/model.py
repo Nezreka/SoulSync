@@ -51,7 +51,7 @@ class AudioQuality:
         }
         base = format_base.get(self.format.lower(), 10.0)
 
-        if self.format.lower() in ('flac', 'wav'):
+        if self.format.lower() in ('flac', 'alac', 'wav'):
             sr = self.sample_rate or 44100
             bd = self.bit_depth or 16
             # sample-rate contribution: 44.1 kHz = 0, 192 kHz = +20
@@ -107,7 +107,7 @@ class AudioQuality:
     def label(self) -> str:
         """Human-readable label, e.g. 'FLAC 24-bit/192kHz' or 'MP3 320kbps'."""
         fmt = self.format.upper()
-        if self.format.lower() in ('flac', 'wav'):
+        if self.format.lower() in ('flac', 'alac', 'wav'):
             bd = f"{self.bit_depth}-bit/" if self.bit_depth else ""
             sr = f"{self.sample_rate // 1000}kHz" if self.sample_rate else ""
             detail = f" {bd}{sr}".rstrip()
@@ -150,8 +150,12 @@ class AudioQuality:
         return cls(
             format=extension.lower().lstrip('.'),
             bitrate=file_data.get('bitRate') or attrs.get(0),
-            sample_rate=attrs.get(4),
-            bit_depth=attrs.get(5),
+            # Newer slskd responses expose these as direct fields while older
+            # versions only carry Soulseek protocol attributes.  Prefer the
+            # direct representation and retain the attribute fallback so both
+            # response shapes feed the same profile ranking.
+            sample_rate=file_data.get('sampleRate') or attrs.get(4),
+            bit_depth=file_data.get('bitDepth') or attrs.get(5),
         )
 
     @classmethod

@@ -1,5 +1,5 @@
 """quality_tier_for_source — derive a source's requested download tier from
-the GLOBAL quality profile instead of a per-source setting.
+the applicable item/default quality profile instead of a per-source setting.
 
 Rule: pick the LOWEST source tier that satisfies the user's top (most
 preferred) target — respecting the user's quality ceiling and saving
@@ -58,6 +58,14 @@ def test_qobuz_hires_max(monkeypatch):
     assert sm.quality_tier_for_source('qobuz') == 'hires_max'
 
 
+def test_amazon_opus_is_not_misreported_as_aac(monkeypatch):
+    _patch_targets(monkeypatch, [QualityTarget(label='', format='opus')])
+    assert sm.quality_tier_for_source('amazon') == 'opus'
+
+    _patch_targets(monkeypatch, [QualityTarget(label='', format='aac')])
+    assert sm.quality_tier_for_source('amazon') == 'flac'
+
+
 T_OPUS = [QualityTarget(label='', format='opus')]
 T_OPUS_192 = [QualityTarget(label='', format='opus', min_bitrate=192)]
 T_AAC_128 = [QualityTarget(label='', format='aac', min_bitrate=128)]
@@ -111,3 +119,97 @@ def test_youtube_opus_160_floor_stays_160_but_161_jumps(monkeypatch):
 def test_youtube_ignores_second_target_when_top_is_unsatisfiable(monkeypatch):
     _patch_targets(monkeypatch, T_FLAC16 + T_OPUS)
     assert sm.quality_tier_for_source('youtube') == 'opus_256'
+
+
+def test_item_profile_context_overrides_default_without_leaking(monkeypatch):
+    _patch_targets(monkeypatch, T_FLAC16)
+    seen = []
+
+    def _load(profile_id):
+        seen.append(profile_id)
+        return {
+            'ranked_targets': [
+                {'format': 'mp3', 'min_bitrate': 320},
+            ],
+            'fallback_enabled': False,
+        }
+
+    monkeypatch.setattr(sm, 'load_profile_by_id', _load)
+
+    with sm.quality_profile_context(44):
+        assert sm.quality_tier_for_source('deezer') == 'mp3_320'
+
+    assert seen == [44]
+    assert sm.quality_tier_for_source('deezer') == 'flac'
+
+
+def test_item_profile_context_reaches_blocking_provider_pool(monkeypatch):
+    import asyncio
+
+    from core.async_utils import run_blocking
+
+    _patch_targets(monkeypatch, T_FLAC16)
+    monkeypatch.setattr(sm, 'load_profile_by_id', lambda profile_id: {
+        'ranked_targets': [{'format': 'mp3', 'min_bitrate': 320}],
+        'fallback_enabled': False,
+    })
+
+    async def _resolve_in_pool():
+        with sm.quality_profile_context(9):
+            return await run_blocking(sm.quality_tier_for_source, 'deezer')
+
+    assert asyncio.run(_resolve_in_pool()) == 'mp3_320'
+
+
+def test_deezer_fallback_never_wraps_above_item_quality_ceiling(monkeypatch):
+    import core.deezer_download_client as deezer_module
+
+    client = deezer_module.DeezerDownloadClient.__new__(
+        deezer_module.DeezerDownloadClient
+    )
+    client.shutdown_check = None
+    client._engine = None
+    client._quality = 'flac'
+    client._config = type('Config', (), {
+        'get': staticmethod(lambda key, default=None: True),
+    })()
+    client._get_track_data = lambda _track_id: {'TRACK_TOKEN': 'token'}
+    attempted = []
+    client._get_media_url = lambda _token, quality: attempted.append(quality)
+    client._set_error = lambda *_args: None
+    monkeypatch.setattr(
+        deezer_module,
+        'quality_tier_for_source',
+        lambda *_args, **_kwargs: 'mp3_320',
+    )
+
+    assert client._download_sync('id', 'track', 'Artist - Track') is None
+    assert attempted == ['mp3_320', 'mp3_128']
+
+
+def test_amazon_fallback_never_wraps_above_item_quality_ceiling(monkeypatch):
+    import core.amazon_download_client as amazon_module
+
+    client = amazon_module.AmazonDownloadClient.__new__(
+        amazon_module.AmazonDownloadClient
+    )
+    client._quality = 'flac'
+    client._allow_fallback = True
+    client._engine = None
+    attempted = []
+
+    class _MediaClient:
+        @staticmethod
+        def media_from_asin(_asin, codec):
+            attempted.append(codec)
+            return []
+
+    client._client = _MediaClient()
+    monkeypatch.setattr(
+        amazon_module,
+        'quality_tier_for_source',
+        lambda *_args, **_kwargs: 'opus',
+    )
+
+    assert client._download_sync('id', 'asin', 'Artist - Track') is None
+    assert attempted == ['opus', 'eac3']

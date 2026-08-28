@@ -16,10 +16,35 @@ lossless.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Optional
 
 from core.quality.model import AudioQuality
-from core.quality.selection import load_profile_targets
+from core.quality.selection import (
+    load_profile_by_id,
+    load_profile_targets,
+    targets_from_profile,
+)
+
+
+# Item-level profiles must not be written onto process-wide client singletons:
+# best-quality fan-out can search several items concurrently. Context-local
+# state gives each async task (and its copied worker context) the right ladder.
+_ACTIVE_QUALITY_PROFILE_ID: ContextVar[object] = ContextVar(
+    'active_quality_profile_id',
+    default=None,
+)
+
+
+@contextmanager
+def quality_profile_context(profile_id=None):
+    """Expose one item's profile to source-tier resolution for this call."""
+    token = _ACTIVE_QUALITY_PROFILE_ID.set(profile_id)
+    try:
+        yield
+    finally:
+        _ACTIVE_QUALITY_PROFILE_ID.reset(token)
 
 
 # ── Extension → format string (source-agnostic) ────────────────────────────
@@ -241,7 +266,10 @@ _SOURCE_TIER_LADDERS: dict[str, list[tuple[str, AudioQuality]]] = {
     ],
     'amazon': [
         ('flac', AudioQuality('flac', sample_rate=48000, bit_depth=24)),
-        ('opus', AudioQuality('aac', bitrate=320)),
+        # T2Tunes names and serves this codec as Opus. Calling it AAC made an
+        # AAC-only profile appear satisfied and prevented an Opus profile from
+        # requesting the tier that actually matches it.
+        ('opus', AudioQuality('opus')),
     ],
     'youtube': [
         ('opus_256', AudioQuality('opus', bitrate=256)),
@@ -252,8 +280,13 @@ _SOURCE_TIER_LADDERS: dict[str, list[tuple[str, AudioQuality]]] = {
 }
 
 
-def quality_tier_for_source(source_name: str, *, default: Optional[str] = None) -> Optional[str]:
-    """Return the source tier key to request, derived from the global profile.
+def quality_tier_for_source(
+    source_name: str,
+    *,
+    default: Optional[str] = None,
+    profile_id=None,
+) -> Optional[str]:
+    """Return the source tier key to request from the applicable profile.
 
     Picks the lowest tier in the source's ladder that satisfies the user's
     top (most-preferred) target — respecting the quality ceiling and saving
@@ -265,7 +298,17 @@ def quality_tier_for_source(source_name: str, *, default: Optional[str] = None) 
     if not ladder:
         return default
 
-    targets, _ = load_profile_targets()
+    effective_profile_id = (
+        profile_id
+        if profile_id is not None
+        else _ACTIVE_QUALITY_PROFILE_ID.get()
+    )
+    if effective_profile_id is None:
+        targets, _ = load_profile_targets()
+    else:
+        targets, _ = targets_from_profile(
+            load_profile_by_id(effective_profile_id)
+        )
     if not targets:
         return ladder[0][0]
 

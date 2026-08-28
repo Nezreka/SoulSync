@@ -260,40 +260,40 @@ def _resolve_soulseek_client(download_orchestrator: Any) -> Any:
     return getattr(download_orchestrator, 'soulseek', download_orchestrator)
 
 
-def _soulseek_album_preflight_enabled(config_manager: Any) -> bool:
-    mode = config_manager.get('download_source.mode', 'hybrid')
-    if mode == 'soulseek':
-        return True
-    if mode != 'hybrid':
-        return False
-    order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
-    if order:
-        return order[0] == 'soulseek'
-    primary = config_manager.get('download_source.hybrid_primary', '')
-    return primary == 'soulseek'
-
-
-def _resolve_album_bundle_source(config_manager: Any) -> str:
-    """Return the album-bundle source for this batch.
+def _resolve_album_bundle_sources(config_manager: Any) -> list[str]:
+    """Return the ordered album-bundle prefix for this batch.
 
     In single-source mode, the active source may own the whole album if
-    it supports album bundles. In hybrid mode, only the first source in
-    the configured order may claim the whole album; later sources remain
-    per-track fallback.
+    it supports album bundles. In hybrid mode, consecutive bundle-capable
+    sources at the HEAD of the configured chain may be tried in order. The
+    first non-bundle source ends the prefix: skipping over it would violate
+    the user's priority by letting a later release source jump ahead.
+
+    Keeping the whole prefix matters for a common ``torrent -> usenet``
+    setup. A fallback-eligible miss on torrent must let Usenet try its own
+    complete release instead of dropping directly into a per-track flow that
+    deliberately excludes both release-level sources.
     """
     mode = (config_manager.get('download_source.mode', 'soulseek') or 'soulseek').lower()
     if mode in _ALBUM_BUNDLE_SOURCES:
-        return mode
+        return [mode]
     if mode != 'hybrid':
-        return ''
+        return []
 
     order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
-    first = ''
-    if order:
-        first = str(order[0] or '').lower()
-    else:
-        first = str(config_manager.get('download_source.hybrid_primary', '') or '').lower()
-    return first if first in _ALBUM_BUNDLE_SOURCES else ''
+    if not order:
+        order = [config_manager.get('download_source.hybrid_primary', '')]
+
+    sources = []
+    seen = set()
+    for raw_source in order:
+        source = str(raw_source or '').lower()
+        if source not in _ALBUM_BUNDLE_SOURCES:
+            break
+        if source and source not in seen:
+            sources.append(source)
+            seen.add(source)
+    return sources
 
 
 @dataclass
@@ -414,6 +414,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
         batch_artist_context = None
         batch_is_album = False
         batch_profile_id = 1
+        batch_quality_profile_id = None
         batch_source = 'spotify'
         batch_playlist_folder_mode = False
         batch_playlist_name = 'Unknown Playlist'
@@ -434,6 +435,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 batch_album_context = download_batches[batch_id].get('album_context')
                 batch_artist_context = download_batches[batch_id].get('artist_context')
                 batch_profile_id = download_batches[batch_id].get('profile_id', 1) or 1
+                batch_quality_profile_id = download_batches[batch_id].get('quality_profile_id')
                 batch_source = download_batches[batch_id].get('batch_source', 'spotify') or 'spotify'
                 batch_playlist_folder_mode = download_batches[batch_id].get('playlist_folder_mode', False)
                 batch_playlist_name = download_batches[batch_id].get('playlist_name', 'Unknown Playlist')
@@ -442,6 +444,16 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     download_batches[batch_id].get('source_playlist_ref') or ''
                 ).strip()
                 batch_skip_acoustid = bool(download_batches[batch_id].get('skip_acoustid', False))
+
+        # Most album requests carry one explicit/mirrored profile on the batch.
+        # For older/internal callers, recover the same intent from the first
+        # stamped track rather than silently reverting the whole-release picker
+        # to the app default.
+        if batch_quality_profile_id is None:
+            for _quality_track in tracks_json or []:
+                if isinstance(_quality_track, dict) and _quality_track.get('quality_profile_id') is not None:
+                    batch_quality_profile_id = _quality_track['quality_profile_id']
+                    break
 
         from core.downloads.playlist_folder import (
             resolve_playlist_folder_mode_for_batch,
@@ -921,8 +933,15 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
         # only after analysis has found missing tracks; otherwise an already
         # owned album would still trigger a release download.
         _bundle_state = _BatchStateAccessImpl()
-        _album_bundle_source = _resolve_album_bundle_source(deps.config_manager)
-        if _album_bundle_source and _album_bundle_source != 'soulseek':
+        _album_bundle_sources = _resolve_album_bundle_sources(deps.config_manager)
+        _album_bundle_staged = batch_private_album_bundle
+        for _album_bundle_source in _album_bundle_sources:
+            # Soulseek gets the richer folder preflight below. Torrent and
+            # Usenet can be attempted here in their configured order; a
+            # fallback-eligible miss proceeds to the next consecutive release
+            # source, while a terminal plugin failure still stops the batch.
+            if _album_bundle_source == 'soulseek' or _album_bundle_staged:
+                break
             if _album_bundle_dispatch.try_dispatch(
                 batch_id=batch_id,
                 is_album=batch_is_album,
@@ -932,14 +951,32 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 plugin_resolver=deps.download_orchestrator.client,
                 state=_bundle_state,
                 source_override=_album_bundle_source,
+                plugin_kwargs=(
+                    {'quality_profile_id': batch_quality_profile_id}
+                    if batch_quality_profile_id is not None else None
+                ),
             ):
                 return
+
+            with tasks_lock:
+                _bundle_row = download_batches.get(batch_id) or {}
+                _album_bundle_staged = bool(
+                    _bundle_row.get('album_bundle_private_staging')
+                    and _bundle_row.get('album_bundle_state') == 'staged'
+                )
+
+        # A successful Torrent/Usenet bundle owns the batch. Refresh this
+        # local value after dispatch; the copy read before network I/O is stale.
+        batch_private_album_bundle = _album_bundle_staged
 
         # === ALBUM PRE-FLIGHT: Search for complete album folder before track-by-track ===
         # Only run pre-flight when Soulseek is the download source (or hybrid with soulseek)
         preflight_source = None
         preflight_tracks = None
-        soulseek_is_source = _soulseek_album_preflight_enabled(deps.config_manager)
+        soulseek_is_source = (
+            'soulseek' in _album_bundle_sources
+            and not batch_private_album_bundle
+        )
         if (batch_is_album and batch_album_context and batch_artist_context
                 and soulseek_is_source and not batch_private_album_bundle):
             artist_name = batch_artist_context.get('name', '')
@@ -982,7 +1019,13 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                         # Score complete folders as releases before falling back to per-track search.
                         scored_albums = []
                         for ar in album_results:
-                            filtered_tracks = slsk.filter_results_by_quality_preference(ar.tracks)
+                            if batch_quality_profile_id is None:
+                                filtered_tracks = slsk.filter_results_by_quality_preference(ar.tracks)
+                            else:
+                                filtered_tracks = slsk.filter_results_by_quality_preference(
+                                    ar.tracks,
+                                    profile_id=batch_quality_profile_id,
+                                )
                             if filtered_tracks:
                                 folder_score = _score_album_folder(
                                     ar,
@@ -1060,8 +1103,8 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
         # exact source into the bundle downloader so we keep the richer
         # tracklist-aware scoring instead of doing a weaker second pick.
         _bundle_state = _BatchStateAccessImpl()
-        _album_bundle_source = _resolve_album_bundle_source(deps.config_manager)
-        if _album_bundle_source == 'soulseek':
+        if soulseek_is_source:
+            _album_bundle_source = 'soulseek'
             if _album_bundle_dispatch.try_dispatch(
                 batch_id=batch_id,
                 is_album=batch_is_album,
@@ -1072,9 +1115,18 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 state=_bundle_state,
                 source_override=_album_bundle_source,
                 plugin_kwargs={
-                    'preferred_source': preflight_source,
-                    'preferred_tracks': preflight_tracks,
-                } if preflight_source and preflight_tracks else None,
+                    **(
+                        {
+                            'preferred_source': preflight_source,
+                            'preferred_tracks': preflight_tracks,
+                        }
+                        if preflight_source and preflight_tracks else {}
+                    ),
+                    **(
+                        {'quality_profile_id': batch_quality_profile_id}
+                        if batch_quality_profile_id is not None else {}
+                    ),
+                } or None,
             ):
                 return
 
