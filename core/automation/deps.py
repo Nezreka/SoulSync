@@ -126,7 +126,10 @@ class AutomationDeps:
     # Triggers a "Run Now" of a library-maintenance repair job by id (e.g.
     # 'quality_upgrade'). Returns truthy if the job was queued. Replaces the old
     # standalone quality-scanner executor/state (the scanner is now a repair job).
-    run_repair_job_now: Callable[[str], Any]
+    # (job_id, *, respect_enabled=False) -> bool. respect_enabled is for
+    # automations: a job switched off in Tools must stay off for a background
+    # trigger, only a Run Now click overrides it (#1207).
+    run_repair_job_now: Callable[..., Any]
 
     # --- Download orchestrator + queue accessors ---
     download_orchestrator: Any

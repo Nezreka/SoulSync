@@ -43,6 +43,26 @@ import types as pytypes
 from core.metadata import registry as metadata_registry
 from core.metadata import similar_artists as metadata_similar_artists
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_image_cache(monkeypatch):
+    """Keep artist image urls raw for these tests.
+
+    similar-artist payloads now register their artwork with the image cache so
+    the browser gets a first-party url (#1201). that turns a raw cdn link into
+    /api/image-cache/<key>, but only when the cache is enabled, which is global
+    config. these tests are about source priority and itunes enrichment, not
+    about how art is served, so pin the identity and stay deterministic. the
+    normalisation itself is covered in tests/test_similar_artist_images.py.
+
+    (this file was invisible to the targeted run that preceded it, and only the
+    full suite caught the order-dependent failure.)
+    """
+    monkeypatch.setattr(metadata_similar_artists, "_cached_artist_image_url",
+                        lambda url: url)
+
 
 class _FakeMusicMapResponse:
     def __init__(self, text):

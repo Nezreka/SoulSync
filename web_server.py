@@ -1409,7 +1409,9 @@ def _register_automation_handlers():
         duplicate_cleaner_lock=duplicate_cleaner_lock,
         duplicate_cleaner_executor=duplicate_cleaner_executor,
         run_duplicate_cleaner=_run_duplicate_cleaner,
-        run_repair_job_now=lambda job_id: repair_worker.run_job_now(job_id) if repair_worker else None,
+        run_repair_job_now=lambda job_id, respect_enabled=False: (
+            repair_worker.run_job_now(job_id, respect_enabled=respect_enabled)
+            if repair_worker else None),
         download_orchestrator=download_orchestrator,
         run_async=run_async,
         tasks_lock=tasks_lock,

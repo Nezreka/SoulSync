@@ -1032,22 +1032,40 @@ class RepairWorker:
             remaining -= chunk
         return self._stop_event.is_set()
 
-    def run_job_now(self, job_id: str) -> bool:
+    def run_job_now(self, job_id: str, respect_enabled: bool = False) -> bool:
         """Queue a job for immediate execution by the main worker loop.
 
         Uses a thread-safe queue instead of spawning a separate thread
         to avoid race conditions with the main loop's _run_job().
 
-        Returns True when the job is queued (or already waiting) — the same
-        contract as the video worker's run_job_now. This never returned
+        Returns True when the job is queued (or already waiting), the same
+        contract as the video worker's run_job_now. it never returned
         ANYTHING, so the quality-check automation read None as "library
         worker unavailable" on every run while the scan it triggered ran
         fine behind its back (#1192).
+
+        respect_enabled is for NON-HUMAN callers. a person clicking Run Now
+        means it, toggle or not, so that stays the default. an automation is
+        different: wishx turned Quality Upgrade Finder off to free up
+        resources and it kept running anyway, because his import automation
+        force-queued it on every scan. a weekly job ran 12 times in two days
+        (#1207). the toggle is the user's statement about resources, so a
+        background trigger has to honour it.
         """
         self._ensure_jobs_loaded()
         if job_id not in self._jobs:
             logger.warning("Unknown job: %s", job_id)
             return False
+
+        if respect_enabled:
+            try:
+                if not self.get_job_config(job_id).get('enabled', True):
+                    logger.info("Job %s is disabled, not running it for a background trigger", job_id)
+                    return False
+            except Exception:
+                # config unreadable, fall through and run. refusing on a bad
+                # read would silently stop scheduled work.
+                logger.debug("Could not read config for %s, allowing the run", job_id, exc_info=True)
 
         with self._force_run_lock:
             if job_id not in self._force_run_queue:
