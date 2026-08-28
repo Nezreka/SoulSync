@@ -709,6 +709,15 @@ def get_artist_image(artist_id):
             plugin=plugin,
             artist_name=artist_name,
         )
+        # Same first-party treatment the similar-artists listing gets: hand the
+        # browser a SoulSync url, never a raw third-party CDN one, so a content
+        # blocker can't silently drop it (#1201).
+        if image_url:
+            try:
+                from core.image_cache import cached_image_url
+                image_url = cached_image_url(image_url) or image_url
+            except Exception as exc:   # noqa: BLE001 - art must never 500
+                logger.debug("artist image cache registration failed: %s", exc)
         return jsonify({"success": True, "image_url": image_url})
     except Exception as e:
         logger.error(f"Error fetching artist image: {e}")
