@@ -323,13 +323,10 @@ class Album:
         else:
             format_str = str(raw_format).lower()
 
-        if ('single' in descriptions or 'single' in format_name or 'single' in format_str
-                # Discogs has no separate EP facet on its own artist pages
-                # ("Singles & EPs" is one bucket there) -- treat it as
-                # 'single' here too rather than inventing a split the
-                # source doesn't make.
-                or 'ep' in descriptions or ', ep' in format_str or format_str.endswith('ep')):
+        if 'single' in descriptions or 'single' in format_name or 'single' in format_str:
             album_type = 'single'
+        elif 'ep' in descriptions or ', ep' in format_str or format_str.endswith('ep'):
+            album_type = 'ep'
         elif ('compilation' in descriptions or 'compilation' in format_str
                 # Discogs' artist/search-release endpoints use the
                 # abbreviated code "Comp", not the full word -- this was
@@ -340,8 +337,10 @@ class Album:
             album_type = 'compilation'
         elif 'lp' in descriptions or 'lp' in format_str or 'album' in descriptions or 'album' in format_str:
             album_type = 'album'
-        elif total_tracks <= 6 and total_tracks > 0:
+        elif total_tracks <= 3 and total_tracks > 0:
             album_type = 'single'
+        elif total_tracks <= 6 and total_tracks > 0:
+            album_type = 'ep'
         else:
             album_type = 'album'
 

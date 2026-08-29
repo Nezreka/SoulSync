@@ -11,21 +11,26 @@ mislabel far too much as generic "album":
    DVD-V, Laserdisc, CDV, professional broadcast tape) landed in the
    generic 'album' bucket alongside real studio albums.
 
-Fix: match the `Comp` abbreviation (and fold `ep` into `single`, since
-Discogs' own artist pages have no separate EP facet), and exclude
-non-audio-format releases from `get_artist_albums()`'s results via a new
-per-item whitelist helper, `_is_non_audio_discogs_release()`. See the
-module-level comment above that helper in `core.discogs_client` for why it
-went through three design iterations (blacklist -> naive whitelist ->
-per-item whitelist), each forced by a real release that broke the simpler
-version.
+Fix: match the `Comp` abbreviation, and exclude non-audio-format releases
+from `get_artist_albums()`'s results via a new per-item whitelist helper,
+`_is_non_audio_discogs_release()`. See the module-level comment above that
+helper in `core.discogs_client` for why it went through three design
+iterations (blacklist -> naive whitelist -> per-item whitelist), each
+forced by a real release that broke the simpler version.
+
+An earlier version of this fix also folded `ep` into `single`, on the
+reasoning that Discogs' own artist pages have no separate EP facet. Reverted
+per review: `core/metadata/discography.py` still has a dedicated EPs tab
+keyed on `album_type == 'ep'`, and Deezer/iTunes still produce `'ep'` for
+the same releases, so Discogs would have been the only source disagreeing.
+`ep` stays its own `album_type` value here, unchanged from before this PR.
 """
 
 from core.discogs_client import Album, _is_non_audio_discogs_release
 
 
 # ---------------------------------------------------------------------------
-# Change 1 -- Comp abbreviation + ep folded into single
+# Change 1 -- Comp abbreviation recognized as compilation
 # ---------------------------------------------------------------------------
 
 def test_comp_abbreviation_is_recognized_as_compilation():
@@ -43,13 +48,14 @@ def test_full_word_compilation_still_works():
     assert album.album_type == 'compilation'
 
 
-def test_ep_format_string_folds_into_single():
-    # Discogs has no separate EP facet on its own artist pages -- 'ep'
-    # should no longer produce a distinct album_type.
+def test_ep_format_string_is_recognized_as_ep():
+    # Unchanged from before this PR -- 'ep' stays its own album_type so the
+    # EPs tab (core/metadata/discography.py, keyed on album_type == 'ep')
+    # keeps working and Discogs agrees with Deezer/iTunes on the same release.
     album = Album.from_discogs_release({
         'id': 3, 'title': 'Fan Club EP', 'format': 'CD, EP, Club, Ltd',
     })
-    assert album.album_type == 'single'
+    assert album.album_type == 'ep'
 
 
 def test_explicit_single_format_unaffected():
@@ -66,15 +72,21 @@ def test_plain_album_format_unaffected():
     assert album.album_type == 'album'
 
 
-def test_track_count_fallback_collapsed_to_single_six_track_cutoff():
-    # No type keyword at all -- falls back to track-count guessing. The old
-    # two-tier fallback (<=3 -> single, <=6 -> ep) is now one <=6 -> single
-    # check, since both tiers fed the same "no Discogs signal" logic for
-    # what's now a single output value.
+def test_track_count_fallback_three_or_fewer_tracks_is_single():
+    # No type keyword at all -- falls back to track-count guessing.
+    # Unchanged two-tier fallback: <=3 tracks -> single.
     album = Album.from_discogs_release({
-        'id': 6, 'title': 'No Format Data', 'tracklist': [{'title': f't{i}'} for i in range(5)],
+        'id': 6, 'title': 'No Format Data Short', 'tracklist': [{'title': f't{i}'} for i in range(2)],
     })
     assert album.album_type == 'single'
+
+
+def test_track_count_fallback_four_to_six_tracks_is_ep():
+    # Unchanged two-tier fallback: 4-6 tracks -> ep.
+    album = Album.from_discogs_release({
+        'id': 9, 'title': 'No Format Data Medium', 'tracklist': [{'title': f't{i}'} for i in range(5)],
+    })
+    assert album.album_type == 'ep'
 
 
 def test_track_count_fallback_above_six_defaults_to_album():
