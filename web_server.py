@@ -5810,6 +5810,277 @@ def get_music_video_status(video_id):
     return jsonify(status)
 
 
+_PLAYBACK_PREFETCH_ACTIVE_STATES = {
+    'pending', 'queued', 'searching', 'downloading', 'post_processing',
+}
+
+
+def _resolve_playback_prefetch_local_file(track):
+    """Return an on-disk library file for a queue row, if one already exists."""
+    raw_path = str(track.get('file_path') or track.get('filename') or '').strip()
+    if raw_path:
+        resolved = _resolve_library_file_path(raw_path)
+        if resolved and os.path.isfile(resolved):
+            return resolved
+
+    title = str(track.get('name') or track.get('title') or '').strip()
+    raw_artists = track.get('artists') if isinstance(track.get('artists'), list) else []
+    artists = []
+    for value in raw_artists:
+        name = value.get('name') if isinstance(value, dict) else value
+        if str(name or '').strip():
+            artists.append(str(name).strip())
+    fallback_artist = str(track.get('artist') or track.get('artist_name') or '').strip()
+    if not artists and fallback_artist:
+        artists.append(fallback_artist)
+    if not title or not artists:
+        return None
+
+    album = track.get('album')
+    if isinstance(album, dict):
+        album = album.get('name') or album.get('title')
+    album = str(album or track.get('album_title') or '').strip() or None
+    database = get_database()
+    active_server = config_manager.get_active_media_server()
+    for artist in artists:
+        matched, confidence = database.check_track_exists(
+            title,
+            artist,
+            confidence_threshold=0.7,
+            server_source=active_server,
+            album=album,
+        )
+        if not matched or confidence < 0.7:
+            continue
+        candidate = _resolve_library_file_path(getattr(matched, 'file_path', '') or '')
+        if candidate and os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def _start_playback_queue_prefetch(raw_tracks):
+    """Add missing player rows to the existing downloader in strict queue order."""
+    from core.playback.prefetch import (
+        PLAYBACK_PREFETCH_MAX_CONCURRENT,
+        deduplicate_prefetch_tracks,
+    )
+
+    tracks, request_ids_by_key = deduplicate_prefetch_tracks(raw_tracks)
+    if not tracks:
+        raise ValueError('No valid missing tracks were provided')
+
+    resolved_paths = {
+        track['_playback_queue_key']: _resolve_playback_prefetch_local_file(track)
+        for track in tracks
+    }
+    items = []
+    new_tracks = []
+    existing_batch_ids = set()
+    requested_rank = {
+        track['_playback_queue_key']: index for index, track in enumerate(tracks)
+    }
+    new_batch_id = ''
+    created_new_batch = False
+
+    with tasks_lock:
+        active_by_key = {}
+        for task_id, task in download_tasks.items():
+            if not isinstance(task, dict) or task.get('playlist_id') != 'playback_queue':
+                continue
+            track_info = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
+            key = track_info.get('_playback_queue_key')
+            if not key:
+                continue
+            state = str(task.get('status') or '')
+            final_path = str(task.get('final_file_path') or '')
+            if state == 'completed' and final_path and os.path.isfile(final_path):
+                active_by_key[key] = (task_id, task, 'ready', final_path)
+            elif state in _PLAYBACK_PREFETCH_ACTIVE_STATES:
+                active_by_key[key] = (task_id, task, state, '')
+
+        reusable_batches = [
+            (batch_id, batch)
+            for batch_id, batch in download_batches.items()
+            if isinstance(batch, dict)
+            and batch.get('playback_prefetch')
+            and str(batch.get('phase') or '') not in {'complete', 'error', 'cancelled'}
+        ]
+        reusable_batches.sort(key=lambda pair: float(pair[1].get('created_at') or 0))
+        reusable_batch_id = reusable_batches[0][0] if reusable_batches else ''
+
+        for track in tracks:
+            key = track['_playback_queue_key']
+            request_ids = request_ids_by_key.get(key, [])
+            local_path = resolved_paths.get(key)
+            if local_path:
+                items.append({
+                    'queue_key': key,
+                    'request_ids': request_ids,
+                    'state': 'ready',
+                    'final_path': local_path,
+                })
+                continue
+            existing = active_by_key.get(key)
+            if existing:
+                task_id, task, state, final_path = existing
+                track_info = task.get('track_info')
+                if isinstance(track_info, dict):
+                    known_request_ids = list(track_info.get('_queue_request_ids') or [])
+                    legacy_request_id = track_info.get('_queue_request_id')
+                    if legacy_request_id and legacy_request_id not in known_request_ids:
+                        known_request_ids.append(legacy_request_id)
+                    for request_id in request_ids:
+                        if request_id not in known_request_ids:
+                            known_request_ids.append(request_id)
+                    track_info['_queue_request_ids'] = known_request_ids
+                batch_id = str(task.get('batch_id') or '')
+                if batch_id:
+                    existing_batch_ids.add(batch_id)
+                items.append({
+                    'queue_key': key,
+                    'request_ids': request_ids,
+                    'state': state,
+                    'final_path': final_path,
+                    'batch_id': batch_id,
+                    'task_id': task_id,
+                })
+                continue
+            new_tracks.append(track)
+
+        if new_tracks:
+            new_batch_id = reusable_batch_id or str(uuid.uuid4())
+            created_new_batch = not bool(reusable_batch_id)
+            if created_new_batch:
+                download_batches[new_batch_id] = {
+                    'phase': 'downloading',
+                    'playlist_id': 'playback_queue',
+                    'playlist_name': 'Playback Queue',
+                    'queue': [],
+                    'active_count': 0,
+                    # Queue downloads are deliberately sequential. The source,
+                    # matching and post-processing logic remains unchanged; this
+                    # only ensures the next audible gap is filled first.
+                    'max_concurrent': PLAYBACK_PREFETCH_MAX_CONCURRENT,
+                    'queue_index': 0,
+                    'permanently_failed_tracks': [],
+                    'cancelled_tracks': set(),
+                    'profile_id': get_current_profile_id(),
+                    'playback_prefetch': True,
+                    'created_at': time.time(),
+                }
+            batch = download_batches[new_batch_id]
+            batch['max_concurrent'] = PLAYBACK_PREFETCH_MAX_CONCURRENT
+            for track in new_tracks:
+                task_id = str(uuid.uuid4())
+                request_ids = request_ids_by_key.get(track['_playback_queue_key'], [])
+                track['_queue_request_ids'] = request_ids
+                track_index = requested_rank[track['_playback_queue_key']]
+                download_tasks[task_id] = {
+                    'status': 'pending',
+                    'track_info': track,
+                    'playlist_id': 'playback_queue',
+                    'batch_id': new_batch_id,
+                    'track_index': track_index,
+                    'download_id': None,
+                    'username': None,
+                    'filename': None,
+                    'retry_count': 0,
+                    'cached_candidates': [],
+                    'used_sources': set(),
+                    'status_change_time': time.time(),
+                }
+                batch['queue'].append(task_id)
+                items.append({
+                    'queue_key': track['_playback_queue_key'],
+                    'request_ids': request_ids_by_key.get(track['_playback_queue_key'], []),
+                    'state': 'queued',
+                    'final_path': '',
+                    'batch_id': new_batch_id,
+                    'task_id': task_id,
+                })
+
+        # A later "Play next" or drag reorder sends the full missing-track
+        # order again. Reorder only tasks that have not started; an active task
+        # is allowed to finish through the normal download lifecycle.
+        for _batch_id, batch in reusable_batches:
+            batch['max_concurrent'] = PLAYBACK_PREFETCH_MAX_CONCURRENT
+        if new_batch_id and created_new_batch:
+            reusable_batches.append((new_batch_id, download_batches[new_batch_id]))
+        for _batch_id, batch in reusable_batches:
+            queue = batch.get('queue') if isinstance(batch.get('queue'), list) else []
+            queue_index = min(max(int(batch.get('queue_index') or 0), 0), len(queue))
+            pending = queue[queue_index:]
+            original_position = {task_id: index for index, task_id in enumerate(pending)}
+
+            def _pending_rank(task_id, original_position=original_position):
+                task = download_tasks.get(task_id)
+                info = task.get('track_info') if isinstance(task, dict) else {}
+                key = info.get('_playback_queue_key') if isinstance(info, dict) else None
+                if key in requested_rank:
+                    return (0, requested_rank[key])
+                return (1, original_position[task_id])
+
+            queue[queue_index:] = sorted(pending, key=_pending_rank)
+
+    if new_tracks:
+        if created_new_batch:
+            download_monitor.start_monitoring(new_batch_id)
+        _start_next_batch_of_downloads(new_batch_id)
+        add_activity_item(
+            '',
+            'Playback Queue Prefetch',
+            f'{len(new_tracks)} missing track(s) queued',
+            'Now',
+        )
+        existing_batch_ids.add(new_batch_id)
+
+    return {
+        'success': True,
+        'items': items,
+        'batch_ids': sorted(existing_batch_ids),
+        'queued': len(new_tracks),
+    }
+
+
+def _playback_queue_prefetch_status(batch_ids):
+    data = _downloads_status.build_batched_status(batch_ids, _build_status_deps())
+    return {'success': True, **data}
+
+
+@app.route('/api/playback/queue/prefetch', methods=['POST'])
+def playback_queue_prefetch():
+    """Acquire missing queue entries through the existing download pipeline."""
+    permission_error = check_download_permission()
+    if permission_error:
+        return permission_error
+    data = request.get_json(silent=True) or {}
+    tracks = data.get('tracks')
+    if not isinstance(tracks, list) or not tracks:
+        return jsonify({'success': False, 'error': 'tracks list is required'}), 400
+    try:
+        return jsonify(_start_playback_queue_prefetch(tracks))
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    except Exception as exc:
+        logger.exception('Playback queue prefetch failed')
+        return jsonify({'success': False, 'error': str(exc)}), 500
+
+
+@app.route('/api/playback/queue/prefetch/status', methods=['GET'])
+def playback_queue_prefetch_status():
+    batch_ids = [value for value in request.args.getlist('batch_ids') if value]
+    if not batch_ids:
+        return jsonify({
+            'success': False,
+            'error': 'At least one batch_ids value is required',
+        }), 400
+    try:
+        return jsonify(_playback_queue_prefetch_status(batch_ids))
+    except Exception as exc:
+        logger.exception('Playback queue prefetch status failed')
+        return jsonify({'success': False, 'error': str(exc)}), 500
+
+
 @app.route('/api/download', methods=['POST'])
 def start_download():
     """Simple download route"""
@@ -15573,11 +15844,7 @@ def get_sync_history_entry(entry_id):
 
 @app.route('/api/sync/history/<int:entry_id>/play')
 def play_sync_history_entry(entry_id):
-    """The synced playlist as a PLAYABLE library track list. Each cached track
-    resolves against the library with the same title+artist matcher the stats
-    play button uses; tracks that never landed are skipped (total says how
-    many the playlist really has). Same track shape as /api/library/radio so
-    the player maps it with the one helper it already owns."""
+    """Resolve a synced playlist into owned rows plus an acquisition-aware queue."""
     try:
         db = MusicDatabase()
         entry = db.get_sync_history_entry(entry_id, profile_id=get_current_profile_id())
@@ -15590,6 +15857,7 @@ def play_sync_history_entry(entry_id):
         # each call, which read as "the play button does nothing for two
         # minutes" on a 300k-track library.
         wanted = []
+        wanted_rows = []
         for t in cached[:200]:
             if not isinstance(t, dict):
                 continue
@@ -15597,16 +15865,18 @@ def play_sync_history_entry(entry_id):
             artists = t.get('artists') or []
             first = artists[0] if isinstance(artists, list) and artists else None
             artist = (first.get('name') if isinstance(first, dict) else str(first or '')).strip()
-            if title:
+            if title and artist:
                 wanted.append((title, artist))
+                wanted_rows.append((title, artist, t))
         resolved = db.resolve_library_tracks(wanted)
 
         tracks = []
-        for title, artist in wanted:
+        queue_tracks = []
+        for title, artist, source_track in wanted_rows:
             row = resolved.get((title.lower(), artist.lower()))
             if row and row.get('file_path'):
                 thumb = row.get('thumb_url')
-                tracks.append({
+                playable = {
                     'id': row.get('id'),
                     'title': row.get('title'),
                     'artist': row.get('artist_name'),
@@ -15617,11 +15887,29 @@ def play_sync_history_entry(entry_id):
                     'duration': row.get('duration'),
                     'artist_id': row.get('artist_id'),
                     'album_id': row.get('album_id'),
+                    'is_library': True,
+                }
+                tracks.append(playable)
+                queue_tracks.append(dict(playable))
+            else:
+                missing = dict(source_track)
+                missing.update({
+                    'title': title,
+                    'name': title,
+                    'artist': artist,
+                    'artists': source_track.get('artists') or [{'name': artist}],
+                    'album': source_track.get('album') or source_track.get('album_name') or '',
+                    'file_path': '',
+                    'is_library': False,
+                    'playback_status': 'missing',
+                    'source': source_track.get('source') or entry.get('source') or '',
                 })
+                queue_tracks.append(missing)
         return jsonify({"success": True,
                         "name": entry.get('playlist_name') or '',
                         "total": len(cached),
-                        "tracks": tracks})
+                        "tracks": tracks,
+                        "queue_tracks": queue_tracks})
     except Exception as e:
         logger.error(f"Error resolving sync entry {entry_id} for playback: {e}")
         return jsonify({"success": False, "error": str(e)}), 500

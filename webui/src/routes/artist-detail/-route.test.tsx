@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -63,6 +63,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
   window.SoulSyncWebShellBridge = undefined;
   delete document.body.dataset.artistSource;
+  delete window.playTrackList;
+  delete window.showLoadingOverlay;
+  delete window.hideLoadingOverlay;
 });
 
 describe('artist-detail route', () => {
@@ -115,5 +118,53 @@ describe('artist-detail route', () => {
 
     unmount();
     expect(window.cancelSimilarArtistsLoad).toHaveBeenCalled();
+  });
+
+  it('loads an album tracklist and sends the complete context to the queue', async () => {
+    window.playTrackList = vi.fn();
+    window.showLoadingOverlay = vi.fn();
+    window.hideLoadingOverlay = vi.fn();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        let body: unknown = { success: false, tracks: [] };
+        if (url.includes('/api/artist-detail/')) {
+          body = {
+            success: true,
+            artist: { id: 42, name: 'Aphex Twin', server_source: 'plex' },
+            discography: {
+              albums: [{ id: 1, title: 'SAW', owned: true, image_url: 'album.jpg' }],
+              source: 'spotify',
+            },
+          };
+        } else if (url.includes('/api/album/1/tracks')) {
+          body = {
+            success: true,
+            tracks: [
+              { id: 'sp-1', name: 'Xtal' },
+              { id: 'sp-2', name: 'Tha' },
+            ],
+          };
+        }
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+
+    renderArtistDetailRoute();
+    await screen.findByText('SAW');
+    fireEvent.click(document.querySelector('.release-card-play-btn')!);
+
+    await waitFor(() => expect(window.playTrackList).toHaveBeenCalledTimes(1));
+    expect(window.playTrackList).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({ title: 'Xtal', artist: 'Aphex Twin', album: 'SAW' }),
+        expect.objectContaining({ title: 'Tha', artist: 'Aphex Twin', album: 'SAW' }),
+      ],
+      'SAW',
+    );
   });
 });

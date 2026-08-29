@@ -334,7 +334,6 @@ function TrackRow({
     };
 
   const enqueue = (playNext: boolean) => {
-    if (!track.file_path) return;
     const payload = queueTrackPayload(track, album, artist);
     // Play-next falls back to a plain enqueue when the player does not expose
     // it, which is what the vanilla's typeof check did.
@@ -482,17 +481,14 @@ function TrackRow({
         </div>
       </td>
 
-      {/* `!missing` is redundant — normalizeExpectedMissingTrack never sets a
-          file_path, so a missing row cannot reach the truthy branch. Kept
-          because the vanilla wrote it, and it survives mutation for that
-          reason rather than for want of a test. */}
       <td className="col-queue">
-        {!missing && track.file_path ? (
+        {track.file_path ||
+        (missing && (track as { _hasActionableContext?: boolean })._hasActionableContext) ? (
           <>
             <button
               type="button"
               className="enhanced-playnext-btn"
-              title="Play next"
+              title={missing ? 'Download automatically and play next' : 'Play next'}
               onClick={act(() => enqueue(true))}
             >
               ⇥
@@ -500,7 +496,7 @@ function TrackRow({
             <button
               type="button"
               className="enhanced-queue-btn"
-              title="Add to queue"
+              title={missing ? 'Add to queue and download automatically' : 'Add to queue'}
               onClick={act(() => enqueue(false))}
             >
               +

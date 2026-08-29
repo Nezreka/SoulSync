@@ -25,6 +25,7 @@ afterEach(() => {
   // lives there, and wiping the body out from under Testing Library's cleanup
   // makes it throw "The node to be removed is not a child of this node".
   cleanup();
+  delete window.playTrackList;
 });
 
 describe('EnhancedView states', () => {
@@ -102,7 +103,9 @@ describe('sections', () => {
       <EnhancedView
         onReload={vi.fn()}
         isAdmin={false}
-        data={{ albums: [{ id: 10, title: 'Greatest Hits', record_type: 'compilation', tracks: [] }] }}
+        data={{
+          albums: [{ id: 10, title: 'Greatest Hits', record_type: 'compilation', tracks: [] }],
+        }}
         status={READY}
       />,
     );
@@ -156,6 +159,43 @@ describe('album rows', () => {
       />,
     );
     expect(document.querySelector('.enhanced-album-title')?.textContent).toBe('Unknown');
+  });
+
+  it('plays every album row in disc and track order without expanding it', () => {
+    window.playTrackList = vi.fn();
+    render(
+      <EnhancedView
+        onReload={vi.fn()}
+        isAdmin={false}
+        data={{
+          artist: { id: 42, name: 'Aphex Twin', thumb_url: 'artist.jpg' },
+          albums: [
+            {
+              id: 1,
+              title: 'SAW 85-92',
+              thumb_url: 'album.jpg',
+              tracks: [
+                { id: 2, title: 'Tha', disc_number: 1, track_number: 2, file_path: 'tha.flac' },
+                { id: 1, title: 'Xtal', disc_number: 1, track_number: 1, file_path: 'xtal.flac' },
+              ],
+            },
+          ],
+        }}
+        status={READY}
+      />,
+    );
+
+    const row = document.getElementById('enhanced-album-row-1') as HTMLElement;
+    fireEvent.click(row.querySelector('.enhanced-album-play-btn')!);
+
+    expect(window.playTrackList).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({ title: 'Xtal', file_path: 'xtal.flac', artist: 'Aphex Twin' }),
+        expect.objectContaining({ title: 'Tha', file_path: 'tha.flac', artist: 'Aphex Twin' }),
+      ],
+      'SAW 85-92',
+    );
+    expect(row.className).not.toContain('expanded');
   });
 });
 

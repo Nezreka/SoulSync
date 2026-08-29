@@ -13,6 +13,7 @@ import {
 } from '../-library.api';
 import { readArtistsResponse, watchlistArtistId } from '../-library.helpers';
 import { useLibraryChanged } from '../-library.live';
+import { loadTopTracks, trackArtistLabel } from '../../artist-detail/-artist-detail.top-tracks';
 import { Route } from '../route';
 import { ExportArtistsModal } from './export-modal';
 import { LibraryArtistCard } from './library-artist-card';
@@ -94,6 +95,7 @@ export function LibraryPage() {
 
   const [exporting, setExporting] = useState(false);
   const [watchingAll, setWatchingAll] = useState(false);
+  const [playing, setPlaying] = useState<ReadonlySet<string>>(new Set());
 
   // The input is local so typing stays responsive; the URL only catches up
   // after the debounce, exactly as the vanilla 300ms timer did.
@@ -193,6 +195,44 @@ export function LibraryPage() {
 
   const setSearch = (patch: Partial<typeof search>) =>
     void navigate({ search: (prev) => ({ ...prev, ...patch, page: patch.page ?? 1 }) });
+
+  /**
+   * Load the same popularity-ranked list as the artist hero and hand the whole
+   * context to the acquisition-aware player. Its queue preflight resolves
+   * owned files first, so a provider/Last.fm row cannot duplicate a track that
+   * is already in the library; genuine misses enter the normal download flow.
+   */
+  const playArtistTopTracks = async (artist: LibraryArtist) => {
+    const key = String(artist.id);
+    if (playing.has(key)) return;
+    setPlaying((current) => new Set(current).add(key));
+    try {
+      const state = await loadTopTracks(artist.id, artist.name);
+      if (!state.tracks.length) {
+        window.showToast?.(`No top tracks found for ${artist.name}`, 'info');
+        return;
+      }
+      const tracks = state.tracks.map((track) => {
+        const artistName = trackArtistLabel(track, artist.name);
+        return {
+          ...track,
+          title: track.title || track.name || 'Unknown Track',
+          name: track.name || track.title || 'Unknown Track',
+          artist: artistName,
+          artists: track.artists?.length ? track.artists : [{ name: artistName }],
+        };
+      });
+      await window.playTrackList?.(tracks, `${artist.name} — Top Tracks`);
+    } catch {
+      window.showToast?.(`Could not play ${artist.name}'s top tracks`, 'error');
+    } finally {
+      setPlaying((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
 
   // TRAP 0 — showLibraryDownloadsSection (shared-helpers.js) inserts a
   // #library-downloads-section node as a SIBLING before #library-artists-grid,
@@ -362,6 +402,8 @@ export function LibraryPage() {
               href={`/artist-detail/library/${artist.id}`}
               onToggleWatch={() => watchArtist.mutate(artist)}
               watchPending={watching.has(String(artist.id))}
+              onPlay={() => void playArtistTopTracks(artist)}
+              playPending={playing.has(String(artist.id))}
             />
           ))}
         </div>

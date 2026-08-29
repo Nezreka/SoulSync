@@ -319,6 +319,51 @@ export function ArtistDetailPage() {
     }
   };
 
+  const playRelease = async (release: DiscographyRelease) => {
+    if (!isReleaseClickable(release)) {
+      window.showToast?.(stillCheckingMessage(release), 'info');
+      return;
+    }
+    if (!payload) return;
+
+    const image = heroImage(payload.artist ?? {}, displayed);
+    const artist = openReleaseArtist(payload, payload.artist?.id, image.primary);
+    if (!artist) {
+      window.showToast?.('Error: No artist information available', 'error');
+      return;
+    }
+
+    window.showLoadingOverlay?.('Loading album...');
+    try {
+      const album = releaseToAlbumData(release);
+      const params = new URLSearchParams(albumTracksParams(release, artist));
+      const response = await fetch(`/api/album/${album.id}/tracks?${params}`);
+      if (!response.ok) throw new Error(`Failed to load album tracks: ${response.status}`);
+
+      const data = await response.json();
+      if (!data.success || !data.tracks?.length)
+        throw new Error('No tracks found for this release');
+
+      const tracks = data.tracks.map((track: Record<string, unknown>) => ({
+        ...track,
+        title: track.title || track.name || 'Unknown Track',
+        name: track.name || track.title || 'Unknown Track',
+        artist: track.artist || track.artist_name || artist.name,
+        artists:
+          Array.isArray(track.artists) && track.artists.length
+            ? track.artists
+            : [{ name: artist.name }],
+        album: track.album || track.album_title || album.name,
+        image_url: track.image_url || album.image_url || artist.image_url,
+      }));
+      window.hideLoadingOverlay?.();
+      await window.playTrackList?.(tracks, String(album.name || 'Album'));
+    } catch (error) {
+      window.hideLoadingOverlay?.();
+      window.showToast?.(`Could not play that album: ${(error as Error).message}`, 'error');
+    }
+  };
+
   // The hero stays hidden on failure — the vanilla kept it hidden rather than
   // showing an empty shell over an error.
   if (failed) {
@@ -406,6 +451,7 @@ export function ArtistDetailPage() {
                   isMusicBrainz={isMusicBrainz}
                   isSourceArtist={sourceOnly}
                   onOpen={openRelease}
+                  onPlay={playRelease}
                 />
               ))}
               <ArtistVideosSection artistName={payload.artist?.name} />

@@ -10,15 +10,17 @@ function renderCard(
   opts: Partial<{ mb: boolean; source: boolean }> = {},
 ) {
   const onOpen = vi.fn();
+  const onPlay = vi.fn();
   render(
     <ReleaseCard
       release={release}
       isMusicBrainz={opts.mb ?? false}
       isSourceArtist={opts.source ?? false}
       onOpen={onOpen}
+      onPlay={onPlay}
     />,
   );
-  return { onOpen, card: document.querySelector('.release-card') as HTMLElement };
+  return { onOpen, onPlay, card: document.querySelector('.release-card') as HTMLElement };
 }
 
 afterEach(() => {
@@ -123,6 +125,13 @@ describe('ReleaseCard interaction', () => {
     const { onOpen, card } = renderCard({ id: 1, title: 'X', musicbrainz_release_id: 'mbid' });
     fireEvent.click(card.querySelector('.mb-card-icon')!);
     expect(open).toHaveBeenCalledWith('https://musicbrainz.org/release/mbid', '_blank');
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it('plays the album without also opening its modal', () => {
+    const { onOpen, onPlay, card } = renderCard({ id: 1, title: 'Kid A', owned: true });
+    fireEvent.click(card.querySelector('.release-card-play-btn')!);
+    expect(onPlay).toHaveBeenCalledWith(expect.objectContaining({ title: 'Kid A' }));
     expect(onOpen).not.toHaveBeenCalled();
   });
 
