@@ -29348,6 +29348,80 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 }
 
 /* Library Controls */
+/* "N tracks imported without a match" strip (#1202). Sits between the header
+   and the filters so it reads as a state of the library, not as a filter. */
+.library-unmatched-banner {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 16px 0 0;
+    padding: 12px 16px;
+    border: 1px solid rgba(255, 176, 32, 0.28);
+    border-left: 3px solid rgba(255, 176, 32, 0.75);
+    border-radius: 10px;
+    background: rgba(255, 176, 32, 0.07);
+}
+
+.library-unmatched-icon {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: rgba(255, 176, 32, 0.18);
+    color: #ffb020;
+    font-size: 0.85rem;
+    font-weight: 700;
+}
+
+.library-unmatched-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+}
+
+.library-unmatched-text strong {
+    font-size: 0.92rem;
+    color: rgba(255, 255, 255, 0.92);
+}
+
+.library-unmatched-text span {
+    font-size: 0.8rem;
+    line-height: 1.4;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.library-unmatched-btn {
+    flex: 0 0 auto;
+    padding: 7px 14px;
+    border: 1px solid rgba(255, 176, 32, 0.4);
+    border-radius: 8px;
+    background: rgba(255, 176, 32, 0.12);
+    color: #ffb020;
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.library-unmatched-btn:hover {
+    background: rgba(255, 176, 32, 0.2);
+    border-color: rgba(255, 176, 32, 0.6);
+}
+
+/* the copy is the first thing to go; the count and the way out both stay */
+@media (max-width: 700px) {
+    .library-unmatched-banner {
+        flex-wrap: wrap;
+    }
+    .library-unmatched-text span {
+        display: none;
+    }
+}
+
 .library-controls {
     display: flex;
     flex-direction: column;

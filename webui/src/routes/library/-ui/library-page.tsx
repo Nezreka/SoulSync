@@ -6,7 +6,11 @@ import { useProfile, useReactPageShell } from '@/platform/shell/route-controller
 
 import type { LibraryArtist, LibraryArtistsResponse } from '../-library.types';
 
-import { libraryArtistsQueryOptions, setArtistWatchlisted } from '../-library.api';
+import {
+  libraryArtistsQueryOptions,
+  libraryUnmatchedQueryOptions,
+  setArtistWatchlisted,
+} from '../-library.api';
 import { readArtistsResponse, watchlistArtistId } from '../-library.helpers';
 import { useLibraryChanged } from '../-library.live';
 import { Route } from '../route';
@@ -43,6 +47,42 @@ const SOURCE_LABELS: Record<string, string> = {
 };
 
 const SEARCH_DEBOUNCE_MS = 300;
+
+/**
+ * The "you have tracks nobody could identify" strip (#1202).
+ *
+ * A file that imports with unreadable tags gets parked under a made-up
+ * "Unknown Artist" as its own one-track album. Re-identify could always re-file
+ * it, but it lives on an artist page, which is the last place you would look
+ * for a track whose missing field IS the artist. So the library says so out
+ * loud and links straight there.
+ *
+ * Renders nothing at all when the count is 0 or the query failed. A banner that
+ * says "0 tracks" or "could not load" is worse than no banner.
+ */
+function UnmatchedImportsBanner() {
+  const { data } = useQuery({ ...libraryUnmatchedQueryOptions(), retry: false });
+  const count = data?.count ?? 0;
+  if (count <= 0 || !data?.artist_id) return null;
+
+  return (
+    <div className="library-unmatched-banner" role="status">
+      <span className="library-unmatched-icon" aria-hidden="true">?</span>
+      <div className="library-unmatched-text">
+        <strong>
+          {count} {count === 1 ? 'track' : 'tracks'} imported without a match
+        </strong>
+        <span>
+          Their tags could not be read, so they are filed under Unknown Artist instead of the
+          album they belong to. Open the artist and use Re-identify on a track to put it back.
+        </span>
+      </div>
+      <a className="library-unmatched-btn" href={`/artist-detail/library/${data.artist_id}`}>
+        Show them
+      </a>
+    </div>
+  );
+}
 
 export function LibraryPage() {
   useReactPageShell('library');
@@ -209,6 +249,8 @@ export function LibraryPage() {
         {exporting ? <ExportArtistsModal onClose={() => setExporting(false)} /> : null}
         {watchingAll ? <WatchAllModal onClose={() => setWatchingAll(false)} /> : null}
       </div>
+
+      <UnmatchedImportsBanner />
 
       <div className="library-controls">
         <div className="library-search-container">

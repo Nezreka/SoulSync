@@ -15070,6 +15070,48 @@ class MusicDatabase:
                 }
             }
 
+    def get_unmatched_import_summary(self) -> Dict[str, Any]:
+        """How many library tracks are parked under 'Unknown Artist' (#1202).
+
+        a file that imports with unreadable tags and no acoustid hit falls all
+        the way back to filename-only identification, which files it under a
+        made-up 'Unknown Artist' as its own one-track album. nothing ever said
+        that happened, so the track just quietly landed in a bucket you had no
+        reason to open. re-identify has always been able to fix it, but you had
+        to already know to go looking on a fake artist's page.
+
+        returns the total, plus the artist row holding the most of them so the
+        banner can link straight there. the same name can exist more than once
+        (one row per server source), which is why this sums rather than taking
+        the first row it finds.
+
+        tracks hang off albums, not off the artist directly, so this walks
+        artist -> album -> track the same way get_library_artists does.
+        """
+        empty = {'count': 0, 'artist_id': None}
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT ar.id AS artist_id, COUNT(DISTINCT t.id) AS track_count
+                    FROM artists ar
+                    LEFT JOIN albums al ON al.artist_id = ar.id
+                    LEFT JOIN tracks t ON t.album_id = al.id
+                    WHERE LOWER(TRIM(ar.name)) = 'unknown artist'
+                    GROUP BY ar.id
+                """)
+                rows = cursor.fetchall()
+
+            total = sum(int(r['track_count'] or 0) for r in rows)
+            if total <= 0:
+                # an empty Unknown Artist row is not worth telling anyone about
+                return empty
+            biggest = max(rows, key=lambda r: int(r['track_count'] or 0))
+            return {'count': total, 'artist_id': biggest['artist_id']}
+        except Exception as e:
+            logger.error(f"Error building unmatched-import summary: {e}")
+            return empty
+
     def get_artist_discography(self, artist_id) -> Dict[str, Any]:
         """
         Get complete artist information and their releases from the database.

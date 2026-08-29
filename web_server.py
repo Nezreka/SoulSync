@@ -7512,6 +7512,20 @@ def get_library_artists():
             }
         }), 500
 
+@app.route('/api/library/unmatched-summary')
+def get_library_unmatched_summary():
+    """How many tracks imported without a match, for the library banner (#1202).
+
+    cheap enough to call on every library load: one grouped count over the
+    'Unknown Artist' rows, no per-track work.
+    """
+    try:
+        return jsonify({"success": True, **get_database().get_unmatched_import_summary()})
+    except Exception as e:
+        logger.error(f"Error fetching unmatched import summary: {e}")
+        return jsonify({"success": False, "error": str(e), "count": 0, "artist_id": None}), 500
+
+
 @app.route('/api/test-artist/<artist_id>')
 def test_artist_endpoint(artist_id):
     """Simple test endpoint"""

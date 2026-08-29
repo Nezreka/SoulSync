@@ -123,3 +123,12 @@ export interface ArtistBadge {
   title: string;
   url: string | null;
 }
+
+/** The "these never got matched" banner's payload (#1202). */
+export interface UnmatchedSummary {
+  success?: boolean;
+  /** Tracks currently filed under Unknown Artist; 0 means no banner. */
+  count: number;
+  /** Library artist row holding the most of them, for the link. */
+  artist_id: string | number | null;
+}
