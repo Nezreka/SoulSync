@@ -169,6 +169,29 @@ def test_parse_skips_comments_and_short_rows():
     assert parse_netscape_cookies(12345) == {}
 
 
+def test_parse_reads_httponly_prefixed_rows():
+    # Netscape format marks an HttpOnly cookie by prefixing its domain field
+    # with "#HttpOnly_" instead of leaving the line plain. Treating that as an
+    # ordinary comment silently drops exactly the session-identity cookies
+    # (SID, __Secure-1PSID, HSID, ...) that authenticate the request — the
+    # export still "looks" complete but the account reads as signed out.
+    jar = (
+        "# Netscape HTTP Cookie File\n"
+        "#HttpOnly_.google.de\tTRUE\t/\tTRUE\t1799999999\t__Secure-1PSID\thttponly-psid\n"
+        "#HttpOnly_.google.de\tTRUE\t/\tTRUE\t1799999999\tHSID\thttponly-hsid\n"
+        ".google.de\tTRUE\t/\tTRUE\t1799999999\t__Secure-3PAPISID\tsecret-sapisid\n"
+    )
+    cookies = parse_netscape_cookies(jar)
+    assert cookies["__Secure-1PSID"] == "httponly-psid"
+    assert cookies["HSID"] == "httponly-hsid"
+    assert cookies["__Secure-3PAPISID"] == "secret-sapisid"
+
+
+def test_looks_like_cookiefile_accepts_httponly_only_export():
+    jar = "#HttpOnly_.google.de\tTRUE\t/\tTRUE\t1799999999\t__Secure-1PSID\thttponly-psid\n"
+    assert looks_like_cookiefile(jar) is True
+
+
 def test_later_duplicate_row_wins():
     jar = _JAR + ".youtube.com\tTRUE\t/\tTRUE\t1799999999\tSID\tnewer-sid\n"
     assert parse_netscape_cookies(jar)["SID"] == "newer-sid"
@@ -189,6 +212,21 @@ def test_auth_headers_drop_non_essential_cookies():
     cookie = ytmusic_auth_headers(parse_netscape_cookies(jar))["Cookie"]
     assert "__Secure-3PAPISID=secret-sapisid" in cookie
     assert "bulky-unrelated-value" not in cookie
+
+
+def test_auth_headers_keep_sidts_rotating_tokens():
+    # Regression for the "Sign in to listen to your liked tracks" bug:
+    # SAPISIDHASH alone verifies fine and generic library calls work, but
+    # Liked Music (list=LM) serves the signed-out view without these two
+    # (sigma67/ytmusicapi#962).
+    jar = (
+        _JAR
+        + ".google.de\tTRUE\t/\tTRUE\t1799999999\t__Secure-1PSIDTS\tsidts-1p\n"
+        + ".google.de\tTRUE\t/\tTRUE\t1799999999\t__Secure-3PSIDTS\tsidts-3p\n"
+    )
+    cookie = ytmusic_auth_headers(parse_netscape_cookies(jar))["Cookie"]
+    assert "__Secure-1PSIDTS=sidts-1p" in cookie
+    assert "__Secure-3PSIDTS=sidts-3p" in cookie
 
 
 def test_sapisid_aliases_are_accepted_in_priority_order():

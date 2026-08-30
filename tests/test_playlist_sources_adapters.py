@@ -33,6 +33,8 @@ from core.playlists.sources.spotify import SpotifyPlaylistSource
 from core.playlists.sources.spotify_public import SpotifyPublicPlaylistSource
 from core.playlists.sources.tidal import TidalPlaylistSource
 from core.playlists.sources.youtube import YouTubePlaylistSource
+import core.playlists.sources.ytmusic as _ytmusic_module
+from core.playlists.sources.ytmusic import YTMusicPlaylistSource
 
 
 # ─── Spotify ────────────────────────────────────────────────────────────
@@ -323,6 +325,97 @@ def test_youtube_adapter_projection():
 def test_youtube_adapter_failed_parse():
     src = YouTubePlaylistSource(lambda url: None)
     assert src.get_playlist("https://bad") is None
+
+
+def test_ytmusic_adapter_unauthenticated_short_circuits():
+    src = YTMusicPlaylistSource(lambda: None)
+    assert src.is_authenticated() is False
+    assert src.list_playlists() == []
+    assert src.get_playlist("PL123") is None
+
+
+def test_ytmusic_adapter_auth_getter_raising_is_treated_as_unauthenticated():
+    def boom():
+        raise RuntimeError("cookie parse blew up")
+
+    src = YTMusicPlaylistSource(boom)
+    assert src.is_authenticated() is False
+    assert src.list_playlists() == []
+
+
+def test_ytmusic_adapter_lists_library_plus_liked_music(monkeypatch):
+    monkeypatch.setattr(_ytmusic_module, "fetch_library_playlists", lambda auth: ["raw-row"])
+    monkeypatch.setattr(
+        _ytmusic_module, "library_playlists_to_rows",
+        lambda raw: [{
+            "id": "pl1", "name": "Road Trip", "track_count": 10,
+            "image_url": "thumb1", "description": None, "owner": None,
+        }],
+    )
+    monkeypatch.setattr(
+        _ytmusic_module, "fetch_liked_music_row",
+        lambda auth: {
+            "id": "LM", "name": "Liked Music", "track_count": 5,
+            "image_url": "thumb2", "description": None, "owner": "You",
+        },
+    )
+
+    src = YTMusicPlaylistSource(lambda: {"Cookie": "x"})
+    assert src.is_authenticated() is True
+    metas = src.list_playlists()
+    # Liked Music is pinned FIRST — matches YouTube Music's own UI, unlike
+    # the Spotify "Liked Songs" / Tidal "Favorite Tracks" virtual-playlist
+    # convention elsewhere in this app, which appends at the end.
+    assert [m.source_playlist_id for m in metas] == ["LM", "pl1"]
+    assert metas[0].name == "Liked Music"
+    assert metas[0].owner == "You"
+    assert metas[1].source == "ytmusic"
+    assert metas[1].name == "Road Trip"
+    assert metas[1].track_count == 10
+
+
+def test_ytmusic_adapter_omits_liked_music_when_none_liked(monkeypatch):
+    monkeypatch.setattr(_ytmusic_module, "fetch_library_playlists", lambda auth: [])
+    monkeypatch.setattr(_ytmusic_module, "library_playlists_to_rows", lambda raw: [])
+    monkeypatch.setattr(_ytmusic_module, "fetch_liked_music_row", lambda auth: None)
+
+    src = YTMusicPlaylistSource(lambda: {"Cookie": "x"})
+    assert src.list_playlists() == []
+
+
+def test_ytmusic_adapter_get_playlist_projection(monkeypatch):
+    def fake_fetch(url, auth):
+        assert url == "https://music.youtube.com/playlist?list=pl1"
+        assert auth == {"Cookie": "x"}
+        return {
+            "id": "pl1", "name": "Road Trip", "track_count": 1,
+            "url": url, "image_url": "thumb",
+            "tracks": [{
+                "id": "vid1", "name": "Track", "artists": ["Artist"],
+                "album": "Album", "duration_ms": 200_000,
+                "url": "https://youtu.be/vid1",
+            }],
+        }
+
+    monkeypatch.setattr(_ytmusic_module, "fetch_ytmusic_playlist", fake_fetch)
+
+    src = YTMusicPlaylistSource(lambda: {"Cookie": "x"})
+    detail = src.get_playlist("pl1")
+    assert detail is not None
+    assert detail.meta.source == "ytmusic"
+    assert detail.meta.source_playlist_id == "pl1"
+    assert detail.meta.name == "Road Trip"
+    assert detail.tracks[0].source_track_id == "vid1"
+    assert detail.tracks[0].album_name == "Album"
+
+    # refresh_playlist is the identical call — the point of being ID-backed.
+    assert src.refresh_playlist("pl1") is not None
+
+
+def test_ytmusic_adapter_get_playlist_failed_fetch(monkeypatch):
+    monkeypatch.setattr(_ytmusic_module, "fetch_ytmusic_playlist", lambda url, auth: None)
+    src = YTMusicPlaylistSource(lambda: {"Cookie": "x"})
+    assert src.get_playlist("pl1") is None
 
 
 # ─── iTunes Link ────────────────────────────────────────────────────────

@@ -1280,6 +1280,12 @@ except Exception as e:
 # --- Automation Progress Tracking ---
 _scan_library_automation_id = None
 _automation_deps = None
+# Module global so routes outside _register_automation_handlers (e.g. the
+# YouTube Music account listing route) can reach the registry without going
+# through AutomationDeps. Mirrors _automation_deps: stays None until
+# _register_automation_handlers() runs (which itself no-ops without a live
+# automation_engine) — callers must treat None as "not ready yet".
+_playlist_source_registry = None
 
 # Playlist-native manual pipeline runs share the automation dependency
 # bundle, but keep their own small progress state for the playlist UI.
@@ -1301,7 +1307,7 @@ def _register_automation_handlers():
     closures still live below until subsequent commits in the same
     branch finish the lift.
     """
-    global _automation_deps
+    global _automation_deps, _playlist_source_registry
 
     if not automation_engine:
         return
@@ -1367,6 +1373,7 @@ def _register_automation_handlers():
         qobuz_client_getter=_get_qobuz_client_for_sync,
         deezer_client_getter=_get_deezer_client,
         youtube_parser=parse_youtube_playlist,
+        ytmusic_auth_getter=_ytmusic_auth_headers,
         itunes_link_parser=_itunes_link_parser_for_registry,
         listenbrainz_manager_getter=_lb_manager_for_registry,
         lastfm_manager_getter=_lb_manager_for_registry,
@@ -3193,6 +3200,10 @@ def _build_system_stats():
             active_syncs += 1
     # Count YouTube playlist syncs
     for _url_hash, state in youtube_playlist_states.items():
+        if state.get('phase') == 'syncing':
+            active_syncs += 1
+    # Count YouTube Music playlist syncs
+    for _playlist_id, state in ytmusic_discovery_states.items():
         if state.get('phase') == 'syncing':
             active_syncs += 1
     # Count Tidal playlist syncs
@@ -18086,6 +18097,7 @@ from api.source_playlists import (  # noqa: E402
     _run_playlist_organize_download,
     _run_sync_task,
     _run_youtube_discovery_worker,
+    _run_ytmusic_discovery_worker,
     _save_source_bubble_snapshot,
     _sync_discovery_results_to_mirrored,
     _validate_discovery_cache_artist,
@@ -18104,6 +18116,8 @@ from api.source_playlists import (  # noqa: E402
     tidal_discovery_states,
     youtube_discovery_executor,
     youtube_playlist_states,
+    ytmusic_discovery_executor,
+    ytmusic_discovery_states,
 )
 # --- Discover Download Snapshot System ---
 
@@ -20783,6 +20797,7 @@ def _has_active_discovery():
     try:
         for states in (tidal_discovery_states, qobuz_discovery_states,
                        deezer_discovery_states, youtube_playlist_states,
+                       ytmusic_discovery_states,
                        beatport_chart_states, listenbrainz_playlist_states,
                        spotify_public_discovery_states, itunes_link_discovery_states):
             for state in list(states.values()):
@@ -21333,6 +21348,7 @@ _cfg_sp(
     _tidal_enrichment_worker=lambda: tidal_enrichment_worker,
     _dev_mode_enabled=lambda: dev_mode_enabled,
     _get_automation_deps=lambda: _automation_deps,
+    _ytmusic_auth_headers=_ytmusic_auth_headers,
 )
 app.register_blueprint(_bp_sp())
 
@@ -21790,6 +21806,7 @@ def _reconcile_discovery_sync_phases():
         (spotify_public_discovery_states, "Spotify Link playlist", _pl_name_strict),
         (itunes_link_discovery_states, "iTunes Link", _pl_name_strict),
         (youtube_playlist_states, "YouTube playlist", _pl_name_safe),
+        (ytmusic_discovery_states, "YouTube Music playlist", _pl_name_safe),
         (listenbrainz_playlist_states, "ListenBrainz playlist", _pl_name_safe),
     )
     for states_dict, activity_subject, name_getter in targets:
@@ -21852,6 +21869,7 @@ def _emit_discovery_progress_loop():
         'qobuz': lambda: qobuz_discovery_states,
         'deezer': lambda: deezer_discovery_states,
         'youtube': lambda: youtube_playlist_states,
+        'ytmusic': lambda: ytmusic_discovery_states,
         'beatport': lambda: beatport_chart_states,
         'listenbrainz': lambda: listenbrainz_playlist_states,
         'spotify_public': lambda: spotify_public_discovery_states,

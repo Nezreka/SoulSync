@@ -198,6 +198,9 @@ describe('page-level endpoints', () => {
     stubFetch({ playlists: [{ id: 'c' }] });
     expect(await fetchSourcePlaylists('tidal')).toEqual([{ id: 'c' }]);
     expect(calls[0].url).toBe('/api/tidal/playlists');
+    stubFetch({ playlists: [{ id: 'd' }] });
+    expect(await fetchSourcePlaylists('ytmusic')).toEqual([{ id: 'd' }]);
+    expect(calls[0].url).toBe('/api/ytmusic/playlists');
   });
 
   it('account sync status + arl status hit the account endpoints', async () => {

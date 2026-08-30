@@ -21,10 +21,10 @@ describe('the id list cannot drift from the table', () => {
     expect([...SYNC_VERTICAL_IDS].sort()).toEqual(Object.keys(SYNC_SOURCES).sort());
   });
 
-  it('is NINE, not fifteen — tabs and verticals are different counts', () => {
+  it('is TEN, not sixteen — tabs and verticals are different counts', () => {
     // Last.fm rides ListenBrainz's vertical, Deezer-link rides Deezer's. If
     // this number ever equals the tab count, someone has conflated the two.
-    expect(SYNC_VERTICAL_IDS).toHaveLength(9);
+    expect(SYNC_VERTICAL_IDS).toHaveLength(10);
   });
 
   it('has no duplicates, which would break hook order', () => {

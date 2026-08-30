@@ -400,28 +400,36 @@ export async function fetchYouTubePlaylists(): Promise<Record<string, unknown>[]
 
 /* ── Source playlist lists ────────────────────────────────────────────────── */
 
+/** Account-vertical base path -> display noun, for the fetch-failure toast. */
+const ACCOUNT_SOURCE_NOUN: Record<'tidal' | 'qobuz' | 'ytmusic', string> = {
+  tidal: 'Tidal',
+  qobuz: 'Qobuz',
+  ytmusic: 'YouTube Music',
+};
+
 /**
- * GET /api/tidal/playlists | /api/qobuz/playlists (vertical heads). Throws
- * the backend error on !ok (the vanilla's sync-services.js 14-17 throw,
- * which lands in the tab's ❌ placeholder + toast).
+ * GET /api/tidal/playlists | /api/qobuz/playlists | /api/ytmusic/playlists
+ * (vertical heads). Throws the backend error on !ok (the vanilla's
+ * sync-services.js 14-17 throw, which lands in the tab's ❌ placeholder +
+ * toast).
  */
-export async function fetchSourcePlaylists(base: 'tidal' | 'qobuz'): Promise<unknown[]> {
+export async function fetchSourcePlaylists(
+  base: 'tidal' | 'qobuz' | 'ytmusic',
+): Promise<unknown[]> {
   const response = await fetch(`/api/${base}/playlists`);
   if (!response.ok) {
     const error = await readJson<{ error?: string }>(response);
-    throw new Error(
-      error.error || `Failed to fetch ${base === 'tidal' ? 'Tidal' : 'Qobuz'} playlists`,
-    );
+    throw new Error(error.error || `Failed to fetch ${ACCOUNT_SOURCE_NOUN[base]} playlists`);
   }
   const data = await readJson<unknown>(response);
   return Array.isArray(data) ? data : ((data as { playlists?: unknown[] })?.playlists ?? []);
 }
 
-/** GET /api/tidal/playlist/<id> | /api/qobuz/playlist/<id> — the on-demand
- * track fetch the account verticals run per playlist (sync-services.js 39,
- * 1550, 1653). */
+/** GET /api/tidal/playlist/<id> | /api/qobuz/playlist/<id> |
+ * /api/ytmusic/playlist/<id> — the on-demand track fetch the account
+ * verticals run per playlist (sync-services.js 39, 1550, 1653). */
 export async function fetchAccountPlaylist(
-  base: 'tidal' | 'qobuz',
+  base: 'tidal' | 'qobuz' | 'ytmusic',
   id: string,
 ): Promise<Record<string, unknown>> {
   return readJson(await fetch(`/api/${base}/playlist/${id}`));

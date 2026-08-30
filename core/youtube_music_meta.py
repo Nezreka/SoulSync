@@ -272,6 +272,76 @@ def ytmusic_playlist_to_payload(
     }
 
 
+# TEMPORARY — remove once ytmusicapi ships get_playlist(validate_responses=...).
+#
+# ytmusicapi's plain continuation loop (ytmusicapi/continuations.py,
+# get_continuations()) silently stops paginating on the FIRST malformed or
+# empty continuation page — no retry, no exception, just `break`. A transient
+# hiccup on any one page of a large playlist truncates the whole result, and
+# the caller has no way to tell "genuinely done" apart from "gave up early".
+#
+# ytmusicapi already has the real fix for this shape of bug —
+# get_validated_continuations() in the same file, which retries a short page
+# up to 3 times before accepting it — and get_library_songs() already takes
+# a validate_responses flag that uses it. get_playlist() doesn't expose that
+# flag yet: sigma67/ytmusicapi#778 (bug report) / #953 (fix PR) are open but
+# unmerged as of writing. Once #953 ships, delete _get_playlist_paginated
+# below and go back to calling client.get_playlist(...) directly with
+# validate_responses=True.
+#
+# CALIBRATION — trackCount counts entries this endpoint can never return a
+# row for (deleted / region-blocked videos; ytmusic_playlist_to_payload
+# already drops those placeholder rows on purpose), so a SMALL gap is
+# normal, not truncation, and retrying never closes it — a retry against a
+# stable small gap just re-fetches the same result at the cost of a slow,
+# blocking request. A genuine truncation looks nothing like that: a severe
+# shortfall that a single retry recovers from. The threshold below is set to
+# catch the second shape and leave the first alone.
+_YTMUSIC_PAGINATION_COMPLETE_RATIO = 0.9
+_YTMUSIC_PAGINATION_RETRY_ATTEMPTS = 2
+
+
+def _get_playlist_paginated(client: Any, playlist_id: str) -> Dict[str, Any]:
+    """``client.get_playlist(playlist_id, limit=None)``, retried when the
+    result looks TRUNCATED (not just short). See the TEMPORARY note above.
+
+    ``trackCount`` comes from the playlist HEADER (fetched before pagination
+    starts); ``len(tracks)`` is what pagination actually produced. A small
+    gap between them is normal (see CALIBRATION above) and is accepted
+    as-is; only a gap below ``_YTMUSIC_PAGINATION_COMPLETE_RATIO`` is treated
+    as a truncation bug worth retrying. This is a mitigation, not a fix: it
+    cannot guarantee completeness, only make a severely-short result less
+    likely, and it gives up after a couple of attempts rather than retrying
+    forever against a page ytmusicapi genuinely can't get past.
+    """
+    best: Optional[Dict[str, Any]] = None
+    best_count = -1
+    for attempt in range(1, _YTMUSIC_PAGINATION_RETRY_ATTEMPTS + 1):
+        try:
+            raw = client.get_playlist(playlist_id, limit=None)
+        except Exception:
+            # A later attempt failing shouldn't throw away a good earlier
+            # one; the FIRST attempt failing is a real failure and should
+            # propagate so the caller falls back to yt-dlp, same as before
+            # this wrapper existed.
+            if best is not None:
+                break
+            raise
+
+        tracks = raw.get("tracks") or []
+        got = len(tracks)
+        declared = raw.get("trackCount")
+        if got > best_count:
+            best, best_count = raw, got
+        if not isinstance(declared, int) or declared <= 0 or got >= declared * _YTMUSIC_PAGINATION_COMPLETE_RATIO:
+            break  # complete, a normal small gap, or no ground truth to compare against
+        logger.info(
+            "YouTube Music pagination looked truncated (%d/%s tracks) for %s — retrying (%d/%d)",
+            got, declared, playlist_id, attempt, _YTMUSIC_PAGINATION_RETRY_ATTEMPTS,
+        )
+    return best
+
+
 def fetch_ytmusic_playlist(
     url: str, auth: Optional[Dict[str, str]] = None
 ) -> Optional[Dict[str, Any]]:
@@ -298,7 +368,9 @@ def fetch_ytmusic_playlist(
     try:
         client = YTMusic(auth) if auth else YTMusic()
         # limit=None pages the whole playlist; the default stops at 100.
-        raw = client.get_playlist(playlist_id, limit=None)
+        # _get_playlist_paginated retries a short result — see its TEMPORARY
+        # note above; delete once ytmusicapi#953 ships.
+        raw = _get_playlist_paginated(client, playlist_id)
     except Exception as e:  # noqa: BLE001 - see docstring: all failures fall back
         logger.info(
             "YouTube Music lookup failed for %s (%s: %s) — falling back to yt-dlp",
