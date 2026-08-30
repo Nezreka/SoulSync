@@ -22042,9 +22042,24 @@ def start_runtime_services():
                 'download_source.album_bundle_staging_path',
                 'storage/album_bundle_staging',
             ) or 'storage/album_bundle_staging'
+            # rescue_root: a stalled atomic-album batch leaves finished audio
+            # here. Deleting it on the next start took people's downloads with
+            # one log line to show for it (#1210), so anything still holding
+            # audio goes to the recycle bin instead and can be restored.
+            from core.repair_jobs.base import deleted_quarantine_root
+            _rescue_root = None
+            try:
+                _rescue_root = deleted_quarantine_root(
+                    docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+                )
+            except Exception as _rescue_err:
+                # No quarantine root means the sweep falls back to its old
+                # delete-only behaviour; better than skipping the sweep.
+                logger.warning("[Startup] Could not resolve recycle bin for staging sweep: %s", _rescue_err)
             _swept = sweep_orphan_album_bundle_staging(
                 _staging_root,
                 active_batch_ids=set(download_batches.keys()),
+                rescue_root=_rescue_root,
             )
             if _swept:
                 logger.warning(

@@ -41599,20 +41599,31 @@ div.artist-hero-badge {
 }
 .enhanced-cancel-btn:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
 
-/* Link / ID lookup row (#775) — a quiet utility line under the hero pill. */
+/* Link / ID lookup row (#775) — a quiet utility line under the hero pill, NOT
+   a second boxed input. But fully transparent with a 28%-white placeholder it
+   read as a caption: "it took a long time to realize this is input" (#1210).
+   Just enough edge to say "type here", still quieter than the pill above. */
 .enh-id-lookup {
     display: flex; align-items: center; gap: 8px; margin-top: 2px;
-    background: transparent; border: none; border-radius: 10px;
-    padding: 0 8px 0 22px; transition: background 0.2s ease;
+    background: rgba(255, 255, 255, 0.028);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 10px;
+    padding: 0 8px 0 14px;
+    cursor: text;
+    transition: background 0.2s ease, border-color 0.2s ease;
 }
-.enh-id-lookup:focus-within { background: rgba(255, 255, 255, 0.03); }
+.enh-id-lookup:hover { background: rgba(255, 255, 255, 0.045); }
+.enh-id-lookup:focus-within {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(var(--accent-rgb), 0.35);
+}
 .enh-id-lookup-icon { font-size: 13px; opacity: 0.4; }
 .enh-id-input {
     flex-grow: 1; background: transparent; border: none; outline: none;
     font-family: 'Segoe UI', sans-serif; font-size: 12.5px;
     color: rgba(255, 255, 255, 0.75); padding: 8px 0;
 }
-.enh-id-input::placeholder { color: rgba(255, 255, 255, 0.28); }
+.enh-id-input::placeholder { color: rgba(255, 255, 255, 0.42); }
 .enh-id-btn {
     flex-shrink: 0; background: rgba(var(--accent-rgb), 0.14);
     border: 1px solid rgba(var(--accent-rgb), 0.25); border-radius: 999px;

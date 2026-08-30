@@ -235,3 +235,105 @@ def test_active_set_ignores_empty_or_none_entries(tmp_path):
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+# ---------------------------------------------------------------------------
+# #1210 — a stranded bundle still holding audio must be rescued, not deleted.
+# ---------------------------------------------------------------------------
+
+
+def _rescue_dir(tmp_path) -> Path:
+    root = tmp_path / 'Transfer' / '.deleted'
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def test_orphan_holding_audio_goes_to_the_recycle_bin_not_oblivion(tmp_path):
+    """ravi72munde found 18 finished FLACs sitting in album-bundle staging. On
+    the next start the sweep would have rmtree'd them, so an album he had
+    already downloaded vanished with one INFO line to explain it."""
+    root = tmp_path / 'album_bundle_staging'
+    orphan = _make_batch_dir(root, 'b_stalled', with_file=False)
+    (orphan / '01-01 Teach Me How To Love.flac').write_bytes(b'audio one')
+    (orphan / '01-02 New Pammy.flac').write_bytes(b'audio two')
+    rescue = _rescue_dir(tmp_path)
+
+    swept = sweep_orphan_album_bundle_staging(str(root), rescue_root=str(rescue))
+
+    assert swept == 1
+    assert not orphan.exists(), 'the dir must leave the staging root'
+    moved = rescue / 'album_bundle_orphans' / 'b_stalled'
+    assert moved.is_dir(), 'the bundle should be in the recycle bin'
+    names = sorted(f.name for f in moved.glob('*.flac'))
+    assert names == ['01-01 Teach Me How To Love.flac', '01-02 New Pammy.flac']
+    # and the bytes survived, not just the filenames
+    assert (moved / '01-02 New Pammy.flac').read_bytes() == b'audio two'
+
+
+def test_orphan_with_no_audio_is_still_just_deleted(tmp_path):
+    """Nothing to lose, so don't clutter the recycle bin with empty shells."""
+    root = tmp_path / 'album_bundle_staging'
+    orphan = _make_batch_dir(root, 'b_empty', with_file=False)
+    (orphan / 'notes.txt').write_text('not audio')
+    rescue = _rescue_dir(tmp_path)
+
+    swept = sweep_orphan_album_bundle_staging(str(root), rescue_root=str(rescue))
+
+    assert swept == 1
+    assert not orphan.exists()
+    assert not (rescue / 'album_bundle_orphans' / 'b_empty').exists()
+
+
+def test_two_rescues_of_the_same_batch_id_do_not_clobber_each_other(tmp_path):
+    """Same batch dirname rescued twice across restarts — keep both."""
+    rescue = _rescue_dir(tmp_path)
+    for run in ('first', 'second'):
+        root = tmp_path / f'staging_{run}'
+        orphan = _make_batch_dir(root, 'b_same', with_file=False)
+        (orphan / 'track.flac').write_bytes(run.encode())
+        sweep_orphan_album_bundle_staging(str(root), rescue_root=str(rescue))
+
+    kept = sorted(p.name for p in (rescue / 'album_bundle_orphans').iterdir())
+    assert kept == ['b_same', 'b_same__1']
+    bodies = sorted(
+        (rescue / 'album_bundle_orphans' / name / 'track.flac').read_bytes()
+        for name in kept
+    )
+    assert bodies == [b'first', b'second']
+
+
+def test_active_batch_holding_audio_is_never_touched(tmp_path):
+    """The rescue path must not override the active-batch guard — a running
+    download would lose its files mid-flight."""
+    root = tmp_path / 'album_bundle_staging'
+    live = _make_batch_dir(root, 'b_live', with_file=False)
+    (live / 'downloading.flac').write_bytes(b'in flight')
+    rescue = _rescue_dir(tmp_path)
+
+    swept = sweep_orphan_album_bundle_staging(
+        str(root), active_batch_ids={'b_live'}, rescue_root=str(rescue))
+
+    assert swept == 0
+    assert (live / 'downloading.flac').exists()
+    assert not (rescue / 'album_bundle_orphans').exists()
+
+
+def test_a_failed_rescue_leaves_the_files_alone_rather_than_deleting(tmp_path, monkeypatch):
+    """If the move fails, the old code's instinct would be to delete. Don't:
+    losing the files is the exact outcome this whole change exists to stop."""
+    import core.downloads.lifecycle as lifecycle
+
+    root = tmp_path / 'album_bundle_staging'
+    orphan = _make_batch_dir(root, 'b_stuck', with_file=False)
+    (orphan / 'track.flac').write_bytes(b'precious')
+    rescue = _rescue_dir(tmp_path)
+
+    def _boom(*_a, **_k):
+        raise OSError('permission denied')
+
+    monkeypatch.setattr(lifecycle.shutil, 'move', _boom)
+
+    swept = sweep_orphan_album_bundle_staging(str(root), rescue_root=str(rescue))
+
+    assert swept == 0
+    assert (orphan / 'track.flac').read_bytes() == b'precious'

@@ -633,7 +633,12 @@ export function AdlDeletedRow({
       ? 'Repair tool'
       : entry.source === 'duplicate-cleaner'
         ? 'Duplicate cleaner'
-        : null;
+        : // An album download that stalled and never made it into the library.
+          // The startup sweep used to delete these outright (#1210); it puts
+          // them here now, so they need to say what they are.
+          entry.source === 'album_bundle_orphan'
+          ? 'Stalled album download'
+          : null;
   const ago = entry.deleted_at ? timeAgo(entry.deleted_at) || entry.deleted_at : 'age unknown';
   return (
     <div className="adl-row adl-row-completed verif-quar-row" data-deleted-id={entry.id}>

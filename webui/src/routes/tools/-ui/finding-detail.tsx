@@ -41,6 +41,10 @@ import {
   pickDuplicateToKeep,
   scoreBar,
 } from '../-tools.core';
+// tracks.duration is stored in MILLISECONDS (music_database.py:424); this
+// panel used to print it raw with an "s" suffix, so a 3:58 song read
+// "238000s" (#1210).
+import { formatDurationMs } from '../../artist-detail/-artist-detail.enhanced';
 
 type Details = Record<string, unknown>;
 
@@ -581,7 +585,7 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
                   <span>
                     Album: {text(track.album) || 'Unknown'}
                     {track.bitrate ? ` · ${track.bitrate} kbps` : ''}
-                    {track.duration ? ` · ${Math.round(track.duration)}s` : ''}
+                    {track.duration ? ` · ${formatDurationMs(track.duration)}` : ''}
                     {track.track_number ? ` · Track #${track.track_number}` : ''}
                   </span>
                   {track.file_path ? <span className="mono">{track.file_path}</span> : null}

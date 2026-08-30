@@ -467,6 +467,14 @@ def _is_same_physical_file(p1, p2, dur1, dur2) -> bool:
         return False
     norm1 = str(p1).replace('\\', '/').rstrip('/')
     norm2 = str(p2).replace('\\', '/').rstrip('/')
+    # One path is one file. This has to come BEFORE the mount-root check
+    # below, which bails out whenever the roots match - and identical paths
+    # always match, so the job called a file a duplicate of itself and "keep
+    # this one" moved the only copy to the deleted folder (#1210).
+    # normcase, not lower(): on Linux, Song.flac and song.flac really are two
+    # files, and folding case would hide that duplicate instead.
+    if os.path.normcase(norm1) == os.path.normcase(norm2):
+        return True
     parts1 = [x for x in norm1.split('/') if x]
     parts2 = [x for x in norm2.split('/') if x]
     if len(parts1) < 3 or len(parts2) < 3:

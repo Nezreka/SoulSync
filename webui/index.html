@@ -19,6 +19,29 @@
             } catch (e) { /* localStorage blocked — full width, no harm */ }
         })();
     </script>
+    <!-- Console noise gate (#1210). The shipped UI makes ~1000 console.log
+         calls, so a normal user's console is a wall of internal chatter and a
+         real error is lost in it. log/debug/info are muted; warn and error
+         ALWAYS come through. One warn line says how to turn it back on, so a
+         quiet console is never a mystery. Same ?debug=1 flag the on-screen
+         console below already uses. -->
+    <script>
+        (function () {
+            var on = false;
+            try {
+                on = /[?&]debug=1(&|$)/.test(location.search)
+                    || localStorage.getItem('soulsync-debug') === '1';
+            } catch (e) { /* storage blocked - stay muted, warn/error still show */ }
+            window.SOULSYNC_DEBUG = on;
+            if (on) return;
+            var noop = function () {};
+            ['log', 'debug', 'info'].forEach(function (name) {
+                if (console[name]) { console[name] = noop; }
+            });
+            console.warn('SoulSync: console output is muted. Add ?debug=1 to the URL, '
+                + 'or run localStorage.setItem("soulsync-debug","1") and reload, to see it.');
+        })();
+    </script>
     <!-- On-screen error console for devices with no devtools (phones/tablets).
          OFF unless the URL carries ?debug=1, so users never see it. Must stay the
          FIRST script in <head> — anything loaded before it can fail unseen. -->
@@ -5128,7 +5151,7 @@
                                         <span class="info-icon" role="button" tabindex="0" title="What's this?"
                                             onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                     </div>
-                                    <div class="setting-help-body" hidden><strong>Off by default</strong> — with this off, tracks appear in your library as they finish downloading (unchanged behavior). When <strong>on</strong>, the tracks of an album download are staged privately and only moved into your media library once the <strong>whole album</strong> completes, so Plex/Jellyfin/Navidrome never shows a half-loaded album while it's still downloading. If a batch stalls or fails, its tracks stay in staging (never your library) and the failed tracks remain retryable in your wishlist. Only affects full-album and wishlist-album downloads — single tracks and album top-ups (completeness fills) are unaffected.</div>
+                                    <div class="setting-help-body" hidden><strong>Off by default</strong> — with this off, tracks appear in your library as they finish downloading (unchanged behavior). When <strong>on</strong>, the tracks of an album download are staged privately and only moved into your media library once the <strong>whole album</strong> completes, so Plex/Jellyfin/Navidrome never shows a half-loaded album while it's still downloading. If a batch stalls or fails, its tracks stay in staging (never your library) and the failed tracks remain retryable in your wishlist. That private staging area is SoulSync's own working folder, <code>storage/album_bundle_staging/&lt;batch id&gt;</code> — it is <strong>not</strong> the Staging path set under Library, which is a different folder for a different job. It is emptied when the batch finishes. If a crash leaves one behind, the next start moves anything still holding audio into the Downloads recycle bin (labelled &ldquo;Stalled album download&rdquo;) rather than deleting it, so a stalled album is recoverable instead of gone. Only affects full-album and wishlist-album downloads — single tracks and album top-ups (completeness fills) are unaffected.</div>
                                 </div>
                             </div>
                             </div><!-- end Album Publishing body -->

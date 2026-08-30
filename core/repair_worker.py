@@ -3299,6 +3299,41 @@ class RepairWorker:
         if self._config_manager:
             download_folder = self._config_manager.get('soulseek.download_path', '')
         transfer_norm = os.path.normpath(self.transfer_folder)
+
+        # Never move the file the keeper points at. Two rows can carry the same
+        # path (#1210), and when they did, "remove the other copy" moved the only
+        # file there was and left the kept row pointing at nothing. The detector
+        # no longer produces those groups, but this is the layer that actually
+        # deletes, so it checks for itself.
+        keep_resolved = ''
+        if best.get('file_path'):
+            keep_resolved = _resolve_file_path(
+                best['file_path'], self.transfer_folder, download_folder,
+                config_manager=self._config_manager) or ''
+        if not keep_resolved:
+            # No usable path for the copy we are keeping, so there is no way to
+            # prove the files below aren't that same copy. Refuse rather than
+            # guess: a duplicate left on disk is fixable, the only copy of a
+            # song is not.
+            return {
+                'success': False,
+                'error': ('Could not resolve the file for the copy being kept, so no '
+                          'duplicate was removed. Check Settings > Library > Music Paths.'),
+                'files_deleted': 0,
+                'files_failed': 0,
+            }
+
+        def _is_keeper_file(candidate):
+            if not keep_resolved or not candidate:
+                return False
+            try:
+                if os.path.exists(keep_resolved) and os.path.exists(candidate):
+                    return os.path.samefile(keep_resolved, candidate)
+            except OSError:
+                pass
+            return (os.path.normcase(os.path.normpath(candidate))
+                    == os.path.normcase(os.path.normpath(keep_resolved)))
+
         from core.repair_jobs.base import deleted_quarantine_root
         deleted_root = deleted_quarantine_root(self.transfer_folder)
         files_deleted = 0
@@ -3332,6 +3367,15 @@ class RepairWorker:
                     "did not resolve to an existing file). DB row kept and file left "
                     "on disk — check your Docker volume mapping and Settings > Library "
                     "> Music Paths.%s", fpath, navidrome_hint)
+                continue
+            if _is_keeper_file(resolved):
+                # Same file as the copy being kept: drop the extra database row
+                # so the phantom duplicate stops coming back, but leave the file
+                # exactly where it is.
+                logger.warning(
+                    "Duplicate cleanup: %r is the same file as the copy being kept. "
+                    "Removing the extra database row only, the file is untouched.", resolved)
+                db_remove_ids.append(tid)
                 continue
             try:
                 dest = self._quarantine_dest(resolved, deleted_root)

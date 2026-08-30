@@ -220,10 +220,67 @@ def _cleanup_private_album_bundle_staging(batch_id: str, batch: dict) -> None:
         logger.warning("[Album Bundle] Could not clean private staging folder %s: %s", staging_path, exc)
 
 
+# Audio a stranded bundle might still be holding. Same list the auto-import
+# worker uses; kept local so this module doesn't import the import pipeline.
+_ORPHAN_RESCUE_AUDIO_EXTS = {
+    '.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma',
+    '.aiff', '.aif', '.ape',
+}
+
+
+def _dir_holds_audio(path: Path) -> bool:
+    try:
+        for child in path.rglob('*'):
+            if child.is_file() and child.suffix.lower() in _ORPHAN_RESCUE_AUDIO_EXTS:
+                return True
+    except OSError:
+        # Unreadable is not the same as empty. Say yes so the caller keeps it.
+        return True
+    return False
+
+
+def _rescue_orphan_staging_dir(entry: Path, rescue_root: str) -> bool:
+    """Move a stranded bundle into the recycle bin instead of deleting it.
+
+    Lands at ``<rescue_root>/album_bundle_orphans/<batch dir>/`` and every audio
+    file is written into the quarantine manifest, so the files show up in the
+    Downloads recycle bin and can be restored like anything else. Returns True
+    when the dir was moved off the staging root.
+    """
+    try:
+        from core.library.deleted_quarantine import record_deleted_entry
+
+        dest_parent = Path(rescue_root) / 'album_bundle_orphans'
+        dest_parent.mkdir(parents=True, exist_ok=True)
+        dest = dest_parent / entry.name
+        # A previous rescue of the same batch id would collide; keep both.
+        suffix = 1
+        while dest.exists():
+            dest = dest_parent / f"{entry.name}__{suffix}"
+            suffix += 1
+        shutil.move(str(entry), str(dest))
+        for child in dest.rglob('*'):
+            if child.is_file() and child.suffix.lower() in _ORPHAN_RESCUE_AUDIO_EXTS:
+                original = str(entry / child.relative_to(dest))
+                record_deleted_entry(rescue_root, str(child), original, 'album_bundle_orphan')
+        logger.warning(
+            "[Album Bundle Sweep] Stranded album bundle %s still had audio in it. "
+            "Moved to the recycle bin at %s instead of deleting it.", entry.name, dest,
+        )
+        return True
+    except Exception as exc:
+        logger.warning(
+            "[Album Bundle Sweep] Could not rescue orphan staging dir %s: %s. "
+            "Leaving it on disk rather than deleting it.", entry, exc,
+        )
+        return False
+
+
 def sweep_orphan_album_bundle_staging(
     staging_root: str,
     *,
     active_batch_ids: Optional[set] = None,
+    rescue_root: Optional[str] = None,
 ) -> int:
     """Remove orphan per-batch dirs from album-bundle staging.
 
@@ -277,6 +334,16 @@ def sweep_orphan_album_bundle_staging(
         if entry.name != _safe_batch_dirname(entry.name):
             continue
         if entry.name in active_dirnames:
+            continue
+        # An orphan dir can still be holding finished audio: an atomic-album
+        # batch that stalled downloaded its tracks here and never got to move
+        # them into the library. rmtree destroyed those on the next start, and
+        # a user who went looking found their album gone with one INFO line to
+        # explain it (#1210). Quarantine instead, the way every other delete
+        # path in this app already does.
+        if rescue_root and _dir_holds_audio(entry):
+            if _rescue_orphan_staging_dir(entry, rescue_root):
+                removed += 1
             continue
         try:
             shutil.rmtree(entry)

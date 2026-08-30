@@ -1,10 +1,11 @@
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AdlDownload, AdlQuarantineEntry } from '../-adl.types';
+import type { AdlDeletedEntry, AdlDownload, AdlQuarantineEntry } from '../-adl.types';
 import type { ReviewActionHandlers } from './adl-review';
 
 import {
+  AdlDeletedRow,
   AdlQuarantineList,
   AdlQuarantineRow,
   AdlReviewBanner,
@@ -428,5 +429,38 @@ describe('AdlReviewBanner', () => {
     fireEvent.click(buttons[2]);
     expect(onApproveAll).toHaveBeenCalled();
     expect(onDeleteAll).toHaveBeenCalled();
+  });
+});
+
+describe('AdlDeletedRow source labels', () => {
+  const entry = (source: string | null): AdlDeletedEntry => ({
+    id: 'd1',
+    name: '01-02 New Pammy.flac',
+    rel: 'album_bundle_orphans/b_stalled/01-02 New Pammy.flac',
+    size: 1234,
+    deleted_at: null,
+    source,
+    original_path: '/app/storage/album_bundle_staging/b_stalled/01-02 New Pammy.flac',
+  });
+  const handlers = { onRestore: vi.fn(), onPurge: vi.fn() };
+
+  it('names a rescued album bundle so it is not an unexplained file (#1210)', () => {
+    const { container } = render(
+      <AdlDeletedRow entry={entry('album_bundle_orphan')} handlers={handlers} />,
+    );
+    expect(container.textContent).toContain('Stalled album download');
+  });
+
+  it('still names the two older sources', () => {
+    const { container } = render(<AdlDeletedRow entry={entry('repair')} handlers={handlers} />);
+    expect(container.textContent).toContain('Repair tool');
+    cleanup();
+    const dupe = render(<AdlDeletedRow entry={entry('duplicate-cleaner')} handlers={handlers} />);
+    expect(dupe.container.textContent).toContain('Duplicate cleaner');
+  });
+
+  it('says nothing rather than guessing for an unknown source', () => {
+    const { container } = render(<AdlDeletedRow entry={entry(null)} handlers={handlers} />);
+    expect(container.querySelector('.adl-row-batch')).toBeNull();
   });
 });
