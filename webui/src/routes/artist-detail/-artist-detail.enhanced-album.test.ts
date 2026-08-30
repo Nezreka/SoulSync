@@ -33,7 +33,6 @@ describe('getServiceUrl', () => {
   it('builds a url per service and entity type', () => {
     expect(getServiceUrl('spotify', 'album', 'abc')).toBe('https://open.spotify.com/album/abc');
     expect(getServiceUrl('musicbrainz', 'album', 'x')).toBe('https://musicbrainz.org/release/x');
-    expect(getServiceUrl('discogs', 'album', '9')).toBe('https://www.discogs.com/release/9');
   });
 
   it('returns the value ITSELF for services that store a full url', () => {
@@ -54,6 +53,20 @@ describe('getServiceUrl', () => {
     expect(getServiceUrl('napster', 'album', '1')).toBeNull();
     expect(getServiceUrl('spotify', 'album', '')).toBeNull();
     expect(getServiceUrl('spotify', 'album', null)).toBeNull();
+  });
+
+  it('routes a tagged Discogs album id to master or release', () => {
+    // 'm'/'r' tag: core/discogs_client.py._tag_discogs_album_id -- release N
+    // and master N are different albums sharing one numeric namespace.
+    expect(getServiceUrl('discogs', 'album', 'r5743831')).toBe(
+      'https://www.discogs.com/release/5743831',
+    );
+    expect(getServiceUrl('discogs', 'album', 'm12345')).toBe(
+      'https://www.discogs.com/master/12345',
+    );
+    // Legacy untagged id: defaults to release, same as the backend's own
+    // _discogs_album_endpoints() fallback.
+    expect(getServiceUrl('discogs', 'album', '9')).toBe('https://www.discogs.com/release/9');
   });
 });
 
@@ -96,6 +109,19 @@ describe('albumIdBadges', () => {
       musicbrainz_release_id: 'm',
     });
     expect(badges.map((b) => b.service)).toEqual(['spotify', 'musicbrainz', 'itunes']);
+  });
+
+  it('shows the bare id for a tagged Discogs master, but routes the link to /master/', () => {
+    const [badge] = albumIdBadges({ discogs_id: 'm12345' });
+    expect(badge.id).toBe('12345');
+    expect(badge.url).toBe('https://www.discogs.com/master/12345');
+    expect(badge.title).toBe('Discogs: 12345 (click to open)');
+  });
+
+  it('shows the bare id for a tagged Discogs release, and routes the link to /release/', () => {
+    const [badge] = albumIdBadges({ discogs_id: 'r5743831' });
+    expect(badge.id).toBe('5743831');
+    expect(badge.url).toBe('https://www.discogs.com/release/5743831');
   });
 });
 
