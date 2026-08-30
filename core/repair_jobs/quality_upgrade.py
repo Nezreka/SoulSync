@@ -46,7 +46,7 @@ from core.library.path_resolver import resolve_library_file_path
 from core.imports.file_ops import probe_audio_quality
 from core.quality.model import rank_candidate
 from core.quality.selection import targets_from_profile, quality_meets_profile, load_profile_by_id
-from core.quality.retention import acquired_quality_from_json, evaluation_qualities
+from core.quality.retention import acquired_quality_from_json, retention_meets_profile
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.quality_upgrade")
@@ -728,27 +728,19 @@ class QualityUpgradeJob(RepairJob):
                     context.update_progress(i + 1, total)
                 continue
 
-            evaluation_values = evaluation_qualities(
-                measured_aq,
-                row.get('acquired_quality_json'),
-                row.get('retention_json'),
-            )
-            if not broken_reason and evaluation_values:
-                if cutoff_index is not None:
-                    # ranking-based: skip only if the file already sits at the
-                    # configured cutoff rank or better. Any lower rank triggers
-                    # a proposed upgrade.
-                    already_best = any(
-                        rank_candidate(value, targets)[0] <= cutoff_index
-                        for value in evaluation_values
-                    )
-                else:
-                    # default: skip if the file meets ANY configured target (i.e.
-                    # it's not below the acceptable floor).
-                    already_best = any(
-                        quality_meets_profile(value, targets)
-                        for value in evaluation_values
-                    )
+            # retention_meets_profile owns this decision: the cutoff rank when
+            # one is configured, the plain profile floor otherwise, judged over
+            # measured PLUS intentionally-acquired quality. This job and the
+            # scanner each inlined their own copy, which is the same split-brain
+            # the shared duplicate rules were added to stop.
+            if not broken_reason:
+                already_best = retention_meets_profile(
+                    measured_aq,
+                    targets,
+                    cutoff_index=cutoff_index,
+                    acquired_quality_json=row.get('acquired_quality_json'),
+                    retention_json=row.get('retention_json'),
+                )
                 if already_best:
                     result.skipped += 1
                     if context.update_progress and (i + 1) % 25 == 0:

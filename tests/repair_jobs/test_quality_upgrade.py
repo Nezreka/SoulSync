@@ -215,6 +215,12 @@ def _stub_quality(monkeypatch, *, meets: bool):
     monkeypatch.setattr(qu, 'probe_audio_quality',
                         lambda p: AudioQuality(format='mp3', bitrate=128))
     monkeypatch.setattr(qu, 'quality_meets_profile', lambda aq, targets: meets)
+    # The verdict is reached through retention.retention_meets_profile now (one
+    # decision shared with the scanner instead of a copy in each), and it
+    # resolves quality_meets_profile through its OWN module, so patching only
+    # the job's name left the real check running against a fake path.
+    import core.quality.retention as _retention
+    monkeypatch.setattr(_retention, 'quality_meets_profile', lambda aq, targets: meets)
 
 
 def _stub_engine(monkeypatch):

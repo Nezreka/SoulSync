@@ -28,7 +28,7 @@ from core.repair_jobs.base import skip_deleted_quarantine, JobContext, JobResult
 # monkeypatch them the same way tests/repair_jobs/test_quality_upgrade.py does.
 from core.quality.model import rank_candidate
 from core.quality.selection import targets_from_profile, quality_meets_profile, load_profile_by_id
-from core.quality.retention import acquired_quality_from_json, evaluation_qualities
+from core.quality.retention import acquired_quality_from_json, retention_meets_profile
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.quality_upgrade")
@@ -379,11 +379,6 @@ class QualityUpgradeScannerJob(RepairJob):
                 logger.debug("Probe failed for %s: %s", fname, e)
                 aq = None
 
-            evaluation_values = evaluation_qualities(
-                aq,
-                meta.get('acquired_quality_json'),
-                meta.get('retention_json'),
-            )
             if broken_reason:
                 issue = 'broken_audio'
                 current_label = aq.label() if aq is not None else 'unknown'
@@ -392,14 +387,15 @@ class QualityUpgradeScannerJob(RepairJob):
                 probe_failed += 1
                 result.skipped += 1
                 continue
-            elif cutoff_index is not None and not any(
-                    rank_candidate(value, targets)[0] <= cutoff_index
-                    for value in evaluation_values):
-                issue = 'below_profile'
-                current_label = aq.label()
-            elif cutoff_index is None and not any(
-                    quality_meets_profile(value, targets)
-                    for value in evaluation_values):
+            # Same call the Quality Upgrade job makes. Both used to inline the
+            # cutoff-vs-floor branch separately, so a change to one silently
+            # left the other disagreeing about what "good enough" means.
+            elif not retention_meets_profile(
+                    aq,
+                    targets,
+                    cutoff_index=cutoff_index,
+                    acquired_quality_json=meta.get('acquired_quality_json'),
+                    retention_json=meta.get('retention_json')):
                 issue = 'below_profile'
                 current_label = aq.label()
             else:
