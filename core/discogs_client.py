@@ -327,7 +327,13 @@ class Album:
             album_type = 'single'
         elif 'ep' in descriptions or ', ep' in format_str or format_str.endswith('ep'):
             album_type = 'ep'
-        elif 'compilation' in descriptions or 'compilation' in format_str or 'compilation' in (release_data.get('type', '') or '').lower():
+        elif ('compilation' in descriptions or 'compilation' in format_str
+                # Discogs' artist/search-release endpoints use the
+                # abbreviated code "Comp", not the full word -- this was
+                # previously never matched, so every compilation fell
+                # through to the generic 'album' branch below.
+                or 'comp' in descriptions or 'comp' in format_str
+                or 'compilation' in (release_data.get('type', '') or '').lower()):
             album_type = 'compilation'
         elif 'lp' in descriptions or 'lp' in format_str or 'album' in descriptions or 'album' in format_str:
             album_type = 'album'
@@ -359,6 +365,112 @@ class Album:
             image_url=image_url,
             external_urls=external_urls if external_urls else None,
         )
+
+
+# --- Non-audio release detection (used by get_artist_albums) ---------------
+# Discogs-only concept, deliberately kept separate from Album.album_type.
+#
+# WHY A WHITELIST, NOT A BLACKLIST: an earlier version of this listed
+# known-video format names and excluded on a match. That missed a real
+# release (a promo tape on "Umatic", a professional broadcast videotape
+# format) because the list of video/broadcast tape formats is long and
+# unenumerable (Betacam, Betacam SP, MiniDV, HD DVD, ...), unlike the
+# small, stable set of AUDIO carrier formats. So this instead lists
+# known-audio names and excludes unless one is found.
+#
+# WHY PER-ITEM, NOT ONE FLAT TOKEN SCAN: Discogs joins a release's distinct
+# bundled items with "+" (e.g. "Blu-ray + 2xCD" is a video disc AND a
+# separate 2-CD audio set). A flat scan of every token anywhere in the
+# string has a real bug: "Laserdisc, 12", NTSC" is a video-only release
+# whose OWN disc size happens to be 12" -- a flat scan misreads that as "a
+# 12" vinyl record is also present" and wrongly un-excludes a genuine video
+# release. Checking each "+"-separated part by its own leading format name
+# avoids that, while still correctly recognizing real bundled audio content
+# (the 2xCD in the Blu-ray example above). This also fixes something
+# unrelated found along the way: a naive blacklist excludes ANY release
+# mentioning "DVD" anywhere, even "CD, Album + DVD" -- a real audio CD with
+# a bonus DVD, wrongly dropped entirely.
+#
+# Promo/Unofficial/RE/RM/etc. are deliberately NOT part of this check at
+# all -- those are modifiers on a release that's still legitimately
+# album/compilation/single, not medium, and are trusted through the normal
+# classifier cascade above instead.
+_AUDIO_FORMAT_NAMES = {
+    'vinyl', 'lp', '7"', '10"', '12"', '6"', '3"', '5½"',
+    'cd', 'cdr', 'cd-r',
+    'cass', 'cassette',
+    'file',
+    'shellac', 'minidisc', 'md', 'dat',
+    'reel', 'reel-to-reel', '8-track cartridge', '8-track',
+    'flexi', 'flexi-disc', 'lathe', 'lathe cut', 'acetate',
+    'm/stick', 'memory stick',
+}
+# Container words that say nothing about medium on their own (a "Box" or
+# "Comp" could hold anything) -- only fall back to checking the REST of
+# that same part's tokens when the leading name is one of these.
+_NEUTRAL_FORMAT_NAMES = {'box', 'comp', 'all media'}
+# Known video/broadcast-tape format names. Unlike the audio list above,
+# this is NOT trusted as exhaustive -- see the WHY A WHITELIST note. Kept
+# only so a video-named part carrying an explicit digital-audio descriptor
+# (e.g. a "DVD-D" data disc of MP3 files) can still correctly resolve to
+# audio via that descriptor, one part at a time.
+_VIDEO_FORMAT_NAMES = {
+    'blu-ray', 'blu-ray-r', 'dvd-v', 'dvd', 'dvdr', 'dvd-d', 'hd dvd',
+    'laserdisc', 'vhs', 'cdv', 'vcd', 'umatic', 'betacam', 'betacam sp',
+}
+_DIGITAL_AUDIO_DESCRIPTORS = {'mp3', 'flac', 'wav', 'aac', 'hdcd', 'sacd', 'dualdisc'}
+
+
+def _format_part_tokens(part: str) -> List[str]:
+    tokens = []
+    for tok in part.split(','):
+        t = tok.strip().lower()
+        if not t:
+            continue
+        t = re.sub(r'^\d+x', '', t)  # strip a leading disc-count like "2x"
+        tokens.append(t)
+    return tokens
+
+
+def _is_non_audio_discogs_release(release_data: Dict[str, Any]) -> bool:
+    """True when a release's format has no genuinely audio component
+    (concert videos, broadcast promo tapes) -- see the module notes above
+    for why this is a per-item whitelist, not a blacklist or a flat scan."""
+    formats = release_data.get('formats', [])
+    format_name = formats[0].get('name', '') if formats else ''
+    descriptions = formats[0].get('descriptions', []) if formats else []
+    raw_format = release_data.get('format') or ''
+    if isinstance(raw_format, list):
+        raw_format = ', '.join(raw_format)
+
+    combined = ', '.join(filter(None, [format_name, raw_format, *descriptions]))
+    if not combined.strip():
+        # No format info at all -- every master on this endpoint. Unknown
+        # is not the same as confirmed non-audio; leave masters alone.
+        return False
+
+    any_audio = False
+    any_recognized = False
+    for part in combined.split('+'):
+        tokens = _format_part_tokens(part)
+        if not tokens:
+            continue
+        leading, rest = tokens[0], set(tokens[1:])
+        if leading in _AUDIO_FORMAT_NAMES:
+            any_audio = any_recognized = True
+        elif leading in _VIDEO_FORMAT_NAMES:
+            any_recognized = True
+            if rest & _DIGITAL_AUDIO_DESCRIPTORS:
+                any_audio = True  # e.g. a "DVD-D" data disc of MP3 files
+        elif leading in _NEUTRAL_FORMAT_NAMES:
+            if rest & _AUDIO_FORMAT_NAMES:
+                any_audio = any_recognized = True
+        # else: an unrecognized leading name -- no signal either way from
+        # this part, deliberately not guessed at.
+
+    if not any_recognized:
+        return False  # nothing recognizable either way -- don't guess
+    return not any_audio
 
 
 class DiscogsClient:
@@ -800,6 +912,18 @@ class DiscogsClient:
 
         for item in ordered:
             try:
+                # Releases with no genuinely audio component (concert
+                # videos, broadcast promo tapes) aren't albums in any sense
+                # the app's discography views can represent (no Video
+                # bucket); drop them before classification instead of
+                # forcing them into 'album'. Promo/Unofficial/etc. are NOT
+                # checked here: those are Discogs modifiers on a release
+                # that IS still an album/compilation/single, and excluding
+                # on them would override Discogs' own type judgment instead
+                # of trusting it.
+                if _is_non_audio_discogs_release(item):
+                    continue
+
                 album = Album.from_discogs_release(item)
 
                 # Use thumb from release list as image
