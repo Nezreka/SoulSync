@@ -349,6 +349,48 @@ def test_scan_with_empty_default_targets_still_processes_tracks(monkeypatch):
     assert findings == []
 
 
+def test_active_finder_does_not_loop_after_profile_downsampling(monkeypatch):
+    """A 24/96 acquisition intentionally retained as 16/44.1 still satisfies
+    the Hi-Res target that selected it; no metadata search should run again."""
+    from core.quality.model import AudioQuality
+    from core.quality.retention import quality_json, transforms_json
+
+    profile = {
+        'id': 31,
+        'name': 'Hi-Res acquisition / CD retention',
+        'ranked_targets': [{
+            'label': 'FLAC 24-bit/96kHz', 'format': 'flac',
+            'bit_depth': 24, 'min_sample_rate': 96_000,
+        }],
+    }
+    acquired = AudioQuality(format='flac', bit_depth=24, sample_rate=96_000)
+    row = _row(path='/music/downsampled.flac') + (
+        None, None, None, None, None, 31,
+        quality_json(acquired),
+        transforms_json([{
+            'type': 'downsample_hires_flac', 'source_replaced': True,
+        }]),
+    )
+    db = _FakeDB([row], profile)
+    monkeypatch.setattr(qu, 'resolve_library_file_path', lambda p, **kw: p)
+    monkeypatch.setattr(
+        qu, 'probe_audio_quality',
+        lambda _p: AudioQuality(format='flac', bit_depth=16, sample_rate=44_100),
+    )
+
+    def _no_search(*_a, **_kw):
+        raise AssertionError('retention provenance should suppress a repeat search')
+
+    monkeypatch.setattr(qu, '_find_best_match', _no_search)
+    findings = []
+
+    result = qu.QualityUpgradeJob().scan(_ctx(db, findings))
+
+    assert result.scanned == 1
+    assert result.skipped == 1
+    assert findings == []
+
+
 def test_dismissed_finding_is_cleared_and_reflagged_when_config_changed(monkeypatch):
     """A dismissed finding must not permanently block re-evaluation: if the
     profile/cutoff this track resolves to has genuinely changed since the
@@ -723,6 +765,56 @@ def _setup_scanner_common(monkeypatch, tmp_path, targets, aq):
         })
     monkeypatch.setattr('core.imports.silence.detect_broken_audio', lambda path: None)
     monkeypatch.setattr('core.imports.file_ops.probe_audio_quality', lambda path: aq)
+
+
+def test_scanner_skips_catalogued_lossy_companion(monkeypatch, tmp_path):
+    """Navidrome/Jellyfin may index both the source and its retained copy."""
+    from core.quality.model import AudioQuality, QualityTarget
+
+    flac = tmp_path / "song.flac"
+    mp3 = tmp_path / "song.mp3"
+    flac.write_bytes(b"lossless")
+    mp3.write_bytes(b"lossy")
+    target = QualityTarget(label="FLAC", format="flac")
+    profile = {
+        "id": 20,
+        "name": "Lossless with portable copy",
+        "ranked_targets": [target.to_dict()],
+    }
+    monkeypatch.setattr(qs, "targets_from_profile", lambda _profile: ([target], False))
+    monkeypatch.setattr(
+        qs.QualityUpgradeScannerJob,
+        "_collect_music_dirs",
+        lambda self, context: [str(tmp_path)],
+    )
+    monkeypatch.setattr(
+        qs.QualityUpgradeScannerJob,
+        "_build_db_suffix_index",
+        lambda self, context: {
+            "song.flac": {"track_id": 1, "title": "Song", "quality_profile_id": 20},
+            "song.mp3": {"track_id": 2, "title": "Song", "quality_profile_id": 20},
+        },
+    )
+    monkeypatch.setattr(
+        "core.library.duplicate_rules.lossy_companion_exts",
+        lambda *_args, **_kwargs: {".mp3"},
+    )
+    monkeypatch.setattr(
+        "core.imports.file_ops.probe_audio_quality",
+        lambda path: AudioQuality(
+            format="flac" if str(path).endswith(".flac") else "mp3",
+            bitrate=320,
+        ),
+    )
+    monkeypatch.setattr("core.imports.silence.detect_broken_audio", lambda _path: None)
+    findings = []
+
+    result = qs.QualityUpgradeScannerJob().scan(
+        _scanner_ctx(_ScannerFakeDB(profile), tmp_path, findings))
+
+    assert findings == []
+    assert result.scanned == 1
+    assert result.skipped == 1
 
 
 def test_scanner_dismissed_finding_stays_dismissed_when_config_unchanged(monkeypatch, tmp_path):

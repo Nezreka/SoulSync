@@ -4463,9 +4463,10 @@
                                         download the real file is verified against the same list. With fallback off, a track
                                         is left missing rather than accepting a quality below every target.
                                         <br><br>
-                                        <strong>Note:</strong> the <em>Downsample hi-res</em> option (under Lossy Copy) also
-                                        bypasses this gate — if off-list files keep slipping through with fallback off, check
-                                        that setting too.
+                                        <strong>Acquisition vs retained output:</strong> Downsample and Lossy Copy run only
+                                        after the downloaded file passes this gate. SoulSync remembers the acquired quality,
+                                        so intentionally retaining 16/44.1 or a lossy-only output does not make the same track
+                                        appear as an upgrade again.
                                     </div>
                                     <div id="ranked-targets-list" class="ranked-targets-list">
                                         <!-- rows injected by renderRankedTargets() -->
@@ -4666,7 +4667,7 @@
                                         <span class="info-icon" role="button" tabindex="0" title="What's this?"
                                             onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                     </div>
-                                    <div class="setting-help-body" hidden>When a 24-bit or high sample-rate FLAC is downloaded, it is automatically converted to 16-bit/44.1kHz. The hi-res original is <strong>replaced</strong>, not kept alongside. Requires ffmpeg.</div>
+                                    <div class="setting-help-body" hidden>When a 24-bit or high sample-rate FLAC is downloaded, it is automatically converted to 16-bit/44.1kHz. The hi-res original is <strong>replaced</strong>, not kept alongside. Its acquired quality is remembered for upgrade decisions, preventing a download/downsample loop. Requires ffmpeg.</div>
                                 </div>
                                 <div class="form-group">
                                     <div class="setting-row">
@@ -4678,7 +4679,7 @@
                                         <span class="info-icon" role="button" tabindex="0" title="What's this?"
                                             onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                     </div>
-                                    <div class="setting-help-body" hidden>After downloading a FLAC, a lossy copy at the selected codec and bitrate is created in the same folder. Requires ffmpeg.</div>
+                                    <div class="setting-help-body" hidden>After downloading a lossless file, a lossy derivative at the selected codec and bitrate is created in the same folder. When the source is kept, it remains the canonical quality and the derivative is treated as a companion version. Requires ffmpeg.</div>
                                 </div>
                                 <div id="lossy-copy-options" style="display: none;">
                                     <div class="form-group">
@@ -4701,13 +4702,18 @@
                                     <div class="form-group" style="margin-top: 12px;">
                                         <label class="checkbox-label">
                                             <input type="checkbox" id="lossy-copy-delete-original">
-                                            Blasphemy Mode — Delete original FLAC after conversion
+                                            Keep lossy output only — delete the lossless source after conversion
                                         </label>
                                     </div>
                                     <div class="help-text" style="color: rgba(255, 100, 100, 0.8);">
-                                        Warning: The original high-quality file will be permanently deleted.
-                                        Only the lossy copy will remain.
+                                        Warning: The acquired lossless file will be permanently deleted after the output is verified.
+                                        Its acquisition quality remains recorded, so this retention choice is not shown as a new upgrade.
                                     </div>
+                                </div>
+                                <div class="help-text">
+                                    <strong>One profile, two decisions:</strong> the quality list controls what SoulSync acquires;
+                                    these options control what it retains. A retained lossless + lossy pair is one track with two
+                                    file versions, not two duplicate tracks.
                                 </div>
                             </div>
                             </div><!-- end Post-Download Conversion body -->

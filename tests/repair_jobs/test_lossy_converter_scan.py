@@ -46,16 +46,20 @@ class _FakeConn:
 
 
 class _FakeDB:
-    def __init__(self, rows):
+    def __init__(self, rows, default_profile=None):
         self._rows = rows
+        self._default_profile = default_profile
 
     def _get_connection(self):
         return _FakeConn(self._rows)
 
+    def get_quality_profile(self):
+        return self._default_profile
 
-def _row(track_id, title, path):
+
+def _row(track_id, title, path, profile_id=None):
     # (t.id, t.title, ar.name, al.title, t.file_path, al.thumb_url, ar.thumb_url, ar.id)
-    return (track_id, title, "Artist", "Album", path, None, None, 42)
+    return (track_id, title, "Artist", "Album", path, None, None, 42, profile_id)
 
 
 def _context(rows, tmp_path: Path):
@@ -130,3 +134,53 @@ def test_missing_on_disk_is_counted_and_surfaced_not_silently_dropped(tmp_path: 
     completion = progress_lines[-1]
     assert "could not be located on disk" in completion
     assert "1 tracks" in completion
+
+
+def test_each_track_uses_its_assigned_profile(monkeypatch, tmp_path: Path):
+    flac = tmp_path / "05 - Profile Track.flac"
+    flac.write_bytes(b"x")
+    monkeypatch.setattr(
+        "core.repair_jobs.lossy_converter.load_profile_by_id",
+        lambda profile_id: {
+            "id": profile_id,
+            "name": "Portable",
+            "lossy_copy_enabled": True,
+            "lossy_copy_codec": "mp3",
+            "lossy_copy_bitrate": "192",
+            "lossy_copy_delete_original": True,
+        },
+    )
+    ctx, findings, _ = _context(
+        [_row(5, "Profile Track", str(flac), profile_id=77)], tmp_path)
+
+    result = LossyConverterJob().scan(ctx)
+
+    assert result.findings_created == 1
+    details = findings[0]["details"]
+    assert details["quality_profile_id"] == 77
+    assert details["quality_profile_name"] == "Portable"
+    assert details["codec"] == "mp3"
+    assert details["bitrate"] == "192"
+    assert details["delete_original"] is True
+
+
+def test_unassigned_track_preserves_live_default_pointer(tmp_path: Path):
+    flac = tmp_path / "06 - Default Track.flac"
+    flac.write_bytes(b"x")
+    ctx, findings, _ = _context(
+        [_row(6, "Default Track", str(flac), profile_id=None)], tmp_path)
+    ctx.db._default_profile = {
+        "id": 88,
+        "name": "Current Default",
+        "lossy_copy_enabled": True,
+        "lossy_copy_codec": "mp3",
+        "lossy_copy_bitrate": "192",
+        "lossy_copy_delete_original": True,
+    }
+
+    result = LossyConverterJob().scan(ctx)
+
+    assert result.findings_created == 1
+    details = findings[0]["details"]
+    assert details["quality_profile_id"] is None
+    assert details["quality_profile_name"] == "Current Default"

@@ -17,6 +17,7 @@ from core.imports.file_ops import (
     downsample_hires_flac,
     get_audio_quality_string,
     get_quality_tier_from_extension,
+    probe_audio_quality,
     safe_move_file,
 )
 from core.imports.context import (
@@ -430,6 +431,58 @@ def _persist_verification_status(context, final_path):
                 write_verification_status(str(final_path), status)
     except Exception as _vs_err:
         logger.debug(f"verification-status persist skipped: {_vs_err}")
+
+
+def _apply_profile_output_transforms(final_path: str, context: dict,
+                                     profile: dict) -> str:
+    """Apply downsample/lossy retention while preserving acquisition truth."""
+    acquired_quality = probe_audio_quality(final_path)
+    if acquired_quality is not None:
+        context['_acquired_audio_quality'] = acquired_quality.to_dict()
+
+    downsampled_path = downsample_hires_flac(
+        final_path, context, enabled=profile.get('downsample_enabled'))
+    if downsampled_path:
+        final_path = downsampled_path
+        context['_final_processed_path'] = final_path
+        retained_quality = probe_audio_quality(final_path)
+        context.setdefault('_retention_transforms', []).append({
+            'type': 'downsample_hires_flac',
+            'source_replaced': True,
+            'target_bit_depth': 16,
+            'target_sample_rate': 44100,
+            'output_quality': retained_quality.to_dict() if retained_quality else None,
+        })
+
+    _persist_verification_status(context, final_path)
+
+    lossy_path = create_lossy_copy(final_path, settings={
+        'enabled': profile.get('lossy_copy_enabled'),
+        'codec': profile.get('lossy_copy_codec'),
+        'bitrate': profile.get('lossy_copy_bitrate'),
+        'delete_original': profile.get('lossy_copy_delete_original'),
+    } if profile else None)
+    if not lossy_path:
+        return final_path
+
+    source_retained = os.path.isfile(final_path)
+    lossy_quality = probe_audio_quality(lossy_path)
+    context.setdefault('_retention_transforms', []).append({
+        'type': 'lossy_copy',
+        'source_replaced': not source_retained,
+        'codec': profile.get('lossy_copy_codec'),
+        'bitrate': profile.get('lossy_copy_bitrate'),
+        'output_quality': lossy_quality.to_dict() if lossy_quality else None,
+    })
+    if source_retained:
+        companions = context.setdefault('_companion_file_paths', [])
+        if lossy_path not in companions:
+            companions.append(lossy_path)
+        context['_final_processed_path'] = final_path
+        return final_path
+
+    context['_final_processed_path'] = lossy_path
+    return lossy_path
 
 
 def post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=None):
@@ -1298,23 +1351,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 pp_logger.debug(f"ReplayGain analysis skipped: {rg_err}")
 
         _qp_post = _resolve_context_quality_profile(context)
-        downsampled_path = downsample_hires_flac(
-            final_path, context,
-            enabled=_qp_post.get('downsample_enabled'))
-        if downsampled_path:
-            final_path = downsampled_path
-            context['_final_processed_path'] = final_path
-
-        _persist_verification_status(context, final_path)
-
-        blasphemy_path = create_lossy_copy(final_path, settings={
-            'enabled': _qp_post.get('lossy_copy_enabled'),
-            'codec': _qp_post.get('lossy_copy_codec'),
-            'bitrate': _qp_post.get('lossy_copy_bitrate'),
-            'delete_original': _qp_post.get('lossy_copy_delete_original'),
-        } if _qp_post else None)
-        if blasphemy_path:
-            context['_final_processed_path'] = blasphemy_path
+        final_path = _apply_profile_output_transforms(
+            final_path, context, _qp_post)
 
         downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
         cleanup_empty_directories(downloads_path, file_path)

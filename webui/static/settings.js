@@ -3007,8 +3007,13 @@ function qpProfileSummary(profile) {
     }
     if (profile.acoustid_required) parts.push('strict AcoustID');
     if (profile.deep_audio_verify) parts.push('deep verify');
-    if (profile.downsample_enabled) parts.push('downsample');
-    if (profile.lossy_copy_enabled) parts.push(`lossy copy ${(profile.lossy_copy_codec || 'mp3').toUpperCase()}`);
+    if (profile.downsample_enabled) parts.push('retain CD-quality (acquisition remembered)');
+    if (profile.lossy_copy_enabled) {
+        const codec = (profile.lossy_copy_codec || 'mp3').toUpperCase();
+        parts.push(profile.lossy_copy_delete_original
+            ? `retain ${codec} only (acquisition remembered)`
+            : `lossless + ${codec} companion`);
+    }
     if (['until_cutoff', 'until_top'].includes(profile.upgrade_policy)) {
         const cutoffIndex = Math.min(Math.max(parseInt(profile.upgrade_cutoff_index || '0', 10) || 0, 0), Math.max(targets.length - 1, 0));
         const cutoff = targets[cutoffIndex]?.label || 'top target';

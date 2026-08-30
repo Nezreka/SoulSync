@@ -15,6 +15,7 @@ from core.repair_jobs.duplicate_detector import (
     _is_lossy_companion_pair,
     _normalize,
 )
+from core.library.duplicate_rules import is_lossy_companion_file
 
 
 def _track(track_id, *, title, artist="Double Duo", album="Crossword Puzzle",
@@ -139,9 +140,41 @@ class TestIsLossyCompanionPair:
             "C:\\Music\\Album\\Song.FLAC", "C:\\music\\album\\Song.Mp3",
             frozenset({'.mp3'}))
 
+    def test_alac_m4a_is_protected_with_mp3_or_opus(self, monkeypatch):
+        monkeypatch.setattr(
+            "core.imports.file_ops.m4a_codec",
+            lambda path: "alac" if str(path).lower().endswith(".m4a") else None,
+        )
+
+        for lossy_ext in (".mp3", ".opus"):
+            assert _is_lossy_companion_pair(
+                "/music/Album/Song.m4a",
+                f"/music/Album/Song{lossy_ext}",
+                frozenset({lossy_ext}),
+            )
+
+    def test_aac_m4a_is_not_treated_as_lossless_source(self, monkeypatch):
+        monkeypatch.setattr("core.imports.file_ops.m4a_codec", lambda _path: "aac")
+
+        assert not _is_lossy_companion_pair(
+            "/music/Album/Song.m4a",
+            "/music/Album/Song.opus",
+            frozenset({".opus"}),
+        )
+
     def test_empty_set_short_circuits(self):
         assert not _is_lossy_companion_pair(
             "/a/Song.flac", "/a/Song.mp3", frozenset())
+
+    def test_filesystem_companion_fallback_requires_lossless_sibling(self, tmp_path):
+        flac = tmp_path / "Song.flac"
+        mp3 = tmp_path / "Song.mp3"
+        flac.write_bytes(b"lossless")
+        mp3.write_bytes(b"lossy")
+
+        assert is_lossy_companion_file(mp3, frozenset({".mp3"})) is True
+        flac.unlink()
+        assert is_lossy_companion_file(mp3, frozenset({".mp3"})) is False
 
 
 class TestCompanionExtsResolution:

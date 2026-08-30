@@ -2,6 +2,7 @@
 duplicate cleaner worker against a tmp transfer folder."""
 
 import os
+import sqlite3
 
 import pytest
 
@@ -10,12 +11,18 @@ from core.library.deleted_quarantine import list_entries
 
 
 class _FakeConfig:
-    def __init__(self, transfer):
+    def __init__(self, transfer, *, lossy_enabled=False, lossy_codec='mp3'):
         self.transfer = transfer
+        self.lossy_enabled = lossy_enabled
+        self.lossy_codec = lossy_codec
 
     def get(self, key, default=None):
         if key == 'soulseek.transfer_path':
             return self.transfer
+        if key == 'lossy_copy.enabled':
+            return self.lossy_enabled
+        if key == 'lossy_copy.codec':
+            return self.lossy_codec
         return default
 
 
@@ -25,6 +32,7 @@ def cleaner(tmp_path, monkeypatch):
     import threading
     dc.init(state, threading.Lock(), lambda p: p, None)
     monkeypatch.setattr(dc, 'config_manager', _FakeConfig(str(tmp_path)))
+    monkeypatch.setattr(dc, 'get_database', lambda: None)
     monkeypatch.setattr(dc, 'add_activity_item', lambda *a, **k: None)
     return state, str(tmp_path)
 
@@ -53,3 +61,86 @@ def test_the_duplicate_cleaner_records_what_it_quarantines(cleaner):
     assert entry['source'] == 'duplicate-cleaner'
     assert entry['deleted_at'] is not None
     assert entry['original_path'] == os.path.join(transfer, 'Artist', 'Album', 'song.mp3')
+
+
+def test_the_duplicate_cleaner_keeps_an_intentional_lossy_copy(cleaner, monkeypatch):
+    state, transfer = cleaner
+    monkeypatch.setattr(
+        dc, 'config_manager',
+        _FakeConfig(transfer, lossy_enabled=True, lossy_codec='mp3'),
+    )
+    album = os.path.join(transfer, 'Artist', 'Album')
+    os.makedirs(album)
+    flac = os.path.join(album, 'song.flac')
+    mp3 = os.path.join(album, 'song.mp3')
+    with open(flac, 'wb') as handle:
+        handle.write(b'flac' * 100)
+    with open(mp3, 'wb') as handle:
+        handle.write(b'mp3')
+
+    dc._run_duplicate_cleaner()
+
+    assert os.path.isfile(flac)
+    assert os.path.isfile(mp3)
+    assert state['duplicates_found'] == 0
+    assert state['deleted'] == 0
+    assert list_entries(transfer)['count'] == 0
+
+
+def test_a_quality_profile_also_protects_its_lossy_copy(cleaner, monkeypatch, tmp_path):
+    state, transfer = cleaner
+    monkeypatch.setattr(dc, 'config_manager', _FakeConfig(transfer))
+    db_path = tmp_path / 'profiles.db'
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE quality_profiles ("
+        "lossy_copy_enabled INTEGER, lossy_copy_codec TEXT)"
+    )
+    conn.execute("INSERT INTO quality_profiles VALUES (1, 'opus')")
+    conn.commit()
+    conn.close()
+
+    class _Db:
+        def _get_connection(self):
+            return sqlite3.connect(db_path)
+
+    monkeypatch.setattr(dc, 'get_database', _Db)
+    album = os.path.join(transfer, 'Artist', 'Album')
+    os.makedirs(album)
+    flac = os.path.join(album, 'song.flac')
+    opus = os.path.join(album, 'song.opus')
+    with open(flac, 'wb') as handle:
+        handle.write(b'flac' * 100)
+    with open(opus, 'wb') as handle:
+        handle.write(b'opus')
+
+    dc._run_duplicate_cleaner()
+
+    assert os.path.isfile(flac)
+    assert os.path.isfile(opus)
+    assert state['duplicates_found'] == 0
+    assert state['deleted'] == 0
+
+
+def test_the_duplicate_cleaner_still_removes_a_real_cross_format_duplicate(
+        cleaner, monkeypatch):
+    state, transfer = cleaner
+    monkeypatch.setattr(
+        dc, 'config_manager',
+        _FakeConfig(transfer, lossy_enabled=True, lossy_codec='mp3'),
+    )
+    album = os.path.join(transfer, 'Artist', 'Album')
+    os.makedirs(album)
+    flac = os.path.join(album, 'song.flac')
+    ogg = os.path.join(album, 'song.ogg')
+    with open(flac, 'wb') as handle:
+        handle.write(b'flac' * 100)
+    with open(ogg, 'wb') as handle:
+        handle.write(b'ogg')
+
+    dc._run_duplicate_cleaner()
+
+    assert os.path.isfile(flac)
+    assert not os.path.isfile(ogg)
+    assert state['duplicates_found'] == 1
+    assert state['deleted'] == 1

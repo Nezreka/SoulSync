@@ -568,14 +568,15 @@ def probe_audio_quality(file_path: str):
                 sample_rate=audio.info.sample_rate,
             )
 
-        if ext in ('m4a', 'aac', 'mp4'):
+        if ext in ('m4a', 'aac', 'mp4', 'alac'):
             from mutagen.mp4 import MP4
             audio = MP4(file_path)
             # .m4a can carry AAC (lossy) OR ALAC (lossless) — only the real
-            # codec tells them apart, which is why extension-based classification
-            # defaults to 'aac' and we correct it here from the probed file.
+            # codec tells them apart.  The explicit .alac extension is already
+            # unambiguous and is accepted by the lossy-copy path, so it must be
+            # probed here as ALAC as well to preserve acquisition provenance.
             codec = (getattr(audio.info, 'codec', '') or '').lower()
-            if 'alac' in codec:
+            if ext == 'alac' or 'alac' in codec:
                 return AudioQuality(
                     format='alac',
                     bitrate=audio.info.bitrate // 1000 if audio.info.bitrate else None,
