@@ -4897,7 +4897,15 @@ function _musicRepairActiveHTML() {
         const cls = t.status === 'error' ? 'error' : (t.status === 'finished' ? 'done' : '');
         const line = `${(done || 0).toLocaleString()} / ${total ? total.toLocaleString() : '…'}` +
             (t.current_item ? ' · ' + _escToast(t.current_item) : '');
-        return _taskCardHTML(t.name || t.job_name || 'Library maintenance', pct, line, cls, _notifActionHTML('Open Tools', 'tools'));
+        // display_name is what the server has always sent (_repair_job_start in
+        // web_server.py puts it in the progress state); this read the wrong key,
+        // so every running job rendered as the same generic "Library
+        // maintenance" card and four at once were indistinguishable (#1211).
+        // t.id is the job_id and beats the generic label if a state ever lands
+        // without a display name.
+        const jobName = t.display_name || t.name || t.job_name || t.id || 'Library maintenance';
+        // _taskCardHTML escapes the title itself, so no _escToast here.
+        return _taskCardHTML(jobName, pct, line, cls, _notifActionHTML('Open Tools', 'tools'));
     }).join('');
 }
 
