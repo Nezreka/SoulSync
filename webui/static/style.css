@@ -16161,8 +16161,10 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     width: 100%;
     height: 100%;
     z-index: 0;
-    opacity: 0;
-    animation: fadeInRow 1s ease-out forwards, gradientShift 8s ease infinite;
+    /* fadeInRow ends at 0.7 — that is the resting look, and it has to
+       live here so a disabled animation lands on it too (#1209). */
+    opacity: 0.7;
+    animation: fadeInRow 1s ease-out both, gradientShift 8s ease infinite;
 }
 
 .pool-category-fallback.failed {
@@ -23311,8 +23313,10 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     display: flex;
     width: fit-content;
     height: 100%;
-    opacity: 0;
-    animation: fadeInRow 1s ease-out forwards, infiniteScroll var(--speed, 30s) linear infinite;
+    /* fadeInRow ends at 0.7 — that is the resting look, and it has to
+       live here so a disabled animation lands on it too (#1209). */
+    opacity: 0.7;
+    animation: fadeInRow 1s ease-out both, infiniteScroll var(--speed, 30s) linear infinite;
     will-change: transform;
 }
 
@@ -35531,9 +35535,8 @@ div.artist-hero-badge {
     aspect-ratio: 0.8;
 
     /* Progressive load animation */
-    opacity: 0;
     transform: translateY(16px) scale(0.97);
-    animation: fadeInUp 0.35s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    animation: fadeInUp 0.35s cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
 @keyframes fadeInUp {
@@ -56321,8 +56324,7 @@ tr.tag-diff-same {
     border: 1px solid rgba(255, 255, 255, 0.08);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     transition: all 0.25s ease;
-    opacity: 0;
-    animation: docImgFadeIn 0.4s ease forwards;
+    animation: docImgFadeIn 0.4s ease both;
 }
 
 .docs-screenshot-label {
@@ -63776,8 +63778,7 @@ tr.tag-diff-same {
     cursor: pointer;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     margin-bottom: 8px;
-    animation: fadeSlideUp 0.3s ease forwards;
-    opacity: 0;
+    animation: fadeSlideUp 0.3s ease both;
 }
 .server-disambig-card:hover {
     background: rgba(255, 255, 255, 0.07);
