@@ -220,8 +220,15 @@ def test_js_search_now_buttons_on_all_three_levels():
 def test_js_search_all_button_wired_and_scoped():
     assert "data-vwsh-searchall" in _INDEX
     assert "'/api/video/wishlist/search-all'" in _WSH_JS
-    # hidden on the YouTube tab (it has its own drain)
-    assert "state.tab === 'youtube' || !has" in _WSH_JS
+    # The button used to be HIDDEN on the YouTube tab ("it has its own drain").
+    # Searching genuinely means nothing there - the video IS the release - but
+    # hiding it left that tab with no bulk action at all, and once a video could
+    # be waiting out a retry backoff the only override was clicking every row.
+    # Same button, different verb: it searches on the TMDB tabs and downloads on
+    # YouTube, through the drain's own enqueue path.
+    assert "sa.hidden = !has" in _WSH_JS
+    assert "'/api/video/wishlist/youtube/download-all'" in _WSH_JS
+    assert "Download all waiting" in _WSH_JS
     assert ".vwsh-searchall[hidden] { display: none; }" in _CSS
 
 
