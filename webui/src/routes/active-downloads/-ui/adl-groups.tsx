@@ -15,6 +15,14 @@ import {
 import { batchColorIndex, batchEta, statusClass } from '../-adl.helpers';
 import { AdlRow } from './adl-row';
 
+function queueOrder(row: AdlDownload): number {
+  return typeof row.batch_position === 'number' ? row.batch_position : Number.MAX_SAFE_INTEGER;
+}
+
+function sortByBatchPosition(rows: AdlDownload[]): AdlDownload[] {
+  return [...rows].sort((a, b) => queueOrder(a) - queueOrder(b) || a.timestamp - b.timestamp);
+}
+
 function PhaseIcon({ icon }: { icon: 'spinner' | 'check' | 'hourglass' | null }) {
   if (icon === 'spinner') return <span className="adl-spinner" style={{ marginRight: '4px' }} />;
   if (icon === 'check') return <span style={{ color: '#22c55e', marginRight: '4px' }}>✓</span>;
@@ -110,15 +118,17 @@ function BucketedRows({
   openBuckets,
   onToggleBucket,
   onCancelRow,
+  onDownloadNext,
 }: {
   rows: AdlDownload[];
   openBuckets: ReadonlySet<string>;
   onToggleBucket: (key: string) => void;
   onCancelRow: (dl: AdlDownload) => void | Promise<void>;
+  onDownloadNext: (dl: AdlDownload) => void | Promise<void>;
 }) {
   const inFlight = rows.filter((dl) => statusClass(dl.status) === 'active');
   const broken = rows.filter((dl) => ['failed', 'cancelled'].includes(statusClass(dl.status)));
-  const queued = rows.filter((dl) => statusClass(dl.status) === 'queued');
+  const queued = sortByBatchPosition(rows.filter((dl) => statusClass(dl.status) === 'queued'));
   const done = rows.filter((dl) => statusClass(dl.status) === 'completed');
 
   return (
@@ -139,7 +149,15 @@ function BucketedRows({
             onToggle={() => onToggleBucket('queued')}
           />
           {openBuckets.has('queued')
-            ? queued.map((dl) => <AdlRow key={dl.task_id} dl={dl} compact onCancel={onCancelRow} />)
+            ? queued.map((dl) => (
+                <AdlRow
+                  key={dl.task_id}
+                  dl={dl}
+                  compact
+                  onCancel={onCancelRow}
+                  onDownloadNext={onDownloadNext}
+                />
+              ))
             : null}
         </>
       ) : null}
@@ -180,6 +198,8 @@ export interface AdlGroupProps {
   onCancel: () => void;
   onOpenModal: () => void;
   onCancelRow: (dl: AdlDownload) => void | Promise<void>;
+  onDownloadNext: (dl: AdlDownload) => void | Promise<void>;
+  onDownloadBatchNext: (batch: AdlBatch) => void | Promise<void>;
 }
 
 /**
@@ -203,6 +223,8 @@ export function AdlGroup({
   onCancel,
   onOpenModal,
   onCancelRow,
+  onDownloadNext,
+  onDownloadBatchNext,
 }: AdlGroupProps) {
   const terminal = isTerminalPhase(batch.phase);
   const [openOverride, setOpenOverride] = useState<boolean | null>(null);
@@ -223,6 +245,11 @@ export function AdlGroup({
   const stats = statLine(batch);
   const eta = batchEta(batch, samples, Date.now());
   const active = isBatchActive(batch);
+  const canDownloadBatchNext = !terminal && (batch.queued || 0) > 0;
+  const orderedRows =
+    rows.length > 0 && rows.every((dl) => statusClass(dl.status) === 'queued')
+      ? sortByBatchPosition(rows)
+      : rows;
 
   const art = allBatchRows.find((t) => t.artwork)?.artwork ?? null;
 
@@ -310,6 +337,32 @@ export function AdlGroup({
               <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
             </svg>
           </button>
+          {canDownloadBatchNext ? (
+            <button
+              type="button"
+              className="adl-group-act adl-group-next"
+              title="Download this batch next"
+              onClick={(event) => {
+                event.stopPropagation();
+                void onDownloadBatchNext(batch);
+              }}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M5 12h14" />
+                <path d="m13 6 6 6-6 6" />
+                <path d="M5 5v14" />
+              </svg>
+            </button>
+          ) : null}
           {/* A finished batch has nothing left to cancel. */}
           {!terminal ? (
             <button
@@ -366,9 +419,18 @@ export function AdlGroup({
               openBuckets={openBuckets}
               onToggleBucket={toggleBucket}
               onCancelRow={onCancelRow}
+              onDownloadNext={onDownloadNext}
             />
           ) : (
-            rows.map((dl) => <AdlRow key={dl.task_id} dl={dl} compact onCancel={onCancelRow} />)
+            orderedRows.map((dl) => (
+              <AdlRow
+                key={dl.task_id}
+                dl={dl}
+                compact
+                onCancel={onCancelRow}
+                onDownloadNext={onDownloadNext}
+              />
+            ))
           )}
           {rows.length === 0 && batch.phase === 'album_downloading' ? (
             <div className="adl-group-note">
@@ -651,6 +713,8 @@ export interface AdlGroupedListProps {
   onOpenBatchModal: (batch: AdlBatch) => void;
   onOpenFullHistory: () => void;
   onCancelRow: (dl: AdlDownload) => void | Promise<void>;
+  onDownloadNext: (dl: AdlDownload) => void | Promise<void>;
+  onDownloadBatchNext: (batch: AdlBatch) => void | Promise<void>;
   onNavigate: (page: string) => void;
 }
 
@@ -673,6 +737,8 @@ export function AdlGroupedList({
   onOpenBatchModal,
   onOpenFullHistory,
   onCancelRow,
+  onDownloadNext,
+  onDownloadBatchNext,
   onNavigate,
 }: AdlGroupedListProps) {
   const batchIds = new Set(batches.map((b) => b.batch_id));
@@ -709,6 +775,8 @@ export function AdlGroupedList({
           onCancel={() => onCancelBatch(batch)}
           onOpenModal={() => onOpenBatchModal(batch)}
           onCancelRow={onCancelRow}
+          onDownloadNext={onDownloadNext}
+          onDownloadBatchNext={onDownloadBatchNext}
         />
       ))}
       {!filterBatchId ? <AdlEarlierGroup rows={earlier} onCancelRow={onCancelRow} /> : null}

@@ -34,6 +34,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from core.downloads.prioritize import (
+    batch_wake_sort_key,
+    should_defer_batch_start,
+    top_promoted_batch_id,
+)
 from core.downloads.history import record_sync_history_completion
 from core.runtime_state import (
     add_activity_item,
@@ -447,6 +452,13 @@ def start_next_batch_of_downloads(batch_id: str, deps: LifecycleDeps) -> None:
 
             logger.info(f"[Batch Lock] Starting workers for {batch_id}: active={active_count}, max={max_concurrent}, queue_pos={queue_index}/{len(queue)}, global_max={global_max}")
 
+            if should_defer_batch_start(batch_id, download_batches, download_tasks):
+                logger.info(
+                    "[Batch Lock] %s yielding to a user-prioritized batch",
+                    batch_id,
+                )
+                return
+
             # Start downloads up to the concurrent limit
             while active_count < max_concurrent and queue_index < len(queue):
                 if global_max is not None:
@@ -538,7 +550,12 @@ def _wake_waiting_batches(finished_batch_id: str, deps: LifecycleDeps) -> None:
     order — the deadlock this codebase has already been bitten by.
     """
     if deps.get_global_max_concurrent is None:
-        return
+        with tasks_lock:
+            has_promoted_batch = (
+                top_promoted_batch_id(download_batches, download_tasks) is not None
+            )
+        if not has_promoted_batch:
+            return
 
     waiting = []
     try:
@@ -564,6 +581,9 @@ def _wake_waiting_batches(finished_batch_id: str, deps: LifecycleDeps) -> None:
     except Exception:  # noqa: BLE001
         global_max = None
 
+    waiting.sort(
+        key=lambda bid: batch_wake_sort_key(bid, download_batches.get(bid, {}))
+    )
     for other_id in waiting:
         if global_max is not None:
             with tasks_lock:

@@ -1891,7 +1891,12 @@ def validate_and_heal_batch_states():
                 # path stops early for the same reason.
                 _free_slots = _global_max - _total_active
                 if _free_slots > 0:
-                    for _bid, _bdata in download_batches.items():
+                    for _bid, _bdata in sorted(
+                        download_batches.items(),
+                        key=lambda item: _downloads_lifecycle.batch_wake_sort_key(
+                            item[0], item[1]
+                        ),
+                    ):
                         if _free_slots <= 0:
                             break
                         if _bid in batches_needing_workers:
@@ -15232,6 +15237,57 @@ def clear_completed_downloads():
         logger.error(f"Error clearing completed downloads: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+@app.route('/api/downloads/task/download-next', methods=['POST'])
+def prioritize_download_task_next():
+    """Move one queued task to the next unstarted slot in its batch."""
+    data = request.get_json(silent=True) or {}
+    task_id = data.get('task_id')
+    if not task_id:
+        return jsonify({'success': False, 'error': 'Missing task_id'}), 400
+
+    try:
+        from core.downloads.prioritize import prioritize_task_next
+        success, message, payload = prioritize_task_next(
+            str(task_id), _get_batch_lock
+        )
+        status = 200 if success else 400
+        body = (
+            {'success': success, 'message': message}
+            if success
+            else {'success': False, 'error': message}
+        )
+        if payload:
+            body.update(payload)
+        return jsonify(body), status
+    except Exception as e:
+        logger.error(f"Error prioritizing download task: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/downloads/batch/download-next', methods=['POST'])
+def prioritize_download_batch_next():
+    """Run a batch next after already-active workers elsewhere drain."""
+    data = request.get_json(silent=True) or {}
+    batch_id = data.get('batch_id')
+    if not batch_id:
+        return jsonify({'success': False, 'error': 'Missing batch_id'}), 400
+
+    try:
+        from core.downloads.prioritize import prioritize_batch_next
+        success, message, payload = prioritize_batch_next(str(batch_id))
+        status = 200 if success else 400
+        body = (
+            {'success': success, 'message': message}
+            if success
+            else {'success': False, 'error': message}
+        )
+        if payload:
+            body.update(payload)
+        return jsonify(body), status
+    except Exception as e:
+        logger.error(f"Error prioritizing download batch: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/downloads/cancel_task', methods=['POST'])
 def cancel_download_task():

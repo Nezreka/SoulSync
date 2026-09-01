@@ -63,6 +63,8 @@ const groupProps = (over: Record<string, unknown> = {}) => ({
   onCancel: vi.fn(),
   onOpenModal: vi.fn(),
   onCancelRow: vi.fn(),
+  onDownloadNext: vi.fn(),
+  onDownloadBatchNext: vi.fn(),
   ...over,
 });
 
@@ -114,6 +116,13 @@ describe('AdlGroup', () => {
     );
   });
 
+  it('runs the batch Download Next action without toggling', () => {
+    const props = groupProps();
+    const { container } = render(<AdlGroup {...props} />);
+    fireEvent.click(container.querySelector('.adl-group-next') as HTMLElement);
+    expect(props.onDownloadBatchNext).toHaveBeenCalledWith(props.batch);
+    expect(container.querySelector('.adl-group-rows')).not.toBeNull();
+  });
   it('keeps modal-open, filter and cancel as header actions that do not toggle', () => {
     const props = groupProps();
     const { container } = render(<AdlGroup {...props} />);
@@ -146,6 +155,15 @@ describe('bucketed group rows', () => {
     row({ task_id: 'x1', status: 'cancelled', title: 'Bailed' }),
   ];
 
+  it('uses batch_position, not server recency order, for the queued preview', () => {
+    const rows = [
+      row({ task_id: 'q2', status: 'queued', title: 'Second', batch_position: 5 }),
+      row({ task_id: 'q1', status: 'queued', title: 'First', batch_position: 4 }),
+    ];
+    const { container } = render(<AdlGroup {...groupProps({ rows, allBatchRows: rows })} />);
+    const fold = container.querySelector('.adl-bucket-fold') as HTMLElement;
+    expect(fold.textContent).toContain('next: First');
+  });
   it('shows moving + broken rows in full and folds queued/done to one line each', () => {
     const { container } = render(
       <AdlGroup {...groupProps({ rows: mixed, allBatchRows: mixed })} />,
@@ -265,6 +283,8 @@ describe('AdlGroupedList', () => {
     onOpenBatchModal: vi.fn(),
     onOpenFullHistory: vi.fn(),
     onCancelRow: vi.fn(),
+    onDownloadNext: vi.fn(),
+    onDownloadBatchNext: vi.fn(),
     onNavigate: vi.fn(),
     ...over,
   });

@@ -142,6 +142,8 @@ export interface AdlRowProps {
    * May return a promise — the row locks its button until it settles.
    */
   onCancel?: (dl: AdlDownload) => void | Promise<void>;
+  /** Rendered only for queued rows; moves the track to the next unstarted slot. */
+  onDownloadNext?: (dl: AdlDownload) => void | Promise<void>;
   /** Set in the unverified view — makes the whole row open the audit trail. */
   onRowAudit?: (dl: AdlDownload) => void;
   /** The review action strip, supplied by the unverified view. */
@@ -150,7 +152,14 @@ export interface AdlRowProps {
   compact?: boolean;
 }
 
-export function AdlRow({ dl, onCancel, onRowAudit, actions, compact }: AdlRowProps) {
+export function AdlRow({
+  dl,
+  onCancel,
+  onDownloadNext,
+  onRowAudit,
+  actions,
+  compact,
+}: AdlRowProps) {
   const cls = statusClass(dl.status);
   const label = statusLabel(dl.status);
   const badge = verificationBadge(dl);
@@ -174,6 +183,8 @@ export function AdlRow({ dl, onCancel, onRowAudit, actions, compact }: AdlRowPro
    */
   const cancellingRef = useRef(false);
   const [cancelling, setCancelling] = useState(false);
+  const downloadNextRef = useRef(false);
+  const [downloadNextPending, setDownloadNextPending] = useState(false);
 
   /**
    * Row expansion (#1156). Local state survives the 2s poll because rows are
@@ -213,6 +224,8 @@ export function AdlRow({ dl, onCancel, onRowAudit, actions, compact }: AdlRowPro
     (cls === 'active' || cls === 'queued') &&
     Boolean(dl.playlist_id) &&
     dl.track_index !== undefined;
+  const canDownloadNext =
+    ['pending', 'queued'].includes(String(dl.status)) && !dl.is_persistent_history;
 
   // The one signal a downloads page owes you: the bar rides the row's bottom
   // edge, and the speed comes from the live narration when the engine has it.
@@ -311,6 +324,46 @@ export function AdlRow({ dl, onCancel, onRowAudit, actions, compact }: AdlRowPro
 
       {actions}
 
+      {canDownloadNext && onDownloadNext ? (
+        <button
+          type="button"
+          className={`adl-row-next${downloadNextPending ? ' adl-row-next-pending' : ''}`}
+          title="Download this track next"
+          aria-label="Download track next"
+          disabled={downloadNextPending}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (downloadNextRef.current) return;
+            downloadNextRef.current = true;
+            setDownloadNextPending(true);
+            void (async () => {
+              try {
+                await onDownloadNext(dl);
+              } catch {
+                // The page handler owns the toast; keep the row from leaking a rejection.
+              } finally {
+                downloadNextRef.current = false;
+                setDownloadNextPending(false);
+              }
+            })();
+          }}
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M5 12h14" />
+            <path d="m13 6 6 6-6 6" />
+            <path d="M5 5v14" />
+          </svg>
+        </button>
+      ) : null}
       {cancellable && onCancel ? (
         <button
           type="button"

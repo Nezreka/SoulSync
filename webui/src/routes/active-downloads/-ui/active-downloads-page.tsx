@@ -4,7 +4,14 @@ import { useCallback, useMemo, useState } from 'react';
 import type { AdlBatch, AdlDeletedEntry, AdlDownload, AdlQuarantineEntry } from '../-adl.types';
 import type { ReviewActionHandlers } from './adl-review';
 
-import { cancelBatch, cancelTask, clearCompleted, setDeletedRetention } from '../-adl.api';
+import {
+  cancelBatch,
+  cancelTask,
+  clearCompleted,
+  downloadBatchNext,
+  downloadTaskNext,
+  setDeletedRetention,
+} from '../-adl.api';
 import { batchSummary, isTerminalPhase } from '../-adl.batch';
 import { formatSpeed, verificationHistoryId, unverifiedKey } from '../-adl.helpers';
 import { useAdlDownloads } from '../-adl.use-downloads';
@@ -119,6 +126,35 @@ export function ActiveDownloadsPage() {
     [refresh],
   );
 
+  const onDownloadNext = useCallback(
+    async (dl: AdlDownload) => {
+      try {
+        const data = await downloadTaskNext(dl.task_id);
+        if (data.success) {
+          toast(`"${dl.title || 'Track'}" will download next`, 'success');
+          refresh();
+        } else toast(data.error || 'Could not move track', 'error');
+      } catch {
+        toast('Could not move track', 'error');
+      }
+    },
+    [refresh],
+  );
+
+  const onDownloadBatchNext = useCallback(
+    async (batch: AdlBatch) => {
+      try {
+        const data = await downloadBatchNext(batch.batch_id);
+        if (data.success) {
+          toast(`"${batch.batch_name || 'Batch'}" will download next`, 'success');
+          refresh();
+        } else toast(data.error || 'Could not prioritize batch', 'error');
+      } catch {
+        toast('Could not prioritize batch', 'error');
+      }
+    },
+    [refresh],
+  );
   const onClearCompleted = useCallback(async () => {
     // This also wipes the persisted history tail and the review queue, so it
     // is confirmed rather than instant.
@@ -439,6 +475,8 @@ export function ActiveDownloadsPage() {
               }
               onOpenFullHistory={() => window.openLibraryHistoryModal?.()}
               onCancelRow={onCancelRow}
+              onDownloadNext={onDownloadNext}
+              onDownloadBatchNext={onDownloadBatchNext}
               // The empty-state links are in-app routes; the router owns those,
               // not the legacy shell navigator.
               onNavigate={(page) => void navigate({ to: `/${page}` })}

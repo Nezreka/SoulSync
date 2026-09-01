@@ -146,6 +146,53 @@ describe('AdlRow', () => {
     });
   });
 
+  describe('download next button', () => {
+    it('appears only for queued rows and calls the handler', () => {
+      const onDownloadNext = vi.fn();
+      const queued = render(
+        <AdlRow dl={row({ status: 'queued' })} onDownloadNext={onDownloadNext} />,
+      );
+      fireEvent.click(queued.container.querySelector('.adl-row-next') as HTMLElement);
+      expect(onDownloadNext).toHaveBeenCalled();
+
+      cleanup();
+      const active = render(
+        <AdlRow dl={row({ status: 'downloading' })} onDownloadNext={onDownloadNext} />,
+      );
+      expect(active.container.querySelector('.adl-row-next')).toBeNull();
+    });
+
+    it('does not also trigger the row click', () => {
+      const onRowAudit = vi.fn();
+      const onDownloadNext = vi.fn();
+      const { container } = render(
+        <AdlRow
+          dl={row({ status: 'queued' })}
+          onDownloadNext={onDownloadNext}
+          onRowAudit={onRowAudit}
+        />,
+      );
+      fireEvent.click(container.querySelector('.adl-row-next') as HTMLElement);
+      expect(onDownloadNext).toHaveBeenCalled();
+      expect(onRowAudit).not.toHaveBeenCalled();
+    });
+
+    it('survives three clicks dispatched in the SAME tick', () => {
+      const onDownloadNext = vi.fn(() => new Promise<void>(() => {}));
+      const { container } = render(
+        <AdlRow dl={row({ status: 'queued' })} onDownloadNext={onDownloadNext} />,
+      );
+      const btn = container.querySelector('.adl-row-next') as HTMLButtonElement;
+
+      act(() => {
+        btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+
+      expect(onDownloadNext).toHaveBeenCalledTimes(1);
+    });
+  });
   describe('cancel button', () => {
     it('appears for in-flight rows with cancel coordinates', () => {
       const onCancel = vi.fn();

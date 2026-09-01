@@ -65956,6 +65956,11 @@ body.max-performance #page-particles-canvas {
     color: #f87171;
 }
 
+.adl-group-next:hover {
+    background: rgba(59, 130, 246, 0.18);
+    color: #93c5fd;
+}
+
 .adl-group-chevron {
     display: inline-flex;
     align-items: center;
@@ -66214,6 +66219,66 @@ body.max-performance #page-particles-canvas {
     transform: rotate(180deg);
 }
 
+/* ── Per-row Download Next button ── */
+.adl-row-next {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    margin-left: 4px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(59, 130, 246, 0.14);
+    border: 1px solid rgba(59, 130, 246, 0.35);
+    color: #93c5fd;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(8px) scale(0.72);
+    transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.adl-row-next svg {
+    display: block;
+}
+
+.adl-row:hover .adl-row-next,
+.adl-row:focus-within .adl-row-next {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0) scale(1);
+}
+
+.adl-row-next:hover {
+    background: linear-gradient(135deg, rgba(96, 165, 250, 0.95), rgba(59, 130, 246, 1));
+    border-color: rgba(96, 165, 250, 0.85);
+    color: #fff;
+    box-shadow: 0 0 14px rgba(59, 130, 246, 0.42), 0 2px 8px rgba(0, 0, 0, 0.3);
+    transform: translateX(0) scale(1.12);
+}
+
+.adl-row-next:active {
+    transform: translateX(0) scale(0.95);
+    transition: transform 0.08s ease;
+}
+
+.adl-row-next-pending,
+.adl-row-next-pending:hover {
+    opacity: 0.5 !important;
+    pointer-events: none !important;
+    transform: translateX(0) scale(1) !important;
+    box-shadow: none !important;
+}
+
+@media (hover: none) {
+    .adl-row-next {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateX(0) scale(1);
+    }
+}
 /* ── Per-row cancel button ──
    Fancy reveal on hover: fades in + slides/scales from the right edge with
    a soft red glow. Only rendered on active/queued rows (set in JS). Terminal
