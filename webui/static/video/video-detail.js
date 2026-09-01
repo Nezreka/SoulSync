@@ -92,6 +92,22 @@
         }
         return defaultSeasonNum(d && d.seasons);
     }
+    // Thumbnail width, not the original. An unsized /api/video/poster/... asks
+    // Plex for the full-size art - a ~2000x3000 poster decoded to ~24MB of
+    // bitmap and then scaled into a 150px card. A twenty-season rail did that
+    // twenty times over. Same helper the wishlist and watchlist grids use.
+    function sizedArt(url, w) {
+        if (!url) return url;
+        if (url.indexOf('/api/video/poster/') !== -1 || url.indexOf('/api/video/backdrop/') !== -1) {
+            return url + (url.indexOf('?') === -1 ? '?' : '&') + 'w=' + w;
+        }
+        if (url.indexOf('image.tmdb.org') !== -1) {
+            var b = w <= 185 ? 185 : (w <= 342 ? 342 : (w <= 500 ? 500 : 780));
+            return url.replace(/\/t\/p\/[^/]+\//, '/t/p/w' + b + '/');
+        }
+        return url;
+    }
+
     function seasonArt(s) {
         // tmdb + youtube carry direct (already-proxied for yt) art urls on the payload.
         if (data && (data.source === 'tmdb' || data.source === 'youtube')) return s.poster_url || data.poster_url || '';
@@ -1384,7 +1400,7 @@
             var oe = fb
                 ? 'var f=this.getAttribute(\'data-fb\');if(f){this.removeAttribute(\'data-fb\');this.src=f;}else{this.style.display=\'none\';}'
                 : 'this.style.display=\'none\'';
-            var img = art ? '<img class="vd-rcard-img" src="' + art + '" alt="" loading="lazy"' +
+            var img = art ? '<img class="vd-rcard-img" src="' + sizedArt(art, 342) + '" alt="" loading="lazy"' +
                 (fb ? ' data-fb="' + esc(fb) + '"' : '') + ' onerror="' + oe + '">' : '';
             return '<button class="vd-rcard' + on + '" type="button" data-vd-season="' + s.season_number + '">' +
                 '<div class="vd-rcard-art">' + img + '<div class="vd-rcard-fb">📺</div>' +
@@ -1509,7 +1525,7 @@
             ? (ep.still_url || '')
             : (ep.has_still ? '/api/video/poster/episode/' + ep.id : '');
         var still = stillSrc
-            ? '<img class="vd-ep-still" src="' + stillSrc + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
+            ? '<img class="vd-ep-still" src="' + sizedArt(stillSrc, 342) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
             : '';
         if (ep.rating) meta.push('★ ' + (Math.round(ep.rating * 10) / 10));
         var key = selectedSeason + '_' + ep.episode_number;
