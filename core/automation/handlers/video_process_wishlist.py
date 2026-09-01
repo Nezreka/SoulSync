@@ -624,8 +624,9 @@ def auto_video_process_wishlist(
                 # be discarded; the best one refused for a reason about
                 # AVAILABILITY (not "wrong season", which is only search noise) is
                 # what turns "why is this stuck" into a decision the user can make.
-                from core.video.wishlist_evidence import summarize_refusals
-                record_outcome(it, media_type, ok, summarize_refusals(cands))
+                from core.video.wishlist_evidence import summarize_search
+                record_outcome(it, media_type, ok, summarize_search(
+                    cands, noun="movie" if media_type == "movie" else "episode"))
             with lock:
                 searched[0] += 1
                 if ok:

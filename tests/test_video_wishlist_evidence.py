@@ -227,3 +227,57 @@ def test_it_still_says_something_useful_with_no_receipt():
     fn = js[js.index("function failWhy("):js.index("function statusPill(")]
     assert "searches without a grab" in fn
     assert "try Search now" in fn, "keep the old advice as the fallback"
+
+
+# ── the two empty-handed cases (the 144-of-147 gap) ──────────────────────────
+
+def test_a_search_that_found_nothing_says_so():
+    """summarize_refusals returns None here, which CLEARED the row's reason and
+    left a warning badge with no sentence. On the live install 144 of 147 stuck
+    rows looked like this - including a 1999 film searched 959 times."""
+    from core.video.wishlist_evidence import NOT_FOUND, refusal_line, summarize_search
+
+    s = summarize_search([])
+    assert s["kind"] == NOT_FOUND
+    assert refusal_line(s) == "Nothing found for this search"
+
+
+def test_results_that_were_all_some_other_title_say_that_instead():
+    """'Nothing found' would be wrong here — the search DID bring things back,
+    they just weren't this item. That difference is the user's next move."""
+    from core.video.wishlist_evidence import IDENTITY, refusal_line, summarize_search
+
+    s = summarize_search([{"rejected": "Wrong season"}, {"rejected": "Wrong year"}],
+                         noun="episode")
+    assert s["kind"] == IDENTITY
+    assert refusal_line(s) == "2 results, none were this episode"
+
+
+def test_a_real_refusal_still_wins_over_the_empty_wording():
+    """The actionable receipt is the whole point; it must not be replaced."""
+    from core.video.wishlist_evidence import refusal_line, summarize_search
+
+    s = summarize_search([
+        {"rejected": "Wrong season"},
+        {"rejected": "SD isn't in your enabled tiers", "quality_label": "SD"},
+    ])
+    assert refusal_line(s) == "Best found: SD — SD isn't in your enabled tiers"
+
+
+def test_neither_empty_case_pretends_to_be_actionable():
+    """is_actionable drives 'you could change a setting'. Nobody can fix
+    'nobody has it' by editing a quality profile."""
+    from core.video.wishlist_evidence import is_actionable, summarize_search
+
+    assert not is_actionable(summarize_search([]))
+    assert not is_actionable(summarize_search([{"rejected": "Wrong year"}]))
+
+
+def test_the_count_is_not_printed_twice():
+    """refusal_line appends '(N releases)' when seen > 1, and the wording here
+    already carries the count."""
+    from core.video.wishlist_evidence import refusal_line, summarize_search
+
+    line = refusal_line(summarize_search([{"rejected": "Wrong year"}] * 5))
+    assert line == "5 results, none were this release"
+    assert "releases)" not in line

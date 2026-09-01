@@ -38,6 +38,7 @@ SWARM = "swarm"                # exists, but nobody is sharing it
 SIZE = "size"                  # exists, but over the size cap
 BLOCKED = "blocked"            # exists, but you blocked it
 OTHER = "other"
+NOT_FOUND = "not_found"    # the search itself came back empty
 
 # Matched against the reason strings core.video.quality_eval actually produces.
 _IDENTITY = ("wrong title", "wrong year", "wrong season", "wrong episode",
@@ -119,6 +120,37 @@ def summarize_refusals(candidates: Iterable[Any]) -> Optional[Dict[str, Any]]:
             "seen": seen}
 
 
+def summarize_search(candidates: Iterable[Any], *, noun: str = "release") -> Optional[Dict[str, Any]]:
+    """The receipt for a fruitless search, INCLUDING the two empty-handed cases.
+
+    :func:`summarize_refusals` answers a narrower question - "which of your rules
+    turned down the best release we found" - and returns None both when nothing
+    was found at all and when everything found was some other title. Those are
+    the two commonest ways a row gets stuck, so the row was left showing a
+    warning badge and forty attempts with no sentence beside it. On the live
+    install that was 144 of 147 stuck rows: a 1999 film nobody seeds reads
+    exactly like one waiting for next week's episode.
+
+    "Nothing found" is not an actionable refusal and must not pretend to be one
+    (:func:`is_actionable` still says no) - but it IS the answer to "why is this
+    stuck", and it is the honest one.
+    """
+    summary = summarize_refusals(candidates)
+    if summary:
+        return summary
+    total = sum(1 for c in candidates or [] if isinstance(c, dict))
+    if not total:
+        return {"quality_label": None, "reason": "Nothing found for this search",
+                "kind": NOT_FOUND, "seen": 1}
+    # Results came back, but every one of them was some other title. Saying how
+    # many stops it reading as "nobody has it" when the truth is "the search
+    # brought back noise".
+    return {"quality_label": None,
+            "reason": "%d result%s, none were this %s"
+                      % (total, "" if total == 1 else "s", noun),
+            "kind": IDENTITY, "seen": 1}
+
+
 def refusal_line(summary: Any) -> Optional[str]:
     """One sentence for the wishlist row. Names the tier AND the rule, because
     either alone leaves the user guessing: "720p" doesn't say why it was refused,
@@ -141,5 +173,6 @@ def is_actionable(summary: Any) -> bool:
     return isinstance(summary, dict) and summary.get("kind") in (QUALITY, SIZE, BLOCKED)
 
 
-__all__ = ["classify_refusal", "summarize_refusals", "refusal_line", "is_actionable",
-           "IDENTITY", "QUALITY", "SWARM", "SIZE", "BLOCKED", "OTHER"]
+__all__ = ["classify_refusal", "summarize_refusals", "summarize_search", "refusal_line",
+           "is_actionable", "IDENTITY", "QUALITY", "SWARM", "SIZE", "BLOCKED", "OTHER",
+           "NOT_FOUND"]
