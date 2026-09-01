@@ -76,7 +76,9 @@ function field(name: string): HTMLInputElement {
   return document.querySelector(`[data-video-conn="${name}"]`) as HTMLInputElement;
 }
 function noteText(server: string): string {
-  return (document.querySelector(`[data-video-conn-note="${server}"]`) as HTMLElement).textContent ?? '';
+  return (
+    (document.querySelector(`[data-video-conn-note="${server}"]`) as HTMLElement).textContent ?? ''
+  );
 }
 function respond(body: unknown) {
   return vi.fn(async () => new Response(JSON.stringify(body))) as unknown as typeof fetch;
@@ -153,20 +155,26 @@ describe('video settings — server connection', () => {
       return new Response(
         JSON.stringify({
           plex: {},
-          jellyfin: { base_url: 'http://jf:8096', api_key: '••••••••••••', has_key: true, inherited: false },
+          jellyfin: {
+            base_url: 'http://jf:8096',
+            api_key: '••••••••••••',
+            has_key: true,
+            inherited: false,
+          },
         }),
       );
     }) as unknown as typeof fetch;
     const { saveConn } = loadConnBlock(fetchImpl);
     field('jellyfin-url').value = 'http://jf:8096';
-    field('jellyfin-key').value = '••••••••••••';   // untouched masked secret
+    field('jellyfin-key').value = '••••••••••••'; // untouched masked secret
     await saveConn(true);
 
-    const posted = JSON.parse(String(calls[0].init?.body));
+    const body = calls[0].init?.body;
+    const posted = JSON.parse(typeof body === 'string' ? body : '{}') as Record<string, unknown>;
     expect(calls[0].url).toBe('/api/video/server-config');
     expect(posted.jellyfin).toEqual({ base_url: 'http://jf:8096', api_key: '••••••••••••' });
     expect(posted.plex).toEqual({ base_url: '', token: '' });
-    expect(calls[1].url).toBe('/api/video/server-config');  // the re-read
+    expect(calls[1].url).toBe('/api/video/server-config'); // the re-read
     expect(noteText('jellyfin')).toBe('Custom video connection.');
   });
 });
