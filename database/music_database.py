@@ -7563,52 +7563,86 @@ class MusicDatabase:
                 logger.error(f"Error clearing {server_source} database data: {e}")
                 raise
     
-    def cleanup_orphaned_records(self) -> Dict[str, int]:
-        """Remove artists and albums that have no associated tracks"""
+    def cleanup_orphaned_records(self, protected_artist_ids=None,
+                                 protected_album_ids=None) -> Dict[str, int]:
+        """Remove artists and albums that have no associated tracks.
+
+        Rows the CURRENT scan run wrote are protected (#1216). A run inserts the
+        album row first and its tracks after, so between those two steps a real
+        album legitimately has zero tracks. If the server's track list for that
+        album comes back short on that one call - no exception, no timeout, just
+        an incomplete answer - this cleanup deletes the album the same run just
+        created. That is not a recoverable loss: with the row gone the server
+        stops reporting the album as recently added, so no later incremental
+        scan rediscovers it either. The album is simply gone until a deep scan.
+
+        Only rows left trackless by an EARLIER run are genuinely orphaned, so
+        the caller passes the ids it touched and they are held back.
+        """
+        def _norm(ids):
+            return {str(i) for i in ids} if ids else set()
+
+        protected_artists = _norm(protected_artist_ids)
+        protected_albums = _norm(protected_album_ids)
+
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                
-                # Find orphaned artists (no tracks)
+
+                # Select the ids rather than counting, so the protected ones can
+                # be held back and the reported counts stay honest.
                 cursor.execute("""
-                    SELECT COUNT(*) FROM artists 
+                    SELECT id FROM artists
                     WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks WHERE artist_id IS NOT NULL)
                 """)
-                orphaned_artists_count = cursor.fetchone()[0]
-                
-                # Find orphaned albums (no tracks)
+                artist_ids = [str(row[0]) for row in cursor.fetchall()]
+
                 cursor.execute("""
-                    SELECT COUNT(*) FROM albums 
+                    SELECT id FROM albums
                     WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)
                 """)
-                orphaned_albums_count = cursor.fetchone()[0]
-                
-                # Delete orphaned artists
-                if orphaned_artists_count > 0:
-                    cursor.execute("""
-                        DELETE FROM artists 
-                        WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks WHERE artist_id IS NOT NULL)
-                    """)
-                    logger.info(f"Removed {orphaned_artists_count} orphaned artists")
-                
-                # Delete orphaned albums  
-                if orphaned_albums_count > 0:
-                    cursor.execute("""
-                        DELETE FROM albums 
-                        WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)
-                    """)
-                    logger.info(f"Removed {orphaned_albums_count} orphaned albums")
-                
+                album_ids = [str(row[0]) for row in cursor.fetchall()]
+
+                artists_to_remove = [i for i in artist_ids if i not in protected_artists]
+                albums_to_remove = [i for i in album_ids if i not in protected_albums]
+                artists_held = len(artist_ids) - len(artists_to_remove)
+                albums_held = len(album_ids) - len(albums_to_remove)
+
+                def _delete(table, ids):
+                    # Chunked: SQLite caps the number of bound variables, and an
+                    # orphan sweep after a big scan can exceed it.
+                    for start in range(0, len(ids), 500):
+                        chunk = ids[start:start + 500]
+                        placeholders = ','.join('?' * len(chunk))
+                        cursor.execute(
+                            f"DELETE FROM {table} WHERE id IN ({placeholders})", chunk)
+
+                if artists_to_remove:
+                    _delete('artists', artists_to_remove)
+                    logger.info(f"Removed {len(artists_to_remove)} orphaned artists")
+
+                if albums_to_remove:
+                    _delete('albums', albums_to_remove)
+                    logger.info(f"Removed {len(albums_to_remove)} orphaned albums")
+
+                if artists_held or albums_held:
+                    logger.info(
+                        f"Kept {artists_held} artists and {albums_held} albums this run "
+                        f"just wrote - trackless for now, not orphaned")
+
                 conn.commit()
-                
+
                 return {
-                    'orphaned_artists_removed': orphaned_artists_count,
-                    'orphaned_albums_removed': orphaned_albums_count
+                    'orphaned_artists_removed': len(artists_to_remove),
+                    'orphaned_albums_removed': len(albums_to_remove),
+                    'artists_protected': artists_held,
+                    'albums_protected': albums_held,
                 }
-                
+
         except Exception as e:
             logger.error(f"Error cleaning up orphaned records: {e}")
-            return {'orphaned_artists_removed': 0, 'orphaned_albums_removed': 0}
+            return {'orphaned_artists_removed': 0, 'orphaned_albums_removed': 0,
+                    'artists_protected': 0, 'albums_protected': 0}
     
     def merge_duplicate_artists(self) -> Dict[str, int]:
         """
