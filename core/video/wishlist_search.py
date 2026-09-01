@@ -119,8 +119,10 @@ def search_all() -> Dict[str, str]:
     from api.video import get_video_db
     db = get_video_db()
     out: Dict[str, str] = {}
-    for media_type, fetch in (("movie", db.movie_wishlist_to_download),
-                              ("episode", db.episode_wishlist_to_download)):
+    # due_only=False: the user asked for everything NOW. Backoff paces the
+    # machine's own hourly tick, it does not overrule a person clicking search.
+    for media_type, fetch in (("movie", lambda: db.movie_wishlist_to_download(due_only=False)),
+                              ("episode", lambda: db.episode_wishlist_to_download(due_only=False))):
         if vpw.is_running(media_type):
             out[media_type] = "busy"
             continue

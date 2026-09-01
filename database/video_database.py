@@ -43,6 +43,8 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
+from core.video.wishlist_backoff import due_sql as _due_sql
+
 SCHEMA_VERSION = 47   # v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
@@ -5904,14 +5906,19 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def movie_wishlist_to_download(self) -> list:
+    def movie_wishlist_to_download(self, due_only: bool = True) -> list:
         """Wished movies ready to grab: only ``status='wanted'`` (released) — skips
         'monitored' (unreleased). OWNED titles are included, annotated with
         ``owned`` + ``owned_resolutions`` (the library files' resolutions,
         comma-joined) — the 'upgrade until cutoff' semantics: the drain skips
         owned items that already meet the cutoff and only accepts strictly
         better releases for the rest, which is what keeps the old
-        owned-re-download loop broken. Newest year first."""
+        owned-re-download loop broken. Newest year first.
+
+        ``due_only`` applies the retry backoff (#wishlist-backoff): a row that has
+        failed repeatedly waits longer and longer before the automatic drain tries
+        it again. Pass False for a user-initiated "search everything now" and for
+        RSS matching, which spends no searches."""
         conn = self._get_connection()
         try:
             return [dict(r) for r in conn.execute(
@@ -5930,6 +5937,8 @@ class VideoDatabase:
                 "(SELECT m.imdb_id FROM movies m WHERE m.tmdb_id=w.tmdb_id) AS imdb_id "
                 "FROM video_wishlist w "
                 "WHERE w.kind='movie' AND w.status='wanted' AND w.tmdb_id IS NOT NULL "
+                + (" AND " + _due_sql("w") + " " if due_only else "")
+                +
                 # release-window gate: only search once within a week of release (early scene
                 # releases appear a few days out). A further-off movie stays wished but isn't
                 # hunted — no risk of grabbing a wrong-titled or fake 'release' before it exists.
@@ -5985,13 +5994,16 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def episode_wishlist_to_download(self) -> list:
+    def episode_wishlist_to_download(self, due_only: bool = True) -> list:
         """Wished episodes READY to grab: aired (or air-date-unknown), never episodes still in
         the future. Upcoming episodes CAN sit on the wishlist now (e.g. pre-ordered from the
         calendar), but the drain must not hunt for a release that can't exist yet — so this
         skips ``air_date`` in the future. OWNED episodes are included with the same
         ``owned``/``owned_resolutions`` annotation as movies (upgrade-until semantics; the
-        drain does the cutoff/strictly-better judging). Newest air date first."""
+        drain does the cutoff/strictly-better judging). Newest air date first.
+
+        ``due_only`` applies the retry backoff — see
+        :meth:`movie_wishlist_to_download`."""
         conn = self._get_connection()
         try:
             return [dict(r) for r in conn.execute(
@@ -6019,6 +6031,8 @@ class VideoDatabase:
                 "(SELECT MAX(s.tvdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS tvdb_id, "
                 "(SELECT MAX(s.imdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS imdb_id "
                 "FROM video_wishlist w WHERE w.kind='episode' AND w.tmdb_id IS NOT NULL "
+                + (" AND " + _due_sql("w") + " " if due_only else "")
+                +
                 # release-window gate: search an episode only once it's within a week of air
                 # (early scene releases show up a few days out) — a further-off episode stays on
                 # the wishlist but isn't searched yet, so the drain never hunts a release that

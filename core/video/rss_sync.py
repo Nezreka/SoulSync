@@ -155,8 +155,10 @@ def _rss_pass_inner(*, fetch, log) -> Dict[str, Any]:
     except Exception:   # noqa: BLE001 - no profile → no cutoff
         cutoff = 0
 
-    for media_type, items in (("movie", db.movie_wishlist_to_download()),
-                              ("episode", db.episode_wishlist_to_download())):
+    # due_only=False: matching an incoming feed against the wishlist spends no
+    # searches, so there is nothing to back off from.
+    for media_type, items in (("movie", db.movie_wishlist_to_download(due_only=False)),
+                              ("episode", db.episode_wishlist_to_download(due_only=False))):
         if any(it.get("owned") for it in items):
             per_item = vpw._cutoff_rank_for_item if any(
                 it.get("quality_profile_id") for it in items) else None
