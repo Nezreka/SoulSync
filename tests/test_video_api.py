@@ -1529,3 +1529,88 @@ def test_download_history_routes_registered():
     rules = {r.rule for r in app.url_map.iter_rules()}
     assert "/api/video/downloads/history" in rules
     assert "/api/video/downloads/history/<int:history_id>" in rules
+
+
+# ── #1213: video's own server creds must survive a half-filled save ──────────
+
+def _no_music_servers(monkeypatch):
+    """A fresh install: music has no Plex/Jellyfin to inherit from."""
+    import core.settings as cs
+
+    class CM:
+        def get_plex_config(self): return {}
+        def get_jellyfin_config(self): return {}
+        def get_active_media_server(self): return None
+    monkeypatch.setattr(cs, "config_manager", CM())
+
+
+def test_half_filled_video_creds_come_back(tmp_path, monkeypatch):
+    """#1213: on a fresh install, typing only the Jellyfin URL made it vanish. The
+    settings form saves on change, then re-reads - and the GET was returning the
+    EFFECTIVE config, where a url without a key isn't a usable override, so it fell
+    through to music's (empty) one and blanked the field the user had just typed.
+    The form has to show what video STORED, half-filled or not."""
+    _no_music_servers(monkeypatch)
+    c = _client_as(tmp_path, is_admin=True)
+
+    # url first, key not typed yet (exactly what a blur into the key field posts)
+    assert c.post("/api/video/server-config",
+                  json={"jellyfin": {"base_url": "http://jf:8096", "api_key": ""},
+                        "plex": {"base_url": "", "token": ""}}).status_code == 200
+    j = c.get("/api/video/server-config").get_json()["jellyfin"]
+    assert j["base_url"] == "http://jf:8096"
+    assert j["has_key"] is False and j["inherited"] is False
+
+    # ...and now the key: both halves stick.
+    assert c.post("/api/video/server-config",
+                  json={"jellyfin": {"base_url": "http://jf:8096", "api_key": "abc123"}}
+                  ).status_code == 200
+    j = c.get("/api/video/server-config").get_json()["jellyfin"]
+    assert j["base_url"] == "http://jf:8096" and j["has_key"] is True
+    assert j["api_key"] and "abc123" not in j["api_key"]     # masked, never echoed
+
+
+def test_key_first_video_creds_come_back(tmp_path, monkeypatch):
+    """The other order from the report: Plex token typed before the URL."""
+    _no_music_servers(monkeypatch)
+    c = _client_as(tmp_path, is_admin=True)
+    assert c.post("/api/video/server-config",
+                  json={"plex": {"base_url": "", "token": "tok"}}).status_code == 200
+    p = c.get("/api/video/server-config").get_json()["plex"]
+    assert p["has_token"] is True and p["base_url"] == "" and p["inherited"] is False
+
+
+def test_music_creds_still_shown_when_video_has_none(tmp_path, monkeypatch):
+    """Unchanged behaviour: with no video override at all, the form shows music's
+    connection flagged as inherited."""
+    import core.settings as cs
+
+    class CM:
+        def get_plex_config(self): return {"base_url": "http://p", "token": "t"}
+        def get_jellyfin_config(self): return {}
+        def get_active_media_server(self): return "plex"
+    monkeypatch.setattr(cs, "config_manager", CM())
+
+    c = _client_as(tmp_path, is_admin=True)
+    body = c.get("/api/video/server-config").get_json()
+    assert body["plex"]["base_url"] == "http://p"
+    assert body["plex"]["has_token"] is True and body["plex"]["inherited"] is True
+    assert body["jellyfin"]["base_url"] == "" and body["jellyfin"]["inherited"] is True
+
+
+def test_video_override_hides_the_inherited_value(tmp_path, monkeypatch):
+    """A video-side URL must not be overwritten by music's, even before its token
+    is filled in - otherwise the user's half-typed override disappears."""
+    import core.settings as cs
+
+    class CM:
+        def get_plex_config(self): return {"base_url": "http://music-plex", "token": "t"}
+        def get_jellyfin_config(self): return {}
+        def get_active_media_server(self): return "plex"
+    monkeypatch.setattr(cs, "config_manager", CM())
+
+    c = _client_as(tmp_path, is_admin=True)
+    c.post("/api/video/server-config", json={"plex": {"base_url": "http://video-plex"}})
+    p = c.get("/api/video/server-config").get_json()["plex"]
+    assert p["base_url"] == "http://video-plex" and p["inherited"] is False
+    assert p["has_token"] is False
