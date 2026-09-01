@@ -703,7 +703,7 @@ def _requery_worker(dl_id) -> None:
     from core.video.quality_eval import evaluate_release
     from core.video.quality_profile import profile_by_id
     from core.video.release_parse import parse_release
-    from core.video.retry import merge_candidates, plan_retry
+    from core.video.retry import exhausted_reason, merge_candidates, plan_retry
     try:
         db = _db_provider() if _db_provider else None
         if db is None:
@@ -711,6 +711,9 @@ def _requery_worker(dl_id) -> None:
         first = db.get_video_download(dl_id) or {}
         # requery under the profile the ORIGINAL grab was judged with (P2)
         profile = profile_by_id(db, first.get("quality_profile_id"))
+        # What the retries actually SAW, so giving up can say why instead of the
+        # one generic sentence every exhausted download used to record.
+        seen = {"searches": 0, "hits": 0, "accepted": 0, "refusals": []}
         for _ in range(8):   # hard loop cap on top of the attempt budget
             row = db.get_video_download(dl_id)
             if not row or row.get("status") != "searching":
@@ -733,6 +736,8 @@ def _requery_worker(dl_id) -> None:
             db.update_video_download(dl_id, tried_queries=json.dumps(tq),
                                      attempts=int(row.get("attempts") or 0) + 1)
             polled = _search_for_retry(query)
+            seen["searches"] += 1
+            seen["hits"] += len(polled.get("hits") or [])
             accepted = []
             blocked_users = db.blocked_usernames()
             from api.video.downloads import _parse_text
@@ -749,6 +754,12 @@ def _requery_worker(dl_id) -> None:
                                      size_gb=round((hit.get("size_bytes") or 0) / (1024 ** 3), 1))
                 if v["accepted"]:
                     accepted.append(hit)
+                    seen["accepted"] += 1
+                else:
+                    # Every refusal, so the summary counts the same population it
+                    # describes (and can name the rule that turned the best down).
+                    seen["refusals"].append({"rejected": v.get("rejected"),
+                                             "quality_label": v.get("quality_label")})
             row2 = db.get_video_download(dl_id)
             if not row2 or row2.get("status") != "searching":
                 return
@@ -763,7 +774,7 @@ def _requery_worker(dl_id) -> None:
             # this query gave nothing usable → loop tries the next query (or fails)
         # Exhausted every retry — fail for real, and (like _fail_or_retry) put it
         # back on the wishlist + archive it so it isn't silently lost.
-        err = "No working release found after retries"
+        err = exhausted_reason(seen, (db.get_video_download(dl_id) or {}).get("tried_files"))
         final = db.get_video_download(dl_id) or {"id": dl_id}
         db.update_video_download(dl_id, status="failed", error=err, completed_at=_now())
         _wishlist_failed(db, final)

@@ -116,4 +116,48 @@ def merge_candidates(new_accepted: Any, tried_files: Any, blocked=frozenset(),
     return out
 
 
-__all__ = ["MAX_ATTEMPTS", "next_query", "plan_retry", "merge_candidates"]
+def exhausted_reason(stats: Any, tried_files: Any = None) -> str:
+    """Why a download gave up, in the words of what actually happened.
+
+    Every exhausted retry recorded the same sentence - "No working release found
+    after retries". On Boulder's install that is 1,495 of 1,507 Soulseek failures
+    and 437 of 443 torrent ones: nearly two thousand rows, no diagnosis in any of
+    them. "Nothing was posted", "six were posted and your profile refused them
+    all" and "four peers were tried and none sent the file" are three different
+    problems with three different answers, and they all read identically.
+
+    ``stats`` = {searches, hits, accepted, refusals} accumulated by the requery
+    loop; ``refusals`` are the per-candidate verdicts, so the same evidence
+    summariser the wishlist row uses can name the rule that refused the best of
+    them. Pure.
+    """
+    st = stats if isinstance(stats, dict) else {}
+    searches = int(st.get("searches") or 0)
+    hits = int(st.get("hits") or 0)
+    tried = len(_loads(tried_files, []) if not isinstance(tried_files, list) else tried_files)
+
+    if searches and not hits:
+        return ("No results from %d search%s" % (searches, "" if searches == 1 else "es"))
+
+    if hits and not int(st.get("accepted") or 0):
+        try:
+            from core.video.wishlist_evidence import refusal_line, summarize_search
+            line = refusal_line(summarize_search(st.get("refusals") or []))
+        except Exception:   # noqa: BLE001 - a diagnosis must never break the failure path
+            line = None
+        if line:
+            # The evidence line already opens with its own count for the
+            # "they were all some other title" case; don't say it twice.
+            return line if line[:1].isdigit() else (
+                "%d result%s, none accepted — %s" % (hits, "" if hits == 1 else "s", line))
+        return "%d result%s, none matched your quality profile" % (hits, "" if hits == 1 else "s")
+
+    if tried:
+        return ("Tried %d release%s, none completed — the sources went away or never sent the file"
+                % (tried, "" if tried == 1 else "s"))
+
+    return "No working release found after retries"
+
+
+__all__ = ["MAX_ATTEMPTS", "next_query", "plan_retry", "merge_candidates",
+           "exhausted_reason"]
