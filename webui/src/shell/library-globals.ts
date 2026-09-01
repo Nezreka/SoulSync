@@ -53,6 +53,8 @@ interface LibraryPlayableTrack {
   album_id?: number;
   artist_name?: string;
   _stats_image?: string | null;
+  /** Play THIS file, skipping the title+artist refresh below. See playLibraryTrack. */
+  exact_path?: boolean;
 }
 
 interface ArtistDetailPageState {
@@ -304,7 +306,17 @@ export async function playLibraryTrack(
   // overwrite the caller-supplied fields with the DB values. Falls back
   // silently to the caller-supplied values on any error so we never lose the
   // play action over a metadata fetch.
-  if (track.id && (track.title || track.name) && (artistName || track.artist_name)) {
+  //
+  // exact_path opts out. resolve-track matches on title+artist with LIMIT 1, so
+  // for two copies of the same song it hands BOTH the same file_path - a caller
+  // auditioning duplicates would play identical audio twice and think it had
+  // compared them. Callers that already hold the exact file say so.
+  if (
+    !track.exact_path &&
+    track.id &&
+    (track.title || track.name) &&
+    (artistName || track.artist_name)
+  ) {
     try {
       const _dbResp = await fetch('/api/stats/resolve-track', {
         method: 'POST',

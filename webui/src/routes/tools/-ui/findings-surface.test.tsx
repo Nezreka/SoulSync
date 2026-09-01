@@ -1758,6 +1758,79 @@ describe('the detail renderer', () => {
     expect(bodyOf('/1/fix')).toEqual({ fix_action: 'trk-1' });
   });
 
+  it('each duplicate copy plays ITS OWN file, verbatim', async () => {
+    // #1214. The whole point is A/B-ing two copies, so the two buttons must not
+    // hand over the same file. exact_path is what guarantees it: without it
+    // playLibraryTrack re-resolves title+artist through resolve-track, which is
+    // LIMIT 1, and two copies of one song would both play whichever row it hit.
+    const detail = await openDetail({
+      finding_type: 'duplicate_tracks',
+      details: {
+        tracks: [
+          {
+            id: 1,
+            title: 'Song',
+            artist: 'Band',
+            album: 'LP',
+            file_path: '/a/x.mp3',
+            bitrate: 320,
+          },
+          { id: 2, title: 'Song', artist: 'Band', album: 'LP', file_path: '/a/x.flac' },
+        ],
+      },
+    });
+    const buttons = [...detail.querySelectorAll('.repair-subitem-play')];
+    expect(buttons).toHaveLength(2);
+
+    fireEvent.click(buttons[0]);
+    fireEvent.click(buttons[1]);
+    expect(playSpy).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ file_path: '/a/x.mp3', id: 1, exact_path: true }),
+      'LP',
+      'Band',
+    );
+    expect(playSpy).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ file_path: '/a/x.flac', id: 2, exact_path: true }),
+      'LP',
+      'Band',
+    );
+  });
+
+  it('auditioning a copy does not choose it', async () => {
+    // The row means "keep this version" and the fix is destructive, so the play
+    // button must not bubble into it.
+    const detail = await openDetail({
+      finding_type: 'duplicate_tracks',
+      details: {
+        tracks: [
+          { id: 1, track_id: 'trk-1', title: 'Song', artist: 'Band', file_path: '/a/x.mp3' },
+          { id: 2, track_id: 'trk-2', title: 'Song', artist: 'Band', file_path: '/a/x.flac' },
+        ],
+      },
+    });
+    fireEvent.click(detail.querySelectorAll('.repair-subitem-play')[0]);
+    await flush();
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+
+  it('a copy with no file path gets no play button', async () => {
+    const detail = await openDetail({
+      finding_type: 'duplicate_tracks',
+      details: {
+        tracks: [
+          { id: 1, title: 'Song', artist: 'Band', file_path: '/a/x.mp3' },
+          { id: 2, title: 'Song', artist: 'Band' },
+        ],
+      },
+    });
+    expect(detail.querySelectorAll('.repair-subitem-play')).toHaveLength(1);
+    const rows = [...detail.querySelectorAll('.repair-detail-subitem')];
+    expect(rows[1].className).not.toContain('playable');
+  });
+
   it('duplicate_tracks with no track list falls back to the count', async () => {
     const detail = await openDetail({
       finding_type: 'duplicate_tracks',

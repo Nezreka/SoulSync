@@ -702,6 +702,8 @@ declare global {
           artist_id?: string | number | null;
           album_id?: string | number | null;
           _stats_image?: string | null;
+          /** Play this exact file: skip the title+artist re-resolve. */
+          exact_path?: boolean;
         },
         albumTitle: string,
         artistName: string,

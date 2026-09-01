@@ -137,6 +137,59 @@ function PlayButton({ finding }: { finding: RepairFinding }) {
 }
 
 /**
+ * Play ONE listed copy (#1214). The duplicate rows are the only place in the app
+ * that shows two files claiming to be the same song, and picking between them by
+ * filename alone is guesswork - so each row can be auditioned.
+ *
+ * `exact_path` is the whole trick: playLibraryTrack normally re-resolves
+ * title+artist through /api/stats/resolve-track, which is LIMIT 1, so both copies
+ * of a duplicate would come back with the SAME file and play identical audio.
+ * Here the file path IS the thing being compared, so it must be played verbatim.
+ */
+function SubitemPlayButton({
+  filePath,
+  trackId,
+  title,
+  artist,
+  album,
+}: {
+  filePath?: string;
+  trackId?: string | number;
+  title?: string;
+  artist?: string;
+  album?: string;
+}) {
+  if (!filePath) return null;
+  return (
+    <button
+      className="repair-subitem-play"
+      type="button"
+      title={`Play this copy: ${filePath}`}
+      aria-label={`Play this copy of ${title || 'this track'}`}
+      onClick={(event) => {
+        // The row itself means "keep this version" - auditioning must not choose.
+        event.stopPropagation();
+        void window.SoulSyncWebShellBridge?.playLibraryTrack(
+          {
+            file_path: filePath,
+            title: title || 'Unknown Track',
+            id: trackId ?? '',
+            exact_path: true,
+          },
+          album || '',
+          artist || '',
+        );
+      }}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <polygon points="5,3 19,12 5,21" />
+      </svg>{' '}
+      Play
+    </button>
+  );
+}
+
+/**
  * `openFindingArtist`. New findings carry the library artist id and navigate
  * without a lookup; older ones resolve by EXACT name, and refuse to guess when
  * there is no exact hit.
@@ -568,33 +621,45 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
               const isBest = track.id === best?.id;
               return (
                 <div
-                  className={`repair-detail-subitem ${isBest ? 'best' : 'removable'}`}
+                  className={`repair-detail-subitem ${isBest ? 'best' : 'removable'}${
+                    track.file_path ? ' playable' : ''
+                  }`}
                   style={{ cursor: 'pointer' }}
                   title="Click to keep this version"
                   key={`${trackId ?? index}`}
                   onClick={() => onKeepDuplicate(finding.id, String(trackId))}
                 >
-                  <strong>
-                    {isBest ? (
-                      <span className="repair-keep-badge">KEEP</span>
-                    ) : (
-                      <span className="repair-remove-badge">REMOVE</span>
-                    )}{' '}
-                    {text(track.title)} by {text(track.artist)}
-                  </strong>
-                  <span>
-                    Album: {text(track.album) || 'Unknown'}
-                    {track.bitrate ? ` · ${track.bitrate} kbps` : ''}
-                    {track.duration ? ` · ${formatDurationMs(track.duration)}` : ''}
-                    {track.track_number ? ` · Track #${track.track_number}` : ''}
-                  </span>
-                  {track.file_path ? <span className="mono">{track.file_path}</span> : null}
+                  <div className="repair-subitem-body">
+                    <strong>
+                      {isBest ? (
+                        <span className="repair-keep-badge">KEEP</span>
+                      ) : (
+                        <span className="repair-remove-badge">REMOVE</span>
+                      )}{' '}
+                      {text(track.title)} by {text(track.artist)}
+                    </strong>
+                    <span>
+                      Album: {text(track.album) || 'Unknown'}
+                      {track.bitrate ? ` · ${track.bitrate} kbps` : ''}
+                      {track.duration ? ` · ${formatDurationMs(track.duration)}` : ''}
+                      {track.track_number ? ` · Track #${track.track_number}` : ''}
+                    </span>
+                    {track.file_path ? <span className="mono">{track.file_path}</span> : null}
+                  </div>
+                  <SubitemPlayButton
+                    filePath={track.file_path}
+                    trackId={trackId}
+                    title={text(track.title)}
+                    artist={text(track.artist)}
+                    album={text(track.album)}
+                  />
                 </div>
               );
             })}
           </div>
           <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: '11px', padding: '4px 0' }}>
-            Click on a version to keep it, or use &quot;Keep Best&quot; for auto-selection
+            Play to compare, click a version to keep it, or use &quot;Keep Best&quot; for
+            auto-selection
           </div>
         </>
       );

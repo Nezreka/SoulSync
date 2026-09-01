@@ -59241,6 +59241,49 @@ tr.tag-diff-same {
     color: rgba(255, 255, 255, 0.35);
 }
 
+/* A copy you can audition (#1214): details on the left, Play on the right. */
+.repair-detail-subitem.playable {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+}
+/* Not scoped to .playable: a copy with no file path gets the wrapper but no
+   button, and its lines still have to stack instead of running together. */
+.repair-subitem-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+}
+.repair-subitem-body .mono {
+    overflow-wrap: anywhere;
+}
+.repair-subitem-play {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 11px;
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.12);
+    border: 1px solid rgba(var(--accent-rgb, 99, 102, 241), 0.25);
+    border-radius: 6px;
+    color: rgb(var(--accent-light-rgb, 129, 140, 248));
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.repair-subitem-play:hover {
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.2);
+    border-color: rgba(var(--accent-rgb, 99, 102, 241), 0.4);
+}
+.repair-subitem-play svg {
+    width: 11px;
+    height: 11px;
+    fill: currentColor;
+}
+
 /* Duplicate keep/remove badges */
 .repair-detail-subitem.best {
     border-color: rgba(34, 197, 94, 0.2);
