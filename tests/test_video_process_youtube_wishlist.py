@@ -45,12 +45,14 @@ def test_videos_to_enqueue_drops_idless():
     assert videos_to_enqueue([{"video_title": "no id"}], []) == []
 
 
-def test_videos_to_enqueue_skips_repeatedly_failed():
-    """Bug 2: a video that has failed max_fail+ times (deleted/private/geo-gated) is not
-    re-queued — otherwise it retries every run forever."""
+def test_videos_to_enqueue_skips_the_permanently_unavailable():
+    """A deleted / private / members-only video will not un-delete, so retrying it
+    hourly learns nothing. Everything else backs off instead of being written off."""
     wanted = [_v("a"), _v("b"), _v("c")]
-    out = videos_to_enqueue(wanted, already_ids=[], failed_counts={"a": 3, "b": 2}, max_fail=3)
-    assert [v["video_id"] for v in out] == ["b", "c"]   # a hit the cap; b (2<3) + c still tried
+    state = {"a": {"permanent": True, "strikes": 3},
+             "b": {"strikes": 2, "hours_since_last": 0.1}}
+    out = videos_to_enqueue(wanted, already_ids=[], retry_state=state, max_fail=3)
+    assert [v["video_id"] for v in out] == ["b", "c"]   # a is gone for good; b under the cap
 
 
 def test_slots_free():
@@ -265,7 +267,7 @@ def _drain(recent, deps=None):
         {"_automation_id": "x", "max_concurrent": 1}, deps,
         youtube_root=lambda: "/yt", fetch_wanted=lambda: [], active_ids=lambda: [],
         running_count=lambda: 0, enqueue=lambda v, r: 1, start_next=lambda: None,
-        reap=lambda: 0, failed_counts=lambda: {}, recent_errors=lambda: recent)
+        reap=lambda: 0, retry_state=lambda: {}, recent_errors=lambda: recent)
     return deps
 
 
@@ -293,5 +295,5 @@ def test_the_drain_still_runs_when_the_diagnostic_explodes():
         {"_automation_id": "x", "max_concurrent": 1}, deps,
         youtube_root=lambda: "/yt", fetch_wanted=lambda: [_v("a")], active_ids=lambda: [],
         running_count=lambda: 0, enqueue=lambda v, r: 1, start_next=lambda: None,
-        reap=lambda: 0, failed_counts=lambda: {}, recent_errors=boom)
+        reap=lambda: 0, retry_state=lambda: {}, recent_errors=boom)
     assert res["status"] == "completed" and res["queued"] == 1

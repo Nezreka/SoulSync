@@ -2092,6 +2092,50 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def youtube_retry_state(self, max_fail: int = 3) -> dict:
+        """``{video_id: {"strikes", "permanent", "attempts", "hours_since_last"}}``.
+
+        The YouTube lane used to give up permanently after three strikes, with
+        nothing to un-stick it: on Boulder's install all 17 wished videos were
+        capped, ten of them on *transient* errors alone - retryable failures that
+        happened to land three times. A bad afternoon killed the video forever.
+
+        Only a GONE failure (deleted, private, members-only) is genuinely
+        permanent. Everything else gets the same treatment the movie/TV wishlist
+        gets: wait longer each time, never stop. ``hours_since_last`` is what the
+        caller measures that wait against.
+        """
+        from core.youtube_errors import GONE, classify, strikes_for
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT media_id, error, "
+                "  julianday('now') - julianday(COALESCE(completed_at, grabbed_at)) AS days_ago "
+                "FROM video_download_history "
+                "WHERE source='youtube' AND outcome='failed' AND media_id IS NOT NULL"
+            ).fetchall()
+        except sqlite3.Error:
+            logger.exception("youtube_retry_state failed")
+            return {}
+        finally:
+            conn.close()
+
+        by_video: dict = {}
+        for r in rows:
+            by_video.setdefault(r["media_id"], []).append(
+                {"error": r["error"], "days_ago": r["days_ago"]})
+
+        out: dict = {}
+        for vid, hist in by_video.items():
+            ages = [h["days_ago"] for h in hist if h["days_ago"] is not None]
+            out[vid] = {
+                "strikes": strikes_for(hist, max_fail=max_fail),
+                "permanent": any(classify(h["error"]) == GONE for h in hist),
+                "attempts": len(hist),
+                "hours_since_last": (min(ages) * 24.0) if ages else None,
+            }
+        return out
+
     def youtube_failed_counts(self, max_fail: int = 3) -> dict:
         """{video_id: strike count} from the permanent history — so the processor can
         stop re-grabbing a video that keeps failing instead of retrying it forever.

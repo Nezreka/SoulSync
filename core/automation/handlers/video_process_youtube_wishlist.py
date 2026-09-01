@@ -25,6 +25,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from core.automation.deps import AutomationDeps
+from core.video.wishlist_backoff import retry_delay_hours
 from utils.logging_config import get_logger
 
 logger = get_logger("automation.video_process_youtube_wishlist")
@@ -33,23 +34,64 @@ logger = get_logger("automation.video_process_youtube_wishlist")
 YT_MAX_FAIL = 3   # give up re-grabbing a video after this many failed attempts
 
 
+def _retry_verdict(state: Optional[Dict[str, Any]], max_fail: int) -> str:
+    """``'go' | 'permanent' | 'waiting'`` for one video's failure history.
+
+    Only a GONE failure is permanent - a deleted or members-only video will not
+    un-delete, and retrying it hourly learns nothing. Everything else BACKS OFF
+    on the same schedule the movie/TV wishlist uses: the wait doubles and caps at
+    a week, but the video is never written off. Pure."""
+    if not isinstance(state, dict):
+        return "go"
+    if state.get("permanent"):
+        return "permanent"
+    strikes = int(state.get("strikes", 0) or 0)
+    if strikes < max_fail:
+        return "go"
+    wait = retry_delay_hours(strikes)
+    since = state.get("hours_since_last")
+    if since is None or float(since) >= wait:
+        return "go"
+    return "waiting"
+
+
 def videos_to_enqueue(wanted: List[Dict[str, Any]], already_ids: Iterable,
-                      failed_counts: Optional[Dict[Any, int]] = None,
+                      retry_state: Optional[Dict[Any, Dict[str, Any]]] = None,
                       max_fail: int = YT_MAX_FAIL) -> List[Dict[str, Any]]:
-    """Wished videos not already queued/downloading and not stuck failing. No concurrency
-    cap here (bounded at start time); ``failed_counts`` skips videos that have failed
-    ``max_fail``+ times (deleted / private / geo-gated) so they don't retry forever. Pure."""
+    """Wished videos ready to queue: not already queued/downloading, not permanently
+    unavailable, and not still inside their retry backoff. No concurrency cap here
+    (bounded at start time). Pure."""
     already = {str(x) for x in (already_ids or ()) if x}
-    fails = failed_counts or {}
+    states = retry_state or {}
     out: List[Dict[str, Any]] = []
     for v in wanted or []:
         vid = v.get("video_id")
         if not vid or str(vid) in already:
             continue
-        if int(fails.get(vid, 0) or 0) >= max_fail:
-            continue   # keeps failing — stop retrying it every run
+        if _retry_verdict(states.get(vid), max_fail) != "go":
+            continue
         out.append(v)
     return out
+
+
+def skip_tally(wanted: List[Dict[str, Any]], already_ids: Iterable,
+               retry_state: Optional[Dict[Any, Dict[str, Any]]] = None,
+               max_fail: int = YT_MAX_FAIL) -> Dict[str, int]:
+    """How many wished videos each reason accounts for, so the run can SAY what it
+    did instead of reporting an empty wishlist. Pure."""
+    already = {str(x) for x in (already_ids or ()) if x}
+    states = retry_state or {}
+    tally = {"ready": 0, "permanent": 0, "waiting": 0, "in_flight": 0, "no_id": 0}
+    for v in wanted or []:
+        vid = v.get("video_id")
+        if not vid:
+            tally["no_id"] += 1
+        elif str(vid) in already:
+            tally["in_flight"] += 1
+        else:
+            verdict = _retry_verdict(states.get(vid), max_fail)
+            tally["ready" if verdict == "go" else verdict] += 1
+    return tally
 
 
 def slots_free(running: int, max_concurrent: int) -> int:
@@ -89,9 +131,9 @@ def _default_active_ids() -> List[Any]:
             if d.get("source") == "youtube" and d.get("media_id")]
 
 
-def _default_failed_counts() -> Dict[Any, int]:
+def _default_retry_state() -> Dict[Any, Dict[str, Any]]:
     from api.video import get_video_db
-    return get_video_db().youtube_failed_counts(max_fail=YT_MAX_FAIL)
+    return get_video_db().youtube_retry_state(max_fail=YT_MAX_FAIL)
 
 
 def _default_recent_errors(days: int = 3) -> list:
@@ -182,7 +224,7 @@ def auto_video_process_youtube_wishlist(
     enqueue: Optional[Callable[[Dict[str, Any], str], Any]] = None,
     start_next: Optional[Callable[[], Any]] = None,
     reap: Optional[Callable[[], int]] = None,
-    failed_counts: Optional[Callable[[], Dict[Any, int]]] = None,
+    retry_state: Optional[Callable[[], Dict[Any, Dict[str, Any]]]] = None,
     recent_errors: Optional[Callable[[], List[Any]]] = None,
 ) -> Dict[str, Any]:
     """Queue the whole YouTube wishlist for download and start up to ``max_concurrent`` now.
@@ -195,7 +237,7 @@ def auto_video_process_youtube_wishlist(
     enqueue = enqueue or _default_enqueue
     start_next = start_next or _default_start_next
     reap = reap or _default_reap
-    failed_counts = failed_counts or _default_failed_counts
+    retry_state = retry_state or _default_retry_state
     recent_errors = recent_errors or _default_recent_errors
     automation_id = config.get('_automation_id')
     max_concurrent = max(1, int(config.get('max_concurrent', 3) or 3))
@@ -222,14 +264,22 @@ def auto_video_process_youtube_wishlist(
                              log_line='Queueing new videos for download', log_type='info')
         wanted = fetch_wanted() or []
         already = list(active_ids() or [])
-        new = videos_to_enqueue(wanted, already, failed_counts() or {})
+        states = retry_state() or {}
+        new = videos_to_enqueue(wanted, already, states)
+        tally = skip_tally(wanted, already, states)
         _warn_if_ytdlp_is_stale(deps, automation_id, recent_errors)
 
         queued = 0
+        refused = 0
         for v in new:
             try:
                 if enqueue(v, root) is not None:
                     queued += 1
+                else:
+                    # The only None is the disk guard, which logs to app.log
+                    # only - the run has to account for it or the user sees
+                    # 'nothing to download' beside a full wishlist.
+                    refused += 1
             except Exception:   # noqa: BLE001 - one bad enqueue shouldn't stop the rest
                 deps.update_progress(automation_id, log_type='warning',
                                      log_line="Couldn't queue '%s'" % (v.get('video_title') or v.get('video_id')))
@@ -251,13 +301,35 @@ def auto_video_process_youtube_wishlist(
         elif running:
             done = '%d already downloading; nothing new to queue' % running
             log_type = 'info'
+        elif refused:
+            done = ('Nothing queued - %d video(s) held back by the disk-space guard '
+                    '(free space is under the floor in Settings > Downloads)' % refused)
+            log_type = 'warning'
+        elif wanted:
+            # THE report that was missing. 'No wished videos' while seventeen
+            # sit on the wishlist is why this read as broken rather than as
+            # waiting, and it is the whole of the bug report.
+            parts = []
+            if tally['permanent']:
+                parts.append('%d unavailable (deleted, private or members-only)'
+                             % tally['permanent'])
+            if tally['waiting']:
+                parts.append('%d waiting out a retry backoff after repeated failures'
+                             % tally['waiting'])
+            if tally['in_flight']:
+                parts.append('%d already queued' % tally['in_flight'])
+            if tally['no_id']:
+                parts.append('%d with no video id' % tally['no_id'])
+            done = '%d wished video(s), none ready right now - %s' % (
+                len(wanted), '; '.join(parts) or 'nothing eligible')
+            log_type = 'warning' if (tally['permanent'] or tally['waiting']) else 'info'
         else:
             done = 'No wished YouTube videos to download'
             log_type = 'info'
         deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
                              log_line=done, log_type=log_type)
         return {'status': 'completed', 'queued': queued, 'started': started, 'running': running,
-                '_manages_own_progress': True}
+                'skipped': tally, '_manages_own_progress': True}
     except Exception as e:  # noqa: BLE001
         deps.update_progress(automation_id, status='error', phase='Error', log_line=str(e), log_type='error')
         return {'status': 'error', 'error': str(e), '_manages_own_progress': True}
