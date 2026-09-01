@@ -48,6 +48,13 @@ class DatabaseUpdateWorker:
         # Spotify/MusicBrainz/etc. ids without a manual backfill.
         self._new_track_ids = set()
 
+        # Artist/album ids this run wrote a row for (insert OR update), passed
+        # to cleanup_orphaned_records() as an exclude-list — protects against
+        # deleting a row this same run just created before its tracks landed
+        # (see cleanup_orphaned_records' docstring for why).
+        self._touched_artist_ids = set()
+        self._touched_album_ids = set()
+
         # Optional callback(worker) run as the FINAL scan phase, immediately
         # before the 'finished' signal — so the auto-reconcile is inside the
         # scan's running window (automations/UI treat it as a normal phase and
@@ -274,7 +281,10 @@ class DatabaseUpdateWorker:
             # Cleanup orphaned records after incremental updates (catches fixed matches)
             if not self.full_refresh and self.database:
                 try:
-                    cleanup_results = self.database.cleanup_orphaned_records()
+                    cleanup_results = self.database.cleanup_orphaned_records(
+                        exclude_artist_ids=self._touched_artist_ids,
+                        exclude_album_ids=self._touched_album_ids,
+                    )
                     orphaned_artists = cleanup_results.get('orphaned_artists_removed', 0)
                     orphaned_albums = cleanup_results.get('orphaned_albums_removed', 0)
 
@@ -416,7 +426,10 @@ class DatabaseUpdateWorker:
             # Phase 4: Cleanup
             self._emit_signal('phase_changed', "Deep scan: Cleaning up orphaned records...")
             try:
-                cleanup_results = self.database.cleanup_orphaned_records()
+                cleanup_results = self.database.cleanup_orphaned_records(
+                    exclude_artist_ids=self._touched_artist_ids,
+                    exclude_album_ids=self._touched_album_ids,
+                )
                 orphaned_artists = cleanup_results.get('orphaned_artists_removed', 0)
                 orphaned_albums = cleanup_results.get('orphaned_albums_removed', 0)
                 if orphaned_artists > 0 or orphaned_albums > 0:
@@ -1005,7 +1018,8 @@ class DatabaseUpdateWorker:
                     artist_success = self.database.insert_or_update_media_artist(artist, server_source=self.server_type)
                     if artist_success:
                         total_processed_artists += 1
-                    
+                        self._touched_artist_ids.add(artist_id)
+
                     # Process albums for this artist  
                     artist_album_ids = albums_by_artist.get(artist_id, set())
                     for album_id in artist_album_ids:
@@ -1022,7 +1036,8 @@ class DatabaseUpdateWorker:
                                     album_success = self.database.insert_or_update_media_album(album, artist_id, server_source=self.server_type)
                                     if album_success:
                                         total_processed_albums += 1
-                                    
+                                        self._touched_album_ids.add(str(album_id))
+
                                     # Process all tracks in this album
                                     for track in album_tracks:
                                         if self.should_stop:
@@ -1505,6 +1520,7 @@ class DatabaseUpdateWorker:
                 return False, "Failed to update artist data", 0, 0
 
             artist_id = str(media_artist.ratingKey)
+            self._touched_artist_ids.add(artist_id)
 
             # 2. Get all albums for this artist (cached from aggressive pre-population)
             try:
@@ -1535,6 +1551,7 @@ class DatabaseUpdateWorker:
                         if album_success:
                             album_count += 1
                             album_id = str(album.ratingKey)
+                            self._touched_album_ids.add(album_id)
 
                             # 4. Process tracks in this album (cached from aggressive pre-population)
                             try:
