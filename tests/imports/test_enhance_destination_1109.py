@@ -25,36 +25,37 @@ import os
 import pytest
 
 from core.imports import paths as paths_mod
-from core.imports.paths import _reachable_original_dir
+from core.imports.paths import _reachable_original_file
 
 
-# ── _reachable_original_dir ──────────────────────────────────────────────────
+# ── _reachable_original_file ─────────────────────────────────────────────────
 
-def test_returns_the_directory_when_the_original_really_is_there(tmp_path):
+def test_returns_the_file_when_the_original_really_is_there(tmp_path):
     album = tmp_path / "Billie Eilish" / "HIT ME HARD AND SOFT"
     album.mkdir(parents=True)
     original = album / "10 BLUE.mp3"
     original.write_bytes(b"x")
 
-    assert _reachable_original_dir(str(original)) == str(album)
+    # The FILE, not its folder (#1215) - the caller needs the name too.
+    assert _reachable_original_file(str(original)) == str(original)
 
 
 def test_returns_none_for_a_media_server_only_path(tmp_path, monkeypatch):
     """The /music/... case from the report — nothing on this filesystem."""
     monkeypatch.setattr(
         paths_mod, "_get_config_manager", lambda: _StubConfig(str(tmp_path)))
-    assert _reachable_original_dir("/music/Billie Eilish/HIT ME HARD AND SOFT/10 BLUE.mp3") is None
+    assert _reachable_original_file("/music/Billie Eilish/HIT ME HARD AND SOFT/10 BLUE.mp3") is None
 
 
 def test_returns_none_when_the_folder_was_deleted(tmp_path):
     """The file's folder is gone — replacing in place is meaningless."""
     missing = tmp_path / "gone" / "track.flac"
-    assert _reachable_original_dir(str(missing)) is None
+    assert _reachable_original_file(str(missing)) is None
 
 
 @pytest.mark.parametrize("value", ["", "   ", None, 123, [], {}])
 def test_returns_none_for_junk_input(value):
-    assert _reachable_original_dir(value) is None
+    assert _reachable_original_file(value) is None
 
 
 def test_never_creates_the_directory(tmp_path, monkeypatch):
@@ -73,7 +74,7 @@ def test_never_creates_the_directory(tmp_path, monkeypatch):
         os, "makedirs",
         lambda *a, **k: (called.append(a), real_makedirs(*a, **k))[1])
 
-    assert _reachable_original_dir(str(target / "track.flac")) is None
+    assert _reachable_original_file(str(target / "track.flac")) is None
     assert called == [], f"probing created directories: {called}"
     assert not target.exists()
 
@@ -93,7 +94,8 @@ def test_falls_back_to_the_resolver_when_the_raw_path_is_unreachable(tmp_path, m
         lambda p, **kw: str(real_file),
     )
 
-    assert _reachable_original_dir("/music/Beck/Beck - Guero/01-01 - E-Pro.flac") == str(real_album)
+    assert _reachable_original_file(
+        "/music/Beck/Beck - Guero/01-01 - E-Pro.flac") == str(real_file)
 
 
 def test_resolver_blowing_up_is_not_fatal(tmp_path, monkeypatch):
@@ -103,7 +105,7 @@ def test_resolver_blowing_up_is_not_fatal(tmp_path, monkeypatch):
         "core.library.path_resolver.resolve_library_file_path",
         lambda p, **kw: (_ for _ in ()).throw(RuntimeError("boom")),
     )
-    assert _reachable_original_dir("/music/whatever/track.flac") is None
+    assert _reachable_original_file("/music/whatever/track.flac") is None
 
 
 # ── build_final_path_for_track: the behaviour users actually see ─────────────
@@ -363,4 +365,4 @@ def test_a_configured_music_path_root_is_rejected_too(monkeypatch, tmp_path):
     monkeypatch.setattr(paths_mod, "_get_config_manager", lambda: cfg)
     monkeypatch.setattr(paths_mod, "_get_album_tracks_for_source", lambda *a: None)
 
-    assert paths_mod._reachable_original_dir(str(loose)) is None
+    assert paths_mod._reachable_original_file(str(loose)) is None
