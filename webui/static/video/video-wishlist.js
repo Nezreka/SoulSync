@@ -366,7 +366,14 @@
             ? ' · <span class="vwsh-failing-inline" title="' + esc(failWhy(e, fails)) +
                 '">&#9888; ' + fails + '</span>'
             : '';
-        var metaTxt = yt ? (date || 'Video') : ('S' + se.season_number + '·E' + e.episode_number + (date ? ' · ' + esc(date) : '') +
+        // A skipped YouTube video used to show nothing at all — the same blank
+        // row whether it was queued, deleted, or backing off. It carries the
+        // same fields as a TV row now, so it renders the same way.
+        var ytTxt = !yt ? '' : (e.unavailable
+            ? ' · <span class="vwsh-failing-inline" title="' + esc(e.last_refusal || '') + '">&#9888; unavailable</span>'
+            : (fails ? ' · <span class="vwsh-failing-inline" title="' + esc(e.last_refusal || failWhy(e, fails)) +
+                       '">&#9888; ' + fails + '</span>' : ''));
+        var metaTxt = yt ? (esc(date || 'Video') + ytTxt) : ('S' + se.season_number + '·E' + e.episode_number + (date ? ' · ' + esc(date) : '') +
             (e.upgrade_from ? ' · ⇪ ' + esc(e.upgrade_from) : '') + failTxt);
         var thumb = e.still_url
             ? '<span class="vwsh-epc-thumb"><img src="' + esc(sized(pimg(e.still_url), 342)) + '" alt="" loading="lazy" ' +
@@ -379,9 +386,17 @@
             (yt ? ' data-src-id="' + esc(e.source_id) + '"' : '') + '>' + thumb +
             '<div class="vwsh-epc-body">' +
                 '<div class="vwsh-epc-title" title="' + esc(t) + '">' + esc(t) + '</div>' +
-                '<div class="vwsh-epc-meta"><span class="vwsh-ep-dot vwsh-ep-dot--' + st + '"></span>' + (yt ? esc(metaTxt) : metaTxt) + '</div>' +
+                '<div class="vwsh-epc-meta"><span class="vwsh-ep-dot vwsh-ep-dot--' + st + '"></span>' + metaTxt + '</div>' +
             '</div>' +
-            (yt || st === 'downloading' ? ''
+            (yt
+                ? (st === 'downloading' ? ''
+                    : '<button class="vwsh-epc-hunt" type="button" data-vwsh-yt-now="' + esc(e.source_id) +
+                      '" data-ch="' + esc(sh.youtube_id || '') + '" data-cht="' + esc(sh.title || '') +
+                      '" data-vt="' + esc(t) + '" data-pub="' + esc(e.air_date || '') +
+                      '" title="Download this video now, ignoring the retry wait">' +
+                      '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+                      '<polygon points="5,3 19,12 5,21"/></svg></button>')
+                : st === 'downloading' ? ''
                 : '<button class="vwsh-epc-hunt" type="button" data-vwsh-hunt="episode" data-tmdb="' + esc(sh.tmdb_id) +
                   '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '" title="Search now">' +
                   '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
@@ -486,6 +501,35 @@
     }
 
     // ── manual acquisition (per-item 'Search now' + 'Search all missing') ─────
+    // YouTube's "Search now". There is nothing to search — the video IS the
+    // release — so it enqueues the download directly, ignoring the retry wait
+    // and the unavailable mark. A user asking for it out-ranks both.
+    function doYtNow(btn) {
+        if (btn.disabled) return;
+        btn.disabled = true; btn.classList.add('vwsh-hunt--busy');
+        fetch('/api/video/youtube/download', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                video_id: btn.getAttribute('data-vwsh-yt-now'),
+                channel_id: btn.getAttribute('data-ch') || null,
+                channel_title: btn.getAttribute('data-cht') || null,
+                video_title: btn.getAttribute('data-vt') || null,
+                published_at: btn.getAttribute('data-pub') || null,
+            }),
+        }).then(function (r) { return r.json(); })
+            .then(function (res) {
+                if (!res || !res.success) throw new Error((res && res.error) || 'failed');
+                if (typeof showToast === 'function')
+                    showToast(res.already ? 'Already downloading' : 'Downloading now', 'success');
+                btn.classList.remove('vwsh-hunt--busy');
+            })
+            .catch(function (err) {
+                btn.disabled = false; btn.classList.remove('vwsh-hunt--busy');
+                if (typeof showToast === 'function')
+                    showToast((err && err.message) || 'Could not start that download', 'error');
+            });
+    }
+
     function doHunt(btn) {
         if (btn.disabled) return;
         var payload = { scope: btn.getAttribute('data-vwsh-hunt'),
@@ -769,6 +813,8 @@
     function onGridClick(e) {
         var pick = e.target.closest('[data-vwsh-pick]');
         if (pick) { e.preventDefault(); e.stopPropagation(); doPick(pick); return; }
+        var ytNow = e.target.closest('[data-vwsh-yt-now]');
+        if (ytNow) { e.preventDefault(); e.stopPropagation(); doYtNow(ytNow); return; }
         var hunt = e.target.closest('[data-vwsh-hunt]');
         if (hunt) { e.preventDefault(); e.stopPropagation(); doHunt(hunt); return; }
         var rm = e.target.closest('[data-vwsh-rm]');

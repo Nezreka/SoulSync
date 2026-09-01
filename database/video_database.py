@@ -43,7 +43,26 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-from core.video.wishlist_backoff import due_sql as _due_sql
+from core.video.wishlist_backoff import due_sql as _due_sql, retry_delay_hours as _retry_delay_hours
+
+
+def _yt_skip_reason(state) -> str | None:
+    """One sentence for a wished YouTube video that isn't downloading, or None
+    when nothing is holding it back. Mirrors the movie/TV rows' last_refusal."""
+    if not isinstance(state, dict) or not state:
+        return None
+    if state.get("permanent"):
+        return "Unavailable — deleted, private or members-only"
+    attempts = int(state.get("attempts") or 0)
+    if not attempts:
+        return None
+    wait = _retry_delay_hours(int(state.get("strikes") or 0))
+    since = state.get("hours_since_last")
+    if wait and since is not None and float(since) < wait:
+        return ("%d failed attempt%s — waiting %dh before the next try"
+                % (attempts, "" if attempts == 1 else "s", wait))
+    return "%d failed attempt%s — will try again on the next run" % (
+        attempts, "" if attempts == 1 else "s")
 
 SCHEMA_VERSION = 47   # v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
@@ -7682,6 +7701,11 @@ class VideoDatabase:
                 "FROM video_wishlist" + wsql +
                 " GROUP BY parent_source_id ORDER BY " + order + " LIMIT ? OFFSET ?",
                 args + [limit, (page - 1) * limit]).fetchall()
+            # Why a wished video isn't downloading. The movie/TV rows have carried
+            # their attempt count and refusal reason for a while; YouTube rows
+            # showed nothing at all, which is how 17 skipped videos looked
+            # identical to an empty wishlist. One history read for the page.
+            retry = self.youtube_retry_state()
             items = []
             for cr in chan_rows:
                 vids = conn.execute(
@@ -7698,10 +7722,16 @@ class VideoDatabase:
                 for yr in sorted(by_year, reverse=True):   # newest year first
                     eps = []
                     for i, v in enumerate(by_year[yr]):
+                        st = retry.get(v["source_id"]) or {}
                         eps.append({"episode_number": i + 1, "title": v["episode_title"],
                                     "still_url": v["still_url"], "overview": v["episode_overview"],
                                     "air_date": v["air_date"], "status": v["status"],
-                                    "source_id": v["source_id"]})
+                                    "source_id": v["source_id"],
+                                    # named to match the movie/TV rows, so the UI
+                                    # has one shape to render for both lanes
+                                    "search_attempts": int(st.get("attempts") or 0),
+                                    "unavailable": bool(st.get("permanent")),
+                                    "last_refusal": _yt_skip_reason(st)})
                     poster = next((e["still_url"] for e in eps if e["still_url"]), cr["poster_url"])
                     seasons.append({"season_number": yr, "year": yr, "poster_url": poster, "episodes": eps})
                 items.append({
