@@ -38,6 +38,7 @@ export const ADD_PLAYLIST_ACCOUNTS: readonly { tab: string; label: string; glyph
   { tab: 'tidal', label: 'Tidal', glyph: '🌊' },
   { tab: 'qobuz', label: 'Qobuz', glyph: '♫' },
   { tab: 'deezer', label: 'Deezer', glyph: '🎧' },
+  { tab: 'ytmusic', label: 'YouTube Music', glyph: '▶️' },
   { tab: 'listenbrainz-sync', label: 'ListenBrainz', glyph: '🧠' },
   { tab: 'lastfm-sync', label: 'Last.fm', glyph: '📻' },
   { tab: 'soulsync-discovery-sync', label: 'SoulSync Discovery', glyph: '✨' },
