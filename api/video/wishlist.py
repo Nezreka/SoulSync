@@ -218,6 +218,64 @@ def register_routes(bp):
             logger.exception("Failed to remove from video wishlist")
             return jsonify({"success": False, "error": "Failed"}), 500
 
+    @bp.route("/wishlist/youtube/download-all", methods=["POST"])
+    def video_wishlist_youtube_download_all():
+        """Queue every waiting YouTube video NOW — the tab's missing bulk action.
+
+        "Search all missing" is hidden on the YouTube tab because there is nothing
+        to search: the video IS the release. But the tab still needs a way to say
+        "stop waiting and fetch these", which is what the hourly drain does. This
+        is that verb, and it is the YouTube twin of search-all: same enqueue path
+        the drain uses, same concurrency cap, and the user's click out-ranks the
+        retry backoff exactly as a manual search out-ranks the release gate.
+
+        Permanently unavailable videos (deleted / private / members-only) are
+        still skipped and reported — the per-row button covers the one case where
+        the user believes a video is back.
+        """
+        from . import get_video_db
+        from core.automation.handlers.video_process_youtube_wishlist import (
+            slots_free, videos_for_manual_run)
+        from core.video.youtube_download import start_next_queued
+        try:
+            db = get_video_db()
+            root = db.get_setting("youtube_path") or ""
+            if not root:
+                return jsonify({"success": False,
+                                "error": "Set the YouTube library folder on Settings → Downloads first."}), 400
+
+            wanted = db.youtube_wishlist_to_download() or []
+            already = [d.get("media_id") for d in db.get_active_video_downloads()
+                       if d.get("source") == "youtube" and d.get("media_id")]
+            states = db.youtube_retry_state()
+            todo = videos_for_manual_run(wanted, already, states)
+
+            from core.automation.handlers.video_process_youtube_wishlist import _default_enqueue
+            queued = refused = 0
+            for v in todo:
+                try:
+                    if _default_enqueue(v, root) is not None:
+                        queued += 1
+                    else:
+                        refused += 1      # disk guard
+                except Exception:   # noqa: BLE001 - one bad row must not stop the rest
+                    logger.exception("youtube download-all: could not queue %r", v.get("video_id"))
+
+            started = 0
+            for _ in range(slots_free(db.count_active_youtube_downloads(), 3)):
+                if start_next_queued(get_video_db) is None:
+                    break
+                started += 1
+
+            unavailable = sum(1 for v in wanted
+                              if (states.get(v.get("video_id")) or {}).get("permanent"))
+            return jsonify({"success": True, "queued": queued, "started": started,
+                            "refused": refused, "unavailable": unavailable,
+                            "already": len(already), "total": len(wanted)})
+        except Exception:
+            logger.exception("youtube wishlist download-all failed")
+            return jsonify({"success": False, "error": "Could not start the downloads"}), 500
+
     @bp.route("/wishlist/clear", methods=["POST"])
     def video_wishlist_clear():
         """Empty an entire wishlist tab. Body: {kind} where kind ∈ movie|show|youtube."""

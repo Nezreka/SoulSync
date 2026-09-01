@@ -110,7 +110,11 @@ def create_video_blueprint() -> Blueprint:
 
         if writing and not getattr(g, "can_download", True) and _p(
                 "/api/video/downloads/grab", "/api/video/downloads/retry",
-                "/api/video/youtube/download", "/api/video/wishlist/add",
+                "/api/video/youtube/download",
+                # the tab's bulk action — spends the same disk and bandwidth as
+                # the per-row grab above, so it takes the same permission
+                "/api/video/wishlist/youtube/download-all",
+                "/api/video/wishlist/add",
                 "/api/video/watchlist/add", "/api/video/youtube/wishlist/add",
                 "/api/video/watch/grab"):
             return jsonify({"error": "Downloads are disabled for this profile."}), 403

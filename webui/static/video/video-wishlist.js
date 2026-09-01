@@ -494,10 +494,19 @@
             : state.tab === 'show' ? state.counts.show > 0
             : (state.ytVideo > 0 || state.ytChannel > 0);
         btn.hidden = !has;
-        // "Search all missing" — TMDB tabs only (YouTube has its own drain), and
-        // only when there's something to search.
+        // The bulk action. On the TMDB tabs it searches; on YouTube there is
+        // nothing to search (the video IS the release) so it downloads instead.
+        // Hiding it there left that tab with no bulk action at all.
         var sa = $('[data-vwsh-searchall]');
-        if (sa) sa.hidden = state.tab === 'youtube' || !has;
+        if (sa) {
+            sa.hidden = !has;
+            var yt = state.tab === 'youtube';
+            var label = sa.lastChild;
+            if (label && label.nodeType === 3) label.nodeValue = yt ? ' Download all waiting' : ' Search all missing';
+            sa.title = yt
+                ? 'Queue every waiting video now instead of waiting for the automation — skips the retry wait, ignores nothing else'
+                : 'Search every eligible wishlist item now instead of waiting for the hourly automation';
+        }
     }
 
     // ── manual acquisition (per-item 'Search now' + 'Search all missing') ─────
@@ -556,8 +565,44 @@
                 if (typeof showToast === 'function') showToast('Search could not start', 'error');
             });
     }
+    // YouTube's half of the bulk action: queue everything that is waiting. The
+    // click out-ranks the retry backoff, the same way "Search all missing"
+    // out-ranks the movie/TV drain's gates. Deleted videos stay skipped.
+    function downloadAllWaiting(btn) {
+        btn.disabled = true;
+        fetch('/api/video/wishlist/youtube/download-all', { method: 'POST' })
+            .then(function (r) { return r.json(); })
+            .then(function (res) {
+                if (!res || !res.success) throw new Error((res && res.error) || 'failed');
+                var msg;
+                if (res.queued) {
+                    msg = 'Queued ' + res.queued + ' video' + (res.queued === 1 ? '' : 's') +
+                          ' — ' + res.started + ' downloading now, the rest drain automatically';
+                } else if (res.refused) {
+                    msg = 'Nothing queued — the disk-space guard held ' + res.refused + ' back';
+                } else if (res.already) {
+                    msg = res.already + ' already downloading';
+                } else if (res.unavailable) {
+                    msg = 'Nothing to queue — ' + res.unavailable +
+                          ' video(s) are unavailable (deleted, private or members-only)';
+                } else {
+                    msg = 'Nothing waiting to download';
+                }
+                if (typeof showToast === 'function')
+                    showToast(msg, res.queued ? 'success' : 'info');
+                btn.disabled = false;
+                load();
+            })
+            .catch(function (err) {
+                btn.disabled = false;
+                if (typeof showToast === 'function')
+                    showToast((err && err.message) || 'Could not start the downloads', 'error');
+            });
+    }
+
     function searchAllMissing() {
         var btn = $('[data-vwsh-searchall]'); if (!btn || btn.disabled) return;
+        if (state.tab === 'youtube') { downloadAllWaiting(btn); return; }
         btn.disabled = true;
         fetch('/api/video/wishlist/search-all', { method: 'POST' })
             .then(function (r) { return r.ok ? r.json() : null; })

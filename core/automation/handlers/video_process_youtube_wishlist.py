@@ -94,6 +94,32 @@ def skip_tally(wanted: List[Dict[str, Any]], already_ids: Iterable,
     return tally
 
 
+def videos_for_manual_run(wanted: List[Dict[str, Any]], already_ids: Iterable,
+                         retry_state: Optional[Dict[Any, Dict[str, Any]]] = None,
+                         max_fail: int = YT_MAX_FAIL) -> List[Dict[str, Any]]:
+    """What a user's "download all waiting" should queue.
+
+    The same list as :func:`videos_to_enqueue` except the retry backoff does not
+    apply - the wait paces the hourly tick, and a person clicking out-ranks it,
+    exactly as "Search all missing" out-ranks the movie/TV drain's gates.
+
+    Permanently unavailable videos are still skipped. Re-requesting six deleted
+    videos on every click is not an override, it is a treadmill; the per-row
+    button is there for the one case where the user thinks a video is back.
+    Pure."""
+    already = {str(x) for x in (already_ids or ()) if x}
+    states = retry_state or {}
+    out: List[Dict[str, Any]] = []
+    for v in wanted or []:
+        vid = v.get("video_id")
+        if not vid or str(vid) in already:
+            continue
+        if _retry_verdict(states.get(vid), max_fail) == "permanent":
+            continue
+        out.append(v)
+    return out
+
+
 def slots_free(running: int, max_concurrent: int) -> int:
     """How many new downloads may start now given how many are already fetching. Pure."""
     return max(0, int(max_concurrent) - max(0, int(running)))
