@@ -7563,49 +7563,82 @@ class MusicDatabase:
                 logger.error(f"Error clearing {server_source} database data: {e}")
                 raise
     
-    def cleanup_orphaned_records(self) -> Dict[str, int]:
-        """Remove artists and albums that have no associated tracks"""
+    def cleanup_orphaned_records(self, exclude_artist_ids: Optional[set] = None,
+                                  exclude_album_ids: Optional[set] = None) -> Dict[str, int]:
+        """Remove artists and albums that have no associated tracks.
+
+        ``exclude_artist_ids``/``exclude_album_ids`` protect rows the CURRENT
+        scan run itself just wrote an artist/album for, from a same-run
+        insert-then-immediately-orphaned race: if the media server's API call
+        for an artist's albums (or an album's tracks) comes back incomplete
+        or empty on one call within a run, an album (or a brand-new,
+        single-album artist) can be inserted with zero tracks and then get
+        swept by this SAME run's cleanup before it ever has a track — and
+        because the row briefly existed, the media server no longer reports
+        it as "recently added/updated" on future incremental scans either,
+        so it silently never comes back (see the
+        soulsync_navidrome_compilation_id_instability_TODO investigation —
+        Rare Funk & Disco 24 on redhome). Excluding rows this run touched
+        costs nothing (a genuinely orphaned row from a PRIOR run is still
+        caught next cleanup) and closes off that permanent-loss path."""
         try:
+            exclude_artist_ids = exclude_artist_ids or set()
+            exclude_album_ids = exclude_album_ids or set()
+
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                
+
+                artist_exclude_sql = ""
+                artist_params: list = []
+                if exclude_artist_ids:
+                    placeholders = ",".join("?" for _ in exclude_artist_ids)
+                    artist_exclude_sql = f" AND id NOT IN ({placeholders})"
+                    artist_params = list(exclude_artist_ids)
+
+                album_exclude_sql = ""
+                album_params: list = []
+                if exclude_album_ids:
+                    placeholders = ",".join("?" for _ in exclude_album_ids)
+                    album_exclude_sql = f" AND id NOT IN ({placeholders})"
+                    album_params = list(exclude_album_ids)
+
                 # Find orphaned artists (no tracks)
-                cursor.execute("""
-                    SELECT COUNT(*) FROM artists 
-                    WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks WHERE artist_id IS NOT NULL)
-                """)
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM artists
+                    WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks WHERE artist_id IS NOT NULL){artist_exclude_sql}
+                """, artist_params)
                 orphaned_artists_count = cursor.fetchone()[0]
-                
+
                 # Find orphaned albums (no tracks)
-                cursor.execute("""
-                    SELECT COUNT(*) FROM albums 
-                    WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)
-                """)
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM albums
+                    WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL){album_exclude_sql}
+                """, album_params)
                 orphaned_albums_count = cursor.fetchone()[0]
-                
+
                 # Delete orphaned artists
                 if orphaned_artists_count > 0:
-                    cursor.execute("""
-                        DELETE FROM artists 
-                        WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks WHERE artist_id IS NOT NULL)
-                    """)
+                    cursor.execute(f"""
+                        DELETE FROM artists
+                        WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks WHERE artist_id IS NOT NULL){artist_exclude_sql}
+                    """, artist_params)
                     logger.info(f"Removed {orphaned_artists_count} orphaned artists")
-                
-                # Delete orphaned albums  
+
+                # Delete orphaned albums
                 if orphaned_albums_count > 0:
-                    cursor.execute("""
-                        DELETE FROM albums 
-                        WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)
-                    """)
+                    cursor.execute(f"""
+                        DELETE FROM albums
+                        WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL){album_exclude_sql}
+                    """, album_params)
                     logger.info(f"Removed {orphaned_albums_count} orphaned albums")
-                
+
                 conn.commit()
-                
+
                 return {
                     'orphaned_artists_removed': orphaned_artists_count,
                     'orphaned_albums_removed': orphaned_albums_count
                 }
-                
+
         except Exception as e:
             logger.error(f"Error cleaning up orphaned records: {e}")
             return {'orphaned_artists_removed': 0, 'orphaned_albums_removed': 0}
