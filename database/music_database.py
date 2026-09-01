@@ -7603,6 +7603,23 @@ class MusicDatabase:
                 """)
                 album_ids = [str(row[0]) for row in cursor.fetchall()]
 
+                # An artist delete CASCADES to its albums (PRAGMA foreign_keys is
+                # ON), so an artist owning a protected album is not deletable
+                # either - dropping it would take the protected row with it and
+                # put #1216 straight back. The worker always writes the artist
+                # before its albums, so today it protects both; this keeps the
+                # guarantee here rather than resting on that.
+                if protected_albums:
+                    owners = list(protected_albums)
+                    for start in range(0, len(owners), 500):
+                        chunk = owners[start:start + 500]
+                        placeholders = ','.join('?' * len(chunk))
+                        cursor.execute(
+                            f"SELECT DISTINCT artist_id FROM albums WHERE id IN ({placeholders})",
+                            chunk)
+                        protected_artists |= {
+                            str(row[0]) for row in cursor.fetchall() if row[0] is not None}
+
                 artists_to_remove = [i for i in artist_ids if i not in protected_artists]
                 albums_to_remove = [i for i in album_ids if i not in protected_albums]
                 artists_held = len(artist_ids) - len(artists_to_remove)

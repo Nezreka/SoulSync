@@ -215,3 +215,30 @@ def test_both_cleanup_call_sites_pass_the_ledger(tmp_path):
     protected = source.count("protected_artist_ids=self._touched_artist_ids")
     assert calls == protected == 2, (
         f"{calls} cleanup call site(s), {protected} passing the ledger")
+
+
+def test_deleting_an_orphan_artist_cannot_cascade_over_a_protected_album(db):
+    """PRAGMA foreign_keys is ON and albums cascade from artists, so sparing an
+    album means nothing if its artist is swept in the same call. The worker
+    happens to protect both, but the guarantee belongs here."""
+    _artist(db, "a1", "Various Artists")
+    _album(db, "al1", "a1", "Compilation")
+
+    # Only the ALBUM is named — the artist is trackless and unprotected.
+    result = db.cleanup_orphaned_records(protected_album_ids={"al1"})
+
+    assert _ids(db, "albums") == {"al1"}, "the protected album was cascaded away"
+    assert _ids(db, "artists") == {"a1"}
+    assert result['orphaned_artists_removed'] == 0
+
+
+def test_an_unrelated_orphan_artist_still_goes(db):
+    """Sparing the owner must not spare everyone else."""
+    _artist(db, "keep", "Owns A Protected Album")
+    _album(db, "keep-al", "keep", "Just Inserted")
+    _artist(db, "drop", "Owns Nothing")
+
+    result = db.cleanup_orphaned_records(protected_album_ids={"keep-al"})
+
+    assert _ids(db, "artists") == {"keep"}
+    assert result['orphaned_artists_removed'] == 1
