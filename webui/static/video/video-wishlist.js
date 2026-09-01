@@ -56,12 +56,18 @@
         failed: ['Failed', 'vwsh-st--failed'],
         monitored: ['Not out yet', 'vwsh-st--monitored'],
         upgrade: ['⇪ Upgrading', 'vwsh-st--upgrade'],
+        muted: ['Muted', 'vwsh-st--monitored'],
     };
     // The pill tells the TRUTH, not the stale status column: an active download
     // row wins, then the upgrade watch (owned below cutoff), then the column.
-    function liveStatus(it) {
+    // `muted` rides on the SHOW row and episodes are what get rendered, so the
+    // caller passes it down. An un-followed show's episodes are no longer
+    // searched by the drain; the pill says that rather than leaving them
+    // looking merely stuck.
+    function liveStatus(it, showMuted) {
         if (it.downloading) return 'downloading';
         if (it.upgrade_from) return 'upgrade';
+        if ((showMuted || it.muted) && (!it.status || it.status === 'wanted')) return 'muted';
         return STATUS[it.status] ? it.status : 'wanted';
     }
     // Why a row keeps coming back empty. The count alone ("13") says a row is
@@ -351,7 +357,7 @@
         var yt = sh.source === 'youtube';
         var pimg = function (u) { return (yt && window.VideoYoutube) ? VideoYoutube.img(u) : u; };
         var t = e.title || (yt ? 'Untitled' : ('Episode ' + e.episode_number));
-        var st = liveStatus(e);
+        var st = liveStatus(e, sh.muted);
         var date = fmtDate(e.air_date);
         // TMDB shows the SxEx label; a YouTube video shows just its upload date.
         // Repeatedly-failing marker (#liveleak-failing-hub) — same rule as movies.
@@ -389,8 +395,8 @@
 
     // Same rule as the failing badges: repeated searches without a grab, and only
     // while the item is still wanted (a downloading item isn't "failing").
-    function isFailingItem(x) {
-        var st = liveStatus(x);
+    function isFailingItem(x, showMuted) {
+        var st = liveStatus(x, showMuted);
         return (Number(x.search_attempts) || 0) >= 3 && (st === 'wanted' || st === 'upgrade');
     }
 
@@ -402,7 +408,7 @@
         } else if (state.tab === 'show') {
             (rawItems || []).forEach(function (sh) {
                 (sh.seasons || []).forEach(function (se) {
-                    (se.episodes || []).forEach(function (e) { if (isFailingItem(e)) n += 1; });
+                    (se.episodes || []).forEach(function (e) { if (isFailingItem(e, sh.muted)) n += 1; });
                 });
             });
         }

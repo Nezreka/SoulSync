@@ -6032,6 +6032,14 @@ class VideoDatabase:
                 "(SELECT MAX(s.imdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS imdb_id "
                 "FROM video_wishlist w WHERE w.kind='episode' AND w.tmdb_id IS NOT NULL "
                 + (" AND " + _due_sql("w") + " " if due_only else "")
+                # Un-following a show means stop bothering with it. The airing scan
+                # already refuses to ADD episodes for a muted show; episodes wished
+                # BEFORE the mute kept being hunted every hour regardless, which is
+                # the opposite of what the user just asked for. They stay on the
+                # wishlist (removing them would be a decision the user didn't make);
+                # they just stop costing searches.
+                + " AND NOT EXISTS (SELECT 1 FROM video_watchlist v "
+                "  WHERE v.kind='show' AND v.tmdb_id = w.tmdb_id AND v.state='mute') "
                 +
                 # release-window gate: search an episode only once it's within a week of air
                 # (early scene releases show up a few days out) — a further-off episode stays on
@@ -6315,9 +6323,15 @@ class VideoDatabase:
                             season_poster[e["season_number"]] = e["season_poster_url"]
                     seasons = [{"season_number": sn, "poster_url": season_poster.get(sn),
                                 "episodes": by_season[sn]} for sn in sorted(by_season)]
+                    # A muted show's episodes are no longer searched (the drain
+                    # skips them), so say so — otherwise they read as stuck.
+                    muted = conn.execute(
+                        "SELECT 1 FROM video_watchlist WHERE kind='show' AND tmdb_id=? "
+                        "AND state='mute'", (sr["tmdb_id"],)).fetchone() is not None
                     items.append({"kind": "show", "tmdb_id": sr["tmdb_id"], "title": sr["title"],
                                   "poster_url": sr["poster_url"], "library_id": sr["library_id"],
-                                  "wanted": sr["wanted"], "done": sr["done"] or 0, "seasons": seasons})
+                                  "wanted": sr["wanted"], "done": sr["done"] or 0,
+                                  "muted": muted, "seasons": seasons})
         finally:
             conn.close()
         total_pages = max(1, (total + limit - 1) // limit)
