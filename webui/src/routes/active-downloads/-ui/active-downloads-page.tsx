@@ -23,6 +23,7 @@ import {
   quarantineAudit,
   quarantineCompare,
   quarantineDeleteEntry,
+  quarantineDeleteGroup,
   quarantinePlayEntry,
   quarantineRecoverEntry,
   reviewableHistoryIds,
@@ -386,6 +387,9 @@ export function ActiveDownloadsPage() {
                   onToggleDetails={verification.toggleQuarantine}
                   onToggleGroup={verification.toggleGroup}
                   handlersFor={quarantineHandlers}
+                  onDeleteGroup={(entry, count) =>
+                    void quarantineDeleteGroup(entry, count, refreshQuarantine)
+                  }
                 />
               )}
             </div>

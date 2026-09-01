@@ -284,6 +284,11 @@ export interface QuarantineApproveResult extends AdlResult {
   removed_siblings?: unknown[];
 }
 
+export interface QuarantineDeleteResult extends AdlResult {
+  /** How many entries actually went - 1 for a single delete, N for a group. */
+  deleted?: number;
+}
+
 /**
  * Approve and re-import one quarantined file.
  *
@@ -304,8 +309,19 @@ export function quarantineRecover(id: string): Promise<AdlResult> {
   return readJson<AdlResult>(apiClient.post(`quarantine/${encodeURIComponent(id)}/recover`));
 }
 
-export function quarantineDelete(id: string): Promise<AdlResult> {
-  return readJson<AdlResult>(apiClient.delete(`quarantine/${encodeURIComponent(id)}`));
+/**
+ * Delete one quarantined entry, or the whole group of candidates it belongs to
+ * (#1208). `siblings` is resolved server-side off the same group key the list
+ * folds rows by, so one request clears a hundred rejected attempts.
+ */
+export function quarantineDelete(
+  id: string,
+  options: { siblings?: boolean } = {},
+): Promise<QuarantineDeleteResult> {
+  const path = `quarantine/${encodeURIComponent(id)}`;
+  return readJson<QuarantineDeleteResult>(
+    apiClient.delete(options.siblings ? `${path}?siblings=1` : path),
+  );
 }
 
 export function quarantineClear(): Promise<AdlResult> {

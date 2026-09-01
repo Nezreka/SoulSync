@@ -310,6 +310,7 @@ export function AdlQuarantineList({
   onToggleDetails,
   onToggleGroup,
   handlersFor,
+  onDeleteGroup,
 }: {
   groups: QuarantineGroup[];
   openDetails: ReadonlySet<string>;
@@ -317,6 +318,8 @@ export function AdlQuarantineList({
   onToggleDetails: (id: string) => void;
   onToggleGroup: (key: string) => void;
   handlersFor: (entry: AdlQuarantineEntry) => ReviewActionHandlers;
+  /** Delete a whole group of candidates at once; absent = per-row deletes only. */
+  onDeleteGroup?: (entry: AdlQuarantineEntry, count: number) => void;
 }) {
   return (
     <>
@@ -345,16 +348,31 @@ export function AdlQuarantineList({
               onToggle={() => onToggleDetails(first.id)}
               handlers={handlersFor(first)}
               altSlot={
-                <button
-                  type="button"
-                  className={`verif-quar-alt-btn${isOpen ? ' open' : ''}`}
-                  data-group-key={groupKey}
-                  data-alt-count={rest.length}
-                  title={`Show ${rest.length} more alternative candidate${rest.length === 1 ? '' : 's'} for this track`}
-                  onClick={() => onToggleGroup(groupKey)}
-                >
-                  {isOpen ? '▴' : '▾'} {rest.length} more
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className={`verif-quar-alt-btn${isOpen ? ' open' : ''}`}
+                    data-group-key={groupKey}
+                    data-alt-count={rest.length}
+                    title={`Show ${rest.length} more alternative candidate${rest.length === 1 ? '' : 's'} for this track`}
+                    onClick={() => onToggleGroup(groupKey)}
+                  >
+                    {isOpen ? '▴' : '▾'} {rest.length} more
+                  </button>
+                  {/* The row's own Delete only takes the one candidate it sits
+                      on. This takes the group (#1208). */}
+                  {onDeleteGroup ? (
+                    <button
+                      type="button"
+                      className="verif-quar-alt-btn verif-quar-alt-del"
+                      data-group-key={groupKey}
+                      title={`Permanently delete all ${group.members.length} quarantined candidates for this track`}
+                      onClick={() => onDeleteGroup(first, group.members.length)}
+                    >
+                      🗑 Delete all {group.members.length}
+                    </button>
+                  ) : null}
+                </>
               }
             />
             <div className={`verif-quar-alt-members${isOpen ? ' vqg-open' : ''}`}>
