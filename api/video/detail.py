@@ -28,6 +28,22 @@ def register_routes(bp):
             return jsonify({"error": "not found"}), 404
         return jsonify({"success": True, "monitored": bool(body.get("monitored"))})
 
+    @bp.route("/detail/show/<int:library_id>/season/<int:season_number>/monitor",
+              methods=["POST"])
+    def video_set_season_monitor(library_id, season_number):
+        """Monitor or unmonitor a whole season at once. Unmonitoring is how you
+        tell the wishlist drain to stop hunting a season you don't want."""
+        from . import get_video_db
+        body = request.get_json(silent=True) or {}
+        if "monitored" not in body:
+            return jsonify({"success": False, "error": "monitored required"}), 400
+        moved = get_video_db().set_season_monitored(
+            library_id, season_number, bool(body.get("monitored")))
+        if not moved:
+            return jsonify({"success": False, "error": "No episodes in that season."}), 404
+        return jsonify({"success": True, "monitored": bool(body.get("monitored")),
+                        "episodes": moved})
+
     # ── Manage sidebar: metadata edits + field locks + watched ────────────────
     @bp.route("/detail/<kind>/<int:item_id>/metadata", methods=["PUT"])
     def video_edit_metadata(kind, item_id):

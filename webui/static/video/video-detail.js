@@ -1734,6 +1734,56 @@
         el.hidden = !ov;
     }
 
+    // Season-level action bar. Acquisition (grab / manual search / wishlist)
+    // only when something is missing; monitoring and stale-failure resets on any
+    // library season, complete or not. Returns '' when there is nothing to offer.
+    function seasonActionsHtml(season) {
+        var isYt = !!(data && data.source === 'youtube');
+        var seasonMissing = season.episodes.filter(function (e) { return !e.owned; });
+        if (isYt && ytFilter.q) seasonMissing = [];   // a filtered view isn't "the season"
+        var canAcquire = !!(seasonMissing.length && (isYt || window.VideoGrab));
+        // Monitoring and stale-failure resets matter on a COMPLETE season too, so a
+        // library show always gets the bar. YouTube never does: it has no episode
+        // rows to monitor, and a preview has no library row to act on at all.
+        var seasonManage = !isYt && !!data && data.kind === 'show' && data.source !== 'tmdb';
+        var monitored = (Number(season.episode_monitored) || 0) > 0;
+        return (canAcquire || seasonManage)
+            ? '<div class="vd-season-actions">' +
+                (canAcquire ? '<span class="vd-season-actions-count">' + seasonMissing.length + ' missing</span>' : '') +
+                (canAcquire ?
+                '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-grab ' +
+                    'title="' + (isYt ? 'Download every missing video in this year'
+                                      : 'Auto-search &amp; download every missing episode in this season') + '">' +
+                    '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">Grab ' + (isYt ? 'year' : 'season') + '</span>' +
+                    '<span class="discog-btn-shimmer"></span></button>' : '') +
+                (canAcquire && !isYt ?
+                '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-search ' +
+                    'title="Manual search — pick releases for this season">' +
+                    '<span class="discog-btn-icon">⌕</span><span class="discog-btn-text">Manual search</span>' +
+                    '<span class="discog-btn-shimmer"></span></button>' : '') +
+                (canAcquire ?
+                '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-wish ' +
+                    'title="' + (isYt ? 'Add every missing video in this year to the wishlist'
+                                      : 'Add every missing episode in this season to the wishlist') + '">' +
+                    '<span class="discog-btn-icon">＋</span><span class="discog-btn-text">Wishlist ' + (isYt ? 'year' : 'season') + '</span>' +
+                    '<span class="discog-btn-shimmer"></span></button>' : '') +
+                (seasonManage ?
+                '<button class="discog-download-btn discog-btn-compact vd-season-mon' + (monitored ? ' vd-season-mon--on' : '') +
+                    '" type="button" data-vd-season-monitor="' + (monitored ? '0' : '1') + '" ' +
+                    'title="' + (monitored ? 'Stop hunting this season'
+                                           : 'Hunt missing episodes in this season again') + '">' +
+                    '<span class="discog-btn-icon">' + (monitored ? '◉' : '○') + '</span>' +
+                    '<span class="discog-btn-text">' + (monitored ? 'Monitored' : 'Unmonitored') + '</span>' +
+                    '<span class="discog-btn-shimmer"></span></button>' : '') +
+                (seasonManage && data.tmdb_id ?
+                '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-clearfail ' +
+                    'title="Clear retry backoff on this season\u2019s stalled wishlist rows and search every source again">' +
+                    '<span class="discog-btn-icon">↺</span><span class="discog-btn-text">Clear failures</span>' +
+                    '<span class="discog-btn-shimmer"></span></button>' : '') +
+              '</div>'
+            : '';
+    }
+
     function renderEpisodes() {
         renderSeasonOverview();
         var host = q('[data-vd-episodes]');
@@ -1744,32 +1794,7 @@
         var emptyMsg = (data && data.source === 'youtube')
             ? (ytFilter.q ? 'No videos match “' + esc(ytFilter.q) + '”.' : 'No videos here.')
             : 'No ' + (missingOnly ? 'missing ' : '') + 'episodes here. 🎉';
-        // Season-level acquisition bar — grab / wishlist every missing episode in
-        // one click. Channels get the SAME bar (TV parity), minus manual search:
-        // there's no release to pick on YouTube, the video is the release.
-        var isYt = !!(data && data.source === 'youtube');
-        var seasonMissing = season.episodes.filter(function (e) { return !e.owned; });
-        if (isYt && ytFilter.q) seasonMissing = [];   // a filtered view isn't "the season"
-        var seasonBar = (seasonMissing.length && (isYt || window.VideoGrab))
-            ? '<div class="vd-season-actions">' +
-                '<span class="vd-season-actions-count">' + seasonMissing.length + ' missing</span>' +
-                '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-grab ' +
-                    'title="' + (isYt ? 'Download every missing video in this year'
-                                      : 'Auto-search &amp; download every missing episode in this season') + '">' +
-                    '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">Grab ' + (isYt ? 'year' : 'season') + '</span>' +
-                    '<span class="discog-btn-shimmer"></span></button>' +
-                (isYt ? '' :
-                '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-search ' +
-                    'title="Manual search — pick releases for this season">' +
-                    '<span class="discog-btn-icon">⌕</span><span class="discog-btn-text">Manual search</span>' +
-                    '<span class="discog-btn-shimmer"></span></button>') +
-                '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-wish ' +
-                    'title="' + (isYt ? 'Add every missing video in this year to the wishlist'
-                                      : 'Add every missing episode in this season to the wishlist') + '">' +
-                    '<span class="discog-btn-icon">＋</span><span class="discog-btn-text">Wishlist ' + (isYt ? 'year' : 'season') + '</span>' +
-                    '<span class="discog-btn-shimmer"></span></button>' +
-              '</div>'
-            : '';
+        var seasonBar = seasonActionsHtml(season);
         host.innerHTML = seasonBar +
             (eps.length ? eps.map(episodeRow).join('') : '<div class="vd-ep-empty">' + emptyMsg + '</div>');
         host.classList.remove('vd-ep-anim'); void host.offsetWidth; host.classList.add('vd-ep-anim');
@@ -2698,6 +2723,12 @@
             if (data && data.source === 'youtube') ytGrabSeasonInline(seasonGrab); else grabSeasonInline(seasonGrab);
             return;
         }
+        var seasonMon = e.target.closest('[data-vd-season-monitor]');
+        if (seasonMon && r.contains(seasonMon)) { e.preventDefault(); toggleSeasonMonitor(seasonMon); return; }
+        var seasonClr = e.target.closest('[data-vd-season-clearfail]');
+        if (seasonClr && r.contains(seasonClr)) { e.preventDefault(); clearSeasonFailures(seasonClr);
+            return;
+        }
         var seasonSearch = e.target.closest('[data-vd-season-search]');
         if (seasonSearch && r.contains(seasonSearch)) { e.preventDefault(); manualSearchSeason(); return; }
         var seasonWish = e.target.closest('[data-vd-season-wish]');
@@ -2914,6 +2945,54 @@
                 } else { toast((d && d.error) || 'Could not add to wishlist', 'error'); }
             })
             .catch(function () { btn.disabled = false; _btnLabel(btn, 'Wishlist year'); toast('Could not add to wishlist', 'error'); });
+    }
+
+    // Season monitoring is per-episode in the schema, so the toggle flips every
+    // episode of the season and the local copy follows without a page reload.
+    function toggleSeasonMonitor(btn) {
+        var season = seasonByNum(selectedSeason);
+        if (!data || data.kind !== 'show' || !season) return;
+        var libId = (data.source !== 'tmdb') ? data.id : data.library_id;
+        if (libId == null) return;
+        var want = btn.getAttribute('data-vd-season-monitor') === '1';
+        btn.disabled = true;
+        fetch('/api/video/detail/show/' + libId + '/season/' + season.season_number + '/monitor', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ monitored: want }),
+        }).then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (res) {
+              btn.disabled = false;
+              if (!res || !res.success) { toast('Couldn\u2019t change monitoring', 'error'); return; }
+              season.episode_monitored = want ? season.episodes.length : 0;
+              season.episodes.forEach(function (e) { e.monitored = want; });
+              renderEpisodes();
+              toast(want ? 'Season monitored' : 'Season unmonitored', 'success');
+          }).catch(function () { btn.disabled = false; toast('Couldn\u2019t change monitoring', 'error'); });
+    }
+
+    // Stalled rows back off for hours by design; this is the user saying "no,
+    // try now, and try everything". The endpoint clears the backoff evidence
+    // and re-searches every source for the season in one call.
+    function clearSeasonFailures(btn) {
+        var season = seasonByNum(selectedSeason);
+        if (!data || !data.tmdb_id || !season) return;
+        btn.disabled = true; _btnLabel(btn, 'Retrying\u2026');
+        var done = function (msg, type) {
+            btn.disabled = false; _btnLabel(btn, 'Clear failures');
+            toast(msg, type);
+        };
+        fetch('/api/video/wishlist/retry', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scope: 'season', tmdb_id: data.tmdb_id,
+                                   season_number: season.season_number }),
+        }).then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (res) {
+              if (!res || !res.success) { done('Retry failed to start', 'error'); return; }
+              var n = Number(res.reset) || 0;
+              done(n ? 'Cleared ' + n + ' stalled row' + (n === 1 ? '' : 's') + ', searching again'
+                     : 'Nothing stalled in this season', n ? 'success' : 'info');
+              document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
+          }).catch(function () { done('Retry failed to start', 'error'); });
     }
 
     function grabSeasonInline(btn) {

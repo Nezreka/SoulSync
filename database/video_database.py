@@ -4603,6 +4603,9 @@ class VideoDatabase:
                 "has_poster": bool(meta["has_poster"]) if meta else False,
                 "episode_total": len(ep_list),
                 "episode_owned": owned,
+                # how much of the season the drain is still hunting — the season
+                # bar's monitor toggle reads this to know which way to flip.
+                "episode_monitored": sum(1 for e in ep_list if e["monitored"]),
                 "episodes": ep_list,
             })
 
@@ -4691,6 +4694,23 @@ class VideoDatabase:
                                (1 if monitored else 0, item_id))
             conn.commit()
             return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def set_season_monitored(self, show_id: int, season_number: int, monitored: bool) -> int:
+        """Flip 'monitored' on every episode of one season. Returns how many rows
+        moved. Season monitoring is per-EPISODE in this schema (there is no
+        seasons.monitored), so the season is just the set of its episodes."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE episodes SET monitored=? WHERE show_id=? AND season_number=?",
+                (1 if monitored else 0, int(show_id), int(season_number)))
+            conn.commit()
+            return int(cur.rowcount or 0)
+        except sqlite3.Error:
+            logger.exception("set_season_monitored failed")
+            return 0
         finally:
             conn.close()
 

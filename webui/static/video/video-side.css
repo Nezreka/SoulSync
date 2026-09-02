@@ -751,6 +751,10 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-health-chip--missing {
     border-color: rgba(245,158,11,0.24); background: rgba(245,158,11,0.08);
 }
+/* An unmonitored season reads as switched-off, not as an error: it's a choice. */
+.vd-season-mon { opacity: 0.62; }
+.vd-season-mon--on { opacity: 1; }
+.vd-season-mon--on .discog-btn-icon { color: rgb(var(--vd-accent-rgb)); }
 .vd-health-chip--fix { cursor: pointer; font: inherit; }
 .vd-health-chip--fix:hover {
     border-color: rgba(245,158,11,0.55); background: rgba(245,158,11,0.16);

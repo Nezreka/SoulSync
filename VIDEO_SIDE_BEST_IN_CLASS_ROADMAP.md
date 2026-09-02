@@ -58,8 +58,8 @@ This is the working checklist for making SoulSync's video side feel better than 
 - [ ] Add an acquisition panel showing owned, wanted, queued, downloading, failed, and ignored states in one place.
 - [ ] Add per-title overrides for quality profile, preferred sources, release group allow/block, and pack preference.
 - [x] Show external ID health as a hero band: library id when it resolves, TMDB/TVDB/IMDb for movies and shows, channel or playlist id plus handle and download count for YouTube. Identity only, so it does not restate the meta line. Commit: `c78ff6ba5`.
-- [x] Deepen external ID health: a missing TMDB/TVDB/IMDb chip on a library title is now the button that opens the manage panel's match search for that service, and every YouTube episode row states its video id as a link out. Preview titles stay inert, since there is no library row to re-match. Commit: this phase.
-- [ ] Add season-level actions: search missing, grab season pack, mark monitored/unmonitored, and clear stale failures.
+- [x] Deepen external ID health: a missing TMDB/TVDB/IMDb chip on a library title is now the button that opens the manage panel's match search for that service, and every YouTube episode row states its video id as a link out. Preview titles stay inert, since there is no library row to re-match. Commit: `932a20aad`.
+- [x] Add season-level actions. Grab season, manual search and wishlist season already existed but only appeared when episodes were missing; the bar now also carries a monitored/unmonitored toggle and a clear-failures reset, and shows on a complete season too, because a season you own in full is exactly the one you want to stop hunting. Clear-failures reuses the existing all-sources wishlist retry at season scope. Commit: this phase.
 
 ## Calendar
 

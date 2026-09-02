@@ -76,6 +76,7 @@ def test_library_management_is_admin_only(tmp_path):
     gated = [
         ("post", "/api/video/bulk/start"),
         ("post", "/api/video/monitor"),
+        ("post", "/api/video/detail/show/5/season/1/monitor"),
         ("post", "/api/video/poster/set"),
         ("post", "/api/video/downloads/blocklist"),
         ("put", "/api/video/detail/movie/5/metadata"),
@@ -1614,3 +1615,61 @@ def test_video_override_hides_the_inherited_value(tmp_path, monkeypatch):
     p = c.get("/api/video/server-config").get_json()["plex"]
     assert p["base_url"] == "http://video-plex" and p["inherited"] is False
     assert p["has_token"] is False
+
+
+def _seed_two_season_show(db):
+    """A show with two seasons of two episodes each, all monitored by default."""
+    return db.upsert_show_tree("plex", {"server_id": "s1", "title": "Show", "seasons": [
+        {"season_number": 1, "server_id": "se1", "episodes": [
+            {"episode_number": 1, "title": "E1", "server_id": "ep1"},
+            {"episode_number": 2, "title": "E2", "server_id": "ep2"}]},
+        {"season_number": 2, "server_id": "se2", "episodes": [
+            {"episode_number": 1, "title": "E3", "server_id": "ep3"},
+            {"episode_number": 2, "title": "E4", "server_id": "ep4"}]}]})
+
+
+def _season(detail, number):
+    return next(s for s in detail["seasons"] if s["season_number"] == number)
+
+
+def test_season_monitor_endpoint_flips_only_that_season(tmp_path):
+    """Unmonitoring season 1 must not stop the drain hunting season 2 — the whole
+    point of a season-level toggle is that it is narrower than the show one."""
+    client, videoapi = _make_client(tmp_path)
+    try:
+        db = videoapi._video_db
+        sid = _seed_two_season_show(db)
+        assert _season(db.show_detail(sid), 1)["episode_monitored"] == 2
+
+        r = client.post("/api/video/detail/show/%d/season/1/monitor" % sid,
+                        json={"monitored": False})
+        assert r.status_code == 200
+        assert r.get_json() == {"success": True, "monitored": False, "episodes": 2}
+
+        detail = db.show_detail(sid)
+        assert _season(detail, 1)["episode_monitored"] == 0
+        assert _season(detail, 2)["episode_monitored"] == 2, "season 2 must be untouched"
+        assert all(not e["monitored"] for e in _season(detail, 1)["episodes"])
+
+        # ...and back on.
+        assert client.post("/api/video/detail/show/%d/season/1/monitor" % sid,
+                           json={"monitored": True}).status_code == 200
+        assert _season(db.show_detail(sid), 1)["episode_monitored"] == 2
+    finally:
+        videoapi._video_db = None
+
+
+def test_season_monitor_endpoint_rejects_bad_input(tmp_path):
+    client, videoapi = _make_client(tmp_path)
+    try:
+        sid = _seed_two_season_show(videoapi._video_db)
+        # An omitted flag is a bug in the caller, not "unmonitor everything".
+        assert client.post("/api/video/detail/show/%d/season/1/monitor" % sid,
+                           json={}).status_code == 400
+        # A season with no episodes moves nothing and says so.
+        assert client.post("/api/video/detail/show/%d/season/99/monitor" % sid,
+                           json={"monitored": False}).status_code == 404
+        assert client.post("/api/video/detail/show/999999/season/1/monitor",
+                           json={"monitored": False}).status_code == 404
+    finally:
+        videoapi._video_db = None
