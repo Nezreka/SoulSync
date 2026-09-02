@@ -235,6 +235,20 @@
         h.hidden = !chips.length;
     }
 
+    // Text colour to put ON the sampled accent. Dark Matter's poster is pale, so
+    // its accent sampled near-white and the Trailer button rendered white on
+    // white — an accent lifted from artwork cannot assume white text just
+    // because the page around it is dark. sRGB relative luminance, WCAG's.
+    function accentFg(rgb) {
+        var lin = [];
+        for (var i = 0; i < 3; i++) {
+            var v = rgb[i] / 255;
+            lin.push(v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+        }
+        var L = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+        return L > 0.45 ? '#0b0b0f' : '#fff';
+    }
+
     // ── accent extraction (poster → dominant vibrant colour) ──────────────────
     function applyAccent(img) {
         try {
@@ -252,7 +266,13 @@
                 if (score > bestScore) { bestScore = score; best = [r, g, b]; }
             }
             if (!best && n) best = [Math.round(fr / n), Math.round(fg / n), Math.round(fb / n)];
-            if (best) { var r0 = root(); if (r0) r0.style.setProperty('--vd-accent-rgb', best[0] + ', ' + best[1] + ', ' + best[2]); }
+            if (best) {
+                var r0 = root();
+                if (r0) {
+                    r0.style.setProperty('--vd-accent-rgb', best[0] + ', ' + best[1] + ', ' + best[2]);
+                    r0.style.setProperty('--vd-accent-fg', accentFg(best));
+                }
+            }
         } catch (e) { /* tainted/no image — keep theme accent */ }
     }
 
@@ -334,7 +354,13 @@
             // your best copy's format facts (4K · HDR · Atmos · 5.1), like the streamers show
             if (d.owned && d.file) meta.push.apply(meta, formatBadges(d.file));
         }
-        if (d.rating) meta.push('<span class="vd-score">★ ' + (Math.round(d.rating * 10) / 10) + '</span>');
+        // The ratings ROW below carries IMDb / RT / Metacritic / Trakt / TVmaze.
+        // Printing the TMDB score up here too put four numbers for one question
+        // two lines apart, disagreeing with each other. Only show it when the row
+        // below has nothing to say.
+        if (d.rating && !hasRatingRow(d)) {
+            meta.push('<span class="vd-score">★ ' + (Math.round(d.rating * 10) / 10) + '</span>');
+        }
         if (d.year) meta.push('<span>' + esc(d.year) + '</span>');
         if (d.content_rating) meta.push('<span class="vd-meta-rating">' + esc(d.content_rating) + '</span>');
         if (d.kind === 'show') {
@@ -473,6 +499,13 @@
         el.hidden = false;
     }
 
+    // Does the dedicated ratings row have anything in it? Drives whether the meta
+    // line needs to carry the score itself.
+    function hasRatingRow(d) {
+        return !!(d.imdb_rating || d.rt_rating != null || d.metacritic != null ||
+                  d.trakt_rating || d.tvmaze_rating);
+    }
+
     function renderRatings(d) {
         var host = q('[data-vd-ratings]');
         if (!host) return;
@@ -583,6 +616,11 @@
                 }).catch(function () { /* keep default state */ });
         }
         var html = '';
+        // Management actions (poster / metadata / sync / watched) collect here and
+        // ship behind one "More" button. Nine same-sized buttons in three rows gave
+        // "Play" and "Manage Poster" identical weight; these four are the ones you
+        // reach for occasionally, so they stop competing with the ones you don't.
+        var more = '';
         // Primary CTA: play it on your media server (owned items; arrives with
         // extras). The logo IS the brand name — "Play on <logo>" (no redundant word).
         if (d.server && d.server.url) {
@@ -697,7 +735,7 @@
         // new poster to) and a tmdb id (to fetch the alternates). Opens VideoPoster.
         var ownLibItem = (d.source !== 'tmdb') || d.owned;
         if (ownLibItem && d.tmdb_id && window.VideoPoster) {
-            html += '<button class="vd-manage-btn" type="button" data-vd-act="poster" title="Change poster">' +
+            more += '<button class="vd-manage-btn" type="button" data-vd-act="poster" title="Change poster">' +
                 '<span class="vd-trailer-ic">🖼</span> Manage Poster</button>';
         }
         // Manage — the per-item metadata editor (library items only: edits write
@@ -705,7 +743,7 @@
         // always have a row; TMDB pages only when owned (library_id resolves it).
         if (ownLibItem && window.VideoManage &&
                 (d.source !== 'tmdb' || d.library_id != null)) {
-            html += '<button class="vd-manage-btn" type="button" data-vd-act="manage" title="Edit metadata">' +
+            more += '<button class="vd-manage-btn" type="button" data-vd-act="manage" title="Edit metadata">' +
                 '<span class="vd-manage-ic">✎</span> Manage</button>';
         }
         // Synchronize — a deep scan scoped to THIS show: re-reads it from the
@@ -714,7 +752,7 @@
         var libShowId = (d.kind === 'show' && ownLibItem)
             ? (d.source !== 'tmdb' ? d.id : d.library_id) : null;
         if (libShowId != null) {
-            html += '<button class="vd-manage-btn" type="button" data-vd-act="sync-show" data-vd-sync-id="' + esc(libShowId) +
+            more += '<button class="vd-manage-btn" type="button" data-vd-act="sync-show" data-vd-sync-id="' + esc(libShowId) +
                 '" title="Re-read this show from your server — picks up new or removed episodes">' +
                 '<span class="vd-manage-ic">⟳</span> Sync</button>';
         }
@@ -722,13 +760,43 @@
         // markPlayed/markUnplayed pushed to the server. Library rows only.
         if (ownLibItem && (d.kind === 'movie' || d.kind === 'show') &&
                 (d.source !== 'tmdb' || d.library_id != null) && (d.owned || d.episode_owned || d.watched)) {
-            html += '<button class="vd-manage-btn" type="button" data-vd-act="watched-toggle" title="' +
+            more += '<button class="vd-manage-btn" type="button" data-vd-act="watched-toggle" title="' +
                 (d.watched ? 'Mark unwatched (clears played state on your server too)'
                            : 'Mark watched (marks played on your server too)') + '">' +
                 '<span class="vd-manage-ic">' + (d.watched ? '↺' : '✓') + '</span> ' +
                 (d.watched ? 'Mark unwatched' : 'Mark watched') + '</button>';
         }
+        // One button instead of four. With a single item behind it the menu is
+        // pure overhead, so that item just rides in the main row.
+        if (more) {
+            html += (moreCount(more) === 1) ? more :
+                '<div class="vd-more" data-vd-more>' +
+                    '<button class="vd-manage-btn vd-more-btn" type="button" data-vd-act="more" ' +
+                        'aria-haspopup="true" aria-expanded="false" title="More actions">' +
+                        '<span class="vd-manage-ic">⋯</span> More</button>' +
+                    '<div class="vd-more-menu" data-vd-more-menu hidden>' + more + '</div>' +
+                '</div>';
+        }
         a.innerHTML = html;
+    }
+
+    function moreCount(html) { return (html.match(/<button/g) || []).length; }
+
+    function toggleMoreMenu(btn) {
+        var wrap = btn.closest('[data-vd-more]');
+        var menu = wrap && wrap.querySelector('[data-vd-more-menu]');
+        if (!menu) return;
+        var open = menu.hidden;
+        menu.hidden = !open;
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    function closeMoreMenu() {
+        var menu = q('[data-vd-more-menu]');
+        if (menu && !menu.hidden) {
+            menu.hidden = true;
+            var b = q('[data-vd-more] .vd-more-btn');
+            if (b) b.setAttribute('aria-expanded', 'false');
+        }
     }
 
     // Continue Watching: played/unplayed toggle → POST /detail/<kind>/<id>/watched
@@ -1749,15 +1817,26 @@
         return links.length
             ? '<div class="vd-ep-links">' + links.join('') + '</div>' : '';
     }
+    // How many guest faces the expanded episode shows before folding the rest
+    // away. One episode came back with fourteen, most of them a grey initial in a
+    // circle, and they out-shouted the episode's own actions.
+    var GUEST_VISIBLE = 8;
+
     function renderEpisodeExtra(panel, ex, showTmdb, season, episode) {
-        var html = '';
-        if (ex.still_url) {
-            html += '<img class="vd-ep-extra-still" src="' + esc(ex.still_url) + '" alt="" loading="lazy">';
+        // The row above already prints this description and TMDB hands back the
+        // same string, so printing it again just doubled the panel's height.
+        var owner = panel.previousElementSibling;
+        var rowDesc = '';
+        if (owner && owner.classList && owner.classList.contains('vd-ep')) {
+            var dEl = owner.querySelector('.vd-ep-desc');
+            rowDesc = dEl ? (dEl.textContent || '').trim() : '';
         }
-        html += '<div class="vd-ep-extra-body">';
-        if (ex.overview) html += '<p class="vd-ep-extra-ov">' + esc(ex.overview) + '</p>';
+        var body = '';
+        if (ex.overview && ex.overview.trim() !== rowDesc) {
+            body += '<p class="vd-ep-extra-ov">' + esc(ex.overview) + '</p>';
+        }
         if (ex.guest_stars && ex.guest_stars.length) {
-            html += '<div class="vd-ep-extra-gh">Guest stars</div><div class="vd-ep-guests">' +
+            body += '<div class="vd-ep-extra-gh">Guest stars</div><div class="vd-ep-guests">' +
                 ex.guest_stars.map(function (g) {
                     var img = g.photo
                         ? '<img class="vd-guest-photo" src="' + esc(g.photo) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
@@ -1767,11 +1846,24 @@
                     return g.tmdb_id
                         ? '<a class="vd-guest" href="/video-detail/tmdb/person/' + g.tmdb_id + '" data-vd-person="' + g.tmdb_id + '">' + inner + '</a>'
                         : '<div class="vd-guest">' + inner + '</div>';
-                }).join('') + '</div>';
+                }).join('') +
+                (ex.guest_stars.length > GUEST_VISIBLE
+                    ? '<button class="vd-guest-more" type="button" data-vd-guests-all>+' +
+                      (ex.guest_stars.length - GUEST_VISIBLE) + ' more</button>'
+                    : '') +
+                '</div>';
         }
-        html += episodeLinks(showTmdb, season, episode, ex);
-        html += '</div>';
-        panel.innerHTML = html || '<div class="vd-ep-extra-empty">No extra info.</div>';
+        body += episodeLinks(showTmdb, season, episode, ex);
+        // The empty-state used to be unreachable: the old code built the wrapper
+        // div into `html` first, so `html || fallback` could never take the
+        // fallback and an episode with no extras opened into a blank box.
+        panel.innerHTML =
+            (ex.still_url
+                ? '<img class="vd-ep-extra-still" src="' + esc(ex.still_url) + '" alt="" loading="lazy">'
+                : '') +
+            '<div class="vd-ep-extra-body">' +
+                (body || '<div class="vd-ep-extra-empty">No extra info.</div>') +
+            '</div>';
     }
 
     function renderSeasonOverview() {
@@ -2799,6 +2891,9 @@
         var act = e.target.closest('[data-vd-act]');
         if (act && r.contains(act)) {
             var which = act.getAttribute('data-vd-act');
+            if (which === 'more') { toggleMoreMenu(act); return; }
+            // Any real action closes the menu it was picked from.
+            if (act.closest('[data-vd-more-menu]')) closeMoreMenu();
             if (which === 'watchlist') toggleWatchlist();
             else if (which === 'request') sendRequest(act);
             else if (which === 'wishtoggle') toggleMovieWishlist(act);
@@ -2814,6 +2909,15 @@
             else if (which === 'trailer' && data && data.trailer) openTrailer(data.trailer.key);
             return;
         }
+        var guestAll = e.target.closest('[data-vd-guests-all]');
+        if (guestAll && r.contains(guestAll)) {
+            e.preventDefault();
+            var gwrap = guestAll.closest('.vd-ep-guests');
+            if (gwrap) gwrap.classList.add('vd-ep-guests--all');
+            guestAll.remove();
+            return;
+        }
+        if (!e.target.closest('[data-vd-more]')) closeMoreMenu();   // click-away
         var mt = e.target.closest('[data-vd-missing-toggle]');
         if (mt && r.contains(mt)) { toggleMissing(); return; }
         if (menuOpen && !e.target.closest('[data-vd-season-nav]')) { menuOpen = false; renderSeasonNav(); }

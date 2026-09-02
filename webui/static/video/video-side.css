@@ -585,7 +585,17 @@ body[data-side="video"] .dashboard-header-sweep {
    ════════════════════════════════════════════════════════════════════════════ */
 /* Break out of the host .page's 40px/90px padding so the billboard is truly
    edge-to-edge (Netflix full-bleed) — no bare gaps around it. */
-.vd-page { --vd-accent-rgb: var(--accent-rgb, 88, 101, 242); position: relative; margin: -40px -40px -90px; }
+.vd-page {
+    --vd-accent-rgb: var(--accent-rgb, 88, 101, 242);
+    /* Text that sits ON the accent. JS re-derives it per poster; this is the
+       fallback for the theme accent before any artwork has been sampled. */
+    --vd-accent-fg: #fff;
+    /* ONE content measure for the whole page. The hero used to cap at 720px
+       while the body ran the full viewport, so the page had two widths and
+       episode actions ended up a screen away from their episode. */
+    --vd-measure: 1400px;
+    position: relative; margin: -40px -40px -90px;
+}
 /* Sticky so it stays reachable on these long detail pages (negative bottom margin
    pulls the billboard up under it, keeping the full-bleed overlay look). */
 .vd-back {
@@ -619,7 +629,8 @@ body[data-side="video"] .dashboard-header-sweep {
         linear-gradient(90deg, rgba(11,11,15,0.92) 0%, rgba(11,11,15,0.55) 38%, transparent 72%);
 }
 .vd-bb-content {
-    position: relative; z-index: 2; max-width: 720px; padding: 0 0 52px 56px;
+    position: relative; z-index: 2; max-width: var(--vd-measure); margin: 0 auto;
+    padding: 0 56px 52px;
     animation: vdRise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 @keyframes vdRise { from { opacity: 0; transform: translateY(26px); } to { opacity: 1; transform: none; } }
@@ -658,6 +669,19 @@ body[data-side="video"] .dashboard-header-sweep {
     color: rgba(200,220,255,0.92); background: rgba(120,170,255,0.1); border: 1px solid rgba(120,170,255,0.22); }
 .vd-sub--more { color: rgba(255,255,255,0.55); background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); }
 .vd-status { color: rgb(var(--vd-accent-rgb)); }
+/* The billboard container is now page-wide, so its text children keep their own
+   measure — a 1400px-wide overview paragraph is unreadable. */
+.vd-bb-content > .vd-title,
+.vd-bb-content > .vd-logo,
+.vd-bb-content > .vd-tagline,
+.vd-bb-content > .vd-meta,
+.vd-bb-content > .vd-crew-line,
+.vd-bb-content > .vd-next-ep,
+.vd-bb-content > .vd-links,
+.vd-bb-content > .vd-ratings,
+.vd-bb-content > .vd-awards,
+.vd-bb-content > .vd-genres,
+.vd-bb-content > .vd-subs { max-width: 760px; }
 .vd-overview { font-size: 16px; line-height: 1.6; color: rgba(255,255,255,0.86); margin: 0 0 22px; max-width: 640px;
     text-shadow: 0 2px 12px rgba(0,0,0,0.6);
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
@@ -751,6 +775,33 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-health-chip--missing {
     border-color: rgba(245,158,11,0.24); background: rgba(245,158,11,0.08);
 }
+/* Guest stars fold after the first row-and-a-bit; the rest are one click away.
+   CSS does the hiding so expanding never re-renders (and never re-fetches). */
+.vd-ep-guests:not(.vd-ep-guests--all) > .vd-guest:nth-child(n + 9) { display: none; }
+.vd-guest-more {
+    align-self: center; padding: 6px 12px; border-radius: 999px; cursor: pointer;
+    font-size: 11.5px; font-weight: 700; color: rgba(255,255,255,0.7);
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+}
+.vd-guest-more:hover { color: #fff; background: rgba(255,255,255,0.12); }
+
+/* Overflow menu for the management actions. Anchored to its button so the menu
+   opens under it rather than shoving the genre chips down the page. */
+.vd-more { position: relative; display: inline-flex; }
+.vd-more-menu {
+    position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
+    display: flex; flex-direction: column; gap: 4px; padding: 6px;
+    min-width: 200px; border-radius: 12px;
+    background: rgba(16, 18, 24, 0.97); border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 0 18px 46px rgba(0,0,0,0.55); backdrop-filter: blur(14px);
+}
+.vd-more-menu .vd-manage-btn {
+    width: 100%; justify-content: flex-start; margin: 0; background: transparent;
+    border-color: transparent; box-shadow: none;
+}
+.vd-more-menu .vd-manage-btn:hover { background: rgba(255,255,255,0.08); }
+
+.vd-acq-section { margin: 0 0 26px; }
 /* Acquisition roll-up: a counted chip per state, plus a library-coverage bar.
    Numbers lead, labels follow - the count is what you scan for. */
 .vd-acq-chips { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
@@ -807,7 +858,9 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-loading { padding: 50px 0; text-align: center; color: rgba(255,255,255,0.55); }
 
 /* ── Episodes ──────────────────────────────────────────────────────────────── */
-.vd-body { padding: 30px 56px 70px; }
+/* Same measure as the billboard above it, so the episode list lines up with the
+   title instead of running to both edges of an ultrawide monitor. */
+.vd-body { max-width: var(--vd-measure); margin: 0 auto; padding: 30px 56px 70px; }
 .vd-ep-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
 .vd-ep-heading { font-size: 22px; font-weight: 800; color: #fff; margin: 0; }
 
@@ -826,7 +879,7 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-vt-btn { width: 34px; height: 30px; border: 0; border-radius: 6px; background: transparent; cursor: pointer;
     color: rgba(255,255,255,0.55); font-size: 14px; transition: all 0.18s ease; }
 .vd-vt-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
-.vd-vt-btn--active { background: rgba(var(--vd-accent-rgb), 0.85); color: #fff; box-shadow: 0 2px 10px rgba(var(--vd-accent-rgb), 0.4); }
+.vd-vt-btn--active { background: rgba(var(--vd-accent-rgb), 0.85); color: var(--vd-accent-fg); box-shadow: 0 2px 10px rgba(var(--vd-accent-rgb), 0.4); }
 
 .vd-season-nav { margin-bottom: 26px; }
 .vd-season-nav:empty { margin: 0; }
@@ -1105,7 +1158,7 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-trailer-btn {
     display: inline-flex; align-items: center; gap: 8px; padding: 7px 18px; border-radius: 8px;
     font-size: 12.5px; font-weight: 800; letter-spacing: 0.02em; cursor: pointer;
-    color: #fff; background: rgb(var(--vd-accent-rgb)); border: 1px solid transparent;
+    color: var(--vd-accent-fg); background: rgb(var(--vd-accent-rgb)); border: 1px solid transparent;
     box-shadow: 0 6px 18px rgba(var(--vd-accent-rgb), 0.4); transition: all 0.2s ease;
 }
 .vd-trailer-btn:hover { transform: translateY(-1px); filter: brightness(1.08);
