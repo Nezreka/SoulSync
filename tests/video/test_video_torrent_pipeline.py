@@ -284,3 +284,91 @@ def test_torrent_search_still_runs_when_extto_is_unconfigured(monkeypatch):
     cands, err = w._search_one_source("torrent", item, "movie")
     assert [c["source"] for c in cands] == ["torrent"]
     assert "EXT.to skipped" in err
+
+
+# ── the torrent lane has two halves; one failing must not sink the other ──────
+#
+# `_search_one_source` returned the moment Prowlarr said "not configured", so a
+# user running FlareSolverr WITHOUT Prowlarr got nothing from the torrent lane
+# while EXT.to sat there able to answer — the opposite of the intent that normal
+# torrent users get EXT.to automatically. The lane has only failed to search
+# when NEITHER half could run.
+
+def _lane(monkeypatch, *, prowlarr, extto):
+    """Drive _search_one_source('torrent', …) with both halves stubbed."""
+    monkeypatch.setattr("api.video.get_video_db", lambda: object())
+    monkeypatch.setattr("core.video.quality_profile.load_for_item", lambda db, item: {})
+    monkeypatch.setattr(w, "search_context",
+                        lambda item, mt: {"scope": "movie", "title": "X", "titles": ["X"]})
+    monkeypatch.setattr("core.video.prowlarr_search.prowlarr_search",
+                        lambda *a, **k: prowlarr)
+    monkeypatch.setattr(w, "_extto_hits_for_context", lambda ctx: extto)
+    monkeypatch.setattr("api.video.downloads._evaluate_hits",
+                        lambda hits, *a, **k: [dict(h) for h in hits])
+    return w._search_one_source("torrent", {"title": "X"}, "movie")
+
+
+def test_extto_still_answers_when_prowlarr_is_not_configured(monkeypatch):
+    cands, err = _lane(monkeypatch,
+                       prowlarr={"configured": False},
+                       extto=([{"title": "ext hit"}], None))
+    assert [c["title"] for c in cands] == ["ext hit"]
+    assert err and "Prowlarr" in err          # the degradation is still reported
+
+
+def test_extto_still_answers_when_prowlarr_errors(monkeypatch):
+    cands, err = _lane(monkeypatch,
+                       prowlarr={"configured": True, "error": "indexer timeout"},
+                       extto=([{"title": "ext hit"}], None))
+    assert [c["title"] for c in cands] == ["ext hit"]
+    assert err and "indexer timeout" in err
+
+
+def test_both_halves_down_is_a_real_search_failure(monkeypatch):
+    """None (not []) is what tells the caller the lane could not SEARCH — an
+    empty list would read as 'looked, found nothing' and stop the fallback."""
+    cands, err = _lane(monkeypatch,
+                       prowlarr={"configured": False},
+                       extto=(None, "EXT.to requires FlareSolverr"))
+    assert cands is None
+    assert "Prowlarr" in err and "FlareSolverr" in err
+
+
+def test_prowlarr_alone_still_works_when_extto_cannot_run(monkeypatch):
+    cands, err = _lane(monkeypatch,
+                       prowlarr={"configured": True, "hits": [{"title": "prowlarr hit"}]},
+                       extto=(None, "EXT.to requires FlareSolverr"))
+    assert [c["title"] for c in cands] == ["prowlarr hit"]
+    assert err and "EXT.to skipped" in err
+
+
+def test_both_halves_answering_are_merged(monkeypatch):
+    cands, err = _lane(monkeypatch,
+                       prowlarr={"configured": True, "hits": [{"title": "prowlarr hit"}]},
+                       extto=([{"title": "ext hit"}], None))
+    assert [c["title"] for c in cands] == ["prowlarr hit", "ext hit"]
+    assert err is None                        # nothing degraded, nothing to report
+
+
+def test_extto_running_but_empty_is_not_a_failure(monkeypatch):
+    """Configured, no error, zero hits = it looked and found nothing. That has to
+    stay distinct from 'could not run', or the chain stops falling back."""
+    cands, err = _lane(monkeypatch,
+                       prowlarr={"configured": False},
+                       extto=([], None))
+    assert cands == []                        # ran, found nothing
+    assert err and "Prowlarr" in err
+
+
+def test_usenet_is_prowlarr_only(monkeypatch):
+    """EXT.to is torrents. A usenet lane must not be rescued by it."""
+    monkeypatch.setattr("api.video.get_video_db", lambda: object())
+    monkeypatch.setattr("core.video.quality_profile.load_for_item", lambda db, item: {})
+    monkeypatch.setattr(w, "search_context",
+                        lambda item, mt: {"scope": "movie", "title": "X", "titles": ["X"]})
+    monkeypatch.setattr("core.video.prowlarr_search.prowlarr_search",
+                        lambda *a, **k: {"configured": False})
+    monkeypatch.setattr(w, "_extto_hits_for_context",
+                        lambda ctx: (_ for _ in ()).throw(AssertionError("EXT.to ran for usenet")))
+    cands, err = w._search_one_source("usenet", {"title": "X"}, "movie")
+    assert cands is None and "Prowlarr" in err

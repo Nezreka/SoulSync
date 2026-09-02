@@ -376,17 +376,35 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
                                series_type=ctx.get("series_type"),
                                imdb_id=ctx.get("imdb_id"), tmdb_id=ctx.get("tmdb_id"),
                                tvdb_id=ctx.get("tvdb_id"))
+        prowlarr_err = None
         if not pres.get("configured"):
-            return None, "Prowlarr not configured"
-        if pres.get("error"):
-            return None, pres["error"]
-        hits = pres["hits"]
-        if source == "torrent":
+            prowlarr_err = "Prowlarr not configured"
+        elif pres.get("error"):
+            prowlarr_err = pres["error"]
+        hits = [] if prowlarr_err else list(pres.get("hits") or [])
+        if source != "torrent":
+            # usenet is Prowlarr-only; EXT.to is torrents.
+            if prowlarr_err:
+                return None, prowlarr_err
+        else:
+            # EXT.to is the OTHER HALF of the torrent lane, so a Prowlarr that
+            # can't run must not take it down with it. Returning early on
+            # "not configured" meant a user running FlareSolverr without Prowlarr
+            # got nothing from the torrent lane while EXT.to sat there able to
+            # answer — the opposite of "normal torrent users get it
+            # automatically". The lane has only genuinely failed to search when
+            # NEITHER half could run.
             ehits, eerr = _extto_hits_for_context(ctx)
             if ehits is None:
+                if prowlarr_err:
+                    return None, "; ".join(
+                        x for x in (prowlarr_err, eerr or "EXT.to search didn't run") if x)
                 source_notes.append("EXT.to skipped — %s" % (eerr or "search didn't run"))
             else:
-                hits = list(hits or []) + list(ehits or [])
+                if prowlarr_err:
+                    # It ran on one leg — say so, same as any other degradation.
+                    source_notes.append("Prowlarr skipped — %s" % prowlarr_err)
+                hits = hits + list(ehits or [])
     elif source == "extto":
         hits, err = _extto_hits_for_context(ctx)
         if hits is None:
