@@ -68,6 +68,7 @@ def pick_best(candidates: List[Dict[str, Any]], min_rank: int = 0) -> Optional[D
 # 133 identical refusals that way. Walking a few keeps one bad release from
 # blocking an item without turning a stuck item into an indexer hammer.
 MAX_GRAB_ATTEMPTS = 3
+MIN_SEASON_PACK_EPISODES = 3
 
 
 def display_name(item: Dict[str, Any], media_type: str) -> str:
@@ -76,8 +77,11 @@ def display_name(item: Dict[str, Any], media_type: str) -> str:
     every episode grab-refusal in the log said "refused for None"."""
     name = item.get("title") or item.get("show_title") or "?"
     if media_type == "episode":
-        return "%s S%02dE%02d" % (name, int(item.get("season_number") or 0),
-                                  int(item.get("episode_number") or 0))
+        season = int(item.get("season_number") or 0)
+        episode = item.get("episode_number")
+        if episode is None:
+            return "%s S%02d" % (name, season)
+        return "%s S%02dE%02d" % (name, season, int(episode or 0))
     return str(name)
 
 
@@ -152,6 +156,8 @@ def item_key(item: Dict[str, Any], media_type: str) -> tuple:
     """Stable identity for de-duping a wished item against active downloads."""
     if media_type == "movie":
         return ("movie", str(item.get("tmdb_id")))
+    if item.get("episode_number") is None and item.get("season_number") is not None:
+        return ("season", str(item.get("show_tmdb_id")), int(item.get("season_number") or 0))
     return ("episode", str(item.get("show_tmdb_id")),
             int(item.get("season_number") or 0), int(item.get("episode_number") or 0))
 
@@ -164,7 +170,7 @@ def active_download_keys(active: Iterable[Dict[str, Any]]) -> set:
         kind = str(d.get("kind") or "").lower()
         if kind == "movie":
             keys.add(("movie", str(d.get("media_id"))))
-        elif kind == "episode":
+        elif kind in ("episode", "show", "season"):
             ctx = d.get("search_ctx")
             if isinstance(ctx, str):
                 try:
@@ -172,9 +178,65 @@ def active_download_keys(active: Iterable[Dict[str, Any]]) -> set:
                 except (ValueError, TypeError):
                     ctx = {}
             ctx = ctx if isinstance(ctx, dict) else {}
-            keys.add(("episode", str(d.get("media_id")),
-                      int(ctx.get("season") or 0), int(ctx.get("episode") or 0)))
+            season = int(ctx.get("season") or 0)
+            episode = ctx.get("episode")
+            if episode is None:
+                keys.add(("season", str(d.get("media_id")), season))
+            else:
+                keys.add(("episode", str(d.get("media_id")), season, int(episode or 0)))
     return keys
+
+
+def _packable_episode(item: Dict[str, Any]) -> bool:
+    """Whether an episode row is safe to fold into an automatic season-pack try."""
+    if item.get("owned") or item.get("_min_rank"):
+        return False
+    if item.get("episode_number") is None or item.get("season_number") is None:
+        return False
+    if str(item.get("series_type") or "").strip().lower() in ("daily", "anime"):
+        return False
+    return bool(item.get("show_tmdb_id") and item.get("show_title"))
+
+
+def season_pack_requests(items: List[Dict[str, Any]], active: Iterable,
+                         min_missing: int = MIN_SEASON_PACK_EPISODES) -> List[Dict[str, Any]]:
+    """Synthetic season-search rows for shows with many missing episodes.
+
+    The ordinary drain receives one wishlist row per episode. When several rows
+    belong to the same show season, searching each SxxExx first burns indexer
+    budget and misses the release shape Sonarr prefers: one season pack. This
+    groups only straightforward missing standard episodes; upgrades, daily/anime
+    numbering, and seasons with an in-flight member stay on the per-episode path.
+    """
+    try:
+        floor = max(2, int(min_missing or MIN_SEASON_PACK_EPISODES))
+    except (TypeError, ValueError):
+        floor = MIN_SEASON_PACK_EPISODES
+    active_set = set(active or set())
+    groups: Dict[tuple, List[Dict[str, Any]]] = {}
+    for it in items or []:
+        if not _packable_episode(it):
+            continue
+        key = (str(it.get("show_tmdb_id")), int(it.get("season_number") or 0))
+        groups.setdefault(key, []).append(it)
+
+    out: List[Dict[str, Any]] = []
+    for (show_id, season), rows in groups.items():
+        if len(rows) < floor:
+            continue
+        if ("season", show_id, season) in active_set:
+            continue
+        if any(("episode", show_id, season, int(r.get("episode_number") or 0)) in active_set
+               for r in rows):
+            continue
+        first = rows[0]
+        pack = dict(first)
+        pack["episode_number"] = None
+        pack["episode_title"] = None
+        pack["_pack_members"] = [
+            (int(r.get("season_number") or 0), int(r.get("episode_number") or 0)) for r in rows]
+        out.append(pack)
+    return out
 
 
 def _acceptable_titles(primary: Any, kind: str, tmdb_id: Any) -> List[str]:
@@ -205,12 +267,17 @@ def search_context(item: Dict[str, Any], media_type: str) -> Dict[str, Any]:
         ctx = {"scope": "movie", "title": item.get("title"), "year": item.get("year")}
         tmdb_id, kind = item.get("tmdb_id"), "movie"
     else:
-        ctx = {"scope": "episode", "title": item.get("show_title"),
-               "season": item.get("season_number"), "episode": item.get("episode_number"),
+        scope = "season" if item.get("episode_number") is None and item.get("season_number") is not None else "episode"
+        ctx = {"scope": scope, "title": item.get("show_title"),
+               "season": item.get("season_number"),
+               "episode": item.get("episode_number"),
                "year": (str(item.get("air_date") or "")[:4] or None),
                # full air date — daily series (Daily Show / Kimmel / soaps) release by
                # DATE, not SxxExx; the ranker + retry queries key off this.
                "air_date": (str(item.get("air_date") or "")[:10] or None)}
+        if scope == "season":
+            ctx.pop("episode", None)
+            ctx.pop("air_date", None)
         # Series type (P8): daily/anime shows QUERY differently. Anime also carries
         # the wanted ABSOLUTE episode number (scene anime is numbered 'Show - 1071',
         # no season) — derived from the library's episode list, best-effort.
@@ -257,8 +324,9 @@ def build_download_record(item: Dict[str, Any], best: Dict[str, Any], candidates
     media_id = str(item.get("tmdb_id") if media_type == "movie" else item.get("show_tmdb_id"))
     source = str(best.get("source") or "soulseek").lower()
     transport_source = "torrent" if source == "extto" else source
+    row_kind = "show" if media_type == "episode" and ctx.get("scope") == "season" else media_type
     common = {
-        "kind": media_type, "title": ctx["title"],
+        "kind": row_kind, "title": ctx["title"],
         "release_title": best.get("title") or best.get("filename"),
         "size_bytes": int(best.get("size_bytes") or 0), "quality_label": best.get("quality_label"),
         "target_dir": target_dir, "status": "downloading",
@@ -651,6 +719,11 @@ def auto_video_process_wishlist(
             items = annotate_upgrades(items, cutoff_rank, cutoff_for=per_item)
         active = set(active_keys(media_type) or set())
         todo = [it for it in items if item_key(it, media_type) not in active]
+        if media_type == "episode" and config.get("season_pack_first", True) is not False:
+            packs = season_pack_requests(todo, active, config.get("season_pack_min_missing", MIN_SEASON_PACK_EPISODES))
+            covered = {("episode", str(p.get("show_tmdb_id")), int(s), int(e))
+                       for p in packs for s, e in (p.get("_pack_members") or [])}
+            todo = packs + [it for it in todo if item_key(it, media_type) not in covered]
         if not todo:
             deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
                                  log_line='Nothing new to grab (%d already in flight)' % len(active),
@@ -676,6 +749,8 @@ def auto_video_process_wishlist(
             # moment its top pick is refused is what let a single bad release
             # block an item indefinitely — the next-best one is usually fine.
             usable = acceptable_candidates(cands, it.get("_min_rank") or 0)
+            if it.get("_pack_members"):
+                usable = [c for c in usable if str(c.get("source") or "").lower() not in ("", "soulseek")]
             ok, refusal = False, None
             for cand in usable[:MAX_GRAB_ATTEMPTS]:
                 out = enqueue_outcome(enqueue(it, cand, cands, media_type, root))

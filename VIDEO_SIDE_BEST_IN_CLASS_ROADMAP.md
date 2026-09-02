@@ -29,14 +29,14 @@ This is the working checklist for making SoulSync's video side feel better than 
 - [x] Show the query variants attempted for TV episodes and season packs, so users can tell when matching is too narrow. Commit: this phase.
 - [x] Add a safe "try anyway" path for manual grabs that failed soft rules but still have a valid link. Commit: this phase.
 - [x] User-triggered grabs carry an import policy: equal-or-better valid files replace existing copies, lower-quality valid files can land beside them, and background automation remains strict-upgrade only. Commit: this phase.
-- [ ] Bias TV searches toward season packs when many wanted episodes from the same season are missing.
+- [x] Bias TV searches toward season packs when many wanted episodes from the same season are missing. Commit: this phase.
 
 ## Wishlist Processing
 
 - [ ] Add a stuck-row diagnostics drawer: last searched, last refusal, attempts, source order, target folder, matched IDs, and queued download state. Partly done in `bea126744` — the row's tooltip now reads last searched, attempts, source order and the per-source breakdown. Still to do: target folder, matched IDs, queued download state, and a real drawer rather than a tooltip.
 - [x] Store per-source search outcome snapshots for wanted items: result count, rejected count, accepted count, and top refusal reason. Commit: `bea126744`.
 - [ ] Add adaptive TV query fanout: canonical title, aliases, year/no-year, `SxxExx`, `season x episode y`, and scene-number variants. Partly done in `3cddae457` — canonical title, TMDB aliases, and year/no-year spellings now ride the ladder alongside the existing `SxxExx`, `1x02`, air-date and anime-absolute forms. Commit: this phase adds spelled-out `season x episode y` fallbacks. Still to do: general scene-number variants.
-- [ ] Add season-pack-first drain when multiple episodes from a season are missing and pack rules allow it.
+- [x] Add season-pack-first drain when multiple episodes from a season are missing and pack rules allow it. Commit: this phase.
 - [ ] Add temporary source cooldowns when a client or indexer repeatedly refuses the same item.
 - [ ] Add a one-click "retry with all sources" action for stale wishlist rows.
 

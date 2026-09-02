@@ -6307,9 +6307,12 @@ class VideoDatabase:
         try:
             where = "kind=? AND tmdb_id=?"
             args = [str(kind), tmdb_id]
-            if season_number is not None and episode_number is not None:
-                where += " AND season_number=? AND episode_number=?"
-                args += [int(season_number), int(episode_number)]
+            if season_number is not None:
+                where += " AND season_number=?"
+                args += [int(season_number)]
+                if episode_number is not None:
+                    where += " AND episode_number=?"
+                    args += [int(episode_number)]
             # The per-source snapshot is written on BOTH paths: on a grab it is
             # the receipt for what worked, and clearing it would throw away the
             # only record of which source actually delivered.
@@ -6355,9 +6358,12 @@ class VideoDatabase:
         try:
             where = "kind=? AND tmdb_id=?"
             args = [str(kind), tmdb_id]
-            if season_number is not None and episode_number is not None:
-                where += " AND season_number=? AND episode_number=?"
-                args += [int(season_number), int(episode_number)]
+            if season_number is not None:
+                where += " AND season_number=?"
+                args += [int(season_number)]
+                if episode_number is not None:
+                    where += " AND episode_number=?"
+                    args += [int(episode_number)]
             conn.execute(
                 "UPDATE video_wishlist SET last_search_at=datetime('now'), "
                 "last_refusal=?, last_refusal_quality=? WHERE " + where,

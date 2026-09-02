@@ -16,6 +16,7 @@ from core.automation.handlers.video_process_wishlist import (
     build_download_record,
     item_key,
     pick_best,
+    season_pack_requests,
 )
 
 
@@ -53,9 +54,34 @@ def test_active_download_keys_reads_ctx_for_episodes():
     active = [
         {"kind": "movie", "media_id": "5"},
         {"kind": "episode", "media_id": "9", "search_ctx": json.dumps({"season": 1, "episode": 3})},
+        {"kind": "show", "media_id": "9", "search_ctx": json.dumps({"scope": "season", "season": 2})},
     ]
     keys = active_download_keys(active)
     assert ("movie", "5") in keys and ("episode", "9", 1, 3) in keys
+    assert ("season", "9", 2) in keys
+
+
+def test_season_pack_requests_group_many_missing_standard_episodes():
+    items = [
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2, "episode_number": 1},
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2, "episode_number": 2},
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2, "episode_number": 3},
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 3, "episode_number": 1},
+    ]
+    packs = season_pack_requests(items, active=set(), min_missing=3)
+    assert len(packs) == 1
+    assert item_key(packs[0], "episode") == ("season", "9", 2)
+    assert packs[0]["_pack_members"] == [(2, 1), (2, 2), (2, 3)]
+
+
+def test_season_pack_requests_skip_upgrades_special_numbering_and_active_members():
+    base = {"show_tmdb_id": 9, "show_title": "Show", "season_number": 2}
+    upgrade = [dict(base, episode_number=n, owned=1, owned_resolutions="720p") for n in (1, 2, 3)]
+    anime = [dict(base, episode_number=n, series_type="anime") for n in (1, 2, 3)]
+    active = [dict(base, episode_number=n) for n in (1, 2, 3)]
+    assert season_pack_requests(upgrade, active=set()) == []
+    assert season_pack_requests(anime, active=set()) == []
+    assert season_pack_requests(active, active={("episode", "9", 2, 2)}) == []
 
 
 def test_build_record_movie_shape():
@@ -81,6 +107,17 @@ def test_build_record_stashes_peer_availability_in_ctx():
     rec = build_download_record(item, best, [best], media_type="movie", target_dir="/m", query="q")
     assert json.loads(rec["search_ctx"])["peer"] == {
         "slots": 1, "queue": 0, "speed": 2100000, "availability": 0.15}
+
+
+def test_build_record_season_pack_shape():
+    item = {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2,
+            "episode_number": None, "poster_url": "/p.jpg", "tvdb_id": 123}
+    best = dict(_cand("Silo.S02.1080p", accepted=True), source="torrent", _client_ref="hash")
+    rec = build_download_record(item, best, [best], media_type="episode", target_dir="/tv", query="Silo S02")
+    ctx = json.loads(rec["search_ctx"])
+    assert rec["kind"] == "show" and rec["media_id"] == "9"
+    assert ctx["scope"] == "season" and ctx["season"] == 2 and "episode" not in ctx
+    assert ctx["tvdb_id"] == 123
 
 
 def test_build_record_episode_shape():
@@ -189,6 +226,36 @@ def test_episode_mode_keys_and_grabs():
     assert res["grabbed"] == 1 and enq[0][0] == ("episode", "9", 1, 3) and enq[0][2] == "/tv"
 
 
+def test_episode_mode_searches_season_pack_before_member_episodes():
+    items = [
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2, "episode_number": 1},
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2, "episode_number": 2},
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2, "episode_number": 3},
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 3, "episode_number": 1},
+    ]
+    searches = {
+        ("season", "9", 2): [dict(_cand("Silo.S02.1080p"), source="torrent")],
+        ("episode", "9", 3, 1): [dict(_cand("Silo.S03E01.1080p"), source="torrent")],
+    }
+    res, enq, seen, _ = _run(items, root="/tv", media_type="episode", searches=searches)
+    assert res["grabbed"] == 2 and res["searched"] == 2
+    assert seen == [("season", "9", 2), ("episode", "9", 3, 1)]
+    assert [e[0] for e in enq] == [("season", "9", 2), ("episode", "9", 3, 1)]
+
+
+def test_season_pack_auto_grab_ignores_soulseek_pack_candidates():
+    items = [
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2, "episode_number": 1},
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2, "episode_number": 2},
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2, "episode_number": 3},
+    ]
+    res, enq, seen, _ = _run(items, root="/tv", media_type="episode", searches={
+        ("season", "9", 2): [dict(_cand("Silo/Season 2"), source="soulseek")],
+    })
+    assert res["grabbed"] == 0 and enq == []
+    assert seen == [("season", "9", 2)]
+
+
 def test_top_level_error_is_caught_and_clears_guard():
     from core.automation.handlers.video_process_wishlist import is_running
 
@@ -262,6 +329,20 @@ def test_episode_wishlist_annotates_owned(db):
     assert set(rows) == {(1, 1), (1, 2)}
     assert rows[(1, 1)]["owned"] == 1 and rows[(1, 1)]["owned_resolutions"] == "720p"
     assert rows[(1, 2)]["owned"] == 0
+
+
+def test_record_wishlist_search_outcome_can_scope_to_one_season(db):
+    db.add_episodes_to_wishlist(9, "Show", [
+        {"season_number": 1, "episode_number": 1},
+        {"season_number": 2, "episode_number": 1},
+        {"season_number": 2, "episode_number": 2},
+    ])
+    db.record_wishlist_search_outcome("episode", 9, False, season_number=2,
+                                      refusal="No season pack", refusal_quality="WEBDL-1080p")
+    rows = db.query_wishlist(kind="show")["items"][0]["seasons"]
+    by_season = {s["season_number"]: s for s in rows}
+    assert by_season[1]["episodes"][0].get("last_refusal") is None
+    assert {e.get("last_refusal") for e in by_season[2]["episodes"]} == {"No season pack"}
 
 
 # ── upgrade-until-cutoff (pure) ───────────────────────────────────────────────
