@@ -2400,6 +2400,7 @@ SERVICE_CONFIG_REGISTRY = {
     'bandcamp':     {'always': True},   # public search + release-page scrape, no credentials
     'discogs':      {'required': ['token']},
     'tidal':        {'custom': lambda _svc: _tidal_has_auth_token()},
+    'youtube':      {'custom': lambda _svc: _youtube_cookies_configured()},
     # Qobuz login (M&E mode) stores its credentials NESTED under
     # qobuz.session = {app_id, app_secret, user_auth_token} — the top-level
     # keys this registry used to check are never written, so a fully
@@ -2424,6 +2425,23 @@ def _tidal_has_auth_token() -> bool:
     """Check if Tidal has a cached OAuth token. Tidal uses a token file, not config fields."""
     try:
         return bool(tidal_client and tidal_client.is_authenticated())
+    except Exception:
+        return False
+
+
+def _youtube_cookies_configured() -> bool:
+    """Check if YouTube cookies are configured — a browser name, or a pasted
+    cookies.txt that actually exists on disk. Mirrors the same check
+    ``_youtube_cookie_opts()`` does before building yt-dlp's cookie opts."""
+    from core.youtube_cookies import PASTE_MODE
+    try:
+        mode = str(config_manager.get('youtube.cookies_browser', '') or '').strip()
+        if not mode:
+            return False
+        if mode == PASTE_MODE:
+            path = config_manager.get('youtube.cookies_file', '')
+            return bool(path) and os.path.exists(path)
+        return True
     except Exception:
         return False
 
