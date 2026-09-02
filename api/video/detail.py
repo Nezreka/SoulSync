@@ -28,6 +28,36 @@ def register_routes(bp):
             return jsonify({"error": "not found"}), 404
         return jsonify({"success": True, "monitored": bool(body.get("monitored"))})
 
+    @bp.route("/detail/<kind>/<int:library_id>/overrides", methods=["PUT"])
+    def video_title_overrides(kind, library_id):
+        """Per-title acquisition overrides: which sources to try, which release
+        groups to insist on or refuse, and whether to reach for season packs.
+
+        Empty lists and 'auto' mean FOLLOW THE GLOBAL CONFIG. That is the only
+        safe reading of an unset override: an empty allow-list treated as a
+        filter would quietly stop the title being grabbed by anything."""
+        from . import get_video_db
+        if kind not in ("movie", "show"):
+            return jsonify({"success": False, "error": "kind must be movie|show"}), 400
+        body = request.get_json(silent=True) or {}
+        fields = {}
+        for key in ("preferred_sources", "release_group_allow", "release_group_block"):
+            if key in body:
+                if not isinstance(body[key], list):
+                    return jsonify({"success": False, "error": "%s must be a list" % key}), 400
+                fields[key] = body[key]
+        if kind == "show" and "pack_preference" in body:
+            if str(body["pack_preference"]) not in ("auto", "prefer", "never"):
+                return jsonify({"success": False,
+                                "error": "pack_preference must be auto|prefer|never"}), 400
+            fields["pack_preference"] = body["pack_preference"]
+        if not fields:
+            return jsonify({"success": False, "error": "nothing to set"}), 400
+        db = get_video_db()
+        if not db.set_title_overrides(kind, library_id, **fields):
+            return jsonify({"success": False, "error": "Title not found."}), 404
+        return jsonify({"success": True, **db.title_overrides(kind, library_id)})
+
     @bp.route("/detail/<kind>/<int:item_id>/acquisition", methods=["GET"])
     def video_title_acquisition(kind, item_id):
         """This title's CURRENT acquisition state in one roll-up - owned, wanted,

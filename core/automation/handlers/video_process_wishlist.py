@@ -22,6 +22,7 @@ The search + enqueue are injected seams, so selection/pick/record are pure + uni
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -212,6 +213,82 @@ def _default_cutoff_rank() -> int:
     from core.video.quality_eval import resolution_rank
     from core.video.quality_profile import load as load_profile
     return resolution_rank((load_profile(get_video_db()) or {}).get("cutoff_resolution"))
+
+
+# Scene names end in the release group: "Show.S01E01.1080p.WEB-DL-NTb". Take the
+# tail after the last '-', minus any container extension. Deliberately blunt —
+# a name we cannot read the group from must never be treated as "group ''",
+# because an allow-list would then reject every unparsable release.
+_GROUP_RE = re.compile(r"-([A-Za-z0-9_.]{2,})$")
+
+
+def release_group(name: str) -> str:
+    text = re.sub(r"\.(mkv|mp4|avi|ts|m2ts|wmv|mov)$", "", str(name or "").strip(), flags=re.I)
+    m = _GROUP_RE.search(text)
+    return m.group(1).strip() if m else ""
+
+
+def title_overrides_for_item(item: Dict[str, Any], media_type: str) -> Dict[str, Any]:
+    """This title's per-title acquisition overrides, read once per item.
+
+    Cached on the item the way _source_snapshot is: the drain hands the same
+    dict to search() and record_outcome(), so one db read covers the run.
+    """
+    cached = item.get("_overrides")
+    if cached is not None:
+        return cached
+    blank = {"preferred_sources": [], "release_group_allow": [],
+             "release_group_block": [], "pack_preference": "auto"}
+    try:
+        from api.video import get_video_db
+        kind = "movie" if media_type == "movie" else "show"
+        tmdb = item.get("tmdb_id") if media_type == "movie" else item.get("show_tmdb_id")
+        out = get_video_db().title_overrides_for(
+            kind, tmdb_id=tmdb, library_id=item.get("library_id")) or blank
+    except Exception:   # noqa: BLE001 - an override lookup must never stop a grab
+        logger.exception("title_overrides_for_item failed")
+        out = blank
+    item["_overrides"] = out
+    return out
+
+
+def chain_for(chain: List[str], overrides: Dict[str, Any]) -> List[str]:
+    """The download chain narrowed to this title's preferred sources, in the
+    USER's order. An empty preference, or one naming nothing the global config
+    offers, follows the global chain — never an empty chain, which would search
+    nothing at all and look like 'no releases exist'."""
+    want = [str(s).strip().lower() for s in (overrides or {}).get("preferred_sources") or []]
+    if not want:
+        return list(chain)
+    picked = [s for s in want if s in chain]
+    return picked or list(chain)
+
+
+def apply_group_overrides(candidates: List[Dict[str, Any]],
+                          overrides: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Mark releases this title refuses as rejected, with the reason.
+
+    NOT a silent drop: the drain reports 'hits, none accepted' with each
+    release's rejection note, and "you blocked that group" is exactly the sort
+    of thing a user needs told. Dropping them instead reads as 'no releases
+    exist', which is the lie the refusal work already fixed once.
+    """
+    allow = [str(g).strip().lower() for g in (overrides or {}).get("release_group_allow") or []]
+    block = [str(g).strip().lower() for g in (overrides or {}).get("release_group_block") or []]
+    if not allow and not block:
+        return candidates or []
+    for c in candidates or []:
+        group = release_group(c.get("filename") or c.get("title") or "")
+        low = group.lower()
+        if block and low and low in block:
+            c["accepted"] = False
+            c["rejected"] = "release group %s is blocked for this title" % group
+        elif allow and low not in allow:
+            c["accepted"] = False
+            c["rejected"] = ("release group %s is not on this title's allow list" % group
+                             if group else "release group unknown; this title allows only %s"
+                             % ", ".join(sorted(allow)))
+    return candidates or []
 
 
 def item_key(item: Dict[str, Any], media_type: str) -> tuple:
@@ -594,6 +671,7 @@ def _default_search(item: Dict[str, Any], media_type: str):
     cfg = download_config.load(get_video_db())
     mode = str(cfg.get("download_mode") or "soulseek")
     chain = (cfg.get("hybrid_order") or ["soulseek"]) if mode == "hybrid" else [mode]
+    chain = chain_for(chain, title_overrides_for_item(item, media_type))
     skips: List[str] = []
     fallback = None      # hits that didn't pass the profile — kept so the caller can say 'rejected'
     # Per-source receipt for this search, read back by the recorder. Attached to
@@ -601,8 +679,10 @@ def _default_search(item: Dict[str, Any], media_type: str):
     # same dict to search() and record_outcome(), and each item is its own.
     snapshot: Dict[str, Any] = {"chain": list(chain), "sources": {}}
     item["_source_snapshot"] = snapshot
+    overrides = title_overrides_for_item(item, media_type)
     for src in chain:
         cands, err = _search_one_source(src, item, media_type)
+        cands = apply_group_overrides(cands, overrides) if cands is not None else None
         snapshot["sources"][src] = source_outcome(cands, err)
         if cands is None:
             skips.append("%s skipped — %s" % (src, err or "search didn't run"))
@@ -617,6 +697,11 @@ def _default_search(item: Dict[str, Any], media_type: str):
     if len(skips) == len(chain):
         return None, note                            # → 'search didn't run' (nothing ran at all)
     return [], note                                  # → 'source empty' (+ any skip note)
+
+
+def _pack_preference_for(item: Dict[str, Any]) -> str:
+    """This show's season-pack preference: auto | prefer | never."""
+    return str(title_overrides_for_item(item, "episode").get("pack_preference") or "auto")
 
 
 def _default_enqueue(item: Dict[str, Any], best: Dict[str, Any], candidates: List[Dict[str, Any]],
@@ -781,8 +866,18 @@ def auto_video_process_wishlist(
             items = annotate_upgrades(items, cutoff_rank, cutoff_for=per_item)
         active = set(active_keys(media_type) or set())
         todo = [it for it in items if item_key(it, media_type) not in active]
-        if media_type == "episode" and config.get("season_pack_first", True) is not False:
-            packs = season_pack_requests(todo, active, config.get("season_pack_min_missing", MIN_SEASON_PACK_EPISODES))
+        if media_type == "episode":
+            # Global setting, overridable per show: 'never' keeps that show on the
+            # per-episode path even when packs are on, 'prefer' reaches for a pack
+            # even when they are globally off.
+            pack_on = config.get("season_pack_first", True) is not False
+            packable = [it for it in todo
+                        if _pack_preference_for(it) == "prefer"
+                        or (pack_on and _pack_preference_for(it) != "never")]
+        else:
+            packable = []
+        if packable:
+            packs = season_pack_requests(packable, active, config.get("season_pack_min_missing", MIN_SEASON_PACK_EPISODES))
             covered = {("episode", str(p.get("show_tmdb_id")), int(s), int(e))
                        for p in packs for s, e in (p.get("_pack_members") or [])}
             todo = packs + [it for it in todo if item_key(it, media_type) not in covered]

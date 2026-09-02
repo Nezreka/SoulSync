@@ -106,6 +106,9 @@ def create_video_blueprint() -> Blueprint:
                                   # per-title acquisition settings (P2/P8) — management,
                                   # same as the metadata edits above
                                   "/quality-profile", "/series-type",
+                                  # per-title acquisition overrides (sources,
+                                  # release groups, season packs)
+                                  "/overrides",
                                   # per-show Synchronize — mutates library rows
                                   "/sync"))
         if admin and not is_admin:

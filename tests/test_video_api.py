@@ -77,6 +77,7 @@ def test_library_management_is_admin_only(tmp_path):
         ("post", "/api/video/bulk/start"),
         ("post", "/api/video/monitor"),
         ("post", "/api/video/detail/show/5/season/1/monitor"),
+        ("put", "/api/video/detail/movie/5/overrides"),
         ("post", "/api/video/poster/set"),
         ("post", "/api/video/downloads/blocklist"),
         ("put", "/api/video/detail/movie/5/metadata"),
@@ -1762,5 +1763,106 @@ def test_acquisition_endpoint_rejects_bad_targets(tmp_path):
     try:
         assert client.get("/api/video/detail/bogus/1/acquisition").status_code == 400
         assert client.get("/api/video/detail/show/999999/acquisition").status_code == 404
+    finally:
+        videoapi._video_db = None
+
+
+def test_title_overrides_round_trip_and_default_to_following_global(tmp_path):
+    """Empty means FOLLOW THE GLOBAL CONFIG. An empty allow-list read as a filter
+    would stop the title being grabbed by anything, which is the opposite of not
+    having set one."""
+    client, videoapi = _make_client(tmp_path)
+    try:
+        db = videoapi._video_db
+        sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "Show", "tmdb_id": 1396})
+
+        # Untouched title: everything empty, packs on auto.
+        assert db.title_overrides("show", sid) == {
+            "preferred_sources": [], "release_group_allow": [],
+            "release_group_block": [], "pack_preference": "auto"}
+
+        r = client.put("/api/video/detail/show/%d/overrides" % sid, json={
+            "preferred_sources": ["torrent", "usenet"],
+            "release_group_allow": ["NTb"], "release_group_block": ["YIFY"],
+            "pack_preference": "never"})
+        assert r.status_code == 200
+        assert db.title_overrides("show", sid) == {
+            "preferred_sources": ["torrent", "usenet"], "release_group_allow": ["NTb"],
+            "release_group_block": ["YIFY"], "pack_preference": "never"}
+        # ...and the detail payload carries them, so the panel opens populated.
+        assert db.show_detail(sid)["release_group_block"] == ["YIFY"]
+
+        # Clearing goes back to following the global config, not to "allow none".
+        client.put("/api/video/detail/show/%d/overrides" % sid,
+                   json={"release_group_allow": [], "preferred_sources": []})
+        cur = db.title_overrides("show", sid)
+        assert cur["release_group_allow"] == [] and cur["preferred_sources"] == []
+        assert cur["release_group_block"] == ["YIFY"], "untouched keys must survive"
+    finally:
+        videoapi._video_db = None
+
+
+def test_title_overrides_reject_junk(tmp_path):
+    client, videoapi = _make_client(tmp_path)
+    try:
+        db = videoapi._video_db
+        mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Film", "tmdb_id": 27205})
+        url = "/api/video/detail/movie/%d/overrides" % mid
+        assert client.put(url, json={"preferred_sources": "torrent"}).status_code == 400
+        assert client.put(url, json={}).status_code == 400
+        assert client.put("/api/video/detail/bogus/1/overrides",
+                          json={"preferred_sources": []}).status_code == 400
+        assert client.put("/api/video/detail/movie/999999/overrides",
+                          json={"preferred_sources": []}).status_code == 404
+        # A movie has no season packs, so the key is simply not its business.
+        assert "pack_preference" not in db.title_overrides("movie", mid) or \
+            db.title_overrides("movie", mid)["pack_preference"] == "auto"
+    finally:
+        videoapi._video_db = None
+
+
+def test_show_pack_preference_is_validated(tmp_path):
+    client, videoapi = _make_client(tmp_path)
+    try:
+        db = videoapi._video_db
+        sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "tmdb_id": 1})
+        url = "/api/video/detail/show/%d/overrides" % sid
+        assert client.put(url, json={"pack_preference": "sometimes"}).status_code == 400
+        assert client.put(url, json={"pack_preference": "prefer"}).status_code == 200
+        assert db.title_overrides("show", sid)["pack_preference"] == "prefer"
+    finally:
+        videoapi._video_db = None
+
+
+def test_overrides_survive_unreadable_storage(tmp_path):
+    """A hand-mangled column must degrade to 'follow the global config' rather
+    than to a filter nothing can satisfy."""
+    _, videoapi = _make_client(tmp_path)
+    try:
+        db = videoapi._video_db
+        sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "tmdb_id": 1})
+        with db.connect() as c:
+            c.execute("UPDATE shows SET release_group_allow='not json', "
+                      "preferred_sources='{\"a\": 1}', pack_preference='wat' WHERE id=?", (sid,))
+            c.commit()
+        cur = db.title_overrides("show", sid)
+        assert cur["release_group_allow"] == []
+        assert cur["preferred_sources"] == []
+        assert cur["pack_preference"] == "auto"
+    finally:
+        videoapi._video_db = None
+
+
+def test_engine_lookup_resolves_a_title_by_tmdb_id(tmp_path):
+    """The drain often knows only the tmdb id; the library row still has to win."""
+    _, videoapi = _make_client(tmp_path)
+    try:
+        db = videoapi._video_db
+        sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "tmdb_id": 1396})
+        db.set_title_overrides("show", sid, release_group_block=["YIFY"])
+        assert db.title_overrides_for("show", tmdb_id=1396)["release_group_block"] == ["YIFY"]
+        assert db.title_overrides_for("show", library_id=sid)["release_group_block"] == ["YIFY"]
+        # An unknown title follows the global config.
+        assert db.title_overrides_for("show", tmdb_id=999999)["release_group_block"] == []
     finally:
         videoapi._video_db = None

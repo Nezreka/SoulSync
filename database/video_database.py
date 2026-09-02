@@ -297,6 +297,18 @@ _COLUMN_MIGRATIONS = [
     # series type (P8, Sonarr parity): standard | daily | anime — drives how the
     # drain QUERIES for episodes (SxxExx vs air date vs absolute number).
     ("shows", "series_type", "TEXT"),
+    # Per-title acquisition overrides (arr-parity P2). JSON lists / a keyword;
+    # NULL or empty means "follow the global config", which is the only safe
+    # reading of an unset override — an empty allow-list that FILTERED would
+    # stop the title being grabbed by anything.
+    ("movies", "preferred_sources", "TEXT"),
+    ("movies", "release_group_allow", "TEXT"),
+    ("movies", "release_group_block", "TEXT"),
+    ("shows", "preferred_sources", "TEXT"),
+    ("shows", "release_group_allow", "TEXT"),
+    ("shows", "release_group_block", "TEXT"),
+    # shows only: auto | prefer | never. Movies have no season packs.
+    ("shows", "pack_preference", "TEXT"),
     ("video_wishlist", "still_url", "TEXT"),   # episode still thumbnail (captured at add time)
     ("video_wishlist", "season_poster_url", "TEXT"),   # the episode's season poster
     ("video_wishlist", "episode_overview", "TEXT"),    # episode synopsis
@@ -4696,6 +4708,9 @@ class VideoDatabase:
             "sort_title": show["sort_title"],
             "quality_profile_id": show["quality_profile_id"] or 0,
             "series_type": show["series_type"] or "standard",
+            # per-title acquisition overrides, so the manage panel renders what
+            # is actually set rather than a blank form
+            **self.title_overrides("show", show["id"]),
             "locked_fields": sorted(self._parse_locked(show["locked_fields"])),
             "watched": (show["watched_episodes"] or 0) >= total > 0,
             "watched_episodes": show["watched_episodes"] or 0,   # raw count for "N of M watched"
@@ -6694,6 +6709,104 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # ── per-title acquisition overrides (P2) ─────────────────────────────────
+    _OVERRIDE_LISTS = ("preferred_sources", "release_group_allow", "release_group_block")
+    _PACK_PREFS = ("auto", "prefer", "never")
+
+    @staticmethod
+    def _load_override_list(raw) -> list:
+        """A stored JSON list back to a list of strings. Anything unreadable
+        degrades to [] — 'follow the global config' — never to a filter that
+        would silently stop grabbing the title."""
+        try:
+            v = json.loads(raw) if raw else []
+        except (TypeError, ValueError):
+            return []
+        if not isinstance(v, list):
+            return []
+        return [str(x).strip() for x in v if str(x).strip()]
+
+    def title_overrides(self, kind: str, library_id) -> dict:
+        """This title's acquisition overrides. Empty lists and 'auto' mean the
+        global config applies."""
+        out = {k: [] for k in self._OVERRIDE_LISTS}
+        out["pack_preference"] = "auto"
+        tbl = "movies" if kind == "movie" else "shows"
+        if kind not in ("movie", "show"):
+            return out
+        cols = list(self._OVERRIDE_LISTS) + (["pack_preference"] if kind == "show" else [])
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT %s FROM %s WHERE id=?" % (", ".join(cols), tbl),
+                               (int(library_id),)).fetchone()
+            if not row:
+                return out
+            for k in self._OVERRIDE_LISTS:
+                out[k] = self._load_override_list(row[k])
+            if kind == "show":
+                pref = (row["pack_preference"] or "auto").strip().lower()
+                out["pack_preference"] = pref if pref in self._PACK_PREFS else "auto"
+            return out
+        except sqlite3.Error:
+            logger.exception("title_overrides failed")
+            return out
+        finally:
+            conn.close()
+
+    def set_title_overrides(self, kind: str, library_id, **values) -> bool:
+        """Replace this title's overrides. Only the keys passed are written."""
+        if kind not in ("movie", "show"):
+            return False
+        tbl = "movies" if kind == "movie" else "shows"
+        sets, args = [], []
+        for k in self._OVERRIDE_LISTS:
+            if k not in values:
+                continue
+            clean = [str(x).strip() for x in (values[k] or []) if str(x).strip()]
+            sets.append("%s=?" % k)
+            args.append(json.dumps(clean) if clean else None)
+        if kind == "show" and "pack_preference" in values:
+            pref = str(values.get("pack_preference") or "auto").strip().lower()
+            sets.append("pack_preference=?")
+            args.append(pref if pref in self._PACK_PREFS else "auto")
+        if not sets:
+            return False
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("UPDATE %s SET %s WHERE id=?" % (tbl, ", ".join(sets)),
+                               args + [int(library_id)])
+            conn.commit()
+            return cur.rowcount > 0
+        except sqlite3.Error:
+            logger.exception("set_title_overrides failed")
+            return False
+        finally:
+            conn.close()
+
+    def title_overrides_for(self, kind: str, *, tmdb_id=None, library_id=None) -> dict:
+        """The engine's lookup, shaped like quality_profile_id_for: the library
+        row wins, tmdb id resolves a title the drain only knows by that."""
+        out = {k: [] for k in self._OVERRIDE_LISTS}
+        out["pack_preference"] = "auto"
+        if kind not in ("movie", "show"):
+            return out
+        if library_id:
+            return self.title_overrides(kind, library_id)
+        if tmdb_id:
+            tbl = "movies" if kind == "movie" else "shows"
+            conn = self._get_connection()
+            try:
+                row = conn.execute("SELECT id FROM %s WHERE tmdb_id=?" % tbl,
+                                   (int(tmdb_id),)).fetchone()
+            except sqlite3.Error:
+                logger.exception("title_overrides_for failed")
+                row = None
+            finally:
+                conn.close()
+            if row:
+                return self.title_overrides(kind, row["id"])
+        return out
+
     def set_title_quality_profile(self, kind: str, library_id, profile_id) -> bool:
         """Assign a quality profile to an owned movie/show (NULL/0 = Default).
         Also stamps the title's wishlist rows so in-flight wishes follow."""
@@ -7981,6 +8094,7 @@ class VideoDatabase:
             "kind": "movie", "id": m["id"], "title": m["title"], "year": m["year"],
             "sort_title": m["sort_title"],
             "quality_profile_id": m["quality_profile_id"] or 0,
+            **self.title_overrides("movie", m["id"]),
             "locked_fields": sorted(self._parse_locked(m["locked_fields"])),
             "watched": (m["play_count"] or 0) > 0,
             # Continue Watching raw state (v45): last watched + resume position

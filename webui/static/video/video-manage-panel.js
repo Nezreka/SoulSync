@@ -141,6 +141,17 @@
             // save (in the header, clear of the app's floating bell/help orbs)
             '.vmg-hint{font-size:11.5px;color:rgba(255,255,255,.4);line-height:1.5;' +
                 'padding:2px 0 30px;}' +
+            // per-title acquisition overrides: source chips read as toggles, not
+            // as a checkbox list — they are a choice, not a form to fill in
+            '.vmg-srcs{display:flex;flex-wrap:wrap;gap:8px;}' +
+            '.vmg-src{display:inline-flex;align-items:center;gap:7px;cursor:pointer;' +
+                'padding:7px 13px;border-radius:9px;font-size:12.5px;font-weight:700;' +
+                'color:rgba(255,255,255,.62);background:rgba(255,255,255,.05);' +
+                'border:1px solid rgba(255,255,255,.1);transition:all .15s;}' +
+            '.vmg-src:hover{color:#fff;background:rgba(255,255,255,.09);}' +
+            '.vmg-src--on{color:#fff;background:rgba(' + A + ',.16);' +
+                'border-color:rgba(' + A + ',.5);}' +
+            '.vmg-src input{accent-color:rgb(' + A + ');margin:0;}' +
             '.vmg-save{position:absolute;top:18px;right:60px;padding:8px 18px;border-radius:999px;' +
                 'font-size:12.5px;font-weight:800;cursor:pointer;border:none;' +
                 'background:rgb(' + A + ');color:#fff;box-shadow:0 6px 18px rgba(' + A + ',.35);transition:all .15s;}' +
@@ -236,6 +247,35 @@
                             '</option>';
                     }).join('') + '</select></div>'
                 : '') +
+            // Per-title acquisition overrides (arr-parity P2). Empty everywhere
+            // means "follow the global config" — an override only exists when the
+            // user deliberately narrowed this one title.
+            '<div class="vmg-sect">Acquisition overrides</div>' +
+            '<div class="vmg-field"><label>Preferred sources</label>' +
+                '<div class="vmg-srcs" data-vmg-srcs>' +
+                SOURCES.map(function (s) {
+                    var on = (d.preferred_sources || []).indexOf(s[0]) !== -1;
+                    return '<label class="vmg-src' + (on ? ' vmg-src--on' : '') + '">' +
+                        '<input type="checkbox" data-vmg-src value="' + s[0] + '"' +
+                        (on ? ' checked' : '') + '>' + esc(s[1]) + '</label>';
+                }).join('') +
+                '</div>' +
+                '<div class="vmg-hint">None ticked follows the global download order.</div></div>' +
+            '<div class="vmg-field"><label>Only these release groups</label>' +
+                inputHtml2('rg-allow', (d.release_group_allow || []).join(', '),
+                           'e.g. NTb, FLUX — blank allows any') + '</div>' +
+            '<div class="vmg-field"><label>Never these release groups</label>' +
+                inputHtml2('rg-block', (d.release_group_block || []).join(', '),
+                           'comma separated') + '</div>' +
+            (d.kind === 'show'
+                ? '<div class="vmg-field"><label>Season packs</label>' +
+                    '<select class="vmg-input" data-vmg-pack-pref>' +
+                    PACK_PREFS.map(function (o) {
+                        var cur = d.pack_preference || 'auto';
+                        return '<option value="' + o[0] + '"' + (o[0] === cur ? ' selected' : '') +
+                            '>' + esc(o[1]) + '</option>';
+                    }).join('') + '</select></div>'
+                : '') +
             '<div class="vmg-sect">Matches</div>' +
             '<div class="vmg-matches" data-vmg-matches>' +
                 '<div class="vmg-msearch-hint">Loading matches…</div>' +
@@ -244,6 +284,66 @@
                 ? '<button class="vmg-btn-ghost vmg-report" type="button" data-vmg-report>⚑ Report an issue</button>'
                 : '')
         );
+    }
+
+    // The download chain, in the order the engine tries them.
+    var SOURCES = [['torrent', 'Torrent'], ['usenet', 'Usenet'], ['soulseek', 'Soulseek']];
+    var PACK_PREFS = [
+        ['auto', 'Follow the global setting'],
+        ['prefer', 'Always try a season pack first'],
+        ['never', 'Never grab season packs'],
+    ];
+    // Like inputHtml but for the override fields, which are not lockable metadata
+    // (there is no server-side field to hand back, so no lock badge).
+    function inputHtml2(key, value, placeholder) {
+        return '<input class="vmg-input" data-vmg-ovr="' + esc(key) + '" value="' + esc(value) +
+            '" placeholder="' + esc(placeholder) + '" spellcheck="false">';
+    }
+
+    // A comma-separated list to a clean array: trimmed, de-duped case-insensitively,
+    // empties dropped. "NTb, , ntb ,FLUX" is two groups, not four.
+    function parseList(text) {
+        var seen = {}, out = [];
+        String(text || '').split(',').forEach(function (raw) {
+            var v = raw.trim();
+            if (!v) return;
+            var k = v.toLowerCase();
+            if (seen[k]) return;
+            seen[k] = 1; out.push(v);
+        });
+        return out;
+    }
+
+    function currentOverrides() {
+        var ov = state.overlay;
+        var srcs = [];
+        ov.querySelectorAll('[data-vmg-src]').forEach(function (cb) {
+            if (cb.checked) srcs.push(cb.value);
+        });
+        var pack = ov.querySelector('[data-vmg-pack-pref]');
+        var get = function (k) {
+            var el = ov.querySelector('[data-vmg-ovr="' + k + '"]');
+            return el ? el.value : '';
+        };
+        return {
+            preferred_sources: srcs,
+            release_group_allow: parseList(get('rg-allow')),
+            release_group_block: parseList(get('rg-block')),
+            pack_preference: pack ? pack.value : 'auto',
+        };
+    }
+
+    function saveOverrides() {
+        if (!state) return;
+        var body = currentOverrides();
+        fetch('/api/video/detail/' + state.kind + '/' + state.id + '/overrides', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body) })
+            .then(function (r) {
+                if (!r.ok) throw new Error();
+                toast('Acquisition overrides saved', 'success');
+            })
+            .catch(function () { toast('Couldn\u2019t save the overrides', 'error'); });
     }
 
     // ── matches (per-service re-match editor) ────────────────────────────────
@@ -704,6 +804,14 @@
             if (qp) setQualityProfile(qp);
             var st = e.target.closest('[data-vmg-series-type]');
             if (st) setSeriesType(st);
+            var src = e.target.closest('[data-vmg-src]');
+            if (src) {
+                var lab = src.closest('.vmg-src');
+                if (lab) lab.classList.toggle('vmg-src--on', src.checked);
+                saveOverrides();
+            }
+            if (e.target.closest('[data-vmg-pack-pref]') ||
+                e.target.closest('[data-vmg-ovr]')) saveOverrides();
         });
         ov.addEventListener('keydown', function (e) {
             var msin = e.target.closest('[data-vmg-msearch-in]');
