@@ -669,6 +669,7 @@ class AutomationEngine:
         self._fix_airing_automation_schedule()
         self._fix_deep_scan_schedules()
         self._fix_wishlist_processor_rename()
+        self._fix_rss_sync_cadence()
         self._fix_orphaned_system_actions()
 
     def _fix_orphaned_system_actions(self):
@@ -751,6 +752,33 @@ class AutomationEngine:
                             yt.get('id'))
         except Exception:
             logger.exception("wishlist processor rename migration failed")
+
+    def _fix_rss_sync_cadence(self):
+        """Migrate older system RSS rows from hourly to the arr-speed 15 min cadence.
+
+        Fresh installs already seed 15 minutes. Existing users kept the old
+        trigger_config forever because ensure_system_automations does not clobber
+        a live row. Match only the system row and only the old hourly shape, so a
+        hand-tuned schedule stays hand-tuned."""
+        try:
+            auto = self.db.get_system_automation_by_action('video_rss_sync')
+            if not auto or auto.get('trigger_type') != 'schedule':
+                return
+            try:
+                cfg = json.loads(auto.get('trigger_config') or '{}')
+            except (TypeError, ValueError):
+                cfg = {}
+            if cfg != {'interval': 1, 'unit': 'hours'}:
+                return
+            new_cfg = {'interval': 15, 'unit': 'minutes'}
+            nr_dt = next_run_at('schedule', new_cfg, now_utc=_utcnow(), default_tz=self._default_tz)
+            self.db.update_automation(
+                auto['id'], trigger_config=json.dumps(new_cfg),
+                next_run=_dt_to_db_str(nr_dt) if nr_dt is not None else None)
+            logger.info("Migrated RSS Sync system automation to a 15-minute cadence (id=%s)",
+                        auto.get('id'))
+        except Exception:
+            logger.exception("RSS Sync cadence migration failed")
 
     def _fix_airing_automation_schedule(self):
         """Migrate 'Auto-Wishlist Episodes Airing Today' from the old rolling 24h
