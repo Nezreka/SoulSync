@@ -157,6 +157,57 @@ def test_a_failure_the_operator_must_fix_is_an_error_not_a_warning(db):
     assert "disk space" in c["detail"].lower()
 
 
+def test_a_success_after_the_failures_clears_the_alarm(db):
+    """Boulder's C: drive filled on the 31st, produced 18 'no space left on device'
+    rows, and was cleared the next day - and the tile went on telling him to free
+    space he had already freed, because the failures were still inside its 3-day
+    window. A light that stays red after the fault is fixed is a light you learn
+    to ignore."""
+    conn = db._get_connection()
+    conn.execute("""INSERT INTO video_download_history
+        (kind, source, media_id, title, outcome, error, completed_at)
+        VALUES ('video','youtube','a','One','failed','[Errno 28] No space left on device',
+                datetime('now','-2 days'))""")
+    conn.execute("""INSERT INTO video_download_history
+        (kind, source, media_id, title, outcome, completed_at)
+        VALUES ('video','youtube','b','Two','completed', datetime('now','-1 hours'))""")
+    conn.commit(); conn.close()
+    c = _yt_check(collect(db))
+    assert "downloads working again" in c["detail"]
+    assert c["status"] != "error", "a cleared fault must not keep shouting"
+
+
+def test_a_success_BEFORE_the_failures_does_not_clear_them(db):
+    """Order is the whole point: a success from last week says nothing about a
+    disk that filled this morning."""
+    conn = db._get_connection()
+    conn.execute("""INSERT INTO video_download_history
+        (kind, source, media_id, title, outcome, completed_at)
+        VALUES ('video','youtube','b','Two','completed', datetime('now','-2 days'))""")
+    conn.execute("""INSERT INTO video_download_history
+        (kind, source, media_id, title, outcome, error, completed_at)
+        VALUES ('video','youtube','a','One','failed','[Errno 28] No space left on device',
+                datetime('now','-1 hours'))""")
+    conn.commit(); conn.close()
+    c = _yt_check(collect(db))
+    assert c["status"] == "error"
+    assert "downloads working again" not in c["detail"]
+
+
+def test_recovered_is_false_when_there_was_nothing_to_recover_from(db):
+    """"Recovered" has to mean "a failure happened and then stopped". A run of
+    plain successes is healthy, not recovered - and the health tile only asks
+    after it has already found failures, so the distinction has to live in the
+    method rather than in its caller."""
+    conn = db._get_connection()
+    conn.execute("""INSERT INTO video_download_history
+        (kind, source, media_id, title, outcome, completed_at)
+        VALUES ('video','youtube','b','Two','completed', datetime('now','-1 hours'))""")
+    conn.commit(); conn.close()
+    assert db.youtube_download_recovered(days=3) is False
+    # ...and with nothing at all in the table either.
+
+
 def test_ordinary_failures_stay_a_warning(db):
     conn = db._get_connection()
     for i in range(3):

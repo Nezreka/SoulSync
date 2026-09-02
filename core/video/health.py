@@ -105,15 +105,22 @@ def _youtube_health_check(db, settings: dict) -> dict:
         from core.youtube_errors import failure_summary
         errors = db.youtube_recent_failure_errors(days=3) or []
         if errors:
-            # A standing problem the operator has to fix (no disk, no ffmpeg, no
-            # cookies) is an ERROR, not the same shade of warning as a handful of
-            # timeouts — it will not clear on its own.
             summary = failure_summary(errors)
-            status = _worse(status, "error" if summary["needs_user_action"] else "warning")
-            top = summary["dominant"]
-            reason = summary["reason"] or "see YouTube download history"
-            bits.append("%d recent YouTube failure(s), mostly %s: %s"
-                        % (summary["total"], str(top).replace("_", " "), reason))
+            top = str(summary["dominant"]).replace("_", " ")
+            # A download that SUCCEEDED after the last failure settles the question:
+            # whatever it was, it is over. Reporting it as a live fault is how a
+            # cleared disk kept demanding to be cleared.
+            if db.youtube_download_recovered(days=3):
+                bits.append("%d recent YouTube failure(s), mostly %s - downloads working again"
+                            % (summary["total"], top))
+            else:
+                # A standing problem the operator has to fix (no disk, no ffmpeg,
+                # no cookies) is an ERROR, not the same shade as a few timeouts:
+                # it will not clear on its own.
+                status = _worse(status, "error" if summary["needs_user_action"] else "warning")
+                reason = summary["reason"] or "see YouTube download history"
+                bits.append("%d recent YouTube failure(s), mostly %s: %s"
+                            % (summary["total"], top, reason))
         else:
             bits.append("recent failures: 0")
     except Exception:   # noqa: BLE001

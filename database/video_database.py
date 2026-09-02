@@ -2139,6 +2139,36 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def youtube_download_recovered(self, days: int = 3) -> bool:
+        """Has a YouTube download SUCCEEDED since the most recent failure?
+
+        Without this the health tile keeps reporting a cleared problem: Boulder's
+        C: drive filled on the 31st, produced 18 'no space left on device' rows,
+        was cleared the next day - and the tile went on demanding he free space he
+        had already freed, because the failures were still inside its window. A
+        light that stays red after the fault is fixed is a light you learn to
+        ignore.
+        """
+        conn = self._get_connection()
+        try:
+            window = ("-%d days" % max(1, int(days)),)
+            last_fail = conn.execute(
+                "SELECT MAX(COALESCE(completed_at, grabbed_at)) FROM video_download_history "
+                "WHERE source='youtube' AND outcome='failed' "
+                "AND COALESCE(completed_at, grabbed_at) >= datetime('now', ?)", window).fetchone()[0]
+            if not last_fail:
+                return False
+            last_ok = conn.execute(
+                "SELECT MAX(COALESCE(completed_at, grabbed_at)) FROM video_download_history "
+                "WHERE source='youtube' AND outcome='completed' "
+                "AND COALESCE(completed_at, grabbed_at) >= datetime('now', ?)", window).fetchone()[0]
+            return bool(last_ok and str(last_ok) > str(last_fail))
+        except sqlite3.Error:
+            logger.exception("youtube_download_recovered failed")
+            return False
+        finally:
+            conn.close()
+
     def youtube_retry_state(self, max_fail: int = 3) -> dict:
         """``{video_id: {"strikes", "permanent", "attempts", "hours_since_last"}}``.
 
