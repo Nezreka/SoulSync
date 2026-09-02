@@ -349,6 +349,7 @@
         ].filter(Boolean).join('');
         var chipHtml = bits.length ? bits.slice(0, 7).map(function (b) { return '<span>' + esc(b) + '</span>'; }).join('') : '<span>Release</span>';
         var grabbable = basicHitGrabbable(r, sourceId);
+        var grabLabel = grabbable && r.accepted === false ? 'Try anyway' : (grabbable ? 'Identify' : 'No link');
         var key = basicHitKey(r, sourceId);
         var d = r.info_url ? basicDetail[r.info_url] : null;
         if (d === false) d = null;                       // looked, nothing came back
@@ -379,7 +380,7 @@
                 '<span class="vsr-basic-hit-linkstate">' + esc(locator) + '</span>' +
                 '<span class="vsr-basic-hit-verdict">' + esc(accepted) + '</span>' +
                 '<button class="vsr-basic-hit-grab" type="button" data-vsr-basic-grab="' + esc(sourceId) + ':' + index + '"' +
-                    (grabbable ? '' : ' disabled') + '>' + (grabbable ? 'Identify' : 'No link') + '</button>' +
+                    (grabbable ? '' : ' disabled') + '>' + esc(grabLabel) + '</button>' +
             '</div>' +
             '<span class="vsr-fresh-chev" aria-hidden="true"></span>' +
             (open ? basicFactsHTML(r, sourceId, d) : '') +

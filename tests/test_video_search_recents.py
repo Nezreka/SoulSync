@@ -69,6 +69,7 @@ def test_basic_search_runs_in_app_provider_searches():
     assert "torrent via EXT.to" in _JS
     assert "function basicSourceCounts" in _JS and "data-vsr-basic-counts" in _JS
     assert "function basicQueryHTML" in _JS and "data-vsr-basic-queries" in _JS
+    assert "Try anyway" in _JS and "r.accepted === false" in _JS
     assert "usable / " in _JS and "review / " in _JS and "no link" in _JS
     assert "vsr-basic-loader" in _JS and "vsr-basic-tab-loader" in _JS
     assert ".vsr-basic-hit-side" in _CSS and "vsrBasicScan" in _CSS and "vsrBasicDots" in _CSS
