@@ -6306,6 +6306,19 @@ body[data-side="video"] #gsearch-aura {
 .vsr-basic-count--review { color: #fbcd7a; border-color: rgba(251,205,122,0.2); }
 .vsr-basic-count--nolink { color: rgba(255,255,255,0.45); }
 
+.vsr-basic-query-list {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 0 16px 12px; margin-top: -8px;
+}
+.vsr-basic-query-label, .vsr-basic-query-chip, .vsr-basic-query-more {
+    display: inline-flex; align-items: center; min-height: 22px; border-radius: 6px; font-size: 10.5px; font-weight: 800;
+}
+.vsr-basic-query-label { color: rgba(255,255,255,0.42); text-transform: uppercase; letter-spacing: 0.06em; }
+.vsr-basic-query-chip {
+    max-width: min(360px, 100%); padding: 3px 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: rgba(255,255,255,0.68); background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.07);
+}
+.vsr-basic-query-more { padding: 3px 7px; color: rgba(var(--vd-accent-rgb),0.9); background: rgba(var(--vd-accent-rgb),0.09); }
+
 /* — The release card. A glass panel with an accent edge and ONE primary
  *   action, replacing a 2x2 grid of boxed pills that read as form fields.
  *   The edge is the signal: accent = a candidate, amber = needs review. */

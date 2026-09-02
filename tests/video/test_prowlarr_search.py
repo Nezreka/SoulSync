@@ -184,3 +184,17 @@ def test_provider_name_filter_uses_plain_tracker_search_categories(monkeypatch):
     assert out["hits"][0]["username"] == "The Pirate Bay"
     assert calls and all(c["ids"] == [1] for c in calls)
     assert all(c["cats"] == [] for c in calls)
+
+
+def test_manual_query_summary_uses_prowlarr_strategies():
+    from api.video.downloads import _search_queries
+
+    got = _search_queries({"year": 2020, "tvdb_id": 555}, "torrent", "episode", "The Show", 1, 2)
+    assert "tvsearch: The Show season=1 ep=2 tvdbid=555" in got
+    assert "search: The Show S01E02" in got
+
+
+def test_manual_query_summary_uses_text_query_for_slskd():
+    from api.video.downloads import _search_queries
+
+    assert _search_queries({}, "soulseek", "season", "The Show", 2, None) == ["The Show S02"]
