@@ -154,6 +154,33 @@ def register_routes(bp):
             logger.exception("wishlist manual search failed")
             return jsonify({"success": False, "error": "Search failed to start"}), 500
 
+    @bp.route("/wishlist/retry", methods=["POST"])
+    def video_wishlist_retry_all_sources():
+        """User-forced retry for a stale row: clear backoff/evidence and search every source."""
+        try:
+            data = request.get_json(silent=True) or {}
+            scope = str(data.get("scope") or "").lower()
+            tmdb_id = data.get("tmdb_id")
+            if scope not in _SCOPES or not tmdb_id:
+                return jsonify({"success": False, "error": "scope + tmdb_id required"}), 400
+            from . import get_video_db
+            from core.automation.handlers.video_process_wishlist import reset_source_cooldowns
+            from core.video.wishlist_search import manual_search
+            kind = "movie" if scope == "movie" else "episode"
+            reset = get_video_db().reset_wishlist_search_state(
+                kind, tmdb_id,
+                season_number=data.get("season_number"),
+                episode_number=data.get("episode_number"))
+            reset_source_cooldowns()
+            res = manual_search(scope, tmdb_id,
+                                season_number=data.get("season_number"),
+                                episode_number=data.get("episode_number"),
+                                all_sources=True)
+            return jsonify({"success": True, "reset": reset, **res})
+        except Exception:
+            logger.exception("wishlist retry-all-sources failed")
+            return jsonify({"success": False, "error": "Retry failed to start"}), 500
+
     @bp.route("/wishlist/search-all", methods=["POST"])
     def video_wishlist_search_all():
         """Search every eligible wished item NOW instead of waiting for the

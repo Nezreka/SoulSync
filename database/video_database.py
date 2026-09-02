@@ -6374,6 +6374,32 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def reset_wishlist_search_state(self, kind: str, tmdb_id, *, season_number=None,
+                                    episode_number=None) -> int:
+        """Clear retry backoff/refusal evidence for a user-forced retry."""
+        conn = self._get_connection()
+        try:
+            where = "kind=? AND tmdb_id=?"
+            args = [str(kind), tmdb_id]
+            if season_number is not None:
+                where += " AND season_number=?"
+                args.append(int(season_number))
+                if episode_number is not None:
+                    where += " AND episode_number=?"
+                    args.append(int(episode_number))
+            cur = conn.execute(
+                "UPDATE video_wishlist SET search_attempts=0, last_search_at=NULL, "
+                "last_refusal=NULL, last_refusal_quality=NULL, search_snapshot=NULL WHERE " + where,
+                args)
+            conn.commit()
+            return int(cur.rowcount or 0)
+        except sqlite3.Error:
+            logger.exception("reset_wishlist_search_state failed")
+            return 0
+        finally:
+            conn.close()
+
+
     def query_wishlist(self, kind: str, *, search=None, sort="added", page=1, limit=60) -> dict:
         """One paged slice of the wishlist. kind='movie' → movie cards; kind='show'
         → shows grouped show→season→episode with wanted/done roll-ups. ``sort`` ∈

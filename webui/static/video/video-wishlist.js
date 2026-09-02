@@ -122,6 +122,13 @@
             'stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>' +
             '</button>';
     }
+    function retryBtn(scope, attrs) {
+        return '<button class="vwsh-hunt vwsh-retry" type="button" title="Retry with all sources" aria-label="Retry with all sources" ' +
+            'data-vwsh-retry="' + scope + '"' + attrs + '>' +
+            '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+            'stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>' +
+            '</button>';
+    }
 
     // Manual search (LiveLeak's failing-hub follow-up): every wishable item gets
     // BOTH buttons, Sonarr-style — auto (huntBtn: the system picks) and manual
@@ -163,6 +170,7 @@
             '" data-vwsh-src="' + (owned ? 'library' : 'tmdb') + '" data-vwsh-id="' + esc(owned ? it.library_id : it.tmdb_id) + '">' +
             '<div class="vwsh-movie-art">' + art + '<div class="vwsh-movie-scrim"></div>' +
             statusPill(st, tip) + failChip +
+            (fails >= 3 && st !== 'downloading' ? retryBtn('movie', ' data-tmdb="' + esc(it.tmdb_id) + '"') : '') +
             (st === 'downloading' ? '' : huntBtn('movie', ' data-tmdb="' + esc(it.tmdb_id) + '"')) +
             (st === 'downloading' ? '' : pickBtn('vwsh-hunt', 'movie',
                 ' data-tmdb="' + esc(it.tmdb_id) + '" data-title="' + esc(it.title || '') +
@@ -412,6 +420,9 @@
                 '<div class="vwsh-epc-title" title="' + esc(t) + '">' + esc(t) + '</div>' +
                 '<div class="vwsh-epc-meta"><span class="vwsh-ep-dot vwsh-ep-dot--' + st + '"></span>' + metaTxt + '</div>' +
             '</div>' +
+            (!yt && fails >= 3 && st !== 'downloading'
+                ? retryBtn('episode', ' data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '"')
+                : '') +
             (yt
                 ? (st === 'downloading' ? ''
                     : '<button class="vwsh-epc-hunt vwsh-epc-hunt--yt" type="button" data-vwsh-yt-now="' + esc(e.source_id) +
@@ -628,6 +639,30 @@
                 btn.disabled = false;
                 if (typeof showToast === 'function')
                     showToast((err && err.message) || 'Could not start the downloads', 'error');
+            });
+    }
+
+    function doRetry(btn) {
+        if (btn.disabled) return;
+        var payload = { scope: btn.getAttribute('data-vwsh-retry'),
+            tmdb_id: parseInt(btn.getAttribute('data-tmdb'), 10) };
+        if (btn.hasAttribute('data-s')) payload.season_number = parseInt(btn.getAttribute('data-s'), 10);
+        if (btn.hasAttribute('data-e')) payload.episode_number = parseInt(btn.getAttribute('data-e'), 10);
+        btn.disabled = true; btn.classList.add('vwsh-hunt--busy');
+        fetch('/api/video/wishlist/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload) })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) {
+                if (!res || !res.success) throw new Error();
+                if (typeof showToast === 'function')
+                    showToast(res.queued ? 'Retrying with all sources — grabs land in Downloads' : 'Nothing queued for retry',
+                        res.queued ? 'success' : 'info');
+                btn.classList.remove('vwsh-hunt--busy');
+                load();
+            })
+            .catch(function () {
+                btn.disabled = false; btn.classList.remove('vwsh-hunt--busy');
+                if (typeof showToast === 'function') showToast('Retry could not start', 'error');
             });
     }
 
@@ -895,6 +930,8 @@
         if (pick) { e.preventDefault(); e.stopPropagation(); doPick(pick); return; }
         var ytNow = e.target.closest('[data-vwsh-yt-now]');
         if (ytNow) { e.preventDefault(); e.stopPropagation(); doYtNow(ytNow); return; }
+        var retry = e.target.closest('[data-vwsh-retry]');
+        if (retry) { e.preventDefault(); e.stopPropagation(); doRetry(retry); return; }
         var hunt = e.target.closest('[data-vwsh-hunt]');
         if (hunt) { e.preventDefault(); e.stopPropagation(); doHunt(hunt); return; }
         var rm = e.target.closest('[data-vwsh-rm]');

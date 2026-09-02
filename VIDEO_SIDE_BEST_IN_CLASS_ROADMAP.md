@@ -38,7 +38,7 @@ This is the working checklist for making SoulSync's video side feel better than 
 - [ ] Add adaptive TV query fanout: canonical title, aliases, year/no-year, `SxxExx`, `season x episode y`, and scene-number variants. Partly done in `3cddae457` — canonical title, TMDB aliases, and year/no-year spellings now ride the ladder alongside the existing `SxxExx`, `1x02`, air-date and anime-absolute forms. Commit: this phase adds spelled-out `season x episode y` fallbacks. Still to do: general scene-number variants.
 - [x] Add season-pack-first drain when multiple episodes from a season are missing and pack rules allow it. Commit: this phase.
 - [x] Add temporary source cooldowns when a client or indexer repeatedly refuses the same item. Commit: this phase.
-- [ ] Add a one-click "retry with all sources" action for stale wishlist rows.
+- [x] Add a one-click "retry with all sources" action for stale wishlist rows. Commit: this phase.
 
 ## YouTube
 

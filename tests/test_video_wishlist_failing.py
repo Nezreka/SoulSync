@@ -259,6 +259,20 @@ def test_the_columns_ride_the_migration_list():
 
 
 
+def test_reset_wishlist_search_state_clears_one_episode(db):
+    _seed_episode(db, tmdb_id=801, s=1, e=1)
+    _seed_episode(db, tmdb_id=801, s=1, e=2)
+    db.record_wishlist_search_outcome("episode", 801, False, season_number=1, episode_number=2,
+                                      refusal="Best found: nope", refusal_quality="SD",
+                                      snapshot={"chain": ["torrent"], "sources": {}})
+    assert db.reset_wishlist_search_state("episode", 801, season_number=1, episode_number=2) == 1
+    rows = {(r["season_number"], r["episode_number"]): r for r in db._get_connection().execute(
+        "SELECT season_number, episode_number, search_attempts, last_refusal, search_snapshot "
+        "FROM video_wishlist WHERE tmdb_id=801")}
+    assert rows[(1, 2)]["search_attempts"] == 0 and rows[(1, 2)]["last_refusal"] is None
+    assert rows[(1, 1)]["search_attempts"] == 0 and rows[(1, 1)]["last_refusal"] is None
+
+
 def test_search_note_updates_reason_without_incrementing_attempts(db):
     _seed_movie(db, tmdb_id=701, title="Client Stuck")
     db.record_wishlist_search_outcome("movie", 701, False)

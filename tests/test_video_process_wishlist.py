@@ -271,6 +271,22 @@ def test_season_pack_auto_grab_ignores_soulseek_pack_candidates():
     assert seen == [("season", "9", 2)]
 
 
+def test_manual_retry_all_sources_combines_sources(monkeypatch):
+    import core.video.wishlist_search as ws
+    calls = []
+
+    def one(src, item, mt):
+        calls.append(src)
+        return ([dict(_cand(src + '.mkv'), source=src, score={'torrent': 5, 'usenet': 9, 'soulseek': 1}[src])], None)
+
+    import core.automation.handlers.video_process_wishlist as vpw
+    monkeypatch.setattr(vpw, '_search_one_source', one)
+    item = {"tmdb_id": 1, "title": "A"}
+    cands, err = ws._all_source_search(item, "movie")
+    assert calls == ["torrent", "usenet", "soulseek"] and err is None
+    assert cands[0]["source"] == "usenet"
+
+
 def test_client_refusal_cooldown_skips_reoffering_same_source():
     reset_source_cooldowns()
     try:

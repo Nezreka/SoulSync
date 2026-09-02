@@ -115,3 +115,11 @@ describe('the tooltip a stuck row shows', () => {
     expect(text).not.toContain('Over your 4 GB size cap');
   });
 });
+
+describe('retry with all sources action', () => {
+  it('wires a dedicated retry button and endpoint for failing rows', () => {
+    expect(SRC).toContain('data-vwsh-retry');
+    expect(SRC).toContain('/api/video/wishlist/retry');
+    expect(SRC).toContain('Retry with all sources');
+  });
+});
