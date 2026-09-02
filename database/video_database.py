@@ -4867,6 +4867,27 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def set_episode_monitored(self, show_tmdb_id, season_number, episode_number,
+                              monitored: bool) -> int:
+        """Flip 'monitored' on ONE episode, addressed the way the calendar knows
+        it: by the show's tmdb id plus season/episode. The calendar never has the
+        local episode row id, and looking one up client-side just to say "stop
+        hunting this" would be a round trip for nothing."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE episodes SET monitored=? WHERE season_number=? AND episode_number=? "
+                "AND show_id IN (SELECT id FROM shows WHERE tmdb_id=?)",
+                (1 if monitored else 0, int(season_number), int(episode_number),
+                 int(show_tmdb_id)))
+            conn.commit()
+            return int(cur.rowcount or 0)
+        except (sqlite3.Error, TypeError, ValueError):
+            logger.exception("set_episode_monitored failed")
+            return 0
+        finally:
+            conn.close()
+
     def set_season_monitored(self, show_id: int, season_number: int, monitored: bool) -> int:
         """Flip 'monitored' on every episode of one season. Returns how many rows
         moved. Season monitoring is per-EPISODE in this schema (there is no

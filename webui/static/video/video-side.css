@@ -784,6 +784,28 @@ body[data-side="video"] .dashboard-header-sweep {
 }
 .vd-more-menu .vd-manage-btn:hover { background: rgba(255,255,255,0.08); }
 
+/* Calendar acquisition badges. Same colour language as the detail page's
+   acquisition panel, so one state means one thing across the video side. */
+.vcal-acq {
+    display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px;
+    font-size: 10.5px; font-weight: 700; white-space: nowrap;
+    border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.05);
+    color: rgba(255,255,255,0.72);
+}
+.vcal-acq--sm { font-size: 9.5px; padding: 1px 6px; }
+.vcal-acq--owned { color: #4ade80; border-color: rgba(74,222,128,0.32); background: rgba(74,222,128,0.1); }
+.vcal-acq--live  { color: #38bdf8; border-color: rgba(56,189,248,0.34); background: rgba(56,189,248,0.1); }
+.vcal-acq--bad   { color: #f87171; border-color: rgba(248,113,113,0.36); background: rgba(248,113,113,0.1); }
+.vcal-acq--want  { color: rgb(var(--vd-accent-rgb, 88 101 242)); border-color: rgba(var(--vd-accent-rgb, 88 101 242), 0.4); }
+.vcal-acq--mut   { opacity: 0.55; }
+.vcal-acq--miss  { color: #fbbf24; border-color: rgba(251,191,36,0.32); background: rgba(251,191,36,0.09); }
+/* The needs-action filter is the one that finds work, so it reads as such. */
+.vcal-filter-btn--needs.vcal-filter-btn--on { border-color: rgba(251,191,36,0.55); color: #fbbf24; }
+.vcm-badge--live { color: #38bdf8; border-color: rgba(56,189,248,0.34); }
+.vcm-badge--bad  { color: #f87171; border-color: rgba(248,113,113,0.36); }
+.vcm-badge--want { color: rgb(var(--vd-accent-rgb, 88 101 242)); }
+.vcm-badge--mut  { opacity: 0.6; }
+
 .vd-acq-section { margin: 0 0 26px; }
 /* Acquisition roll-up: a counted chip per state, plus a library-coverage bar.
    Numbers lead, labels follow - the count is what you scan for. */

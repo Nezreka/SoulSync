@@ -98,6 +98,8 @@ def create_video_blueprint() -> Blueprint:
             # (delete/sync/clear-match/delete-batch) + the download blocklist config. Content
             # views only READ metadata (the detail GET stays open); these MUTATE the library.
             admin = admin or _p("/api/video/bulk", "/api/video/monitor",
+                                 # single-episode monitor flip from the calendar
+                                 "/api/video/episode/monitor",
                                  "/api/video/poster/set", "/api/video/downloads/blocklist") \
                 or path.endswith(("/metadata", "/lock", "/refresh-art",
                                   # season-wide monitor flip — same library

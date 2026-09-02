@@ -73,6 +73,28 @@ def register_routes(bp):
         state = db.acquisition_state(kind, item_id, tmdb_id=detail.get("tmdb_id"))
         return jsonify({"success": True, **state})
 
+    @bp.route("/episode/monitor", methods=["POST"])
+    def video_set_episode_monitor():
+        """Monitor or unmonitor a single episode, addressed by show tmdb id +
+        season/episode. That is the identity the calendar carries; it never has
+        the local episode row id."""
+        from . import get_video_db
+        body = request.get_json(silent=True) or {}
+        try:
+            tmdb_id = int(body["tmdb_id"])
+            season = int(body["season_number"])
+            episode = int(body["episode_number"])
+        except (KeyError, TypeError, ValueError):
+            return jsonify({"success": False,
+                            "error": "tmdb_id, season_number and episode_number required"}), 400
+        if "monitored" not in body:
+            return jsonify({"success": False, "error": "monitored required"}), 400
+        moved = get_video_db().set_episode_monitored(
+            tmdb_id, season, episode, bool(body.get("monitored")))
+        if not moved:
+            return jsonify({"success": False, "error": "No such episode."}), 404
+        return jsonify({"success": True, "monitored": bool(body.get("monitored"))})
+
     @bp.route("/detail/show/<int:library_id>/season/<int:season_number>/monitor",
               methods=["POST"])
     def video_set_season_monitor(library_id, season_number):

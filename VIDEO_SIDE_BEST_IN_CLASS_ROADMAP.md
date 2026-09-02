@@ -71,10 +71,10 @@ This is the working checklist for making SoulSync's video side feel better than 
 
 ## Calendar
 
-- [ ] Overlay acquisition state on upcoming and recent episodes: owned, wanted, queued, downloading, failed, and ignored.
-- [ ] Add a focused "needs action" calendar filter for aired-but-missing episodes.
-- [ ] Add stale schedule warnings when the local episode list has not refreshed recently.
-- [ ] Let calendar cards trigger search, retry, ignore, or detail drill-in without leaving the view.
+- [x] Overlay acquisition state on upcoming and recent episodes. Eight states, reusing the detail panel's vocabulary plus the two only a calendar needs: `unaired` (nothing is wrong yet) and `missing` (it aired, nothing has it, nothing is looking for it). Reality beats intent throughout — a file on disk is owned whatever the wishlist believes, and a season pack in flight marks every episode it covers. Commit: `36470cf5e`.
+- [x] Add a focused "needs action" calendar filter for aired-but-missing episodes. The SERVER decides what needs action, so the filter and the header count cannot drift apart. `wanted` is excluded (the drain has it in hand) and `ignored` is excluded (you already answered). Commit: this phase.
+- [x] Add stale schedule warnings when the local episode list has not refreshed recently. Nothing recorded when the refresh last ran, so the automation now stamps a receipt — only on a run that actually refreshed something — and a never-refreshed install reads as stale rather than as fine. A calendar that has not refreshed is not empty, it is confidently wrong. Commit: `36470cf5e`.
+- [x] Let calendar cards trigger search, retry, ignore, or detail drill-in without leaving the view. Retry appears only on a failed row, where there is actually a backoff to clear. Ignore needed a new single-episode monitor endpoint — nothing existed below show and season level — addressed by show tmdb id plus season/episode, since the calendar never carries the local episode row id. Commit: this phase.
 
 ## Automation And Ops
 

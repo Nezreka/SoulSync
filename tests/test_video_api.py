@@ -78,6 +78,7 @@ def test_library_management_is_admin_only(tmp_path):
         ("post", "/api/video/monitor"),
         ("post", "/api/video/detail/show/5/season/1/monitor"),
         ("put", "/api/video/detail/movie/5/overrides"),
+        ("post", "/api/video/episode/monitor"),
         ("post", "/api/video/poster/set"),
         ("post", "/api/video/downloads/blocklist"),
         ("put", "/api/video/detail/movie/5/metadata"),

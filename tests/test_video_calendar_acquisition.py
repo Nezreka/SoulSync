@@ -129,3 +129,36 @@ def test_a_schedule_refreshed_long_ago_goes_stale_again(client, monkeypatch):
     sched = _cal(c)["schedule"]
     assert sched["stale"] is True
     assert sched["age_days"] > db.SCHEDULE_STALE_DAYS
+
+
+def test_ignoring_one_episode_leaves_the_rest_alone(client):
+    """The calendar addresses an episode by the show's tmdb id plus
+    season/episode - it never carries the local episode row id - so the write
+    has to be that narrow or 'stop looking for this one' silently unmonitors
+    a whole show."""
+    c, db = client
+    _seed(db, episodes=[{"episode_number": n, "title": "E%d" % n,
+                         "air_date": "2026-06-1%d" % n} for n in (1, 2, 3)])
+    r = c.post("/api/video/episode/monitor",
+               json={"tmdb_id": 1396, "season_number": 1, "episode_number": 2,
+                     "monitored": False})
+    assert r.status_code == 200 and r.get_json()["monitored"] is False
+
+    conn = db._get_connection()
+    rows = {n: m for n, m in conn.execute(
+        "SELECT episode_number, monitored FROM episodes ORDER BY episode_number")}
+    conn.close()
+    assert rows == {1: 1, 2: 0, 3: 1}
+
+
+def test_the_episode_monitor_endpoint_rejects_junk(client):
+    c, db = client
+    _seed(db)
+    for body in ({"tmdb_id": 1396, "season_number": 1},                # no episode
+                 {"tmdb_id": 1396, "season_number": 1, "episode_number": 1},  # no flag
+                 {"tmdb_id": "x", "season_number": 1, "episode_number": 1, "monitored": False}):
+        assert c.post("/api/video/episode/monitor", json=body).status_code == 400
+    # A real request for an episode that does not exist is a 404, not a silent ok.
+    assert c.post("/api/video/episode/monitor",
+                  json={"tmdb_id": 1396, "season_number": 9, "episode_number": 9,
+                        "monitored": False}).status_code == 404
