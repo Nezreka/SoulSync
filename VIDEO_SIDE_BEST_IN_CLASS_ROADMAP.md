@@ -10,6 +10,13 @@ This is the working checklist for making SoulSync's video side feel better than 
 - [x] Sweep completed YouTube wishlist rows before requeueing. Commit: `5db0bcaf4`.
 - [x] Migrate video RSS sync from hourly legacy cadence to the faster Arr-style cadence. Commit: `c56f20c72`.
 - [x] Warn immediately when wishlist auto-search cannot run because a movie, TV, or YouTube target folder is missing. Commit: `861936c7a`.
+- [x] Let EXT.to answer when Prowlarr can't — the torrent lane only fails when neither half can run. Commit: `b2243fcd2`.
+- [x] Back off retries instead of re-searching a dead row hourly forever (174 → 10 searches per tick on the live install). Commit: `6c5018f4a`.
+- [x] Say why a search came back empty instead of storing NULL. Commit: `f7cfafc36`.
+- [x] Stop hunting episodes of a show the user un-followed. Commit: `c9a233a57`.
+- [x] YouTube: back off instead of giving up permanently, and report the split. Commit: `34b86380b`.
+- [x] A download that gives up now says why, instead of one generic sentence for ~1,900 history rows. Commit: `6bcf24d9d`.
+- [x] Feed the EXT.to board into the RSS wishlist matcher (coverage lane, reads the cached snapshot — never scrapes on the tick). Commit: `5503a6f1f`.
 
 ## Search Page
 
@@ -22,8 +29,8 @@ This is the working checklist for making SoulSync's video side feel better than 
 
 ## Wishlist Processing
 
-- [ ] Add a stuck-row diagnostics drawer: last searched, last refusal, attempts, source order, target folder, matched IDs, and queued download state.
-- [ ] Store per-source search outcome snapshots for wanted items: result count, rejected count, accepted count, and top refusal reason.
+- [ ] Add a stuck-row diagnostics drawer: last searched, last refusal, attempts, source order, target folder, matched IDs, and queued download state. Partly done in `bea126744` — the row's tooltip now reads last searched, attempts, source order and the per-source breakdown. Still to do: target folder, matched IDs, queued download state, and a real drawer rather than a tooltip.
+- [x] Store per-source search outcome snapshots for wanted items: result count, rejected count, accepted count, and top refusal reason. Commit: `bea126744`.
 - [ ] Add adaptive TV query fanout: canonical title, aliases, year/no-year, `SxxExx`, `season x episode y`, and scene-number variants.
 - [ ] Add season-pack-first drain when multiple episodes from a season are missing and pack rules allow it.
 - [ ] Add temporary source cooldowns when a client or indexer repeatedly refuses the same item.
@@ -31,7 +38,7 @@ This is the working checklist for making SoulSync's video side feel better than 
 
 ## YouTube
 
-- [ ] Separate unavailable, members-only, private, age-gated, cookie-needed, throttled, postprocessing, and disk-space failures in row state.
+- [ ] Separate unavailable, members-only, private, age-gated, cookie-needed, throttled, postprocessing, and disk-space failures in row state. Partly done in `6ffd37ef2` — rows distinguish unavailable (deleted/private/members-only) from a retry backoff, and carry the attempt count and reason. Still to do: age-gated, cookie-needed, throttled, postprocessing and disk-space as distinct states.
 - [ ] Add a YouTube health tile covering yt-dlp version, cookies status, temp space, output space, and recent HTTP failures.
 - [ ] Finalize stale active/importing rows that no longer map to a live download worker.
 - [ ] Offer per-channel and per-playlist retry policies, including archive recheck cadence.
