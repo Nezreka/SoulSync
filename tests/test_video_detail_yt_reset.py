@@ -28,15 +28,35 @@ def test_playlist_section_lives_only_in_show_detail():
 def test_reset_targets_the_show_dom_directly():
     # ytResetPlaylists must NOT rely on the kind-scoped q() (which points at the
     # movie root during a movie load) — it queries the show subpage explicitly.
-    i = _DETAIL.index('function ytResetPlaylists(')
-    body = _DETAIL[i:i + 700]
+    body = _fn_body('ytResetPlaylists')
     assert "document.querySelector('[data-video-detail=\"show\"]')" in body
     assert 'data-vd-yt-playlists' in body
+
+
+def _fn_body(name: str) -> str:
+    """The whole body of a top-level function in video-detail.js, brace-matched.
+
+    These assertions used to read a fixed 700 characters, which quietly stopped
+    covering the thing under test as soon as the function grew.
+    """
+    i = _DETAIL.index("function %s(" % name)
+    depth, start = 0, _DETAIL.index("{", i)
+    for j in range(start, len(_DETAIL)):
+        if _DETAIL[j] == "{":
+            depth += 1
+        elif _DETAIL[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return _DETAIL[i:j + 1]
+    raise AssertionError("unbalanced braces reading %s" % name)
 
 
 def test_every_detail_load_clears_stale_playlists():
     # resetExtras() runs on loadMovie/loadShow/loadChannel/loadPlaylist, so wiring
     # the clear there covers all navigations into a non-YouTube detail.
-    i = _DETAIL.index('function resetExtras(')
-    body = _DETAIL[i:i + 700]
+    #
+    # Read to the END of the function rather than a fixed byte count: the list of
+    # sections it hides grows (the acquisition panel joined it), and a 700-char
+    # window silently stopped covering the call this test exists to protect.
+    body = _fn_body('resetExtras')
     assert 'ytResetPlaylists()' in body
