@@ -63859,6 +63859,23 @@ tr.tag-diff-same {
     align-items: center;
 }
 
+/* #1219: shown only when two candidates share a name AND source, where every
+   other field on the card is identical and there is nothing to choose on. */
+.server-disambig-ref {
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.5);
+}
+.server-disambig-hint {
+    margin: 0 0 10px;
+    font-size: 11px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.42);
+}
+
 .server-disambig-details .source-badge {
     font-size: 9px;
     padding: 2px 8px;

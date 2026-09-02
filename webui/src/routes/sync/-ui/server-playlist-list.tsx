@@ -378,6 +378,34 @@ const DISAMBIG_SOURCE_ICONS: Readonly<Record<string, string>> = {
   file: '📄',
 };
 
+/** How many DISTINCT sources the candidates span (#1219). */
+export function distinctSources(candidates: { source?: string }[]): number {
+  return new Set((candidates ?? []).map((c) => (c.source ?? '').toLowerCase())).size;
+}
+
+/** Whether any two candidates show the same name AND source — i.e. the list
+    gives the user nothing to choose on. */
+export function hasIndistinguishable(
+  candidates: { name?: string; display_name?: string; source?: string }[],
+): boolean {
+  const seen = new Set<string>();
+  for (const c of candidates ?? []) {
+    const key = `${((c.display_name || c.name) ?? '').trim().toLowerCase()}::${(c.source ?? '').toLowerCase()}`;
+    if (seen.has(key)) return true;
+    seen.add(key);
+  }
+  return false;
+}
+
+/** The tail of a source reference — enough to tell two mirrors apart without
+    printing a full URL into a card. */
+export function shortRef(candidate: { source_ref?: string; id?: number }): string {
+  const ref = String(candidate.source_ref ?? '').trim();
+  if (!ref) return `#${candidate.id ?? '?'}`;
+  const tail = ref.split(/[/:]/).filter(Boolean).pop() ?? ref;
+  return tail.length > 14 ? `…${tail.slice(-12)}` : tail;
+}
+
 export function ServerDisambigModal({
   playlistName,
   candidates,
@@ -402,6 +430,9 @@ export function ServerDisambigModal({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  // Two candidates the user cannot tell apart: same shown name, same source.
+  const ambiguous = hasIndistinguishable(candidates);
+
   return (
     <div
       id="server-disambig-overlay"
@@ -421,9 +452,16 @@ export function ServerDisambigModal({
         <div className="server-disambig-header">
           <div>
             <h3 className="server-disambig-title">Multiple Sources Found</h3>
+            {/* #1219: this said "found on N sources" no matter what, so four
+                mirrors of four same-named TIDAL playlists read as "4 sources"
+                — and the reporter quite reasonably said "they are all the same
+                source". Count the sources actually present. */}
             <p className="server-disambig-subtitle" id="server-disambig-subtitle">
-              &ldquo;{playlistName}&rdquo; was found on {candidates.length} sources. Which one do
-              you want to compare against?
+              &ldquo;{playlistName}&rdquo;{' '}
+              {distinctSources(candidates) > 1
+                ? `was found on ${distinctSources(candidates)} sources.`
+                : `matches ${candidates.length} mirrored playlists.`}{' '}
+              Which one do you want to compare against?
             </p>
           </div>
           {/* 3248 — `onclick="closeServerDisambig()"`, the same close the
@@ -432,6 +470,12 @@ export function ServerDisambigModal({
             ×
           </button>
         </div>
+        {ambiguous ? (
+          <p className="server-disambig-hint">
+            These share a name. You can rename a mirror from the Mirrored tab (card menu → Rename)
+            to tell them apart here.
+          </p>
+        ) : null}
         <div className="server-disambig-list" id="server-disambig-list">
           {candidates.map((candidate, i) => (
             <div
@@ -444,11 +488,26 @@ export function ServerDisambigModal({
                 {DISAMBIG_SOURCE_ICONS[candidate.source ?? ''] ?? '📋'}
               </div>
               <div className="server-disambig-info">
-                <div className="server-disambig-name">{candidate.name}</div>
+                {/* display_name is the user's alias when they have renamed
+                    this mirror. Rename exists (Mirrored tab → card menu) but
+                    this modal showed the raw upstream name, so renaming to tell
+                    two same-named playlists apart changed nothing HERE — the
+                    one screen where you need them told apart. */}
+                <div className="server-disambig-name">
+                  {candidate.display_name || candidate.name}
+                </div>
                 <div className="server-disambig-details">
                   <span className="source-badge">{candidate.source}</span>
                   <span>{candidate.track_count || 0} tracks</span>
                   {candidate.owner ? <span>by {candidate.owner}</span> : null}
+                  {/* When two candidates share a name AND a source, everything
+                      above is identical and there is nothing to choose on. The
+                      source reference is the one thing that differs. */}
+                  {ambiguous ? (
+                    <span className="server-disambig-ref" title={candidate.source_ref}>
+                      {shortRef(candidate)}
+                    </span>
+                  ) : null}
                   {/* 197: mirrored_at FIRST here. The mirrored tab's card reads
                       the same two fields in the OPPOSITE order (527). */}
                   <span>
