@@ -62,6 +62,14 @@ def test_a_video_under_the_cap_is_always_ready():
     assert _retry_verdict({"strikes": 1, "hours_since_last": 0}, 3) == "go"
 
 
+def test_aggressive_policy_retries_without_waiting():
+    assert _retry_verdict({"strikes": 9, "hours_since_last": 0.1}, 3, "aggressive") == "go"
+
+
+def test_manual_policy_stops_automation_after_one_failure():
+    assert _retry_verdict({"strikes": 1, "hours_since_last": 99}, 3, "manual") == "waiting"
+
+
 def test_no_history_at_all_is_ready():
     assert _retry_verdict(None, 3) == "go"
     assert _retry_verdict({}, 3) == "go"
@@ -89,6 +97,20 @@ def test_the_tally_matches_what_actually_gets_queued():
     assert len(videos_to_enqueue(wanted, [], state)) == skip_tally(wanted, [], state)["ready"]
 
 
+def test_source_retry_policy_changes_automation_selection():
+    wanted = [_v("again"), {**_v("manual"), "channel_id": "c2"}]
+    state = {"again": {"strikes": 5, "hours_since_last": 0.1},
+             "manual": {"strikes": 1, "hours_since_last": 99}}
+
+    def settings(cid):
+        return {"retry_policy": "aggressive"} if cid == "c1" else {"retry_policy": "manual"}
+
+    ready = videos_to_enqueue(wanted, [], state, source_settings=settings)
+    tally = skip_tally(wanted, [], state, source_settings=settings)
+    assert [v["video_id"] for v in ready] == ["again"]
+    assert tally["ready"] == 1 and tally["waiting"] == 1
+
+
 # ── what the user is told ────────────────────────────────────────────────────
 
 def _run(wanted, state, **kw):
@@ -98,7 +120,8 @@ def _run(wanted, state, **kw):
         youtube_root=lambda: "/yt", fetch_wanted=lambda: wanted, active_ids=lambda: [],
         running_count=lambda: 0, enqueue=kw.get("enqueue", lambda v, r: 1),
         start_next=lambda: None, reap=lambda: 0,
-        retry_state=lambda: state, recent_errors=lambda: [])
+        retry_state=lambda: state, source_settings=kw.get("source_settings", lambda cid: {}),
+        recent_errors=lambda: [])
     return res, deps
 
 

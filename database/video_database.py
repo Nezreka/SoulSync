@@ -7736,14 +7736,10 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def get_channel_settings(self, channel_id) -> dict:
-        """Per-channel YouTube overrides — ``{custom_name?, quality?}`` — or {} if none.
-        ``custom_name`` overrides the show-name (the ``$channel`` folder token); ``quality``
-        is a youtube_quality profile that forces a different quality than the global default
-        for this channel. Kept in the settings KV store, so no schema change."""
-        if not channel_id:
+    def _youtube_source_settings(self, prefix: str, source_id) -> dict:
+        if not source_id:
             return {}
-        raw = self.get_setting("youtube_channel_settings:" + str(channel_id))
+        raw = self.get_setting(prefix + str(source_id))
         if not raw:
             return {}
         try:
@@ -7753,16 +7749,72 @@ class VideoDatabase:
         except (ValueError, TypeError):
             return {}
 
-    def set_channel_settings(self, channel_id, settings: dict) -> bool:
-        """Persist per-channel overrides (or clear them with an empty/blank dict)."""
-        if not channel_id:
+    def _set_youtube_source_settings(self, prefix: str, source_id, settings: dict) -> bool:
+        if not source_id:
             return False
         import json
         clean = settings if isinstance(settings, dict) else {}
         # Drop empty values so a blank form clears the override rather than storing noise.
         clean = {k: v for k, v in clean.items() if v not in (None, "", {})}
-        self.set_setting("youtube_channel_settings:" + str(channel_id), json.dumps(clean))
+        self.set_setting(prefix + str(source_id), json.dumps(clean))
         return True
+
+    def get_channel_settings(self, channel_id) -> dict:
+        """Per-channel YouTube overrides — folder name, quality, filters, retention,
+        retry policy and archive cadence. Kept in settings KV; no schema churn."""
+        return self._youtube_source_settings("youtube_channel_settings:", channel_id)
+
+    def set_channel_settings(self, channel_id, settings: dict) -> bool:
+        """Persist per-channel overrides (or clear them with an empty/blank dict)."""
+        return self._set_youtube_source_settings("youtube_channel_settings:", channel_id, settings)
+
+    def get_playlist_settings(self, playlist_id) -> dict:
+        """Per-playlist YouTube overrides, same shape as channel settings where relevant."""
+        return self._youtube_source_settings("youtube_playlist_settings:", playlist_id)
+
+    def set_playlist_settings(self, playlist_id, settings: dict) -> bool:
+        """Persist per-playlist overrides (or clear them with an empty/blank dict)."""
+        return self._set_youtube_source_settings("youtube_playlist_settings:", playlist_id, settings)
+
+    def get_youtube_source_settings(self, source_id) -> dict:
+        """Settings for a source id used as a YouTube wishlist parent. Channels win;
+        playlist settings cover playlist-sourced rows whose parent is the playlist id."""
+        return self.get_channel_settings(source_id) or self.get_playlist_settings(source_id)
+
+    def youtube_archive_recheck_hours(self, source_id, default_hours: int = 24) -> int:
+        """Per-source archive recheck cadence in hours. ``0``/missing = default."""
+        settings = self.get_youtube_source_settings(source_id) or {}
+        try:
+            days = int(settings.get("archive_recheck_days") or 0)
+        except (TypeError, ValueError):
+            days = 0
+        if days <= 0:
+            return max(1, int(default_hours or 24))
+        return max(1, min(days, 365)) * 24
+
+    def mark_youtube_source_checked(self, source_id, kind: str = "playlist") -> None:
+        sid = str(source_id or "")
+        if not sid:
+            return
+        self.set_setting("youtube_%s_checked_at:%s" % (kind or "source", sid),
+                         datetime.now(timezone.utc).isoformat(timespec="seconds"))
+
+    def youtube_source_checked_recently(self, source_id, kind: str = "playlist",
+                                        within_hours: int = 24) -> bool:
+        sid = str(source_id or "")
+        if not sid:
+            return False
+        raw = self.get_setting("youtube_%s_checked_at:%s" % (kind or "source", sid))
+        if not raw:
+            return False
+        try:
+            dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            age = datetime.now(timezone.utc) - dt.astimezone(timezone.utc)
+            return age.total_seconds() < max(1, int(within_hours or 24)) * 3600
+        except (TypeError, ValueError):
+            return False
 
     def get_playlist_seen(self, playlist_id) -> list:
         """The video ids already accounted for in a followed playlist — the membership

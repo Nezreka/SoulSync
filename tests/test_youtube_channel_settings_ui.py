@@ -34,8 +34,10 @@ def test_modal_is_exposed_and_built():
 
 
 def test_modal_loads_and_saves_via_the_settings_api():
-    assert "/channel/' + encodeURIComponent(channelId) + '/settings'" in _YT
+    assert "/channel/' + encodeURIComponent(channelId) + '/settings?kind='" in _YT
     assert "method: 'POST'" in _YT
-    # the form carries the custom name + the optional quality override
+    # the form carries the custom name + optional quality/retry/cadence overrides
     assert 'data-cset-name' in _YT and 'data-cset-qon' in _YT
+    assert 'data-cset-retry' in _YT and 'data-cset-recheck' in _YT
     assert 'custom_name' in _YT and 'max_resolution' in _YT
+    assert 'retry_policy' in _YT and 'archive_recheck_days' in _YT

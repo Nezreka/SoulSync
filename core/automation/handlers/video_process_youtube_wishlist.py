@@ -31,21 +31,45 @@ from utils.logging_config import get_logger
 logger = get_logger("automation.video_process_youtube_wishlist")
 
 
-YT_MAX_FAIL = 3   # give up re-grabbing a video after this many failed attempts
+YT_MAX_FAIL = 3   # start applying retry backoff after this many failed attempts
+_RETRY_POLICIES = {"default", "aggressive", "manual"}
 
 
-def _retry_verdict(state: Optional[Dict[str, Any]], max_fail: int) -> str:
+def _retry_policy(settings: Optional[Dict[str, Any]]) -> str:
+    p = str((settings or {}).get("retry_policy") or "default").strip().lower()
+    return p if p in _RETRY_POLICIES else "default"
+
+
+def _source_settings_for_video(video: Dict[str, Any], source_settings=None) -> Dict[str, Any]:
+    if not source_settings:
+        return {}
+    if callable(source_settings):
+        try:
+            return source_settings(video.get("channel_id"), video) or {}
+        except TypeError:
+            return source_settings(video.get("channel_id")) or {}
+    if isinstance(source_settings, dict):
+        return source_settings.get(video.get("channel_id")) or source_settings.get(video.get("video_id")) or {}
+    return {}
+
+
+def _retry_verdict(state: Optional[Dict[str, Any]], max_fail: int, policy: str = "default") -> str:
     """``'go' | 'permanent' | 'waiting'`` for one video's failure history.
 
     Only a GONE failure is permanent - a deleted or members-only video will not
     un-delete, and retrying it hourly learns nothing. Everything else BACKS OFF
     on the same schedule the movie/TV wishlist uses: the wait doubles and caps at
     a week, but the video is never written off. Pure."""
+    policy = policy if policy in _RETRY_POLICIES else "default"
     if not isinstance(state, dict):
         return "go"
     if state.get("permanent"):
         return "permanent"
     strikes = int(state.get("strikes", 0) or 0)
+    if policy == "aggressive":
+        return "go"
+    if policy == "manual" and strikes > 0:
+        return "waiting"
     if strikes < max_fail:
         return "go"
     wait = retry_delay_hours(strikes)
@@ -57,7 +81,7 @@ def _retry_verdict(state: Optional[Dict[str, Any]], max_fail: int) -> str:
 
 def videos_to_enqueue(wanted: List[Dict[str, Any]], already_ids: Iterable,
                       retry_state: Optional[Dict[Any, Dict[str, Any]]] = None,
-                      max_fail: int = YT_MAX_FAIL) -> List[Dict[str, Any]]:
+                      max_fail: int = YT_MAX_FAIL, source_settings=None) -> List[Dict[str, Any]]:
     """Wished videos ready to queue: not already queued/downloading, not permanently
     unavailable, and not still inside their retry backoff. No concurrency cap here
     (bounded at start time). Pure."""
@@ -68,7 +92,8 @@ def videos_to_enqueue(wanted: List[Dict[str, Any]], already_ids: Iterable,
         vid = v.get("video_id")
         if not vid or str(vid) in already:
             continue
-        if _retry_verdict(states.get(vid), max_fail) != "go":
+        settings = _source_settings_for_video(v, source_settings)
+        if _retry_verdict(states.get(vid), max_fail, _retry_policy(settings)) != "go":
             continue
         out.append(v)
     return out
@@ -76,7 +101,7 @@ def videos_to_enqueue(wanted: List[Dict[str, Any]], already_ids: Iterable,
 
 def skip_tally(wanted: List[Dict[str, Any]], already_ids: Iterable,
                retry_state: Optional[Dict[Any, Dict[str, Any]]] = None,
-               max_fail: int = YT_MAX_FAIL) -> Dict[str, int]:
+               max_fail: int = YT_MAX_FAIL, source_settings=None) -> Dict[str, int]:
     """How many wished videos each reason accounts for, so the run can SAY what it
     did instead of reporting an empty wishlist. Pure."""
     already = {str(x) for x in (already_ids or ()) if x}
@@ -89,7 +114,8 @@ def skip_tally(wanted: List[Dict[str, Any]], already_ids: Iterable,
         elif str(vid) in already:
             tally["in_flight"] += 1
         else:
-            verdict = _retry_verdict(states.get(vid), max_fail)
+            settings = _source_settings_for_video(v, source_settings)
+            verdict = _retry_verdict(states.get(vid), max_fail, _retry_policy(settings))
             tally["ready" if verdict == "go" else verdict] += 1
     return tally
 
@@ -171,6 +197,11 @@ def _default_retry_state() -> Dict[Any, Dict[str, Any]]:
     return get_video_db().youtube_retry_state(max_fail=YT_MAX_FAIL)
 
 
+def _default_source_settings(source_id: Any) -> Dict[str, Any]:
+    from api.video import get_video_db
+    return get_video_db().get_youtube_source_settings(source_id)
+
+
 def _default_recent_errors(days: int = 3) -> list:
     """Failure texts from the last few days, for the stale-yt-dlp check."""
     from api.video import get_video_db
@@ -223,7 +254,7 @@ def _default_enqueue(video: Dict[str, Any], root: str) -> Any:
         logger.warning("disk guard: %.1f GB free on %s — not queuing %s",
                        free or 0, root, video.get("video_title"))
         return None
-    ctx = enqueue_ctx(video, db.get_channel_settings(video.get("channel_id")))
+    ctx = enqueue_ctx(video, db.get_youtube_source_settings(video.get("channel_id")))
     ctx["server_source"] = resolve_video_server()
     return db.add_video_download({
         "kind": "youtube", "source": "youtube", "media_source": "youtube",
@@ -261,6 +292,7 @@ def auto_video_process_youtube_wishlist(
     start_next: Optional[Callable[[], Any]] = None,
     reap: Optional[Callable[[], int]] = None,
     retry_state: Optional[Callable[[], Dict[Any, Dict[str, Any]]]] = None,
+    source_settings: Optional[Callable[..., Dict[str, Any]]] = None,
     recent_errors: Optional[Callable[[], List[Any]]] = None,
 ) -> Dict[str, Any]:
     """Queue the whole YouTube wishlist for download and start up to ``max_concurrent`` now.
@@ -275,6 +307,7 @@ def auto_video_process_youtube_wishlist(
     start_next = start_next or _default_start_next
     reap = reap or _default_reap
     retry_state = retry_state or _default_retry_state
+    source_settings = source_settings or _default_source_settings
     recent_errors = recent_errors or _default_recent_errors
     automation_id = config.get('_automation_id')
     max_concurrent = max(1, int(config.get('max_concurrent', 3) or 3))
@@ -307,8 +340,8 @@ def auto_video_process_youtube_wishlist(
         wanted = fetch_wanted() or []
         already = list(active_ids() or [])
         states = retry_state() or {}
-        new = videos_to_enqueue(wanted, already, states)
-        tally = skip_tally(wanted, already, states)
+        new = videos_to_enqueue(wanted, already, states, source_settings=source_settings)
+        tally = skip_tally(wanted, already, states, source_settings=source_settings)
         _warn_if_ytdlp_is_stale(deps, automation_id, recent_errors)
 
         queued = 0
