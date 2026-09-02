@@ -771,9 +771,16 @@ body[data-side="video"] .dashboard-header-sweep {
 /* Overflow menu for the management actions. Anchored to its button so the menu
    opens under it rather than shoving the genre chips down the page. */
 .vd-more { position: relative; display: inline-flex; }
+/* Opens UPWARD. The billboard has overflow:hidden because its backdrop runs a
+   Ken Burns scale to 1.1 and would otherwise spill out of the hero, so a menu
+   dropping downward from a button near the bottom gets its last item clipped
+   away with no sign it existed. There is a whole hero of room above.
+   max-height + scroll is the belt: whatever the space, the menu can never be
+   silently truncated again - worst case it scrolls. */
 .vd-more-menu {
-    position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
+    position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 30;
     display: flex; flex-direction: column; gap: 4px; padding: 6px;
+    max-height: 60vh; overflow-y: auto;
     min-width: 200px; border-radius: 12px;
     background: rgba(16, 18, 24, 0.97); border: 1px solid rgba(255,255,255,0.12);
     box-shadow: 0 18px 46px rgba(0,0,0,0.55); backdrop-filter: blur(14px);

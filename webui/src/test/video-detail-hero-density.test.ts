@@ -89,6 +89,31 @@ describe('the management actions collapse into one button', () => {
   });
 });
 
+describe('the overflow menu stays inside the hero', () => {
+  const CSS = readFileSync(resolve(process.cwd(), 'static/video/video-side.css'), 'utf8');
+  const rule = CSS.slice(CSS.indexOf('\n.vd-more-menu {'),
+                         CSS.indexOf('}', CSS.indexOf('\n.vd-more-menu {')));
+
+  it('opens upward, because the billboard clips whatever drops below', () => {
+    // .vd-billboard has overflow:hidden - its backdrop runs a Ken Burns scale to
+    // 1.1 and would spill out of the hero otherwise. A menu dropping DOWN from a
+    // button near the bottom loses its last item with no sign it was ever there.
+    expect(rule).toContain('bottom: calc(100% + 6px)');
+    expect(rule).not.toMatch(/top:\s*calc\(100%/);
+  });
+
+  it('scrolls rather than truncating, whatever the room', () => {
+    expect(rule).toContain('max-height');
+    expect(rule).toContain('overflow-y: auto');
+  });
+
+  it('still clips the backdrop, which is what the overflow was for', () => {
+    const bb = CSS.slice(CSS.indexOf('\n.vd-billboard {'),
+                         CSS.indexOf('}', CSS.indexOf('\n.vd-billboard {')));
+    expect(bb).toContain('overflow: hidden');
+  });
+});
+
 describe('the overflow menu opens and closes', () => {
   function wire() {
     const host = document.createElement('div');
