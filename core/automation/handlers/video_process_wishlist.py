@@ -254,6 +254,7 @@ def build_download_record(item: Dict[str, Any], best: Dict[str, Any], candidates
         ctx = {**ctx, "peer": peer}
     media_id = str(item.get("tmdb_id") if media_type == "movie" else item.get("show_tmdb_id"))
     source = str(best.get("source") or "soulseek").lower()
+    transport_source = "torrent" if source == "extto" else source
     common = {
         "kind": media_type, "title": ctx["title"],
         "release_title": best.get("title") or best.get("filename"),
@@ -265,14 +266,14 @@ def build_download_record(item: Dict[str, Any], best: Dict[str, Any], candidates
         # decisions stay consistent even if the title is reassigned mid-flight
         "quality_profile_id": item.get("quality_profile_id"),
     }
-    if source == "soulseek":
+    if transport_source == "soulseek":
         rest = [c for c in (candidates or []) if c.get("filename") != best.get("filename")]
         return {**common, "source": "soulseek", "username": best.get("username"),
                 "filename": best.get("filename"), "candidates": json.dumps(rest),
                 "tried_queries": json.dumps([query] if query else []),
                 "tried_files": json.dumps([best.get("filename")])}
     # torrent / usenet — tracked by the client ref the grab returned; no Soulseek requery pool.
-    return {**common, "source": source, "username": best.get("username"),   # indexer (display)
+    return {**common, "source": transport_source, "username": best.get("username"),   # indexer (display)
             # keep the indexer ID too, not just its name. the seeding sweep needs a
             # stable key to look up that tracker's own seed goal.
             "indexer_id": best.get("indexer_id"),
@@ -361,6 +362,19 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
         if pres.get("error"):
             return None, pres["error"]
         hits = pres["hits"]
+    elif source == "extto":
+        from core.video.extto_search import extto_search
+        from core.video.slskd_search import build_query
+        query = build_query(ctx["scope"], ctx["title"], year=ctx.get("year"),
+                            season=ctx.get("season"), episode=ctx.get("episode"),
+                            air_date=ctx.get("air_date"), absolute=ctx.get("absolute"),
+                            series_type=ctx.get("series_type"))
+        eres = extto_search(query, limit=30, timeout=35, max_candidates=2)
+        if not eres.get("configured"):
+            return None, "EXT.to requires FlareSolverr"
+        if eres.get("error"):
+            return None, eres["error"]
+        hits = eres.get("hits") or []
     else:
         return None, "unsupported source %r" % source
     cands = _evaluate_hits(hits, profile, ctx["scope"], ctx.get("season"), ctx.get("episode"),
@@ -425,7 +439,8 @@ def _default_enqueue(item: Dict[str, Any], best: Dict[str, Any], candidates: Lis
                        free or 0, target_dir, name)
         return {"ok": False, "error": "Only %.1f GB free on %s" % (free or 0, target_dir)}
     source = str(best.get("source") or "soulseek").lower()
-    if source == "soulseek":
+    transport_source = "torrent" if source == "extto" else source
+    if transport_source == "soulseek":
         from core.video.slskd_download import start_download
         started = start_download(best.get("username"), best.get("filename"), best.get("size_bytes") or 0)
         if not started.get("ok"):
@@ -433,7 +448,7 @@ def _default_enqueue(item: Dict[str, Any], best: Dict[str, Any], candidates: Lis
     else:
         # torrent / usenet — hand off to the shared client; carry the returned ref into the row.
         from core.video.client_grab import grab
-        res = grab(source, best.get("download_url"),
+        res = grab(transport_source, best.get("download_url"),
                    fallback_magnet=best.get("magnet_uri"))
         if not res.get("ok"):
             logger.warning("video hybrid: %s grab refused for %s: %s", source, name, res.get("error"))

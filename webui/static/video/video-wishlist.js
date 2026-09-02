@@ -92,7 +92,7 @@
     // "Search now" — the manual override Sonarr users expect: skips the release
     // gate for THIS item and runs the drain's search/pick/enqueue immediately.
     function huntBtn(scope, attrs) {
-        return '<button class="vwsh-hunt" type="button" title="Search now" aria-label="Search now" ' +
+        return '<button class="vwsh-hunt" type="button" title="Auto search now" aria-label="Auto search now" ' +
             'data-vwsh-hunt="' + scope + '"' + attrs + '>' +
             '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
             'stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>' +
@@ -382,7 +382,7 @@
         var rm = yt
             ? 'data-vwsh-rm="yt-video" data-id="' + esc(e.source_id) + '"'
             : 'data-vwsh-rm="episode" data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '"';
-        return '<div class="vwsh-epc" data-vwsh-ep data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '"' +
+        return '<div class="vwsh-epc' + (yt ? ' vwsh-epc--youtube' : '') + '" data-vwsh-ep data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '"' +
             (yt ? ' data-src-id="' + esc(e.source_id) + '"' : '') + '>' + thumb +
             '<div class="vwsh-epc-body">' +
                 '<div class="vwsh-epc-title" title="' + esc(t) + '">' + esc(t) + '</div>' +
@@ -390,7 +390,7 @@
             '</div>' +
             (yt
                 ? (st === 'downloading' ? ''
-                    : '<button class="vwsh-epc-hunt" type="button" data-vwsh-yt-now="' + esc(e.source_id) +
+                    : '<button class="vwsh-epc-hunt vwsh-epc-hunt--yt" type="button" data-vwsh-yt-now="' + esc(e.source_id) +
                       '" data-ch="' + esc(sh.youtube_id || '') + '" data-cht="' + esc(sh.title || '') +
                       '" data-vt="' + esc(t) + '" data-pub="' + esc(e.air_date || '') +
                       '" title="Download this video now, ignoring the retry wait">' +
@@ -501,6 +501,7 @@
         if (sa) {
             sa.hidden = !has;
             var yt = state.tab === 'youtube';
+            sa.setAttribute('data-vwsh-mode', yt ? 'youtube' : 'search');
             var label = sa.lastChild;
             if (label && label.nodeType === 3) label.nodeValue = yt ? ' Download all waiting' : ' Search all missing';
             sa.title = yt
@@ -551,6 +552,12 @@
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (res) {
                 if (!res || !res.success) throw new Error();
+                if (res.missing_target) {
+                    if (typeof showToast === 'function')
+                        showToast('Set the ' + (res.missing_target === 'movie' ? 'Movies' : 'TV') + ' library folder in Video Settings first', 'error');
+                    btn.disabled = false; btn.classList.remove('vwsh-hunt--busy');
+                    return;
+                }
                 if (typeof showToast === 'function') {
                     showToast(res.queued
                         ? 'Searching for ' + res.queued + ' item' + (res.queued === 1 ? '' : 's') + '… grabs land in Downloads'
@@ -609,16 +616,20 @@
             .then(function (res) {
                 if (!res || !res.success) throw new Error();
                 var k = res.kinds || {};
-                var going = [];
+                var going = [], missing = [];
                 if (k.movie === 'started') going.push('movies');
                 if (k.episode === 'started') going.push('episodes');
+                if (k.movie === 'unconfigured') missing.push('Movies');
+                if (k.episode === 'unconfigured') missing.push('TV');
                 if (typeof showToast === 'function') {
                     showToast(going.length
                         ? 'Searching wishlist ' + going.join(' + ') + ' now — grabs land in Downloads'
-                        : (k.movie === 'busy' || k.episode === 'busy'
-                            ? 'A wishlist search is already running'
-                            : 'Nothing eligible to search right now'),
-                        going.length ? 'success' : 'info');
+                        : (missing.length
+                            ? 'Set the ' + missing.join(' and ') + ' library folder' + (missing.length === 1 ? '' : 's') + ' in Video Settings first'
+                            : (k.movie === 'busy' || k.episode === 'busy'
+                                ? 'A wishlist search is already running'
+                                : 'Nothing eligible to search right now')),
+                        going.length ? 'success' : (missing.length ? 'error' : 'info'));
                 }
                 btn.disabled = false;
             })

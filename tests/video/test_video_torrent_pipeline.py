@@ -201,3 +201,43 @@ def test_single_mode_only_tries_that_source(monkeypatch):
     })
     cands, err = w._default_search({"title": "X"}, "movie")
     assert calls == ["torrent"] and cands[0]["title"] == "tor"   # order ignored in single mode
+
+
+
+def test_extto_can_participate_in_hybrid_source_chain(monkeypatch):
+    calls = _hybrid(monkeypatch, "hybrid", ["torrent", "extto", "soulseek"], {
+        "torrent": ([], None),
+        "extto": ([{"accepted": True, "title": "ext hit", "source": "extto"}], None),
+    })
+    cands, err = w._default_search({"title": "X"}, "movie")
+    assert calls == ["torrent", "extto"]
+    assert cands[0]["source"] == "extto" and err is None
+
+
+def test_extto_auto_grab_uses_torrent_transport(monkeypatch):
+    grabbed = {}
+    monkeypatch.setattr("core.video.disk_guard.has_room", lambda target, org: (True, 999))
+    monkeypatch.setattr("core.video.organization.load", lambda db: {})
+    monkeypatch.setattr("core.video.download_monitor.ensure_started", lambda get_db: None)
+
+    def fake_grab(source, url, **kw):
+        grabbed["call"] = (source, url, kw)
+        return {"ok": True, "ref": "hash"}
+
+    monkeypatch.setattr("core.video.client_grab.grab", fake_grab)
+    rows = []
+
+    class DB:
+        def add_video_download(self, row):
+            rows.append(row)
+
+    monkeypatch.setattr("api.video.get_video_db", lambda: DB())
+    best = {"source": "extto", "title": "Silo S03E08 1080p WEB", "download_url": "magnet:?xt=1",
+            "magnet_uri": "magnet:?xt=1", "username": "EXT.to", "indexer_id": "extto",
+            "size_bytes": 1000, "accepted": True}
+    res = w._default_enqueue({"show_tmdb_id": 9, "show_title": "Silo", "season_number": 3,
+                              "episode_number": 8}, best, [best], "episode", "/tv")
+    assert res["ok"] is True
+    assert grabbed["call"][0] == "torrent"
+    assert rows[0]["source"] == "torrent"
+    assert rows[0]["username"] == "EXT.to" and rows[0]["indexer_id"] == "extto"

@@ -20,7 +20,7 @@ from typing import Any
 
 from core.downloads import seed_rules
 
-SOURCES = ("soulseek", "torrent", "usenet")
+SOURCES = ("soulseek", "torrent", "usenet", "extto")
 MODES = SOURCES + ("hybrid",)
 
 

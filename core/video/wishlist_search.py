@@ -107,6 +107,10 @@ def manual_search(scope: str, tmdb_id, season_number=None, episode_number=None) 
     if not items:
         return {"queued": 0, "skipped": 0, "total": 0}
     todo = _prepare(items, media_type)
+    if todo and not vpw._default_target_dir(media_type):
+        _finish(todo, media_type)
+        return {"queued": 0, "skipped": len(items) - len(todo), "total": len(items),
+                "missing_target": media_type}
     if todo:
         threading.Thread(target=_run_batch, args=(todo, media_type),
                          daemon=True, name="wishlist-manual-search").start()
@@ -125,6 +129,9 @@ def search_all() -> Dict[str, str]:
                               ("episode", lambda: db.episode_wishlist_to_download(due_only=False))):
         if vpw.is_running(media_type):
             out[media_type] = "busy"
+            continue
+        if not vpw._default_target_dir(media_type):
+            out[media_type] = "unconfigured"
             continue
         if media_type == "movie":
             # same pre-flight as the drain: resolve availability dates so the

@@ -14,11 +14,14 @@ invisible upgrade watch). This suite covers the three additions:
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import pytest
 from flask import Flask
 
 from database.video_database import VideoDatabase
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture()
@@ -238,3 +241,30 @@ def test_css_covers_new_states_and_touch():
     # search buttons must stay reachable on touch (no hover)
     assert ("@media (hover: none) { .vwsh-movie-art .vwsh-hunt, .vwsh-nebula .vwsh-epc-hunt, "
             ".vwsh-nebula .vwsh-szn-hunt { opacity: 1; } }") in _CSS
+
+
+def test_search_now_reports_missing_target_before_dispatch(client, db, monkeypatch):
+    from core.automation.handlers import video_process_wishlist as vpw
+    db.add_movie_to_wishlist(303, "No Folder")
+    monkeypatch.setattr(vpw, "_default_target_dir", lambda mt: "")
+    out = client.post("/api/video/wishlist/search", json={"scope": "movie", "tmdb_id": 303}).get_json()
+    assert out["queued"] == 0
+    assert out["missing_target"] == "movie"
+
+
+def test_search_all_reports_unconfigured_kinds(client, db, monkeypatch):
+    from core.automation.handlers import video_process_wishlist as vpw
+    monkeypatch.setattr(vpw, "_backfill_movie_available_dates", lambda limit=25: None)
+    monkeypatch.setattr(vpw, "_default_target_dir", lambda mt: "")
+    db.add_movie_to_wishlist(304, "No Movie Folder")
+    db.add_episodes_to_wishlist(700, "No TV Folder", [{"season_number": 1, "episode_number": 1}])
+    out = client.post("/api/video/wishlist/search-all").get_json()
+    assert out["kinds"] == {"movie": "unconfigured", "episode": "unconfigured"}
+
+
+
+def test_service_switch_exposes_extto_as_hybrid_source():
+    src = (ROOT / "webui" / "static" / "video" / "video-service-status.js").read_text(encoding="utf-8")
+    assert "var SOURCES = ['torrent', 'extto', 'soulseek', 'usenet'];" in src
+    assert "extto: { name: 'EXT.to'" in src
+    assert "extto: 'EXT.to'" in src
