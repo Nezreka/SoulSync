@@ -599,7 +599,8 @@ body[data-side="video"] .dashboard-header-sweep {
     margin: 0 0 -42px 22px;
     display: inline-flex; align-items: center; gap: 7px;
     padding: 8px 15px; border-radius: 999px;
-    background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(10,10,14,0.92); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.14);
     color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
     backdrop-filter: blur(10px); transition: background 0.2s ease, transform 0.2s ease;
 }
@@ -953,11 +954,12 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-ep-anim .vd-ep:nth-child(n+5) { animation-delay: 0.12s; }
 @keyframes vdEpIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 .vd-ep {
-    display: grid; grid-template-columns: 48px 150px minmax(0, 720px) auto auto;
+    display: grid; grid-template-columns: 48px 150px minmax(0, 900px) auto auto auto;
     justify-content: start; align-items: center; gap: 20px;
     padding: 18px 14px; border-bottom: 1px solid rgba(255,255,255,0.06);
     transition: background 0.2s ease; cursor: pointer;
 }
+.vd-ep-badge, .vd-ep-get, .vd-ep-chev { justify-self: start; }
 .vd-ep-chev { color: rgba(255,255,255,0.35); font-size: 16px; transition: transform 0.25s ease, color 0.2s ease; }
 .vd-ep:hover .vd-ep-chev { color: rgba(255,255,255,0.7); }
 .vd-ep--open .vd-ep-chev { transform: rotate(180deg); color: rgb(var(--vd-accent-rgb)); }
@@ -4472,7 +4474,7 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vd-section-h { font-size: 20px; font-weight: 800; color: #fff; margin: 0 0 16px; }
 .vd-yt-pl-section { margin-top: 34px; }
 /* YouTube episode rows have no index/badge → 4 columns (thumb · info · wish · chev) */
-.vd-ep--yt { grid-template-columns: 150px minmax(0, 720px) auto auto; }
+.vd-ep--yt { grid-template-columns: 150px minmax(0, 900px) auto auto; }
 /* per-video Wish button inside an episode row */
 /* Per-video wishlist toggle = the standard watchlist button (.library-artist-
    watchlist-btn), shrunk for the dense rows; .watching → "on the wishlist" green. */

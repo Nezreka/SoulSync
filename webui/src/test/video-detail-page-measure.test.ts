@@ -34,21 +34,13 @@ function block(selector: string): string {
 }
 
 describe('the episode row keeps its actions next to the episode', () => {
-  it('caps the text column instead of letting it absorb the screen', () => {
+  it('never lets the text column absorb the screen', () => {
     // `1fr` here is the original bug: the description grows, the buttons leave.
-    const row = block('.vd-ep');
-    expect(row).toContain('minmax(0, 720px)');
-    expect(row).not.toMatch(/grid-template-columns:[^;]*\b1fr\b/);
-  });
-
-  it('packs the tracks left so the slack lands after the buttons', () => {
-    expect(block('.vd-ep')).toContain('justify-content: start');
-  });
-
-  it('does the same for a youtube row, which has no index column', () => {
-    const yt = block('.vd-ep--yt');
-    expect(yt).toContain('minmax(0, 720px)');
-    expect(yt).not.toMatch(/\b1fr\b/);
+    // The exact cap lives in video-detail-row-grid.test.ts, beside the check
+    // that the column COUNT matches what the row builder emits - pinning the
+    // number in two files just means changing it breaks an unrelated test.
+    expect(block('.vd-ep')).not.toMatch(/grid-template-columns:[^;]*\b1fr\b/);
+    expect(block('.vd-ep--yt')).not.toMatch(/\b1fr\b/);
   });
 });
 

@@ -1038,7 +1038,7 @@
         // Nothing true is nothing to say. An empty strip of zeroes is noise.
         if (!shown.length) return '';
         var owned = Number(c.owned) || 0;
-        var bar = total > 0
+        var bar = total > 0 && owned < total
             ? '<div class="vd-acq-bar" title="' + owned + ' of ' + total + ' in library">' +
                 '<span class="vd-acq-bar-fill" style="width:' +
                 Math.round(owned / total * 100) + '%"></span></div>'

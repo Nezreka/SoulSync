@@ -92,6 +92,14 @@ describe('the acquisition panel', () => {
     expect(fill.style.width).toBe('25%');
   });
 
+  it('drops the bar once nothing is outstanding', () => {
+    // A full green bar under "8 Owned" repeats the chip and nothing else. It
+    // earns its place only while something is still missing.
+    expect(panel({ total: 8, counts: { ...ZERO, owned: 8 } }).querySelector('.vd-acq-bar')).toBeNull();
+    expect(panel({ total: 8, counts: { ...ZERO, owned: 7, wanted: 1 } })
+      .querySelector('.vd-acq-bar')).not.toBeNull();
+  });
+
   it('draws no coverage bar when there is nothing to be a share of', () => {
     // total 0 would divide by zero and render width:NaN%.
     const host = panel({ total: 0, counts: { ...ZERO, failed: 1 } });
