@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import { extractFunction } from './vanilla-extract';
+
 /**
  * Video grids have to ask for a THUMBNAIL, not the original.
  *
@@ -27,14 +29,18 @@ function source(file: string): string {
   return readFileSync(resolve(process.cwd(), file), 'utf8');
 }
 
-/** Pull one named function out of a classic script and make it callable. */
+/**
+ * Pull one named function out of a classic script and make it callable.
+ *
+ * Brace-matched, not `'\n    }\n'`-matched. video-wishlist.js is committed with
+ * CRLF, so searching for that line literal found nothing in it and every
+ * wishlist case here failed with "sized is not defined" - a broken harness
+ * wearing the costume of a broken helper.
+ */
 function extract(file: string, name: string): (url: string | null, w: number) => string {
-  const text = source(file);
-  const at = text.indexOf(`    function ${name}(url, w) {`);
-  expect(at, `${name} is gone from ${file}`).toBeGreaterThan(-1);
-  const end = text.indexOf('\n    }\n', at) + '\n    }\n'.length;
+  const body = extractFunction(name, source(file));
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  return new Function(`${text.slice(at, end)}\n return ${name};`)() as (
+  return new Function(`${body}\n return ${name};`)() as (
     url: string | null,
     w: number,
   ) => string;

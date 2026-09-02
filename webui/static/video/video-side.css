@@ -731,6 +731,34 @@ body[data-side="video"] .dashboard-header-sweep {
     50% { box-shadow: 0 0 16px -3px rgba(var(--accent-rgb), 0.6); } }
 .vd-links { margin-bottom: 16px; }
 .vd-links .artist-hero-badge[title="TVDB"] img { filter: invert(1); }
+.vd-health {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin: 0 0 14px; max-width: 780px;
+}
+.vd-health-chip {
+    display: inline-flex; align-items: center; gap: 7px; min-height: 28px; max-width: 100%;
+    padding: 5px 10px; border-radius: 8px;
+    background: rgba(8, 10, 14, 0.42); border: 1px solid rgba(255,255,255,0.11);
+    color: rgba(255,255,255,0.74); backdrop-filter: blur(8px);
+}
+.vd-health-chip--neutral {
+    border-color: rgba(255,255,255,0.11); background: rgba(8, 10, 14, 0.42);
+}
+.vd-health-chip--ok {
+    border-color: rgba(74,222,128,0.26); background: rgba(74,222,128,0.08);
+    color: rgba(226,255,236,0.9);
+}
+.vd-health-chip--missing {
+    border-color: rgba(245,158,11,0.24); background: rgba(245,158,11,0.08);
+}
+.vd-health-k {
+    flex: none; font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0;
+    color: rgba(255,255,255,0.48);
+}
+.vd-health-v {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 12.5px; font-weight: 700;
+}
 
 .vd-loading { padding: 50px 0; text-align: center; color: rgba(255,255,255,0.55); }
 

@@ -36,7 +36,9 @@ export const VANILLA_DISCOVER = readFileSync(
  * broke this harness.
  */
 export function extractFunction(name: string, source: string = VANILLA_DISCOVER): string {
-  const decl = new RegExp(`^(?:async )?function ${name}\\s*\\(`, 'm');
+  // Leading indent is allowed: video-detail.js and friends declare inside an
+  // IIFE, so anchoring hard at column 0 finds nothing in them.
+  const decl = new RegExp(`^[ \\t]*(?:async )?function ${name}\\s*\\(`, 'm');
   const m = decl.exec(source);
   if (!m) throw new Error(`vanilla function ${name} not found`);
 

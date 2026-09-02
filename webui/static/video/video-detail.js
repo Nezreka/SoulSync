@@ -177,6 +177,50 @@
             ? '<a class="artist-hero-badge" title="' + title + '" href="' + url + '" target="_blank" rel="noopener noreferrer">' + inner + '</a>'
             : '<div class="artist-hero-badge" title="' + title + '">' + inner + '</div>';
     }
+    function countLabel(n, one, many) {
+        n = Number(n) || 0;
+        return n + ' ' + (n === 1 ? one : many);
+    }
+    // one chip. mode is 'ok' (identity is there), 'missing' (a gap automation
+    // will trip over) or 'neutral' (a count, not a verdict).
+    function healthChip(label, value, mode) {
+        return '<span class="vd-health-chip vd-health-chip--' + mode + '">' +
+            '<span class="vd-health-k">' + esc(label) + '</span>' +
+            '<span class="vd-health-v">' + esc(value || 'Missing') + '</span></span>';
+    }
+    function idChip(label, value) {
+        return healthChip(label, value, value ? 'ok' : 'missing');
+    }
+    // the band answers ONE question the hero can't: does automation have the ids
+    // it needs to go find this thing. owned/wanted, coverage and format facts all
+    // live in the meta line right above, so repeating them here just doubles the
+    // noise the band exists to cut.
+    function renderHealth(d) {
+        var h = q('[data-vd-health]');
+        if (!h) return;
+        if (!d) { h.hidden = true; h.innerHTML = ''; return; }
+        var chips = [];
+        if (d.source === 'youtube') {
+            var isPl = d.kind === 'playlist';
+            chips.push(idChip(isPl ? 'Playlist ID' : 'Channel ID', d.id));
+            if (!isPl && d.handle) chips.push(idChip('Handle', d.handle));
+            // still no video TOTAL for a channel, see the meta line: youtube
+            // won't state one honestly, so it can't carry a "missing N" verdict
+            // either. what we downloaded is ours to count, so only that shows.
+            chips.push(healthChip('Downloaded',
+                countLabel(d.episode_owned, 'download', 'downloads'), 'neutral'));
+        } else {
+            // only when it resolves: a tmdb preview has no library row yet, and
+            // that's the normal state, not a gap worth flagging amber.
+            var libId = (d.source !== 'tmdb') ? d.id : d.library_id;
+            if (libId != null) chips.push(idChip('Library ID', libId));
+            chips.push(idChip('TMDB', d.tmdb_id));
+            if (d.kind === 'show') chips.push(idChip('TVDB', d.tvdb_id));
+            chips.push(idChip('IMDb', d.imdb_id));
+        }
+        h.innerHTML = chips.join('');
+        h.hidden = !chips.length;
+    }
 
     // ── accent extraction (poster → dominant vibrant colour) ──────────────────
     function applyAccent(img) {
@@ -252,6 +296,7 @@
             }
             var mm = q('[data-vd-meta]'); if (mm) mm.innerHTML = meta.join('');
             renderActions(d);
+            renderHealth(d);
             var ll = q('[data-vd-links]'); if (ll) ll.innerHTML = '';
             var gg = q('[data-vd-genres]');
             if (gg) gg.innerHTML = (d.genres || []).slice(0, 8).map(genreChip).join('');
@@ -296,6 +341,7 @@
         var m = q('[data-vd-meta]'); if (m) m.innerHTML = meta.join('');
 
         renderActions(d);
+        renderHealth(d);
 
         var l = q('[data-vd-links]');
         if (l && d.source === 'tmdb') {
@@ -925,7 +971,7 @@
         ['[data-vd-providers-section]', '[data-vd-similar-section]', '[data-vd-collection-section]',
          '[data-vd-next-ep]', '[data-vd-crew-line]', '[data-vd-season-overview]',
          '[data-vd-facts-section]', '[data-vd-videos-section]', '[data-vd-gallery-section]',
-         '[data-vd-review-section]', '[data-vd-cast-all]', '[data-vd-history-section]'].forEach(function (s) {
+         '[data-vd-review-section]', '[data-vd-cast-all]', '[data-vd-history-section]', '[data-vd-health]'].forEach(function (s) {
             var n = q(s); if (n) n.hidden = true;
         });
         // Clear any YouTube-channel playlists from the show DOM so they don't leak
@@ -2083,6 +2129,12 @@
             yt_duration: v.duration || '', view_count: v.view_count || 0,
             like_count: v.like_count || 0, dislike_count: v.dislike_count || 0 };
     }
+    // how many of these videos are actually on disk. three builders used to
+    // hardcode 0 here, which the season pills showed as "0 / N eps" and the
+    // health band showed as "0 downloads" on a playlist you'd fully grabbed.
+    function ytOwnedCount(vids) {
+        return (vids || []).filter(function (v) { return v.downloaded; }).length;
+    }
     function ytDurSecs(d) {
         if (!d) return 0;
         return String(d).split(':').reduce(function (acc, n) { return acc * 60 + (parseInt(n, 10) || 0); }, 0);
@@ -2104,11 +2156,11 @@
             for (var k = 0; k < vids.length; k++) { if (vids[k].thumbnail_url) { thumb = vids[k].thumbnail_url; break; } }
             var poster = thumb ? ytProx(ytHiRes(thumb)) : '';        // maxres for the rail card
             var eps = vids.map(ytEpisodeOf);
-            var wishedN = eps.filter(function (e) { return e.owned; }).length;
+            var ownedN = eps.filter(function (e) { return e.owned; }).length;
             var label = yr ? String(yr) : (years.length === 1 ? 'All Videos' : 'Earlier videos');
             return { season_number: yr, title: label, poster_url: poster || ytProx(ch.avatar_url),
                 poster_fallback: thumb ? ytProx(thumb) : '',         // ← if maxres 404s
-                episode_owned: wishedN, episode_total: eps.length, episodes: eps };
+                episode_owned: ownedN, episode_total: eps.length, episodes: eps };
         });
     }
     // A search OR a popularity/length sort collapses the year view into one flat,
@@ -2129,7 +2181,7 @@
         var title = ytFilter.q ? (vids.length + ' result' + (vids.length === 1 ? '' : 's'))
             : (ytFilter.sort === 'views' ? 'Most viewed' : 'Longest');
         return { season_number: -1, title: title, poster_url: ytProx(ch.avatar_url),
-            episode_owned: 0, episode_total: vids.length, episodes: vids.map(ytEpisodeOf) };
+            episode_owned: ytOwnedCount(vids), episode_total: vids.length, episodes: vids.map(ytEpisodeOf) };
     }
     function ytRebuildMap() {
         ytVideoMap = {};
@@ -2152,6 +2204,10 @@
         }
         data.season_count = data.seasons.length;
         data.episode_total = (data._channel.videos || []).length;
+        // count off the MASTER list, not the seasons: a search filters the
+        // seasons, and the band must not read as "your downloads vanished".
+        data.episode_owned = ytOwnedCount(data._channel.videos);
+        renderHealth(data);
         renderSeasonNav();
         var nowObj = seasonByNum(selectedSeason);
         if (force || selectedSeason !== prevSel || !nowObj || nowObj.episodes.length !== prevEp) renderEpisodes();
@@ -2182,7 +2238,7 @@
             poster_url: ytProx(ch.avatar_url), has_poster: !!ch.avatar_url, genres: ch.tags || [], handle: ch.handle,
             subscriber_count: ch.subscriber_count, video_count: ch.video_count, view_count: ch.view_count,
             following: !!resp.following, _channel: ch, seasons: seasons, season_count: seasons.length,
-            episode_total: (ch.videos || []).length, episode_owned: 0 };
+            episode_total: (ch.videos || []).length, episode_owned: ytOwnedCount(ch.videos) };
     }
 
     // Stream the channel's FULL video catalog in batches via InnerTube (each page
@@ -2282,14 +2338,14 @@
         // YouTube throttles large-playlist listing for our client — be honest when partial.
         var note = total > vids.length ? 'Showing ' + vids.length + ' of ' + total + ' videos.' : '';
         var season = { season_number: 1, title: 'Videos', poster_url: ytProx(pl.thumbnail_url),
-            episode_owned: 0, episode_total: vids.length, episodes: vids.map(ytEpisodeOf) };
+            episode_owned: ytOwnedCount(vids), episode_total: vids.length, episodes: vids.map(ytEpisodeOf) };
         return { kind: 'playlist', source: 'youtube', id: pl.playlist_id, title: pl.title || 'Playlist',
             overview: note, poster_url: ytProx(pl.thumbnail_url), has_poster: !!pl.thumbnail_url,
             backdrop_url: ytProx(pl.thumbnail_url), has_backdrop: !!pl.thumbnail_url,
             genres: pl.channel_title ? [pl.channel_title] : [], handle: null,
             subscriber_count: null, view_count: null, video_count: pl.video_count,
             following: !!resp.following, _playlist: pl, seasons: [season], season_count: 1,
-            episode_total: vids.length, episode_owned: 0 };
+            episode_total: vids.length, episode_owned: ytOwnedCount(vids) };
     }
 
     function loadPlaylist(id) {

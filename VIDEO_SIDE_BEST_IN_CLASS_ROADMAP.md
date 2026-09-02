@@ -50,9 +50,15 @@ This is the working checklist for making SoulSync's video side feel better than 
 
 ## Detail Page
 
+- Design review:
+  - The hero reads well, but the acquisition truth is split across hero badges, action buttons, episode rows, and history. Identity is the piece nothing surfaced at all.
+  - When a title has no TVDB or IMDb id, nothing on the page says so. Users find out when a search or a wishlist action quietly fails.
+  - YouTube channels reuse the show shell well, but nothing stated the channel or playlist id the downloader actually keys on.
+  - Owned/wanted, coverage percent, episode counts and format badges are already in the meta line. Anything added under the hero has to say something new or it just competes with the row above it.
 - [ ] Add an acquisition panel showing owned, wanted, queued, downloading, failed, and ignored states in one place.
 - [ ] Add per-title overrides for quality profile, preferred sources, release group allow/block, and pack preference.
-- [ ] Show external ID health: TMDB, TVDB, IMDb, YouTube channel/playlist/video IDs, and library IDs.
+- [x] Show external ID health as a hero band: library id when it resolves, TMDB/TVDB/IMDb for movies and shows, channel or playlist id plus handle and download count for YouTube. Identity only, so it does not restate the meta line. Commit: this phase.
+- [ ] Deepen external ID health with per-episode YouTube video IDs and failed-ID repair actions.
 - [ ] Add season-level actions: search missing, grab season pack, mark monitored/unmonitored, and clear stale failures.
 
 ## Calendar
