@@ -107,3 +107,34 @@ def test_the_fields_are_named_like_the_tv_rows(db):
     row = _first_video(db)
     for field in ("search_attempts", "last_refusal", "status", "source_id"):
         assert field in row
+
+
+
+def test_completed_history_rows_are_swept_from_youtube_wishlist(db):
+    _wish_video(db, "done1")
+    _wish_video(db, "still1")
+    conn = db._get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO video_download_history (kind, source, media_id, title, outcome, completed_at) "
+            "VALUES ('youtube','youtube','done1','Done','completed', datetime('now'))")
+        conn.commit()
+    finally:
+        conn.close()
+    assert db.clear_completed_youtube_from_wishlist() == 1
+    rows = db.youtube_wishlist_to_download()
+    assert [r["video_id"] for r in rows] == ["still1"]
+
+
+def test_completed_download_rows_are_swept_from_youtube_wishlist(db):
+    _wish_video(db, "done2")
+    conn = db._get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO video_downloads (kind, source, media_id, title, status) "
+            "VALUES ('youtube','youtube','done2','Done','completed')")
+        conn.commit()
+    finally:
+        conn.close()
+    assert db.clear_completed_youtube_from_wishlist() == 1
+    assert db.youtube_wishlist_to_download() == []

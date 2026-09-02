@@ -7525,6 +7525,29 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def clear_completed_youtube_from_wishlist(self) -> int:
+        """Remove wished YouTube videos that have already landed.
+
+        Completion normally unwishes at worker finish, but a crash/restart can
+        leave a completed history/download row beside a still-wanted wishlist
+        row. The next drain should heal that before reporting backlog."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("""
+                DELETE FROM video_wishlist
+                WHERE kind='video' AND source='youtube' AND source_id IN (
+                    SELECT media_id FROM video_download_history
+                    WHERE source='youtube' AND outcome='completed' AND media_id IS NOT NULL
+                    UNION
+                    SELECT media_id FROM video_downloads
+                    WHERE source='youtube' AND status='completed' AND media_id IS NOT NULL
+                )
+            """)
+            conn.commit()
+            return int(cur.rowcount or 0)
+        finally:
+            conn.close()
+
     def youtube_wishlist_to_download(self, limit: int = 0) -> list:
         """Flat list of wished YouTube videos for the fulfillment worker to grab, newest
         upload first. Each carries what organising + the download row need: the video id,

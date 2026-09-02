@@ -151,6 +151,15 @@ def _default_fetch_wanted() -> List[Dict[str, Any]]:
     return get_video_db().youtube_wishlist_to_download()
 
 
+def _default_clear_completed_wishlist() -> int:
+    from api.video import get_video_db
+    try:
+        return int(get_video_db().clear_completed_youtube_from_wishlist() or 0)
+    except Exception:   # noqa: BLE001 - cleanup assists the drain; it must not block it
+        logger.debug("clear_completed_youtube_from_wishlist failed", exc_info=True)
+        return 0
+
+
 def _default_active_ids() -> List[Any]:
     from api.video import get_video_db
     return [d.get("media_id") for d in get_video_db().get_active_video_downloads()
@@ -245,6 +254,7 @@ def auto_video_process_youtube_wishlist(
     *,
     youtube_root: Optional[Callable[[], str]] = None,
     fetch_wanted: Optional[Callable[[], List[Dict[str, Any]]]] = None,
+    clear_completed_wishlist: Optional[Callable[[], int]] = None,
     active_ids: Optional[Callable[[], Iterable]] = None,
     running_count: Optional[Callable[[], int]] = None,
     enqueue: Optional[Callable[[Dict[str, Any], str], Any]] = None,
@@ -258,6 +268,7 @@ def auto_video_process_youtube_wishlist(
     Returns ``{'status': 'completed', 'queued': int, 'started': int, 'running': int, ...}``."""
     youtube_root = youtube_root or _default_youtube_root
     fetch_wanted = fetch_wanted or _default_fetch_wanted
+    clear_completed_wishlist = clear_completed_wishlist or _default_clear_completed_wishlist
     active_ids = active_ids or _default_active_ids
     running_count = running_count or _default_running_count
     enqueue = enqueue or _default_enqueue
@@ -285,6 +296,11 @@ def auto_video_process_youtube_wishlist(
         if recovered:
             deps.update_progress(automation_id, log_type='info',
                                  log_line='Recovered %d stalled download(s) from a restart' % recovered)
+
+        cleared = int(clear_completed_wishlist() or 0)
+        if cleared:
+            deps.update_progress(automation_id, log_type='info',
+                                 log_line='Cleared %d already-downloaded YouTube wishlist item(s)' % cleared)
 
         deps.update_progress(automation_id, phase='Checking the YouTube wishlist…', progress=15,
                              log_line='Queueing new videos for download', log_type='info')

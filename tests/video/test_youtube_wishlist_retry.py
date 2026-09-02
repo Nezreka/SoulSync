@@ -134,3 +134,18 @@ def test_a_normal_run_is_unchanged():
     res, deps = _run([_v("a"), _v("b")], {})
     assert res["queued"] == 2
     assert "Queued 2 new" in _lines(deps)[-1]
+
+
+
+def test_the_drain_clears_already_downloaded_wishlist_rows_before_counting():
+    deps = _Deps()
+    wanted = [_v("still")]
+    res = auto_video_process_youtube_wishlist(
+        {"_automation_id": "x", "max_concurrent": 3}, deps,
+        youtube_root=lambda: "/yt", fetch_wanted=lambda: wanted,
+        clear_completed_wishlist=lambda: 2,
+        active_ids=lambda: [], running_count=lambda: 0,
+        enqueue=lambda v, r: 1, start_next=lambda: None, reap=lambda: 0,
+        retry_state=lambda: {}, recent_errors=lambda: [])
+    assert res["queued"] == 1
+    assert any("Cleared 2 already-downloaded" in line for line in _lines(deps))
