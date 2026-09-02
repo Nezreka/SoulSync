@@ -17,6 +17,9 @@ This is the working checklist for making SoulSync's video side feel better than 
 - [x] YouTube: back off instead of giving up permanently, and report the split. Commit: `34b86380b`.
 - [x] A download that gives up now says why, instead of one generic sentence for ~1,900 history rows. Commit: `6bcf24d9d`.
 - [x] Feed the EXT.to board into the RSS wishlist matcher (coverage lane, reads the cached snapshot — never scrapes on the tick). Commit: `5503a6f1f`.
+- [x] Give the YouTube wishlist tab its bulk action back — same button, different verb (search on the TMDB tabs, download on YouTube), reusing the drain's enqueue path and concurrency cap. Commit: `b97b18fdd`.
+- [x] Cache Plex/Jellyfin artwork on disk like TMDB art, instead of re-fetching every poster on every page view. Commit: `b5c720621`.
+- [x] Stop video grids pulling full-size (~2000x3000) posters into 150px cards — watchlist, detail season rail and episode thumbs now request thumbnails. Commit: `f8c5735af`.
 
 ## Search Page
 
