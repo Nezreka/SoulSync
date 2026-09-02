@@ -77,8 +77,32 @@
     function failWhy(row, fails) {
         var out = fails + ' searches without a grab';
         if (row && row.last_search_at) out += ' · last tried ' + row.last_search_at;
-        if (row && row.last_refusal) return out + '\n' + row.last_refusal;
-        return out + ' — try Search now, or a different quality profile';
+        var per = sourceLines(row);
+        if (per.length) out += '\n\n' + per.join('\n');
+        else if (row && row.last_refusal) return out + '\n' + row.last_refusal;
+        else return out + ' — try Search now, or a different quality profile';
+        return out;
+    }
+    // Per-source diagnostics for a stuck row. One attempt count and one refusal
+    // line described a search that may have asked three different sources, so
+    // "stuck on 40" could equally mean prowlarr was never configured, slskd
+    // returns nothing, or every source finds it and the profile refuses them
+    // all. The drain stores what each source actually did; this reads it back.
+    function sourceLines(row) {
+        var snap = row && row.search_snapshot;
+        if (!snap || !snap.sources) return [];
+        var order = (snap.chain && snap.chain.length) ? snap.chain : Object.keys(snap.sources);
+        var out = [];
+        for (var i = 0; i < order.length; i++) {
+            var name = order[i], s = snap.sources[name];
+            if (!s) continue;
+            if (!s.ran) { out.push('• ' + name + ': could not search — ' + (s.reason || 'unknown')); continue; }
+            if (!s.results) { out.push('• ' + name + ': found nothing'); continue; }
+            if (s.accepted) { out.push('• ' + name + ': ' + s.accepted + ' usable of ' + s.results); continue; }
+            out.push('• ' + name + ': ' + s.results + ' found, none accepted' +
+                     (s.reason ? ' — ' + s.reason : ''));
+        }
+        return out;
     }
 
     function statusPill(status, tip) {

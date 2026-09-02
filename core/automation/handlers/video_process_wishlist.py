@@ -423,6 +423,30 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
     return cands, "; ".join(source_notes) or None
 
 
+def source_outcome(cands, err=None) -> Dict[str, Any]:
+    """One source's result for the last search, as a storable fact.
+
+    ``cands is None`` means the source could not SEARCH (slskd down, Prowlarr
+    unconfigured) — which is not evidence about the release and must never read
+    as "found nothing". Everything else is a real answer: how many releases came
+    back, how many the profile accepted, and the rule that turned down the best
+    of the rest. Pure."""
+    if cands is None:
+        return {"ran": False, "results": 0, "accepted": 0, "rejected": 0,
+                "reason": err or "search didn't run"}
+    accepted = sum(1 for c in cands if c.get("accepted"))
+    rejected = [c for c in cands if not c.get("accepted")]
+    reason = None
+    if rejected:
+        try:
+            from core.video.wishlist_evidence import refusal_line, summarize_search
+            reason = refusal_line(summarize_search(rejected))
+        except Exception:   # noqa: BLE001 - a snapshot must never break a search
+            reason = None
+    return {"ran": True, "results": len(cands), "accepted": accepted,
+            "rejected": len(rejected), "reason": reason}
+
+
 def _default_search(item: Dict[str, Any], media_type: str):
     """Ranked candidates for a wished item, honoring the download mode/order. In hybrid mode the
     sources are tried IN ORDER — the first that yields an ACCEPTED release wins (mirrors the
@@ -440,8 +464,14 @@ def _default_search(item: Dict[str, Any], media_type: str):
     chain = (cfg.get("hybrid_order") or ["soulseek"]) if mode == "hybrid" else [mode]
     skips: List[str] = []
     fallback = None      # hits that didn't pass the profile — kept so the caller can say 'rejected'
+    # Per-source receipt for this search, read back by the recorder. Attached to
+    # the item the way annotate_upgrades attaches _min_rank: the drain hands the
+    # same dict to search() and record_outcome(), and each item is its own.
+    snapshot: Dict[str, Any] = {"chain": list(chain), "sources": {}}
+    item["_source_snapshot"] = snapshot
     for src in chain:
         cands, err = _search_one_source(src, item, media_type)
+        snapshot["sources"][src] = source_outcome(cands, err)
         if cands is None:
             skips.append("%s skipped — %s" % (src, err or "search didn't run"))
             continue
@@ -533,7 +563,8 @@ def _default_record_outcome(item: Dict[str, Any], media_type: str, grabbed: bool
             season_number=season,
             episode_number=episode,
             refusal=refusal_line(refusal),
-            refusal_quality=(refusal or {}).get('quality_label'))
+            refusal_quality=(refusal or {}).get('quality_label'),
+            snapshot=item.get("_source_snapshot"))
     except Exception:   # noqa: BLE001 - visibility must never break acquisition
         logger.debug("record_wishlist_search_outcome failed", exc_info=True)
 

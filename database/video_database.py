@@ -46,6 +46,18 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 from core.video.wishlist_backoff import due_sql as _due_sql, retry_delay_hours as _retry_delay_hours
 
 
+def _load_snapshot(raw):
+    """The stored per-source snapshot, or None. A corrupt blob is not worth an
+    error on a page of wishlist rows - it just means no diagnostics for that one."""
+    if not raw:
+        return None
+    try:
+        out = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return out if isinstance(out, dict) else None
+
+
 def _yt_skip_reason(state) -> str | None:
     """One sentence for a wished YouTube video that isn't downloading, or None
     when nothing is holding it back. Mirrors the movie/TV rows' last_refusal."""
@@ -200,6 +212,10 @@ _COLUMN_MIGRATIONS = [
     # processor via core.video.wishlist_evidence.
     ("video_wishlist", "last_refusal", "TEXT"),
     ("video_wishlist", "last_refusal_quality", "TEXT"),
+    # Per-source outcome of the LAST drain search: what each source in the
+    # chain returned, so "stuck" can be read per source instead of as one
+    # number. JSON: {source: {ran, results, accepted, rejected, reason}}.
+    ("video_wishlist", "search_snapshot", "TEXT"),
     # video_downloads — media identity for the Downloads page cards (poster + open).
     ("video_downloads", "media_id", "TEXT"),
     ("video_downloads", "media_source", "TEXT"),
@@ -6273,7 +6289,8 @@ class VideoDatabase:
 
     def record_wishlist_search_outcome(self, kind: str, tmdb_id, grabbed: bool,
                                        season_number=None, episode_number=None,
-                                       refusal=None, refusal_quality=None) -> None:
+                                       refusal=None, refusal_quality=None,
+                                       snapshot=None) -> None:
         """Track consecutive fruitless drain searches per wishlist row
         (#liveleak-failing-hub): a grab resets the counter, a genuinely
         fruitless search (no results / all rejected) increments it. Searches
@@ -6293,20 +6310,32 @@ class VideoDatabase:
             if season_number is not None and episode_number is not None:
                 where += " AND season_number=? AND episode_number=?"
                 args += [int(season_number), int(episode_number)]
+            # The per-source snapshot is written on BOTH paths: on a grab it is
+            # the receipt for what worked, and clearing it would throw away the
+            # only record of which source actually delivered.
+            snap = None
+            if snapshot is not None:
+                try:
+                    snap = json.dumps(snapshot) if not isinstance(snapshot, str) else snapshot
+                except (TypeError, ValueError):
+                    snap = None
             if grabbed:
                 # It landed — the receipt is history, and leaving it would explain
                 # a row that is no longer stuck.
                 conn.execute(
                     "UPDATE video_wishlist SET search_attempts=0, "
                     "last_search_at=datetime('now'), last_refusal=NULL, "
-                    "last_refusal_quality=NULL WHERE " + where, args)
+                    "last_refusal_quality=NULL, "
+                    "search_snapshot=COALESCE(?, search_snapshot) WHERE " + where,
+                    [snap] + args)
             else:
                 conn.execute(
                     "UPDATE video_wishlist SET "
                     "search_attempts=COALESCE(search_attempts,0)+1, "
                     "last_search_at=datetime('now'), last_refusal=?, "
-                    "last_refusal_quality=? WHERE " + where,
-                    [refusal, refusal_quality] + args)
+                    "last_refusal_quality=?, "
+                    "search_snapshot=COALESCE(?, search_snapshot) WHERE " + where,
+                    [refusal, refusal_quality, snap] + args)
             conn.commit()
         except sqlite3.Error:
             logger.exception("record_wishlist_search_outcome failed")
@@ -6362,7 +6391,7 @@ class VideoDatabase:
                 total = conn.execute("SELECT COUNT(*) c FROM video_wishlist" + wsql, args).fetchone()["c"]
                 rows = conn.execute(
                     "SELECT tmdb_id, title, poster_url, year, status, library_id, date_added, "
-                    "search_attempts, last_search_at, last_refusal, last_refusal_quality "
+                    "search_attempts, last_search_at, last_refusal, last_refusal_quality, search_snapshot "
                     "FROM video_wishlist" + wsql + " ORDER BY " + order + " LIMIT ? OFFSET ?",
                     args + [limit, (page - 1) * limit]).fetchall()
                 items = [{"kind": "movie", "tmdb_id": r["tmdb_id"], "title": r["title"],
@@ -6371,7 +6400,8 @@ class VideoDatabase:
                           "search_attempts": r["search_attempts"] or 0,
                           "last_search_at": r["last_search_at"],
                           "last_refusal": r["last_refusal"],
-                          "last_refusal_quality": r["last_refusal_quality"]} for r in rows]
+                          "last_refusal_quality": r["last_refusal_quality"],
+                          "search_snapshot": _load_snapshot(r["search_snapshot"])} for r in rows]
             else:   # shows (grouped from episode rows)
                 where, args = ["kind='episode'"], []
                 if s:
@@ -6394,7 +6424,8 @@ class VideoDatabase:
                     eps = conn.execute(
                         "SELECT season_number, episode_number, episode_title, still_url, "
                         "episode_overview, season_poster_url, air_date, status, "
-                        "search_attempts, last_search_at, last_refusal, last_refusal_quality "
+                        "search_attempts, last_search_at, last_refusal, last_refusal_quality, "
+                        "search_snapshot "
                         "FROM video_wishlist WHERE kind='episode' AND tmdb_id=? "
                         "ORDER BY season_number, episode_number", (sr["tmdb_id"],)).fetchall()
                     by_season: dict = {}
@@ -6407,7 +6438,8 @@ class VideoDatabase:
                             "search_attempts": e["search_attempts"] or 0,
                             "last_search_at": e["last_search_at"],
                             "last_refusal": e["last_refusal"],
-                            "last_refusal_quality": e["last_refusal_quality"]})
+                            "last_refusal_quality": e["last_refusal_quality"],
+                            "search_snapshot": _load_snapshot(e["search_snapshot"])})
                         if e["season_poster_url"] and e["season_number"] not in season_poster:
                             season_poster[e["season_number"]] = e["season_poster_url"]
                     seasons = [{"season_number": sn, "poster_url": season_poster.get(sn),
