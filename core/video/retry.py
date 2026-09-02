@@ -12,9 +12,46 @@ Pure (json + stdlib only); unit-tested. Isolated — no music imports.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 MAX_ATTEMPTS = 6   # total tries (candidate hops + requeries) before giving up
+
+
+def title_variants(ctx: dict) -> list:
+    """Every name worth searching for one title, best first.
+
+    A wishlist title is a DATABASE title — "Insomnia (2024)", "The Voice (AU)",
+    "Gabby's Dollhouse (2021)". Scene releases are not named that way: they use
+    ``Insomnia.2024`` and ``The.Voice.AU``, so a query built from the raw title
+    cannot match, and every variant in the ladder below inherited the same dead
+    parenthetical. On the live install six such shows had burnt 5,071 fruitless
+    searches between them without a single grab.
+
+    Order matters more than length: the retry budget is a handful of attempts, so
+    the primary title comes first (never regress a search that already works),
+    then the scene form with the brackets flattened, then without them at all,
+    then TMDB's aliases. For an ordinary title every variant collapses onto the
+    primary and is deduped away, so nothing changes for the shows that were fine.
+    Pure."""
+    out: list = []
+    seen = set()
+
+    def add(value):
+        text = re.sub(r"\s+", " ", str(value or "")).strip()
+        key = text.lower()
+        if text and key not in seen:
+            seen.add(key)
+            out.append(text)
+
+    primary = ctx.get("title")
+    add(primary)
+    if primary:
+        add(re.sub(r"[()\[\]]", " ", str(primary)))          # Insomnia 2024
+        add(re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", str(primary)))   # Insomnia
+    for alias in (ctx.get("titles") or []):
+        add(alias)
+    return out
 
 
 def next_query(ctx: dict, tried: Any) -> str | None:
@@ -27,12 +64,13 @@ def next_query(ctx: dict, tried: Any) -> str | None:
     ctx = ctx or {}
     triedset = set(tried or [])
     scope = str(ctx.get("scope") or "movie").lower()
-    title = str(ctx.get("title") or "").strip()
+    names = title_variants(ctx)
+    title = names[0] if names else ""
     cands = []
     if scope == "movie":
         if ctx.get("year"):
             cands.append(("%s %s" % (title, ctx["year"])).strip())
-        cands.append(title)
+        cands.extend(names)
     elif scope == "episode" and ctx.get("season") is not None and ctx.get("episode") is not None:
         s, e = int(ctx["season"]), int(ctx["episode"])
         stype = str(ctx.get("series_type") or "").lower()
@@ -45,14 +83,16 @@ def next_query(ctx: dict, tried: Any) -> str | None:
             cands.append("%s %s" % (title, ad.replace("-", " ")))   # Title 2026 07 08
         if stype == "anime" and ctx.get("absolute"):
             cands.append("%s %s" % (title, ctx["absolute"]))        # Title 1071
-        cands.append("%s S%02dE%02d" % (title, s, e))
+        for name in names:
+            cands.append("%s S%02dE%02d" % (name, s, e))
         cands.append("%s %dx%02d" % (title, s, e))
         if len(ad) == 10 and stype != "daily":
             cands.append("%s %s" % (title, ad.replace("-", " ")))   # Title 2026 07 08
             cands.append("%s %s" % (title, ad.replace("-", ".")))   # Title 2026.07.08
     elif scope == "season" and ctx.get("season") is not None:
         s = int(ctx["season"])
-        cands.append("%s S%02d" % (title, s))
+        for name in names:
+            cands.append("%s S%02d" % (name, s))
         cands.append("%s Season %d" % (title, s))
     else:
         cands.append(title)
