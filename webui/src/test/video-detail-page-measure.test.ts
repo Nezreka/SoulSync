@@ -3,18 +3,22 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * How wide the detail page's content runs.
+ * Where the episode row's spare width goes.
  *
- * Two failure modes, and fixing one caused the other:
+ * Three attempts, and the first two each traded one problem for another:
  *
- * 1. The body originally ran the FULL viewport while the billboard capped at
- *    720px, so on an ultrawide monitor an episode's action buttons sat most of
- *    a screen away from the episode they belonged to.
- * 2. The first fix centred both halves on a shared measure. That reads as the
- *    page having shrunk - a full-bleed backdrop wants its content anchored to
- *    the artwork, not floating in the middle of it (Boulder, on sight).
+ * 1. The row grid gave its TEXT column the 1fr, so every extra pixel of screen
+ *    went into the description and shoved the action buttons to the far right
+ *    edge - most of a screen away from the episode they belong to.
+ * 2. Capping the whole page fixed the distance but centred the hero, which read
+ *    as the page having shrunk. A full-bleed backdrop wants its content anchored
+ *    to the artwork.
+ * 3. Left-anchoring the capped body fixed that, and left a dead band down the
+ *    right of every list instead.
  *
- * So: cap the body, but keep BOTH halves anchored to the same left edge.
+ * The fix belongs in the ROW: cap the text column and pack the tracks left, so
+ * the buttons sit beside their episode and the page keeps the full width it was
+ * given.
  *
  * NOTE ON WHAT THIS CAN AND CANNOT DO. jsdom does not lay out and this
  * environment has no Chromium, so nothing here MEASURES anything - it pins the
@@ -29,34 +33,48 @@ function block(selector: string): string {
   return CSS.slice(at, CSS.indexOf('}', at) + 1);
 }
 
-describe('the detail page content width', () => {
-  it('caps the body instead of letting it run the whole viewport', () => {
-    expect(block('.vd-body')).toContain('max-width: var(--vd-measure)');
-    expect(block('.vd-page')).toContain('--vd-measure:');
+describe('the episode row keeps its actions next to the episode', () => {
+  it('caps the text column instead of letting it absorb the screen', () => {
+    // `1fr` here is the original bug: the description grows, the buttons leave.
+    const row = block('.vd-ep');
+    expect(row).toContain('minmax(0, 720px)');
+    expect(row).not.toMatch(/grid-template-columns:[^;]*\b1fr\b/);
   });
 
-  it('never centres either half', () => {
-    // `margin: 0 auto` on either one is the "why has the page shrunk" bug.
+  it('packs the tracks left so the slack lands after the buttons', () => {
+    expect(block('.vd-ep')).toContain('justify-content: start');
+  });
+
+  it('does the same for a youtube row, which has no index column', () => {
+    const yt = block('.vd-ep--yt');
+    expect(yt).toContain('minmax(0, 720px)');
+    expect(yt).not.toMatch(/\b1fr\b/);
+  });
+});
+
+describe('the page keeps the width it was given', () => {
+  it('does not cap the body', () => {
+    // Capping left a dead band down the right of every list. The row grid above
+    // is what keeps the buttons close, so the page does not need to shrink.
+    expect(block('.vd-body')).not.toContain('max-width');
+  });
+
+  it('does not centre either half', () => {
     expect(block('.vd-body')).not.toMatch(/margin:\s*0 auto/);
     expect(block('.vd-bb-content')).not.toMatch(/margin:\s*0 auto/);
   });
 
   it('anchors the billboard and the body to the same left edge', () => {
-    // 56px both, so the episode list starts under the title rather than
-    // stepping in or out from it.
     expect(block('.vd-bb-content')).toContain('padding: 0 0 52px 56px');
     expect(block('.vd-body')).toContain('padding: 30px 56px 70px');
   });
 
-  it('keeps the hero text to its own readable measure', () => {
-    // The billboard sits over artwork and has always been the narrower column;
-    // the body below it is free to be wider.
+  it('keeps the hero text to its own readable measure over the artwork', () => {
     expect(block('.vd-bb-content')).toContain('max-width: 720px');
     expect(block('.vd-overview')).toContain('max-width: 640px');
   });
 
   it('leaves the backdrop full-bleed', () => {
-    // Only CONTENT is constrained; constraining the art would letterbox the hero.
-    expect(block('.vd-bb-bg')).not.toContain('--vd-measure');
+    expect(block('.vd-bb-bg')).not.toContain('max-width');
   });
 });

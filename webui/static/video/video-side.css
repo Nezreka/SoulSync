@@ -590,10 +590,6 @@ body[data-side="video"] .dashboard-header-sweep {
     /* Text that sits ON the accent. JS re-derives it per poster; this is the
        fallback for the theme accent before any artwork has been sampled. */
     --vd-accent-fg: #fff;
-    /* How wide the page's CONTENT may get. The billboard has always capped its
-       text; this stops the body below running the full width of an ultrawide
-       monitor, which put an episode's buttons a screen away from the episode. */
-    --vd-measure: 1500px;
     position: relative; margin: -40px -40px -90px;
 }
 /* Sticky so it stays reachable on these long detail pages (negative bottom margin
@@ -844,12 +840,10 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-loading { padding: 50px 0; text-align: center; color: rgba(255,255,255,0.55); }
 
 /* ── Episodes ──────────────────────────────────────────────────────────────── */
-/* Capped, but LEFT-aligned on the billboard's own left edge (both indent 56px).
-   Centring it looked like the page had shrunk: a full-bleed backdrop wants its
-   content anchored to the art, not floating in the middle. The cap is still
-   worth having — uncapped, an episode's action buttons sat most of an ultrawide
-   screen away from the episode they belong to. */
-.vd-body { max-width: var(--vd-measure); margin: 0; padding: 30px 56px 70px; }
+/* Full width again. Capping the body kept the episode buttons near their
+   episode but left a dead band down the right of the page; the row grid above
+   fixes that at its source, so the page can use the screen it is given. */
+.vd-body { padding: 30px 56px 70px; }
 .vd-ep-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
 .vd-ep-heading { font-size: 22px; font-weight: 800; color: #fff; margin: 0; }
 
@@ -959,7 +953,8 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-ep-anim .vd-ep:nth-child(n+5) { animation-delay: 0.12s; }
 @keyframes vdEpIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 .vd-ep {
-    display: grid; grid-template-columns: 48px 150px 1fr auto auto; align-items: center; gap: 20px;
+    display: grid; grid-template-columns: 48px 150px minmax(0, 720px) auto auto;
+    justify-content: start; align-items: center; gap: 20px;
     padding: 18px 14px; border-bottom: 1px solid rgba(255,255,255,0.06);
     transition: background 0.2s ease; cursor: pointer;
 }
@@ -4477,7 +4472,7 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vd-section-h { font-size: 20px; font-weight: 800; color: #fff; margin: 0 0 16px; }
 .vd-yt-pl-section { margin-top: 34px; }
 /* YouTube episode rows have no index/badge → 4 columns (thumb · info · wish · chev) */
-.vd-ep--yt { grid-template-columns: 150px 1fr auto auto; }
+.vd-ep--yt { grid-template-columns: 150px minmax(0, 720px) auto auto; }
 /* per-video Wish button inside an episode row */
 /* Per-video wishlist toggle = the standard watchlist button (.library-artist-
    watchlist-btn), shrunk for the dense rows; .watching → "on the wishlist" green. */
