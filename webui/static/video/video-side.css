@@ -590,10 +590,10 @@ body[data-side="video"] .dashboard-header-sweep {
     /* Text that sits ON the accent. JS re-derives it per poster; this is the
        fallback for the theme accent before any artwork has been sampled. */
     --vd-accent-fg: #fff;
-    /* ONE content measure for the whole page. The hero used to cap at 720px
-       while the body ran the full viewport, so the page had two widths and
-       episode actions ended up a screen away from their episode. */
-    --vd-measure: 1400px;
+    /* How wide the page's CONTENT may get. The billboard has always capped its
+       text; this stops the body below running the full width of an ultrawide
+       monitor, which put an episode's buttons a screen away from the episode. */
+    --vd-measure: 1500px;
     position: relative; margin: -40px -40px -90px;
 }
 /* Sticky so it stays reachable on these long detail pages (negative bottom margin
@@ -629,8 +629,7 @@ body[data-side="video"] .dashboard-header-sweep {
         linear-gradient(90deg, rgba(11,11,15,0.92) 0%, rgba(11,11,15,0.55) 38%, transparent 72%);
 }
 .vd-bb-content {
-    position: relative; z-index: 2; max-width: var(--vd-measure); margin: 0 auto;
-    padding: 0 56px 52px;
+    position: relative; z-index: 2; max-width: 720px; padding: 0 0 52px 56px;
     animation: vdRise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 @keyframes vdRise { from { opacity: 0; transform: translateY(26px); } to { opacity: 1; transform: none; } }
@@ -669,19 +668,6 @@ body[data-side="video"] .dashboard-header-sweep {
     color: rgba(200,220,255,0.92); background: rgba(120,170,255,0.1); border: 1px solid rgba(120,170,255,0.22); }
 .vd-sub--more { color: rgba(255,255,255,0.55); background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); }
 .vd-status { color: rgb(var(--vd-accent-rgb)); }
-/* The billboard container is now page-wide, so its text children keep their own
-   measure — a 1400px-wide overview paragraph is unreadable. */
-.vd-bb-content > .vd-title,
-.vd-bb-content > .vd-logo,
-.vd-bb-content > .vd-tagline,
-.vd-bb-content > .vd-meta,
-.vd-bb-content > .vd-crew-line,
-.vd-bb-content > .vd-next-ep,
-.vd-bb-content > .vd-links,
-.vd-bb-content > .vd-ratings,
-.vd-bb-content > .vd-awards,
-.vd-bb-content > .vd-genres,
-.vd-bb-content > .vd-subs { max-width: 760px; }
 .vd-overview { font-size: 16px; line-height: 1.6; color: rgba(255,255,255,0.86); margin: 0 0 22px; max-width: 640px;
     text-shadow: 0 2px 12px rgba(0,0,0,0.6);
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
@@ -858,9 +844,12 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-loading { padding: 50px 0; text-align: center; color: rgba(255,255,255,0.55); }
 
 /* ── Episodes ──────────────────────────────────────────────────────────────── */
-/* Same measure as the billboard above it, so the episode list lines up with the
-   title instead of running to both edges of an ultrawide monitor. */
-.vd-body { max-width: var(--vd-measure); margin: 0 auto; padding: 30px 56px 70px; }
+/* Capped, but LEFT-aligned on the billboard's own left edge (both indent 56px).
+   Centring it looked like the page had shrunk: a full-bleed backdrop wants its
+   content anchored to the art, not floating in the middle. The cap is still
+   worth having — uncapped, an episode's action buttons sat most of an ultrawide
+   screen away from the episode they belong to. */
+.vd-body { max-width: var(--vd-measure); margin: 0; padding: 30px 56px 70px; }
 .vd-ep-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
 .vd-ep-heading { font-size: 22px; font-weight: 800; color: #fff; margin: 0; }
 
