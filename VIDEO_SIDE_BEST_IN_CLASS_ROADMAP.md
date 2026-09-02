@@ -31,7 +31,7 @@ This is the working checklist for making SoulSync's video side feel better than 
 
 - [ ] Add a stuck-row diagnostics drawer: last searched, last refusal, attempts, source order, target folder, matched IDs, and queued download state. Partly done in `bea126744` — the row's tooltip now reads last searched, attempts, source order and the per-source breakdown. Still to do: target folder, matched IDs, queued download state, and a real drawer rather than a tooltip.
 - [x] Store per-source search outcome snapshots for wanted items: result count, rejected count, accepted count, and top refusal reason. Commit: `bea126744`.
-- [ ] Add adaptive TV query fanout: canonical title, aliases, year/no-year, `SxxExx`, `season x episode y`, and scene-number variants.
+- [ ] Add adaptive TV query fanout: canonical title, aliases, year/no-year, `SxxExx`, `season x episode y`, and scene-number variants. Partly done in `3cddae457` — canonical title, TMDB aliases, and year/no-year spellings now ride the ladder alongside the existing `SxxExx`, `1x02`, air-date and anime-absolute forms. Still to do: the spelled-out `season x episode y` form and general scene-number variants.
 - [ ] Add season-pack-first drain when multiple episodes from a season are missing and pack rules allow it.
 - [ ] Add temporary source cooldowns when a client or indexer repeatedly refuses the same item.
 - [ ] Add a one-click "retry with all sources" action for stale wishlist rows.
