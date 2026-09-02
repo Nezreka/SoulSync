@@ -61,6 +61,24 @@ def register_routes(bp):
             # client filter Radarr never shipped.
             movies = db.calendar_movie_releases(start.isoformat(), end.isoformat())
 
+            # Acquisition state per episode. The calendar knew the air date and
+            # whether a file existed, which cannot tell an episode nothing is
+            # looking for from one that is downloading right now.
+            from core.video import calendar_state as cs
+            from core.automation.handlers.video_process_wishlist import (
+                active_download_keys)
+            try:
+                live_rows = db.get_active_video_downloads() or []
+            except Exception:   # noqa: BLE001 - a card without live state still draws
+                logger.exception("calendar: active downloads unreadable")
+                live_rows = []
+            # active_download_keys gives identities; keep each one's status too so
+            # queued and downloading stay distinguishable on the card.
+            live: dict = {}
+            for row in live_rows:
+                for key in active_download_keys([row]):
+                    live[key] = row.get("status")
+
             # Per-date counts drive the day-strip dots without a second query.
             counts: dict[str, int] = {}
             owned = 0
@@ -68,6 +86,9 @@ def register_routes(bp):
                 counts[e["air_date"]] = counts.get(e["air_date"], 0) + 1
                 if e.get("has_file"):
                     owned += 1
+                state = cs.acquisition_state(e, today=today.isoformat(), active=live)
+                e["acq"] = state
+                e["needs_action"] = cs.needs_action(state)
             return jsonify({
                 "today": today.isoformat(),       # real today (for the highlight)
                 "start": start.isoformat(),       # window start (may be a future week)
@@ -77,6 +98,9 @@ def register_routes(bp):
                 "counts_by_date": counts,
                 "total": len(eps),
                 "owned": owned,
+                "acq_counts": cs.summarize(e.get("acq") for e in eps),
+                "needs_action": sum(1 for e in eps if e.get("needs_action")),
+                "schedule": db.calendar_schedule_freshness(),
                 "episodes": eps,
                 "movies": movies,
             })

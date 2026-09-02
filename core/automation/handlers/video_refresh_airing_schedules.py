@@ -86,6 +86,17 @@ def auto_video_refresh_airing_schedules(
             else:
                 failed += 1
 
+        # Stamp the receipt: the calendar reads this to say whether the window it
+        # is drawing is current. Only on a run that actually refreshed something -
+        # a run that failed every show has not made the calendar any truer.
+        if refreshed:
+            try:
+                from api.video import get_video_db
+                get_video_db().mark_airing_schedule_refreshed()
+            except Exception:   # noqa: BLE001 - a missing receipt must not fail the run
+                deps.update_progress(automation_id, log_type='warning',
+                                     log_line='Schedules refreshed, but the calendar '
+                                              'freshness stamp could not be written')
         done = 'Refreshed %d show schedule(s)' % refreshed + (' · %d failed' % failed if failed else '')
         deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
                              log_line=done, log_type='success')

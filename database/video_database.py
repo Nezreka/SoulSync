@@ -3449,11 +3449,13 @@ class VideoDatabase:
                 "SELECT e.id, e.show_id, e.season_number, e.episode_number, e.title, "
                 "e.overview, e.air_date, e.runtime_minutes, e.rating, e.has_file, e.monitored, "
                 "e.still_url, (e.still_url IS NOT NULL AND e.still_url<>'') AS has_still, "
-                "s.tmdb_id AS show_tmdb_id, "
+                "s.tmdb_id AS show_tmdb_id, w.status AS wishlist_status, "
                 "s.title AS show_title, s.network, s.airs_time, s.year AS show_year, s.status AS show_status, "
                 "(s.poster_url IS NOT NULL AND s.poster_url<>'') AS show_has_poster, "
                 "(s.backdrop_url IS NOT NULL AND s.backdrop_url<>'') AS show_has_backdrop "
                 "FROM episodes e JOIN shows s ON s.id = e.show_id "
+                "LEFT JOIN video_wishlist w ON w.kind='episode' AND w.tmdb_id = s.tmdb_id "
+                "  AND w.season_number = e.season_number AND w.episode_number = e.episode_number "
                 "WHERE " + srv_where + " "
                 "AND e.air_date IS NOT NULL AND e.air_date >= ? AND e.air_date <= ?" + wl_where + " "
                 "ORDER BY e.air_date, COALESCE(s.sort_title, s.title) COLLATE NOCASE, "
@@ -3462,6 +3464,49 @@ class VideoDatabase:
             return [dict(r) for r in rows]
         finally:
             conn.close()
+
+    # How long a schedule may go unrefreshed before the calendar is lying about
+    # what is coming. A week covers a missed nightly run; beyond that the window
+    # is showing what TMDB knew last time anyone asked.
+    SCHEDULE_STALE_DAYS = 7
+
+    def calendar_schedule_freshness(self) -> dict:
+        """When the airing schedules were last refreshed, and whether that is
+        long enough ago to distrust the calendar.
+
+        A calendar that has not refreshed is not empty — it is confidently wrong,
+        showing last month's idea of next week. Nothing recorded this before, so
+        a never-refreshed install reads as stale rather than as fine.
+        """
+        raw = None
+        try:
+            raw = self.get_setting("airing_schedule_refreshed_at")
+        except Exception:   # noqa: BLE001 - freshness is a nicety, never a blocker
+            logger.exception("calendar_schedule_freshness failed")
+        if not raw:
+            return {"refreshed_at": None, "stale": True, "age_days": None}
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT julianday('now') - julianday(?) AS age", (str(raw),)).fetchone()
+            age = row["age"] if row and row["age"] is not None else None
+        except sqlite3.Error:
+            age = None
+        finally:
+            conn.close()
+        if age is None:
+            return {"refreshed_at": str(raw), "stale": True, "age_days": None}
+        return {"refreshed_at": str(raw), "age_days": round(float(age), 2),
+                "stale": float(age) > self.SCHEDULE_STALE_DAYS}
+
+    def mark_airing_schedule_refreshed(self) -> None:
+        """Stamp a successful schedule refresh. Called by the automation handler."""
+        try:
+            from datetime import datetime, timezone
+            self.set_setting("airing_schedule_refreshed_at",
+                             datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
+        except Exception:   # noqa: BLE001 - never break a refresh over its receipt
+            logger.exception("mark_airing_schedule_refreshed failed")
 
     def calendar_movie_releases(self, start_date: str, end_date: str) -> list[dict]:
         """Movie release events in [start_date, end_date] (ISO) for WISHLISTED
