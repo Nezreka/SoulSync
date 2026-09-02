@@ -6325,7 +6325,24 @@ body[data-side="video"] #gsearch-aura {
 }
 .vsr-basic-hit--review:hover { border-color: rgba(251,205,122,0.32); }
 .vsr-basic-hit-main { gap: 9px; }
-.vsr-basic-hit strong { font-size: 14.5px; font-weight: 700; letter-spacing: -0.005em; }
+.vsr-basic-hit strong { font-size: 14.5px; font-weight: 700; letter-spacing: 0; }
+.vsr-basic-hit-kicker { flex-wrap: wrap; gap: 5px; }
+.vsr-basic-hit-kicker span {
+    flex: 0 1 auto; max-width: 180px; padding: 2px 7px; border-radius: 999px;
+    background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.06);
+}
+.vsr-basic-hit-kicker .vsr-basic-source-chip {
+    color: rgba(var(--vd-accent-rgb), 0.95); background: rgba(var(--vd-accent-rgb), 0.11);
+    border-color: rgba(var(--vd-accent-rgb), 0.18);
+}
+.vsr-basic-hit-note {
+    display: flex; align-items: flex-start; gap: 8px; max-width: 100%; margin: 0; padding: 8px 10px;
+    border-radius: 8px; color: rgba(255,214,165,0.82); background: rgba(245,158,11,0.08);
+    border: 1px solid rgba(245,158,11,0.16); font-size: 12px; line-height: 1.35;
+}
+.vsr-basic-hit-note span {
+    flex: 0 0 auto; color: #fbcd7a; font-size: 10px; font-weight: 900; letter-spacing: 0.06em; text-transform: uppercase;
+}
 .vsr-basic-hit-tags span {
     padding: 3px 9px; border-radius: 999px; font-size: 10px; font-weight: 700;
     letter-spacing: 0.05em; color: rgba(255,255,255,0.55);

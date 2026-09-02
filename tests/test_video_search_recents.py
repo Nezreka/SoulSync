@@ -65,6 +65,8 @@ def test_basic_search_runs_in_app_provider_searches():
     assert "vsr-basic-hit-analysis" in _JS and "vsr-basic-hit-reason" not in _JS
     assert "basicSizeLabel" in _JS and "basicHealthLabel" in _JS
     assert "vsr-basic-hit-side" in _JS and "vsr-basic-hit-linkstate" in _JS
+    assert "vsr-basic-source-chip" in _JS and "vsr-basic-hit-note" in _JS
+    assert "torrent via EXT.to" in _JS
     assert "vsr-basic-loader" in _JS and "vsr-basic-tab-loader" in _JS
     assert ".vsr-basic-hit-side" in _CSS and "vsrBasicScan" in _CSS and "vsrBasicDots" in _CSS
 

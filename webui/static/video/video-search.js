@@ -295,12 +295,22 @@
 
     function basicResultHTML(r, sourceId, index) {
         r = r || {};
+        var cfg = BASIC_SEARCH_SOURCES[sourceId] || {};
         var bits = [r.quality_label || r.resolution, r.source, r.codec, r.audio, r.hdr, r.group].filter(Boolean);
-        var provider = r.username || (r.indexer_id ? String(r.indexer_id).toUpperCase() : 'Source');
-        var protocol = (r.protocol || '').toString().toUpperCase() || 'SEARCH';
+        var provider = r.username || (r.indexer_id ? String(r.indexer_id).toUpperCase() : (cfg.label || 'Source'));
+        var transport = (cfg.source || r.source || sourceId || 'search').toString();
+        var protocol = (r.protocol || transport).toString().toUpperCase() || 'SEARCH';
         var locator = r.download_url || r.magnet_uri ? 'Ready link' : (r.info_url ? 'Detail page' : 'Result only');
         var accepted = r.accepted === false ? 'Review' : 'Candidate';
         var analysis = r.rejected ? '<details class="vsr-basic-hit-analysis"><summary>Why review?</summary><p>' + esc(r.rejected) + '</p></details>' : '';
+        var visibleNote = r.rejected ? '<p class="vsr-basic-hit-note"><span>Review</span>' + esc(r.rejected) + '</p>' : '';
+        var origin = r.indexer_id || sourceId;
+        var sourceLine = [
+            '<span class="vsr-basic-source-chip">' + esc(provider) + '</span>',
+            '<span>' + esc(protocol) + '</span>',
+            '<span>' + esc(transport === 'extto' ? 'torrent via EXT.to' : transport) + '</span>',
+            origin ? '<span>' + esc(origin) + '</span>' : ''
+        ].filter(Boolean).join('');
         var chipHtml = bits.length ? bits.slice(0, 7).map(function (b) { return '<span>' + esc(b) + '</span>'; }).join('') : '<span>Release</span>';
         var grabbable = basicHitGrabbable(r, sourceId);
         var key = basicHitKey(r, sourceId);
@@ -320,9 +330,10 @@
                   '" alt="" loading="lazy" decoding="async">'
                 : '') +
             '<div class="vsr-basic-hit-main">' +
-                '<div class="vsr-basic-hit-kicker"><span>' + esc(provider) + '</span><em>' + esc(protocol) + '</em></div>' +
+                '<div class="vsr-basic-hit-kicker">' + sourceLine + '</div>' +
                 '<strong title="' + esc(r.title || '') + '">' + esc(r.title || 'Untitled release') + '</strong>' +
                 '<div class="vsr-basic-hit-tags">' + chipHtml + '</div>' +
+                visibleNote +
                 basicExtrasHTML(r, d) +
                 analysis +
             '</div>' +
