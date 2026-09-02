@@ -10,7 +10,9 @@ import pytest
 from core.automation.handlers.video_process_youtube_wishlist import (
     auto_video_process_youtube_wishlist,
     slots_free,
+    videos_for_alternate_search,
     videos_to_enqueue,
+    youtube_alternate_search_item,
 )
 
 
@@ -54,6 +56,62 @@ def test_videos_to_enqueue_skips_the_permanently_unavailable():
     out = videos_to_enqueue(wanted, already_ids=[], retry_state=state, max_fail=3)
     assert [v["video_id"] for v in out] == ["b", "c"]   # a is gone for good; b under the cap
 
+
+
+def test_youtube_alternate_search_item_requires_strong_metadata():
+    good = _v("v1", title="A Real Upload Title", date="2024-02-03")
+    item = youtube_alternate_search_item(good)
+    assert item["title"] == "Chan A Real Upload Title"
+    assert item["year"] == 2024
+
+    assert youtube_alternate_search_item(_v("v2", title="A Real Upload Title", date="")) is None
+    assert youtube_alternate_search_item(_v("v3", title="Live", date="2024-02-03")) is None
+    assert youtube_alternate_search_item({"video_id": "v4", "video_title": "A Real Upload Title",
+                                          "published_at": "2024-02-03"}) is None
+
+
+def test_videos_for_alternate_search_only_uses_native_backoff_rows():
+    wanted = [_v("fresh", title="Fresh Upload"),
+              _v("waiting", title="Waiting Upload"),
+              _v("gone", title="Gone Upload"),
+              _v("weak", title="Live")]
+    state = {
+        "waiting": {"strikes": 4, "hours_since_last": 0.1},
+        "gone": {"permanent": True, "strikes": 8},
+        "weak": {"strikes": 4, "hours_since_last": 0.1},
+    }
+    out = videos_for_alternate_search(wanted, already_ids=["active"], retry_state=state, max_fail=3,
+                                      source_settings=lambda *_: {})
+    assert [v["video_id"] for v in out] == ["waiting"]
+
+
+def test_youtube_drain_uses_alternate_transport_only_after_native_backoff():
+    wanted = [_v("fresh", title="Fresh Upload"), _v("waiting", title="Waiting Upload")]
+    state = {"waiting": {"strikes": 5, "hours_since_last": 0.25}}
+    native, alternate = [], []
+
+    def enqueue(video, root):
+        native.append(video["video_id"])
+        return len(native)
+
+    def alternate_search(video):
+        return ([{"accepted": True, "source": "torrent", "title": "Chan.Waiting.Upload.2024.1080p",
+                  "filename": "Chan.Waiting.Upload.2024.1080p.mkv", "download_url": "magnet:?xt=abc"}], None)
+
+    def alternate_enqueue(video, best, candidates, root):
+        alternate.append((video["video_id"], best["source"], root))
+        return {"ok": True}
+
+    res = auto_video_process_youtube_wishlist(
+        {"_automation_id": "a", "max_concurrent": 1, "max_alternate_searches": 5}, _Deps(),
+        youtube_root=lambda: "/yt", fetch_wanted=lambda: wanted, active_ids=lambda: [],
+        running_count=lambda: 0, enqueue=enqueue, alternate_search=alternate_search,
+        alternate_enqueue=alternate_enqueue, start_next=lambda: None, reap=lambda: 0,
+        retry_state=lambda: state, source_settings=lambda *_: {}, recent_errors=lambda: [])
+
+    assert native == ["fresh"]
+    assert alternate == [("waiting", "torrent", "/yt")]
+    assert res["queued"] == 2 and res["alternate_queued"] == 1 and res["alternate_searched"] == 1
 
 def test_slots_free():
     assert slots_free(running=0, max_concurrent=3) == 3

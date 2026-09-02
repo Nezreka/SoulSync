@@ -299,7 +299,10 @@ def write_sidecars(db, dl, dest_path, settings, fs):
     the monitor and the manual-import endpoint."""
     try:
         from core.video import sidecars
-        scope = "movie" if str(dl.get("kind") or "").lower() == "movie" else "episode"
+        kind = str(dl.get("kind") or "").lower()
+        if kind == "youtube":
+            return
+        scope = "movie" if kind == "movie" else "episode"
         tmdb_id, _imdb = _media_ids(db, dl)
         detail = None
         if tmdb_id is not None:
@@ -418,6 +421,8 @@ def retry_another_release(db, dl) -> dict:
     kicked = False
     try:
         kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
+        if kind == "youtube":
+            return {"status": "failed", "wishlist_search": False}
         if tmdb_id:
             if already_failed:
                 _wishlist_failed(db, dl)   # make sure the row is back on the wishlist
@@ -461,6 +466,8 @@ def _wishlist_ids(db, dl):
     media_id = dl.get("media_id")
     if kind == "movie":
         return "movie", (_as_int(media_id) if is_tmdb else db.movie_tmdb_id(media_id)), None, None, ctx
+    if kind == "youtube":
+        return "youtube", media_id, None, None, ctx
     return ("show", (_as_int(media_id) if is_tmdb else db.show_tmdb_id(media_id)),
             ctx.get("season"), ctx.get("episode"), ctx)
 
@@ -478,7 +485,7 @@ def _owned_library_dir(db, dl):
 
         from core.video.path_resolver import resolve_video_file_path, video_base_dirs
         kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
-        if not tmdb_id:
+        if kind == "youtube" or not tmdb_id:
             return None
         stored = db.video_stored_file_path("movie" if kind == "movie" else "episode",
                                            tmdb_id=int(tmdb_id), season=sn, episode=en)
@@ -542,7 +549,9 @@ def _wishlist_obtained(db, dl, upd=None) -> None:
                             dl.get("id"), label)
         except Exception:   # noqa: BLE001 - judgment failure → classic remove-on-obtain
             logger.debug("wishlist cutoff judgment failed; removing row", exc_info=True)
-        if kind == "movie":
+        if kind == "youtube":
+            db.remove_youtube_from_wishlist("video", str(tmdb_id))
+        elif kind == "movie":
             db.remove_from_wishlist("movie", tmdb_id=int(tmdb_id))
         elif sn is not None and en is not None:
             db.remove_from_wishlist("episode", tmdb_id=int(tmdb_id), season_number=sn, episode_number=en)

@@ -166,6 +166,60 @@ def enqueue_ctx(video: Dict[str, Any], channel_settings: Dict[str, Any]) -> Dict
     return ctx
 
 
+def _published_year(video: Dict[str, Any]) -> Optional[int]:
+    raw = str((video or {}).get("published_at") or "")[:10]
+    if len(raw) < 4:
+        return None
+    try:
+        year = int(raw[:4])
+    except (TypeError, ValueError):
+        return None
+    return year if 1900 <= year <= 2200 else None
+
+
+def youtube_alternate_search_item(video: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """A conservative pseudo-movie identity for alternate transports.
+
+    Torrent/Soulseek/Usenet mirrors of YouTube videos are usually named by channel
+    plus upload title, so only search when we have that pair and a real publish year.
+    That keeps native YouTube first, and avoids spraying weak title-only searches
+    across every configured source. Pure."""
+    vid = str((video or {}).get("video_id") or "").strip()
+    channel = str((video or {}).get("channel_title") or "").strip()
+    title = str((video or {}).get("video_title") or "").strip()
+    year = _published_year(video)
+    if not (vid and channel and title and year):
+        return None
+    if len(title) < 4 or title.lower() in {"untitled", "live", "stream"}:
+        return None
+    return {
+        "title": "%s %s" % (channel, title),
+        "year": year,
+        "poster_url": video.get("thumbnail_url"),
+        "_youtube_video": dict(video),
+    }
+
+
+def videos_for_alternate_search(wanted: List[Dict[str, Any]], already_ids: Iterable,
+                                retry_state: Optional[Dict[Any, Dict[str, Any]]] = None,
+                                max_fail: int = YT_MAX_FAIL, source_settings=None) -> List[Dict[str, Any]]:
+    """Videos eligible for alternate transports: already tried natively and now
+    waiting on backoff, still wished, and strong enough to search by channel/title/year.
+    Pure."""
+    already = {str(x) for x in (already_ids or ()) if x}
+    states = retry_state or {}
+    out: List[Dict[str, Any]] = []
+    for v in wanted or []:
+        vid = v.get("video_id")
+        if not vid or str(vid) in already:
+            continue
+        settings = _source_settings_for_video(v, source_settings)
+        verdict = _retry_verdict(states.get(vid), max_fail, _retry_policy(settings))
+        if verdict == "waiting" and youtube_alternate_search_item(v):
+            out.append(v)
+    return out
+
+
 # ── production seams ──────────────────────────────────────────────────────────
 def _default_youtube_root() -> str:
     from api.video import get_video_db
@@ -189,7 +243,7 @@ def _default_clear_completed_wishlist() -> int:
 def _default_active_ids() -> List[Any]:
     from api.video import get_video_db
     return [d.get("media_id") for d in get_video_db().get_active_video_downloads()
-            if d.get("source") == "youtube" and d.get("media_id")]
+            if d.get("media_id") and (d.get("source") == "youtube" or d.get("kind") == "youtube")]
 
 
 def _default_retry_state() -> Dict[Any, Dict[str, Any]]:
@@ -241,6 +295,70 @@ def _default_running_count() -> int:
     return get_video_db().count_active_youtube_downloads()
 
 
+
+def _default_alternate_search(video: Dict[str, Any]):
+    from core.automation.handlers.video_process_wishlist import _default_search
+    item = youtube_alternate_search_item(video)
+    if not item:
+        return [], "not enough YouTube metadata for alternate search"
+    return _default_search(item, "movie")
+
+
+def _default_enqueue_alternate(video: Dict[str, Any], best: Dict[str, Any],
+                               candidates: List[Dict[str, Any]], root: str) -> Dict[str, Any]:
+    """Start an alternate transport for a YouTube video while preserving YouTube
+    identity/import placement. Returns ``{ok, error}``."""
+    import json
+    from api.video import get_video_db
+    from core.video import disk_guard, organization
+    from core.video.download_monitor import ensure_started
+    db = get_video_db()
+    ok_room, free = disk_guard.has_room(root, organization.load(db))
+    if not ok_room:
+        return {"ok": False, "error": "Only %.1f GB free on %s" % (free or 0, root)}
+    source = str(best.get("source") or "soulseek").lower()
+    transport_source = "torrent" if source == "extto" else source
+    if transport_source == "soulseek":
+        from core.video.slskd_download import start_download
+        started = start_download(best.get("username"), best.get("filename"), best.get("size_bytes") or 0)
+        if not started.get("ok"):
+            return {"ok": False, "error": started.get("error") or "Soulseek refused the transfer"}
+    else:
+        from core.video.client_grab import grab
+        res = grab(transport_source, best.get("download_url"), fallback_magnet=best.get("magnet_uri"))
+        if not res.get("ok"):
+            return {"ok": False, "error": res.get("error") or "the download client refused it"}
+        best = {**best, "_client_ref": res["ref"]}
+    settings = db.get_youtube_source_settings(video.get("channel_id"))
+    ctx = enqueue_ctx(video, settings)
+    ctx.update({
+        "scope": "youtube",
+        "title": video.get("video_title"),
+        "youtube_id": video.get("video_id"),
+        "alternate_transport": transport_source,
+        "alternate_source": source,
+    })
+    rest = [c for c in (candidates or []) if c is not best and c.get("filename") != best.get("filename")]
+    db.add_video_download({
+        "kind": "youtube", "source": transport_source, "media_source": "youtube",
+        "title": video.get("video_title") or video.get("channel_title"),
+        "release_title": best.get("title") or best.get("filename"),
+        "size_bytes": int(best.get("size_bytes") or 0),
+        "quality_label": best.get("quality_label"), "target_dir": root,
+        "status": "downloading", "media_id": video.get("video_id"),
+        "year": video.get("published_at"), "poster_url": video.get("thumbnail_url"),
+        "search_ctx": json.dumps(ctx), "attempts": 0,
+        "username": best.get("username"),
+        "filename": best.get("filename") or best.get("title"),
+        "indexer_id": best.get("indexer_id"),
+        "client_ref": best.get("_client_ref"),
+        "candidates": json.dumps(rest if transport_source == "soulseek" else []),
+        "tried_queries": json.dumps(["%s %s" % (video.get("channel_title") or "", video.get("video_title") or "")]),
+        "tried_files": json.dumps([best.get("filename") or best.get("title")]),
+    })
+    ensure_started(get_video_db)
+    return {"ok": True, "error": None}
+
 def _default_enqueue(video: Dict[str, Any], root: str) -> Any:
     """Create a QUEUED download row (no thread spawned here — the pump starts it). Returns
     the row id."""
@@ -289,6 +407,8 @@ def auto_video_process_youtube_wishlist(
     active_ids: Optional[Callable[[], Iterable]] = None,
     running_count: Optional[Callable[[], int]] = None,
     enqueue: Optional[Callable[[Dict[str, Any], str], Any]] = None,
+    alternate_search: Optional[Callable[[Dict[str, Any]], Any]] = None,
+    alternate_enqueue: Optional[Callable[[Dict[str, Any], Dict[str, Any], List[Dict[str, Any]], str], Dict[str, Any]]] = None,
     start_next: Optional[Callable[[], Any]] = None,
     reap: Optional[Callable[[], int]] = None,
     retry_state: Optional[Callable[[], Dict[Any, Dict[str, Any]]]] = None,
@@ -304,6 +424,8 @@ def auto_video_process_youtube_wishlist(
     active_ids = active_ids or _default_active_ids
     running_count = running_count or _default_running_count
     enqueue = enqueue or _default_enqueue
+    alternate_search = alternate_search or _default_alternate_search
+    alternate_enqueue = alternate_enqueue or _default_enqueue_alternate
     start_next = start_next or _default_start_next
     reap = reap or _default_reap
     retry_state = retry_state or _default_retry_state
@@ -345,6 +467,8 @@ def auto_video_process_youtube_wishlist(
         _warn_if_ytdlp_is_stale(deps, automation_id, recent_errors)
 
         queued = 0
+        alternate_queued = 0
+        alternate_searched = 0
         refused = 0
         for v in new:
             try:
@@ -359,6 +483,35 @@ def auto_video_process_youtube_wishlist(
                 deps.update_progress(automation_id, log_type='warning',
                                      log_line="Couldn't queue '%s'" % (v.get('video_title') or v.get('video_id')))
 
+        # Native YouTube stays first. Alternate transports only step in for rows that
+        # already hit native retry backoff and have enough metadata to search safely.
+        try:
+            from core.automation.handlers.video_process_wishlist import pick_best
+            alt_limit = max(0, int(config.get("max_alternate_searches", 3) or 0))
+            alt_ready = videos_for_alternate_search(wanted, already, states, source_settings=source_settings)[:alt_limit]
+            for v in alt_ready:
+                alternate_searched += 1
+                cands, err = alternate_search(v)
+                if cands is None:
+                    deps.update_progress(automation_id, log_type='warning',
+                                         log_line="Alternate search skipped for '%s': %s"
+                                         % (v.get('video_title') or v.get('video_id'), err or "search didn't run"))
+                    continue
+                best = pick_best(cands or [])
+                if not best:
+                    continue
+                res = alternate_enqueue(v, best, cands or [], root) or {}
+                if res.get("ok"):
+                    queued += 1
+                    alternate_queued += 1
+                else:
+                    refused += 1
+                    deps.update_progress(automation_id, log_type='warning',
+                                         log_line="Alternate transport refused '%s': %s"
+                                         % (v.get('video_title') or v.get('video_id'), res.get("error") or "client refused it"))
+        except Exception:   # noqa: BLE001 - alternate transports must never stop native queueing
+            logger.exception("youtube alternate fallback pass failed")
+
         # Fill the concurrency slots now; each finished download starts the next, so the
         # whole queue drains on its own from here.
         deps.update_progress(automation_id, phase='Starting downloads…', progress=70,
@@ -371,7 +524,8 @@ def auto_video_process_youtube_wishlist(
 
         running = (running_count() or 0)
         if queued or started:
-            done = 'Queued %d new · %d downloading now (the rest drain automatically)' % (queued, running)
+            alt = (' including %d alternate transport' % alternate_queued) if alternate_queued else ''
+            done = 'Queued %d new%s - %d native downloading now (the rest drain automatically)' % (queued, alt, running)
             log_type = 'success'
         elif running:
             done = '%d already downloading; nothing new to queue' % running
@@ -404,6 +558,7 @@ def auto_video_process_youtube_wishlist(
         deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
                              log_line=done, log_type=log_type)
         return {'status': 'completed', 'queued': queued, 'started': started, 'running': running,
+                'alternate_queued': alternate_queued, 'alternate_searched': alternate_searched,
                 'skipped': tally, '_manages_own_progress': True}
     except Exception as e:  # noqa: BLE001
         deps.update_progress(automation_id, status='error', phase='Error', log_line=str(e), log_type='error')
