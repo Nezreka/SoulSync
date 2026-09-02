@@ -523,9 +523,10 @@ def _wishlist_obtained(db, dl, upd=None) -> None:
     open on a label we can't parse). An empty cutoff ('always chase the best')
     never removes — those rows stay upgrade-eligible forever. Best-effort."""
     try:
-        kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
+        kind, tmdb_id, sn, en, ctx = _wishlist_ids(db, dl)
         if not tmdb_id:
             return
+        user_initiated = str((ctx or {}).get("import_policy") or "").lower() == "user_replace"
         try:
             from core.video.quality_eval import meets_cutoff, resolution_rank
             from core.video.quality_profile import profile_by_id
@@ -533,9 +534,12 @@ def _wishlist_obtained(db, dl, upd=None) -> None:
             # judged under the profile the grab was made with (per-title, P2)
             profile = profile_by_id(db, dl.get("quality_profile_id"))
             if resolution_rank(label) and not meets_cutoff(label, profile):
-                logger.info("video download %s: '%s' landed below the cutoff — kept on the "
-                            "wishlist for a future upgrade", dl.get("id"), label)
-                return
+                if not user_initiated:
+                    logger.info("video download %s: '%s' landed below the cutoff - kept on the "
+                                "wishlist for a future upgrade", dl.get("id"), label)
+                    return
+                logger.info("video download %s: '%s' landed below the cutoff from a user-triggered search - removing wishlist row",
+                            dl.get("id"), label)
         except Exception:   # noqa: BLE001 - judgment failure → classic remove-on-obtain
             logger.debug("wishlist cutoff judgment failed; removing row", exc_info=True)
         if kind == "movie":

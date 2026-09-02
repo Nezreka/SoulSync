@@ -6,8 +6,9 @@ returns immediately and the download monitor + badge polling surface progress):
   · manual_search(scope, tmdb_id, ...) — ONE wished movie / episode / season /
     show, straight through the drain's own search → pick → enqueue seams, but
     WITHOUT the release-window gate (the click is the override, like Sonarr's
-    manual search). Upgrade-until-cutoff semantics are identical: an owned item
-    only accepts a strictly-better release.
+    manual search). A user-triggered row carries an import policy: equal-or-better
+    valid files replace the current copy; lower-quality files are allowed to land
+    beside it as an intentional recovery/alternate copy.
 
   · search_all() — the whole eligible wishlist NOW (movies + episodes), gates
     intact: this is "don't wait for the hourly tick", not "hunt unreleased
@@ -40,11 +41,14 @@ def _cutoff_rank() -> int:
         return 0
 
 
-def _prepare(items: List[Dict[str, Any]], media_type: str) -> List[Dict[str, Any]]:
+def _prepare(items: List[Dict[str, Any]], media_type: str, *, user_initiated: bool = False) -> List[Dict[str, Any]]:
     """The drain's pre-flight over raw wishlist rows: upgrade-until-cutoff
     judging for owned rows, then de-dupe against active downloads AND other
-    in-flight manual searches. Marks survivors in-flight (caller must _finish)."""
-    if any(it.get("owned") for it in items):
+    in-flight manual searches. Marks survivors in-flight (caller must _finish).
+
+    A direct user click means "go get this", so it bypasses the owned/cutoff skip
+    that protects the background drain from pointless equal-quality churn."""
+    if any(it.get("owned") for it in items) and not user_initiated:
         per_item = vpw._cutoff_rank_for_item if any(
             it.get("quality_profile_id") for it in items) else None
         items = vpw.annotate_upgrades(items, _cutoff_rank(), cutoff_for=per_item)
@@ -68,6 +72,7 @@ def _finish(items: List[Dict[str, Any]], media_type: str) -> None:
 
 def _one(item: Dict[str, Any], media_type: str, target: str) -> bool:
     try:
+        item = {**item, "_user_initiated": True}
         found = vpw._default_search(item, media_type)
         cands = found[0] if isinstance(found, tuple) else found
         best = vpw.pick_best(cands or [], int(item.get("_min_rank") or 0))
@@ -99,14 +104,14 @@ def _run_batch(todo: List[Dict[str, Any]], media_type: str) -> None:
 def manual_search(scope: str, tmdb_id, season_number=None, episode_number=None) -> Dict[str, Any]:
     """Kick a background search for one wished item (or a season/show of
     episodes). Returns immediately: {queued, skipped, total}. 'skipped' =
-    already downloading / already being searched / owned-and-cutoff-met."""
+    already downloading / already being searched."""
     from api.video import get_video_db
     media_type = "movie" if scope == "movie" else "episode"
     items = get_video_db().wishlist_manual_search_items(
         scope, tmdb_id, season_number=season_number, episode_number=episode_number)
     if not items:
         return {"queued": 0, "skipped": 0, "total": 0}
-    todo = _prepare(items, media_type)
+    todo = _prepare(items, media_type, user_initiated=True)
     if todo and not vpw._default_target_dir(media_type):
         _finish(todo, media_type)
         return {"queued": 0, "skipped": len(items) - len(todo), "total": len(items),
@@ -138,7 +143,7 @@ def search_all() -> Dict[str, str]:
             # release-window gate can skip cinema-only films
             vpw._backfill_movie_available_dates()
         items = fetch() or []
-        todo = _prepare(items, media_type)
+        todo = _prepare(items, media_type, user_initiated=True)
         if not todo:
             out[media_type] = "empty"
             continue

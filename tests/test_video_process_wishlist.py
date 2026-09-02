@@ -297,11 +297,14 @@ def test_wishlist_obtained_gates_on_cutoff(db, monkeypatch):
     db.add_movie_to_wishlist(1, "Low", year="2020", status="wanted")
     db.add_movie_to_wishlist(2, "Done", year="2020", status="wanted")
     db.add_movie_to_wishlist(3, "Mystery", year="2020", status="wanted")
+    db.add_movie_to_wishlist(4, "User Asked", year="2020", status="wanted")
     monkeypatch.setattr("core.video.quality_profile.load",
                         lambda _db: {"cutoff_resolution": "1080p"})
     dl = {"id": 7, "kind": "movie", "media_source": "tmdb", "media_id": "1"}
     dm._wishlist_obtained(db, dl, {"quality_label": "WEBDL-720p"})
     dm._wishlist_obtained(db, dict(dl, media_id="2"), {"quality_label": "BluRay-2160p"})
     dm._wishlist_obtained(db, dict(dl, media_id="3"), {"quality_label": "who knows"})
+    user_dl = dict(dl, media_id="4", search_ctx=json.dumps({"import_policy": "user_replace"}))
+    dm._wishlist_obtained(db, user_dl, {"quality_label": "WEBDL-720p"})
     left = {r["tmdb_id"] for r in db.movie_wishlist_to_download()}
-    assert left == {1}         # below cutoff kept; met removed; unreadable removed (classic)
+    assert left == {1}         # background below cutoff kept; user-triggered below cutoff satisfied

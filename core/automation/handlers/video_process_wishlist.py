@@ -252,6 +252,8 @@ def build_download_record(item: Dict[str, Any], best: Dict[str, Any], candidates
     peer = {k: best.get(k) for k in ("slots", "queue", "speed", "availability") if best.get(k) is not None}
     if peer:
         ctx = {**ctx, "peer": peer}
+    if item.get("_user_initiated"):
+        ctx = {**ctx, "user_initiated": True, "import_policy": "user_replace"}
     media_id = str(item.get("tmdb_id") if media_type == "movie" else item.get("show_tmdb_id"))
     source = str(best.get("source") or "soulseek").lower()
     transport_source = "torrent" if source == "extto" else source

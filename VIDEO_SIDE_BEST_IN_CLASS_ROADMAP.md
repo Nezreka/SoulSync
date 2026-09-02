@@ -28,6 +28,7 @@ This is the working checklist for making SoulSync's video side feel better than 
 - [ ] Add per-source counts for usable, review, and no-link results in the source tabs.
 - [ ] Show the query variants attempted for TV episodes and season packs, so users can tell when matching is too narrow.
 - [ ] Add a safe "try anyway" path for manual grabs that failed soft rules but still have a valid link.
+- [x] User-triggered grabs carry an import policy: equal-or-better valid files replace existing copies, lower-quality valid files can land beside them, and background automation remains strict-upgrade only. Commit: this phase.
 - [ ] Bias TV searches toward season packs when many wanted episodes from the same season are missing.
 
 ## Wishlist Processing

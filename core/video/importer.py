@@ -111,6 +111,33 @@ def _ctx(dl: dict) -> dict:
     }
 
 
+def _user_replace_policy(dl: dict) -> bool:
+    """True when the row came from a direct user click rather than the background drain.
+
+    This is deliberately narrower than forced manual import: the normal sanity gates
+    still protect the library, but valid equal-quality replacements are allowed so a
+    corrupt copy can be recovered without pretending the new file is an upgrade.
+    """
+    ctx = _search_ctx(dl)
+    return str(ctx.get("import_policy") or "").lower() == "user_replace"
+
+
+def _unique_dest(dest: dict, names: list[str]) -> dict:
+    existing = {str(n).casefold() for n in (names or [])}
+    filename = str(dest.get("filename") or "")
+    if filename.casefold() not in existing:
+        return dest
+    stem, ext = os.path.splitext(filename)
+    for n in range(2, 1000):
+        candidate = f"{stem} ({n}){ext}"
+        if candidate.casefold() not in existing:
+            return {**dest, "filename": candidate,
+                    "path": os.path.join(dest["dir"], candidate)}
+    suffix = uuid.uuid4().hex[:8]
+    candidate = f"{stem} ({suffix}){ext}"
+    return {**dest, "filename": candidate, "path": os.path.join(dest["dir"], candidate)}
+
+
 def _reject(reason: str, bad_release: bool = False) -> dict:
     """``bad_release=True`` marks rejects where the FILE ITSELF is junk (sample /
     corrupt / fake / not a video) — the monitor auto-blocklists those releases so
@@ -262,30 +289,43 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
     # (parent of the Season folder) — so it isn't dropped per-season.
     artwork_dir = dest["dir"] if scope == "movie" else os.path.dirname(dest["dir"])
 
-    existing = _existing_match(scope, dest["dir"], ctx, list_dir)
+    existing_names = []
+    try:
+        existing_names = [str(n) for n in (list_dir(dest["dir"]) or [])]
+    except Exception:   # noqa: BLE001 - collision avoidance is best-effort
+        existing_names = []
+    existing = _existing_match(scope, dest["dir"], ctx, lambda _d: existing_names)
     if existing:
         # A forced placement replaces whatever's there (the user chose to put it here).
         if force:
             return {"action": "upgrade", "dest": dest, "quality_label": quality,
                     "replace_path": os.path.join(dest["dir"], existing), "artwork_dir": artwork_dir}
+        new_score = quality_score(parsed)
+        old_score = quality_score(parse_release(existing))
+        if _user_replace_policy(dl):
+            if new_score >= old_score:
+                return {"action": "upgrade", "dest": dest, "quality_label": quality,
+                        "replace_path": os.path.join(dest["dir"], existing), "artwork_dir": artwork_dir}
+            return {"action": "import", "dest": _unique_dest(dest, existing_names),
+                    "quality_label": quality, "artwork_dir": artwork_dir,
+                    "kept_existing": os.path.join(dest["dir"], existing)}
         # Idempotent re-import: the file already sits at the EXACT path we'd write. This is
-        # the crash-recovery case — an import that finished the copy but died before the row
+        # the crash-recovery case - an import that finished the copy but died before the row
         # flipped to 'completed' (e.g. a restart), so the monitor re-drives it. The goal (this
-        # item in the library, here) is already met → report it done instead of the misleading
+        # item in the library, here) is already met -> report it done instead of the misleading
         # "not an upgrade" failure that would otherwise leave a landed download looking failed.
         if existing == dest["filename"]:
             return {"action": "already_placed", "dest": dest, "quality_label": quality,
                     "artwork_dir": artwork_dir}
         if not settings.get("replace_existing", True):
-            return _reject("Already in the library (%s) — replace is turned off" % existing)
-        new_score = quality_score(parsed)
-        old_score = quality_score(parse_release(existing))
+            return _reject("Already in the library (%s) - replace is turned off" % existing)
         if new_score > old_score:
             return {"action": "upgrade", "dest": dest, "quality_label": quality,
                     "replace_path": os.path.join(dest["dir"], existing), "artwork_dir": artwork_dir}
         return _reject("Not an upgrade over the copy already in the library (%s)" % existing)
 
-    return {"action": "import", "dest": dest, "quality_label": quality, "artwork_dir": artwork_dir}
+    return {"action": "import", "dest": _unique_dest(dest, existing_names),
+            "quality_label": quality, "artwork_dir": artwork_dir}
 
 
 def plan_subs(src_path: str, dest_path: str, list_dir: Callable) -> list:
@@ -359,6 +399,14 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
     move_mode = settings.get("transfer_mode") == "move"
     try:
         fs.makedirs(dest["dir"])
+        replace_path = plan.get("replace_path")
+        same_replace = bool(replace_path) and os.path.normcase(os.path.abspath(replace_path)) == \
+            os.path.normcase(os.path.abspath(dest["path"]))
+        if same_replace:
+            try:
+                (recycle or fs.remove)(replace_path)
+            except Exception:   # noqa: BLE001 - a failed pre-recycle falls through to copy error/manual import
+                pass
         if move_mode:
             fs.move(src_path, dest["path"])
         else:
@@ -369,7 +417,7 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
                     fs.copy(sub_src, sub_dst)
                 except Exception:   # noqa: BLE001 - a subtitle that won't copy isn't fatal
                     pass
-        if plan["action"] == "upgrade" and plan.get("replace_path"):
+        if plan["action"] == "upgrade" and plan.get("replace_path") and not same_replace:
             try:
                 (recycle or fs.remove)(plan["replace_path"])
             except Exception:   # noqa: BLE001 - failing to delete the old file isn't fatal

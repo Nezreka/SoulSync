@@ -152,6 +152,24 @@ def test_search_all_respects_drain_guard_and_gates(client, db, monkeypatch):
     del calls
 
 
+def test_user_triggered_prepare_keeps_owned_cutoff_items(monkeypatch):
+    from core.video import wishlist_search as ws
+    from core.automation.handlers import video_process_wishlist as vpw
+
+    items = [{"tmdb_id": 202, "title": "Owned Movie", "owned": 1, "owned_resolutions": "1080p"}]
+    monkeypatch.setattr(vpw, "_default_active_keys", lambda media_type: set())
+    monkeypatch.setattr(vpw, "annotate_upgrades", lambda items, *a, **k: [])
+
+    background_shape = ws._prepare(items, "movie", user_initiated=False)
+    user_shape = ws._prepare(items, "movie", user_initiated=True)
+    try:
+        assert background_shape == []
+        assert user_shape == items
+    finally:
+        ws._finish(user_shape, "movie")
+
+
+
 # ---------------------------------------------------------------------------
 # Page annotations: downloading + upgrade_from
 # ---------------------------------------------------------------------------

@@ -1051,6 +1051,7 @@ def register_routes(bp):
         import json as _json
         from core.video.slskd_search import build_query
         ctx = body.get("search_ctx") if isinstance(body.get("search_ctx"), dict) else {}
+        ctx = {**ctx, "user_initiated": True, "import_policy": "user_replace"}
         _prof, _pid = _profile_for_request(db, body)
         common = {
             "kind": str(body.get("kind") or "movie"), "title": body.get("title"),
@@ -1163,7 +1164,8 @@ def register_routes(bp):
             if not res.get("ok"):
                 skipped += 1
                 continue
-            ctx = {"scope": "episode", "title": title, "season": sn, "episode": en, "year": body.get("year")}
+            ctx = {"scope": "episode", "title": title, "season": sn, "episode": en, "year": body.get("year"),
+                   "user_initiated": True, "import_policy": "user_replace"}
             first_query = build_query("episode", title, season=sn, episode=en)
             dl_id = db.add_video_download({
                 "kind": "show", "title": title, "release_title": _os.path.basename(str(fn)),
