@@ -468,6 +468,12 @@ def _default_enqueue(item: Dict[str, Any], best: Dict[str, Any], candidates: Lis
 _running: Dict[str, bool] = {"movie": False, "episode": False}
 
 
+def _wishlist_db_key(item: Dict[str, Any], media_type: str) -> tuple:
+    tmdb = item.get('tmdb_id') or item.get('show_tmdb_id')
+    kind = 'movie' if media_type == 'movie' else 'episode'
+    return kind, tmdb, item.get('season_number'), item.get('episode_number')
+
+
 def _default_record_outcome(item: Dict[str, Any], media_type: str, grabbed: bool,
                             refusal: Optional[Dict[str, Any]] = None) -> None:
     """Persist the drain search outcome on the wishlist row (#liveleak-failing-hub):
@@ -482,20 +488,33 @@ def _default_record_outcome(item: Dict[str, Any], media_type: str, grabbed: bool
     try:
         from api.video import get_video_db
         from core.video.wishlist_evidence import refusal_line
-        # episode drain items alias the show id as show_tmdb_id (movie items
-        # carry plain tmdb_id) — read both or episodes silently never record
-        tmdb = item.get('tmdb_id') or item.get('show_tmdb_id')
+        kind, tmdb, season, episode = _wishlist_db_key(item, media_type)
         if not tmdb:
             return
         get_video_db().record_wishlist_search_outcome(
-            'movie' if media_type == 'movie' else 'episode',
-            tmdb, grabbed,
-            season_number=item.get('season_number'),
-            episode_number=item.get('episode_number'),
+            kind, tmdb, grabbed,
+            season_number=season,
+            episode_number=episode,
             refusal=refusal_line(refusal),
             refusal_quality=(refusal or {}).get('quality_label'))
     except Exception:   # noqa: BLE001 - visibility must never break acquisition
         logger.debug("record_wishlist_search_outcome failed", exc_info=True)
+
+
+def _default_record_note(item: Dict[str, Any], media_type: str, note: str,
+                         refusal_quality: Optional[str] = None) -> None:
+    """Persist a non-fruitless reason on the wishlist row. Used when a release
+    passed matching/profile gates but the download/import side could not land it."""
+    try:
+        from api.video import get_video_db
+        kind, tmdb, season, episode = _wishlist_db_key(item, media_type)
+        if not tmdb:
+            return
+        get_video_db().record_wishlist_search_note(
+            kind, tmdb, note, season_number=season, episode_number=episode,
+            refusal_quality=refusal_quality)
+    except Exception:   # noqa: BLE001 - visibility must never break acquisition
+        logger.debug("record_wishlist_search_note failed", exc_info=True)
 
 
 def is_running(media_type: str) -> bool:
@@ -513,6 +532,7 @@ def auto_video_process_wishlist(
     search: Optional[Callable[[Dict[str, Any], str], List[Dict[str, Any]]]] = None,
     enqueue: Optional[Callable[..., bool]] = None,
     record_outcome: Optional[Callable[[Dict[str, Any], str, bool], None]] = None,
+    record_note: Optional[Callable[[Dict[str, Any], str, str, Optional[str]], None]] = None,
 ) -> Dict[str, Any]:
     """Auto-grab the wished movies (or episodes): search Soulseek, pick the best release,
     enqueue. Processes the whole eligible wishlist, a few searches at a time.
@@ -524,6 +544,7 @@ def auto_video_process_wishlist(
     search = search or _default_search
     enqueue = enqueue or _default_enqueue
     record_outcome = record_outcome or _default_record_outcome
+    record_note = record_note or _default_record_note
     automation_id = config.get('_automation_id')
     concurrency = max(1, int(config.get('max_concurrent', 3) or 3))
     label = 'movie' if media_type == 'movie' else 'episode'
@@ -609,10 +630,13 @@ def auto_video_process_wishlist(
                 # this branch used to fall through to) points the user at the one
                 # setting that is not the problem, and leaves the real reason —
                 # sitting right there in the client's own error — unsaid.
+                reason = refusal or "no reason given"
                 msg = ("Found %d release(s) for '%s' but the download client "
                        "refused %s — %s" % (len(usable), name,
                                             "them" if len(usable) > 1 else "it",
-                                            refusal or "no reason given"))
+                                            reason))
+                record_note(it, media_type, "Download client refused: " + str(reason),
+                            usable[0].get("quality_label"))
                 lt = 'warning'
             elif not cands:
                 msg, lt = "No search results for '%s'" % name, 'info'

@@ -6313,6 +6313,32 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def record_wishlist_search_note(self, kind: str, tmdb_id, note,
+                                    season_number=None, episode_number=None,
+                                    refusal_quality=None) -> None:
+        """Store a visible wishlist reason without changing the fruitless-search
+        counter. Client/import refusals mean a release exists but could not be
+        landed, so they should explain the stuck row without pretending the
+        search came back empty."""
+        if not str(note or "").strip():
+            return
+        conn = self._get_connection()
+        try:
+            where = "kind=? AND tmdb_id=?"
+            args = [str(kind), tmdb_id]
+            if season_number is not None and episode_number is not None:
+                where += " AND season_number=? AND episode_number=?"
+                args += [int(season_number), int(episode_number)]
+            conn.execute(
+                "UPDATE video_wishlist SET last_search_at=datetime('now'), "
+                "last_refusal=?, last_refusal_quality=? WHERE " + where,
+                [str(note).strip(), refusal_quality] + args)
+            conn.commit()
+        except sqlite3.Error:
+            logger.exception("record_wishlist_search_note failed")
+        finally:
+            conn.close()
+
     def query_wishlist(self, kind: str, *, search=None, sort="added", page=1, limit=60) -> dict:
         """One paged slice of the wishlist. kind='movie' → movie cards; kind='show'
         → shows grouped show→season→episode with wanted/done roll-ups. ``sort`` ∈

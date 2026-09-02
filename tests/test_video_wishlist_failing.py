@@ -256,3 +256,31 @@ def test_the_columns_ride_the_migration_list():
     src = (_ROOT / "database" / "video_database.py").read_text(encoding="utf-8")
     assert '("video_wishlist", "last_refusal", "TEXT")' in src
     assert '("video_wishlist", "last_refusal_quality", "TEXT")' in src
+
+
+
+def test_search_note_updates_reason_without_incrementing_attempts(db):
+    _seed_movie(db, tmdb_id=701, title="Client Stuck")
+    db.record_wishlist_search_outcome("movie", 701, False)
+    db.record_wishlist_search_note("movie", 701, "Download client refused: already queued",
+                                   refusal_quality="WEBDL-1080p")
+    row = db._get_connection().execute(
+        "SELECT search_attempts, last_refusal, last_refusal_quality, last_search_at "
+        "FROM video_wishlist WHERE tmdb_id=701").fetchone()
+    assert row["search_attempts"] == 1
+    assert row["last_refusal"] == "Download client refused: already queued"
+    assert row["last_refusal_quality"] == "WEBDL-1080p"
+    assert row["last_search_at"]
+
+
+def test_episode_search_note_targets_one_episode(db):
+    _seed_episode(db, tmdb_id=702, s=1, e=1)
+    _seed_episode(db, tmdb_id=702, s=1, e=2)
+    db.record_wishlist_search_note("episode", 702, "Download client refused: no files",
+                                   season_number=1, episode_number=2)
+    rows = {(r["season_number"], r["episode_number"]): r["last_refusal"] for r in
+            db._get_connection().execute(
+                "SELECT season_number, episode_number, last_refusal FROM video_wishlist "
+                "WHERE tmdb_id=702")}
+    assert rows[(1, 1)] is None
+    assert rows[(1, 2)] == "Download client refused: no files"
