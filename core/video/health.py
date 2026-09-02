@@ -10,6 +10,8 @@ status is the worst individual one.
 from __future__ import annotations
 
 import os
+import tempfile
+from collections import Counter
 
 from utils.logging_config import get_logger
 
@@ -21,6 +23,105 @@ _ROOTS = (("movies_path", "Movie library"), ("tv_path", "TV library"),
 
 def _check(cid, label, status, detail) -> dict:
     return {"id": cid, "label": label, "status": status, "detail": detail}
+
+
+def _fmt_gb(v) -> str:
+    return "unknown" if v is None else "%.1f GB" % float(v)
+
+
+def _worse(a: str, b: str) -> str:
+    order = {"ok": 0, "warning": 1, "error": 2}
+    return b if order.get(b, 0) > order.get(a, 0) else a
+
+
+def _youtube_cookie_status() -> tuple[str, str]:
+    try:
+        from core.settings import config_manager
+        mode = str(config_manager.get("youtube.cookies_browser", "") or "").strip()
+        cookiefile = str(config_manager.get("youtube.cookies_file", "") or "").strip()
+    except Exception:   # noqa: BLE001
+        logger.debug("youtube cookie health probe failed", exc_info=True)
+        return "warning", "cookies: config unreadable"
+    if mode == "custom":
+        if not cookiefile:
+            return "warning", "cookies: custom file not set"
+        if not os.path.isfile(cookiefile):
+            return "warning", "cookies: file missing"
+        return "ok", "cookies: pasted file"
+    if mode:
+        return "ok", f"cookies: {mode} browser"
+    return "ok", "cookies: none"
+
+
+def _youtube_health_check(db, settings: dict) -> dict:
+    """One user-facing YouTube readiness tile: version, auth, disk, recent blockers."""
+    status = "ok"
+    bits = []
+
+    try:
+        from core.ytdlp_update import installed_version
+        ver = installed_version()
+    except Exception:   # noqa: BLE001
+        logger.debug("yt-dlp version health probe failed", exc_info=True)
+        ver = None
+    if ver:
+        bits.append(f"yt-dlp {ver}")
+    else:
+        status = _worse(status, "error")
+        bits.append("yt-dlp unavailable")
+
+    c_status, c_detail = _youtube_cookie_status()
+    status = _worse(status, c_status)
+    bits.append(c_detail)
+
+    try:
+        from core.video.disk_guard import free_gb
+        temp_free = free_gb(tempfile.gettempdir())
+        bits.append(f"temp: {_fmt_gb(temp_free)} free")
+        if temp_free is not None and temp_free < 2:
+            status = _worse(status, "warning")
+
+        out = str(db.get_setting("youtube_path") or "").strip()
+        if out:
+            out_free = free_gb(out)
+            if not os.path.isdir(out):
+                status = _worse(status, "error")
+                bits.append("output: unreachable")
+            else:
+                bits.append(f"output: {_fmt_gb(out_free)} free")
+                try:
+                    floor = float(settings.get("min_free_disk_gb") or 0)
+                except (TypeError, ValueError):
+                    floor = 0
+                if out_free is not None and ((floor and out_free < floor) or out_free < 2):
+                    status = _worse(status, "warning")
+        else:
+            bits.append("output: not configured")
+    except Exception:   # noqa: BLE001
+        logger.debug("youtube disk health probe failed", exc_info=True)
+        status = _worse(status, "warning")
+        bits.append("disk: probe failed")
+
+    try:
+        from core.youtube_errors import BLOCKED, classify, human_reason
+        errors = db.youtube_recent_failure_errors(days=3) or []
+        counts = Counter(classify(e) for e in errors)
+        if errors:
+            status = _worse(status, "warning")
+            if counts.get(BLOCKED, 0):
+                bits.append("%d recent YouTube failure(s), %d look like bot/age/cookie or yt-dlp blocks"
+                            % (len(errors), counts[BLOCKED]))
+            else:
+                reason = human_reason(errors[0]) or "see YouTube download history"
+                bits.append("%d recent YouTube failure(s): %s" % (len(errors), reason))
+        else:
+            bits.append("recent failures: 0")
+    except Exception:   # noqa: BLE001
+        logger.debug("youtube failure health probe failed", exc_info=True)
+        status = _worse(status, "warning")
+        bits.append("recent failures: unreadable")
+
+    return _check("youtube_health", "YouTube", status, "; ".join(bits))
 
 
 def collect(db) -> dict:
@@ -81,6 +182,10 @@ def collect(db) -> dict:
                                  "isn't running — restart or re-trigger a download"))
     except Exception:   # noqa: BLE001
         logger.debug("monitor health probe failed", exc_info=True)
+
+    # 5) YouTube readiness: always visible, because an OK tile tells users which
+    # moving parts are healthy before they start chasing a failed channel/video.
+    checks.append(_youtube_health_check(db, settings))
 
     order = {"error": 0, "warning": 1, "ok": 2}
     checks.sort(key=lambda c: order.get(c["status"], 3))

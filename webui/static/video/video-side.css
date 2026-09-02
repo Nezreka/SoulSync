@@ -6079,6 +6079,9 @@ body[data-side="video"] #gsearch-aura {
 .vdash-health-chip--error {
     background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.3); color: #f5b5b5;
 }
+.vdash-health-chip--ok {
+    background: rgba(34, 197, 94, 0.08); border-color: rgba(34, 197, 94, 0.24); color: #b8efc9;
+}
 
 /* ── Import subscriptions (ytdl-sub / Kometa) ─────────────────────────────── */
 .vwlp-import-btn {

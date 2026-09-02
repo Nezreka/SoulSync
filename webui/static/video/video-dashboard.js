@@ -393,7 +393,7 @@
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (h) {
                 if (!h || !(h.checks || []).length) { host.hidden = true; host.innerHTML = ''; return; }
-                var icons = { error: '🔴', warning: '⚠️' };
+                var icons = { error: '🔴', warning: '⚠️', ok: '✓' };
                 host.innerHTML = h.checks.map(function (c) {
                     return '<div class="vdash-health-chip vdash-health-chip--' + c.status + '">' +
                         (icons[c.status] || 'ℹ️') + ' <strong>' + esc(c.label) + ':</strong> ' +
