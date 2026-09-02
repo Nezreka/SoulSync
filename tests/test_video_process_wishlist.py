@@ -16,7 +16,10 @@ from core.automation.handlers.video_process_wishlist import (
     build_download_record,
     item_key,
     pick_best,
+    reset_source_cooldowns,
     season_pack_requests,
+    source_cooldown_remaining,
+    note_source_refusal,
 )
 
 
@@ -34,6 +37,18 @@ def _cand(fn, *, accepted=True, score=10, user="u"):
 
 
 # ── pure ──────────────────────────────────────────────────────────────────────
+def test_repeated_client_refusals_cool_down_that_item_source():
+    reset_source_cooldowns()
+    item = {"tmdb_id": 1, "title": "A"}
+    cand = dict(_cand("A.1080p.mkv"), source="torrent")
+    assert source_cooldown_remaining(item, "movie", cand, now=100) == 0
+    note_source_refusal(item, "movie", cand, now=100, limit=2, cooldown_seconds=3600)
+    assert source_cooldown_remaining(item, "movie", cand, now=101) == 0
+    note_source_refusal(item, "movie", cand, now=102, limit=2, cooldown_seconds=3600)
+    assert source_cooldown_remaining(item, "movie", cand, now=103) > 3500
+    reset_source_cooldowns()
+
+
 def test_pick_best_takes_first_accepted():
     cands = [_cand("a", accepted=False), _cand("b", accepted=True), _cand("c", accepted=True)]
     assert pick_best(cands)["filename"] == "b"
@@ -254,6 +269,41 @@ def test_season_pack_auto_grab_ignores_soulseek_pack_candidates():
     })
     assert res["grabbed"] == 0 and enq == []
     assert seen == [("season", "9", 2)]
+
+
+def test_client_refusal_cooldown_skips_reoffering_same_source():
+    reset_source_cooldowns()
+    try:
+        item = {"tmdb_id": 1, "title": "A"}
+        cand = dict(_cand("A.1080p.mkv"), source="torrent")
+        calls = []
+
+        def enqueue(_item, best, _cands, _mt, _target):
+            calls.append(best["filename"])
+            return {"ok": False, "error": "torrent already queued"}
+
+        deps = _Deps()
+        res = auto_video_process_wishlist(
+            {"_automation_id": "a", "max_concurrent": 1}, deps, media_type="movie",
+            fetch_items=lambda mt: [item], active_keys=lambda mt: set(), target_dir=lambda mt: "/movies",
+            search=lambda _item, _mt: [cand], enqueue=enqueue)
+        assert res["refused"] == 1 and calls == ["A.1080p.mkv"]
+
+        res = auto_video_process_wishlist(
+            {"_automation_id": "a", "max_concurrent": 1}, deps, media_type="movie",
+            fetch_items=lambda mt: [item], active_keys=lambda mt: set(), target_dir=lambda mt: "/movies",
+            search=lambda _item, _mt: [cand], enqueue=enqueue)
+        assert res["refused"] == 1 and calls == ["A.1080p.mkv", "A.1080p.mkv"]
+
+        res = auto_video_process_wishlist(
+            {"_automation_id": "a", "max_concurrent": 1}, deps, media_type="movie",
+            fetch_items=lambda mt: [item], active_keys=lambda mt: set(), target_dir=lambda mt: "/movies",
+            search=lambda _item, _mt: [cand], enqueue=enqueue)
+        assert res["refused"] == 1 and calls == ["A.1080p.mkv", "A.1080p.mkv"]
+        logs = " ".join(p.get("log_line") or "" for p in deps.progress)
+        assert "cooling down" in logs
+    finally:
+        reset_source_cooldowns()
 
 
 def test_top_level_error_is_caught_and_clears_guard():

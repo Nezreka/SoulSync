@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
@@ -69,6 +70,11 @@ def pick_best(candidates: List[Dict[str, Any]], min_rank: int = 0) -> Optional[D
 # blocking an item without turning a stuck item into an indexer hammer.
 MAX_GRAB_ATTEMPTS = 3
 MIN_SEASON_PACK_EPISODES = 3
+SOURCE_REFUSAL_LIMIT = 2
+SOURCE_COOLDOWN_SECONDS = 6 * 60 * 60
+_SOURCE_REFUSALS: Dict[tuple, int] = {}
+_SOURCE_COOLDOWNS: Dict[tuple, float] = {}
+_SOURCE_COOLDOWN_LOCK = threading.Lock()
 
 
 def display_name(item: Dict[str, Any], media_type: str) -> str:
@@ -96,6 +102,62 @@ def enqueue_outcome(result: Any) -> Dict[str, Any]:
     if isinstance(result, dict):
         return {"ok": bool(result.get("ok")), "error": result.get("error")}
     return {"ok": bool(result), "error": None}
+
+
+def _candidate_source(cand: Dict[str, Any]) -> str:
+    src = str((cand or {}).get("source") or "soulseek").strip().lower()
+    return "torrent" if src == "extto" else (src or "soulseek")
+
+
+def source_refusal_key(item: Dict[str, Any], media_type: str, cand: Dict[str, Any]) -> tuple:
+    """The temporary cooldown identity: this wanted item on this transport."""
+    return item_key(item, media_type), _candidate_source(cand)
+
+
+def source_cooldown_remaining(item: Dict[str, Any], media_type: str, cand: Dict[str, Any],
+                              *, now: Optional[float] = None) -> int:
+    now = time.time() if now is None else float(now)
+    key = source_refusal_key(item, media_type, cand)
+    with _SOURCE_COOLDOWN_LOCK:
+        until = float(_SOURCE_COOLDOWNS.get(key) or 0)
+        if until <= now:
+            _SOURCE_COOLDOWNS.pop(key, None)
+            return 0
+        return int(round(until - now))
+
+
+def note_source_refusal(item: Dict[str, Any], media_type: str, cand: Dict[str, Any],
+                        *, now: Optional[float] = None,
+                        limit: int = SOURCE_REFUSAL_LIMIT,
+                        cooldown_seconds: int = SOURCE_COOLDOWN_SECONDS) -> None:
+    """After repeated client refusals, pause this item/source briefly.
+
+    This is intentionally about the download client refusing an accepted release,
+    not the quality profile rejecting a result. It keeps a bad torrent client/indexer
+    handoff from being offered the same item every drain while other sources can
+    still be tried on later passes.
+    """
+    now = time.time() if now is None else float(now)
+    key = source_refusal_key(item, media_type, cand)
+    with _SOURCE_COOLDOWN_LOCK:
+        strikes = int(_SOURCE_REFUSALS.get(key) or 0) + 1
+        _SOURCE_REFUSALS[key] = strikes
+        if strikes >= max(1, int(limit or 1)):
+            _SOURCE_COOLDOWNS[key] = now + max(1, int(cooldown_seconds or SOURCE_COOLDOWN_SECONDS))
+
+
+def clear_source_refusal(item: Dict[str, Any], media_type: str, cand: Dict[str, Any]) -> None:
+    key = source_refusal_key(item, media_type, cand)
+    with _SOURCE_COOLDOWN_LOCK:
+        _SOURCE_REFUSALS.pop(key, None)
+        _SOURCE_COOLDOWNS.pop(key, None)
+
+
+def reset_source_cooldowns() -> None:
+    """Test/support hook: clear temporary in-process refusal memory."""
+    with _SOURCE_COOLDOWN_LOCK:
+        _SOURCE_REFUSALS.clear()
+        _SOURCE_COOLDOWNS.clear()
 
 
 def annotate_upgrades(items: List[Dict[str, Any]], cutoff_rank: int,
@@ -748,15 +810,20 @@ def auto_video_process_wishlist(
             # Offer the client more than one release. Abandoning the item the
             # moment its top pick is refused is what let a single bad release
             # block an item indefinitely — the next-best one is usually fine.
-            usable = acceptable_candidates(cands, it.get("_min_rank") or 0)
+            usable_all = acceptable_candidates(cands, it.get("_min_rank") or 0)
             if it.get("_pack_members"):
-                usable = [c for c in usable if str(c.get("source") or "").lower() not in ("", "soulseek")]
+                usable_all = [c for c in usable_all if str(c.get("source") or "").lower() not in ("", "soulseek")]
+            cooled = [(c, source_cooldown_remaining(it, media_type, c)) for c in usable_all]
+            usable = [c for c, remaining in cooled if remaining <= 0]
+            cooldown_wait = max([remaining for _c, remaining in cooled], default=0)
             ok, refusal = False, None
             for cand in usable[:MAX_GRAB_ATTEMPTS]:
                 out = enqueue_outcome(enqueue(it, cand, cands, media_type, root))
                 if out["ok"]:
+                    clear_source_refusal(it, media_type, cand)
                     ok = True
                     break
+                note_source_refusal(it, media_type, cand)
                 refusal = out["error"] or refusal
             name = display_name(it, media_type)
             # tell apart: grabbed / search-didn't-run / source-empty / hits-but-all-rejected.
@@ -768,6 +835,12 @@ def auto_video_process_wishlist(
             elif didnt_run:
                 msg = ("Search didn't run for '%s' — %s" % (name, err)) if err \
                     else ("Search didn't run for '%s' — slskd not responding?" % name)
+                lt = 'warning'
+            elif usable_all and not usable:
+                hours = max(1, int((cooldown_wait + 3599) // 3600))
+                msg = ("Found release(s) for '%s', but that source is cooling down "
+                       "after repeated client refusals — retrying in about %dh" % (name, hours))
+                record_note(it, media_type, "Source cooldown after repeated client refusals")
                 lt = 'warning'
             elif usable:
                 # Releases PASSED the profile and the download client turned them
@@ -817,7 +890,7 @@ def auto_video_process_wishlist(
                     grabbed[0] += 1
                 elif didnt_run:
                     notrun[0] += 1
-                elif usable:
+                elif usable_all:
                     refused[0] += 1
                 elif not cands:
                     noresults[0] += 1
