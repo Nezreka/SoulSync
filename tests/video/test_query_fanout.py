@@ -84,9 +84,17 @@ def test_the_episode_identity_is_tried_across_every_spelling_first():
     assert "Insomnia (2024) 2x02" in got
 
 
-def test_an_ordinary_show_keeps_exactly_the_ladder_it_had():
+def test_an_ordinary_show_keeps_the_same_first_two_queries():
     got = _ladder({**EP, "title": "Silo"})
     assert got[:2] == ["Silo S02E02", "Silo 2x02"]
+
+
+def test_episode_queries_include_spelled_out_season_episode_forms():
+    got = _ladder({**EP, "title": "Insomnia (2024)"}, limit=20)
+    assert "Insomnia (2024) Season 2 Episode 2" in got
+    assert "Insomnia 2024 Season 2 Episode 2" in got
+    assert "Insomnia Season 2 Episode 2" in got
+    assert got.index("Insomnia (2024) 2x02") < got.index("Insomnia (2024) Season 2 Episode 2")
 
 
 def test_a_daily_show_still_leads_with_its_air_date():

@@ -86,6 +86,8 @@ def next_query(ctx: dict, tried: Any) -> str | None:
         for name in names:
             cands.append("%s S%02dE%02d" % (name, s, e))
         cands.append("%s %dx%02d" % (title, s, e))
+        for name in names:
+            cands.append("%s Season %d Episode %d" % (name, s, e))
         if len(ad) == 10 and stype != "daily":
             cands.append("%s %s" % (title, ad.replace("-", " ")))   # Title 2026 07 08
             cands.append("%s %s" % (title, ad.replace("-", ".")))   # Title 2026.07.08
