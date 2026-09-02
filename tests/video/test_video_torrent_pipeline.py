@@ -241,3 +241,46 @@ def test_extto_auto_grab_uses_torrent_transport(monkeypatch):
     assert grabbed["call"][0] == "torrent"
     assert rows[0]["source"] == "torrent"
     assert rows[0]["username"] == "EXT.to" and rows[0]["indexer_id"] == "extto"
+
+
+
+def test_torrent_search_includes_extto_hits(monkeypatch):
+    item = {"tmdb_id": 5, "title": "Interstellar", "year": "2014"}
+    monkeypatch.setattr("api.video.get_video_db", lambda: object())
+    monkeypatch.setattr("core.video.quality_profile.load_for_item", lambda db, item: {})
+    monkeypatch.setattr("core.video.prowlarr_search.prowlarr_search", lambda *a, **k: {
+        "configured": True,
+        "hits": [{"title": "Interstellar 2014 1080p Prowlarr", "accepted": True, "indexer_id": "7"}],
+    })
+    monkeypatch.setattr("core.video.extto_search.extto_search", lambda *a, **k: {
+        "configured": True,
+        "hits": [{"title": "Interstellar 2014 1080p EXT.to", "accepted": True,
+                  "indexer_id": "extto", "username": "EXT.to"}],
+    })
+    monkeypatch.setattr("api.video.downloads._evaluate_hits", lambda hits, *a, **k: list(hits))
+
+    cands, err = w._search_one_source("torrent", item, "movie")
+    assert err is None
+    assert [c["title"] for c in cands] == [
+        "Interstellar 2014 1080p Prowlarr", "Interstellar 2014 1080p EXT.to"]
+    assert cands[0]["source"] == "torrent"
+    assert cands[1]["source"] == "extto"
+
+
+def test_torrent_search_still_runs_when_extto_is_unconfigured(monkeypatch):
+    item = {"tmdb_id": 5, "title": "Interstellar", "year": "2014"}
+    monkeypatch.setattr("api.video.get_video_db", lambda: object())
+    monkeypatch.setattr("core.video.quality_profile.load_for_item", lambda db, item: {})
+    monkeypatch.setattr("core.video.prowlarr_search.prowlarr_search", lambda *a, **k: {
+        "configured": True,
+        "hits": [{"title": "Interstellar 2014 1080p Prowlarr", "accepted": True, "indexer_id": "7"}],
+    })
+    monkeypatch.setattr("core.video.extto_search.extto_search", lambda *a, **k: {
+        "configured": False,
+        "hits": [],
+    })
+    monkeypatch.setattr("api.video.downloads._evaluate_hits", lambda hits, *a, **k: list(hits))
+
+    cands, err = w._search_one_source("torrent", item, "movie")
+    assert [c["source"] for c in cands] == ["torrent"]
+    assert "EXT.to skipped" in err

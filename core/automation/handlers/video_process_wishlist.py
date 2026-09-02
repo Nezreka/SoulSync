@@ -330,14 +330,33 @@ def _default_target_dir(media_type: str) -> str:
     return db.get_setting("tv_path") or ""
 
 
+def _extto_hits_for_context(ctx: Dict[str, Any]) -> tuple:
+    from core.video.extto_search import extto_search
+    from core.video.slskd_search import build_query
+    query = build_query(ctx["scope"], ctx["title"], year=ctx.get("year"),
+                        season=ctx.get("season"), episode=ctx.get("episode"),
+                        air_date=ctx.get("air_date"), absolute=ctx.get("absolute"),
+                        series_type=ctx.get("series_type"))
+    eres = extto_search(query, limit=30, timeout=35, max_candidates=2)
+    if not eres.get("configured"):
+        return None, "EXT.to requires FlareSolverr"
+    if eres.get("error"):
+        return None, eres["error"]
+    return eres.get("hits") or [], None
+
+
 def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
-    """Search ONE source → (ranked candidates tagged with source, error). soulseek via slskd,
-    torrent/usenet via Prowlarr. Returns (None, error) when the search couldn't run."""
+    """Search ONE configured source → (ranked candidates tagged with source, error).
+
+    ``torrent`` is the torrent discovery lane: Prowlarr torrent indexers plus EXT.to
+    when FlareSolverr is configured. EXT.to can still be listed explicitly in a
+    hybrid chain, but normal torrent users should get it automatically."""
     from api.video import get_video_db
     from api.video.downloads import _evaluate_hits
     from core.video.quality_profile import load_for_item
     ctx = search_context(item, media_type)
     profile = load_for_item(get_video_db(), item)   # per-title profile (P2)
+    source_notes: List[str] = []
     if source == "soulseek":
         from core.video.download_monitor import _search_for_retry
         from core.video.slskd_search import build_query
@@ -362,19 +381,16 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
         if pres.get("error"):
             return None, pres["error"]
         hits = pres["hits"]
+        if source == "torrent":
+            ehits, eerr = _extto_hits_for_context(ctx)
+            if ehits is None:
+                source_notes.append("EXT.to skipped — %s" % (eerr or "search didn't run"))
+            else:
+                hits = list(hits or []) + list(ehits or [])
     elif source == "extto":
-        from core.video.extto_search import extto_search
-        from core.video.slskd_search import build_query
-        query = build_query(ctx["scope"], ctx["title"], year=ctx.get("year"),
-                            season=ctx.get("season"), episode=ctx.get("episode"),
-                            air_date=ctx.get("air_date"), absolute=ctx.get("absolute"),
-                            series_type=ctx.get("series_type"))
-        eres = extto_search(query, limit=30, timeout=35, max_candidates=2)
-        if not eres.get("configured"):
-            return None, "EXT.to requires FlareSolverr"
-        if eres.get("error"):
-            return None, eres["error"]
-        hits = eres.get("hits") or []
+        hits, err = _extto_hits_for_context(ctx)
+        if hits is None:
+            return None, err
     else:
         return None, "unsupported source %r" % source
     cands = _evaluate_hits(hits, profile, ctx["scope"], ctx.get("season"), ctx.get("episode"),
@@ -382,8 +398,11 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
                            want_title=ctx.get("titles") or ctx.get("title"),
                            want_date=ctx.get("air_date"), want_absolute=ctx.get("absolute"))
     for c in cands:
-        c["source"] = source
-    return cands, None
+        if source == "torrent" and str(c.get("indexer_id") or "").lower() == "extto":
+            c["source"] = "extto"
+        else:
+            c["source"] = source
+    return cands, "; ".join(source_notes) or None
 
 
 def _default_search(item: Dict[str, Any], media_type: str):
