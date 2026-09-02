@@ -69,21 +69,49 @@ def test_date_match_trumps_scene_numbering_mismatch():
     assert v["accepted"] is True
 
 
-def test_retry_ladder_adds_date_queries_after_sxxexx():
+def _ladder(ctx):
+    """The whole ladder in order, by walking next_query until it gives up.
+
+    Asserting rung-by-rung with q1..q4 made inserting a rung fail as a confusing
+    mismatch three lines down; a list comparison names the change directly.
+    """
+    tried = []
+    while True:
+        q = next_query(ctx, tried)
+        if q is None:
+            return tried
+        assert q not in tried, "next_query repeated %r" % q
+        tried.append(q)
+
+
+def test_retry_ladder_adds_date_queries_after_the_numbering_forms():
     ctx = {"scope": "episode", "title": "The Daily Show", "season": 31, "episode": 85,
            "air_date": "2026-07-08"}
-    q1 = next_query(ctx, [])
-    q2 = next_query(ctx, [q1])
-    q3 = next_query(ctx, [q1, q2])
-    q4 = next_query(ctx, [q1, q2, q3])
-    assert q1 == "The Daily Show S31E85"
-    assert q2 == "The Daily Show 31x85"
-    assert q3 == "The Daily Show 2026 07 08"
-    assert q4 == "The Daily Show 2026.07.08"
-    assert next_query(ctx, [q1, q2, q3, q4]) is None
+    # Numbering identities first (what most scene releases use), spelled-out next,
+    # then the date forms — the ranker accepts a date match as the episode
+    # identity, so they are safe to try but wrong to lead with for a NON-daily show.
+    assert _ladder(ctx) == [
+        "The Daily Show S31E85",
+        "The Daily Show 31x85",
+        "The Daily Show Season 31 Episode 85",
+        "The Daily Show 2026 07 08",
+        "The Daily Show 2026.07.08",
+    ]
     # no air date -> ladder unchanged (numbering forms only)
     assert next_query({"scope": "episode", "title": "X", "season": 1, "episode": 2},
                       ["X S01E02"]) == "X 1x02"
+
+
+def test_a_daily_series_leads_with_the_air_date():
+    """The whole point of series_type='daily': late night / soaps / House Hunters
+    release by date, so hunting SxxExx first burns the retry budget on a naming
+    the scene never used for them."""
+    ctx = {"scope": "episode", "title": "The Daily Show", "season": 31, "episode": 85,
+           "air_date": "2026-07-08", "series_type": "daily"}
+    ladder = _ladder(ctx)
+    assert ladder[:2] == ["The Daily Show 2026.07.08", "The Daily Show 2026 07 08"]
+    # ...and the numbering forms stay in as fallbacks rather than being dropped.
+    assert "The Daily Show S31E85" in ladder
 
 
 def test_search_context_carries_the_air_date(monkeypatch):

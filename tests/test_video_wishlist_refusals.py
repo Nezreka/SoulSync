@@ -221,7 +221,17 @@ def test_a_movie_keeps_its_plain_title():
 
 def test_a_nameless_row_degrades_to_a_placeholder():
     assert display_name({}, "movie") == "?"
-    assert display_name({}, "episode") == "? S00E00"
+    # No episode number means a SEASON-scoped row (a season pack), and naming it
+    # "E00" invented an episode that was never wanted. A nameless row is that
+    # shape by default.
+    assert display_name({}, "episode") == "? S00"
+
+
+def test_a_season_row_is_not_named_after_a_phantom_episode():
+    assert display_name({"show_title": "Aussie Shore", "season_number": 2}, "episode") \
+        == "Aussie Shore S02"
+    assert display_name({"show_title": "Aussie Shore", "season_number": 2,
+                         "episode_number": 4}, "episode") == "Aussie Shore S02E04"
 
 
 def test_the_episode_refusal_message_carries_the_episode_name():
