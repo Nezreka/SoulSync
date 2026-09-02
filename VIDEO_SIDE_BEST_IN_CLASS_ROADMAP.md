@@ -46,7 +46,7 @@ This is the working checklist for making SoulSync's video side feel better than 
 - [x] Add a YouTube health tile covering yt-dlp version, cookies status, temp space, output space, and recent HTTP failures.
 - [x] Finalize stale active/importing rows that no longer map to a live download worker. Current `recover_and_pump()`/`requeue_orphaned_youtube()` path covers `downloading` and `importing` orphans; verified by `tests/test_youtube_download.py::test_requeue_orphaned_youtube_recovers_only_dead_downloads` and `::test_recover_and_pump_requeues_orphans_then_fills_free_slots`.
 - [x] Offer per-channel and per-playlist retry policies, including archive recheck cadence.
-- [x] Prefer the configured hybrid fallback only where it makes sense: YouTube-native first, then alternate search when metadata is strong enough. Commit: this phase. Native YouTube remains first; alternate transports only run for backoff-waiting rows with video id, channel title, upload title, and publish year, and client-backed YouTube rows import into the YouTube library instead of masquerading as movies.
+- [x] Prefer the configured hybrid fallback only where it makes sense: YouTube-native first, then alternate search when metadata is strong enough. Commit: `0a9aa08c7`. Native YouTube remains first; alternate transports only run for backoff-waiting rows with video id, channel title, upload title, and publish year, and client-backed YouTube rows import into the YouTube library instead of masquerading as movies.
 
 ## Detail Page
 
