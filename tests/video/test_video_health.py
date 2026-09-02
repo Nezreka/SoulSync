@@ -133,7 +133,40 @@ def test_youtube_recent_blocked_failures_warn(db):
     c = _yt_check(h)
     assert h["status"] == "warning" and c["status"] == "warning"
     assert "2 recent YouTube failure(s)" in c["detail"]
-    assert "yt-dlp blocks" in c["detail"]
+    # The tile now names the failure and its fix rather than counting a bucket.
+    assert "mostly blocked" in c["detail"]
+    assert "yt-dlp" in c["detail"]
+
+
+def test_a_failure_the_operator_must_fix_is_an_error_not_a_warning(db):
+    """A full disk or a missing ffmpeg will not clear on its own, so it must not
+    wear the same colour as a couple of timeouts. Whoever is looking at the tile
+    needs to know which of the two they are in."""
+    conn = db._get_connection()
+    conn.execute("""INSERT INTO video_download_history
+        (kind, source, media_id, title, outcome, error, completed_at)
+        VALUES ('video','youtube','a','One','failed','Connection reset by peer',datetime('now'))""")
+    conn.execute("""INSERT INTO video_download_history
+        (kind, source, media_id, title, outcome, error, completed_at)
+        VALUES ('video','youtube','b','Two','failed','ERROR: [Errno 28] No space left on device',datetime('now'))""")
+    conn.commit(); conn.close()
+    c = _yt_check(collect(db))
+    assert c["status"] == "error"
+    # ...and the ONE standing problem is named, not drowned by the ordinary one.
+    assert "mostly disk" in c["detail"]
+    assert "disk space" in c["detail"].lower()
+
+
+def test_ordinary_failures_stay_a_warning(db):
+    conn = db._get_connection()
+    for i in range(3):
+        conn.execute("""INSERT INTO video_download_history
+            (kind, source, media_id, title, outcome, error, completed_at)
+            VALUES ('video','youtube',?,'X','failed','Connection reset by peer',datetime('now'))""",
+                     (str(i),))
+    conn.commit(); conn.close()
+    c = _yt_check(collect(db))
+    assert c["status"] == "warning"
 
 
 def test_endpoint_and_dashboard_strip(db, tmp_path):

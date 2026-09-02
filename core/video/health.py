@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import os
 import tempfile
-from collections import Counter
 
 from utils.logging_config import get_logger
 
@@ -103,17 +102,18 @@ def _youtube_health_check(db, settings: dict) -> dict:
         bits.append("disk: probe failed")
 
     try:
-        from core.youtube_errors import BLOCKED, classify, human_reason
+        from core.youtube_errors import failure_summary
         errors = db.youtube_recent_failure_errors(days=3) or []
-        counts = Counter(classify(e) for e in errors)
         if errors:
-            status = _worse(status, "warning")
-            if counts.get(BLOCKED, 0):
-                bits.append("%d recent YouTube failure(s), %d look like bot/age/cookie or yt-dlp blocks"
-                            % (len(errors), counts[BLOCKED]))
-            else:
-                reason = human_reason(errors[0]) or "see YouTube download history"
-                bits.append("%d recent YouTube failure(s): %s" % (len(errors), reason))
+            # A standing problem the operator has to fix (no disk, no ffmpeg, no
+            # cookies) is an ERROR, not the same shade of warning as a handful of
+            # timeouts — it will not clear on its own.
+            summary = failure_summary(errors)
+            status = _worse(status, "error" if summary["needs_user_action"] else "warning")
+            top = summary["dominant"]
+            reason = summary["reason"] or "see YouTube download history"
+            bits.append("%d recent YouTube failure(s), mostly %s: %s"
+                        % (summary["total"], str(top).replace("_", " "), reason))
         else:
             bits.append("recent failures: 0")
     except Exception:   # noqa: BLE001
