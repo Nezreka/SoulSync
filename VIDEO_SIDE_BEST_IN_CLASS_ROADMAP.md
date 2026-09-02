@@ -44,7 +44,7 @@ This is the working checklist for making SoulSync's video side feel better than 
 
 - [ ] Separate unavailable, members-only, private, age-gated, cookie-needed, throttled, postprocessing, and disk-space failures in row state. Partly done in `6ffd37ef2` — rows distinguish unavailable (deleted/private/members-only) from a retry backoff, and carry the attempt count and reason. Still to do: age-gated, cookie-needed, throttled, postprocessing and disk-space as distinct states.
 - [x] Add a YouTube health tile covering yt-dlp version, cookies status, temp space, output space, and recent HTTP failures.
-- [ ] Finalize stale active/importing rows that no longer map to a live download worker.
+- [x] Finalize stale active/importing rows that no longer map to a live download worker. Current `recover_and_pump()`/`requeue_orphaned_youtube()` path covers `downloading` and `importing` orphans; verified by `tests/test_youtube_download.py::test_requeue_orphaned_youtube_recovers_only_dead_downloads` and `::test_recover_and_pump_requeues_orphans_then_fills_free_slots`.
 - [ ] Offer per-channel and per-playlist retry policies, including archive recheck cadence.
 - [ ] Prefer the configured hybrid fallback only where it makes sense: YouTube-native first, then alternate search when metadata is strong enough.
 
