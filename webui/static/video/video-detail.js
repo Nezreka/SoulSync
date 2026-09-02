@@ -188,7 +188,17 @@
             '<span class="vd-health-k">' + esc(label) + '</span>' +
             '<span class="vd-health-v">' + esc(value || 'Missing') + '</span></span>';
     }
-    function idChip(label, value) {
+    // a missing id isn't news, it's a job. `fix` is the enrichment service key,
+    // and the chip becomes the button that opens Manage on that service's match
+    // search. that repair flow already existed in the manage panel; nothing on
+    // the detail page pointed at it.
+    function idChip(label, value, fix) {
+        if (!value && fix) {
+            return '<button class="vd-health-chip vd-health-chip--missing vd-health-chip--fix" type="button" ' +
+                'data-vd-health-fix="' + esc(fix) + '" title="Find the right ' + esc(label) + ' match">' +
+                '<span class="vd-health-k">' + esc(label) + '</span>' +
+                '<span class="vd-health-v">Find\u2026</span></button>';
+        }
         return healthChip(label, value, value ? 'ok' : 'missing');
     }
     // the band answers ONE question the hero can't: does automation have the ids
@@ -213,10 +223,13 @@
             // only when it resolves: a tmdb preview has no library row yet, and
             // that's the normal state, not a gap worth flagging amber.
             var libId = (d.source !== 'tmdb') ? d.id : d.library_id;
+            // only a library row can be re-matched, so only a library row gets the
+            // repair button. a preview has nothing to repair yet.
+            var fixable = libId != null;
             if (libId != null) chips.push(idChip('Library ID', libId));
-            chips.push(idChip('TMDB', d.tmdb_id));
-            if (d.kind === 'show') chips.push(idChip('TVDB', d.tvdb_id));
-            chips.push(idChip('IMDb', d.imdb_id));
+            chips.push(idChip('TMDB', d.tmdb_id, fixable && 'tmdb'));
+            if (d.kind === 'show') chips.push(idChip('TVDB', d.tvdb_id, fixable && 'tvdb'));
+            chips.push(idChip('IMDb', d.imdb_id, fixable && 'imdb'));
         }
         h.innerHTML = chips.join('');
         h.hidden = !chips.length;
@@ -1506,6 +1519,13 @@
         if (ep.like_count) { meta.push('👍 ' + (yc0 ? yc0.compactCount(ep.like_count) : ep.like_count)); }
         if (ep.dislike_count) { meta.push('👎 ' + (yc0 ? yc0.compactCount(ep.dislike_count) : ep.dislike_count)); }
         if (ep.air_date) meta.push(fmtDate(ep.air_date));
+        // the id the downloader keys on, and the only way to check a video by hand
+        // when a grab fails. data-vd-ext lets the root click handler pass it through.
+        var vidChip = ep.youtube_id
+            ? '<a class="vd-ep-vid" data-vd-ext target="_blank" rel="noopener" ' +
+                'href="https://www.youtube.com/watch?v=' + encodeURIComponent(ep.youtube_id) + '" ' +
+                'title="Open on YouTube">' + esc(ep.youtube_id) + '</a>'
+            : '';
         var wished = !!ep.wished;
         // Downloaded videos wear the SAME owned treatment as TV episodes (.vd-ep--owned
         // + badge) but KEEP the direct-download button: a server-side delete leaves the
@@ -1516,7 +1536,8 @@
             still + '<span class="vd-ep-thumb-ic">▶</span>' + dur + '</div>' +
             '<div class="vd-ep-info"><div class="vd-ep-top"><span class="vd-ep-title">' +
             esc(ep.title || 'Untitled') + '</span>' +
-            (meta.length ? '<span class="vd-ep-rt">' + esc(meta.join(' · ')) + '</span>' : '') + '</div>' +
+            (meta.length ? '<span class="vd-ep-rt">' + esc(meta.join(' · ')) + '</span>' : '') +
+            vidChip + '</div>' +
             (ep.overview ? '<p class="vd-ep-desc">' + esc(ep.overview) + '</p>' : '') + '</div>' +
             (ep.owned ? '<div class="vd-ep-get" data-vd-ep-get="' + esc(ep.youtube_id) + '">' +
                             '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
@@ -2633,6 +2654,16 @@
         if (shot && r.contains(shot)) { openLightbox(parseInt(shot.getAttribute('data-vd-shot'), 10) || 0); return; }
         var vid = e.target.closest('[data-vd-video]');
         if (vid && r.contains(vid)) { openTrailer(vid.getAttribute('data-vd-video')); return; }
+        var healthFix = e.target.closest('[data-vd-health-fix]');
+        if (healthFix && r.contains(healthFix)) {
+            e.preventDefault();
+            var hfId = data ? ((data.source !== 'tmdb') ? data.id : data.library_id) : null;
+            if (window.VideoManage && hfId != null) {
+                VideoManage.open({ kind: data.kind, id: hfId,
+                    focusMatch: healthFix.getAttribute('data-vd-health-fix') });
+            }
+            return;
+        }
         var castAll = e.target.closest('[data-vd-cast-all]');
         if (castAll && r.contains(castAll)) { openCastModal(); return; }
         var revMore = e.target.closest('[data-vd-review-more]');

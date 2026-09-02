@@ -284,13 +284,31 @@
         '<div class="vmg-msearch-hint">Re-pointing a match clears the old data and re-enriches in the background.</div>';
     }
 
+    // Opened from a missing-id chip on the detail page: jump straight into that
+    // service's search instead of making the user find the row. One shot - a later
+    // reload of the matches must not yank the panel back here.
+    function applyFocusMatch() {
+        if (!state || !state.focusMatch) return;
+        var svc = state.focusMatch;
+        state.focusMatch = null;
+        var host = state.overlay.querySelector('[data-vmg-matches]');
+        if (!host) return;
+        if (svc === 'imdb') {
+            var inp = host.querySelector('[data-vmg-imdb-in]');
+            if (inp) { inp.focus(); inp.select(); }
+        } else if (MATCH_LABELS[svc]) {
+            openMatchSearch(svc);
+        }
+        host.scrollIntoView({ block: 'center' });
+    }
+
     function loadMatches() {
         if (!state) return;
         fetch('/api/video/enrichment/matches/' + state.kind + '/' + state.id)
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (res) {
                 if (!state) return;
-                if (res && res.matches && res.matches.length) renderMatches(res.matches);
+                if (res && res.matches && res.matches.length) { renderMatches(res.matches); applyFocusMatch(); }
                 else { var h = state.overlay.querySelector('[data-vmg-matches]'); if (h) h.innerHTML = ''; }
             })
             .catch(function () { /* section is a nicety — leave the loading hint */ });
@@ -731,7 +749,7 @@
                 document.body.appendChild(ov);
                 state = { kind: d.kind, id: d.id, data: d, saving: false,
                     genres: (d.genres || []).slice(), locked: (d.locked_fields || []).slice(),
-                    overlay: ov };
+                    overlay: ov, focusMatch: opts.focusMatch || null };
                 renderChips();
                 wire();
                 loadGenreSuggestions(d.kind);

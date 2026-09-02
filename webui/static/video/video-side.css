@@ -751,6 +751,18 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-health-chip--missing {
     border-color: rgba(245,158,11,0.24); background: rgba(245,158,11,0.08);
 }
+.vd-health-chip--fix { cursor: pointer; font: inherit; }
+.vd-health-chip--fix:hover {
+    border-color: rgba(245,158,11,0.55); background: rgba(245,158,11,0.16);
+    color: #fff;
+}
+.vd-ep-vid {
+    flex: none; margin-left: 8px; padding: 1px 6px; border-radius: 5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px;
+    color: rgba(255,255,255,0.4); background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08); text-decoration: none;
+}
+.vd-ep-vid:hover { color: rgba(255,255,255,0.85); border-color: rgba(var(--vd-accent-rgb), 0.5); }
 .vd-health-k {
     flex: none; font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0;
     color: rgba(255,255,255,0.48);

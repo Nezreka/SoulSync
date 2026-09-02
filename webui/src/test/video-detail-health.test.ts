@@ -74,11 +74,11 @@ const SHOW = {
 describe('the detail health band', () => {
   it('flags an identity gap and only an identity gap', () => {
     const { chips: c } = band({ ...SHOW, tvdb_id: null });
-    expect(c.find((x) => x.label === 'TVDB')).toEqual({
-      label: 'TVDB',
-      value: 'Missing',
-      mode: 'missing',
-    });
+    const tvdb = c.find((x) => x.label === 'TVDB');
+    expect(tvdb?.mode).toBe('missing');
+    // On a library title the gap is actionable, so the chip reads as the action.
+    // See video-detail-id-repair.test.ts for where that click lands.
+    expect(tvdb?.value).toBe('Find\u2026');
     expect(c.find((x) => x.label === 'TMDB')?.mode).toBe('ok');
     expect(c.find((x) => x.label === 'IMDb')?.mode).toBe('ok');
   });
