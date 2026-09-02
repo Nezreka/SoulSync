@@ -158,6 +158,7 @@
                 '<em>' + esc(source.kind) + '</em></div>' +
                 '<div class="vsr-basic-source-meta"><span class="vsr-basic-source-query">' + esc(q) + '</span>' +
                 '<span class="vsr-basic-source-action" data-vsr-basic-state>Queued</span></div></div>' +
+                '<div class="vsr-basic-source-counts" data-vsr-basic-counts aria-live="polite"></div>' +
                 '<div class="vsr-basic-hits" data-vsr-basic-hits></div>' +
             '</section>';
         }).join('');
@@ -219,6 +220,32 @@
 
     function basicHitKey(r, sourceId) {
         return sourceId + '|' + (r.info_url || r.guid || r.download_url || r.filename || r.title || '');
+    }
+
+    function basicSourceCounts(rows, sourceId) {
+        var counts = { usable: 0, review: 0, noLink: 0 };
+        (rows || []).forEach(function (r) {
+            r = r || {};
+            if (r.accepted === false || r.rejected) counts.review += 1;
+            if (!basicHitGrabbable(r, sourceId)) counts.noLink += 1;
+            if (r.accepted !== false && basicHitGrabbable(r, sourceId)) counts.usable += 1;
+        });
+        return counts;
+    }
+
+    function basicSourceCountHTML(rows, sourceId, done) {
+        if (!done) return '';
+        var c = basicSourceCounts(rows, sourceId);
+        return '<span class="vsr-basic-count vsr-basic-count--usable">' + c.usable + ' usable</span>' +
+            '<span class="vsr-basic-count vsr-basic-count--review">' + c.review + ' review</span>' +
+            '<span class="vsr-basic-count vsr-basic-count--nolink">' + c.noLink + ' no link</span>';
+    }
+
+    function basicSourceCountText(rows, sourceId, done) {
+        if (!done) return 'Searching';
+        var c = basicSourceCounts(rows, sourceId);
+        if (!(rows || []).length) return 'No matches';
+        return c.usable + ' usable / ' + c.review + ' review / ' + c.noLink + ' no link';
     }
 
     // Age from an indexer's publish date. Indexers state an ISO timestamp; the
@@ -406,29 +433,33 @@
     function renderBasicHits(card, rows, done, error, totalFiles) {
         var state = card.querySelector('[data-vsr-basic-state]');
         var hits = card.querySelector('[data-vsr-basic-hits]');
+        var sourceId = card.getAttribute('data-vsr-basic-card');
+        var countsHost = card.querySelector('[data-vsr-basic-counts]');
         if (!hits) return;
         if (error) {
             if (state) state.textContent = 'Needs setup';
-            var errTab = document.querySelector('[data-vsr-basic-source-tab="' + card.getAttribute('data-vsr-basic-card') + '"] [data-vsr-basic-tab-count]');
+            if (countsHost) countsHost.innerHTML = '';
+            var errTab = document.querySelector('[data-vsr-basic-source-tab="' + sourceId + '"] [data-vsr-basic-tab-count]');
             if (errTab) errTab.textContent = 'Needs setup';
             hits.innerHTML = '<div class="vsr-basic-source-note">' + esc(error) + '</div>';
             return;
         }
         rows = rows || [];
         var label = done ? (rows.length ? rows.length + ' found' : 'No matches') : 'Searching';
+        var countText = basicSourceCountText(rows, sourceId, done);
         card.classList.toggle('is-searching', !done);
         if (state) state.innerHTML = done ? esc(label) : '<span class="vsr-basic-loader-dot" aria-hidden="true"></span>' + esc(label);
-        var tabBtn = document.querySelector('[data-vsr-basic-source-tab="' + card.getAttribute('data-vsr-basic-card') + '"]');
+        if (countsHost) countsHost.innerHTML = basicSourceCountHTML(rows, sourceId, done);
+        var tabBtn = document.querySelector('[data-vsr-basic-source-tab="' + sourceId + '"]');
         var tab = tabBtn && tabBtn.querySelector('[data-vsr-basic-tab-count]');
         if (tabBtn) tabBtn.classList.toggle('is-searching', !done);
-        if (tab) tab.textContent = label;
+        if (tab) tab.textContent = countText;
         if (!rows.length) {
             hits.innerHTML = '<div class="vsr-basic-source-note ' + (!done ? 'vsr-basic-source-note--loading' : '') + '">' + (done
                 ? (totalFiles ? 'Files were found, but none matched as video releases.' : 'No matching releases found.')
                 : '<span class="vsr-basic-loader" aria-hidden="true"><i></i><i></i><i></i></span><span>Searching this source...</span>') + '</div>';
             return;
         }
-        var sourceId = card.getAttribute('data-vsr-basic-card');
         var shown = rows.slice(0, 12);
         basicRowsBySource[sourceId] = shown;   // what the Identify buttons index into
         hits.innerHTML = shown.map(function (r, i) { return basicResultHTML(r, sourceId, i); }).join('') +
