@@ -751,6 +751,34 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-health-chip--missing {
     border-color: rgba(245,158,11,0.24); background: rgba(245,158,11,0.08);
 }
+/* Acquisition roll-up: a counted chip per state, plus a library-coverage bar.
+   Numbers lead, labels follow - the count is what you scan for. */
+.vd-acq-chips { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+.vd-acq-chip {
+    display: inline-flex; align-items: baseline; gap: 7px;
+    padding: 7px 13px; border-radius: 10px;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.09);
+}
+.vd-acq-n { font-size: 17px; font-weight: 800; line-height: 1; }
+.vd-acq-k {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+}
+.vd-acq-chip--ok   { border-color: rgba(74,222,128,0.28);  background: rgba(74,222,128,0.09); }
+.vd-acq-chip--want { border-color: rgba(var(--vd-accent-rgb), 0.4); background: rgba(var(--vd-accent-rgb), 0.11); }
+.vd-acq-chip--live { border-color: rgba(56,189,248,0.34);  background: rgba(56,189,248,0.1); }
+.vd-acq-chip--bad  { border-color: rgba(248,113,113,0.34); background: rgba(248,113,113,0.1); }
+.vd-acq-chip--mut  { opacity: 0.62; }
+.vd-acq-bar {
+    height: 5px; border-radius: 3px; overflow: hidden;
+    background: rgba(255,255,255,0.07); max-width: 520px;
+}
+.vd-acq-bar-fill {
+    display: block; height: 100%; border-radius: 3px;
+    background: linear-gradient(90deg, rgb(var(--vd-accent-rgb)), rgba(74,222,128,0.9));
+}
+.vd-acq-note { margin-top: 8px; font-size: 11.5px; color: rgba(255,255,255,0.38); }
+
 /* An unmonitored season reads as switched-off, not as an error: it's a choice. */
 .vd-season-mon { opacity: 0.62; }
 .vd-season-mon--on { opacity: 1; }

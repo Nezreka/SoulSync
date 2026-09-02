@@ -2396,6 +2396,86 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def acquisition_state(self, kind: str, library_id: int, tmdb_id=None) -> dict:
+        """Where this title stands right now, in one shape.
+
+        The unit is what the user acts on: a movie is one unit, a show is its
+        episodes, so a show's numbers are episode counts and a movie's are 0 or 1.
+
+        'ignored' is un-owned AND unmonitored - the drain is deliberately not
+        hunting it. Without its own bucket it hides inside 'wanted' and the page
+        claims to be looking for something nothing is looking for.
+
+        'queued' and 'downloading' come from the live queue and are a SUBSET of
+        'wanted', not a sibling of it: a wished episode that is mid-grab is still
+        wished. Callers that want disjoint buckets must say so in their labels.
+        """
+        counts = {k: 0 for k in ("owned", "wanted", "queued", "downloading",
+                                 "failed", "ignored")}
+        out = {"counts": counts, "total": 0, "kind": kind}
+        if kind not in ("movie", "show"):
+            return out
+        conn = self._get_connection()
+        try:
+            if kind == "movie":
+                row = conn.execute(
+                    "SELECT has_file, monitored, tmdb_id FROM movies WHERE id=?",
+                    (int(library_id),)).fetchone()
+                if not row:
+                    return out
+                tmdb_id = row["tmdb_id"] if tmdb_id is None else tmdb_id
+                out["total"] = 1
+                if row["has_file"]:
+                    counts["owned"] = 1
+                elif not row["monitored"]:
+                    counts["ignored"] = 1
+                wl_kind = "movie"
+            else:
+                row = conn.execute("SELECT tmdb_id FROM shows WHERE id=?",
+                                   (int(library_id),)).fetchone()
+                if not row:
+                    return out
+                tmdb_id = row["tmdb_id"] if tmdb_id is None else tmdb_id
+                eps = conn.execute(
+                    "SELECT has_file, monitored FROM episodes WHERE show_id=?",
+                    (int(library_id),)).fetchall()
+                out["total"] = len(eps)
+                for e in eps:
+                    if e["has_file"]:
+                        counts["owned"] += 1
+                    elif not e["monitored"]:
+                        counts["ignored"] += 1
+                wl_kind = "episode"
+
+            if tmdb_id:
+                for w in conn.execute(
+                        "SELECT status FROM video_wishlist WHERE kind=? AND tmdb_id=?",
+                        (wl_kind, tmdb_id)):
+                    st = (w["status"] or "").strip().lower()
+                    if st == "failed":
+                        counts["failed"] += 1
+                    elif st != "downloaded":     # downloaded rows are 'owned' now
+                        counts["wanted"] += 1
+
+            # Live grabs, matched under BOTH identities the title can carry - a
+            # grab started from the TMDB preview page keeps the tmdb identity even
+            # after the title lands in the library (same rule as the history view).
+            idents = [("library", str(library_id))]
+            if tmdb_id:
+                idents.append(("tmdb", str(tmdb_id)))
+            where = " OR ".join("(media_source=? AND media_id=?)" for _ in idents)
+            args = [v for pair in idents for v in pair]
+            for d in conn.execute(
+                    "SELECT status FROM video_downloads WHERE (" + where + ") "
+                    "AND status IN ('queued','downloading','importing')", args):
+                counts["queued" if d["status"] == "queued" else "downloading"] += 1
+            return out
+        except sqlite3.Error:
+            logger.exception("acquisition_state failed")
+            return out
+        finally:
+            conn.close()
+
     def clear_finished_video_downloads(self) -> int:
         conn = self._get_connection()
         try:

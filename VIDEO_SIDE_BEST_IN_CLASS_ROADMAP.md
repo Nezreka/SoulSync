@@ -55,11 +55,11 @@ This is the working checklist for making SoulSync's video side feel better than 
   - When a title has no TVDB or IMDb id, nothing on the page says so. Users find out when a search or a wishlist action quietly fails.
   - YouTube channels reuse the show shell well, but nothing stated the channel or playlist id the downloader actually keys on.
   - Owned/wanted, coverage percent, episode counts and format badges are already in the meta line. Anything added under the hero has to say something new or it just competes with the row above it.
-- [ ] Add an acquisition panel showing owned, wanted, queued, downloading, failed, and ignored states in one place.
+- [x] Add an acquisition panel showing owned, wanted, queued, downloading, failed and ignored in one place, above the history section: history says what happened, the panel says what is true. Counted over the unit you act on (a movie is one, a show is its episodes). Queued and downloading are a SUBSET of wanted and the panel says so, rather than printing totals that look like they add up. Commit: this phase.
 - [ ] Add per-title overrides for quality profile, preferred sources, release group allow/block, and pack preference.
 - [x] Show external ID health as a hero band: library id when it resolves, TMDB/TVDB/IMDb for movies and shows, channel or playlist id plus handle and download count for YouTube. Identity only, so it does not restate the meta line. Commit: `c78ff6ba5`.
 - [x] Deepen external ID health: a missing TMDB/TVDB/IMDb chip on a library title is now the button that opens the manage panel's match search for that service, and every YouTube episode row states its video id as a link out. Preview titles stay inert, since there is no library row to re-match. Commit: `932a20aad`.
-- [x] Add season-level actions. Grab season, manual search and wishlist season already existed but only appeared when episodes were missing; the bar now also carries a monitored/unmonitored toggle and a clear-failures reset, and shows on a complete season too, because a season you own in full is exactly the one you want to stop hunting. Clear-failures reuses the existing all-sources wishlist retry at season scope. Commit: this phase.
+- [x] Add season-level actions. Grab season, manual search and wishlist season already existed but only appeared when episodes were missing; the bar now also carries a monitored/unmonitored toggle and a clear-failures reset, and shows on a complete season too, because a season you own in full is exactly the one you want to stop hunting. Clear-failures reuses the existing all-sources wishlist retry at season scope. Commit: `283db7251`.
 
 ## Calendar
 

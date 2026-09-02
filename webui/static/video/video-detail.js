@@ -951,6 +951,54 @@
         failed: ['Failed', 'vd-hist-chip--bad'],
         cancelled: ['Cancelled', 'vd-hist-chip--mut'],
     };
+    // The six states, in the order you'd read them: what you have, what is
+    // being fetched, what is stuck, what nothing is chasing. queued/downloading
+    // are a SUBSET of wanted (a wished episode mid-grab is still wished), so
+    // they sit inside the wanted chip's own line rather than beside it.
+    var _ACQ_STATES = [
+        ['owned', 'Owned', 'vd-acq-chip--ok'],
+        ['wanted', 'Wanted', 'vd-acq-chip--want'],
+        ['queued', 'Queued', 'vd-acq-chip--live'],
+        ['downloading', 'Downloading', 'vd-acq-chip--live'],
+        ['failed', 'Failed', 'vd-acq-chip--bad'],
+        ['ignored', 'Ignored', 'vd-acq-chip--mut'],
+    ];
+    function acqPanelHtml(state) {
+        var c = (state && state.counts) || {};
+        var total = Number(state && state.total) || 0;
+        var shown = _ACQ_STATES.filter(function (s) { return (Number(c[s[0]]) || 0) > 0; });
+        // Nothing true is nothing to say. An empty strip of zeroes is noise.
+        if (!shown.length) return '';
+        var owned = Number(c.owned) || 0;
+        var bar = total > 0
+            ? '<div class="vd-acq-bar" title="' + owned + ' of ' + total + ' in library">' +
+                '<span class="vd-acq-bar-fill" style="width:' +
+                Math.round(owned / total * 100) + '%"></span></div>'
+            : '';
+        return '<div class="vd-acq-chips">' + shown.map(function (s) {
+            return '<span class="vd-acq-chip ' + s[2] + '">' +
+                '<span class="vd-acq-n">' + (Number(c[s[0]]) || 0) + '</span>' +
+                '<span class="vd-acq-k">' + esc(s[1]) + '</span></span>';
+        }).join('') + '</div>' + bar +
+        ((Number(c.queued) || 0) + (Number(c.downloading) || 0)
+            ? '<div class="vd-acq-note">Queued and downloading are part of wanted, not extra to it.</div>'
+            : '');
+    }
+
+    function loadAcquisition(kind, id) {
+        var section = q('[data-vd-acq-section]'), host = q('[data-vd-acq]');
+        if (!section || !host) return;
+        fetch('/api/video/detail/' + kind + '/' + id + '/acquisition',
+              { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var html = (d && d.success) ? acqPanelHtml(d) : '';
+                host.innerHTML = html;
+                section.hidden = !html;
+            })
+            .catch(function () { section.hidden = true; });
+    }
+
     function loadTitleHistory(kind, id) {
         var section = q('[data-vd-history-section]'), host = q('[data-vd-history]');
         if (!section || !host) return;
@@ -984,7 +1032,8 @@
         ['[data-vd-providers-section]', '[data-vd-similar-section]', '[data-vd-collection-section]',
          '[data-vd-next-ep]', '[data-vd-crew-line]', '[data-vd-season-overview]',
          '[data-vd-facts-section]', '[data-vd-videos-section]', '[data-vd-gallery-section]',
-         '[data-vd-review-section]', '[data-vd-cast-all]', '[data-vd-history-section]', '[data-vd-health]'].forEach(function (s) {
+         '[data-vd-review-section]', '[data-vd-cast-all]', '[data-vd-history-section]', '[data-vd-health]',
+         '[data-vd-acq-section]'].forEach(function (s) {
             var n = q(s); if (n) n.hidden = true;
         });
         // Clear any YouTube-channel playlists from the show DOM so they don't leak
@@ -1960,6 +2009,7 @@
                     maybeRefreshMovie(id);
                     loadExtras('movie', id);
                     loadTitleHistory('movie', id);    // acquisition history (P9)
+                    loadAcquisition('movie', id);        // ...and where it stands now
                     watchMovieDownload(id);           // live download progress chip (if any)
                 }
             })
@@ -2035,6 +2085,7 @@
                     maybeRefreshArt(id);
                     loadExtras('show', id);
                     loadTitleHistory('show', id);     // acquisition history (P9)
+                    loadAcquisition('show', id);        // ...and where it stands now
                 }
             })
             .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load show'); });

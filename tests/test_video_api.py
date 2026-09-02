@@ -1673,3 +1673,94 @@ def test_season_monitor_endpoint_rejects_bad_input(tmp_path):
                            json={"monitored": False}).status_code == 404
     finally:
         videoapi._video_db = None
+
+
+def test_acquisition_state_partitions_a_show_by_what_you_can_act_on(tmp_path):
+    """Owned / ignored / wanted / failed must not double-count, and 'ignored' must
+    not hide inside 'wanted': an unmonitored episode is one nothing is hunting,
+    which is the opposite of wanted."""
+    client, videoapi = _make_client(tmp_path)
+    try:
+        db = videoapi._video_db
+        sid = db.upsert_show_tree("plex", {
+            "server_id": "s1", "title": "Show", "tmdb_id": 1396, "seasons": [
+                {"season_number": 1, "server_id": "se1", "episodes": [
+                    {"episode_number": 1, "title": "E1", "server_id": "ep1",
+                     "file": {"relative_path": "e1.mkv", "size_bytes": 10}},
+                    {"episode_number": 2, "title": "E2", "server_id": "ep2"},
+                    {"episode_number": 3, "title": "E3", "server_id": "ep3"},
+                    {"episode_number": 4, "title": "E4", "server_id": "ep4"}]}]})
+        # E4 is deliberately not hunted.
+        with db.connect() as c:
+            c.execute("UPDATE episodes SET monitored=0 WHERE show_id=? AND episode_number=4", (sid,))
+            c.execute("INSERT INTO video_wishlist (kind, tmdb_id, title, season_number, "
+                      "episode_number, status) VALUES ('episode', 1396, 'Show', 1, 2, 'wanted')")
+            c.execute("INSERT INTO video_wishlist (kind, tmdb_id, title, season_number, "
+                      "episode_number, status) VALUES ('episode', 1396, 'Show', 1, 3, 'failed')")
+            c.commit()
+
+        body = client.get("/api/video/detail/show/%d/acquisition" % sid).get_json()
+        assert body["total"] == 4
+        assert body["counts"] == {"owned": 1, "wanted": 1, "queued": 0,
+                                  "downloading": 0, "failed": 1, "ignored": 1}
+    finally:
+        videoapi._video_db = None
+
+
+def test_acquisition_state_counts_live_grabs_under_both_identities(tmp_path):
+    """A grab started from the TMDB preview keeps the tmdb identity after the title
+    lands in the library, so scoping by library id alone loses it."""
+    client, videoapi = _make_client(tmp_path)
+    try:
+        db = videoapi._video_db
+        sid = db.upsert_show_tree("plex", {
+            "server_id": "s1", "title": "Show", "tmdb_id": 1396, "seasons": [
+                {"season_number": 1, "server_id": "se1", "episodes": [
+                    {"episode_number": 1, "title": "E1", "server_id": "ep1"}]}]})
+        with db.connect() as c:
+            c.execute("INSERT INTO video_downloads (kind, media_source, media_id, status) "
+                      "VALUES ('show', 'library', ?, 'queued')", (str(sid),))
+            c.execute("INSERT INTO video_downloads (kind, media_source, media_id, status) "
+                      "VALUES ('show', 'tmdb', '1396', 'downloading')")
+            # 'importing' is still in flight, not finished.
+            c.execute("INSERT INTO video_downloads (kind, media_source, media_id, status) "
+                      "VALUES ('show', 'tmdb', '1396', 'importing')")
+            # ...but a finished one must not be counted as in-flight.
+            c.execute("INSERT INTO video_downloads (kind, media_source, media_id, status) "
+                      "VALUES ('show', 'tmdb', '1396', 'completed')")
+            # ...and another title's grab must not leak in.
+            c.execute("INSERT INTO video_downloads (kind, media_source, media_id, status) "
+                      "VALUES ('show', 'tmdb', '9999', 'downloading')")
+            c.commit()
+
+        counts = client.get("/api/video/detail/show/%d/acquisition" % sid).get_json()["counts"]
+        assert counts["queued"] == 1
+        assert counts["downloading"] == 2, "downloading + importing are both in flight"
+    finally:
+        videoapi._video_db = None
+
+
+def test_acquisition_state_for_a_movie_is_one_unit(tmp_path):
+    client, videoapi = _make_client(tmp_path)
+    try:
+        db = videoapi._video_db
+        mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Film", "tmdb_id": 27205})
+        assert client.get("/api/video/detail/movie/%d/acquisition" % mid
+                          ).get_json()["counts"]["owned"] == 0
+        with db.connect() as c:
+            c.execute("UPDATE movies SET monitored=0 WHERE id=?", (mid,))
+            c.commit()
+        body = client.get("/api/video/detail/movie/%d/acquisition" % mid).get_json()
+        assert body["total"] == 1
+        assert body["counts"]["ignored"] == 1 and body["counts"]["wanted"] == 0
+    finally:
+        videoapi._video_db = None
+
+
+def test_acquisition_endpoint_rejects_bad_targets(tmp_path):
+    client, videoapi = _make_client(tmp_path)
+    try:
+        assert client.get("/api/video/detail/bogus/1/acquisition").status_code == 400
+        assert client.get("/api/video/detail/show/999999/acquisition").status_code == 404
+    finally:
+        videoapi._video_db = None

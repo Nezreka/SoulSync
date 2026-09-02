@@ -28,6 +28,21 @@ def register_routes(bp):
             return jsonify({"error": "not found"}), 404
         return jsonify({"success": True, "monitored": bool(body.get("monitored"))})
 
+    @bp.route("/detail/<kind>/<int:item_id>/acquisition", methods=["GET"])
+    def video_title_acquisition(kind, item_id):
+        """This title's CURRENT acquisition state in one roll-up - owned, wanted,
+        queued, downloading, failed, ignored. The history endpoint above says what
+        already happened; this says where things stand."""
+        from . import get_video_db
+        if kind not in ("movie", "show"):
+            return jsonify({"error": "bad kind"}), 400
+        db = get_video_db()
+        detail = db.movie_detail(item_id) if kind == "movie" else db.show_detail(item_id)
+        if not detail:
+            return jsonify({"error": "not found"}), 404
+        state = db.acquisition_state(kind, item_id, tmdb_id=detail.get("tmdb_id"))
+        return jsonify({"success": True, **state})
+
     @bp.route("/detail/show/<int:library_id>/season/<int:season_number>/monitor",
               methods=["POST"])
     def video_set_season_monitor(library_id, season_number):
