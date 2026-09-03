@@ -113,10 +113,36 @@ def sweep() -> Dict[str, Any]:
             _running = False
 
 
+def _status(ref: str):
+    """The client's word on one torrent, as ``(status, answered)``.
+
+    ``answered`` is False when the CLIENT never answered: no client configured,
+    a refused connection, a timeout, bad credentials. That is emphatically NOT
+    "the torrent is gone", and the difference decides whether a row is marked
+    ``seed_released`` — which is terminal, the awaiting query filters released
+    rows out for good.
+
+    Going through ``client_download._get_status`` collapsed both cases into
+    None, so a qBittorrent that was merely down would silently abandon seed
+    management for every row this sweep touched, forever. The music sweep has
+    guarded exactly this since it shipped; this side had not.
+    """
+    from core.torrent_clients import get_active_adapter
+    from utils.async_helpers import run_async
+    adapter = get_active_adapter()
+    if adapter is None:
+        return None, False
+    try:
+        return run_async(adapter.get_status(ref)), True
+    except Exception:   # noqa: BLE001 - client hiccup: keep managing, retry next sweep
+        logger.debug("seeding: status poll failed for %s, retrying next sweep",
+                     ref[:8], exc_info=True)
+        return None, False
+
+
 def _sweep_inner() -> Dict[str, Any]:
     from api.video import get_video_db
     from core.video import download_config
-    from core.video.client_download import _get_status
     db = get_video_db()
     cfg = download_config.load(db)
     # a user who set rules on one tracker and left the globals blank still
@@ -169,7 +195,12 @@ def _sweep_inner() -> Dict[str, Any]:
             continue
         polled += 1
 
-        status = _get_status("torrent", ref)
+        status, answered = _status(ref)
+        if not answered:
+            # the client did not answer. leave the row exactly as it is and
+            # try again next sweep — never read silence as "it's gone".
+            seeding += 1
+            continue
         if status is None:
             # client forgot it (user removed by hand, or a restart lost it) —
             # nothing left to manage
