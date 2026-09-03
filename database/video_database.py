@@ -301,6 +301,14 @@ _COLUMN_MIGRATIONS = [
     # NULL or empty means "follow the global config", which is the only safe
     # reading of an unset override — an empty allow-list that FILTERED would
     # stop the title being grabbed by anything.
+    # Manual alternative titles — the arr answer to a release the scene names
+    # differently. Radarr and Sonarr both let you add one by hand; TMDB's alias
+    # list covers most shows ("Big Brother US" comes straight from it) and simply
+    # has nothing for others ("Password (2022)" returns an empty list), which is a
+    # DATA gap, not a matching-logic one. Guessing at it by stripping brackets
+    # collides two real shows; being told the name once does not.
+    ("movies", "manual_aliases", "TEXT"),
+    ("shows", "manual_aliases", "TEXT"),
     ("movies", "preferred_sources", "TEXT"),
     ("movies", "release_group_allow", "TEXT"),
     ("movies", "release_group_block", "TEXT"),
@@ -6973,7 +6981,8 @@ class VideoDatabase:
             conn.close()
 
     # ── per-title acquisition overrides (P2) ─────────────────────────────────
-    _OVERRIDE_LISTS = ("preferred_sources", "release_group_allow", "release_group_block")
+    _OVERRIDE_LISTS = ("preferred_sources", "release_group_allow", "release_group_block",
+                       "manual_aliases")
     _PACK_PREFS = ("auto", "prefer", "never")
 
     @staticmethod

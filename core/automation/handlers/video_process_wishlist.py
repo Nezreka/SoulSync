@@ -379,9 +379,17 @@ def season_pack_requests(items: List[Dict[str, Any]], active: Iterable,
 
 
 def _acceptable_titles(primary: Any, kind: str, tmdb_id: Any) -> List[str]:
-    """[primary title, *TMDB alternative titles] — deduped, primary first. The alias
+    """[primary title, *TMDB aliases, *your own] — deduped, primary first. The alias
     set the release-title gate matches against (so a release named by a known aka still
-    matches). Best-effort: just the primary when TMDB is unavailable."""
+    matches). Best-effort: just the primary when TMDB is unavailable.
+
+    Manual aliases are the arr answer to the case TMDB does not cover. Its list
+    carries "Big Brother US" for "Big Brother (US)" and nothing at all for
+    "Password (2022)" — a DATA gap, not a matching-logic one. Radarr and Sonarr
+    both let you add the missing name by hand rather than inferring it, and the
+    reason is exactly what inference costs here: stripping a title's bracket
+    collides "Avatar: The Last Airbender (2024)" with the 2005 series.
+    """
     aliases: List[str] = []
     if tmdb_id:
         try:
@@ -389,6 +397,12 @@ def _acceptable_titles(primary: Any, kind: str, tmdb_id: Any) -> List[str]:
             aliases = get_video_enrichment_engine().alt_titles_for(kind, tmdb_id) or []
         except Exception:   # noqa: BLE001 - a matching assist must never break a grab
             aliases = []
+    try:
+        from api.video import get_video_db
+        aliases = list(aliases) + list(
+            get_video_db().title_overrides_for(kind, tmdb_id=tmdb_id).get("manual_aliases") or [])
+    except Exception:   # noqa: BLE001 - same: an assist never blocks a grab
+        logger.debug("manual aliases unavailable for %s %s", kind, tmdb_id, exc_info=True)
     out, seen = [], set()
     for t in [primary, *aliases]:
         t = str(t or "").strip()

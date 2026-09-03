@@ -229,6 +229,10 @@
                 '<div class="vmg-toggle' + (d.monitored ? ' vmg-toggle--on' : '') + '" data-vmg-monitored role="switch" ' +
                     'aria-checked="' + (d.monitored ? 'true' : 'false') + '" tabindex="0"><span>Monitored</span><span class="vmg-sw"></span></div>' +
             '</div>' +
+            // Everything below is about ACQUISITION, not metadata. These two sat
+            // at the tail of "Artwork & state" with no heading, so a section about
+            // posters and watched-state appeared to own the quality ladder.
+            '<div class="vmg-sect">Acquisition</div>' +
             // Per-title quality profile (arr-parity P2): which ladder/cutoff this
             // title is grabbed + upgraded under. Options fill in async.
             '<div class="vmg-field"><label>Quality profile</label>' +
@@ -247,6 +251,18 @@
                             '</option>';
                     }).join('') + '</select></div>'
                 : '') +
+            // Manual alternative titles — the arr answer to a scene name TMDB does
+            // not know. Its alias list already carries "Big Brother US" for
+            // "Big Brother (US)"; it has nothing at all for "Password (2022)", and
+            // that show could never match a release. Being told the name once beats
+            // inferring it: stripping the bracket collides "Avatar: The Last
+            // Airbender (2024)" with the 2005 series. It WIDENS what matches, so it
+            // sits with the quality ladder rather than under the narrowing overrides.
+            '<div class="vmg-field"><label>Also known as</label>' +
+                inputHtml2('aliases', (d.manual_aliases || []).join(', '),
+                           'names the scene uses, comma separated') +
+                '<div class="vmg-hint">TMDB\u2019s own aliases are already matched. Add one here ' +
+                'only when a release is named something TMDB does not list.</div></div>' +
             // Per-title acquisition overrides (arr-parity P2). Empty everywhere
             // means "follow the global config" — an override only exists when the
             // user deliberately narrowed this one title.
@@ -329,6 +345,7 @@
             preferred_sources: srcs,
             release_group_allow: parseList(get('rg-allow')),
             release_group_block: parseList(get('rg-block')),
+            manual_aliases: parseList(get('aliases')),
             pack_preference: pack ? pack.value : 'auto',
         };
     }
@@ -341,7 +358,9 @@
             body: JSON.stringify(body) })
             .then(function (r) {
                 if (!r.ok) throw new Error();
-                toast('Acquisition overrides saved', 'success');
+                // The alias set is read on the NEXT search, not retroactively —
+                // saying so stops "I added it and nothing happened".
+                toast('Saved \u2014 applies from the next search', 'success');
             })
             .catch(function () { toast('Couldn\u2019t save the overrides', 'error'); });
     }

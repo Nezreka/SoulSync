@@ -1780,7 +1780,7 @@ def test_title_overrides_round_trip_and_default_to_following_global(tmp_path):
         # Untouched title: everything empty, packs on auto.
         assert db.title_overrides("show", sid) == {
             "preferred_sources": [], "release_group_allow": [],
-            "release_group_block": [], "pack_preference": "auto"}
+            "release_group_block": [], "manual_aliases": [], "pack_preference": "auto"}
 
         r = client.put("/api/video/detail/show/%d/overrides" % sid, json={
             "preferred_sources": ["torrent", "usenet"],
@@ -1789,7 +1789,7 @@ def test_title_overrides_round_trip_and_default_to_following_global(tmp_path):
         assert r.status_code == 200
         assert db.title_overrides("show", sid) == {
             "preferred_sources": ["torrent", "usenet"], "release_group_allow": ["NTb"],
-            "release_group_block": ["YIFY"], "pack_preference": "never"}
+            "release_group_block": ["YIFY"], "manual_aliases": [], "pack_preference": "never"}
         # ...and the detail payload carries them, so the panel opens populated.
         assert db.show_detail(sid)["release_group_block"] == ["YIFY"]
 
@@ -1865,5 +1865,61 @@ def test_engine_lookup_resolves_a_title_by_tmdb_id(tmp_path):
         assert db.title_overrides_for("show", library_id=sid)["release_group_block"] == ["YIFY"]
         # An unknown title follows the global config.
         assert db.title_overrides_for("show", tmdb_id=999999)["release_group_block"] == []
+    finally:
+        videoapi._video_db = None
+
+
+def test_a_manual_alias_reaches_the_release_matcher(tmp_path, monkeypatch):
+    """The arr answer to a name TMDB does not know.
+
+    TMDB's alias list already carries "Big Brother US" for "Big Brother (US)" —
+    that path works. It returns [] for "Password (2022)", so that show could
+    never match a release, and the fix is to be TOLD the name rather than to
+    infer it: stripping a title's bracket collides "Avatar: The Last Airbender
+    (2024)" with the 2005 series on 85 of Boulder's titles.
+    """
+    import api.video as videoapi
+    from database.video_database import VideoDatabase
+    videoapi._video_db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    try:
+        db = videoapi._video_db
+        sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "Password (2022)",
+                                           "tmdb_id": 203254})
+        # No TMDB aliases for this one, which is the whole point.
+        import core.video.enrichment.engine as eng_mod
+        monkeypatch.setattr(eng_mod, "get_video_enrichment_engine",
+                            lambda: type("E", (), {"alt_titles_for": lambda *a, **k: []})())
+
+        from core.automation.handlers.video_process_wishlist import _acceptable_titles
+        assert _acceptable_titles("Password (2022)", "show", 203254) == ["Password (2022)"]
+
+        db.set_title_overrides("show", sid, manual_aliases=["Password"])
+        got = _acceptable_titles("Password (2022)", "show", 203254)
+        assert got == ["Password (2022)", "Password"], "primary stays first"
+
+        # ...and the gate now takes the release the scene actually ships.
+        from core.video.release_parse import titles_match
+        assert titles_match("Password 2022 S03E14 1080p WEB h264-EDITH", got) is True
+        # ...while an unrelated show is still refused.
+        assert titles_match("Jeopardy S40E01 1080p", got) is False
+    finally:
+        videoapi._video_db = None
+
+
+def test_a_broken_alias_lookup_never_blocks_a_grab(tmp_path, monkeypatch):
+    """An alias set is an assist. If reading it fails the title still gets
+    hunted under its primary name."""
+    import api.video as videoapi
+    from database.video_database import VideoDatabase
+    videoapi._video_db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    try:
+        import core.video.enrichment.engine as eng_mod
+        monkeypatch.setattr(eng_mod, "get_video_enrichment_engine",
+                            lambda: type("E", (), {"alt_titles_for": lambda *a, **k: []})())
+        import api.video as v
+        monkeypatch.setattr(v, "get_video_db",
+                            lambda: (_ for _ in ()).throw(RuntimeError("db gone")))
+        from core.automation.handlers.video_process_wishlist import _acceptable_titles
+        assert _acceptable_titles("Password (2022)", "show", 203254) == ["Password (2022)"]
     finally:
         videoapi._video_db = None

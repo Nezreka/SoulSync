@@ -41,7 +41,8 @@ def register_routes(bp):
             return jsonify({"success": False, "error": "kind must be movie|show"}), 400
         body = request.get_json(silent=True) or {}
         fields = {}
-        for key in ("preferred_sources", "release_group_allow", "release_group_block"):
+        for key in ("preferred_sources", "release_group_allow", "release_group_block",
+                    "manual_aliases"):
             if key in body:
                 if not isinstance(body[key], list):
                     return jsonify({"success": False, "error": "%s must be a list" % key}), 400
