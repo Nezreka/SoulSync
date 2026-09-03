@@ -330,6 +330,36 @@ class SoulseekClient(DownloadSourcePlugin):
                 except Exception as _e:
                     logger.debug("aiohttp direct session close: %s", _e)
 
+    def _normalize_search_responses(self, responses_data: Any) -> List[Dict[str, Any]]:
+        """Return slskd search responses from the payload shapes seen across versions."""
+        if isinstance(responses_data, list):
+            return [item for item in responses_data if isinstance(item, dict)]
+
+        if not isinstance(responses_data, dict):
+            return []
+
+        for key in ('responses', 'results', 'items', 'data'):
+            value = responses_data.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+
+        if isinstance(responses_data.get('files'), list):
+            return [responses_data]
+
+        return []
+
+    def _search_response_key(self, response_data: Dict[str, Any]) -> tuple:
+        username = response_data.get('username', '')
+        files = response_data.get('files') or response_data.get('fileList') or []
+        file_keys = []
+        for file_data in files:
+            if not isinstance(file_data, dict):
+                continue
+            filename = file_data.get('filename') or file_data.get('fileName') or file_data.get('path') or ''
+            size = file_data.get('size', 0)
+            file_keys.append((filename, size))
+        return username, tuple(file_keys)
+
     def _process_search_responses(self, responses_data: List[Dict[str, Any]]) -> tuple[List[TrackResult], List[AlbumResult]]:
         """Process search response data into TrackResult and AlbumResult objects"""
         from collections import defaultdict
@@ -345,11 +375,14 @@ class SoulseekClient(DownloadSourcePlugin):
         
         for response_data in responses_data:
             username = response_data.get('username', '')
-            files = response_data.get('files', [])
+            files = response_data.get('files') or response_data.get('fileList') or []
             
             
             for file_data in files:
-                filename = file_data.get('filename', '')
+                if not isinstance(file_data, dict):
+                    continue
+
+                filename = file_data.get('filename') or file_data.get('fileName') or file_data.get('path') or ''
                 size = file_data.get('size', 0)
                 
                 file_ext = Path(filename).suffix.lower().lstrip('.')
@@ -602,6 +635,7 @@ class SoulseekClient(DownloadSourcePlugin):
 
             # Poll for results - process and emit results immediately when found
             all_responses = []
+            seen_response_keys = set()
             all_tracks = []
             all_albums = []
             poll_interval = 1  # Check every 1 second for responsive updates
@@ -624,13 +658,19 @@ class SoulseekClient(DownloadSourcePlugin):
                 
                 # Get current search responses
                 responses_data = await self._make_request('GET', f'searches/{search_id}/responses')
-                if responses_data and isinstance(responses_data, list):
-                    # Check if we got new responses
-                    new_response_count = len(responses_data) - len(all_responses)
-                    if new_response_count > 0:
-                        # Process only the new responses
-                        new_responses = responses_data[len(all_responses):]
-                        all_responses = responses_data
+                responses = self._normalize_search_responses(responses_data)
+                if responses:
+                    new_responses = []
+                    for response_data in responses:
+                        response_key = self._search_response_key(response_data)
+                        if response_key in seen_response_keys:
+                            continue
+                        seen_response_keys.add(response_key)
+                        new_responses.append(response_data)
+
+                    if new_responses:
+                        all_responses.extend(new_responses)
+                        new_response_count = len(new_responses)
                         
                         logger.info(f"Found {new_response_count} new responses ({len(all_responses)} total) at {poll_count * poll_interval:.1f}s")
                         
@@ -662,6 +702,8 @@ class SoulseekClient(DownloadSourcePlugin):
                         logger.debug(f"No new responses, total still: {len(all_responses)}")
                     else:
                         logger.debug(f"Still waiting for responses... ({poll_count * poll_interval:.1f}s elapsed)")
+                else:
+                    logger.debug(f"Still waiting for responses... ({poll_count * poll_interval:.1f}s elapsed)")
                 
                 # Wait before next poll (unless this is the last attempt)
                 if poll_count < max_polls - 1:
