@@ -1484,8 +1484,8 @@ async function loadSettingsData() {
         if (typeof syncAcoustidRequireVerifiedVisibility === 'function') syncAcoustidRequireVerifiedVisibility();
 
         // Populate Last.fm settings
-        const _bitId = document.getElementById('concerts-bandsintown-app-id');
-        if (_bitId) _bitId.value = settings.concerts?.bandsintown_app_id || '';
+        const _tmKey = document.getElementById('concerts-ticketmaster-api-key');
+        if (_tmKey) _tmKey.value = settings.concerts?.ticketmaster_api_key || '';
         const _slfmKey = document.getElementById('concerts-setlistfm-api-key');
         if (_slfmKey) _slfmKey.value = settings.concerts?.setlistfm_api_key || '';
         document.getElementById('lastfm-api-key').value = settings.lastfm?.api_key || '';
@@ -4517,7 +4517,7 @@ async function saveSettings(quiet = false) {
             require_verified: document.getElementById('acoustid-require-verified')?.checked === true
         },
         concerts: {
-            bandsintown_app_id: document.getElementById('concerts-bandsintown-app-id')?.value?.trim() || '',
+            ticketmaster_api_key: document.getElementById('concerts-ticketmaster-api-key')?.value?.trim() || '',
             setlistfm_api_key: document.getElementById('concerts-setlistfm-api-key')?.value?.trim() || ''
         },
         lastfm: {

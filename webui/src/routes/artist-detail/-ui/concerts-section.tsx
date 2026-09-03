@@ -10,7 +10,7 @@ import {
  * What this artist is playing, and what they actually played.
  *
  * Two providers answering two different questions:
- *   Bandsintown — upcoming dates, venue, tickets. Nothing historical.
+ *   Ticketmaster — upcoming dates, venue, tickets. Nothing historical.
  *   Setlist.fm  — the songs from a past show, in order. This is the half that
  *                 connects to a music library, because a setlist is a playlist
  *                 somebody already made and tested on a live audience.

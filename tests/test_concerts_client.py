@@ -1,7 +1,7 @@
 """Concerts on the artist page: upcoming dates and what they actually played.
 
 Two providers because they answer two different questions and neither answers
-the other's. Bandsintown knows they are playing Berlin on the 14th; Setlist.fm
+the other's. Ticketmaster knows they are playing Berlin on the 14th; Setlist.fm
 knows what they played in Berlin last month, song by song - which is the half
 that connects to a music library, since those song names can become a playlist.
 
@@ -30,7 +30,7 @@ def _clean_cache():
 @pytest.fixture()
 def keys(monkeypatch):
     """Configure either/both providers."""
-    state = {"concerts.setlistfm_api_key": "", "concerts.bandsintown_app_id": ""}
+    state = {"concerts.setlistfm_api_key": "", "concerts.ticketmaster_api_key": ""}
     monkeypatch.setattr(cc, "_cfg", lambda path, default="": state.get(path, default))
     return state
 
@@ -131,41 +131,102 @@ def test_setlistfm_is_not_called_at_all_without_a_key(keys, monkeypatch):
     assert calls == []
 
 
-# ── Bandsintown ──────────────────────────────────────────────────────────────
-BIT_PAYLOAD = [{
-    "id": "1", "datetime": "2026-09-14T20:00:00", "title": "",
-    "venue": {"name": "Berghain", "city": "Berlin", "region": "", "country": "Germany"},
-    "url": "https://bandsintown.com/e/1",
-    "offers": [{"type": "Tickets", "url": "https://tix.example/1"}],
-    "lineup": ["Aphex Twin"],
-}]
+# ── Ticketmaster ─────────────────────────────────────────────────────────────
+def _tm_event(artist="Aphex Twin", venue="Berghain", city="Berlin",
+              ident="1", dt="2026-09-14T20:00:00Z", local="2026-09-14"):
+    start = {"localDate": local}
+    if dt:
+        start["dateTime"] = dt
+    return {
+        "id": ident, "name": f"{artist} live", "url": "https://ticketmaster.com/e/1",
+        "dates": {"start": start},
+        "_embedded": {
+            "venues": [{"name": venue, "city": {"name": city},
+                        "state": {"name": ""}, "country": {"name": "Germany"}}],
+            "attractions": [{"name": artist}],
+        },
+    }
+
+
+def _tm_payload(*events):
+    return {"_embedded": {"events": list(events)}}
 
 
 def test_upcoming_dates_carry_the_venue_and_a_ticket_link(keys, monkeypatch):
-    keys["concerts.bandsintown_app_id"] = "app"
-    _get(monkeypatch, lambda url, **kw: _resp(200, BIT_PAYLOAD))
+    keys["concerts.ticketmaster_api_key"] = "app"
+    _get(monkeypatch, lambda url, **kw: _resp(200, _tm_payload(_tm_event())))
 
-    ev = cc.bandsintown_upcoming("Aphex Twin")["events"][0]
+    ev = cc.ticketmaster_upcoming("Aphex Twin")["events"][0]
     assert ev["venue"] == "Berghain" and ev["city"] == "Berlin"
-    assert ev["tickets_url"] == "https://tix.example/1"
+    assert ev["tickets_url"] == "https://ticketmaster.com/e/1"
 
 
-def test_the_artist_name_is_escaped_into_the_path(keys, monkeypatch):
-    """The name goes in the PATH. A slash in a band name would otherwise change
-    the route rather than the artist."""
-    keys["concerts.bandsintown_app_id"] = "app"
-    calls = _get(monkeypatch, lambda url, **kw: _resp(200, []))
-    cc.bandsintown_upcoming("AC/DC")
-    assert "AC%2FDC" in calls[0]["url"]
-    assert "/AC/DC/" not in calls[0]["url"]
+def test_only_events_whose_ATTRACTION_is_the_artist_count(keys, monkeypatch):
+    """Discovery search is keyword based and generous with it. A search for the
+    artist returns tribute acts and festivals that merely mention them, and an
+    attraction is Ticketmaster's real artist entity."""
+    keys["concerts.ticketmaster_api_key"] = "app"
+    _get(monkeypatch, lambda url, **kw: _resp(200, _tm_payload(
+        _tm_event(artist="Aphex Twin", ident="real"),
+        _tm_event(artist="Aphex Twin Tribute Band", ident="tribute"),
+        _tm_event(artist="Some Festival", ident="festival"),
+    )))
+
+    got = cc.ticketmaster_upcoming("Aphex Twin")["events"]
+    assert [e["id"] for e in got] == ["real"]
+
+
+def test_the_event_name_alone_never_qualifies_an_event(keys, monkeypatch):
+    """"An Evening of Aphex Twin Covers" contains the name and is not them."""
+    keys["concerts.ticketmaster_api_key"] = "app"
+    ev = _tm_event(artist="Covers Collective", ident="covers")
+    ev["name"] = "An Evening of Aphex Twin Covers"
+    _get(monkeypatch, lambda url, **kw: _resp(200, _tm_payload(ev)))
+    assert cc.ticketmaster_upcoming("Aphex Twin")["events"] == []
+
+
+def test_matching_ignores_case_accents_and_punctuation(keys, monkeypatch):
+    keys["concerts.ticketmaster_api_key"] = "app"
+    _get(monkeypatch, lambda url, **kw: _resp(200, _tm_payload(
+        _tm_event(artist="BEYONCE", ident="a"))))
+    assert cc.ticketmaster_upcoming("Beyonc\u00e9")["events"][0]["id"] == "a"
+
+    cc.clear_cache()
+    _get(monkeypatch, lambda url, **kw: _resp(200, _tm_payload(
+        _tm_event(artist="Motley Crue", ident="b"))))
+    assert cc.ticketmaster_upcoming("M\u00f6tley Cr\u00fce")["events"][0]["id"] == "b"
+
+
+def test_a_date_with_no_announced_time_still_shows(keys, monkeypatch):
+    """dateTime is absent until a time is announced; localDate is not. A row
+    with a date beats no row at all."""
+    keys["concerts.ticketmaster_api_key"] = "app"
+    _get(monkeypatch, lambda url, **kw: _resp(200, _tm_payload(
+        _tm_event(dt=None, local="2026-11-02"))))
+    assert cc.ticketmaster_upcoming("Aphex Twin")["events"][0]["datetime"] == "2026-11-02"
+
+
+def test_it_over_fetches_because_the_filter_discards_most_of_a_keyword_search(keys, monkeypatch):
+    keys["concerts.ticketmaster_api_key"] = "app"
+    calls = _get(monkeypatch, lambda url, **kw: _resp(200, _tm_payload()))
+    cc.ticketmaster_upcoming("Aphex Twin", limit=10)
+    assert calls[0]["params"]["size"] > 10
+    assert calls[0]["params"]["classificationName"] == "music"
+
+
+@pytest.mark.parametrize("status,phrase", [(401, "API key"), (429, "rate limiting")])
+def test_ticketmaster_says_which_failure_it_hit(keys, monkeypatch, status, phrase):
+    keys["concerts.ticketmaster_api_key"] = "app"
+    _get(monkeypatch, lambda url, **kw: _resp(status, None))
+    assert phrase in cc.ticketmaster_upcoming("X")["error"]
 
 
 def test_an_unknown_artist_comes_back_as_no_events(keys, monkeypatch):
-    """Bandsintown answers with {} or a warning string rather than [] for an
-    artist it does not know."""
-    keys["concerts.bandsintown_app_id"] = "app"
-    _get(monkeypatch, lambda url, **kw: _resp(200, {"warn": "not found"}))
-    assert cc.bandsintown_upcoming("Nobody")["events"] == []
+    """Discovery answers with no _embedded block at all rather than an empty
+    list when nothing matched."""
+    keys["concerts.ticketmaster_api_key"] = "app"
+    _get(monkeypatch, lambda url, **kw: _resp(200, {"page": {"totalElements": 0}}))
+    assert cc.ticketmaster_upcoming("Nobody")["events"] == []
 
 
 # ── caching ──────────────────────────────────────────────────────────────────
@@ -198,29 +259,29 @@ def test_clearing_the_cache_lets_a_corrected_key_through(keys, monkeypatch):
 
 # ── the combined call ────────────────────────────────────────────────────────
 def test_one_provider_being_unconfigured_never_blanks_the_other(keys, monkeypatch):
-    keys["concerts.setlistfm_api_key"] = "k"      # bandsintown left unset
+    keys["concerts.setlistfm_api_key"] = "k"      # ticketmaster left unset
     _get(monkeypatch, lambda url, **kw: _resp(200, SETLIST_PAYLOAD))
 
     out = cc.artist_concerts("Aphex Twin")
     assert out["setlists"], "the configured provider produced nothing"
     assert out["upcoming"] == []
-    assert out["providers"]["bandsintown"]["configured"] is False
+    assert out["providers"]["ticketmaster"]["configured"] is False
     assert out["providers"]["setlistfm"]["configured"] is True
 
 
 def test_one_provider_failing_never_blanks_the_other(keys, monkeypatch):
     keys["concerts.setlistfm_api_key"] = "k"
-    keys["concerts.bandsintown_app_id"] = "app"
+    keys["concerts.ticketmaster_api_key"] = "app"
 
     def handler(url, **kw):
-        if "bandsintown" in url:
-            raise RuntimeError("bandsintown down")
+        if "ticketmaster" in url:
+            raise RuntimeError("ticketmaster down")
         return _resp(200, SETLIST_PAYLOAD)
 
     _get(monkeypatch, handler)
     out = cc.artist_concerts("Aphex Twin")
     assert out["setlists"], "a dead provider took the working one with it"
-    assert "error" in out["providers"]["bandsintown"]
+    assert "error" in out["providers"]["ticketmaster"]
 
 
 def test_neither_configured_is_a_clean_empty_answer(keys, monkeypatch):

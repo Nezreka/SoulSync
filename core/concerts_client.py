@@ -3,18 +3,25 @@
 Two providers, because they answer two different questions and neither answers
 the other's:
 
-  Bandsintown  — "they are playing near you on the 14th". Upcoming tour dates,
+  Ticketmaster — "they are playing near you on the 14th". Upcoming dates,
                  venue, city, ticket link. Useless for anything historical.
   Setlist.fm   — "here is the set they played in Berlin last month". Song by
                  song, which is the half that connects to a music library:
                  those song names can become a playlist.
 
+Bandsintown was the obvious pick for the first half and had to be dropped: its
+own docs say API access "is available for organizations ... through our
+partnership program", and the self-service key is "linked to a single artist" -
+for an artist maintaining their own listings, not for looking anybody else up.
+Nobody self-hosting this can get a usable key. Ticketmaster's Discovery API
+self-registers with a 5000/day free tier, which an individual actually can.
+
 Both are treated as OPTIONAL and independent. One being unconfigured or down
 must never blank the other, because most people will only ever set up one.
 
-Rate limits are real on both (Setlist.fm asks for a modest cadence, Bandsintown
-gates on an app id), so every answer is cached. Concert data does not move fast:
-a tour announcement is news over days, not seconds.
+Rate limits are real on both (Setlist.fm asks for a modest cadence, Ticketmaster
+allows 5000 calls a day and 5 a second), so every answer is cached. Concert data
+does not move fast: a tour announcement is news over days, not seconds.
 """
 
 from __future__ import annotations
@@ -30,7 +37,7 @@ from utils.logging_config import get_logger
 logger = get_logger("concerts")
 
 SETLISTFM_API = "https://api.setlist.fm/rest/1.0"
-BANDSINTOWN_API = "https://rest.bandsintown.com"
+TICKETMASTER_API = "https://app.ticketmaster.com/discovery/v2"
 
 # Long on purpose. Tour dates and past setlists are not live data, and both
 # providers would rather we asked seldom. A user who just added a key does not
@@ -183,67 +190,108 @@ def setlistfm_recent(artist_name: str, *, mbid: str = "", limit: int = 5,
     return _store(cache_key, {"configured": True, "setlists": out})
 
 
-# ── Bandsintown ──────────────────────────────────────────────────────────────
+# ── Ticketmaster ─────────────────────────────────────────────────────────────
 
-def bandsintown_configured() -> bool:
-    return bool(_cfg("concerts.bandsintown_app_id"))
+def ticketmaster_configured() -> bool:
+    return bool(_cfg("concerts.ticketmaster_api_key"))
 
 
-def bandsintown_upcoming(artist_name: str, *, limit: int = 10,
-                         timeout: int = 12) -> Dict[str, Any]:
+def _norm(name: Any) -> str:
+    """Loose compare key for artist names: case, accents and punctuation off."""
+    import re
+    import unicodedata
+    raw = unicodedata.normalize("NFKD", str(name or ""))
+    raw = "".join(c for c in raw if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9]+", "", raw.lower())
+
+
+def _event_is_for_artist(event: Dict[str, Any], artist: str) -> bool:
+    """Discovery search is keyword-based and generous with it.
+
+    A search for "Air" comes back with tribute acts, festivals that merely list
+    the artist, and unrelated events whose blurb happens to contain the word. So
+    an event only counts when one of its ATTRACTIONS is the artist - the
+    attraction is Ticketmaster's actual artist entity. Falling back to the event
+    NAME is deliberately not done: "An Evening of Air Covers" would pass.
+    """
+    want = _norm(artist)
+    if not want:
+        return False
+    attractions = ((event.get("_embedded") or {}).get("attractions")) or []
+    return any(_norm(a.get("name")) == want for a in attractions)
+
+
+def ticketmaster_upcoming(artist_name: str, *, limit: int = 10,
+                          timeout: int = 12) -> Dict[str, Any]:
     """Upcoming dates for an artist, soonest first."""
-    app_id = _cfg("concerts.bandsintown_app_id")
-    if not app_id:
+    key = _cfg("concerts.ticketmaster_api_key")
+    if not key:
         return {"configured": False, "events": []}
     name = (artist_name or "").strip()
     if not name:
         return {"configured": True, "events": []}
 
-    cache_key = "bit:%s:%s" % (name.lower(), limit)
+    cache_key = "tm:%s:%s" % (name.lower(), limit)
     hit = _cached(cache_key)
     if hit is not None:
         return hit
 
     try:
         resp = requests.get(
-            # the name goes in the PATH, and a slash or ? in a band name would
-            # otherwise change the route rather than the artist
-            f"{BANDSINTOWN_API}/artists/{requests.utils.quote(name, safe='')}/events",
-            params={"app_id": app_id, "date": "upcoming"},
+            f"{TICKETMASTER_API}/events.json",
+            params={
+                "apikey": key,
+                "keyword": name,
+                "classificationName": "music",
+                "sort": "date,asc",
+                # over-fetch: the attraction filter below discards most of a
+                # keyword search, so asking for exactly `limit` would routinely
+                # return two or three real dates
+                "size": min(100, max(20, int(limit) * 5)),
+            },
             headers={"Accept": "application/json"},
             timeout=timeout,
         )
-        if resp.status_code == 404:
-            return _store(cache_key, {"configured": True, "events": []})
+        if resp.status_code == 401:
+            return {"configured": True, "events": [],
+                    "error": "Ticketmaster rejected the API key"}
+        if resp.status_code == 429:
+            return {"configured": True, "events": [],
+                    "error": "Ticketmaster is rate limiting, try again shortly"}
         if resp.status_code >= 400:
             return {"configured": True, "events": [],
-                    "error": "Bandsintown returned %s" % resp.status_code}
-        data = resp.json()
+                    "error": "Ticketmaster returned %s" % resp.status_code}
+        data = resp.json() or {}
     except Exception as exc:   # noqa: BLE001
-        logger.debug("bandsintown lookup failed for %r", name, exc_info=True)
+        logger.debug("ticketmaster lookup failed for %r", name, exc_info=True)
         return {"configured": True, "events": [], "error": str(exc)}
 
-    # An unknown artist comes back as {} or a warning string rather than [].
-    if not isinstance(data, list):
-        return _store(cache_key, {"configured": True, "events": []})
-
+    events = ((data.get("_embedded") or {}).get("events")) or []
     out = []
-    for ev in data[: max(1, int(limit))]:
-        venue = (ev or {}).get("venue") or {}
-        offers = [o for o in ((ev or {}).get("offers") or [])
-                  if str(o.get("type") or "").lower() == "tickets"]
+    for ev in events:
+        if not _event_is_for_artist(ev, name):
+            continue
+        venues = ((ev.get("_embedded") or {}).get("venues")) or []
+        venue = venues[0] if venues else {}
+        start = (ev.get("dates") or {}).get("start") or {}
         out.append({
             "id": ev.get("id"),
-            "datetime": ev.get("datetime"),
-            "title": ev.get("title") or "",
+            # dateTime is absent for a date with no announced time; localDate
+            # still is, and a date with no time beats no row at all.
+            "datetime": start.get("dateTime") or start.get("localDate") or "",
+            "title": ev.get("name") or "",
             "venue": venue.get("name") or "",
-            "city": venue.get("city") or "",
-            "region": venue.get("region") or "",
-            "country": venue.get("country") or "",
+            "city": (venue.get("city") or {}).get("name") or "",
+            "region": (venue.get("state") or {}).get("name") or "",
+            "country": (venue.get("country") or {}).get("name") or "",
             "url": ev.get("url") or "",
-            "tickets_url": (offers[0].get("url") if offers else "") or "",
-            "lineup": [x for x in ((ev or {}).get("lineup") or []) if x],
+            "tickets_url": ev.get("url") or "",
+            "lineup": [a.get("name") for a in
+                       (((ev.get("_embedded") or {}).get("attractions")) or [])
+                       if a.get("name")],
         })
+        if len(out) >= max(1, int(limit)):
+            break
     return _store(cache_key, {"configured": True, "events": out})
 
 
@@ -262,16 +310,16 @@ def artist_concerts(artist_name: str, *, mbid: str = "", upcoming_limit: int = 1
         "artist": artist_name,
         "upcoming": [], "setlists": [],
         "providers": {
-            "bandsintown": {"configured": bandsintown_configured()},
+            "ticketmaster": {"configured": ticketmaster_configured()},
             "setlistfm": {"configured": setlistfm_configured()},
         },
     }
 
-    if result["providers"]["bandsintown"]["configured"]:
-        bit = bandsintown_upcoming(artist_name, limit=upcoming_limit)
-        result["upcoming"] = bit.get("events") or []
-        if bit.get("error"):
-            result["providers"]["bandsintown"]["error"] = bit["error"]
+    if result["providers"]["ticketmaster"]["configured"]:
+        tm = ticketmaster_upcoming(artist_name, limit=upcoming_limit)
+        result["upcoming"] = tm.get("events") or []
+        if tm.get("error"):
+            result["providers"]["ticketmaster"]["error"] = tm["error"]
 
     if result["providers"]["setlistfm"]["configured"]:
         slf = setlistfm_recent(artist_name, mbid=mbid, limit=setlist_limit)

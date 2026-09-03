@@ -37,7 +37,7 @@ const EVENT = {
   venue: 'Printworks',
   city: 'London',
   country: 'UK',
-  url: 'https://bandsintown.com/e/1',
+  url: 'https://ticketmaster.com/e/1',
   tickets_url: 'https://tix.example/1',
 };
 
@@ -56,7 +56,7 @@ function stub(payload: unknown, extra?: Record<string, unknown>) {
 }
 
 const CONFIGURED = {
-  bandsintown: { configured: true },
+  ticketmaster: { configured: true },
   setlistfm: { configured: true },
 };
 
@@ -91,7 +91,7 @@ describe('formatting', () => {
 describe('when nothing is set up', () => {
   it('renders nothing at all rather than an empty Live heading', async () => {
     // A permanent empty section is an advert for a feature the user declined.
-    stub({ providers: { bandsintown: { configured: false }, setlistfm: { configured: false } } });
+    stub({ providers: { ticketmaster: { configured: false }, setlistfm: { configured: false } } });
     const { container } = render(<ConcertsSection artistName="Aphex Twin" />);
     await waitFor(() => expect(fetch).toHaveBeenCalled());
     expect(container.querySelector('.artist-concerts-section')).toBeNull();
@@ -108,7 +108,7 @@ describe('when nothing is set up', () => {
 describe('one provider is enough', () => {
   it('shows setlists when only setlist.fm answered', async () => {
     stub({
-      providers: { bandsintown: { configured: false }, setlistfm: { configured: true } },
+      providers: { ticketmaster: { configured: false }, setlistfm: { configured: true } },
       upcoming: [],
       setlists: [SETLIST],
     });
@@ -117,9 +117,9 @@ describe('one provider is enough', () => {
     expect(screen.queryByText('Upcoming')).toBeNull();
   });
 
-  it('shows upcoming dates when only bandsintown answered', async () => {
+  it('shows upcoming dates when only ticketmaster answered', async () => {
     stub({
-      providers: { bandsintown: { configured: true }, setlistfm: { configured: false } },
+      providers: { ticketmaster: { configured: true }, setlistfm: { configured: false } },
       upcoming: [EVENT],
       setlists: [],
     });
@@ -136,7 +136,7 @@ describe('upcoming dates', () => {
 
     const tickets = await screen.findByText('Tickets');
     expect(tickets.getAttribute('href')).toBe('https://tix.example/1');
-    expect(screen.getByText('Details').getAttribute('href')).toBe('https://bandsintown.com/e/1');
+    expect(screen.getByText('Details').getAttribute('href')).toBe('https://ticketmaster.com/e/1');
   });
 
   it('never opens an external link with access to this page', async () => {

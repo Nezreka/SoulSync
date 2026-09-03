@@ -714,11 +714,13 @@ class ConfigManager:
             "genius": {
                 "access_token": ""
             },
-            # Two providers answering two different questions: Bandsintown for
+            # Two providers answering two different questions: Ticketmaster for
             # upcoming dates, Setlist.fm for what was actually played. Both
             # optional and independent - most people set up one or neither.
+            # (Bandsintown would have been the better fit for the first half but
+            # only issues keys to partner organizations.)
             "concerts": {
-                "bandsintown_app_id": "",
+                "ticketmaster_api_key": "",
                 "setlistfm_api_key": ""
             },
             "logging": {
