@@ -44,8 +44,26 @@
             .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
     }
     function postJSON(url, body) {
+        // The body is parsed on a FAILURE too. Every one of these endpoints puts
+        // the reason in {ok:false, error:"..."} - "Only 2.5 GB free on the
+        // temporary/working drive (C:\\Users\\...) - under your 5 GB minimum",
+        // "Missing the release's download URL", "Set the library folder for this
+        // type" - and `r.ok ? r.json() : null` threw all of it away, so five
+        // different refusals arrived at the user as one bare "Grab failed" with
+        // nothing to act on. Callers already read res.error; they were just
+        // never given one.
         return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify(body) }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+            body: JSON.stringify(body) }).then(function (r) {
+                return r.json().then(function (d) {
+                    if (r.ok) return d;
+                    // keep whatever the server said; only invent a message when
+                    // it sent none, so the user still learns something happened
+                    return Object.assign({ ok: false, error: 'Request failed (HTTP ' + r.status + ')' }, d || {});
+                }).catch(function () {
+                    // not JSON at all (a proxy error page, an empty 502)
+                    return r.ok ? null : { ok: false, error: 'Request failed (HTTP ' + r.status + ')' };
+                });
+            }).catch(function () { return null; });
     }
 
     function contentHTML() {
@@ -419,7 +437,17 @@
     // send an identical request (incl. the auto-retry candidate pool).
     function buildGrabPayload(panel, r) {
         var p = panel._search || {};
-        var src = p.source || 'soulseek';   // the DOWNLOAD source this panel actually searched
+        // The DOWNLOAD source this panel searched...
+        var src = p.source || 'soulseek';
+        // ...except a torrent search returns Prowlarr AND EXT.to rows together,
+        // and they are not grabbed the same way: an EXT.to row carries an
+        // info_url and no magnet yet, so it has to reach the backend labelled
+        // 'extto' or the magnet is never resolved.
+        // Keyed on indexer_id, NOT on r.source: a result row's `source` is the
+        // RELEASE source parsed out of the filename - "BluRay", "WEB-DL" - and
+        // sending that as the download source makes every grab fail with
+        // "Unsupported download source".
+        if (String(r.indexer_id || '').toLowerCase() === 'extto') src = 'extto';
         var container = panel.closest('[data-vgm-dl-content]');
         var o = (container && (container._opts || container._dl)) || {};
         var payload = {
@@ -447,6 +475,10 @@
             payload.username = r.username;          // indexer name (display only)
             payload.filename = r.filename || r.title;
             payload.candidates = [];
+            // What EXT.to resolves its magnet FROM, at grab time, for the one
+            // release actually picked. Harmless on a Prowlarr row: undefined.
+            payload.info_url = r.info_url;
+            payload.magnet_id = r.magnet_id;
         }
         return payload;
     }

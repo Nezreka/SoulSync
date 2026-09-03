@@ -138,6 +138,64 @@ def _search_queries(body, source: str, scope: str, title: str, season, episode) 
         return []
 
 
+def _torrent_lane_hits(body, scope, title, want_season, want_episode, source):
+    """The torrent/usenet lane, in ONE place.
+
+    Returns ``(hits, note, hard_error)``. ``hard_error`` is set only when NOTHING
+    could run; ``note`` reports a half that failed while the other answered.
+
+    This exists because there are two manual-search endpoints - /downloads/search
+    and /downloads/search/start - and only the second is reachable from any UI.
+    They each had their own copy of "search the torrent lane", so adding EXT.to
+    to one of them shipped a feature nobody could see. One function now, called
+    by both, and they cannot drift again.
+
+    EXT.to is the OTHER HALF of the torrent lane, the same way the wishlist drain
+    treats it (video_process_wishlist._hits_for_context). Usenet stays
+    Prowlarr-only: EXT.to is torrents.
+    """
+    from core.video.prowlarr_search import prowlarr_search
+    # A person is waiting on this response, so bound the time it will sit in the
+    # shared Prowlarr budget (core.prowlarr_throttle). The background wishlist
+    # drain queues happily; a manual search should say "busy, try again" rather
+    # than hold a request worker while the drain empties the window.
+    pres = prowlarr_search(scope, title, year=body.get("year"),
+                           season=want_season, episode=want_episode, source=source,
+                           max_wait_seconds=MANUAL_SEARCH_MAX_WAIT_SECONDS,
+                           indexer_names=_basic_indexer_names(body),
+                           **_external_ids(body))
+    prowlarr_error = None
+    if not pres.get("configured"):
+        prowlarr_error = ("Prowlarr isn't configured — set its URL + key on "
+                          "Settings → Downloads.")
+    elif pres.get("error"):
+        prowlarr_error = "Prowlarr: " + str(pres["error"])
+    hits = list(pres.get("hits") or [])
+
+    extto_note = None
+    if source == "torrent":
+        from core.video.extto_search import extto_search
+        try:
+            eres = extto_search(title, limit=25, timeout=EXTTO_PAGE_TIMEOUT_SECONDS,
+                                resolve_magnets=False, max_candidates=1)
+        except Exception as exc:   # noqa: BLE001 - one half must not sink the lane
+            eres = {"configured": True, "error": str(exc), "hits": []}
+        if not eres.get("configured"):
+            extto_note = "EXT.to needs FlareSolverr — set flaresolverr.url."
+        elif eres.get("error"):
+            extto_note = "EXT.to: " + str(eres["error"])
+        else:
+            hits = hits + list(eres.get("hits") or [])
+
+    # The lane has only genuinely FAILED when neither half could run. Returning
+    # Prowlarr's error while EXT.to had results would hide them behind a message
+    # about a service the user may not even run.
+    if prowlarr_error and not hits:
+        return [], None, (prowlarr_error + (" · " + extto_note if extto_note else ""))
+    note = " · ".join(n for n in (prowlarr_error, extto_note) if n) or None
+    return hits, note, None
+
+
 def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None, want_year=None,
                    want_title=None, blocked_users=None, want_date=None, want_absolute=None) -> list:
     """Parse → evaluate → rank a list of raw indexer hits against the quality profile.
@@ -914,59 +972,12 @@ def register_routes(bp):
                 return jsonify({"scope": scope, "results": [], "queries": queries, "error": "EXT.to: " + str(eres["error"])})
             raw, live = eres["hits"], True
         elif source in ("torrent", "usenet"):
-            from core.video.prowlarr_search import prowlarr_search
-            # A person is waiting on this response, so bound the time it will
-            # sit in the shared Prowlarr budget (core.prowlarr_throttle). The
-            # background wishlist drain queues happily; a manual search should
-            # say "busy, try again" rather than hold a request worker while the
-            # drain empties the window.
-            pres = prowlarr_search(scope, title, year=body.get("year"),
-                                   season=want_season, episode=want_episode, source=source,
-                                   max_wait_seconds=MANUAL_SEARCH_MAX_WAIT_SECONDS,
-                                   indexer_names=_basic_indexer_names(body),
-                                   **_external_ids(body))
-            prowlarr_error = None
-            if not pres.get("configured"):
-                prowlarr_error = ("Prowlarr isn't configured — set its URL + key on "
-                                  "Settings → Downloads.")
-            elif pres.get("error"):
-                prowlarr_error = "Prowlarr: " + str(pres["error"])
-            raw = list(pres.get("hits") or [])
-            live = not prowlarr_error
-
-            # EXT.to is the OTHER HALF of the torrent lane, exactly as the
-            # wishlist drain treats it (video_process_wishlist._hits_for_context).
-            # This endpoint used to run Prowlarr alone, so the same search that
-            # found an EXT.to release in the background returned nothing here and
-            # EXT.to only appeared if you knew to pick it as its own source.
-            # Usenet stays Prowlarr-only: EXT.to is torrents.
-            extto_note = None
-            if source == "torrent":
-                from core.video.extto_search import extto_search
-                try:
-                    eres = extto_search(title, limit=25, timeout=EXTTO_PAGE_TIMEOUT_SECONDS,
-                                        resolve_magnets=False, max_candidates=1)
-                except Exception as exc:   # noqa: BLE001 - one half must not sink the lane
-                    eres = {"configured": True, "error": str(exc), "hits": []}
-                if not eres.get("configured"):
-                    extto_note = "EXT.to needs FlareSolverr — set flaresolverr.url."
-                elif eres.get("error"):
-                    extto_note = "EXT.to: " + str(eres["error"])
-                else:
-                    ehits = list(eres.get("hits") or [])
-                    if ehits:
-                        raw = raw + ehits
-                        live = True
-
-            # The lane has only genuinely failed when NEITHER half could run.
-            # Returning Prowlarr's error while EXT.to had results would hide
-            # them behind a message about a service the user may not even run.
-            if prowlarr_error and not raw:
-                err = prowlarr_error if not extto_note else prowlarr_error + " · " + extto_note
-                return jsonify({"scope": scope, "results": [], "queries": queries, "error": err})
-            notes = [n for n in (prowlarr_error, extto_note) if n]
-            if notes:
-                partial_note = " · ".join(notes)
+            raw, partial_note, hard_error = _torrent_lane_hits(
+                body, scope, title, want_season, want_episode, source)
+            if hard_error:
+                return jsonify({"scope": scope, "results": [], "queries": queries,
+                                "error": hard_error})
+            live = True
         else:
             raw = mock_search(scope, title, year=body.get("year"), season=want_season,
                               episode=want_episode, season_end=season_end, source=source)
@@ -1020,24 +1031,20 @@ def register_routes(bp):
                             "results": _evaluate_hits(eres["hits"], profile, scope, want_season, want_episode, want_year=body.get("year"), want_title=body.get("title"))})
         if source in ("torrent", "usenet"):
             # Prowlarr is synchronous — like the old mock, results come back in one shot
-            # (no polling id), so the client renders immediately.
-            from core.video.prowlarr_search import prowlarr_search
-            # A person is waiting on this response, so bound the time it will
-            # sit in the shared Prowlarr budget (core.prowlarr_throttle). The
-            # background wishlist drain queues happily; a manual search should
-            # say "busy, try again" rather than hold a request worker while the
-            # drain empties the window.
-            pres = prowlarr_search(scope, title, year=body.get("year"),
-                                   season=want_season, episode=want_episode, source=source,
-                                   max_wait_seconds=MANUAL_SEARCH_MAX_WAIT_SECONDS,
-                                   indexer_names=_basic_indexer_names(body),
-                                   **_external_ids(body))
-            if not pres.get("configured"):
-                return jsonify({"queries": queries, "error": "Prowlarr isn't configured — set its URL + key on Settings → Downloads."})
-            if pres.get("error"):
-                return jsonify({"queries": queries, "error": "Prowlarr: " + str(pres["error"])})
-            return jsonify({"id": None, "live": True, "complete": True, "queries": queries,
-                            "results": _evaluate_hits(pres["hits"], profile, scope, want_season, want_episode, want_year=body.get("year"), want_title=body.get("title"))})
+            # (no polling id), so the client renders immediately. Shares the lane
+            # with /downloads/search so EXT.to cannot be wired into one and not
+            # the other; this is the endpoint every UI actually calls.
+            hits, note, hard_error = _torrent_lane_hits(
+                body, scope, title, want_season, want_episode, source)
+            if hard_error:
+                return jsonify({"queries": queries, "error": hard_error})
+            out = {"id": None, "live": True, "complete": True, "queries": queries,
+                   "results": _evaluate_hits(hits, profile, scope, want_season, want_episode,
+                                             want_year=body.get("year"),
+                                             want_title=body.get("title"))}
+            if note:
+                out["note"] = note
+            return jsonify(out)
         # remaining mock sources (e.g. youtube placeholder) resolve in one shot
         raw = mock_search(scope, title, year=body.get("year"), season=want_season,
                           episode=want_episode, season_end=season_end, source=source)
