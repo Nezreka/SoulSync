@@ -47,6 +47,7 @@ import { ArtistHero } from './artist-hero';
 import { ArtistVideosSection } from './artist-videos-section';
 import { DiscographyFilters } from './discography-filters';
 import { DiscographySection } from './discography-section';
+import { ConcertsSection } from './concerts-section';
 import { EnhancedView } from './enhanced-view';
 import { SimilarArtistsSection } from './similar-artists-section';
 
@@ -483,6 +484,14 @@ export function ArtistDetailPage() {
           {/* Standard view only — the vanilla hid it in Enhanced. Mounted
               BEFORE loadSimilarArtists can run, or the loader finds no section
               and bails. */}
+          {/* Live dates and setlists. Renders nothing unless a concert
+              provider is configured, so it costs an unconfigured install
+              exactly one request that answers "not set up". */}
+          <ConcertsSection
+            artistName={String(payload?.artist?.name || '')}
+            mbid={String(payload?.artist?.musicbrainz_id || '')}
+          />
+
           <SimilarArtistsSection />
         </div>
       </div>

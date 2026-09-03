@@ -714,6 +714,13 @@ class ConfigManager:
             "genius": {
                 "access_token": ""
             },
+            # Two providers answering two different questions: Bandsintown for
+            # upcoming dates, Setlist.fm for what was actually played. Both
+            # optional and independent - most people set up one or neither.
+            "concerts": {
+                "bandsintown_app_id": "",
+                "setlistfm_api_key": ""
+            },
             "logging": {
                 "path": "logs/app.log",
                 "level": "INFO"

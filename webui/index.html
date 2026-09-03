@@ -2809,6 +2809,38 @@
                                 </div>
 
                                 <!-- Last.fm Settings -->
+                                <!-- Concerts: two providers, two questions -->
+                                <div class="api-service-frame stg-service" data-service="concerts">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #00b4b3;"></span>
+                                        <h4 class="service-title">Concerts</h4>
+                                        <span class="stg-service-chevron">&rsaquo;</span>
+                                    </div>
+                                    <div class="stg-service-body">
+                                        <div class="setting-help-text">
+                                            Adds a <strong>Live</strong> section to artist pages. Both are optional and
+                                            independent &mdash; set up either, both, or neither.
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Bandsintown App ID:</label>
+                                            <input type="text" id="concerts-bandsintown-app-id" placeholder="Your registered app id">
+                                            <div class="setting-help-text">
+                                                Upcoming tour dates, venues and ticket links. Register an app id at
+                                                artists.bandsintown.com/support/api-installation.
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Setlist.fm API Key:</label>
+                                            <input type="text" id="concerts-setlistfm-api-key" placeholder="Your setlist.fm API key">
+                                            <div class="setting-help-text">
+                                                What the artist actually played at recent shows, song by song &mdash; and a
+                                                setlist can be played straight from your library. Free key from
+                                                setlist.fm/settings/api (non-commercial use).
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <div class="api-service-frame stg-service" data-service="lastfm">
                                     <div class="stg-service-header" onclick="toggleStgService(this)">
                                         <span class="stg-service-dot" style="color: #d51007;"></span>

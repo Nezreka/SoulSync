@@ -58766,6 +58766,135 @@ tr.tag-diff-same {
 /* ── Cache health: what it means and what to do ──
    The modal used to state a verdict ("Cleanup recommended") and stop, leaving
    the reader to guess what was wrong and what would fix it. */
+/* ── Live: upcoming dates and past setlists on an artist page ── */
+.artist-concerts-section {
+    margin: 28px 0 8px;
+}
+.artist-concerts-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    margin: 0 0 14px;
+}
+.artist-concerts-block + .artist-concerts-block {
+    margin-top: 18px;
+}
+.artist-concerts-block-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.45);
+    margin-bottom: 8px;
+}
+.artist-concerts-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.artist-concert-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    font-size: 13px;
+}
+.artist-concert-row + .artist-concert-row {
+    margin-top: 6px;
+}
+/* Fixed width so the dates form a column instead of ragging with the venue. */
+.artist-concert-date {
+    flex: 0 0 118px;
+    color: rgb(var(--accent-rgb, 99, 102, 241));
+    font-weight: 600;
+}
+.artist-concert-where {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: rgba(255, 255, 255, 0.8);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.artist-concert-link {
+    flex: 0 0 auto;
+    color: rgba(255, 255, 255, 0.6);
+    text-decoration: none;
+    font-size: 12px;
+    font-weight: 600;
+}
+.artist-concert-link:hover {
+    color: #fff;
+}
+
+/* A setlist row opens, so it is a column with a header line. */
+.artist-setlist-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+}
+.artist-setlist-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.artist-setlist-toggle {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: none;
+    border: 0;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.artist-setlist-count {
+    flex: 0 0 auto;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 12px;
+}
+.artist-setlist-play {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgb(var(--accent-rgb, 99, 102, 241));
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+    transition: filter 0.15s ease;
+}
+.artist-setlist-play:hover:not(:disabled) {
+    filter: brightness(1.12);
+}
+.artist-setlist-play:disabled {
+    cursor: wait;
+    opacity: 0.6;
+}
+.artist-setlist-songs {
+    margin: 10px 0 2px;
+    padding-left: 26px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 12.5px;
+    line-height: 1.7;
+}
+
+@media (max-width: 640px) {
+    .artist-concert-date { flex-basis: 92px; }
+    .artist-concert-row { font-size: 12.5px; gap: 8px; }
+}
+
 .cache-health-explain {
     margin: 14px 0 4px;
     padding: 14px 16px;

@@ -3531,7 +3531,7 @@ def handle_settings():
                     for key, value in _experimental_in.items():
                         config_manager.set(f'experimental.{key}', value)
 
-                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental', 'image_cache']:
+                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental', 'image_cache']:
                     if service in new_settings:
                         if service == 'experimental' and isinstance(_experimental_in, dict):
                             continue
@@ -3555,6 +3555,17 @@ def handle_settings():
                     reset_image_cache()
                 except Exception as _ic_err:
                     logger.debug("image cache reset after settings save failed: %s", _ic_err)
+
+            if 'concerts' in new_settings:
+                # Answers are cached for six hours. Without this, fixing a
+                # rejected API key would keep showing the failure it produced
+                # for the rest of the afternoon, which reads as "my key doesn't
+                # work" rather than "the old answer is still cached".
+                try:
+                    from core.concerts_client import clear_cache as _clear_concerts
+                    _clear_concerts()
+                except Exception as _cc_err:
+                    logger.debug("concert cache clear after settings save failed: %s", _cc_err)
 
             if any(s in new_settings for s in ('acoustid', 'lossy_copy', 'post_processing', 'import')):
                 try:
