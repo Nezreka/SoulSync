@@ -560,7 +560,8 @@ def _extto_hits_for_context(ctx: Dict[str, Any]) -> tuple:
                         season=ctx.get("season"), episode=ctx.get("episode"),
                         air_date=ctx.get("air_date"), absolute=ctx.get("absolute"),
                         series_type=ctx.get("series_type"))
-    eres = extto_search(query, limit=30, timeout=35, max_candidates=2)
+    eres = extto_search(query, limit=30, timeout=35, max_candidates=2,
+                        resolve_magnets=False)
     if not eres.get("configured"):
         return None, "EXT.to requires FlareSolverr"
     if eres.get("error"):
@@ -781,6 +782,13 @@ def _default_enqueue(item: Dict[str, Any], best: Dict[str, Any], candidates: Lis
             return {"ok": False, "error": started.get("error") or "Soulseek refused the transfer"}
     else:
         # torrent / usenet — hand off to the shared client; carry the returned ref into the row.
+        if source == "extto" and not best.get("download_url") and best.get("info_url"):
+            from core.video.extto_search import resolve_magnet
+            resolved = resolve_magnet(best.get("info_url"), magnet_id=best.get("magnet_id"))
+            if not resolved.get("ok"):
+                return {"ok": False, "error": resolved.get("error")
+                        or "EXT.to would not hand over a magnet for this release."}
+            best = {**best, "download_url": resolved["magnet"], "magnet_uri": resolved["magnet"]}
         from core.video.client_grab import grab
         res = grab(transport_source, best.get("download_url"),
                    fallback_magnet=best.get("magnet_uri"))

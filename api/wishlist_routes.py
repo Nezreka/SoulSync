@@ -379,7 +379,7 @@ def start_wishlist_missing_downloads():
             force_download_all=data.get('force_download_all', False),
         )
         return jsonify(payload), status_code
-        
+
     except Exception as e:
         logger.error(f"Error starting wishlist download process: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -409,7 +409,7 @@ def cleanup_wishlist():
     try:
         from core.wishlist_service import get_wishlist_service
         from database.music_database import MusicDatabase
-        
+
         wishlist_service = get_wishlist_service()
         db = MusicDatabase()
         active_server = config_manager.get_active_media_server()
@@ -420,7 +420,7 @@ def cleanup_wishlist():
             active_server,
         )
         return jsonify(payload), status_code
-        
+
     except Exception as e:
         logger.error(f"Error in wishlist cleanup: {e}")
         import traceback

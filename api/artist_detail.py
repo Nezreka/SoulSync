@@ -2149,7 +2149,7 @@ def check_artist_discography_completion_stream(artist_id):
             return jsonify({"error": "Missing discography data"}), 400
     except Exception as e:
         return jsonify({"error": "Invalid request data"}), 400
-    
+
     # Extract data for the generator
     discography = data['discography']
     artist_name = data.get('artist_name', 'Unknown Artist')
@@ -2173,7 +2173,7 @@ def check_artist_discography_completion_stream(artist_id):
             import traceback
             traceback.print_exc()
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
-    
+
     return Response(
         generate_completion_stream(),
         content_type='text/event-stream',

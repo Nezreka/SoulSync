@@ -243,6 +243,41 @@ def test_extto_auto_grab_uses_torrent_transport(monkeypatch):
     assert rows[0]["username"] == "EXT.to" and rows[0]["indexer_id"] == "extto"
 
 
+def test_extto_auto_grab_resolves_the_winning_magnet_only(monkeypatch):
+    grabbed = {}
+    resolved = {}
+    monkeypatch.setattr("core.video.disk_guard.check_room", lambda target, org: {"ok": True})
+    monkeypatch.setattr("core.video.organization.load", lambda db: {})
+    monkeypatch.setattr("core.video.download_monitor.ensure_started", lambda get_db: None)
+
+    def fake_resolve(url, **kw):
+        resolved["call"] = (url, kw)
+        return {"ok": True, "magnet": "magnet:?xt=winner"}
+
+    def fake_grab(source, url, **kw):
+        grabbed["call"] = (source, url, kw)
+        return {"ok": True, "ref": "hash"}
+
+    monkeypatch.setattr("core.video.extto_search.resolve_magnet", fake_resolve)
+    monkeypatch.setattr("core.video.client_grab.grab", fake_grab)
+    rows = []
+
+    class DB:
+        def add_video_download(self, row):
+            rows.append(row)
+
+    monkeypatch.setattr("api.video.get_video_db", lambda: DB())
+    best = {"source": "extto", "title": "Silo S03E08 1080p WEB", "download_url": "",
+            "magnet_uri": "", "info_url": "https://ext.to/silo-1/", "magnet_id": "1",
+            "username": "EXT.to", "indexer_id": "extto", "size_bytes": 1000,
+            "accepted": True}
+    res = w._default_enqueue({"show_tmdb_id": 9, "show_title": "Silo", "season_number": 3,
+                              "episode_number": 8}, best, [best], "episode", "/tv")
+    assert res["ok"] is True
+    assert resolved["call"] == ("https://ext.to/silo-1/", {"magnet_id": "1"})
+    assert grabbed["call"] == ("torrent", "magnet:?xt=winner", {"fallback_magnet": "magnet:?xt=winner"})
+    assert rows[0]["source"] == "torrent" and rows[0]["client_ref"] == "hash"
+
 
 def test_torrent_search_includes_extto_hits(monkeypatch):
     item = {"tmdb_id": 5, "title": "Interstellar", "year": "2014"}

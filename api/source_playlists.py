@@ -1316,33 +1316,33 @@ def get_tidal_playlists():
     try:
         # Use same method as sync.py - this already includes all track data
         playlists = client.get_user_playlists_metadata_only()
-        
+
         playlist_data = []
         for p in playlists:
             # Get track count from metadata (set during listing) or actual tracks
             track_count = getattr(p, 'track_count', 0) or (len(p.tracks) if hasattr(p, 'tracks') and p.tracks else 0)
-            
+
             playlist_dict = {
-                "id": p.id, 
-                "name": p.name, 
+                "id": p.id,
+                "name": p.name,
                 "owner": getattr(p, 'owner', 'Unknown'),
                 "track_count": track_count,
                 "image_url": getattr(p, 'image_url', None),
                 "description": getattr(p, 'description', ''),
                 "tracks": []  # Add tracks data like sync.py
             }
-            
+
             # Include full track data if available (like sync.py has)
             if hasattr(p, 'tracks') and p.tracks:
                 playlist_dict['tracks'] = [{
                     'id': t.id,
-                    'name': t.name, 
+                    'name': t.name,
                     'artists': t.artists or [],
                     'album': getattr(t, 'album', 'Unknown Album'),
                     'duration_ms': getattr(t, 'duration_ms', 0),
                     'track_number': getattr(t, 'track_number', 0)
                 } for t in p.tracks]
-                
+
             playlist_data.append(playlist_dict)
 
         # Append virtual "Favorite Tracks" playlist at the END (mirrors
@@ -1415,12 +1415,12 @@ def get_tidal_playlist_tracks(playlist_id):
         full_playlist = client.get_playlist(playlist_id)
         if not full_playlist:
             return jsonify({"error": "Playlist not found or unable to access. This may be due to privacy settings or Tidal API restrictions."}), 404
-            
+
         if not full_playlist.tracks:
             return jsonify({"error": "This playlist appears to have no tracks or they cannot be accessed"}), 403
-        
+
         logger.info(f"Loaded {len(full_playlist.tracks)} tracks from Tidal playlist: {full_playlist.name}")
-        
+
         # Convert playlist to dict (matches sync.py structure)
         playlist_dict = {
             'id': full_playlist.id,
@@ -1431,17 +1431,17 @@ def get_tidal_playlist_tracks(playlist_id):
             'image_url': getattr(full_playlist, 'image_url', None),
             'tracks': []
         }
-        
+
         # Convert tracks to dict format (for discovery modal)
         playlist_dict['tracks'] = [{
             'id': t.id,
-            'name': t.name, 
+            'name': t.name,
             'artists': t.artists or [],
             'album': getattr(t, 'album', 'Unknown Album'),
             'duration_ms': getattr(t, 'duration_ms', 0),
             'track_number': getattr(t, 'track_number', 0)
         } for t in full_playlist.tracks]
-        
+
         return jsonify(playlist_dict)
     except Exception as e:
         logger.error(f"Error getting Tidal playlist tracks: {e}")
@@ -1472,7 +1472,7 @@ def start_tidal_discovery(playlist_id):
 
         if not target_playlist.tracks:
             return jsonify({"error": "Playlist has no tracks"}), 400
-        
+
         # Initialize discovery state if it doesn't exist, or update existing state
         if playlist_id in tidal_discovery_states:
             existing_state = tidal_discovery_states[playlist_id]
@@ -1480,7 +1480,7 @@ def start_tidal_discovery(playlist_id):
                 return jsonify({"error": "Discovery already in progress"}), 400
             # Update existing state for discovery
             existing_state['phase'] = 'discovering'
-            existing_state['status'] = 'discovering' 
+            existing_state['status'] = 'discovering'
             existing_state['last_accessed'] = time.time()
             state = existing_state
         else:
@@ -1502,18 +1502,18 @@ def start_tidal_discovery(playlist_id):
                 'sync_progress': {}
             }
             tidal_discovery_states[playlist_id] = state
-        
+
         # Add activity for discovery start
         add_activity_item("", "Tidal Discovery Started", f"'{target_playlist.name}' - {len(target_playlist.tracks)} tracks", "Now")
-        
+
         # Start discovery worker (capture profile ID while we have Flask context)
         state['_profile_id'] = get_current_profile_id()
         future = tidal_discovery_executor.submit(_run_tidal_discovery_worker, playlist_id)
         state['discovery_future'] = future
-        
+
         logger.info(f"Started Spotify discovery for Tidal playlist: {target_playlist.name}")
         return jsonify({"success": True, "message": "Discovery started"})
-        
+
     except Exception as e:
         logger.error(f"Error starting Tidal discovery: {e}")
         return jsonify({"error": str(e)}), 500
@@ -1541,10 +1541,10 @@ def get_tidal_playlist_state(playlist_id):
     try:
         if playlist_id not in tidal_discovery_states:
             return jsonify({"error": "Tidal playlist not found"}), 404
-        
+
         state = tidal_discovery_states[playlist_id]
         state['last_accessed'] = time.time()
-        
+
         # Return full state information (including results for modal hydration)
         response = {
             'playlist_id': playlist_id,
@@ -1561,9 +1561,9 @@ def get_tidal_playlist_state(playlist_id):
             'sync_progress': state.get('sync_progress', {}),
             'last_accessed': state['last_accessed']
         }
-        
+
         return jsonify(response)
-        
+
     except Exception as e:
         logger.error(f"Error getting Tidal playlist state: {e}")
         return jsonify({"error": str(e)}), 500
@@ -4022,22 +4022,22 @@ def parse_youtube_playlist_endpoint():
     try:
         data = request.get_json()
         url = data.get('url', '').strip()
-        
+
         if not url:
             return jsonify({"error": "YouTube URL is required"}), 400
-        
+
         # Validate URL
         if not ('youtube.com/playlist' in url or 'music.youtube.com/playlist' in url):
             return jsonify({"error": "Invalid YouTube playlist URL"}), 400
-        
+
         logger.info(f"Parsing YouTube playlist: {url}")
-        
+
         # Parse the playlist using our function
         playlist_data = parse_youtube_playlist(url)
-        
+
         if not playlist_data:
             return jsonify({"error": "Failed to parse YouTube playlist"}), 500
-        
+
         # Use deterministic hash for state tracking (built-in hash() is randomized per process restart)
         import hashlib
         yt_playlist_id = playlist_data.get('id', '')
@@ -4073,7 +4073,7 @@ def parse_youtube_playlist_endpoint():
                     logger.info(f"Migrated YouTube mirrored playlist '{keep['name']}' source_playlist_id to deterministic hash {url_hash}")
         except Exception as e:
             logger.debug(f"YouTube mirror migration check: {e}")
-        
+
         # Initialize persistent playlist state (similar to Spotify download_batches structure)
         youtube_playlist_states[url_hash] = {
             'playlist': playlist_data,
@@ -4092,12 +4092,12 @@ def parse_youtube_playlist_endpoint():
             'discovery_future': None,
             'sync_progress': {}
         }
-        
+
         playlist_data['url_hash'] = url_hash
-        
+
         logger.info(f"YouTube playlist parsed successfully: {playlist_data['name']} ({len(playlist_data['tracks'])} tracks)")
         return jsonify(playlist_data)
-        
+
     except Exception as e:
         logger.error(f"Error parsing YouTube playlist: {e}")
         return jsonify({"error": str(e)}), 500
@@ -4108,13 +4108,13 @@ def start_youtube_discovery(url_hash):
     try:
         if url_hash not in youtube_playlist_states:
             return jsonify({"error": "YouTube playlist not found"}), 404
-        
+
         state = youtube_playlist_states[url_hash]
         state['last_accessed'] = time.time()  # Update access time
-        
+
         if state['phase'] == 'discovering':
             return jsonify({"error": "Discovery already in progress"}), 400
-        
+
         # Update phase to discovering
         state['phase'] = 'discovering'
         state['status'] = 'discovering'
@@ -4130,14 +4130,14 @@ def start_youtube_discovery(url_hash):
         playlist_name = state['playlist']['name']
         track_count = len(state['playlist']['tracks'])
         add_activity_item("", "YouTube Discovery Started", f"'{playlist_name}' - {track_count} tracks", "Now")
-        
+
         # Start discovery worker
         future = youtube_discovery_executor.submit(_run_youtube_discovery_worker, url_hash)
         state['discovery_future'] = future
-        
+
         logger.info(f"Started Spotify discovery for YouTube playlist: {state['playlist']['name']}")
         return jsonify({"success": True, "message": "Discovery started"})
-        
+
     except Exception as e:
         logger.error(f"Error starting YouTube discovery: {e}")
         return jsonify({"error": str(e)}), 500
@@ -4440,24 +4440,24 @@ def _calculate_similarity(str1, str2):
     """Calculate string similarity using simple character overlap"""
     if not str1 or not str2:
         return 0
-    
+
     # Convert to lowercase and remove extra spaces
     str1 = str1.lower().strip()
     str2 = str2.lower().strip()
-    
+
     if str1 == str2:
         return 1.0
-    
+
     # Calculate character overlap
     set1 = set(str1.replace(' ', ''))
     set2 = set(str2.replace(' ', ''))
-    
+
     if not set1 or not set2:
         return 0
-    
+
     intersection = len(set1.intersection(set2))
     union = len(set1.union(set2))
-    
+
     return intersection / union if union > 0 else 0
 
 @bp.route('/api/youtube/sync/start/<url_hash>', methods=['POST'])
@@ -4500,7 +4500,7 @@ def get_all_youtube_playlists():
     try:
         playlists = []
         current_time = time.time()
-        
+
         for url_hash, state in youtube_playlist_states.items():
             # Skip mirrored playlist entries — they have their own hydration
             if url_hash.startswith('mirrored_'):
@@ -4524,10 +4524,10 @@ def get_all_youtube_playlists():
                 'last_accessed': state['last_accessed']
             }
             playlists.append(playlist_info)
-        
+
         logger.info(f"Returning {len(playlists)} stored YouTube playlists for hydration")
         return jsonify({"playlists": playlists})
-        
+
     except Exception as e:
         logger.error(f"Error getting YouTube playlists: {e}")
         return jsonify({"error": str(e)}), 500
@@ -4538,10 +4538,10 @@ def get_youtube_playlist_state(url_hash):
     try:
         if url_hash not in youtube_playlist_states:
             return jsonify({"error": "YouTube playlist not found"}), 404
-        
+
         state = youtube_playlist_states[url_hash]
         state['last_accessed'] = time.time()
-        
+
         # Return full state information (including results for modal hydration)
         response = {
             'url_hash': url_hash,
@@ -4559,9 +4559,9 @@ def get_youtube_playlist_state(url_hash):
             'created_at': state['created_at'],
             'last_accessed': state['last_accessed']
         }
-        
+
         return jsonify(response)
-        
+
     except Exception as e:
         logger.error(f"Error getting YouTube playlist state: {e}")
         return jsonify({"error": str(e)}), 500
@@ -4575,13 +4575,13 @@ def reset_youtube_playlist(url_hash):
             # 404 here permanently wedges a mirrored playlist whose state vanished
             # (#702); treat a reset of nothing as a success so the UI recovers.
             return jsonify({"success": True, "message": "Playlist already reset"})
-        
+
         state = youtube_playlist_states[url_hash]
-        
+
         # Stop any active discovery
         if 'discovery_future' in state and state['discovery_future']:
             state['discovery_future'].cancel()
-        
+
         # Reset state to fresh (preserve original playlist data)
         state['phase'] = 'fresh'
         state['status'] = 'parsed'
@@ -4593,10 +4593,10 @@ def reset_youtube_playlist(url_hash):
         state['sync_progress'] = {}
         state['discovery_future'] = None
         state['last_accessed'] = time.time()
-        
+
         logger.info(f"Reset YouTube playlist to fresh phase: {state['playlist']['name']}")
         return jsonify({"success": True, "message": "Playlist reset to fresh state"})
-        
+
     except Exception as e:
         logger.error(f"Error resetting YouTube playlist: {e}")
         return jsonify({"error": str(e)}), 500
@@ -4609,20 +4609,20 @@ def delete_youtube_playlist(url_hash):
             # Idempotent: already gone (restart/eviction) — deleting nothing is a
             # success, not a 404 that wedges the UI (#702).
             return jsonify({"success": True, "message": "Playlist already removed"})
-        
+
         state = youtube_playlist_states[url_hash]
-        
+
         # Stop any active discovery
         if 'discovery_future' in state and state['discovery_future']:
             state['discovery_future'].cancel()
-        
+
         # Remove from storage
         playlist_name = state['playlist']['name']
         del youtube_playlist_states[url_hash]
-        
+
         logger.info(f"Deleted YouTube playlist from backend: {playlist_name}")
         return jsonify({"success": True, "message": f"Playlist '{playlist_name}' deleted"})
-        
+
     except Exception as e:
         logger.error(f"Error deleting YouTube playlist: {e}")
         return jsonify({"error": str(e)}), 500
@@ -5115,7 +5115,7 @@ def start_playlist_sync():
     """Starts a new sync process for a given playlist."""
     request_start_time = time.time()
     logger.info(f"⏱️ [TIMING] Sync request received at {time.strftime('%H:%M:%S')}")
-    
+
     data = request.get_json()
     playlist_id = data.get('playlist_id')
     playlist_name = data.get('playlist_name')
@@ -5220,26 +5220,26 @@ def test_database_access():
     """Test endpoint to verify database connectivity for sync operations"""
     try:
         logger.debug("Testing database access for sync operations...")
-        
+
         # Test database initialization
         from database.music_database import MusicDatabase
         db = MusicDatabase()
         logger.debug(f"   Database initialized: {db is not None}")
-        
+
         # Test basic database query
         stats = db.get_database_info_for_server()
         logger.debug(f"   Database stats retrieved: {stats}")
-        
+
         # Test track existence check (like sync service does)
         db_track, confidence = db.check_track_exists("test track", "test artist", confidence_threshold=0.7)
         logger.info(f"   Track existence check works: found={db_track is not None}, confidence={confidence}")
-        
+
         # Test config manager
         from core.settings import config_manager
         active_server = config_manager.get_active_media_server()
         logger.info(f"   Active media server: {active_server}")
-        
-        # Test media clients 
+
+        # Test media clients
         logger.info("   Media clients status:")
         logger.info(f"     media_server_engine.client('plex'): {media_server_engine.client('plex') is not None}")
         if media_server_engine.client('plex'):
@@ -5247,9 +5247,9 @@ def test_database_access():
         logger.info(f"     media_server_engine.client('jellyfin'): {media_server_engine.client('jellyfin') is not None}")
         if media_server_engine.client('jellyfin'):
             logger.info(f"     media_server_engine.client('jellyfin').is_connected(): {media_server_engine.client('jellyfin').is_connected()}")
-        
+
         return jsonify({
-            "success": True, 
+            "success": True,
             "message": "Database access test successful",
             "details": {
                 "database_initialized": db is not None,
@@ -5259,14 +5259,13 @@ def test_database_access():
                 "jellyfin_connected": media_server_engine.client('jellyfin').is_connected() if media_server_engine.client('jellyfin') else False,
             }
         })
-        
+
     except Exception as e:
         logger.error(f"   Database test failed: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({
-            "success": False, 
+            "success": False,
             "error": str(e),
             "message": "Database access test failed"
         }), 500
-

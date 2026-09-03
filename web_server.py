@@ -1598,12 +1598,12 @@ def get_cached_transfer_data():
     Returns a lookup dictionary for efficient transfer matching.
     """
     current_time = time.time()
-    
+
     with transfer_data_cache['update_lock']:
         # Check if cache is still valid
         if (current_time - transfer_data_cache['last_update']) < transfer_data_cache['cache_duration']:
             return transfer_data_cache['data']
-        
+
         # Cache expired or empty, fetch new data
         live_transfers_lookup = {}
         try:
@@ -1668,13 +1668,13 @@ def get_cached_transfer_data():
             # Update cache
             transfer_data_cache['data'] = live_transfers_lookup
             transfer_data_cache['last_update'] = current_time
-            
+
         except Exception as e:
             logger.error(f"Could not fetch live transfers (cached): {e}")
             # Return empty dict on error, but don't update cache timestamp
             # This way we'll retry on the next request
             return {}
-    
+
     return live_transfers_lookup
 
 # --- Beatport Data Cache ---
@@ -1924,7 +1924,7 @@ def validate_and_heal_batch_states():
                 _check_batch_completion_v2(batch_id)
             except Exception as e:
                 logger.error(f"[Batch Healing] Error checking completion for {batch_id}: {e}")
-            
+
     except Exception as healing_error:
         logger.error(f"[Batch Healing] Error during validation: {healing_error}")
 
@@ -1981,7 +1981,7 @@ def cleanup_monitor():
         download_monitor.shutdown()
         # Give the thread a moment to exit cleanly
         time.sleep(0.5)
-        
+
     # Clean up batch locks to prevent memory leaks
     try:
         acquired = tasks_lock.acquire(timeout=1.0)
@@ -2170,7 +2170,7 @@ def _update_task_status(task_id, new_status):
 # Thread-safe album grouping for consistent naming across tracks
 album_cache_lock = threading.Lock()
 album_groups = {}  # album_key -> final_album_name
-album_artists = {}  # album_key -> artist_name  
+album_artists = {}  # album_key -> artist_name
 album_editions = {}  # album_key -> "standard" or "deluxe"
 album_name_cache = {}  # album_key -> cached_final_name
 
@@ -2282,7 +2282,7 @@ def _find_downloaded_file(download_path, track_data):
     """Find the downloaded audio file in the downloads directory tree (works for Soulseek, YouTube, and Tidal)"""
     # Ensure path is accessible in Docker (handles E:/ -> /host/mnt/e/)
     download_path = docker_resolve_path(download_path)
-    
+
     audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
     target_filename = extract_filename(track_data.get('filename', ''))
 
@@ -3358,12 +3358,12 @@ def get_recent_toasts():
     try:
         import time
         current_time = time.time()
-        
+
         with activity_feed_lock:
             # Return activities from last 10 seconds that should show toasts
             recent_toasts = [
-                activity for activity in activity_feed 
-                if activity.get('show_toast', True) and 
+                activity for activity in activity_feed
+                if activity.get('show_toast', True) and
                    (current_time - activity.get('timestamp', 0)) <= 10
             ]
             return jsonify({'toasts': recent_toasts})
@@ -3563,7 +3563,7 @@ def handle_settings():
                     logger.error(f"Default quality profile sync failed: {_qp_sync_err}")
 
             logger.info("Settings saved successfully via Web UI.")
-            
+
             # Add activity for settings save
             changed_services = list(new_settings.keys())
             services_text = ", ".join(changed_services)
@@ -3906,10 +3906,10 @@ def test_connection_endpoint():
         return jsonify({"success": False, "error": "No service specified."}), 400
 
     logger.info(f"Received test connection request for: {service}")
-    
+
     # Get the current settings from the main config manager to test with
     test_config = config_manager.get(service, {})
-    
+
     # For media servers, the service name might be 'server'
     if service == 'server':
         active_server = config_manager.get_active_media_server()
@@ -4142,10 +4142,10 @@ def test_dashboard_connection_endpoint():
         return jsonify({"success": False, "error": "No service specified."}), 400
 
     logger.info(f"Received dashboard test connection request for: {service}")
-    
+
     # Get the current settings from the main config manager to test with
     test_config = config_manager.get(service, {})
-    
+
     # For media servers, the service name might be 'server'
     if service == 'server':
         active_server = config_manager.get_active_media_server()
@@ -4184,10 +4184,10 @@ def detect_media_server_endpoint():
     data = request.get_json()
     server_type = data.get('server_type')
     logger.info(f"Received auto-detect request for: {server_type}")
-    
+
     # Add activity for auto-detect start
     add_activity_item("", "Auto-Detect Started", f"Searching for {server_type} server", "Now")
-    
+
     found_url = run_detection(server_type)
     if found_url:
         add_activity_item("", "Auto-Detect Complete", f"{server_type} found at {found_url}", "Now")
@@ -4788,19 +4788,19 @@ def auth_tidal():
         # Create a fresh tidal client to get OAuth URL
         from core.tidal_client import TidalClient
         temp_tidal_client = TidalClient()
-        
+
         if not temp_tidal_client.client_id:
             return "<h1>Tidal Authentication Failed</h1><p>Tidal client ID not configured. Check your credentials.</p>", 400
-        
+
         # Generate PKCE challenge and store globally
         temp_tidal_client._generate_pkce_challenge()
-        
+
         # Store PKCE values globally for callback use
         global tidal_oauth_state
         with tidal_oauth_lock:
             tidal_oauth_state["code_verifier"] = temp_tidal_client.code_verifier
             tidal_oauth_state["code_challenge"] = temp_tidal_client.code_challenge
-        
+
         # Use the user's configured redirect_uri from settings, falling back
         # to the constructor default (``http://127.0.0.1:<port>/tidal/callback``).
         # The settings UI displays the default as the placeholder, and SoulSync's
@@ -4857,19 +4857,19 @@ def auth_tidal():
             'code_challenge_method': 'S256',
             'prompt': 'consent',
         }
-        
+
         auth_url = f"{temp_tidal_client.auth_url}?" + urllib.parse.urlencode(params)
-        
+
         logger.info(f"Generated Tidal OAuth URL: {auth_url}")
         logger.info(f"Redirect URI in URL: {params['redirect_uri']}")
-        
+
         add_activity_item("", "Tidal Auth Started", "Please complete OAuth in browser", "Now")
 
         # Detect if accessing remotely (copied from Spotify auth logic)
         host = request.host.split(':')[0]
         is_remote = host not in ['127.0.0.1', 'localhost']
         is_docker = os.path.exists('/.dockerenv')
-        
+
         # If in Docker and accessing via 127.0.0.1, recommend localhost
         if is_docker and host == '127.0.0.1':
             host = 'localhost'
@@ -4945,7 +4945,7 @@ def auth_tidal():
             '''
         else:
             return f'<h1>Tidal Authentication</h1><p>Please visit this URL to authenticate:</p><p><a href="{auth_url}" target="_blank">{auth_url}</a></p><p>After authentication, return to the app.</p>'
-        
+
     except Exception as e:
         logger.error(f"Error starting Tidal auth: {e}")
         import traceback
@@ -5179,7 +5179,7 @@ def tidal_callback():
     """
     global tidal_client # We will re-initialize the global client
     auth_code = request.args.get('code')
-    
+
     if not auth_code:
         error = request.args.get('error', 'Unknown error')
         error_description = request.args.get('error_description', 'No description provided.')
@@ -6106,10 +6106,10 @@ def start_download():
     data = request.get_json()
     if not data:
         return jsonify({"error": "No download data provided."}), 400
-    
+
     try:
         result_type = data.get('result_type', 'track')
-        
+
         if result_type == 'album':
             tracks = data.get('tracks', [])
             if not tracks:
@@ -6159,7 +6159,7 @@ def start_download():
                 "success": True,
                 "message": f"Started {started_downloads} downloads from album"
             })
-        
+
         else:
             # Single track download
             username = data.get('username')
@@ -6231,7 +6231,7 @@ def start_download():
             else:
                 logger.error(f"Failed to start download for: {filename}")
                 return jsonify({"error": "Failed to start download"}), 500
-                
+
     except Exception as e:
         logger.error(f"Download error: {e}")
         return jsonify({"error": str(e)}), 500
@@ -7571,7 +7571,7 @@ def maintain_search_history():
         data = request.get_json() or {}
         keep_searches = data.get('keep_searches', 50)
         trigger_threshold = data.get('trigger_threshold', 200)
-        
+
         success = run_async(download_orchestrator.maintain_search_history_with_buffer(
             keep_searches=keep_searches, trigger_threshold=trigger_threshold
         ))
@@ -11475,25 +11475,25 @@ def _generate_artist_suggestions(search_result, is_album=False, album_result=Non
     """
     if not spotify_client or not matching_engine:
         return []
-    
+
     try:
         logger.info(f"Generating artist suggestions for: {search_result.get('artist', '')} - {search_result.get('title', '')}")
         suggestions = []
-        
+
         # Special handling for albums - use album title to find artist
         if is_album and album_result and album_result.get('album_title'):
             logger.info("Album mode detected - using album title for artist search")
             album_title = album_result.get('album_title', '')
-            
+
             # Clean album title (remove year prefixes like "(2005)")
             import re
             clean_album_title = re.sub(r'^\(\d{4}\)\s*', '', album_title).strip()
             logger.info(f"    clean_album_title: '{clean_album_title}'")
-            
+
             # Search tracks using album title to find the artist
             tracks = spotify_client.search_tracks(clean_album_title, limit=10)
             logger.info(f"Found {len(tracks)} tracks from album search")
-            
+
             # Collect unique artists and their associated tracks/albums
             unique_artists = {}  # artist_name -> list of (track, album) tuples
             for track in tracks:
@@ -11501,11 +11501,11 @@ def _generate_artist_suggestions(search_result, is_album=False, album_result=Non
                     if artist_name not in unique_artists:
                         unique_artists[artist_name] = []
                     unique_artists[artist_name].append((track, track.album))
-            
+
             # Batch fetch artist objects for speed
             from concurrent.futures import ThreadPoolExecutor, as_completed
             artist_objects = {}  # artist_name -> Artist object
-            
+
             def fetch_artist(artist_name):
                 try:
                     matches = spotify_client.search_artists(artist_name, limit=1)
@@ -11514,25 +11514,25 @@ def _generate_artist_suggestions(search_result, is_album=False, album_result=Non
                 except Exception as e:
                     logger.error(f"Error fetching artist '{artist_name}': {e}")
                 return artist_name, None
-            
+
             # Use limited concurrency to respect rate limits
             with ThreadPoolExecutor(max_workers=3) as executor:
                 future_to_artist = {executor.submit(fetch_artist, name): name for name in unique_artists.keys()}
-                
+
                 for future in as_completed(future_to_artist):
                     artist_name, artist_obj = future.result()
                     if artist_obj:
                         artist_objects[artist_name] = artist_obj
-            
+
             # Calculate confidence scores for each artist
             artist_scores = {}
             for artist_name, track_album_pairs in unique_artists.items():
                 if artist_name not in artist_objects:
                     continue
-                    
+
                 artist = artist_objects[artist_name]
                 best_confidence = 0
-                
+
                 # Find the best confidence score across all albums for this artist
                 for _track, album in track_album_pairs:
                     confidence = matching_engine.similarity_score(
@@ -11541,9 +11541,9 @@ def _generate_artist_suggestions(search_result, is_album=False, album_result=Non
                     )
                     if confidence > best_confidence:
                         best_confidence = confidence
-                
+
                 artist_scores[artist_name] = (artist, best_confidence)
-            
+
             # Create suggestions from top matches
             for _artist_name, (artist, confidence) in sorted(artist_scores.items(), key=lambda x: x[1][1], reverse=True)[:8]:
                 suggestions.append({
@@ -11556,25 +11556,25 @@ def _generate_artist_suggestions(search_result, is_album=False, album_result=Non
                     },
                     "confidence": confidence
                 })
-                
+
         else:
             # Single track mode - search by artist name
             search_artist = search_result.get('artist', '')
             if not search_artist:
                 return []
-            
+
             logger.info(f"Single track mode - searching for artist: '{search_artist}'")
-            
+
             # Search for artists directly
             artist_matches = spotify_client.search_artists(search_artist, limit=10)
-            
+
             for artist in artist_matches:
                 # Calculate confidence based on artist name similarity
                 confidence = matching_engine.similarity_score(
                     matching_engine.normalize_string(search_artist),
                     matching_engine.normalize_string(artist.name)
                 )
-                
+
                 suggestions.append({
                     "artist": {
                         "id": artist.id,
@@ -11585,11 +11585,11 @@ def _generate_artist_suggestions(search_result, is_album=False, album_result=Non
                     },
                     "confidence": confidence
                 })
-        
+
         # Sort by confidence and return top results
         suggestions.sort(key=lambda x: x['confidence'], reverse=True)
         return suggestions[:4]
-        
+
     except Exception as e:
         logger.error(f"Error generating artist suggestions: {e}")
         return []
@@ -11601,25 +11601,25 @@ def _generate_album_suggestions(selected_artist, search_result):
     """
     if not spotify_client or not matching_engine:
         return []
-    
+
     try:
         logger.info(f"Generating album suggestions for artist: {selected_artist['name']}")
-        
+
         # Determine target album name from search result
         target_album_name = search_result.get('album', '') or search_result.get('album_title', '')
         if not target_album_name:
             logger.warning("No album name found in search result")
             return []
-        
+
         # Clean target album name
         import re
         clean_target = re.sub(r'^\(\d{4}\)\s*', '', target_album_name).strip()
         logger.info(f"    target_album: '{clean_target}'")
-        
+
         # Get artist's albums from Spotify
         artist_albums = spotify_client.get_artist_albums(selected_artist['id'])
         logger.info(f"Found {len(artist_albums)} albums for artist")
-        
+
         album_matches = []
         for album in artist_albums:
             # Calculate confidence based on album name similarity
@@ -11627,7 +11627,7 @@ def _generate_album_suggestions(selected_artist, search_result):
                 matching_engine.normalize_string(clean_target),
                 matching_engine.normalize_string(album.name)
             )
-            
+
             album_matches.append({
                 "album": {
                     "id": album.id,
@@ -11639,11 +11639,11 @@ def _generate_album_suggestions(selected_artist, search_result):
                 },
                 "confidence": confidence
             })
-        
+
         # Sort by confidence and return top results
         album_matches.sort(key=lambda x: x['confidence'], reverse=True)
         return album_matches[:4]
-        
+
     except Exception as e:
         logger.error(f"Error generating album suggestions: {e}")
         return []
@@ -11655,7 +11655,7 @@ def get_match_suggestions():
         data = request.get_json()
         search_result = data.get('search_result', {})
         context = data.get('context', 'artist')  # 'artist' or 'album'
-        
+
         if context == 'artist':
             is_album = data.get('is_album', False)
             album_result = data.get('album_result', None) if is_album else None
@@ -11665,9 +11665,9 @@ def get_match_suggestions():
             suggestions = _generate_album_suggestions(selected_artist, search_result)
         else:
             return jsonify({"error": "Invalid context. Must be 'artist' or 'album'"}), 400
-        
+
         return jsonify({"suggestions": suggestions})
-        
+
     except Exception as e:
         logger.error(f"Error in match suggestions: {e}")
         return jsonify({"error": str(e)}), 500
@@ -11679,7 +11679,7 @@ def search_match():
         data = request.get_json()
         query = data.get('query', '').strip()
         context = data.get('context', 'artist')  # 'artist' or 'album'
-        
+
         if not query:
             return jsonify({"results": []})
 
@@ -11721,7 +11721,7 @@ def search_match():
                 })
 
             return jsonify({"results": results, "provider": provider})
-            
+
         elif context == 'album':
             # Search for albums by specific artist
             artist_id = data.get('artist_id')
@@ -11762,10 +11762,10 @@ def search_match():
             # Sort by confidence
             results.sort(key=lambda x: x['confidence'], reverse=True)
             return jsonify({"results": results[:8], "provider": provider})
-        
+
         else:
             return jsonify({"error": "Invalid context. Must be 'artist' or 'album'"}), 400
-        
+
     except Exception as e:
         logger.error(f"Error in match search: {e}")
         return jsonify({"error": str(e)}), 500
@@ -11924,7 +11924,7 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
     ensuring perfect tagging and naming.
     """
     logger.info(f"Processing matched album download for '{spotify_album['name']}' with {len(album_result.get('tracks', []))} tracks.")
-    
+
     tracks_to_download = album_result.get('tracks', [])
     if not tracks_to_download:
         logger.warning("Album result contained no tracks. Aborting.")
@@ -11975,7 +11975,7 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
 
             # Pre-parse the filename to get a baseline for metadata
             parsed_meta = _parse_filename_metadata(filename)
-            
+
             # --- THIS IS THE CRITICAL MATCHING STEP ---
             # Match the parsed metadata against the official Spotify tracklist
             corrected_meta = _match_track_to_spotify_title(parsed_meta, official_spotify_tracks)
@@ -12024,7 +12024,7 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
         except Exception as e:
             logger.error(f"Error processing track in album batch: {track_data.get('filename')}: {e}")
             continue
-            
+
     return started_count
 
 @app.route('/api/download/matched', methods=['POST'])
@@ -12123,7 +12123,7 @@ def start_matched_download():
             parsed_meta = _parse_filename_metadata(filename)
             download_payload['title'] = parsed_meta.get('title') or download_payload.get('title')
             download_payload['artist'] = parsed_meta.get('artist') or download_payload.get('artist')
-            
+
             download_id = run_async(download_orchestrator.download(username, filename, size))
 
             if download_id:
@@ -12403,9 +12403,9 @@ def _detect_deluxe_edition(album_name: str) -> bool:
     """
     if not album_name:
         return False
-    
+
     album_lower = album_name.lower()
-    
+
     # Check for deluxe indicators
     deluxe_indicators = [
         'deluxe',
@@ -12422,12 +12422,12 @@ def _detect_deluxe_edition(album_name: str) -> bool:
         'gold edition',
         'platinum edition',
     ]
-    
+
     for indicator in deluxe_indicators:
         if indicator in album_lower:
             logger.info(f"Detected deluxe edition: '{album_name}' contains '{indicator}'")
             return True
-    
+
     return False
 
 def _normalize_base_album_name(base_album: str, artist_name: str) -> str:
@@ -12435,56 +12435,56 @@ def _normalize_base_album_name(base_album: str, artist_name: str) -> str:
     Normalize the base album name to handle case variations and known corrections.
     """
     import re
-    
+
     # Apply known album corrections for consistent naming
     normalized_lower = base_album.lower().strip()
-    
+
     # Handle common album title variations
     known_corrections = {
         # Add specific album name corrections here as needed
         # Example: "good kid maad city": "good kid, m.A.A.d city"
     }
-    
+
     # Check for exact matches in our corrections
     for variant, correction in known_corrections.items():
         if normalized_lower == variant.lower():
             logger.info(f"Album correction applied: '{base_album}' -> '{correction}'")
             return correction
-    
-    # Handle punctuation variations 
+
+    # Handle punctuation variations
     normalized = base_album
-    
+
     # Normalize common punctuation patterns
     normalized = re.sub(r'\s*&\s*', ' & ', normalized)  # Standardize & spacing
     normalized = re.sub(r'\s+', ' ', normalized)  # Clean multiple spaces
     normalized = normalized.strip()
-    
+
     logger.info(f"Album variant normalization: '{base_album}' -> '{normalized}'")
     return normalized
 
 def _clean_album_title_web(album_title: str, artist_name: str) -> str:
     """Clean up album title by removing common prefixes, suffixes, and artist redundancy"""
     import re
-    
+
     # Start with the original title
     original = album_title.strip()
     cleaned = original
     logger.info(f"Album Title Cleaning: '{original}' (artist: '{artist_name}')")
-    
+
     # Remove "Album - " prefix
     cleaned = re.sub(r'^Album\s*-\s*', '', cleaned, flags=re.IGNORECASE)
-    
+
     # Remove artist name prefix if it appears at the beginning
     # This handles cases like "Kendrick Lamar - good kid, m.A.A.d city"
     artist_pattern = re.escape(artist_name) + r'\s*-\s*'
     cleaned = re.sub(f'^{artist_pattern}', '', cleaned, flags=re.IGNORECASE)
-    
+
     # Remove common Soulseek suffixes in square brackets and parentheses
     # Examples: [Deluxe Edition] [2012] [320 Kbps] [Album+iTunes+Bonus Tracks] [F10]
     #           (Deluxe Edition) (2012) (320 Kbps) etc.
     # Remove year patterns like [2012], (2020), etc.
     cleaned = re.sub(r'\s*[\[\(]\d{4}[\]\)]\s*', ' ', cleaned)
-    
+
     # Remove quality/format indicators
     quality_patterns = [
         r'\s*[\[\(].*?320.*?kbps.*?[\]\)]\s*',
@@ -12495,19 +12495,19 @@ def _clean_album_title_web(album_title: str, artist_name: str) -> str:
         r'\s*[\[\(].*?web.*?[\]\)]\s*',
         r'\s*[\[\(].*?cd.*?[\]\)]\s*'
     ]
-    
+
     for pattern in quality_patterns:
         cleaned = re.sub(pattern, ' ', cleaned, flags=re.IGNORECASE)
-    
+
     # Remove common edition indicators (but preserve them for deluxe detection above)
     # This happens AFTER deluxe detection to avoid interfering with that logic
-    
+
     # Clean up spacing
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-    
+
     # Remove leading/trailing punctuation
     cleaned = re.sub(r'^[-\s]+|[-\s]+$', '', cleaned)
-    
+
     logger.info(f"Album Title Result: '{original}' -> '{cleaned}'")
     return cleaned if cleaned else original
 
@@ -12519,57 +12519,57 @@ def _search_track_in_album_context_web(context: dict, spotify_artist: dict) -> d
     try:
         from core.matching_engine import MusicMatchingEngine
         matching_engine = MusicMatchingEngine()
-        
+
         # Get album and track info from context
         original_search = context.get("original_search_result", {})
         album_name = original_search.get("album")
         track_title = original_search.get("title")
         artist_name = spotify_artist["name"]
-        
+
         if not album_name or not track_title:
             logger.error(f"Album-aware search failed: Missing album ({album_name}) or track ({track_title})")
             return None
-        
+
         logger.info(f"Album-aware search: '{track_title}' in album '{album_name}' by '{artist_name}'")
-        
+
         # Clean the album name for better search results
         clean_album = _clean_album_title_web(album_name, artist_name)
         clean_track = _clean_track_title_web(track_title, artist_name)
-        
+
         # Search for the specific album first
         album_query = f"album:{clean_album} artist:{artist_name}"
         logger.info(f"Searching albums: {album_query}")
         albums = spotify_client.search_albums(album_query, limit=5)
-        
+
         if not albums:
             logger.warning(f"No albums found for query: {album_query}")
             return None
-        
+
         # Check each album to see if our track is in it
         for album in albums:
             logger.info(f"Checking album: '{album.name}' ({album.total_tracks} tracks)")
-            
+
             # Get tracks from this album
             album_tracks_data = spotify_client.get_album_tracks(album.id)
             if not album_tracks_data or 'items' not in album_tracks_data:
                 logger.error(f"Could not get tracks for album: {album.name}")
                 continue
-            
+
             # Check if our track is in this album
             for track_data in album_tracks_data['items']:
                 track_name = track_data['name']
                 track_number = track_data['track_number']
-                
+
                 # Calculate similarity between our track and this album track
                 similarity = matching_engine.similarity_score(
                     matching_engine.normalize_string(clean_track),
                     matching_engine.normalize_string(track_name)
                 )
-                
+
                 # Use higher threshold for remix matching to ensure precision (GUI PARITY)
                 is_remix = any(word in clean_track.lower() for word in ['remix', 'mix', 'edit', 'version'])
                 threshold = 0.9 if is_remix else 0.65  # Lower threshold to favor album matches over singles
-                
+
                 if similarity > threshold:
                     logger.info(f"FOUND: '{track_name}' (track #{track_number}) matches '{clean_track}' (similarity: {similarity:.2f})")
 
@@ -12593,12 +12593,12 @@ def _search_track_in_album_context_web(context: dict, spotify_artist: dict) -> d
                         'confidence': similarity,
                         'source': 'album_context_search'
                     }
-            
+
             logger.warning(f"Track '{clean_track}' not found in album '{album.name}'")
-        
+
         logger.warning(f"Track '{clean_track}' not found in any matching albums")
         return None
-        
+
     except Exception as e:
         logger.error(f"Error in album-aware search: {e}")
         return None
@@ -12606,21 +12606,21 @@ def _search_track_in_album_context_web(context: dict, spotify_artist: dict) -> d
 def _clean_track_title_web(track_title: str, artist_name: str) -> str:
     """Clean up track title by removing artist prefix and common patterns"""
     import re
-    
+
     # Start with the original title
     original = track_title.strip()
     cleaned = original
     logger.info(f"Track Title Cleaning: '{original}' (artist: '{artist_name}')")
-    
+
     # Remove artist name prefix if it appears at the beginning
     # This handles cases like "Kendrick Lamar - HUMBLE."
     artist_pattern = re.escape(artist_name) + r'\s*-\s*'
     cleaned = re.sub(f'^{artist_pattern}', '', cleaned, flags=re.IGNORECASE)
-    
+
     # Remove common prefixes
     cleaned = re.sub(r'^Track\s*\d*\s*-\s*', '', cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r'^\d+\.\s*', '', cleaned)  # Remove track numbers like "01. "
-    
+
     # Remove quality/format indicators
     quality_patterns = [
         r'\s*[\[\(].*?320.*?kbps.*?[\]\)]\s*',
@@ -12629,16 +12629,16 @@ def _clean_track_title_web(track_title: str, artist_name: str) -> str:
         r'\s*[\[\(].*?mp3.*?[\]\)]\s*',
         r'\s*[\[\(].*?explicit.*?[\]\)]\s*'
     ]
-    
+
     for pattern in quality_patterns:
         cleaned = re.sub(pattern, ' ', cleaned, flags=re.IGNORECASE)
-    
+
     # Clean up spacing
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-    
+
     # Remove leading/trailing punctuation
     cleaned = re.sub(r'^[-\s]+|[-\s]+$', '', cleaned)
-    
+
     logger.info(f"Track Title Result: '{original}' -> '{cleaned}'")
     return cleaned if cleaned else original
 
@@ -12650,7 +12650,7 @@ def _clean_track_title_web(track_title: str, artist_name: str) -> str:
 def clean_youtube_track_title(title, artist_name=None):
     """
     Aggressively clean YouTube track titles by removing video noise and extracting clean track names
-    
+
     Examples:
     'No Way Jose (Official Music Video)' → 'No Way Jose'
     'bbno$ - mary poppins (official music video)' → 'mary poppins'
@@ -12660,12 +12660,12 @@ def clean_youtube_track_title(title, artist_name=None):
     'Espresso Macchiato | Estonia 🇪🇪 | Official Music Video | #Eurovision2025' → 'Espresso Macchiato'
     """
     import re
-    
+
     if not title:
         return title
-    
+
     original_title = title
-    
+
     # FIRST: Try to extract track name from "Artist - Track" or "Track - Artist" format
     artist_removed = False
     if artist_name and '-' in title:
@@ -12702,14 +12702,14 @@ def clean_youtube_track_title(title, artist_name=None):
     if artist_removed:
         # Safe to remove any remaining trailing dash content (likely album/extra info)
         title = re.sub(r'\s*-\s*.*$', '', title)
-    
+
     # Remove everything after pipes (|) - often used for additional context
     title = re.split(r'\s*\|\s*', title)[0].strip()
-    
+
     # Remove common video/platform noise
     noise_patterns = [
         r'\bapple\s+music\b',
-        r'\bfull\s+video\b', 
+        r'\bfull\s+video\b',
         r'\bmusic\s+video\b',
         r'\bofficial\s+video\b',
         r'\bofficial\s+music\s+video\b',
@@ -12730,10 +12730,10 @@ def clean_youtube_track_title(title, artist_name=None):
         r'\bremaster(ed)?\b',
         r'\bremix\b'
     ]
-    
+
     for pattern in noise_patterns:
         title = re.sub(pattern, '', title, flags=re.IGNORECASE)
-    
+
     # Only remove artist name if it's standalone (not part of "Artist1 & Artist2")
     # Skip this if the title contains collaboration indicators near the artist name
     if artist_name:
@@ -12748,7 +12748,7 @@ def clean_youtube_track_title(title, artist_name=None):
             title = re.sub(rf'^{re.escape(artist_name)}\s*[-–—:]\s*', '', title, flags=re.IGNORECASE)
         else:
             logger.info(f"Skipping artist removal - collaboration detected: '{title}'")
-    
+
     # Remove "prod. Producer" patterns
     title = re.sub(r'\s+prod\.?\s+\S+', '', title, flags=re.IGNORECASE)
 
@@ -12758,31 +12758,31 @@ def clean_youtube_track_title(title, artist_name=None):
     # Remove featured artist patterns (after removing parentheses)
     feat_patterns = [
         r'\s+feat\.?\s+.+$',     # " feat Artist" at end
-        r'\s+ft\.?\s+.+$',       # " ft Artist" at end  
+        r'\s+ft\.?\s+.+$',       # " ft Artist" at end
         r'\s+featuring\s+.+$',   # " featuring Artist" at end
         r'\s+with\s+.+$',        # " with Artist" at end
     ]
-    
+
     for pattern in feat_patterns:
         title = re.sub(pattern, '', title, flags=re.IGNORECASE).strip()
-    
+
     # Clean up whitespace and punctuation
     title = re.sub(r'\s+', ' ', title).strip()
     title = re.sub(r'^[-–—:,.\s]+|[-–—:,.\s]+$', '', title).strip()
-    
+
     # If we cleaned too much, return original
     if not title.strip() or len(title.strip()) < 2:
         title = original_title
-    
+
     if title != original_title:
         logger.info(f"YouTube title cleaned: '{original_title}' → '{title}'")
-    
+
     return title
 
 def clean_youtube_artist(artist_string):
     """
     Clean YouTube artist strings to get primary artist name
-    
+
     Examples:
     'Yung Gravy, bbno$ (BABY GRAVY)' → 'Yung Gravy'
     'Y2K, bbno$' → 'Y2K'
@@ -12791,21 +12791,21 @@ def clean_youtube_artist(artist_string):
     'ArtistVEVO' → 'Artist'
     """
     import re
-    
+
     if not artist_string:
         return artist_string
-    
+
     original_artist = artist_string
-    
+
     # Remove all quotes - they're usually not part of artist names
     artist_string = artist_string.replace('"', '').replace("'", '').replace(''', '').replace(''', '').replace('"', '').replace('"', '')
-    
+
     # Remove anything in parentheses (often group/label names)
     artist_string = re.sub(r'\s*\([^)]*\)', '', artist_string).strip()
-    
+
     # Remove anything in brackets (often additional info)
     artist_string = re.sub(r'\s*\[[^\]]*\]', '', artist_string).strip()
-    
+
     # Remove common YouTube channel suffixes
     channel_suffixes = [
         r'\s*-\s*Topic\s*$',       # YouTube auto-generated "Topic" channels (e.g. "Koven - Topic")
@@ -12817,31 +12817,31 @@ def clean_youtube_artist(artist_string):
         r'\s*TV\s*$',
         r'\s*Channel\s*$'
     ]
-    
+
     for suffix in channel_suffixes:
         artist_string = re.sub(suffix, '', artist_string, flags=re.IGNORECASE).strip()
-    
+
     # Split on common separators and take the first artist
     separators = [',', '&', ' and ', ' x ', ' X ', ' feat.', ' ft.', ' featuring', ' with', ' vs ', ' vs.']
-    
+
     for sep in separators:
         if sep in artist_string:
             parts = artist_string.split(sep)
             artist_string = parts[0].strip()
             break
-    
+
     # Clean up extra whitespace and punctuation
     artist_string = re.sub(r'\s+', ' ', artist_string).strip()
     artist_string = re.sub(r'^\-\s*|\s*\-$', '', artist_string).strip()  # Remove leading/trailing dashes
     artist_string = re.sub(r'^,\s*|\s*,$', '', artist_string).strip()    # Remove leading/trailing commas
-    
+
     # If we cleaned too much, return original
     if not artist_string.strip():
         artist_string = original_artist
-    
+
     if artist_string != original_artist:
         logger.info(f"YouTube artist cleaned: '{original_artist}' → '{artist_string}'")
-    
+
     return artist_string
 
 def _youtube_cookie_opts():
@@ -12962,27 +12962,27 @@ def parse_youtube_playlist(url):
             'extractor_args': {'youtubetab': {'skip': ['webpage']}},
         }
         ydl_opts.update(_youtube_cookie_opts())
-        
+
         tracks = []
-        
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             # Extract playlist info
             playlist_info = ydl.extract_info(url, download=False)
-            
+
             if not playlist_info:
                 logger.error("Could not extract playlist information")
                 return None
-            
+
             playlist_name = playlist_info.get('title', 'Unknown Playlist')
             playlist_id = playlist_info.get('id', 'unknown_id')
             entries = list(playlist_info.get('entries', []) or [])
-            
+
             logger.info(f"Found YouTube playlist: '{playlist_name}' with {len(entries)} entries")
-            
+
             for entry in entries:
                 if not entry:
                     continue
-                
+
                 # Extract basic information from flat extraction
                 raw_title = entry.get('title', 'Unknown Track')
                 raw_uploader = entry.get('uploader') or entry.get('channel') or ''
@@ -13015,7 +13015,7 @@ def parse_youtube_playlist(url):
                     'raw_artist': derived_artist or raw_uploader,  # Keep original for reference
                     'url': f"https://www.youtube.com/watch?v={video_id}"
                 }
-                
+
                 tracks.append(track_data)
 
             # NOTE: on youtube.com, flat extraction gives no trustworthy per-entry
@@ -13043,7 +13043,7 @@ def parse_youtube_playlist(url):
 
             logger.info(f"Successfully parsed YouTube playlist: {len(tracks)} tracks extracted")
             return playlist_data
-            
+
     except Exception as e:
         logger.error(f"Error parsing YouTube playlist: {e}")
         return None
@@ -14253,28 +14253,28 @@ def _recover_worker_slot(batch_id, task_id):
     """
     try:
         logger.warning(f"[Worker Recovery] Attempting to recover worker slot for batch {batch_id}, task {task_id}")
-        
+
         # Acquire lock with timeout to prevent deadlock
         lock_acquired = tasks_lock.acquire(timeout=3.0)
         if not lock_acquired:
             logger.error("[Worker Recovery] FATAL: Could not acquire lock for recovery - worker slot LEAKED")
             return False
-            
+
         try:
             # Verify batch still exists
             if batch_id not in download_batches:
                 logger.warning(f"[Worker Recovery] Batch {batch_id} not found - nothing to recover")
                 return True
-                
+
             batch = download_batches[batch_id]
             old_active = batch['active_count']
-            
+
             # Only decrement if there are active workers to prevent negative counts
             if old_active > 0:
                 batch['active_count'] -= 1
                 new_active = batch['active_count']
                 logger.warning(f"[Worker Recovery] Recovered worker slot - Active count: {old_active} → {new_active}")
-                
+
                 # Try to start next worker if queue isn't empty
                 if batch['queue_index'] < len(batch['queue']) and new_active < batch['max_concurrent']:
                     logger.warning("[Worker Recovery] Attempting to start replacement worker")
@@ -14285,15 +14285,15 @@ def _recover_worker_slot(batch_id, task_id):
                     finally:
                         # Re-acquire lock for final cleanup
                         tasks_lock.acquire(timeout=2.0)
-                        
+
                 return True
             else:
                 logger.warning("[Worker Recovery] Active count already 0 - no recovery needed")
                 return True
-                
+
         finally:
             tasks_lock.release()
-            
+
     except Exception as recovery_error:
         logger.error(f"[Worker Recovery] FATAL ERROR in recovery: {recovery_error}")
         return False
@@ -14358,10 +14358,10 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
     Process failed tracks to wishlist for auto-initiated batches and handle auto-processing completion.
     This extends the standard processing with automatic scheduling of the next cycle.
     """
-    
+
     try:
         logger.info(f"[Auto-Wishlist] Processing completion for auto-initiated batch {batch_id}")
-        
+
         completion_summary = _process_failed_tracks_to_wishlist_exact(batch_id)
 
         def _reset_auto_processing_state():
@@ -15020,7 +15020,7 @@ def start_playlist_missing_downloads(playlist_id):
 
     try:
         batch_id = str(uuid.uuid4())
-        
+
         # Create task queue for this batch
         task_queue = []
         with tasks_lock:
@@ -15042,7 +15042,7 @@ def start_playlist_missing_downloads(playlist_id):
                 # Extract track data and original track index from frontend
                 track_data = track_entry.get('track', track_entry)  # Support both old and new format
                 original_track_index = track_entry.get('track_index', i)  # Use original index or fallback to enumeration
-                
+
                 download_tasks[task_id] = {
                     'status': 'pending',
                     'track_info': track_data,
@@ -15058,18 +15058,18 @@ def start_playlist_missing_downloads(playlist_id):
                     'used_sources': set(),
                     'status_change_time': time.time()
                 }
-                
+
                 # Add to batch queue instead of submitting immediately
                 download_batches[batch_id]['queue'].append(task_id)
-        
+
         # Start background monitoring for timeouts and retries (GUI parity)
         download_monitor.start_monitoring(batch_id)
-        
+
         # Start the first batch of downloads (up to 3)
         _start_next_batch_of_downloads(batch_id)
-        
+
         return jsonify({"success": True, "batch_id": batch_id, "message": f"Queued {len(missing_tracks)} downloads for processing."})
-        
+
     except Exception as e:
         logger.error(f"Error starting missing downloads: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -15082,7 +15082,7 @@ def get_active_processes():
     - YouTube discovery/sync processes (non-fresh phases)
     """
     active_processes = []
-    
+
     # Add active download batch processes
     with tasks_lock:
         for batch_id, batch_data in download_batches.items():
@@ -15094,7 +15094,7 @@ def get_active_processes():
                     "batch_id": batch_id,
                     "phase": batch_data.get('phase')
                 }
-                
+
                 # Enhanced wishlist information for better frontend state management
                 if batch_data.get('playlist_id') == 'wishlist':
                     process_info.update({
@@ -15108,9 +15108,9 @@ def get_active_processes():
                     # Add current auto-processing state for frontend awareness
                     with wishlist_timer_lock:
                         process_info["auto_processing_active"] = _rt_state.wishlist_auto_processing
-                
+
                 active_processes.append(process_info)
-    
+
     # Add YouTube playlists in non-fresh phases for rehydration
     for url_hash, state in youtube_playlist_states.items():
         # Include playlists that have progressed beyond fresh phase
@@ -15128,7 +15128,7 @@ def get_active_processes():
                 "converted_spotify_playlist_id": state.get('converted_spotify_playlist_id'),
                 "download_process_id": state.get('download_process_id')  # batch_id for download modal rehydration
             })
-    
+
     logger.info(f"Active processes check: {len([p for p in active_processes if p['type'] == 'batch'])} download batches, {len([p for p in active_processes if p['type'] == 'youtube_playlist'])} YouTube playlists")
     return jsonify({"active_processes": active_processes})
 
@@ -15305,22 +15305,22 @@ def cancel_download_task():
         with tasks_lock:
             if task_id not in download_tasks:
                 return jsonify({"success": False, "error": "Task not found"}), 404
-            
+
             task = download_tasks[task_id]
-            
+
             # Log current task state for debugging
             current_status = task.get('status', 'unknown')
             download_id = task.get('download_id')
             username = task.get('username')
             logger.info(f"[Cancel Debug] Task {task_id} - Current status: '{current_status}', download_id: {download_id}, username: {username}")
-            
+
             # Immediately mark as cancelled to prevent race conditions
             task['status'] = 'cancelled'
-            
+
         # IMPROVED WORKER SLOT MANAGEMENT: Use batch state validation instead of task status
         batch_id = task.get('batch_id')
         worker_slot_freed = False
-        
+
         if batch_id:
             try:
                 # Decide whether to free a worker slot by examining batch state.
@@ -15385,15 +15385,15 @@ def cancel_download_task():
         try:
             from core.wishlist_service import get_wishlist_service
             wishlist_service = get_wishlist_service()
-            
+
             # The task dictionary contains all the necessary info
             track_info = task.get('track_info', {})
-            
+
             # The wishlist service expects a dictionary with specific keys
             # We need to properly format the artists to avoid nested structures
             artists_data = track_info.get('artists', [])
             formatted_artists = []
-            
+
             for artist in artists_data:
                 if isinstance(artist, str):
                     # Already a string, use as-is
@@ -15412,7 +15412,7 @@ def cancel_download_task():
                 else:
                     # Fallback for any other type
                     formatted_artists.append({'name': str(artist)})
-            
+
             # Build album data - preserve all fields (including artists) for correct folder placement
             album_raw = track_info.get('album', {})
             if isinstance(album_raw, dict):
@@ -15432,7 +15432,7 @@ def cancel_download_task():
                 'album': album_data,
                 'duration_ms': track_info.get('duration_ms')
             }
-            
+
             source_context = {
                 'playlist_name': task.get('playlist_name', 'Unknown Playlist'),
                 'playlist_id': task.get('playlist_id'),
@@ -15476,7 +15476,7 @@ def _find_task_by_playlist_track(playlist_id, track_index):
     This enables the new v2 API to work without requiring task_id from frontend.
     """
     for task_id, task in download_tasks.items():
-        if (task.get('playlist_id') == playlist_id and 
+        if (task.get('playlist_id') == playlist_id and
             task.get('track_index') == track_index):
             return task_id, task
     return None, None
@@ -15492,54 +15492,54 @@ def _atomic_cancel_task(playlist_id, track_index):
         task_id, task = _find_task_by_playlist_track(playlist_id, track_index)
         if not task_id:
             return False, f"Task not found for playlist {playlist_id}, track {track_index}", None
-            
+
         # Check if already cancelled
         if task.get('status') == 'cancelled':
             return False, "Task already cancelled", {'task_id': task_id, 'status': 'cancelled'}
-            
+
         current_status = task.get('status', 'unknown')
         original_status = current_status  # Store original status before changing it
         batch_id = task.get('batch_id')
-        
+
         logger.info(f"[Atomic Cancel] Starting atomic cancel: playlist={playlist_id}, track={track_index}, task={task_id}, status={current_status}")
-        
+
         # Mark task as cancelled immediately (within same lock context)
         task['status'] = 'cancelled'
         task['cancel_requested'] = True
         task['cancel_timestamp'] = __import__('time').time()
         task['ui_state'] = 'cancelled'
-        
+
         # Ensure task has persistent identifiers for V2 system
         if 'playlist_id' not in task:
             task['playlist_id'] = playlist_id
-        
+
         # Handle worker slot management
         worker_slot_freed = False
         if batch_id and batch_id in download_batches:
             batch = download_batches[batch_id]
             active_count = batch['active_count']
-            
+
             # Free worker slot if task was consuming one
             # More precise check: only free if task was actually running
             if active_count > 0 and current_status in ['pending', 'searching', 'downloading', 'queued']:
                 logger.info(f"[Atomic Cancel] Freeing worker slot for {task_id} (was {current_status})")
-                
+
                 # CRITICAL: Direct worker slot management to prevent _on_download_completed race
                 old_active = batch['active_count']
                 batch['active_count'] = max(0, old_active - 1)  # Prevent negative counts
                 worker_slot_freed = True
-                
+
                 logger.info(f"[Atomic Cancel] Worker count: {old_active} → {batch['active_count']}")
-                
+
                 # Try to start next task if available (still within lock)
-                if (batch['queue_index'] < len(batch['queue']) and 
+                if (batch['queue_index'] < len(batch['queue']) and
                     batch['active_count'] < batch['max_concurrent']):
                     logger.info("[Atomic Cancel] Starting next task in queue")
                     # Call the existing function to start next downloads
                     # Note: This will be called outside the lock to prevent deadlock
                 else:
                     logger.warning(f"[Atomic Cancel] No next task to start (queue_index: {batch['queue_index']}/{len(batch['queue'])}, active: {batch['active_count']}/{batch['max_concurrent']})")
-        
+
         # Build result info
         task_info = {
             'task_id': task_id,
@@ -15550,10 +15550,10 @@ def _atomic_cancel_task(playlist_id, track_index):
             'track_index': track_index,
             'worker_slot_freed': worker_slot_freed
         }
-        
+
         logger.warning(f"[Atomic Cancel] Successfully cancelled task {task_id}")
         return True, "Task cancelled successfully", task_info
-        
+
     except Exception as e:
         logger.error(f"[Atomic Cancel] Error in atomic cancel: {e}")
         import traceback
@@ -15564,7 +15564,7 @@ def _atomic_cancel_task(playlist_id, track_index):
 def cancel_task_v2():
     """
     NEW ATOMIC CANCEL SYSTEM V2
-    
+
     Accepts playlist_id and track_index instead of task_id.
     Performs atomic cancellation with proper worker slot management.
     No race conditions, no dual state management.
@@ -15572,10 +15572,10 @@ def cancel_task_v2():
     data = request.get_json()
     playlist_id = data.get('playlist_id')
     track_index = data.get('track_index')
-    
+
     if not playlist_id or track_index is None:
         return jsonify({
-            "success": False, 
+            "success": False,
             "error": "Missing playlist_id or track_index"
         }), 400
 
@@ -15583,14 +15583,14 @@ def cancel_task_v2():
         # Everything in one atomic operation within the lock
         with tasks_lock:
             success, message, task_info = _atomic_cancel_task(playlist_id, track_index)
-            
+
         if not success:
             return jsonify({"success": False, "error": message}), 400
-            
+
         # Handle post-cancel operations (outside the lock to prevent deadlock)
         task_id = task_info['task_id']
         task = download_tasks.get(task_id)
-        
+
         # Try to start next batch of downloads (this may start new workers)
         if task and task.get('batch_id'):
             batch_id = task['batch_id']
@@ -15599,26 +15599,26 @@ def cancel_task_v2():
                 _start_next_batch_of_downloads(batch_id)
             except Exception as e:
                 logger.error(f"[Atomic Cancel] Could not start next downloads: {e}")
-            
+
             # CRITICAL: Check for batch completion after V2 cancel
             # V2 system bypasses _on_download_completed, so we need to check completion manually
             try:
                 _check_batch_completion_v2(batch_id)
             except Exception as e:
                 logger.error(f"[Atomic Cancel] Could not check batch completion: {e}")
-        
+
         # Cancel Soulseek download if active (non-blocking)
         if task:
             download_id = task.get('download_id')
             username = task.get('username')
             current_status = task.get('status')
             original_status = task_info.get('original_status', current_status)  # Get original status from task_info
-            
+
             logger.info(f"[Atomic Cancel] Task {task_id} state: status='{current_status}', original_status='{original_status}', download_id='{download_id}', username='{username}'")
             logger.info(f"[Atomic Cancel] Download ID type: {type(download_id)}, length: {len(str(download_id)) if download_id else 0}")
             backslash = '\\'
             logger.info(f"[Atomic Cancel] Download ID looks like filename: {download_id and ('/' in str(download_id) or backslash in str(download_id))}")
-            
+
             if download_id and username:
                 # Route through the DownloadOrchestrator's dispatch (same code
                 # path /api/downloads/cancel uses). It picks the right client by
@@ -15650,13 +15650,13 @@ def cancel_task_v2():
                     logger.error(f"[Atomic Cancel] Cancel error traceback: {traceback.format_exc()}")
             else:
                 logger.warning("ℹ️ [Atomic Cancel] No download_id or username available - skipping cancel dispatch")
-        
+
         # Add to wishlist (non-blocking, best effort)
         try:
             _add_cancelled_task_to_wishlist(task)
         except Exception as e:
             logger.error(f"[Atomic Cancel] Could not add to wishlist: {e}")
-        
+
         return jsonify({
             "success": True,
             "message": message,
@@ -15666,7 +15666,7 @@ def cancel_task_v2():
                 'status': 'cancelled'
             }
         })
-        
+
     except Exception as e:
         logger.error(f"[Cancel V2] Unexpected error: {e}")
         import traceback
@@ -15722,14 +15722,14 @@ def _add_cancelled_task_to_wishlist(task):
 @app.route('/api/playlists/<batch_id>/cancel_batch', methods=['POST'])
 def cancel_batch(batch_id):
     """
-    Cancels an entire batch - useful for cancelling during analysis phase 
+    Cancels an entire batch - useful for cancelling during analysis phase
     or cancelling all downloads at once.
     """
     try:
         with tasks_lock:
             if batch_id not in download_batches:
                 return jsonify({"success": False, "error": "Batch not found"}), 404
-            
+
             # Mark batch as cancelled
             download_batches[batch_id]['phase'] = 'cancelled'
 
@@ -15754,7 +15754,7 @@ def cancel_batch(batch_id):
                 if url_hash in youtube_playlist_states:
                     youtube_playlist_states[url_hash]['phase'] = 'discovered'
                     logger.warning(f"Reset YouTube playlist {url_hash} to discovered phase (batch cancelled)")
-            
+
             # Cancel all individual tasks in the batch
             cancelled_count = 0
             for task_id in download_batches[batch_id].get('queue', []):
@@ -15763,14 +15763,14 @@ def cancel_batch(batch_id):
                     if task['status'] not in ['completed', 'failed', 'not_found', 'cancelled']:
                         task['status'] = 'cancelled'
                         cancelled_count += 1
-            
+
             # Add activity for batch cancellation
             playlist_name = download_batches[batch_id].get('playlist_name', 'Unknown Playlist')
             add_activity_item("", "Batch Cancelled", f"'{playlist_name}' - {cancelled_count} downloads cancelled", "Now")
-            
+
             logger.warning(f"Cancelled batch {batch_id} with {cancelled_count} tasks")
             return jsonify({"success": True, "cancelled_tasks": cancelled_count})
-            
+
     except Exception as e:
         logger.error(f"Error cancelling batch {batch_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -15819,12 +15819,12 @@ def cleanup_batch():
 
                 # Delete the batch record
                 del download_batches[batch_id]
-                
+
                 # Clean up the associated tasks from the tasks dictionary
                 for task_id in task_ids_to_remove:
                     if task_id in download_tasks:
                         del download_tasks[task_id]
-                
+
                 logger.info(f"Cleaned up batch '{batch_id}' and its associated tasks from server state.")
                 return jsonify({"success": True, "message": f"Batch {batch_id} cleaned up."})
             else:
@@ -17248,11 +17248,11 @@ def start_missing_tracks_process(playlist_id):
 
     # Limit concurrent analysis processes to prevent resource exhaustion
     with tasks_lock:
-        active_analysis_count = sum(1 for batch in download_batches.values() 
+        active_analysis_count = sum(1 for batch in download_batches.values()
                                   if batch.get('phase') == 'analysis')
         if active_analysis_count >= 3:  # Allow max 3 concurrent analysis processes
             return jsonify({
-                "success": False, 
+                "success": False,
                 "error": "Too many analysis processes running. Please wait for one to complete."
             }), 429
 
@@ -17332,7 +17332,7 @@ def start_missing_tracks_process(playlist_id):
             youtube_playlist_states[url_hash]['phase'] = 'downloading'
             youtube_playlist_states[url_hash]['converted_spotify_playlist_id'] = playlist_id
             logger.info(f"Linked YouTube playlist {url_hash} to download process {batch_id} (converted ID: {playlist_id})")
-    
+
     # Link Tidal playlist to download process if this is a Tidal playlist
     if playlist_id.startswith('tidal_'):
         tidal_playlist_id = playlist_id.replace('tidal_', '')
@@ -17392,14 +17392,14 @@ def start_missing_downloads():
 
     if not missing_tracks:
         return jsonify({"success": False, "error": "No missing tracks provided"}), 400
-    
+
     # Use a default playlist_id for legacy compatibility
     playlist_id = "legacy_modal"
-    
+
     # Call the new endpoint logic directly
     try:
         batch_id = str(uuid.uuid4())
-        
+
         # Create task queue for this batch
         task_queue = []
         with tasks_lock:
@@ -17427,15 +17427,15 @@ def start_missing_downloads():
                     'download_id': None,
                     'username': None
                 }
-                
+
                 # Add to batch queue instead of submitting immediately
                 download_batches[batch_id]['queue'].append(task_id)
-        
+
         # Start the first batch of downloads (up to 3)
         _start_next_batch_of_downloads(batch_id)
 
         return jsonify({"success": True, "batch_id": batch_id, "message": f"Queued {len(missing_tracks)} downloads for processing."})
-        
+
     except Exception as e:
         logger.error(f"Error starting missing downloads: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -17561,11 +17561,11 @@ def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, sna
             if key in kwargs:
                 status[key] = kwargs[key]
         sync_statuses[playlist_id] = status
-        
+
         # Save to file
         _save_sync_status_file(sync_statuses)
         logger.info(f"Updated sync status for playlist '{playlist_name}' (ID: {playlist_id})")
-        
+
     except Exception as e:
         logger.error(f"Error updating sync status for {playlist_id}: {e}")
 
@@ -18276,7 +18276,7 @@ def hydrate_artist_bubbles():
                     logger.warning(f"Skipping malformed download in bubble snapshot for artist {artist_id}")
                     continue
                 virtual_playlist_id = download['virtualPlaylistId']
-                
+
                 # Determine current live status
                 if virtual_playlist_id in current_processes:
                     process_info = current_processes[virtual_playlist_id]
@@ -18286,7 +18286,7 @@ def hydrate_artist_bubbles():
                     # No active process - likely completed
                     live_status = 'view_results'
                     logger.warning(f"No active process for {download['album']['name']} - marking as completed")
-                
+
                 # Create updated download entry
                 updated_download = {
                     'virtualPlaylistId': virtual_playlist_id,
@@ -18295,27 +18295,27 @@ def hydrate_artist_bubbles():
                     'status': live_status,
                     'startTime': download.get('startTime', datetime.now().isoformat())
                 }
-                
+
                 hydrated_bubble['downloads'].append(updated_download)
-                
+
                 # Update hasCompletedDownloads flag
                 if live_status == 'view_results':
                     hydrated_bubble['hasCompletedDownloads'] = True
-            
+
             # Only include artists that still have downloads
             if hydrated_bubble['downloads']:
                 hydrated_bubbles[artist_id] = hydrated_bubble
-        
+
         bubble_count = len(hydrated_bubbles)
-        active_count = sum(1 for bubble in hydrated_bubbles.values() 
-                          for download in bubble['downloads'] 
+        active_count = sum(1 for bubble in hydrated_bubbles.values()
+                          for download in bubble['downloads']
                           if download['status'] == 'in_progress')
-        completed_count = sum(1 for bubble in hydrated_bubbles.values() 
-                             for download in bubble['downloads'] 
+        completed_count = sum(1 for bubble in hydrated_bubbles.values()
+                             for download in bubble['downloads']
                              if download['status'] == 'view_results')
-        
+
         logger.info(f"Hydrated {bubble_count} artist bubbles: {active_count} active, {completed_count} completed")
-        
+
         return jsonify({
             'success': True,
             'bubbles': hydrated_bubbles,
@@ -18326,7 +18326,7 @@ def hydrate_artist_bubbles():
                 'snapshot_time': snapshot_time
             }
         })
-        
+
     except Exception as e:
         logger.error(f"Error hydrating artist bubbles: {e}")
         import traceback
@@ -18787,19 +18787,19 @@ def _get_lb_discover_playlists(playlist_type):
 def start_metadata_update():
     """Start the metadata update process - EXACT copy of dashboard.py logic"""
     global metadata_update_worker, metadata_update_runtime_worker, metadata_update_state
-    
+
     try:
         # Check if already running
         if metadata_update_state['status'] == 'running':
             return jsonify({"success": False, "error": "Metadata update already running"}), 400
-        
+
         # Get refresh interval from request
         data = request.get_json() or {}
         refresh_interval_days = data.get('refresh_interval_days', 30)
-        
+
         # Check active server and client availability - EXACTLY like dashboard.py
         active_server = config_manager.get_active_media_server()
-        
+
         # Get appropriate media client - Support all three servers
         if active_server == "jellyfin":
             media_client = media_server_engine.client('jellyfin')
@@ -18816,7 +18816,7 @@ def start_metadata_update():
             if not media_client:
                 add_activity_item("", "Metadata Update", "Plex client not available", "Now")
                 return jsonify({"success": False, "error": "Plex client not available"}), 400
-            
+
             logger.debug("Plex connection details: active_server=%s client=%s", active_server, media_client)
             if hasattr(media_client, 'server') and media_client.server:
                 logger.debug(
@@ -18832,12 +18832,12 @@ def start_metadata_update():
                     logger.debug("Error getting Plex libraries: %s", e)
             else:
                 logger.debug("Plex server is NOT connected!")
-        
+
         # Check Spotify client - EXACTLY like dashboard.py
         if not spotify_client:
             add_activity_item("", "Metadata Update", "Spotify client not available", "Now")
             return jsonify({"success": False, "error": "Spotify client not available"}), 400
-        
+
         # Reset state
         metadata_update_state.update({
             'status': 'running',
@@ -18852,7 +18852,7 @@ def start_metadata_update():
             'error': None,
             'refresh_interval_days': refresh_interval_days
         })
-        
+
         # Start the metadata update worker - EXACTLY like dashboard.py
         def run_metadata_update():
             global metadata_update_runtime_worker
@@ -18873,13 +18873,13 @@ def start_metadata_update():
                 add_activity_item("", "Metadata Error", str(e), "Now")
             finally:
                 metadata_update_runtime_worker = None
-        
+
         metadata_update_worker = metadata_update_executor.submit(run_metadata_update)
-        
+
         add_activity_item("", "Metadata Update", "Loading artists from library...", "Now")
-        
+
         return jsonify({"success": True})
-        
+
     except Exception as e:
         logger.error(f"Error starting metadata update: {e}")
         metadata_update_state['status'] = 'error'
@@ -18890,15 +18890,15 @@ def start_metadata_update():
 def stop_metadata_update():
     """Stop the metadata update process"""
     global metadata_update_state
-    
+
     try:
         if metadata_update_state['status'] == 'running':
             metadata_update_state['status'] = 'stopping'
             metadata_update_state['current_artist'] = 'Stopping...'
             add_activity_item("", "Metadata Update", "Stopping metadata update process", "Now")
-        
+
         return jsonify({"success": True})
-        
+
     except Exception as e:
         logger.error(f"Error stopping metadata update: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -18909,15 +18909,15 @@ def get_metadata_update_status():
     try:
         # Return a copy of the state with datetime serialization
         state_copy = metadata_update_state.copy()
-        
+
         # Convert datetime objects to ISO format for JSON serialization
         if state_copy.get('started_at'):
             state_copy['started_at'] = state_copy['started_at'].isoformat()
         if state_copy.get('completed_at'):
             state_copy['completed_at'] = state_copy['completed_at'].isoformat()
-        
+
         return jsonify({"success": True, "status": state_copy})
-        
+
     except Exception as e:
         logger.error(f"Error getting metadata update status: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -19117,7 +19117,7 @@ def start_oauth_callback_servers():
     import threading
     from http.server import HTTPServer, BaseHTTPRequestHandler
     import urllib.parse
-    
+
     # Spotify callback server (port 8888 — for direct/local access only)
     _oauth_logger = get_logger("oauth_callback")
 
@@ -19259,7 +19259,7 @@ def start_oauth_callback_servers():
 
         def log_message(self, format, *args):
             pass  # Suppress BaseHTTPRequestHandler access logs (we use our own logger)
-    
+
     # Start Spotify callback server
     def run_spotify_server():
         _env_val = os.environ.get('SOULSYNC_SPOTIFY_CALLBACK_PORT')
@@ -19280,36 +19280,36 @@ def start_oauth_callback_servers():
         except Exception as e:
             _oauth_logger.error(f"Failed to start Spotify callback server: {e}")
             logger.error(f"Failed to start Spotify callback server: {e}")
-    
-    # Tidal callback server  
+
+    # Tidal callback server
     class TidalCallbackHandler(BaseHTTPRequestHandler):
         def do_GET(self):
             logger.info("TIDAL CALLBACK SERVER RECEIVED REQUEST ")
             parsed_url = urllib.parse.urlparse(self.path)
             query_params = urllib.parse.parse_qs(parsed_url.query)
             logger.info(f"Callback path: {self.path}")
-            
+
             if 'code' in query_params:
                 auth_code = query_params['code'][0]
                 logger.info(f"Received Tidal authorization code: {auth_code[:10]}...")
-                
+
                 # Exchange the authorization code for tokens
                 try:
                     from core.tidal_client import TidalClient
-                    
+
                     # Create a temporary client and set the stored PKCE values
                     temp_client = TidalClient()
-                    
+
                     # Restore the PKCE values from the auth request
                     global tidal_oauth_state
                     with tidal_oauth_lock:
                         temp_client.code_verifier = tidal_oauth_state["code_verifier"]
                         temp_client.code_challenge = tidal_oauth_state["code_challenge"]
-                    
+
                     logger.info(f"Restored PKCE - verifier: {temp_client.code_verifier[:20] if temp_client.code_verifier else 'None'}... challenge: {temp_client.code_challenge[:20] if temp_client.code_challenge else 'None'}...")
-                    
+
                     success = temp_client.fetch_token_from_code(auth_code)
-                    
+
                     if success:
                         # Reinitialize the global tidal client with new tokens
                         global tidal_client
@@ -19324,7 +19324,7 @@ def start_oauth_callback_servers():
                         self.wfile.write(b'<h1>Tidal Authentication Successful!</h1><p>You can close this window.</p>')
                     else:
                         raise Exception("Failed to exchange authorization code for tokens")
-                        
+
                 except Exception as e:
                     logger.error(f"Tidal token processing error: {e}")
                     add_activity_item("", "Tidal Auth Failed", f"Token processing failed: {str(e)}", "Now")
@@ -19340,10 +19340,10 @@ def start_oauth_callback_servers():
                 self.send_header('Content-type', 'text/html')
                 self.end_headers()
                 self.wfile.write(f'<h1>Tidal Authentication Failed</h1><p>{error}</p>'.encode())
-        
+
         def log_message(self, format, *args):
             pass  # Suppress server logs
-    
+
     def run_tidal_server():
         _env_val = os.environ.get('SOULSYNC_TIDAL_CALLBACK_PORT')
         tidal_port = int(_env_val) if _env_val else 8889
@@ -19360,14 +19360,14 @@ def start_oauth_callback_servers():
             logger.error(f"Failed to start Tidal callback server: {e}")
             import traceback
             logger.error(f"Full error: {traceback.format_exc()}")
-    
+
     # Start both servers in background threads
     spotify_thread = threading.Thread(target=run_spotify_server, daemon=True)
     tidal_thread = threading.Thread(target=run_tidal_server, daemon=True)
-    
+
     spotify_thread.start()
     tidal_thread.start()
-    
+
     logger.info("OAuth callback servers started")
 
 # ================================================================================================
