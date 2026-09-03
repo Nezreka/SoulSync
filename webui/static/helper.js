@@ -3372,11 +3372,21 @@ function _handleSearchResultClick(match) {
     } else if (match.type === 'content') {
         exitHelperMode();
 
-        // Try to find the element on the current page first
+        // Try to find the element on the current page first.
+        // A tabbed page can hold the target MOUNTED but hidden, and a hidden
+        // element has no offsetParent — which reads here as "not on this page",
+        // so we would scroll to nothing and pin a popover to an invisible node.
+        // Ask the page to reveal it before believing that.
         let el = document.querySelector(match.selector);
-        if (el && el.offsetParent !== null) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            setTimeout(() => showHelperPopover(el, HELPER_CONTENT[match.selector]), 300);
+        let revealed = false;
+        try { revealed = Boolean(window.revealToolsTabFor && window.revealToolsTabFor(match.selector)); } catch (_) { }
+        if (el && (el.offsetParent !== null || revealed)) {
+            // a tab that just switched has not painted yet, so give it a frame
+            const show = () => {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setTimeout(() => showHelperPopover(el, HELPER_CONTENT[match.selector]), 300);
+            };
+            if (revealed) setTimeout(show, 60); else show();
             return;
         }
 
@@ -3385,6 +3395,8 @@ function _handleSearchResultClick(match) {
         if (pageHint) {
             navigateToPage(pageHint);
             setTimeout(() => {
+                // the page has mounted by now, so its reveal hook exists
+                try { window.revealToolsTabFor && window.revealToolsTabFor(match.selector); } catch (_) { }
                 const el2 = document.querySelector(match.selector);
                 if (el2) {
                     el2.scrollIntoView({ behavior: 'smooth', block: 'center' });

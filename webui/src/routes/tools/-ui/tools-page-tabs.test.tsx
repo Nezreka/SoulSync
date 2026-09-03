@@ -38,7 +38,14 @@ describe('the tab switch', () => {
   });
 
   it('offers exactly the two tabs asked for, Operations first', () => {
-    const block = PAGE.slice(PAGE.indexOf('tools-tabs'), PAGE.indexOf('tabpanel'));
+    // sliced from the tablist div to the first panel. 'tabpanel' now also
+    // appears earlier in the reveal hook, so indexOf on it alone inverts the
+    // range and silently compares an empty string.
+    const start = PAGE.indexOf('className="tools-tabs"');
+    const end = PAGE.indexOf('id="tools-panel-operations"');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const block = PAGE.slice(start, end);
     expect(block.indexOf("'operations', 'Operations'")).toBeGreaterThan(-1);
     expect(block.indexOf("'tools', 'Tools'")).toBeGreaterThan(-1);
     expect(block.indexOf("'operations', 'Operations'")).toBeLessThan(

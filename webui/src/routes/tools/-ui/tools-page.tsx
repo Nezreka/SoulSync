@@ -14,7 +14,7 @@
  * section, both come from index.html. The route is not flipped until P7.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import {
   BlacklistCard,
@@ -30,6 +30,31 @@ import { ToolsSection } from './tool-card';
 
 export function ToolsPage() {
   const [tab, setTab] = useState<'operations' | 'tools'>('operations');
+
+  /* Anything that jumps straight to a tool card - the helper's search, the
+     onboarding checklist's "Run First Library Scan" - finds it MOUNTED but
+     hidden once the cards live behind a tab, and helper.js decides an element
+     with no offsetParent is not on this page. It then scrolls to nothing and
+     anchors a popover to an invisible node.
+     So the page publishes a way to ask for the right tab. Returns true when it
+     actually had to switch, which is the caller's cue to wait a frame for the
+     panel to paint before measuring anything. */
+  useEffect(() => {
+    const reveal = (selector: string): boolean => {
+      if (!selector) return false;
+      const target = document.querySelector(selector);
+      if (!target) return false;
+      const panel = target.closest<HTMLElement>('[role="tabpanel"]');
+      if (!panel || !panel.hidden) return false;
+      const wanted = panel.id === 'tools-panel-tools' ? 'tools' : 'operations';
+      setTab(wanted);
+      return true;
+    };
+    window.revealToolsTabFor = reveal;
+    return () => {
+      if (window.revealToolsTabFor === reveal) delete window.revealToolsTabFor;
+    };
+  }, []);
 
   return (
     <div className="page-shell tools-page-container" id="tools-page">
