@@ -20393,6 +20393,8 @@ def _hydrabase_reconnect_loop():
 # skip, only an all-or-nothing "does this broadcast have an audience".
 _connected_sids = set()
 _connected_sids_lock = threading.Lock()
+_log_live_sids = set()
+_log_live_sids_lock = threading.Lock()
 
 
 def _has_connected_clients() -> bool:
@@ -20699,6 +20701,8 @@ def handle_disconnect():
     try:
         with _activity_sids_lock:
             _activity_sids.discard(request.sid)
+        with _log_live_sids_lock:
+            _log_live_sids.discard(request.sid)
     except Exception:   # noqa: BLE001, S110 - cleanup only; a missing sid is fine
         pass
     with _connected_sids_lock:
@@ -21715,6 +21719,9 @@ def _emit_live_log_loop():
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(0.5)
         try:
+            with _log_live_sids_lock:
+                if not _log_live_sids:
+                    continue
             # Read which source clients want (stored by subscribe handler)
             source = getattr(_emit_live_log_loop, '_source', 'app')
             log_path = log_map.get(source, log_map['app'])
@@ -21758,11 +21765,15 @@ def handle_logs_subscribe(data):
     source = data.get('source', 'app')
     _emit_live_log_loop._source = source
     join_room('logs:live')
+    with _log_live_sids_lock:
+        _log_live_sids.add(request.sid)
 
 
 @socketio.on('logs:unsubscribe')
 def handle_logs_unsubscribe(data):
     leave_room('logs:live')
+    with _log_live_sids_lock:
+        _log_live_sids.discard(request.sid)
 
 
 def _playlist_room_allowed(raw_id, spid, is_admin) -> bool:
@@ -21971,9 +21982,12 @@ def _emit_discovery_progress_loop():
                 logger.debug(f"Error in {platform_name} discovery loop: {e}")
 
 def _emit_scan_status_loop():
-    """Push watchlist and media scan status every 2 seconds."""
+    """Push watchlist and media scan status every 2 seconds.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
+        if not _has_connected_clients():
+            continue
         # Watchlist scan
         try:
             state = watchlist_scan_state.copy()
