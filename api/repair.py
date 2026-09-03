@@ -246,6 +246,40 @@ def repair_findings_groups():
         logger.error(f"Error grouping repair findings: {e}")
         return jsonify({'error': str(e)}), 500
 
+@bp.route('/api/repair/findings/albums', methods=['GET'])
+def repair_findings_albums():
+    """Findings folded to one row per album (or artist), worst audio first.
+
+    Nobody reviews an upgrade backlog one track at a time - the decision is
+    "re-rip this album" or "everything by them is a bad rip". This is that
+    unit, carrying the artwork already stored on the finding so the grid can
+    render without a lookup per row.
+    """
+    try:
+        if _repair_worker() is None:
+            return jsonify({'groups': []}), 200
+        group_by = request.args.get('group_by') or 'album'
+        if group_by not in ('album', 'artist'):
+            return jsonify({'error': 'group_by must be album or artist'}), 400
+        groups = _repair_worker().get_finding_albums(
+            group_by=group_by,
+            job_id=request.args.get('job_id'),
+            status=request.args.get('status') or 'pending',
+            finding_type=request.args.get('finding_type'),
+            q=request.args.get('q'),
+            limit=int(request.args.get('limit', 200)),
+        )
+        # Same relative-thumb repair the flat list does; a Plex/Jellyfin path
+        # is not loadable from the browser as stored.
+        for g in groups:
+            for key in ('album_thumb_url', 'artist_thumb_url'):
+                if g.get(key):
+                    g[key] = fix_artist_image_url(g[key])
+        return jsonify({'groups': groups}), 200
+    except Exception as e:
+        logger.error(f"Error grouping repair findings by album: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @bp.route('/api/repair/findings/<int:finding_id>/reopen', methods=['POST'])
 def repair_finding_reopen(finding_id):
     """Put a resolved/dismissed finding back to pending — the undo half of
