@@ -57,6 +57,88 @@ def register_routes(bp):
             logger.exception("create overlay template failed")
             return jsonify({"ok": False, "error": "Could not create template"}), 500
 
+    # A template's design and nothing else. No id, no thumbnail (a machine-local
+    # data-URL that the import re-renders anyway), no timestamps, no assignment -
+    # which scope a template is bound to is a property of YOUR library, not of
+    # the design, and importing someone else's binding would silently repaint
+    # your posters.
+    _PORTABLE_TEMPLATE = ("name", "definition")
+
+    @bp.route("/overlays/templates/export", methods=["GET"])
+    def overlay_templates_export():
+        """Every template as portable JSON, so a design can leave this install.
+
+        Collection Studio has had this since it shipped and Overlay Studio never
+        did, which is backwards: a template is the artifact people actually
+        share, and an hour of design work could not be backed up or handed to
+        anybody.
+        """
+        from . import get_video_db
+        try:
+            db = get_video_db()
+            out = []
+            for light in db.list_overlay_templates() or []:
+                full = db.get_overlay_template(light["id"])
+                if full:
+                    out.append({k: full.get(k) for k in _PORTABLE_TEMPLATE})
+            return jsonify({"soulsync_overlay_templates": 1, "templates": out})
+        except Exception:
+            logger.exception("overlay template export failed")
+            return jsonify({"error": "Export failed"}), 500
+
+    @bp.route("/overlays/templates/import", methods=["POST"])
+    def overlay_templates_import():
+        """Import shared templates. An existing NAME is skipped rather than
+        overwritten - the same idempotent bargain the collection import makes,
+        so re-importing a pack is safe and never destroys a design you have
+        since edited."""
+        from . import get_video_db
+        d = request.get_json(silent=True) or {}
+        rows = d.get("templates")
+        if not isinstance(rows, list) or not rows:
+            return jsonify({"ok": False, "error": "templates are required"}), 400
+        try:
+            db = get_video_db()
+            existing = {" ".join(str(t.get("name") or "").split()).casefold()
+                        for t in db.list_overlay_templates() or []}
+            imported, skipped = [], []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                name = " ".join(str(row.get("name") or "").split())
+                if not name:
+                    continue
+                if name.casefold() in existing:
+                    skipped.append(name)
+                    continue
+                definition = row.get("definition")
+                # A template with no layers is not a design; importing it would
+                # add a card that paints nothing.
+                if isinstance(definition, str):
+                    import json as _json
+                    try:
+                        definition = _json.loads(definition)
+                    except (ValueError, TypeError):
+                        continue
+                if not isinstance(definition, dict) or not definition.get("layers"):
+                    continue
+                tid = db.create_overlay_template(name, definition=definition)
+                if tid is None:
+                    continue
+                existing.add(name.casefold())
+                imported.append(name)
+                # The gallery card is a rendered preview, so a freshly imported
+                # design has to earn its own rather than carry a stale one.
+                try:
+                    _prerender_thumb(db, tid)
+                except Exception:   # noqa: BLE001 - a missing thumb is cosmetic
+                    logger.debug("thumb prerender failed for imported template %s", tid,
+                                 exc_info=True)
+            return jsonify({"ok": True, "imported": imported, "skipped": skipped})
+        except Exception:
+            logger.exception("overlay template import failed")
+            return jsonify({"ok": False, "error": "Import failed"}), 500
+
     @bp.route("/overlays/templates/<int:template_id>", methods=["GET"])
     def overlay_template_get(template_id):
         from . import get_video_db
