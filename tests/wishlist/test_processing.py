@@ -686,7 +686,10 @@ def test_db_update_cleanup_runs_on_dedicated_thread_not_shared_pool():
     """Source guard: the post-DB-update cleanup must not ride the shared
     3-worker missing_download_executor (it starves download post-processing)."""
     from pathlib import Path
-    src = Path(processing.__file__).resolve().parents[2] / "web_server.py"
-    text = src.read_text(encoding="utf-8")
-    assert "missing_download_executor.submit(_automatic_wishlist_cleanup_after_db_update)" not in text
-    assert 'name="WishlistCleanup"' in text
+    root = Path(processing.__file__).resolve().parents[2]
+    # the spawn site moved to api/database_admin.py (aug 25 lift); the ban
+    # holds in both homes
+    for name in ("web_server.py", "api/database_admin.py"):
+        text = (root / name).read_text(encoding="utf-8")
+        assert "missing_download_executor.submit(_automatic_wishlist_cleanup_after_db_update)" not in text
+    assert 'name="WishlistCleanup"' in (root / "api/database_admin.py").read_text(encoding="utf-8")

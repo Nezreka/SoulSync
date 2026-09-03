@@ -138,8 +138,11 @@ def test_owned_item_only_accepts_strictly_better(db, seams, monkeypatch):
     real_annotate = vpw.annotate_upgrades
     orig_fetch = db.movie_wishlist_to_download
 
-    def fake_items():
-        items = orig_fetch()
+    def fake_items(**kw):
+        # **kw: the real getter grew `due_only` for the retry backoff. RSS passes
+        # due_only=False (matching a feed spends no searches), and a stub that
+        # can't take it fails the pass rather than the assertion.
+        items = orig_fetch(**kw)
         for it in items:
             it["owned"] = 1
             it["owned_resolutions"] = "1080p"
@@ -198,7 +201,7 @@ def test_skip_reason_reports_upgrade_only_for_owned(db, seams, monkeypatch):
     db.add_movie_to_wishlist(1, "Heat", year=1995)
     orig = db.movie_wishlist_to_download
 
-    def owned_1080():
+    def owned_1080(**kw):   # **kw: the getter grew due_only for the retry backoff
         items = orig()
         for it in items:
             it["owned"] = 1

@@ -20,6 +20,13 @@ processed_download_ids = set()
 post_process_locks: Dict[str, threading.Lock] = {}
 post_process_locks_lock = threading.Lock()
 
+# wishlist auto-processing flag pair. shared mutable state: the wishlist
+# routes, the stall checker, the downloads pipeline reset callback and the
+# post-process path all read/write it, so it lives here rather than as a
+# web_server module global.
+wishlist_auto_processing = False
+wishlist_auto_processing_timestamp = 0.0
+
 activity_feed = []
 activity_feed_lock = threading.Lock()
 _activity_toast_emitter = None

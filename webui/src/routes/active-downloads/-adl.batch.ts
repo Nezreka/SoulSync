@@ -167,6 +167,22 @@ export function statChips(batch: AdlBatch): StatChip[] {
 }
 
 /**
+ * The group header's stat line: "3 done · 2 failed · 1 active · 4 queued".
+ *
+ * Replaces the four micro chips — at chip size the red ✗ pill next to the
+ * green ✓ pill read as noise. Zero counts are dropped so an untouched batch
+ * says nothing.
+ */
+export function statLine(batch: AdlBatch): string {
+  const parts: string[] = [];
+  if (batch.completed) parts.push(`${batch.completed} done`);
+  if (batch.failed) parts.push(`${batch.failed} failed`);
+  if (batch.active) parts.push(`${batch.active} active`);
+  if (batch.queued) parts.push(`${batch.queued} queued`);
+  return parts.join(' · ');
+}
+
+/**
  * The track a batch is working on right now.
  *
  * Prefers a downloading track over a searching one — both are "active", but

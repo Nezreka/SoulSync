@@ -12,7 +12,7 @@ import { forgetAccountPlaylists } from '../-sync.account-cache';
 import { fetchAccountPlaylist } from '../-sync.api';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { useSourceVertical } from '../-sync.use-vertical';
-import { QobuzTab, TidalTab } from './account-tab';
+import { QobuzTab, TidalTab, YTMusicTab } from './account-tab';
 import { hydrateStatesForLoaded, resumeIfInFlight } from './url-import-tab';
 
 interface Call {
@@ -450,6 +450,113 @@ describe('QobuzTab', () => {
     render(<QobuzHarness />);
     fireEvent.click(screen.getByText('🔄 Refresh'));
     await waitFor(() => expect(screen.getByText('No Qobuz playlists found.')).toBeInTheDocument());
+  });
+});
+
+function YTMusicHarness({ onOpen }: { onOpen?: (id: string) => void }) {
+  const vertical = useSourceVertical(SYNC_SOURCES.ytmusic);
+  const [openId, setOpenId] = useState<string | null>(null);
+  return (
+    <div>
+      <YTMusicTab vertical={vertical} onOpen={onOpen ?? setOpenId} />
+      <span data-testid="open-id">{openId ?? 'none'}</span>
+      <span data-testid="seeded">
+        {JSON.stringify(vertical.states[openId ?? 'ytm1']?.playlist?.tracks ?? null)}
+      </span>
+    </div>
+  );
+}
+
+describe('YTMusicTab', () => {
+  it('starts on the click-Refresh placeholder and loads nothing', () => {
+    stubFetch();
+    render(<YTMusicHarness />);
+    expect(
+      screen.getByText("Click 'Refresh' to load your YouTube Music playlists."),
+    ).toBeInTheDocument();
+    expect(calls).toEqual([]);
+  });
+
+  it('a fresh click fetches tracks from the ytmusic endpoint (not qobuz), then opens', async () => {
+    stubFetch();
+    const overlay = vi.fn();
+    const hideOverlay = vi.fn();
+    window.showLoadingOverlay = overlay as typeof window.showLoadingOverlay;
+    window.hideLoadingOverlay = hideOverlay as typeof window.hideLoadingOverlay;
+    let clickFetches = 0;
+    responder = (url) => {
+      if (url === '/api/ytmusic/playlists') {
+        return [{ id: 'ytm1', name: 'YTM Mix', track_count: 0 }];
+      }
+      if (url === '/api/ytmusic/playlist/ytm1') {
+        clickFetches += 1;
+        return clickFetches === 1
+          ? { tracks: [] }
+          : { tracks: [{ id: 'v1', name: 'Vid', artists: ['Ch'], duration_ms: 5 }] };
+      }
+      if (url === '/api/ytmusic/playlists/states') return { states: [] };
+      return { success: true };
+    };
+    render(<YTMusicHarness />);
+    fireEvent.click(screen.getByText('🔄 Refresh'));
+    await waitFor(() => expect(screen.getByText('YTM Mix')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(calls.some((c) => c.url === '/api/ytmusic/playlists/states')).toBe(true),
+    );
+
+    fireEvent.click(screen.getByText('YTM Mix'));
+    await waitFor(() => expect(screen.getByTestId('open-id')).toHaveTextContent('ytm1'));
+    expect(overlay).toHaveBeenCalledWith('Loading YTM Mix...');
+    expect(hideOverlay).toHaveBeenCalled();
+    // Every track fetch — background crawl AND the click — hit ytmusic's own
+    // endpoint. The bug this guards against sent the click's fetch to qobuz's.
+    expect(calls.some((c) => c.url === '/api/qobuz/playlist/ytm1')).toBe(false);
+    expect(clickFetches).toBe(2);
+    expect(JSON.parse(screen.getByTestId('seeded').textContent!)).toEqual([
+      { id: 'v1', name: 'Vid', artists: ['Ch'], album: '', duration_ms: 5, track_number: 0 },
+    ]);
+  });
+
+  it("no tracks → 'Could not load tracks for this playlist', no open", async () => {
+    stubFetch();
+    const toast = vi.fn();
+    window.showToast = toast as typeof window.showToast;
+    responder = (url) => {
+      if (url === '/api/ytmusic/playlists') {
+        return [{ id: 'ytm2', name: 'Empty Mix', track_count: 0 }];
+      }
+      if (url === '/api/ytmusic/playlists/states') return { states: [] };
+      return { tracks: [] };
+    };
+    render(<YTMusicHarness />);
+    fireEvent.click(screen.getByText('🔄 Refresh'));
+    await waitFor(() => expect(screen.getByText('Empty Mix')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Empty Mix'));
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith('Could not load tracks for this playlist', 'error'),
+    );
+    expect(screen.getByTestId('open-id')).toHaveTextContent('none');
+  });
+
+  it('unauthenticated account (401) surfaces the backend error, not a blank list', async () => {
+    // The list route 401s when Settings → YouTube has no cookies configured;
+    // fetchSourcePlaylists throws on !ok, same as every other account vertical,
+    // and AccountVerticalTab.load() renders that into the error placeholder.
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        calls.push({ url, method: 'GET', body: undefined });
+        return new Response(JSON.stringify({ error: 'YouTube Music not authenticated.' }), {
+          status: 401,
+        });
+      }),
+    );
+    render(<YTMusicHarness />);
+    fireEvent.click(screen.getByText('🔄 Refresh'));
+    await waitFor(() =>
+      expect(screen.getByText('❌ Error: YouTube Music not authenticated.')).toBeInTheDocument(),
+    );
   });
 });
 

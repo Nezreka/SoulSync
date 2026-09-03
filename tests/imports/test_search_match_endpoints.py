@@ -64,7 +64,7 @@ class TestDeezerSearchTracksEndpoint:
         fake_client.search_tracks.return_value = [
             fake_track('Dirty White Boy', 'Foreigner'),
         ]
-        with patch('web_server._get_deezer_client', return_value=fake_client):
+        with patch('api.source_playlists._get_deezer_client', return_value=fake_client):
             resp = app_test_client.get(
                 '/api/deezer/search_tracks?track=Dirty+White+Boy&artist=Foreigner&limit=20'
             )
@@ -86,7 +86,7 @@ class TestDeezerSearchTracksEndpoint:
             fake_track('Dirty White Boy', 'Foreigner', album='Head Games',
                        album_type='album', track_id='real-1'),
         ]
-        with patch('web_server._get_deezer_client', return_value=fake_client):
+        with patch('api.source_playlists._get_deezer_client', return_value=fake_client):
             resp = app_test_client.get(
                 '/api/deezer/search_tracks?track=Dirty+White+Boy&artist=Foreigner'
             )
@@ -107,7 +107,7 @@ class TestDeezerSearchTracksEndpoint:
         fake_client.search_tracks.return_value = [
             fake_track('Anything', 'Whatever', track_id='only'),
         ]
-        with patch('web_server._get_deezer_client', return_value=fake_client):
+        with patch('api.source_playlists._get_deezer_client', return_value=fake_client):
             resp = app_test_client.get(
                 '/api/deezer/search_tracks?query=anything+whatever'
             )
@@ -118,7 +118,7 @@ class TestDeezerSearchTracksEndpoint:
 
     def test_missing_query_returns_400(self, app_test_client):
         """Empty input → 400. Don't waste an API call."""
-        with patch('web_server._get_deezer_client', return_value=MagicMock()):
+        with patch('api.source_playlists._get_deezer_client', return_value=MagicMock()):
             resp = app_test_client.get('/api/deezer/search_tracks')
         assert resp.status_code == 400
 
@@ -144,9 +144,9 @@ class TestiTunesSearchTracksEndpoint:
                        track_id='real-1'),
         ]
         # Endpoint dispatches via _get_metadata_fallback_client; stub it
-        monkeypatch.setattr('web_server._get_metadata_fallback_client', lambda: fake_client)
-        monkeypatch.setattr('web_server._get_metadata_fallback_source', lambda: 'itunes')
-        monkeypatch.setattr('web_server._is_hydrabase_active', lambda: False)
+        monkeypatch.setattr('api.source_playlists._get_metadata_fallback_client', lambda: fake_client)
+        monkeypatch.setattr('api.source_playlists._get_metadata_fallback_source', lambda: 'itunes')
+        monkeypatch.setattr('api.source_playlists._is_hydrabase_active', lambda: False)
         # Avoid hydrabase worker side-effect during test
         monkeypatch.setattr('web_server.hydrabase_worker', None, raising=False)
         monkeypatch.setattr('web_server.dev_mode_enabled', False, raising=False)
@@ -169,9 +169,9 @@ class TestiTunesSearchTracksEndpoint:
         b = fake_track('Whatever', 'Y', track_id='second')
         fake_client = MagicMock()
         fake_client.search_tracks.return_value = [a, b]
-        monkeypatch.setattr('web_server._get_metadata_fallback_client', lambda: fake_client)
-        monkeypatch.setattr('web_server._get_metadata_fallback_source', lambda: 'itunes')
-        monkeypatch.setattr('web_server._is_hydrabase_active', lambda: False)
+        monkeypatch.setattr('api.source_playlists._get_metadata_fallback_client', lambda: fake_client)
+        monkeypatch.setattr('api.source_playlists._get_metadata_fallback_source', lambda: 'itunes')
+        monkeypatch.setattr('api.source_playlists._is_hydrabase_active', lambda: False)
         monkeypatch.setattr('web_server.hydrabase_worker', None, raising=False)
         monkeypatch.setattr('web_server.dev_mode_enabled', False, raising=False)
 
@@ -200,7 +200,7 @@ class TestSpotifySearchTracksEndpoint:
                        album_type='album', track_id='real-1'),
         ]
         monkeypatch.setattr('web_server.spotify_client', fake_client, raising=False)
-        monkeypatch.setattr('web_server._is_hydrabase_active', lambda: False)
+        monkeypatch.setattr('api.source_playlists._is_hydrabase_active', lambda: False)
         monkeypatch.setattr('web_server.hydrabase_worker', None, raising=False)
         monkeypatch.setattr('web_server.dev_mode_enabled', False, raising=False)
 

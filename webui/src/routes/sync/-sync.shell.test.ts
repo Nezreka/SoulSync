@@ -63,16 +63,21 @@ describe('the tab table matches the markup it was transcribed from', () => {
    */
   const SHELL = readFileSync(resolve(__dirname, '__fixtures__/-vanilla-sync-markup.html'), 'utf8');
 
+  /**
+   * drop items not in the vanilla JS code
+   */
+  const TRANSCRIBED_TABS = SYNC_TABS.filter((t) => t.id !== 'ytmusic');
+
   it('has the same fifteen ids, in the same order', () => {
     const inMarkup = [
       ...SHELL.matchAll(/class="sync-tab-button[^"]*"[^>]*data-tab="([^"]+)"/g),
     ].map((m) => m[1]);
     expect(inMarkup).toHaveLength(15);
-    expect(SYNC_TABS.map((t) => t.id)).toEqual(inMarkup);
+    expect(TRANSCRIBED_TABS.map((t) => t.id)).toEqual(inMarkup);
   });
 
   it('has the same label for each, and uses it as the title too', () => {
-    for (const t of SYNC_TABS) {
+    for (const t of TRANSCRIBED_TABS) {
       const row = new RegExp(
         `data-tab="${t.id}"[^>]*title="([^"]+)"[\\s\\S]{0,160}?sync-tab-label">([^<]+)<`,
       ).exec(SHELL);
@@ -83,7 +88,7 @@ describe('the tab table matches the markup it was transcribed from', () => {
   });
 
   it('has the same sprite for each', () => {
-    for (const t of SYNC_TABS) {
+    for (const t of TRANSCRIBED_TABS) {
       const row = new RegExp(`data-tab="${t.id}"[^>]*>\\s*<span class="tab-icon ([^"]+)"`).exec(
         SHELL,
       );
@@ -93,7 +98,7 @@ describe('the tab table matches the markup it was transcribed from', () => {
 
   it('marks the same tabs as link tabs', () => {
     const inMarkup = [...SHELL.matchAll(/data-tab="([^"]+)" data-link="true"/g)].map((m) => m[1]);
-    expect(SYNC_TABS.filter((t) => t.link).map((t) => t.id)).toEqual(inMarkup);
+    expect(TRANSCRIBED_TABS.filter((t) => t.link).map((t) => t.id)).toEqual(inMarkup);
   });
 
   it('DIVERGES from the markup on which tab opens, deliberately', () => {
@@ -176,7 +181,7 @@ describe('the strip (syncStripTabs)', () => {
   it('every tab is still REACHABLE even when it is not in the strip', () => {
     // The panels all still render; only the chips were reduced.
     const stripped = SYNC_TABS.filter((t) => !SYNC_PRIMARY_TAB_IDS.includes(t.id));
-    expect(stripped.length).toBe(12);
+    expect(stripped.length).toBe(13);
     for (const t of stripped) {
       expect(syncStripTabs(t.id).map((x) => x.id)).toContain(t.id);
     }

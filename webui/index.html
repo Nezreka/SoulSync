@@ -19,6 +19,29 @@
             } catch (e) { /* localStorage blocked — full width, no harm */ }
         })();
     </script>
+    <!-- Console noise gate (#1210). The shipped UI makes ~1000 console.log
+         calls, so a normal user's console is a wall of internal chatter and a
+         real error is lost in it. log/debug/info are muted; warn and error
+         ALWAYS come through. One warn line says how to turn it back on, so a
+         quiet console is never a mystery. Same ?debug=1 flag the on-screen
+         console below already uses. -->
+    <script>
+        (function () {
+            var on = false;
+            try {
+                on = /[?&]debug=1(&|$)/.test(location.search)
+                    || localStorage.getItem('soulsync-debug') === '1';
+            } catch (e) { /* storage blocked - stay muted, warn/error still show */ }
+            window.SOULSYNC_DEBUG = on;
+            if (on) return;
+            var noop = function () {};
+            ['log', 'debug', 'info'].forEach(function (name) {
+                if (console[name]) { console[name] = noop; }
+            });
+            console.warn('SoulSync: console output is muted. Add ?debug=1 to the URL, '
+                + 'or run localStorage.setItem("soulsync-debug","1") and reload, to see it.');
+        })();
+    </script>
     <!-- On-screen error console for devices with no devtools (phones/tablets).
          OFF unless the URL carries ?debug=1, so users never see it. Must stay the
          FIRST script in <head> — anything loaded before it can fail unseen. -->
@@ -645,7 +668,6 @@
             <div class="page video-page" id="video-page-host">
                 <section class="video-subpage" data-video-subpage="video-dashboard">
                     <div class="page-shell dashboard-container">
-                        <div class="vdash-health" data-vdash-health hidden></div>
                         <div class="dashboard-header"><div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
                             <div class="header-text">
                                 <h2 class="header-title"><img src="/static/dashboard.png" class="page-header-icon" alt=""><span>Video Dashboard</span></h2>
@@ -1494,6 +1516,9 @@
                                         <button class="vcal-filter-btn vcal-filter-btn--on" type="button" data-video-cal-filter="all">All</button>
                                         <button class="vcal-filter-btn" type="button" data-video-cal-filter="owned">In library</button>
                                         <button class="vcal-filter-btn" type="button" data-video-cal-filter="missing">Missing</button>
+                                        <!-- Aired, nothing has it, nothing is looking for it. The
+                                             server decides this so the filter and the count agree. -->
+                                        <button class="vcal-filter-btn vcal-filter-btn--needs" type="button" data-video-cal-filter="needs">Needs action</button>
                                     </div>
                                     <div class="vcal-filter hidden" role="group" aria-label="Movie releases" data-video-cal-movies-wrap>
                                         <button class="vcal-filter-btn vcal-filter-btn--on" type="button" data-video-cal-movietype="cinema" title="Theatrical premieres of wishlisted movies">🎬 Cinema</button>
@@ -1712,33 +1737,47 @@
                             <div class="adl-main">
                                 <div class="adl-container">
                                     <div class="adl-header">
-                                        <h2 class="adl-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Downloads</h2>
-                                        <div class="adl-controls">
-                                            <div class="adl-filter-pills" data-vdpg-pills>
-                                                <button class="adl-pill active" type="button" data-vdpg-filter="all">All</button>
-                                                <button class="adl-pill" type="button" data-vdpg-filter="active">Active</button>
-                                                <button class="adl-pill" type="button" data-vdpg-filter="completed">Completed</button>
-                                                <button class="adl-pill" type="button" data-vdpg-filter="failed">Failed</button>
+                                        <div class="adl-hero">
+                                            <div class="adl-hero-stats">
+                                                <div class="adl-stat" data-vdpg-stat="active"><span class="adl-stat-num">0</span><span class="adl-stat-label">active</span><span class="adl-stat-sub" data-vdpg-speed hidden></span></div>
+                                                <div class="adl-stat" data-vdpg-stat="completed"><span class="adl-stat-num">0</span><span class="adl-stat-label">done</span></div>
+                                                <div class="adl-stat" data-vdpg-stat="failed"><span class="adl-stat-num">0</span><span class="adl-stat-label">failed</span></div>
+                                                <div class="adl-stat" data-vdpg-stat="all"><span class="adl-stat-num">0</span><span class="adl-stat-label">total</span></div>
                                             </div>
-                                            <div class="adl-controls-right">
-                                                <span class="adl-count" data-vdpg-sub></span>
+                                            <div class="adl-hero-actions">
+                                                <span class="adl-count" data-vdpg-sub hidden></span>
                                                 <button class="adl-history-btn" type="button" data-vdh-open title="Download history">
                                                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
                                                     History <span class="adl-history-n" data-vdh-count hidden>0</span>
-                                                </button>
-                                                <button class="adl-history-btn" type="button" data-vblk-open title="Blocked releases — never picked again">
-                                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/></svg>
-                                                    Blocklist
                                                 </button>
                                                 <button class="adl-clear-btn" type="button" data-vdpg-retry-all style="display:none" title="Re-grab every failed download (same releases)">Retry Failed</button>
                                                 <button class="adl-cancel-all-btn" type="button" data-vdpg-cancel-all style="display:none">Cancel All</button>
                                                 <button class="adl-clear-btn" type="button" data-vdpg-clear style="display:none">Clear Finished</button>
                                             </div>
                                         </div>
+                                        <div class="adl-nav">
+                                            <div class="adl-view-tabs" data-vdpg-views>
+                                                <button class="adl-view-tab active" type="button" data-vdpg-view="downloads">Downloads</button>
+                                                <button class="adl-view-tab" type="button" data-vdpg-view="review" title="Recycle bin + release blocklist">Review<span class="adl-pill-badge" data-vdpg-review-n style="display:none">0</span></button>
+                                                <button class="adl-view-tab" type="button" data-vdpg-view="clients" title="Your download clients — torrent, usenet, slskd — in one pane">Clients</button>
+                                                <!-- the old header Blocklist button lives on inside the Review pane;
+                                                     kept here hidden because the blocklist MODAL is still reachable
+                                                     from history rows -->
+                                                <button type="button" data-vblk-open hidden aria-hidden="true"></button>
+                                            </div>
+                                            <div class="adl-status-chips" data-vdpg-pills>
+                                                <button class="adl-pill active" type="button" data-vdpg-filter="all">All</button>
+                                                <button class="adl-pill" type="button" data-vdpg-filter="active">Active</button>
+                                                <button class="adl-pill" type="button" data-vdpg-filter="completed">Completed</button>
+                                                <button class="adl-pill" type="button" data-vdpg-filter="failed">Failed</button>
+                                            </div>
+                                        </div>
                                     </div>
                                     <div class="adl-list" data-vdpg-list>
                                         <div class="adl-empty vdpg-empty" data-vdpg-empty>No downloads yet. Hit Grab on a search result and it'll show up here.</div>
                                     </div>
+                                    <div data-vdpg-pane="review" hidden></div>
+                                    <div data-vdpg-pane="clients" hidden></div>
                                 </div>
                             </div>
                         </div>
@@ -1823,6 +1862,7 @@
                                 <p class="vd-overview" data-vd-overview></p>
                                 <!-- Action buttons reuse the exact artist-detail button styles. -->
                                 <div class="vd-actions artist-hero-actions" data-vd-actions></div>
+                                <div class="vd-health" data-vd-health hidden></div>
                                 <div class="vd-genres" data-vd-genres></div>
                                 <div class="vd-subs" data-vd-subs hidden></div>
                             </div>
@@ -1839,6 +1879,13 @@
                             </div>
                         </div>
                         <div class="vd-body">
+                            <!-- Where acquisition stands RIGHT NOW. First thing in the
+                                 body on purpose: it was below the whole episode list and
+                                 the cast, next to the history block, where nobody found it. -->
+                            <div class="vd-acq-section" data-vd-acq-section hidden>
+                                <h2 class="vd-section-h">Acquisition</h2>
+                                <div class="vd-acq" data-vd-acq></div>
+                            </div>
                             <div class="vd-ep-toolbar">
                                 <h2 class="vd-ep-heading">Episodes</h2>
                                 <div class="vd-toolbar-right">
@@ -1927,6 +1974,7 @@
                                 <div class="vd-awards" data-vd-awards hidden></div>
                                 <p class="vd-overview" data-vd-overview></p>
                                 <div class="vd-actions artist-hero-actions" data-vd-actions></div>
+                                <div class="vd-health" data-vd-health hidden></div>
                                 <div class="vd-genres" data-vd-genres></div>
                                 <div class="vd-subs" data-vd-subs hidden></div>
                             </div>
@@ -1942,6 +1990,13 @@
                             </div>
                         </div>
                         <div class="vd-body">
+                            <!-- Where acquisition stands RIGHT NOW. First thing in the
+                                 body on purpose: it was below the whole episode list and
+                                 the cast, next to the history block, where nobody found it. -->
+                            <div class="vd-acq-section" data-vd-acq-section hidden>
+                                <h2 class="vd-section-h">Acquisition</h2>
+                                <div class="vd-acq" data-vd-acq></div>
+                            </div>
                             <div class="vd-details" data-vd-details></div>
                             <div class="vd-cast-section" data-vd-cast-section hidden>
                                 <div class="vd-section-head">
@@ -5123,7 +5178,7 @@
                                         <span class="info-icon" role="button" tabindex="0" title="What's this?"
                                             onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                     </div>
-                                    <div class="setting-help-body" hidden><strong>Off by default</strong> — with this off, tracks appear in your library as they finish downloading (unchanged behavior). When <strong>on</strong>, the tracks of an album download are staged privately and only moved into your media library once the <strong>whole album</strong> completes, so Plex/Jellyfin/Navidrome never shows a half-loaded album while it's still downloading. If a batch stalls or fails, its tracks stay in staging (never your library) and the failed tracks remain retryable in your wishlist. Only affects full-album and wishlist-album downloads — single tracks and album top-ups (completeness fills) are unaffected.</div>
+                                    <div class="setting-help-body" hidden><strong>Off by default</strong> — with this off, tracks appear in your library as they finish downloading (unchanged behavior). When <strong>on</strong>, the tracks of an album download are staged privately and only moved into your media library once the <strong>whole album</strong> completes, so Plex/Jellyfin/Navidrome never shows a half-loaded album while it's still downloading. If a batch stalls or fails, its tracks stay in staging (never your library) and the failed tracks remain retryable in your wishlist. That private staging area is SoulSync's own working folder, <code>storage/album_bundle_staging/&lt;batch id&gt;</code> — it is <strong>not</strong> the Staging path set under Library, which is a different folder for a different job. It is emptied when the batch finishes. If a crash leaves one behind, the next start moves anything still holding audio into the Downloads recycle bin (labelled &ldquo;Stalled album download&rdquo;) rather than deleting it, so a stalled album is recoverable instead of gone. Only affects full-album and wishlist-album downloads — single tracks and album top-ups (completeness fills) are unaffected.</div>
                                 </div>
                             </div>
                             </div><!-- end Album Publishing body -->
@@ -7173,6 +7228,10 @@
                         <span class="np-queue-count" id="np-queue-count"></span>
                     </button>
                     <div class="np-queue-header-actions">
+                        <button class="np-autodownload-btn" id="np-autodownload-btn" title="Automatically download missing queue tracks" aria-pressed="false">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+                            <span>Auto-download</span>
+                        </button>
                         <button class="np-radio-btn" id="np-radio-btn" title="Radio mode - auto-add similar tracks" aria-pressed="false">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 14 0"/><path d="M1.5 9.289a15 15 0 0 1 21 0"/></svg>
                             <span class="np-radio-label">Radio</span>
@@ -7637,28 +7696,27 @@
     <script src="{{ url_for('static', filename='settings.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-spotify.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='downloads.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='server-activity.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='track-detail.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='wishlist-tools.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='origin-history.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='watchlist-history.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='blocklist.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='service-switch.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='my-accounts.js', v=static_v) }}"></script>
+    <!-- the SHELL bundle: classic scripts ported to typescript (src/shell/*,
+         built by vite.shell.config.ts as a synchronous IIFE). currently:
+         blocklist, origin-history, watchlist-history, my-accounts,
+         service-switch, library-globals, track-detail, manual-library-match,
+         server-activity. loaded in the slot of the first ported file so the
+         window globals exist by the time anything that calls them runs.
+         (discover-section-controller.js was deleted outright - its consumer,
+         the vanilla discover page, is long gone.) -->
+    <script src="{{ url_for('static', filename='dist/shell.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-listenbrainz.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-lastfm.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-soulsync-discovery.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='api-monitor.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='library-globals.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='manual-library-match.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='beatport-ui.js', v=static_v) }}"></script>
     <!-- Artist Web graph stack (sigma.js): graphology = data model, sigma = WebGL renderer,
          graphology-library = utils incl. forceAtlas2 layout. CDN/UMD (SoulSync is vanilla). -->
     <script defer src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/graphology-library/dist/graphology-library.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/sigma@2.4.0/build/sigma.min.js"></script>
-    <script src="{{ url_for('static', filename='discover-section-controller.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='enrichment.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='enrichment-manager.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='stats-automations.js', v=static_v) }}"></script>
@@ -7811,6 +7869,7 @@
     <script src="{{ url_for('static', filename='video/video-download-history.js', v=static_v) }}"></script>
     <!-- Downloads page (isolated): live status of every grab from the video side -->
     <script src="{{ url_for('static', filename='video/video-downloads-page.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='video/video-downloads-tabs.js', v=static_v) }}"></script>
     <!-- Automations page (shared system automations, video view) -->
     <script src="{{ url_for('static', filename='video/video-automations.js', v=static_v) }}"></script>
     <!-- Video library page (isolated; lists movies/shows + scan trigger) -->

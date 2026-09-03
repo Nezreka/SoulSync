@@ -45,6 +45,10 @@ def test_resolves_owned_tracks_in_mix_order(db):
     assert result['total'] == 3
     assert result['matched'] == 2
     assert [t['title'] for t in result['tracks']] == ['Aerodynamic', 'One More Time']
+    assert [t['title'] for t in result['queue_tracks']] == [
+        'Aerodynamic', 'One More Time', 'Not Owned Song'
+    ]
+    assert result['queue_tracks'][-1]['playback_status'] == 'missing'
     assert all(t['file_path'] for t in result['tracks'])
     assert result['tracks'][0]['artist'] == 'Daft Punk'
     assert result['tracks'][0]['album'] == 'Discovery'
@@ -70,6 +74,8 @@ def test_repeated_tracks_resolve_once(db):
 
 
 def test_empty_and_nameless_input(db):
-    assert resolve_playable_tracks(db, []) == {'tracks': [], 'matched': 0, 'total': 0}
+    assert resolve_playable_tracks(db, []) == {
+        'tracks': [], 'queue_tracks': [], 'matched': 0, 'total': 0
+    }
     result = resolve_playable_tracks(db, [{'artist': '', 'title': 'X'}, {'title': ''}])
     assert result['matched'] == 0

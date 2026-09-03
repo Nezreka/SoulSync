@@ -186,6 +186,27 @@ export function clearCompleted(): Promise<ClearCompletedResult> {
   return readJson<ClearCompletedResult>(apiClient.post('downloads/clear-completed'));
 }
 
+export interface DownloadNextResult extends AdlResult {
+  task_id?: string;
+  batch_id?: string;
+  batch_position?: number;
+}
+
+export function downloadTaskNext(taskId: string): Promise<DownloadNextResult> {
+  return readJson<DownloadNextResult>(
+    apiClient.post('downloads/task/download-next', { json: { task_id: taskId } }),
+  );
+}
+
+export interface DownloadBatchNextResult extends AdlResult {
+  batch_id?: string;
+}
+
+export function downloadBatchNext(batchId: string): Promise<DownloadBatchNextResult> {
+  return readJson<DownloadBatchNextResult>(
+    apiClient.post('downloads/batch/download-next', { json: { batch_id: batchId } }),
+  );
+}
 export interface CancelTaskResult extends AdlResult {
   task_info?: { track_name?: string };
 }
@@ -284,6 +305,11 @@ export interface QuarantineApproveResult extends AdlResult {
   removed_siblings?: unknown[];
 }
 
+export interface QuarantineDeleteResult extends AdlResult {
+  /** How many entries actually went - 1 for a single delete, N for a group. */
+  deleted?: number;
+}
+
 /**
  * Approve and re-import one quarantined file.
  *
@@ -304,8 +330,19 @@ export function quarantineRecover(id: string): Promise<AdlResult> {
   return readJson<AdlResult>(apiClient.post(`quarantine/${encodeURIComponent(id)}/recover`));
 }
 
-export function quarantineDelete(id: string): Promise<AdlResult> {
-  return readJson<AdlResult>(apiClient.delete(`quarantine/${encodeURIComponent(id)}`));
+/**
+ * Delete one quarantined entry, or the whole group of candidates it belongs to
+ * (#1208). `siblings` is resolved server-side off the same group key the list
+ * folds rows by, so one request clears a hundred rejected attempts.
+ */
+export function quarantineDelete(
+  id: string,
+  options: { siblings?: boolean } = {},
+): Promise<QuarantineDeleteResult> {
+  const path = `quarantine/${encodeURIComponent(id)}`;
+  return readJson<QuarantineDeleteResult>(
+    apiClient.delete(options.siblings ? `${path}?siblings=1` : path),
+  );
 }
 
 export function quarantineClear(): Promise<AdlResult> {

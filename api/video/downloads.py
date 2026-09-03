@@ -107,6 +107,37 @@ def _basic_indexer_names(body) -> list:
     return aliases.get(key, [])
 
 
+def _format_strategy_query(search_type: str, query: str, extra: list) -> str:
+    params = " ".join("%s=%s" % (k, v) for k, v in (extra or []) if v is not None)
+    return ("%s: %s %s" % (search_type, query, params)).strip()
+
+
+def _search_queries(body, source: str, scope: str, title: str, season, episode) -> list:
+    """Human-readable queries this manual search request will run/start."""
+    body = body if isinstance(body, dict) else {}
+    source = str(source or "").lower()
+    if source in ("torrent", "usenet"):
+        try:
+            from core.video.prowlarr_search import build_strategies
+            return [_format_strategy_query(t, q, extra) for t, q, extra in build_strategies(
+                scope, title, year=body.get("year"), season=season, episode=episode,
+                air_date=body.get("air_date"), absolute=body.get("absolute"),
+                series_type=body.get("series_type"), **_external_ids(body))]
+        except Exception:   # noqa: BLE001 - query visibility must never break search
+            logger.debug("manual search query summary failed", exc_info=True)
+    if source == "extto":
+        return [str(title or "").strip()] if str(title or "").strip() else []
+    try:
+        from core.video.slskd_search import build_query
+        q = build_query(scope, title, year=body.get("year"), season=season, episode=episode,
+                        air_date=body.get("air_date"), absolute=body.get("absolute"),
+                        series_type=body.get("series_type"))
+        return [q] if q else []
+    except Exception:   # noqa: BLE001
+        logger.debug("manual search text query summary failed", exc_info=True)
+        return []
+
+
 def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None, want_year=None,
                    want_title=None, blocked_users=None, want_date=None, want_absolute=None) -> list:
     """Parse → evaluate → rank a list of raw indexer hits against the quality profile.
@@ -381,6 +412,67 @@ def register_routes(bp):
         if res.get("status") == "skipped":
             return jsonify({"success": False, "error": "A rename run is already in progress."}), 409
         return jsonify({"success": True, **res})
+
+    # ── the recycle bin, browsable (Aug 27 — parity with the music side's
+    #    deleted-files manager: list / restore / purge / bulk) ──
+    @bp.route("/downloads/recycle", methods=["GET"])
+    def video_downloads_recycle():
+        from core.video import recycle as _recycle
+        from core.video.organization import load as _org_load
+
+        from . import get_video_db
+        db = get_video_db()
+        settings = _org_load(db)
+        items = _recycle.list_entries(settings, db)
+        return jsonify({
+            "success": True,
+            "items": items,
+            "total_size": sum(i.get("size") or 0 for i in items),
+            "keep_days": int(settings.get("recycle_keep_days") or 7),
+            "recycle_enabled": bool(settings.get("recycle_deletes", True)),
+        })
+
+    @bp.route("/downloads/recycle/restore", methods=["POST"])
+    def video_downloads_recycle_restore():
+        """Body: {trash_dir, name} for one entry, or {all: true}."""
+        from core.video import recycle as _recycle
+        from core.video.organization import load as _org_load
+
+        from . import get_video_db
+        db = get_video_db()
+        settings = _org_load(db)
+        body = request.get_json(silent=True) or {}
+        if body.get("all"):
+            restored = 0
+            failed = 0
+            for entry in _recycle.list_entries(settings, db):
+                res = _recycle.restore_entry(entry["trash_dir"], entry["name"], settings, db)
+                if res.get("success"):
+                    restored += 1
+                else:
+                    failed += 1
+            return jsonify({"success": failed == 0, "restored": restored, "failed": failed})
+        res = _recycle.restore_entry(body.get("trash_dir"), body.get("name"), settings, db)
+        return jsonify(res), (200 if res.get("success") else 400)
+
+    @bp.route("/downloads/recycle/purge", methods=["POST"])
+    def video_downloads_recycle_purge():
+        """Body: {trash_dir, name} for one entry, or {all: true} to empty."""
+        from core.video import recycle as _recycle
+        from core.video.organization import load as _org_load
+
+        from . import get_video_db
+        db = get_video_db()
+        settings = _org_load(db)
+        body = request.get_json(silent=True) or {}
+        if body.get("all"):
+            purged = 0
+            for entry in _recycle.list_entries(settings, db):
+                if _recycle.purge_entry(entry["trash_dir"], entry["name"], settings, db).get("success"):
+                    purged += 1
+            return jsonify({"success": True, "purged": purged})
+        res = _recycle.purge_entry(body.get("trash_dir"), body.get("name"), settings, db)
+        return jsonify(res), (200 if res.get("success") else 400)
 
     @bp.route("/downloads/blocklist", methods=["GET"])
     def video_downloads_blocklist():
@@ -801,23 +893,24 @@ def register_routes(bp):
         want_season, want_episode, season_end = _search_ints(body)
         profile, _pid = _profile_for_request(get_video_db(), body)
         live = False
+        queries = _search_queries(body, source, scope, title, want_season, want_episode)
         if source == "soulseek":
             from core.video.slskd_search import build_query, slskd_search
             sres = slskd_search(build_query(scope, title, year=body.get("year"),
                                             season=want_season, episode=want_episode))
             if not sres.get("configured"):
-                return jsonify({"scope": scope, "results": [], "error": "slskd isn't configured — set its URL on Settings → Downloads."})
+                return jsonify({"scope": scope, "results": [], "queries": queries, "error": "slskd isn't configured — set its URL on Settings → Downloads."})
             if sres.get("error"):
-                return jsonify({"scope": scope, "results": [], "error": "slskd: " + str(sres["error"])})
+                return jsonify({"scope": scope, "results": [], "queries": queries, "error": "slskd: " + str(sres["error"])})
             raw, live = sres["hits"], True
         elif source == "extto":
             from core.video.extto_search import extto_search
             eres = extto_search(title, limit=25, timeout=EXTTO_PAGE_TIMEOUT_SECONDS,
                                  resolve_magnets=False, max_candidates=1)
             if not eres.get("configured"):
-                return jsonify({"scope": scope, "results": [], "error": "EXT.to requires FlareSolverr — set flaresolverr.url."})
+                return jsonify({"scope": scope, "results": [], "queries": queries, "error": "EXT.to requires FlareSolverr — set flaresolverr.url."})
             if eres.get("error"):
-                return jsonify({"scope": scope, "results": [], "error": "EXT.to: " + str(eres["error"])})
+                return jsonify({"scope": scope, "results": [], "queries": queries, "error": "EXT.to: " + str(eres["error"])})
             raw, live = eres["hits"], True
         elif source in ("torrent", "usenet"):
             from core.video.prowlarr_search import prowlarr_search
@@ -832,15 +925,15 @@ def register_routes(bp):
                                    indexer_names=_basic_indexer_names(body),
                                    **_external_ids(body))
             if not pres.get("configured"):
-                return jsonify({"scope": scope, "results": [],
+                return jsonify({"scope": scope, "results": [], "queries": queries,
                                 "error": "Prowlarr isn't configured — set its URL + key on Settings → Downloads."})
             if pres.get("error"):
-                return jsonify({"scope": scope, "results": [], "error": "Prowlarr: " + str(pres["error"])})
+                return jsonify({"scope": scope, "results": [], "queries": queries, "error": "Prowlarr: " + str(pres["error"])})
             raw, live = pres["hits"], True
         else:
             raw = mock_search(scope, title, year=body.get("year"), season=want_season,
                               episode=want_episode, season_end=season_end, source=source)
-        return jsonify({"scope": scope, "live": live,
+        return jsonify({"scope": scope, "live": live, "queries": queries,
                         "results": _evaluate_hits(raw, profile, scope, want_season, want_episode, want_year=body.get("year"), want_title=body.get("title"))})
 
     @bp.route("/downloads/search/start", methods=["POST"])
@@ -855,6 +948,7 @@ def register_routes(bp):
         title = body.get("title") or ""
         source = str(body.get("source") or "").lower()
         want_season, want_episode, season_end = _search_ints(body)
+        queries = _search_queries(body, source, scope, title, want_season, want_episode)
 
         if source == "soulseek":
             from core.video.slskd_search import (
@@ -863,11 +957,11 @@ def register_routes(bp):
                                            season=want_season, episode=want_episode),
                                max_throttle_wait=_INTERACTIVE_MAX_WAIT_SECONDS)
             if not res.get("configured"):
-                return jsonify({"error": "slskd isn't configured — set its URL on Settings → Downloads."})
+                return jsonify({"queries": queries, "error": "slskd isn't configured — set its URL on Settings → Downloads."})
             if res.get("error"):
-                return jsonify({"error": "slskd: " + str(res["error"])})
+                return jsonify({"queries": queries, "error": "slskd: " + str(res["error"])})
             # how long the client should keep polling (slskd keeps searching this long).
-            return jsonify({"id": res["id"], "live": True, "complete": False,
+            return jsonify({"id": res["id"], "live": True, "complete": False, "queries": queries,
                             "poll_ms": search_timeout_ms() + 8000})
         profile, _pid = _profile_for_request(get_video_db(), body)
         if source == "extto":
@@ -875,10 +969,10 @@ def register_routes(bp):
             eres = extto_search(title, limit=25, timeout=EXTTO_PAGE_TIMEOUT_SECONDS,
                                  resolve_magnets=False, max_candidates=1)
             if not eres.get("configured"):
-                return jsonify({"error": "EXT.to requires FlareSolverr — set flaresolverr.url."})
+                return jsonify({"queries": queries, "error": "EXT.to requires FlareSolverr — set flaresolverr.url."})
             if eres.get("error"):
-                return jsonify({"error": "EXT.to: " + str(eres["error"])})
-            return jsonify({"id": None, "live": True, "complete": True,
+                return jsonify({"queries": queries, "error": "EXT.to: " + str(eres["error"])})
+            return jsonify({"id": None, "live": True, "complete": True, "queries": queries,
                             "results": _evaluate_hits(eres["hits"], profile, scope, want_season, want_episode, want_year=body.get("year"), want_title=body.get("title"))})
         if source in ("torrent", "usenet"):
             # Prowlarr is synchronous — like the old mock, results come back in one shot
@@ -895,15 +989,15 @@ def register_routes(bp):
                                    indexer_names=_basic_indexer_names(body),
                                    **_external_ids(body))
             if not pres.get("configured"):
-                return jsonify({"error": "Prowlarr isn't configured — set its URL + key on Settings → Downloads."})
+                return jsonify({"queries": queries, "error": "Prowlarr isn't configured — set its URL + key on Settings → Downloads."})
             if pres.get("error"):
-                return jsonify({"error": "Prowlarr: " + str(pres["error"])})
-            return jsonify({"id": None, "live": True, "complete": True,
+                return jsonify({"queries": queries, "error": "Prowlarr: " + str(pres["error"])})
+            return jsonify({"id": None, "live": True, "complete": True, "queries": queries,
                             "results": _evaluate_hits(pres["hits"], profile, scope, want_season, want_episode, want_year=body.get("year"), want_title=body.get("title"))})
         # remaining mock sources (e.g. youtube placeholder) resolve in one shot
         raw = mock_search(scope, title, year=body.get("year"), season=want_season,
                           episode=want_episode, season_end=season_end, source=source)
-        return jsonify({"id": None, "live": False, "complete": True,
+        return jsonify({"id": None, "live": False, "complete": True, "queries": queries,
                         "results": _evaluate_hits(raw, profile, scope, want_season, want_episode, want_year=body.get("year"), want_title=body.get("title"))})
 
     @bp.route("/downloads/search/poll", methods=["GET"])
@@ -972,10 +1066,10 @@ def register_routes(bp):
             paths["movies_path"] = db.get_setting("transfer_path") or ""
         target = target_dir_for(body.get("kind"), paths)
         from core.video import disk_guard, organization
-        ok_room, free = disk_guard.has_room(target, organization.load(get_video_db()))
-        if not ok_room:
-            return jsonify({"ok": False, "error": "Drive is nearly full (%.1f GB free) — "
-                            "below your minimum free space setting." % (free or 0)}), 507
+        room = disk_guard.check_room(target, organization.load(get_video_db()))
+        if not room["ok"]:
+            return jsonify({"ok": False,
+                            "error": disk_guard.shortfall_message(room, target)}), 507
         if not target:
             return jsonify({"ok": False, "error": "Set the library folder for this type on Settings → Downloads."}), 400
 
@@ -990,6 +1084,7 @@ def register_routes(bp):
         import json as _json
         from core.video.slskd_search import build_query
         ctx = body.get("search_ctx") if isinstance(body.get("search_ctx"), dict) else {}
+        ctx = {**ctx, "user_initiated": True, "import_policy": "user_replace"}
         _prof, _pid = _profile_for_request(db, body)
         common = {
             "kind": str(body.get("kind") or "movie"), "title": body.get("title"),
@@ -1069,10 +1164,10 @@ def register_routes(bp):
         paths = {k: db.get_setting(k) or "" for k in ("movies_path", "tv_path", "youtube_path")}
         target = target_dir_for("show", paths)
         from core.video import disk_guard, organization
-        ok_room, free = disk_guard.has_room(target, organization.load(get_video_db()))
-        if not ok_room:
-            return jsonify({"ok": False, "error": "Drive is nearly full (%.1f GB free) — "
-                            "below your minimum free space setting." % (free or 0)}), 507
+        room = disk_guard.check_room(target, organization.load(get_video_db()))
+        if not room["ok"]:
+            return jsonify({"ok": False,
+                            "error": disk_guard.shortfall_message(room, target)}), 507
         if not target:
             return jsonify({"ok": False, "error": "Set the TV library folder on Settings → Downloads."}), 400
 
@@ -1102,7 +1197,8 @@ def register_routes(bp):
             if not res.get("ok"):
                 skipped += 1
                 continue
-            ctx = {"scope": "episode", "title": title, "season": sn, "episode": en, "year": body.get("year")}
+            ctx = {"scope": "episode", "title": title, "season": sn, "episode": en, "year": body.get("year"),
+                   "user_initiated": True, "import_policy": "user_replace"}
             first_query = build_query("episode", title, season=sn, episode=en)
             dl_id = db.add_video_download({
                 "kind": "show", "title": title, "release_title": _os.path.basename(str(fn)),

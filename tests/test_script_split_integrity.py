@@ -43,8 +43,8 @@ SPLIT_MODULES = [
     "wishlist-tools.js",
     "sync-services.js",
     "api-monitor.js",
-    "library-globals.js",
-    "manual-library-match.js",
+    # library-globals.js + manual-library-match.js ported to typescript
+    # (src/shell, aug 26) - their globals now flow through the shell bundle
     "beatport-ui.js",
     "enrichment.js",
     "stats-automations.js",
@@ -55,9 +55,22 @@ SPLIT_MODULES = [
 
 # Other JS files that exist in static/ but are NOT part of the split
 NON_SPLIT_JS = {"setup-wizard.js", "docs.js", "helper.js", "particles.js", "worker-orbs.js",
-                "enrichment-manager.js", "origin-history.js", "blocklist.js",
-                "watchlist-history.js", "service-switch.js", "my-accounts.js",
+                "enrichment-manager.js",
                 "config-migration.js", "video/video-service-status.js"}
+
+# Classic scripts ported to typescript live in webui/src/shell and reach the
+# page as the shell IIFE bundle (static/dist/shell.js). Their window globals
+# come from the SHELL_WINDOW_EXPORTS map in src/shell/index.ts - parse the
+# export names from there so onclick coverage keeps holding as files migrate.
+# (blocklist / origin-history / watchlist-history / my-accounts / service-switch
+# moved out of NON_SPLIT_JS in the aug 26 port.)
+_SHELL_INDEX = _ROOT / "webui" / "src" / "shell" / "index.ts"
+
+
+def _shell_window_exports() -> set[str]:
+    text = _SHELL_INDEX.read_text(encoding="utf-8")
+    block = text.split("SHELL_WINDOW_EXPORTS = {", 1)[1].split("} as const", 1)[0]
+    return {m.group(1) for m in re.finditer(r"^\s*([A-Za-z_][A-Za-z0-9_]*),", block, re.M)}
 
 # Pre-existing duplicate helper functions that lived in the original monolith.
 # In a plain <script> context the last-loaded declaration wins.  These are NOT
@@ -248,6 +261,9 @@ class TestOnclickCoverage:
             path = _STATIC / extra
             if path.exists():
                 self.all_fns.update(_all_onclick_targets(_read(path)))
+
+        # Shell-bundle globals (typescript ports of former classic scripts)
+        self.all_fns.update(_shell_window_exports())
 
         # Extract all onclick function references from HTML
         html = _read(_INDEX)

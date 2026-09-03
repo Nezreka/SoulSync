@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import sys
 
 from core.youtube_music_meta import (
+    _get_playlist_paginated,
     playlist_id_from_url,
     search_ytmusic_songs,
     ytmusic_playlist_to_payload,
@@ -296,3 +297,102 @@ def test_search_ytmusic_songs_sorts_atv_first(monkeypatch):
     ])
     hits = search_ytmusic_songs("Example Artist - Example Track")
     assert [h["id"] for h in hits] == ["atv", "omv", "ugc"]
+
+
+# TEMPORARY, delete alongside the function once
+# sigma67/ytmusicapi#953 ships and get_playlist grows its own validate_responses.
+
+
+class _CountingClient:
+    """A fake ytmusicapi client whose get_playlist() replays one canned
+    response per call, in order, and records how many times it was called."""
+
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.calls = 0
+
+    def get_playlist(self, playlist_id, limit=None):
+        self.calls += 1
+        # Repeat the last response if asked for more calls than scripted —
+        # keeps a test's intent ("it should have stopped by now") legible
+        # instead of an IndexError burying the real assertion.
+        idx = min(self.calls - 1, len(self._responses) - 1)
+        return self._responses[idx]
+
+
+def test_paginated_no_retry_when_first_attempt_is_already_complete():
+    client = _CountingClient([{"tracks": [1, 2, 3], "trackCount": 3}])
+    result = _get_playlist_paginated(client, "PL1")
+    assert result["tracks"] == [1, 2, 3]
+    assert client.calls == 1
+
+
+def test_paginated_does_not_retry_a_normal_small_gap():
+    # 143/144 (99.3%) — a real, reproducible shape from production: one
+    # dead/region-blocked video that legitimately produces no row. Must be
+    # accepted on the first attempt, not chased with a full refetch.
+    client = _CountingClient([{"tracks": list(range(143)), "trackCount": 144}])
+    result = _get_playlist_paginated(client, "PL1")
+    assert len(result["tracks"]) == 143
+    assert client.calls == 1
+
+
+def test_paginated_retries_a_severely_truncated_result():
+    # 2000/3132 (63.9%) — the real bug shape: catastrophically short, not
+    # "a couple of dead entries". Recovers to the normal ceiling on retry.
+    client = _CountingClient([
+        {"tracks": list(range(2000)), "trackCount": 3132},
+        {"tracks": list(range(3032)), "trackCount": 3132},
+    ])
+    result = _get_playlist_paginated(client, "PL1")
+    assert len(result["tracks"]) == 3032
+    assert client.calls == 2
+
+
+def test_paginated_gives_up_after_max_attempts_and_keeps_the_best_seen():
+    # Never crosses the completeness threshold — bounded, not infinite.
+    client = _CountingClient([
+        {"tracks": [1], "trackCount": 100},
+        {"tracks": [1, 2], "trackCount": 100},   # the best of the two
+    ])
+    result = _get_playlist_paginated(client, "PL1")
+    assert result["tracks"] == [1, 2]
+    assert client.calls == 2
+
+
+def test_paginated_does_not_retry_without_a_trackcount_to_validate_against():
+    client = _CountingClient([{"tracks": [1], "trackCount": None}])
+    result = _get_playlist_paginated(client, "PL1")
+    assert result["tracks"] == [1]
+    assert client.calls == 1
+
+
+def test_paginated_first_attempt_failure_propagates():
+    # Unchanged from before this wrapper existed: fetch_ytmusic_playlist's
+    # own try/except catches this and falls back to yt-dlp.
+    class _Boom:
+        def get_playlist(self, playlist_id, limit=None):
+            raise RuntimeError("network blip")
+
+    try:
+        _get_playlist_paginated(_Boom(), "PL1")
+        assert False, "expected the exception to propagate"
+    except RuntimeError:
+        pass
+
+
+def test_paginated_later_attempt_failure_keeps_the_partial_result():
+    class _FailsOnSecondCall:
+        def __init__(self):
+            self.calls = 0
+
+        def get_playlist(self, playlist_id, limit=None):
+            self.calls += 1
+            if self.calls == 1:
+                return {"tracks": [1, 2], "trackCount": 3}
+            raise RuntimeError("network blip")
+
+    client = _FailsOnSecondCall()
+    result = _get_playlist_paginated(client, "PL1")
+    assert result["tracks"] == [1, 2]
+    assert client.calls == 2

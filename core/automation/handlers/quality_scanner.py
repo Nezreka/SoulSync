@@ -22,17 +22,26 @@ from core.automation.deps import AutomationDeps
 def auto_start_quality_scan(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
     automation_id = config.get('_automation_id')
 
+    # respect_enabled: this is an automation, not someone clicking Run Now.
+    # turning the job off in Tools has to mean off, or an import-triggered
+    # automation quietly force-runs a weekly job a dozen times a day (#1207).
+    # Upstream applied this to `quality_upgrade`; the job that owns the outcome
+    # here is `monitoring_list_reconcile`, and it is toggleable in Tools too.
     triggered = deps.run_repair_job_now(
         'monitoring_list_reconcile',
         scope={'compatibility_source': 'start_quality_scan'},
+        respect_enabled=True,
     )
     if not triggered:
+        # Both refusals — switched off, and no library worker — report as
+        # skipped. #1192: this automation used to cry wolf on every run, and a
+        # deliberate toggle is not a fault either way.
         deps.update_progress(
-            automation_id, status='error', phase='Unavailable',
-            log_line='Monitoring List Reconcile could not be triggered (library worker unavailable)',
-            log_type='error',
+            automation_id, status='finished', progress=100, phase='Skipped',
+            log_line='Monitoring List Reconcile is switched off in Tools, skipping',
+            log_type='info',
         )
-        return {'status': 'error', 'reason': 'library worker unavailable',
+        return {'status': 'skipped', 'reason': 'monitoring list reconcile job is disabled',
                 '_manages_own_progress': True}
 
     deps.update_progress(

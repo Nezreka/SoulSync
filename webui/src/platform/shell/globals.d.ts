@@ -547,6 +547,83 @@ declare global {
     discoverMirroredPlaylist?: (playlistId: number) => void | Promise<void>;
     openWatchlistHistoryModal?: () => void;
     openBlocklistModal?: (initialType: string) => void;
+    /** the rest of the blocklist modal surface - lives in src/shell since the
+     * aug 26 TS port; inline onclick handlers in its generated HTML use these. */
+    closeBlocklistModal?: () => void;
+    switchBlocklistTab?: (type: string) => void;
+    onBlocklistSearchInput?: () => void;
+    blockFromSearch?: (payloadEnc: string) => Promise<void>;
+    unblockEntry?: (id: number) => Promise<void>;
+    /** shared-helpers.js html escaper (also re-declared by downloads.js) */
+    escapeHtml?: (text: unknown) => string;
+    /** init.js - the active profile, or null before profiles load */
+    getCurrentProfileContext?: () => ShellProfileContext | null;
+    /** shared-helpers.js - refresh the sidebar service dots */
+    fetchAndUpdateServiceStatus?: () => void;
+    /** src/shell ports (aug 26): origin-history, watchlist-history (already
+     * declared piecemeal below where react used them), my-accounts,
+     * service-switch - inline onclick handlers in their generated markup */
+    closeDownloadOriginsModal?: () => void;
+    switchDownloadOriginTab?: (tab: string) => void;
+    toggleOriginGroup?: (btn: HTMLElement) => void;
+    toggleOriginEntry?: (id: number, on: boolean) => void;
+    toggleAllOriginEntries?: (on: boolean) => void;
+    deleteSelectedOriginEntries?: (singleId?: number) => Promise<void>;
+    openMyAccountsModal?: () => void;
+    closeMyAccountsModal?: () => void;
+    connectMyAccount?: (serviceId: string) => void;
+    saveMyAccountToken?: (serviceId: string) => Promise<void>;
+    disconnectMyAccount?: (serviceId: string) => Promise<void>;
+    openServiceSwitchModal?: (tab?: string) => void;
+    closeServiceSwitchModal?: () => void;
+    switchServiceSwitchTab?: (tab: string) => void;
+    setActiveSource?: (kind: string, id: string) => Promise<void>;
+    setDownloadMode?: (which: string) => Promise<void>;
+    closeWatchlistHistoryModal?: () => void;
+    toggleWatchlistHistoryRun?: (runId: string, btn: HTMLElement) => Promise<void>;
+    /** src/shell ports (aug 26, batch 3): library-globals, track-detail,
+     * manual-library-match, server-activity */
+    artistDetailBackLabels?: Record<string, string>;
+    artistDetailLabelStack?: Array<
+      { type: 'page'; pageId: string } | { type: 'artist'; name: string }
+    >;
+    navigateToArtistDetail?: (
+      artistId: string | number,
+      artistName: string,
+      sourceOverride?: string | null,
+      options?: { skipRouteChange?: boolean },
+    ) => void;
+    playLibraryTrack?: (
+      track: Record<string, unknown>,
+      albumTitle?: string,
+      artistName?: string,
+    ) => Promise<void>;
+    clearArtistDetailPageState?: () => void;
+    openTrackDetail?: (taskId: string) => Promise<void>;
+    closeTrackDetail?: () => void;
+    _mlmClose?: () => void;
+    _mlmSourceDebounce?: (q: string) => void;
+    _mlmLibraryDebounce?: (q: string) => void;
+    _mlmSelectSource?: (idx: number) => void;
+    _mlmSelectLibrary?: (idx: number) => void;
+    _mlmSaveMatch?: () => Promise<void>;
+    _mlmDeleteMatch?: (id: number) => Promise<void>;
+    ServerActivity?: {
+      toggle: () => void;
+      open: () => void;
+      close: () => void;
+      refresh: () => Promise<unknown>;
+      _onSocket: (d: unknown) => void;
+      _wantsLive: () => boolean;
+    };
+    SoulSyncActivitySocket?: {
+      isConnected: () => boolean;
+      subscribe: () => void;
+      unsubscribe: () => void;
+    };
+    SoulSyncVideo?: {
+      openDetail?: (args: { kind: string; id: number | string; source?: string }) => void;
+    };
     SoulSyncIssueDomain?: IssueDomainBridge;
     SoulSyncWorkflowActions?: {
       openDownloadMissingAlbum: (input: DownloadMissingAlbumWorkflowInput) => void | Promise<void>;
@@ -644,6 +721,8 @@ declare global {
           lib2_artist_id?: string | number | null;
           album_id?: string | number | null;
           _stats_image?: string | null;
+          /** Play this exact file: skip the title+artist re-resolve. */
+          exact_path?: boolean;
         },
         albumTitle: string,
         artistName: string,

@@ -48,7 +48,10 @@ export function ToolsPage() {
             Tools &amp; Operations
           </h2>
           <p className="tools-page-subtitle">
-            Database management, library scanning, metadata, backups
+            {/* Says what the Issues page ISN'T, so the two stop reading as
+                duplicates of each other (#1210). */}
+            Automated scans, database management, metadata, backups — hand-reported problems live on
+            the Issues page
           </p>
         </div>
       </div>

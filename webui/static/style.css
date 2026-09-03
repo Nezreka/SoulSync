@@ -6404,6 +6404,43 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 .notif-panel-title { font-size: 14px; font-weight: 700; color: #fff; }
+/* System health, as symbols in the notification panel header. Health is a STATE,
+   so it sits on a surface you consult rather than in the event history, where
+   reading an entry marks it done and a dismissed warning is one you no longer
+   have. Detail lives behind a click. */
+/* Pushed right, but with room either side: the header buttons ran together into
+   "HistoryClear All" once the pill landed between them. */
+.notif-health { display: inline-flex; align-items: center; margin-left: auto; }
+.notif-panel-header { gap: 8px; }
+.notif-panel-header .notif-panel-clear + .notif-panel-clear { margin-left: 4px; }
+.notif-health-btn {
+    display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+    padding: 3px 9px; border-radius: 999px; font: inherit; font-size: 11.5px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.75);
+}
+.notif-health-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.notif-health-btn--error { border-color: rgba(239,68,68,0.45); }
+.notif-health-btn--warning { border-color: rgba(245,158,11,0.45); }
+.notif-health-btn--ok { border-color: rgba(34,197,94,0.32); }
+.notif-health-sym { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.notif-health-sym--error { color: #f5b5b5; }
+.notif-health-sym--warn { color: #f5d9a8; }
+.notif-health-sym--ok { color: #b8efc9; }
+
+.notif-health-row {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 11px 14px; border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.notif-health-row:last-child { border-bottom: none; }
+.notif-health-ico { flex: none; font-size: 14px; line-height: 1.5; }
+.notif-health-text { min-width: 0; }
+.notif-health-label { font-size: 13px; font-weight: 700; color: #fff; margin-bottom: 2px; }
+.notif-health-detail { font-size: 12px; line-height: 1.5; color: rgba(255,255,255,0.62); }
+.notif-health-row--error .notif-health-label { color: #f5b5b5; }
+.notif-health-row--warning .notif-health-label { color: #f5d9a8; }
+
+
 .notif-panel-clear {
     font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.35);
     background: none; border: none; cursor: pointer; transition: color 0.15s;
@@ -15265,6 +15302,10 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     background-image: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ff0000"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>');
 }
 
+.ytmusic-icon {
+    background-image: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 176 176"><circle fill="%23ff0000" cx="88" cy="88" r="88"/><path fill="%23ffffff" d="M88,46c23.1,0,42,18.8,42,42s-18.8,42-42,42s-42-18.8-42-42S64.9,46,88,46 M88,42c-25.4,0-46,20.6-46,46s20.6,46,46,46s46-20.6,46-46S113.4,42,88,42L88,42z"/><polygon fill="%23ffffff" points="72,111 111,87 72,65"/></svg>');
+}
+
 .qobuz-icon {
     background-image: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ffffff"><circle cx="12" cy="12" r="9.5" fill="none" stroke="%23ffffff" stroke-width="1.8"/><path d="M16.5 16.5l3 3" stroke="%23ffffff" stroke-width="1.8" stroke-linecap="round"/></svg>');
 }
@@ -16157,8 +16198,10 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     width: 100%;
     height: 100%;
     z-index: 0;
-    opacity: 0;
-    animation: fadeInRow 1s ease-out forwards, gradientShift 8s ease infinite;
+    /* fadeInRow ends at 0.7 — that is the resting look, and it has to
+       live here so a disabled animation lands on it too (#1209). */
+    opacity: 0.7;
+    animation: fadeInRow 1s ease-out both, gradientShift 8s ease infinite;
 }
 
 .pool-category-fallback.failed {
@@ -23307,8 +23350,10 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     display: flex;
     width: fit-content;
     height: 100%;
-    opacity: 0;
-    animation: fadeInRow 1s ease-out forwards, infiniteScroll var(--speed, 30s) linear infinite;
+    /* fadeInRow ends at 0.7 — that is the resting look, and it has to
+       live here so a disabled animation lands on it too (#1209). */
+    opacity: 0.7;
+    animation: fadeInRow 1s ease-out both, infiniteScroll var(--speed, 30s) linear infinite;
     will-change: transform;
 }
 
@@ -29377,6 +29422,80 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 }
 
 /* Library Controls */
+/* "N tracks imported without a match" strip (#1202). Sits between the header
+   and the filters so it reads as a state of the library, not as a filter. */
+.library-unmatched-banner {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 16px 0 0;
+    padding: 12px 16px;
+    border: 1px solid rgba(255, 176, 32, 0.28);
+    border-left: 3px solid rgba(255, 176, 32, 0.75);
+    border-radius: 10px;
+    background: rgba(255, 176, 32, 0.07);
+}
+
+.library-unmatched-icon {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: rgba(255, 176, 32, 0.18);
+    color: #ffb020;
+    font-size: 0.85rem;
+    font-weight: 700;
+}
+
+.library-unmatched-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+}
+
+.library-unmatched-text strong {
+    font-size: 0.92rem;
+    color: rgba(255, 255, 255, 0.92);
+}
+
+.library-unmatched-text span {
+    font-size: 0.8rem;
+    line-height: 1.4;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.library-unmatched-btn {
+    flex: 0 0 auto;
+    padding: 7px 14px;
+    border: 1px solid rgba(255, 176, 32, 0.4);
+    border-radius: 8px;
+    background: rgba(255, 176, 32, 0.12);
+    color: #ffb020;
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.library-unmatched-btn:hover {
+    background: rgba(255, 176, 32, 0.2);
+    border-color: rgba(255, 176, 32, 0.6);
+}
+
+/* the copy is the first thing to go; the count and the way out both stay */
+@media (max-width: 700px) {
+    .library-unmatched-banner {
+        flex-wrap: wrap;
+    }
+    .library-unmatched-text span {
+        display: none;
+    }
+}
+
 .library-controls {
     display: flex;
     flex-direction: column;
@@ -29921,6 +30040,43 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
             rgba(0, 0, 0, 0.9) 0%,
             rgba(0, 0, 0, 0.3) 40%,
             transparent 65%);
+}
+
+.library-artist-play-btn {
+    position: absolute;
+    right: 14px;
+    bottom: 58px;
+    z-index: 3;
+    width: 42px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgb(var(--accent-rgb));
+    color: #fff;
+    font-size: 16px;
+    line-height: 1;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.42);
+    cursor: pointer;
+    opacity: 0;
+    transform: translateY(8px) scale(0.94);
+    transition: opacity 0.2s ease, transform 0.2s ease, filter 0.2s ease;
+}
+
+.library-artist-card:hover .library-artist-play-btn,
+.library-artist-play-btn:focus-visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+}
+
+.library-artist-play-btn:hover {
+    filter: brightness(1.12);
+}
+
+.library-artist-play-btn[aria-disabled="true"] {
+    cursor: wait;
 }
 
 /* Artist Info — pinned to bottom over the gradient */
@@ -31075,16 +31231,48 @@ div.artist-hero-badge {
     transition: max-height 0.4s ease;
 }
 .artist-hero-bio.expanded {
-    max-height: 500px;
+    /* was 500px — a long biography simply clipped again at the taller cap,
+       with no toggle in sight. expanded means expanded. */
+    max-height: none;
 }
+
+/* The collapsed box fades its last line so the clip reads as "there is more"
+   rather than as a sentence that just stops. */
+.artist-hero-bio.has-more:not(.expanded)::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 3.2em;
+    pointer-events: none;
+    background: linear-gradient(to bottom, rgba(18, 20, 26, 0), rgba(18, 20, 26, 0.92));
+    border-radius: 0 0 10px 10px;
+}
+
+/* PINNED, not in flow. The toggle used to be a plain block after the text
+   inside a `max-height: 8em; overflow: hidden` box — so on any bio long
+   enough to need it, the toggle was pushed past the clip and became
+   invisible. That is #1200: no way to read on, no scroll, no pop-out. */
 .artist-hero-bio-toggle {
+    position: absolute;
+    right: 16px;
+    bottom: 8px;
+    z-index: 1;
+    border: none;
+    background: transparent;
     color: rgb(var(--accent-rgb));
     cursor: pointer;
     font-size: 0.82em;
     font-weight: 600;
+    padding: 4px 0;
+    font-family: inherit;
+}
+.artist-hero-bio.expanded .artist-hero-bio-toggle {
+    /* nothing to fade past once open — sit under the text in flow */
+    position: static;
     display: block;
     margin-top: 8px;
-    padding: 4px 0;
 }
 .artist-hero-bio-toggle:hover {
     text-decoration: underline;
@@ -35413,9 +35601,8 @@ div.artist-hero-badge {
     aspect-ratio: 0.8;
 
     /* Progressive load animation */
-    opacity: 0;
     transform: translateY(16px) scale(0.97);
-    animation: fadeInUp 0.35s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    animation: fadeInUp 0.35s cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
 @keyframes fadeInUp {
@@ -41485,20 +41672,31 @@ div.artist-hero-badge {
 }
 .enhanced-cancel-btn:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
 
-/* Link / ID lookup row (#775) — a quiet utility line under the hero pill. */
+/* Link / ID lookup row (#775) — a quiet utility line under the hero pill, NOT
+   a second boxed input. But fully transparent with a 28%-white placeholder it
+   read as a caption: "it took a long time to realize this is input" (#1210).
+   Just enough edge to say "type here", still quieter than the pill above. */
 .enh-id-lookup {
     display: flex; align-items: center; gap: 8px; margin-top: 2px;
-    background: transparent; border: none; border-radius: 10px;
-    padding: 0 8px 0 22px; transition: background 0.2s ease;
+    background: rgba(255, 255, 255, 0.028);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 10px;
+    padding: 0 8px 0 14px;
+    cursor: text;
+    transition: background 0.2s ease, border-color 0.2s ease;
 }
-.enh-id-lookup:focus-within { background: rgba(255, 255, 255, 0.03); }
+.enh-id-lookup:hover { background: rgba(255, 255, 255, 0.045); }
+.enh-id-lookup:focus-within {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(var(--accent-rgb), 0.35);
+}
 .enh-id-lookup-icon { font-size: 13px; opacity: 0.4; }
 .enh-id-input {
     flex-grow: 1; background: transparent; border: none; outline: none;
     font-family: 'Segoe UI', sans-serif; font-size: 12.5px;
     color: rgba(255, 255, 255, 0.75); padding: 8px 0;
 }
-.enh-id-input::placeholder { color: rgba(255, 255, 255, 0.28); }
+.enh-id-input::placeholder { color: rgba(255, 255, 255, 0.42); }
 .enh-id-btn {
     flex-shrink: 0; background: rgba(var(--accent-rgb), 0.14);
     border: 1px solid rgba(var(--accent-rgb), 0.25); border-radius: 999px;
@@ -52077,6 +52275,25 @@ textarea.enhanced-meta-field-input {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+.enhanced-album-play-btn {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border-radius: 50%;
+    border: 1px solid rgba(var(--accent-rgb), 0.34);
+    background: rgba(var(--accent-rgb), 0.18);
+    color: rgb(var(--accent-light-rgb));
+    cursor: pointer;
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+.enhanced-album-play-btn:hover,
+.enhanced-album-play-btn:focus-visible {
+    background: rgba(var(--accent-rgb), 0.34);
+    transform: scale(1.06);
+}
 .enhanced-album-year {
     font-size: 12px;
     color: rgba(255,255,255,0.4);
@@ -54442,6 +54659,28 @@ textarea.enhanced-meta-field-input {
     gap: 4px;
     transition: all 0.15s ease;
 }
+.np-autodownload-btn {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.15s ease;
+}
+.np-autodownload-btn:hover {
+    color: rgba(255, 255, 255, 0.7);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+.np-autodownload-btn.active {
+    color: rgb(var(--accent-rgb));
+    border-color: rgba(var(--accent-rgb), 0.3);
+    background: rgba(var(--accent-rgb), 0.08);
+}
 .np-radio-btn:hover {
     color: rgba(255, 255, 255, 0.7);
     border-color: rgba(255, 255, 255, 0.2);
@@ -54909,6 +55148,15 @@ textarea.enhanced-meta-field-input {
 .np-queue-item-title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .np-queue-item-artist { font-size: 12px; color: rgba(255,255,255,0.4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .np-queue-item-duration { font-size: 12px; font-variant-numeric: tabular-nums; color: rgba(255,255,255,0.38); }
+.np-queue-item-status { font-size: 11px; white-space: nowrap; color: rgba(255,255,255,0.5); }
+.np-queue-item-status.downloading,
+.np-queue-item-status.searching,
+.np-queue-item-status.post_processing,
+.np-queue-item-status.requesting { color: rgb(var(--accent-light-rgb)); }
+.np-queue-item-status.failed,
+.np-queue-item-status.not_found,
+.np-queue-item-status.cancelled,
+.np-queue-item-status.quarantined { color: #ff7777; }
 .np-queue-item-eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
 .np-queue-item-eq i { width: 3px; border-radius: 2px; background: rgb(var(--accent-light-rgb)); animation: npQueueEq 0.9s ease-in-out infinite; }
 .np-queue-item-eq i:nth-child(2) { animation-delay: 0.2s; }
@@ -56142,8 +56390,7 @@ tr.tag-diff-same {
     border: 1px solid rgba(255, 255, 255, 0.08);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     transition: all 0.25s ease;
-    opacity: 0;
-    animation: docImgFadeIn 0.4s ease forwards;
+    animation: docImgFadeIn 0.4s ease both;
 }
 
 .docs-screenshot-label {
@@ -59065,6 +59312,49 @@ tr.tag-diff-same {
     font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
     font-size: 10px;
     color: rgba(255, 255, 255, 0.35);
+}
+
+/* A copy you can audition (#1214): details on the left, Play on the right. */
+.repair-detail-subitem.playable {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+}
+/* Not scoped to .playable: a copy with no file path gets the wrapper but no
+   button, and its lines still have to stack instead of running together. */
+.repair-subitem-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+}
+.repair-subitem-body .mono {
+    overflow-wrap: anywhere;
+}
+.repair-subitem-play {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 11px;
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.12);
+    border: 1px solid rgba(var(--accent-rgb, 99, 102, 241), 0.25);
+    border-radius: 6px;
+    color: rgb(var(--accent-light-rgb, 129, 140, 248));
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.repair-subitem-play:hover {
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.2);
+    border-color: rgba(var(--accent-rgb, 99, 102, 241), 0.4);
+}
+.repair-subitem-play svg {
+    width: 11px;
+    height: 11px;
+    fill: currentColor;
 }
 
 /* Duplicate keep/remove badges */
@@ -63604,8 +63894,7 @@ tr.tag-diff-same {
     cursor: pointer;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     margin-bottom: 8px;
-    animation: fadeSlideUp 0.3s ease forwards;
-    opacity: 0;
+    animation: fadeSlideUp 0.3s ease both;
 }
 .server-disambig-card:hover {
     background: rgba(255, 255, 255, 0.07);
@@ -63641,6 +63930,23 @@ tr.tag-diff-same {
     font-size: 11px;
     color: rgba(255, 255, 255, 0.35);
     align-items: center;
+}
+
+/* #1219: shown only when two candidates share a name AND source, where every
+   other field on the card is identical and there is nothing to choose on. */
+.server-disambig-ref {
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.5);
+}
+.server-disambig-hint {
+    margin: 0 0 10px;
+    font-size: 11px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.42);
 }
 
 .server-disambig-details .source-badge {
@@ -65166,14 +65472,13 @@ body.max-performance #page-particles-canvas {
 
 .adl-layout {
     /* outer gutter comes from .page (40px) — consistent with the other
-       full-width exception pages (library, etc.) */
-    display: flex;
-    gap: 0;
-    max-width: 1440px;
+       full-width exception pages (library, etc.). wide: the group grid
+       below spends the horizontal room a 1100px column left empty. */
+    max-width: 1720px;
+    margin: 0 auto;
 }
 
 .adl-main {
-    flex: 1;
     min-width: 0;
 }
 
@@ -65182,66 +65487,132 @@ body.max-performance #page-particles-canvas {
 }
 
 .adl-header {
-    margin-bottom: 24px;
+    margin-bottom: 20px;
 }
 
-.adl-title {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: #fff;
+/* ── Stat hero ──
+   Replaces the "Downloads" h2 (the sidebar already says where you are) and
+   the invisible 0.78rem count string. Four numbers you can read from across
+   the room, with the live speed/eta under the active one. */
+
+.adl-hero {
     display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 16px;
+    align-items: flex-end;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+    margin-bottom: 18px;
+}
+
+.adl-hero-stats {
+    display: flex;
+    align-items: flex-end;
+    gap: 28px;
+    flex-wrap: wrap;
+}
+
+.adl-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 52px;
+}
+
+.adl-stat-num {
+    font-size: 1.7rem;
+    font-weight: 700;
+    line-height: 1.1;
+    color: rgba(255, 255, 255, 0.88);
+    font-variant-numeric: tabular-nums;
     letter-spacing: -0.02em;
 }
 
-.adl-title svg {
-    color: rgb(var(--accent-rgb));
-    filter: drop-shadow(0 0 6px rgba(var(--accent-rgb), 0.3));
+.adl-stat-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(255, 255, 255, 0.55);
 }
 
-.adl-controls {
+.adl-stat-sub {
+    font-size: 0.7rem;
+    color: rgb(var(--accent-light-rgb));
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.adl-stat-live .adl-stat-num {
+    color: rgb(var(--accent-light-rgb));
+    text-shadow: 0 0 18px rgba(var(--accent-rgb), 0.35);
+}
+
+.adl-stat-bad .adl-stat-num {
+    color: #f87171;
+}
+
+.adl-hero-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+/* ── Navigation ──
+   Two levels the old single pill bar collapsed into one: a view switcher for
+   the three actual views, and ghost status chips inside Downloads only. */
+
+.adl-nav {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    flex-wrap: wrap;
+    gap: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    padding-bottom: 0;
 }
 
-.adl-filter-pills {
+.adl-view-tabs {
     display: flex;
-    gap: 4px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 10px;
-    padding: 3px;
+    gap: 2px;
 }
 
-.adl-pill {
-    padding: 6px 16px;
-    border-radius: 8px;
+.adl-view-tab {
+    position: relative;
+    padding: 9px 16px 11px;
     border: none;
     background: transparent;
-    color: rgba(255, 255, 255, 0.45);
-    font-size: 0.78rem;
-    font-weight: 500;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 0.9rem;
+    font-weight: 650;
+    letter-spacing: 0.005em;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: color 0.2s ease;
 }
 
-.adl-pill:hover {
-    background: rgba(255, 255, 255, 0.05);
-    color: rgba(255, 255, 255, 0.7);
+.adl-view-tab:hover {
+    color: rgba(255, 255, 255, 0.85);
 }
 
-.adl-pill.active {
-    background: rgba(var(--accent-rgb), 0.15);
-    color: rgb(var(--accent-light-rgb));
-    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.15);
+.adl-view-tab.active {
+    color: #fff;
 }
 
-/* count on the review pill. amber not accent, this is a "you have stuff
-   waiting" number and it should read differently from the filter pills. */
+/* the underline is the tab indicator — sits on the nav's bottom border */
+.adl-view-tab.active::after {
+    content: '';
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: -1px;
+    height: 2px;
+    border-radius: 2px;
+    background: rgb(var(--accent-rgb));
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.5);
+}
+
+/* count on the review tab. amber not accent, this is a "you have stuff
+   waiting" number and it should read differently from navigation. */
 .adl-pill-badge {
     display: inline-flex;
     align-items: center;
@@ -65259,25 +65630,44 @@ body.max-performance #page-particles-canvas {
     vertical-align: middle;
 }
 
-.adl-pill.active .adl-pill-badge {
-    background: rgba(245, 158, 11, 0.3);
-    color: #fcd34d;
+.adl-status-chips {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    padding-bottom: 7px;
 }
 
-.adl-count {
-    font-size: 0.78rem;
-    color: rgba(255, 255, 255, 0.3);
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
+.adl-pill {
+    padding: 4px 12px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 0.76rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.adl-pill:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.adl-pill.active {
+    background: rgba(var(--accent-rgb), 0.15);
+    border-color: rgba(var(--accent-rgb), 0.25);
+    color: rgb(var(--accent-light-rgb));
+    box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.12);
 }
 
 .adl-clear-btn {
-    padding: 5px 12px;
-    border-radius: 7px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 6px 13px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
     background: rgba(255, 255, 255, 0.03);
-    color: rgba(255, 255, 255, 0.4);
-    font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.74rem;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -65285,20 +65675,20 @@ body.max-performance #page-particles-canvas {
 }
 
 .adl-clear-btn:hover {
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.7);
-    border-color: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.07);
+    color: rgba(255, 255, 255, 0.85);
+    border-color: rgba(255, 255, 255, 0.16);
 }
 
-/* Cancel All button — appears in the header only when at least one batch has
-   active or queued work. Same shape as clear-btn, red themed. */
+/* Cancel All — appears only when at least one batch has active or queued
+   work. Quiet by default; red enough on hover to say what it is. */
 .adl-cancel-all-btn {
-    padding: 5px 12px;
-    border-radius: 7px;
+    padding: 6px 13px;
+    border-radius: 8px;
     border: 1px solid rgba(239, 68, 68, 0.35);
-    background: rgba(239, 68, 68, 0.12);
+    background: rgba(239, 68, 68, 0.1);
     color: rgba(252, 165, 165, 0.95);
-    font-size: 0.72rem;
+    font-size: 0.74rem;
     font-weight: 600;
     letter-spacing: 0.02em;
     cursor: pointer;
@@ -65324,41 +65714,502 @@ body.max-performance #page-particles-canvas {
     pointer-events: none;
 }
 
+/* ── List ── */
+
 .adl-list {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 10px;
+}
+
+/* the Downloads view only: batch groups flow into columns on wide screens
+   instead of stacking into one long scroll. review/quarantine/deleted keep
+   the plain column above. min() guards the phone case where 560px would
+   overflow the container. */
+.adl-list.adl-group-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(560px, 100%), 1fr));
+    gap: 12px;
+    align-items: start;
+}
+
+/* the tail sections and the empty state always span the full row */
+.adl-group-grid .adl-earlier,
+.adl-group-grid .adl-batch-history-section,
+.adl-group-grid .adl-empty-hero {
+    grid-column: 1 / -1;
+}
+
+/* one folded bucket line: "6 queued · next: BLUE" / "3 done" */
+.adl-bucket-fold {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    padding: 7px 12px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.76rem;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.adl-bucket-fold:hover {
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.adl-bucket-fold-chevron {
+    display: inline-flex;
+    color: rgba(255, 255, 255, 0.35);
+    transition: transform 0.2s ease;
+}
+
+.adl-bucket-fold.open .adl-bucket-fold-chevron {
+    transform: rotate(90deg);
+}
+
+.adl-bucket-fold-preview {
+    color: rgba(255, 255, 255, 0.4);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .adl-empty {
     text-align: center;
     padding: 64px 20px;
-    color: rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.5);
     font-size: 0.9rem;
 }
 
-/* ---- Section Headers ---- */
+/* the nothing-at-all state, with somewhere to go */
+.adl-empty-hero {
+    padding: 80px 20px;
+}
+
+.adl-empty-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+    background: rgba(var(--accent-rgb), 0.07);
+    color: rgb(var(--accent-light-rgb));
+    opacity: 0.85;
+    margin-bottom: 14px;
+}
+
+.adl-empty-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.adl-empty-sub {
+    font-size: 0.8rem;
+    margin-top: 4px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.adl-empty-links {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    margin-top: 16px;
+}
+
+.adl-empty-links a {
+    padding: 6px 16px;
+    border-radius: 8px;
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    color: rgb(var(--accent-light-rgb));
+    font-size: 0.8rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: background 0.2s ease;
+}
+
+.adl-empty-links a:hover {
+    background: rgba(var(--accent-rgb), 0.12);
+}
 
 .adl-section-header {
     font-size: 0.7rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: rgba(255, 255, 255, 0.2);
-    padding: 12px 14px 4px;
+    color: rgba(255, 255, 255, 0.5);
+    padding: 14px 14px 2px;
 }
 
-/* ---- Download Row ---- */
+/* ── Batch group ──
+   The old side-panel card promoted to a full-width group header, with the
+   batch's real rows nested under it. One rendering of the truth. */
 
-.adl-row {
+.adl-group {
+    position: relative;
+    background: rgba(255, 255, 255, 0.014);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 14px;
+    overflow: hidden;
+    /* a whisper of top light so the card reads as a surface, not a hole */
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045), 0 4px 18px rgba(0, 0, 0, 0.22);
+    transition: border-color 0.2s ease, opacity 0.4s ease, box-shadow 0.2s ease;
+}
+
+.adl-group:hover {
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* the batch's own album art as a blurred wash behind the card. it has to
+   stay a WASH: at the first attempt a bright cover put a recognizable face
+   behind the rows. heavy blur, low opacity, and a mask that concentrates
+   the color at the header and lets the row area fall back to the surface. */
+.adl-group-backdrop {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center 30%;
+    filter: blur(95px) saturate(1.8);
+    /* oversized so the blur has no vignetted edges inside the card, and
+       scaled far enough that a face can never survive as a face */
+    transform: scale(2.2);
+    opacity: 0.09;
+    pointer-events: none;
+    -webkit-mask-image: linear-gradient(to bottom, black, rgba(0, 0, 0, 0.25) 60%, transparent);
+    mask-image: linear-gradient(to bottom, black, rgba(0, 0, 0, 0.25) 60%, transparent);
+}
+
+.adl-group > :not(.adl-group-backdrop) {
+    position: relative;
+}
+
+.adl-group.active-glow {
+    border-color: rgba(var(--accent-rgb), 0.28);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 0 22px rgba(var(--accent-rgb), 0.1),
+        0 4px 18px rgba(0, 0, 0, 0.22);
+}
+
+.adl-group.active-glow .adl-group-backdrop {
+    opacity: 0.13;
+}
+
+.adl-group.filtered {
+    border-color: rgba(var(--accent-rgb), 0.4);
+}
+
+.adl-group.phase-complete { opacity: 0.85; }
+.adl-group.phase-error,
+.adl-group.phase-cancelled { opacity: 0.72; }
+
+.adl-group-header {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 10px 14px;
+    padding: 12px 14px 12px 18px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.adl-group-header:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.adl-group-rail {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+}
+
+.adl-group-thumb {
+    width: 46px;
+    height: 46px;
+    border-radius: 10px;
+    object-fit: cover;
+    flex-shrink: 0;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+    outline: 1px solid rgba(255, 255, 255, 0.09);
+    outline-offset: -1px;
+}
+
+.adl-group-thumb-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
+.adl-group-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.adl-group-name-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.adl-group-name {
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.adl-group-name:hover {
+    color: rgb(var(--accent-light-rgb));
+    text-decoration: underline;
+    text-decoration-color: rgba(var(--accent-rgb), 0.4);
+}
+
+.adl-group-source {
+    font-size: 0.62rem;
+    color: rgba(255, 255, 255, 0.45);
+    flex-shrink: 0;
+}
+
+.adl-group-phase {
+    display: flex;
+    align-items: center;
+    font-size: 0.76rem;
+    color: rgba(255, 255, 255, 0.6);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.adl-group-eta {
+    color: rgb(var(--accent-light-rgb));
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.adl-group-stats {
+    font-size: 0.74rem;
+    color: rgba(255, 255, 255, 0.6);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.adl-group-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.adl-group-act {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.45);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.adl-group-act:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.adl-group-filter.active {
+    color: rgb(var(--accent-light-rgb));
+    background: rgba(var(--accent-rgb), 0.15);
+}
+
+.adl-group-cancel:hover {
+    background: rgba(239, 68, 68, 0.18);
+    color: #f87171;
+}
+
+.adl-group-next:hover {
+    background: rgba(59, 130, 246, 0.18);
+    color: #93c5fd;
+}
+
+.adl-group-chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    color: rgba(255, 255, 255, 0.4);
+    transition: transform 0.2s ease, color 0.15s ease;
+}
+
+.adl-group-header:hover .adl-group-chevron {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.adl-group-chevron.open {
+    transform: rotate(180deg);
+}
+
+/* Segmented progress bar — full group width, done/failed/active */
+.adl-group-segbar {
+    display: flex;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+}
+
+.adl-batch-seg { height: 100%; transition: width 0.4s ease; }
+.adl-batch-seg.seg-done { background: #22c55e; }
+.adl-batch-seg.seg-fail { background: #ef4444; }
+.adl-batch-seg.seg-active { background: rgba(var(--accent-rgb), 0.85); }
+.adl-batch-seg.seg-active.shimmer {
+    background: linear-gradient(
+        90deg,
+        rgba(var(--accent-rgb), 0.85) 0%,
+        rgba(var(--accent-light-rgb), 1) 50%,
+        rgba(var(--accent-rgb), 0.85) 100%
+    );
+    background-size: 200% 100%;
+    animation: adlSegShimmer 1.6s linear infinite;
+}
+
+@keyframes adlSegShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+.adl-group-rows {
+    display: flex;
+    flex-direction: column;
+    padding: 6px 8px 8px;
+    gap: 2px;
+}
+
+.adl-group-note {
+    font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.5);
+    padding: 8px 10px;
+}
+
+/* ── Earlier (batchless / aged-out rows) ── */
+
+.adl-earlier {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+/* one folded album line in the Earlier tail */
+.adl-earlier-album {
+    background: rgba(255, 255, 255, 0.014);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.adl-earlier-album-header {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    padding: 8px 14px;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 0.8rem;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.adl-earlier-album-header:hover {
+    background: rgba(255, 255, 255, 0.035);
+}
+
+.adl-earlier-album-header.open .adl-bucket-fold-chevron {
+    transform: rotate(90deg);
+}
+
+.adl-earlier-album-thumb {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    object-fit: cover;
+    flex-shrink: 0;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.adl-earlier-album-name {
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.adl-earlier-album-artist {
+    color: rgba(255, 255, 255, 0.5);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 1;
+}
+
+.adl-earlier-album-summary {
+    margin-left: auto;
+    color: rgba(255, 255, 255, 0.55);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.adl-earlier-more {
+    align-self: center;
+    margin-top: 6px;
+    padding: 6px 18px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.65);
+    font-size: 0.76rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.adl-earlier-more:hover {
+    background: rgba(255, 255, 255, 0.07);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+/* ── Download row ── */
+
+.adl-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 14px;
     background: rgba(255, 255, 255, 0.018);
     border: 1px solid rgba(255, 255, 255, 0.035);
     border-radius: 10px;
     transition: all 0.2s ease;
+    overflow: hidden;
 }
 
 .adl-row:hover {
@@ -65366,11 +66217,34 @@ body.max-performance #page-particles-canvas {
     border-color: rgba(255, 255, 255, 0.07);
 }
 
+/* rows inside a group: the group carries the box, rows go frameless */
+.adl-row-compact {
+    padding: 6px 10px;
+    background: transparent;
+    border-color: transparent;
+    border-radius: 8px;
+}
+
+.adl-row-compact .adl-row-art {
+    width: 34px;
+    height: 34px;
+    border-radius: 7px;
+}
+
+.adl-row-compact:hover {
+    background: rgba(255, 255, 255, 0.035);
+    border-color: transparent;
+}
+
 /* Active row accent glow */
 .adl-row.adl-row-active {
     border-color: rgba(var(--accent-rgb), 0.18);
     background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.04) 0%, rgba(var(--accent-rgb), 0.01) 100%);
-    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.06);
+}
+
+.adl-row-compact.adl-row-active {
+    border-color: transparent;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.06) 0%, rgba(var(--accent-rgb), 0.015) 100%);
 }
 
 /* Completed row subtle green */
@@ -65378,11 +66252,123 @@ body.max-performance #page-particles-canvas {
     border-color: rgba(34, 197, 94, 0.1);
 }
 
+.adl-row-compact.adl-row-completed {
+    border-color: transparent;
+}
+
 /* Failed row subtle red */
 .adl-row.adl-row-failed {
     border-color: rgba(239, 68, 68, 0.1);
 }
 
+.adl-row-compact.adl-row-failed {
+    border-color: transparent;
+    background: rgba(239, 68, 68, 0.03);
+}
+
+/* The one signal a downloads page owes you: a live progress bar riding the
+   row's bottom edge. */
+.adl-row-progress {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: rgba(var(--accent-rgb), 0.12);
+}
+
+.adl-row-progress-fill {
+    height: 100%;
+    background: rgb(var(--accent-rgb));
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.6);
+    transition: width 0.5s ease;
+}
+
+.adl-row-speed {
+    margin-left: 6px;
+    font-size: 0.68rem;
+    color: rgba(255, 255, 255, 0.55);
+    font-variant-numeric: tabular-nums;
+}
+
+/* the expandable rows never said so — the chevron is the affordance */
+.adl-row-chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: rgba(255, 255, 255, 0.25);
+    transition: transform 0.2s ease, color 0.15s ease;
+}
+
+.adl-row:hover .adl-row-chevron {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.adl-row-chevron.open {
+    transform: rotate(180deg);
+}
+
+/* ── Per-row Download Next button ── */
+.adl-row-next {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    margin-left: 4px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(59, 130, 246, 0.14);
+    border: 1px solid rgba(59, 130, 246, 0.35);
+    color: #93c5fd;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(8px) scale(0.72);
+    transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.adl-row-next svg {
+    display: block;
+}
+
+.adl-row:hover .adl-row-next,
+.adl-row:focus-within .adl-row-next {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0) scale(1);
+}
+
+.adl-row-next:hover {
+    background: linear-gradient(135deg, rgba(96, 165, 250, 0.95), rgba(59, 130, 246, 1));
+    border-color: rgba(96, 165, 250, 0.85);
+    color: #fff;
+    box-shadow: 0 0 14px rgba(59, 130, 246, 0.42), 0 2px 8px rgba(0, 0, 0, 0.3);
+    transform: translateX(0) scale(1.12);
+}
+
+.adl-row-next:active {
+    transform: translateX(0) scale(0.95);
+    transition: transform 0.08s ease;
+}
+
+.adl-row-next-pending,
+.adl-row-next-pending:hover {
+    opacity: 0.5 !important;
+    pointer-events: none !important;
+    transform: translateX(0) scale(1) !important;
+    box-shadow: none !important;
+}
+
+@media (hover: none) {
+    .adl-row-next {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateX(0) scale(1);
+    }
+}
 /* ── Per-row cancel button ──
    Fancy reveal on hover: fades in + slides/scales from the right edge with
    a soft red glow. Only rendered on active/queued rows (set in JS). Terminal
@@ -65392,17 +66378,16 @@ body.max-performance #page-particles-canvas {
     flex-shrink: 0;
     width: 28px;
     height: 28px;
-    margin-left: 8px;
+    margin-left: 4px;
     padding: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     border-radius: 50%;
-    background: linear-gradient(135deg, rgba(239, 68, 68, 0.85), rgba(220, 38, 38, 0.9));
-    border: 1px solid rgba(239, 68, 68, 0.55);
-    color: #fff;
+    background: rgba(239, 68, 68, 0.14);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    color: #fca5a5;
     cursor: pointer;
-    box-shadow: 0 0 10px rgba(239, 68, 68, 0.25), 0 2px 6px rgba(0, 0, 0, 0.25);
     opacity: 0;
     pointer-events: none;
     transform: translateX(8px) scale(0.72);
@@ -65423,6 +66408,7 @@ body.max-performance #page-particles-canvas {
 .adl-row-cancel:hover {
     background: linear-gradient(135deg, rgba(248, 113, 113, 0.95), rgba(239, 68, 68, 1));
     border-color: rgba(248, 113, 113, 0.85);
+    color: #fff;
     box-shadow: 0 0 14px rgba(239, 68, 68, 0.45), 0 2px 8px rgba(0, 0, 0, 0.3);
     transform: translateX(0) scale(1.12);
 }
@@ -65451,8 +66437,8 @@ body.max-performance #page-particles-canvas {
 }
 
 .adl-row-art {
-    width: 44px;
-    height: 44px;
+    width: 40px;
+    height: 40px;
     border-radius: 8px;
     object-fit: cover;
     flex-shrink: 0;
@@ -65483,8 +66469,8 @@ body.max-performance #page-particles-canvas {
 }
 
 .adl-row-meta {
-    font-size: 0.78rem;
-    color: rgba(255, 255, 255, 0.4);
+    font-size: 0.76rem;
+    color: rgba(255, 255, 255, 0.58);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -65493,7 +66479,7 @@ body.max-performance #page-particles-canvas {
 
 .adl-row-batch {
     font-size: 0.7rem;
-    color: rgba(var(--accent-rgb), 0.55);
+    color: rgba(var(--accent-rgb), 0.7);
     margin-top: 1px;
     white-space: nowrap;
     overflow: hidden;
@@ -65501,49 +66487,57 @@ body.max-performance #page-particles-canvas {
 }
 
 .adl-row-error {
-    font-size: 0.7rem;
-    color: rgba(239, 68, 68, 0.65);
-    margin-top: 1px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-size: 0.72rem;
+    color: rgba(252, 165, 165, 0.9);
+    margin-top: 2px;
+    white-space: normal;
+    line-height: 1.35;
 }
 
-/* ---- Status Badges ---- */
+/* ── Status chip ── */
 
 .adl-row-status {
-    font-size: 0.76rem;
-    font-weight: 500;
+    font-size: 0.73rem;
+    font-weight: 600;
     white-space: nowrap;
-    min-width: 95px;
-    text-align: right;
     flex-shrink: 0;
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    justify-content: flex-end;
-    gap: 4px;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    font-variant-numeric: tabular-nums;
 }
 
 .adl-row-status.active {
     color: rgb(var(--accent-light-rgb));
+    background: rgba(var(--accent-rgb), 0.12);
+    border-color: rgba(var(--accent-rgb), 0.2);
 }
 
 .adl-row-status.queued {
-    color: rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 0.55);
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .adl-row-status.completed {
-    color: #22c55e;
+    color: #4ade80;
+    background: rgba(34, 197, 94, 0.1);
+    border-color: rgba(34, 197, 94, 0.16);
 }
 
 .adl-row-status.failed {
-    color: #ef4444;
+    color: #f87171;
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.16);
 }
 
 .adl-row-status.cancelled {
-    color: rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.04);
     text-decoration: line-through;
-    text-decoration-color: rgba(255, 255, 255, 0.1);
+    text-decoration-color: rgba(255, 255, 255, 0.2);
 }
 
 /* Status dot indicator */
@@ -65560,10 +66554,10 @@ body.max-performance #page-particles-canvas {
     animation: adlPulse 1.5s ease infinite;
 }
 
-.adl-status-dot.queued { background: rgba(255, 255, 255, 0.2); }
+.adl-status-dot.queued { background: rgba(255, 255, 255, 0.3); }
 .adl-status-dot.completed { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, 0.3); }
 .adl-status-dot.failed { background: #ef4444; box-shadow: 0 0 6px rgba(239, 68, 68, 0.3); }
-.adl-status-dot.cancelled { background: rgba(255, 255, 255, 0.15); }
+.adl-status-dot.cancelled { background: rgba(255, 255, 255, 0.2); }
 
 @keyframes adlPulse {
     0%, 100% { opacity: 1; }
@@ -65616,445 +66610,24 @@ body.max-performance #page-particles-canvas {
     min-height: 32px;
 }
 
-/* ---- Batch Context Panel ---- */
-.adl-batch-panel {
-    width: 366px;
-    flex-shrink: 0;
-    border-left: 1px solid rgba(255, 255, 255, 0.06);
-    padding: 0 14px 0 22px;
-    margin-left: 8px;
-    overflow-y: auto;
-    overflow-x: hidden;
-    max-height: calc(100vh - 120px);
-    position: sticky;
-    top: 80px;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
-}
-.adl-batch-panel::-webkit-scrollbar { width: 7px; }
-.adl-batch-panel::-webkit-scrollbar-track { background: transparent; }
-.adl-batch-panel::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 4px; }
-.adl-batch-panel::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.24); }
-
-.adl-batch-panel-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 14px;
-}
-
-.adl-batch-panel-title {
-    font-size: 1rem;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.85);
-    margin: 0;
-}
-
-/* Collapse toggle */
-.adl-batch-panel-collapse {
-    background: none;
-    border: none;
-    color: rgba(255, 255, 255, 0.3);
-    cursor: pointer;
-    padding: 4px;
-    border-radius: 4px;
-    transition: all 0.2s;
-}
-
-.adl-batch-panel-collapse:hover {
-    color: rgba(255, 255, 255, 0.6);
-    background: rgba(255, 255, 255, 0.05);
-}
-
-.adl-batch-panel-collapse svg {
-    transition: transform 0.2s;
-}
-
-.adl-batch-panel.collapsed .adl-batch-panel-collapse svg {
-    transform: rotate(180deg);
-}
-
-.adl-batch-panel.collapsed .adl-batch-active,
-.adl-batch-panel.collapsed .adl-batch-history-section,
-/* The active-batches summary line ("N batches · M downloading · …") is shown
-   via JS and was NOT hidden on collapse, so it overflowed the 44px rail as
-   clipped text (#814). Hide it with the rest of the panel body. */
-.adl-batch-panel.collapsed .adl-batch-summary {
-    display: none;
-}
-
-.adl-batch-panel.collapsed {
-    width: 44px;
-    min-width: 44px;
-    padding: 0 4px;
-}
-
-.adl-batch-panel.collapsed .adl-batch-panel-title {
-    display: none;
-}
-
-.adl-batch-panel.collapsed .adl-batch-panel-header {
-    justify-content: center;
-}
-
-.adl-batch-empty {
-    color: rgba(255, 255, 255, 0.3);
-    font-size: 0.8rem;
-    text-align: center;
-    padding: 32px 12px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-}
-
-/* Batch card */
-.adl-batch-card {
-    background: rgba(255, 255, 255, 0.018);
-    border: 1px solid rgba(255, 255, 255, 0.035);
-    border-radius: 10px;
-    padding: 10px 12px;
-    margin-bottom: 6px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    border-left: 3px solid transparent;
-}
-
-.adl-batch-card:hover {
-    background: rgba(255, 255, 255, 0.035);
-    border-color: rgba(255, 255, 255, 0.06);
-}
-
-.adl-batch-card-top {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.adl-batch-card-info {
-    flex: 1;
-    min-width: 0;
-}
-
-.adl-batch-card-name {
-    font-size: 0.82rem;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.9);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.adl-batch-card-meta {
-    font-size: 0.7rem;
-    color: rgba(255, 255, 255, 0.4);
-    margin-top: 2px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.adl-batch-card-source {
-    font-size: 0.65rem;
-    padding: 1px 6px;
-    border-radius: 4px;
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.5);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    flex-shrink: 0;
-}
-
-/* Batch card thumbnail */
-.adl-batch-card-thumb {
-    width: 36px;
-    height: 36px;
-    border-radius: 6px;
-    object-fit: cover;
-    flex-shrink: 0;
-}
-
-.adl-batch-card-actions {
-    display: flex;
-    gap: 2px;
-    flex-shrink: 0;
-}
-
-.adl-batch-card-cancel,
-.adl-batch-card-filter {
-    background: none;
-    border: none;
-    color: rgba(255, 255, 255, 0.3);
-    cursor: pointer;
-    padding: 3px;
-    border-radius: 4px;
-    transition: all 0.2s;
-}
-
-.adl-batch-card-cancel:hover {
-    color: #ef4444;
-}
-
-.adl-batch-card-filter:hover {
-    color: rgba(255, 255, 255, 0.7);
-    background: rgba(255, 255, 255, 0.05);
-}
-
-.adl-batch-card-filter.active {
-    color: rgba(var(--accent-rgb), 1);
-    background: rgba(var(--accent-rgb), 0.1);
-}
-
-/* Active batch glow */
-.adl-batch-card.active-glow {
-    border-color: rgba(var(--accent-rgb), 0.15);
-    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.06);
-}
-
-/* Filtered batch highlight */
-.adl-batch-card.filtered {
-    background: rgba(var(--accent-rgb), 0.04);
-    border-color: rgba(var(--accent-rgb), 0.15);
-}
-
-/* Progress bar inside batch card */
-.adl-batch-progress {
-    height: 3px;
-    background: rgba(255, 255, 255, 0.06);
-    border-radius: 2px;
-    margin-top: 8px;
-    overflow: hidden;
-}
-
-.adl-batch-progress-fill {
-    height: 100%;
-    border-radius: 2px;
-    background: rgba(var(--accent-rgb), 0.7);
-    transition: width 0.4s ease;
-}
-
-.adl-batch-progress-fill.has-failed {
-    background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.7), #ef4444);
-}
-
-/* ── Batches panel: Phase-A upgrade ─────────────────────────────────────── */
-
-/* Glanceable aggregate strip */
-.adl-batch-summary {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    padding: 7px 11px; margin: 0 0 8px;
-    background: rgba(var(--accent-rgb), 0.08);
-    border: 1px solid rgba(var(--accent-rgb), 0.18);
-    border-radius: 9px;
-    font-size: 0.72rem;
-}
-.adl-batch-summary-main { color: rgba(255, 255, 255, 0.85); font-weight: 600; letter-spacing: 0.01em; }
-.adl-batch-summary-eta { color: rgb(var(--accent-rgb)); font-weight: 700; white-space: nowrap; }
-
-/* Segmented progress bar */
-.adl-batch-segbar {
-    display: flex; height: 4px; margin-top: 9px; border-radius: 3px; overflow: hidden;
-    background: rgba(255, 255, 255, 0.07);
-}
-.adl-batch-seg { height: 100%; transition: width 0.4s ease; }
-.adl-batch-seg.seg-done { background: #22c55e; }
-.adl-batch-seg.seg-fail { background: #ef4444; }
-.adl-batch-seg.seg-active { background: rgba(var(--accent-rgb), 0.85); }
-.adl-batch-seg.seg-active.shimmer {
-    background-image: linear-gradient(90deg,
-        rgba(var(--accent-rgb), 0.55) 0%, rgba(var(--accent-rgb), 1) 50%, rgba(var(--accent-rgb), 0.55) 100%);
-    background-size: 200% 100%;
-    animation: adlSegShimmer 1.4s linear infinite;
-}
-@keyframes adlSegShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-
-/* Stat chips + ETA */
-.adl-batch-statline {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 7px;
-}
-.adl-batch-chips { display: flex; flex-wrap: wrap; gap: 5px; }
-.adl-chip {
-    font-size: 0.64rem; font-weight: 700; padding: 1px 6px; border-radius: 999px;
-    border: 1px solid currentColor; line-height: 1.5; white-space: nowrap;
-}
-.adl-chip-done { color: #22c55e; }
-.adl-chip-fail { color: #ef4444; }
-.adl-chip-active { color: rgb(var(--accent-rgb)); }
-.adl-chip-queued { color: rgba(255, 255, 255, 0.4); }
-.adl-batch-eta { font-size: 0.66rem; color: rgba(255, 255, 255, 0.55); white-space: nowrap; }
-
-/* "Now downloading" line */
-.adl-batch-card-now {
-    display: flex; align-items: center; gap: 4px; margin-top: 3px;
-    font-size: 0.68rem; color: rgba(255, 255, 255, 0.55);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.adl-batch-now-icon { color: rgb(var(--accent-rgb)); font-weight: 700; }
-
-/* Expand chevron affordance */
-.adl-batch-card-chevron {
-    display: inline-flex; align-items: center; color: rgba(255, 255, 255, 0.3);
-    transition: transform 0.2s ease, color 0.2s ease;
-}
-.adl-batch-card:hover .adl-batch-card-chevron { color: rgba(255, 255, 255, 0.55); }
-.adl-batch-card.expanded .adl-batch-card-chevron { transform: rotate(180deg); }
-
-/* Phase tints — subtle whole-card cue */
-.adl-batch-card.phase-complete { opacity: 0.82; }
-.adl-batch-card.phase-error,
-.adl-batch-card.phase-cancelled { opacity: 0.7; }
-
-/* Polished empty state */
-.adl-batch-empty-icon { color: rgb(var(--accent-rgb)); opacity: 0.4; margin-bottom: 8px; }
-.adl-batch-empty-title { font-size: 0.82rem; font-weight: 600; color: rgba(255, 255, 255, 0.7); }
-.adl-batch-empty-sub { font-size: 0.7rem; margin-top: 3px; color: rgba(255, 255, 255, 0.4); }
-.adl-batch-empty-links { display: flex; gap: 12px; justify-content: center; margin-top: 12px; }
-.adl-batch-empty-links a {
-    font-size: 0.72rem; font-weight: 600; color: rgb(var(--accent-rgb)); text-decoration: none;
-    padding: 4px 10px; border: 1px solid rgba(var(--accent-rgb), 0.3); border-radius: 8px;
-    transition: background 0.15s ease;
-}
-.adl-batch-empty-links a:hover { background: rgba(var(--accent-rgb), 0.12); }
-
-/* Expanded tracks list */
-.adl-batch-tracks {
-    display: none;
-    margin-top: 10px;
-    /* right padding keeps the nested scrollbar off the track text */
-    padding: 8px 8px 2px 2px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-    max-height: 360px;
-    overflow-y: auto;
-    overflow-x: hidden;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
-}
-.adl-batch-tracks::-webkit-scrollbar { width: 6px; }
-.adl-batch-tracks::-webkit-scrollbar-track { background: transparent; }
-.adl-batch-tracks::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 3px; }
-.adl-batch-tracks::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.24); }
-
-.adl-batch-card.expanded .adl-batch-tracks {
-    display: block;
-}
-
-/* Clickable batch name */
-.adl-batch-card-link {
-    cursor: pointer;
-    transition: color 0.15s;
-}
-
-.adl-batch-card-link:hover {
-    color: rgba(var(--accent-rgb), 1);
-    text-decoration: underline;
-    text-underline-offset: 2px;
-}
-
-.adl-batch-track-row {
-    display: grid;
-    grid-template-columns: 18px 1fr auto;
-    align-items: center;
-    column-gap: 10px;
-    padding: 6px 8px;
-    border-radius: 7px;
-    font-size: 0.76rem;
-    transition: background 0.12s ease;
-}
-.adl-batch-track-row:hover { background: rgba(255, 255, 255, 0.04); }
-
-.adl-batch-track-idx {
-    font-size: 0.66rem;
-    color: rgba(255, 255, 255, 0.28);
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-}
-
-.adl-batch-track-text {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-}
-
-.adl-batch-track-title {
-    color: rgba(255, 255, 255, 0.82);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.adl-batch-track-sub {
-    font-size: 0.64rem;
-    color: rgba(255, 255, 255, 0.4);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.adl-batch-track-state {
-    font-size: 0.68rem;
-    color: rgba(255, 255, 255, 0.35);
-    text-align: right;
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-}
-
-/* Row-state coloring (class from _adlStatusClass) */
-.adl-batch-track-row.completed .adl-batch-track-state { color: #22c55e; }
-.adl-batch-track-row.completed .adl-batch-track-idx { color: rgba(34, 197, 94, 0.45); }
-.adl-batch-track-row.failed .adl-batch-track-state { color: #ef4444; }
-.adl-batch-track-row.active .adl-batch-track-state { color: rgb(var(--accent-rgb)); }
-.adl-batch-track-row.queued .adl-batch-track-title { color: rgba(255, 255, 255, 0.5); }
-.adl-batch-track-row.cancelled .adl-batch-track-title { color: rgba(255, 255, 255, 0.4); text-decoration: line-through; }
-
-.adl-batch-release-note {
-    padding: 6px 0;
-    color: rgba(255, 255, 255, 0.38);
-    font-size: 0.7rem;
-    line-height: 1.4;
-}
-
-/* Per-track progress — spans the full row width under a downloading track */
-.adl-batch-track-progress {
-    grid-column: 1 / -1;
-    height: 2px;
-    margin-top: 5px;
-    background: rgba(255, 255, 255, 0.06);
-    border-radius: 1px;
-    overflow: hidden;
-}
-
-.adl-batch-track-progress-fill {
-    height: 100%;
-    background: rgba(var(--accent-rgb), 0.8);
-    border-radius: 1px;
-    transition: width 0.4s ease;
-}
-
-/* Thumbnail fallback (initial letter) */
-.adl-batch-card-thumb-fallback {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1rem;
-    font-weight: 700;
-    border-radius: 6px;
-}
-
-/* Batch filter banner above download list */
+/* Batch filter banner above download list (also the review sub-view banner
+   and the clients tab strip) */
 .adl-batch-filter-banner {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
     padding: 8px 14px;
-    margin-bottom: 8px;
+    margin-bottom: 12px;
     background: rgba(var(--accent-rgb), 0.06);
-    border: 1px solid rgba(var(--accent-rgb), 0.12);
-    border-radius: 8px;
-    font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(var(--accent-rgb), 0.15);
+    border-radius: 10px;
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.75);
 }
 
 .adl-filter-banner-dot {
+    display: inline-block;
     width: 8px;
     height: 8px;
     border-radius: 50%;
@@ -66062,62 +66635,75 @@ body.max-performance #page-particles-canvas {
 }
 
 .adl-filter-banner-clear {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.6);
+    padding: 4px 11px;
+    border-radius: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.7);
     font-size: 0.72rem;
-    padding: 2px 10px;
-    border-radius: 4px;
     cursor: pointer;
-    margin-left: auto;
-    transition: all 0.15s;
+    transition: all 0.2s ease;
+    white-space: nowrap;
 }
 
 .adl-filter-banner-clear:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.09);
+    color: #fff;
 }
 
 /* History source color dot */
 .adl-batch-history-dot {
-    width: 6px;
-    height: 6px;
+    display: inline-block;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     flex-shrink: 0;
 }
 
-/* Completed batch cards fade via inline opacity from JS */
-.adl-batch-card {
-    transition: all 0.2s ease, opacity 0.5s ease;
+/* ── Recent history fold (moved down from the dead side panel) ── */
+
+.adl-batch-history-section {
+    margin-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    padding-top: 8px;
 }
 
-/* Batch history section */
 .adl-batch-history-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 8px;
+    padding: 6px 4px;
     cursor: pointer;
-    padding: 8px 0;
-    margin-top: 12px;
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
-    color: rgba(255, 255, 255, 0.4);
-    font-size: 0.75rem;
-    font-weight: 500;
-    letter-spacing: 0.3px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.6);
+    border-radius: 8px;
+    transition: color 0.15s ease;
 }
 
 .adl-batch-history-header:hover {
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.9);
 }
 
 .adl-batch-history-chevron {
-    transition: transform 0.2s;
+    color: rgba(255, 255, 255, 0.4);
+    transition: transform 0.2s ease;
 }
 
 .adl-batch-history-header-actions {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
+}
+
+/* the shared library-history-btn is ALL-CAPS bordered; inside this quiet
+   fold it shouted louder than the section itself */
+.adl-batch-history-header-actions .library-history-btn {
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 0.72rem;
+    padding: 4px 11px;
 }
 
 .adl-batch-history-section.expanded .adl-batch-history-chevron {
@@ -66129,82 +66715,58 @@ body.max-performance #page-particles-canvas {
 }
 
 .adl-batch-history-section.expanded .adl-batch-history-list {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 0 8px;
 }
 
 .adl-batch-history-item {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+    gap: 9px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    font-size: 0.76rem;
+}
+
+.adl-batch-history-item:hover {
+    background: rgba(255, 255, 255, 0.03);
 }
 
 .adl-batch-history-name {
     flex: 1;
-    font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.5);
+    min-width: 0;
+    color: rgba(255, 255, 255, 0.75);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
 .adl-batch-history-stats {
-    font-size: 0.68rem;
-    color: rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 0.55);
+    font-variant-numeric: tabular-nums;
     flex-shrink: 0;
 }
 
 .adl-batch-history-date {
-    font-size: 0.65rem;
-    color: rgba(255, 255, 255, 0.2);
+    font-size: 0.68rem;
+    color: rgba(255, 255, 255, 0.45);
     flex-shrink: 0;
 }
 
-/* ---- Responsive ---- */
+/* ---- Responsive (the real phone pass lives in mobile.css) ---- */
 
 @media (max-width: 900px) {
-    .adl-layout {
-        flex-direction: column;
-        padding: 20px 16px;
+    .adl-hero-stats {
+        gap: 20px;
     }
 
-    .adl-batch-panel {
-        width: 100%;
-        border-left: none;
-        border-top: 1px solid rgba(255, 255, 255, 0.06);
-        padding: 16px 12px 0 0;
-        margin-left: 0;
-        margin-top: 16px;
-        max-height: 300px;
-        position: static;
+    .adl-group-stats {
+        display: none;
     }
 }
 
-@media (max-width: 600px) {
-    .adl-layout {
-        padding: 16px 12px;
-    }
-
-    .adl-controls {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .adl-filter-pills {
-        flex-wrap: wrap;
-    }
-
-    .adl-row-art {
-        width: 36px;
-        height: 36px;
-        border-radius: 6px;
-    }
-
-    .adl-row-status {
-        min-width: 70px;
-    }
-}
 
 /* ═══════════════════════════════════════════════════════════════════
    DASHBOARD LIBRARY STATUS CARD
@@ -70141,6 +70703,60 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
 
 .artist-detail-page .release-card.album-card .mb-card-icon:hover {
     opacity: 1;
+}
+
+/* Bottom-left, NOT centred over the artwork. The card itself opens the album
+   detail modal; this button only plays. Centred, it sat exactly where someone
+   aims to click the cover, so "open this album" silently became "play this
+   album". 74px clears the 65px title strip with a gap, and 14px matches the
+   strip's own inset so the button lines up with the album name above it. The
+   library artist card has always done it this way. */
+.artist-detail-page .release-card-play-btn {
+    position: absolute;
+    left: 14px;
+    bottom: 74px;
+    z-index: 4;
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    background: rgb(var(--accent-rgb));
+    color: #fff;
+    font-size: 18px;
+    line-height: 1;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.48);
+    cursor: pointer;
+    opacity: 0;
+    transform: translateY(8px) scale(0.94);
+    transition: opacity 0.2s ease, transform 0.2s ease, filter 0.2s ease;
+}
+
+.artist-detail-page .release-card.album-card:hover .release-card-play-btn,
+.artist-detail-page .release-card-play-btn:focus-visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+}
+
+.artist-detail-page .release-card-play-btn:hover {
+    filter: brightness(1.12);
+}
+
+.artist-detail-page .release-card-play-btn:disabled {
+    cursor: wait;
+}
+
+@media (hover: none) {
+    .library-artist-play-btn {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+    .artist-detail-page .release-card-play-btn {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
 }
 
 /* ── HiFi API instances list (drag and drop) ── */
@@ -76891,6 +77507,11 @@ body.em-scroll-lock { overflow: hidden; }
     flex: 1;
 }
 
+.adl-client-add-toggle {
+    align-self: flex-start;
+    margin-bottom: 10px;
+}
+
 /* slskd downloads/uploads switch + trim note */
 .adl-client-viewswitch {
     display: flex;
@@ -77213,14 +77834,48 @@ body.em-scroll-lock { overflow: hidden; }
 
 /* one-line explainer under the review banner - what this sub-view IS */
 .adl-review-explainer {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
     margin: 2px 0 10px;
     padding: 8px 12px;
     font-size: 12px;
     line-height: 1.5;
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(255, 255, 255, 0.65);
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 8px;
+}
+.adl-review-explainer-dismiss { flex-shrink: 0; margin-left: auto; }
+.adl-review-explainer-toggle {
+    align-self: flex-start;
+    margin: 0 0 8px;
+    padding: 2px 8px;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 11.5px;
+    cursor: pointer;
+    border-radius: 6px;
+}
+.adl-review-explainer-toggle:hover { color: rgba(255, 255, 255, 0.8); background: rgba(255,255,255,0.05); }
+/* multi-select checkbox on unverified rows */
+.verif-select {
+    flex-shrink: 0;
+    width: 15px;
+    height: 15px;
+    accent-color: rgb(var(--accent-rgb));
+    cursor: pointer;
+}
+/* labeled approve/delete — the two decisions that matter read as words */
+.verif-act-labeled { display: inline-flex; align-items: center; gap: 4px; }
+.verif-act-label { font-size: 11px; font-weight: 600; }
+.adl-deleted-retention-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.55);
 }
 .verif-quar-details { margin-top: 6px; font-size: 11.5px; color: rgba(255,255,255,0.6); line-height: 1.5; word-break: break-all; }
 .verif-detail-label { color: rgba(255,255,255,0.4); margin-right: 4px; }
@@ -77228,10 +77883,14 @@ body.em-scroll-lock { overflow: hidden; }
 .verif-bulk-danger { border-color: rgba(248,113,113,0.4) !important; color: #f87171 !important; }
 
 .verif-quar-alt-wrapper { display: contents; }
-.verif-quar-alt-slot { min-width: 68px; display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; }
+.verif-quar-alt-slot { min-width: 68px; display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; gap: 0; flex-wrap: wrap; }
 .verif-quar-alt-btn { border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.5); border-radius: 6px; padding: 2px 7px; font-size: 11px; cursor: pointer; white-space: nowrap; line-height: 18px; }
 .verif-quar-alt-btn:hover { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.8); }
 .verif-quar-alt-btn.open { color: rgba(255,255,255,0.75); border-color: rgba(255,255,255,0.25); }
+/* Delete-the-whole-group, beside the expand toggle (#1208). Destructive, so it
+   reads red rather than borrowing the neutral toggle colours. */
+.verif-quar-alt-del { border-color: rgba(239,68,68,0.25); color: rgba(248,113,113,0.75); margin-left: 6px; }
+.verif-quar-alt-del:hover { background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.45); color: #fca5a5; }
 .verif-quar-alt-members { display: none; padding-left: 20px; border-left: 2px solid rgba(255,255,255,0.07); margin-left: 8px; margin-bottom: 2px; }
 .verif-quar-alt-members.vqg-open { display: block; }
 
@@ -78790,6 +79449,19 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     padding: 40px 20px; text-align: center; font-size: 14px; color: rgba(255,255,255,0.4);
 }
 .chat-problem { color: #f0a05a; }
+
+/* a poll hiccup over a rendered room: quiet pill, not the error screen */
+.chat-reconnect-pill {
+    align-self: center;
+    margin: 6px auto 0;
+    padding: 3px 12px;
+    border-radius: 999px;
+    background: rgba(240, 160, 90, 0.12);
+    border: 1px solid rgba(240, 160, 90, 0.3);
+    color: #f0a05a;
+    font-size: 0.72rem;
+    width: fit-content;
+}
 /* join gate (auto-join off = you're out until you say otherwise) */
 .chat-join-btn { padding: 8px 18px; border-radius: 10px; border: 1px solid rgba(var(--accent-rgb, 29, 185, 84), 0.5);
     background: rgba(var(--accent-rgb, 29, 185, 84), 0.15); color: rgb(var(--accent-rgb, 29, 185, 84));

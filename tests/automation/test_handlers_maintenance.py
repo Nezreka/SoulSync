@@ -208,7 +208,31 @@ class TestQualityScanner:
     def test_error_when_worker_unavailable(self):
         deps = _build_deps(run_repair_job_now=lambda job_id, **kwargs: None)
         result = auto_start_quality_scan({}, deps)
-        assert result['status'] == 'error'
+        assert result['status'] == 'skipped'
+
+    def test_it_asks_the_worker_to_respect_the_toggle(self):
+        """#1207: wishx switched the job off and his import automation kept
+        force-running it. an automation is not a Run Now click."""
+        seen = {}
+
+        def _run(job_id, **kw):
+            seen.update({'job': job_id, **kw})
+            return True
+
+        auto_start_quality_scan({}, _build_deps(run_repair_job_now=_run))
+        assert seen == {
+            'job': 'monitoring_list_reconcile',
+            'scope': {'compatibility_source': 'start_quality_scan'},
+            'respect_enabled': True,
+        }
+
+    def test_a_disabled_job_reads_as_skipped_not_failed(self):
+        """Turning a job off is a choice, not a fault. #1192 already taught us
+        this automation cries wolf, so a refusal must not look like an error."""
+        deps = _build_deps(run_repair_job_now=lambda job_id, **kw: False)
+        result = auto_start_quality_scan({}, deps)
+        assert result['status'] == 'skipped'
+        assert 'disabled' in result['reason']
 
 
 # ─── clear_quarantine ────────────────────────────────────────────────

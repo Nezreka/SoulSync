@@ -42,6 +42,27 @@ class DatabaseUpdateWorker:
         self.full_refresh = full_refresh
         self.should_stop = False
 
+        # Track ids of rows newly INSERTED this run (not updates). The web
+        # layer reads this to gap-fill embedded provider IDs for the new files
+        # (auto-reconcile), so newly-added music contributes its
+        # Spotify/MusicBrainz/etc. ids without a manual backfill.
+        self._new_track_ids = set()
+
+        # Ids this run wrote (inserted OR updated). The orphan sweep at the end
+        # of the same run must not delete them: an album row goes in before its
+        # tracks do, so a short track-list response leaves a REAL album with
+        # zero tracks for a moment. Deleting it there loses the album for good -
+        # the server stops calling it recently-added, so no later incremental
+        # scan finds it again (#1216).
+        self._touched_artist_ids = set()
+        self._touched_album_ids = set()
+
+        # Optional callback(worker) run as the FINAL scan phase, immediately
+        # before the 'finished' signal — so the auto-reconcile is inside the
+        # scan's running window (automations/UI treat it as a normal phase and
+        # wait for it). Injected by the web layer (which owns path resolution).
+        self.post_scan_hook = None
+
         # Statistics tracking
         self.processed_artists = 0
         self.processed_albums = 0
@@ -251,7 +272,9 @@ class DatabaseUpdateWorker:
             # Cleanup orphaned records after incremental updates (catches fixed matches)
             if not self.full_refresh and self.database:
                 try:
-                    cleanup_results = self.database.cleanup_orphaned_records()
+                    cleanup_results = self.database.cleanup_orphaned_records(
+                        protected_artist_ids=self._touched_artist_ids,
+                        protected_album_ids=self._touched_album_ids)
                     orphaned_artists = cleanup_results.get('orphaned_artists_removed', 0)
                     orphaned_albums = cleanup_results.get('orphaned_albums_removed', 0)
 
@@ -399,7 +422,9 @@ class DatabaseUpdateWorker:
             # Phase 4: Cleanup
             self._emit_signal('phase_changed', "Deep scan: Cleaning up orphaned records...")
             try:
-                cleanup_results = self.database.cleanup_orphaned_records()
+                cleanup_results = self.database.cleanup_orphaned_records(
+                    protected_artist_ids=self._touched_artist_ids,
+                    protected_album_ids=self._touched_album_ids)
                 orphaned_artists = cleanup_results.get('orphaned_artists_removed', 0)
                 orphaned_albums = cleanup_results.get('orphaned_albums_removed', 0)
                 if orphaned_artists > 0 or orphaned_albums > 0:
@@ -988,6 +1013,7 @@ class DatabaseUpdateWorker:
                     artist_success = self.database.insert_or_update_media_artist(artist, server_source=self.server_type)
                     if artist_success:
                         total_processed_artists += 1
+                        self._touched_artist_ids.add(artist_id)
                     
                     # Process albums for this artist  
                     artist_album_ids = albums_by_artist.get(artist_id, set())
@@ -1005,6 +1031,7 @@ class DatabaseUpdateWorker:
                                     album_success = self.database.insert_or_update_media_album(album, artist_id, server_source=self.server_type)
                                     if album_success:
                                         total_processed_albums += 1
+                                        self._touched_album_ids.add(str(album_id))
                                     
                                     # Process all tracks in this album
                                     for track in album_tracks:
@@ -1452,6 +1479,7 @@ class DatabaseUpdateWorker:
                 return False, "Failed to update artist data", 0, 0
 
             artist_id = str(media_artist.ratingKey)
+            self._touched_artist_ids.add(artist_id)
 
             # 2. Get all albums for this artist (cached from aggressive pre-population)
             try:
@@ -1482,6 +1510,7 @@ class DatabaseUpdateWorker:
                         if album_success:
                             album_count += 1
                             album_id = str(album.ratingKey)
+                            self._touched_album_ids.add(album_id)
 
                             # 4. Process tracks in this album (cached from aggressive pre-population)
                             try:

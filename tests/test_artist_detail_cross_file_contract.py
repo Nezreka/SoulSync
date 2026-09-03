@@ -33,7 +33,9 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
 _STATIC = _ROOT / "webui" / "static"
-_LIBRARY_JS = (_STATIC / "library-globals.js").read_text(encoding="utf-8")
+# ported to typescript in the aug 26 shell migration - the contract this test
+# guards moved with it, one home, same global names
+_LIBRARY_JS = (_ROOT / "webui" / "src" / "shell" / "library-globals.ts").read_text(encoding="utf-8")
 
 # name -> the files that reach for it. Hardcoded on purpose: deriving this from
 # the current source would shrink whenever a consumer is deleted, and the test
@@ -110,9 +112,10 @@ def test_library_globals_still_declares_the_name(name):
     """It must exist. This is the check the library-list cleanup did not have:
     `artistDetailPageState` was deleted as collateral and 177 references were
     left pointing at nothing, while the file still parsed cleanly."""
-    assert re.search(rf"^(?:async )?function {re.escape(name)}\b", _LIBRARY_JS, re.M) or re.search(
-        rf"^(?:const|let|var)\s+{re.escape(name)}\b", _LIBRARY_JS, re.M
-    ), f"library-globals.js no longer declares {name}, which other files still call"
+    # the TS port declares with `export function` / `export const`
+    assert re.search(rf"^(?:export )?(?:async )?function {re.escape(name)}\b", _LIBRARY_JS, re.M) or re.search(
+        rf"^(?:export )?(?:const|let|var)\s+{re.escape(name)}\b", _LIBRARY_JS, re.M
+    ), f"library-globals no longer declares {name}, which other files still call"
 
 
 @pytest.mark.parametrize("name,consumers", sorted((k, v) for k, v in _CONTRACT.items()))
@@ -199,7 +202,7 @@ def test_navigate_to_artist_detail_only_hands_off_and_never_renders():
     React and the still-vanilla Enhanced modals read back out
     (currentArtistId / currentArtistName / currentArtistSource).
     """
-    source = (Path(__file__).resolve().parents[1] / "webui/static/library-globals.js").read_text(
+    source = (Path(__file__).resolve().parents[1] / "webui/src/shell/library-globals.ts").read_text(
         encoding="utf-8"
     )
     start = source.index("function navigateToArtistDetail(")
@@ -229,12 +232,14 @@ def test_the_label_stack_is_cleared_in_place_not_reassigned():
     detached copy, and the Back button would keep naming a page you had already
     left.
     """
-    source = (Path(__file__).resolve().parents[1] / "webui/static/library-globals.js").read_text(
+    source = (Path(__file__).resolve().parents[1] / "webui/src/shell/library-globals.ts").read_text(
         encoding="utf-8"
     )
     assert "_artistDetailLabelStack.length = 0" in source
     assert not re.search(r"_artistDetailLabelStack\s*=\s*\[\]\s*;(?!\s*//\s*declaration)", 
-                         source.split("let _artistDetailLabelStack")[1])
+                         # the TS port declares it `const` - reassignment is now
+                         # a compile error too, which is this test's invariant
+                         source.split("const _artistDetailLabelStack")[1])
 
 
 def test_selected_tracks_set_identity_survives_navigation():
@@ -243,7 +248,7 @@ def test_selected_tracks_set_identity_survives_navigation():
     React mirrors its selection into the SAME object, so replacing it here would
     leave those writes landing on a Set nobody reads.
     """
-    source = (Path(__file__).resolve().parents[1] / "webui/static/library-globals.js").read_text(
+    source = (Path(__file__).resolve().parents[1] / "webui/src/shell/library-globals.ts").read_text(
         encoding="utf-8"
     )
     start = source.index("function navigateToArtistDetail(")

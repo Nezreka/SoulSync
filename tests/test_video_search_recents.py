@@ -65,8 +65,16 @@ def test_basic_search_runs_in_app_provider_searches():
     assert "vsr-basic-hit-analysis" in _JS and "vsr-basic-hit-reason" not in _JS
     assert "basicSizeLabel" in _JS and "basicHealthLabel" in _JS
     assert "vsr-basic-hit-side" in _JS and "vsr-basic-hit-linkstate" in _JS
+    assert "vsr-basic-source-chip" in _JS and "vsr-basic-hit-note" in _JS
+    assert "torrent via EXT.to" in _JS
+    assert "function basicSourceCounts" in _JS and "data-vsr-basic-counts" in _JS
+    assert "function basicQueryHTML" in _JS and "data-vsr-basic-queries" in _JS
+    assert "Try anyway" in _JS and "r.accepted === false" in _JS
+    assert "usable / " in _JS and "review / " in _JS and "no link" in _JS
     assert "vsr-basic-loader" in _JS and "vsr-basic-tab-loader" in _JS
     assert ".vsr-basic-hit-side" in _CSS and "vsrBasicScan" in _CSS and "vsrBasicDots" in _CSS
+    assert ".vsr-basic-source-counts" in _CSS and ".vsr-basic-count--usable" in _CSS
+    assert ".vsr-basic-query-list" in _CSS and ".vsr-basic-query-chip" in _CSS
 
 
 def test_fresh_releases_tab_fetches_extto_homepage_board_in_app():

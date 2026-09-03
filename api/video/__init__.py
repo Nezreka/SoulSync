@@ -98,11 +98,19 @@ def create_video_blueprint() -> Blueprint:
             # (delete/sync/clear-match/delete-batch) + the download blocklist config. Content
             # views only READ metadata (the detail GET stays open); these MUTATE the library.
             admin = admin or _p("/api/video/bulk", "/api/video/monitor",
+                                 # single-episode monitor flip from the calendar
+                                 "/api/video/episode/monitor",
                                  "/api/video/poster/set", "/api/video/downloads/blocklist") \
                 or path.endswith(("/metadata", "/lock", "/refresh-art",
+                                  # season-wide monitor flip — same library
+                                  # management as /api/video/monitor above
+                                  "/monitor",
                                   # per-title acquisition settings (P2/P8) — management,
                                   # same as the metadata edits above
                                   "/quality-profile", "/series-type",
+                                  # per-title acquisition overrides (sources,
+                                  # release groups, season packs)
+                                  "/overrides",
                                   # per-show Synchronize — mutates library rows
                                   "/sync"))
         if admin and not is_admin:
@@ -110,7 +118,11 @@ def create_video_blueprint() -> Blueprint:
 
         if writing and not getattr(g, "can_download", True) and _p(
                 "/api/video/downloads/grab", "/api/video/downloads/retry",
-                "/api/video/youtube/download", "/api/video/wishlist/add",
+                "/api/video/youtube/download",
+                # the tab's bulk action — spends the same disk and bandwidth as
+                # the per-row grab above, so it takes the same permission
+                "/api/video/wishlist/youtube/download-all",
+                "/api/video/wishlist/add",
                 "/api/video/watchlist/add", "/api/video/youtube/wishlist/add",
                 "/api/video/watch/grab"):
             return jsonify({"error": "Downloads are disabled for this profile."}), 403

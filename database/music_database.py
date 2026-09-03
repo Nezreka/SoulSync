@@ -6815,12 +6815,34 @@ class MusicDatabase:
                 logger.error(f"Error clearing {server_source} database data: {e}")
                 raise
     
-    def cleanup_orphaned_records(self) -> Dict[str, int]:
-        """Detach stale server stamps without deleting catalogue rows."""
+    def cleanup_orphaned_records(self, protected_artist_ids=None,
+                                 protected_album_ids=None) -> Dict[str, int]:
+        """Detach stale server stamps without deleting catalogue rows.
+
+        A discography row has no tracks by design, and a monitored artist may
+        wait months for its first file. The media server does not own either
+        catalogue identity, so cleanup only retires its mapping — which is why
+        #1216's "the scan deleted the album it just wrote" cannot happen in
+        this shape at all.
+
+        The race behind #1216 still reaches the STAMP, though. A run writes the
+        album row before its tracks, so between those two steps a real album
+        legitimately has zero files; a short track-list answer on that one call
+        would strip the server link off the album the same run just created,
+        and the album would stop resolving on the server until a deep scan put
+        the mapping back. Rows the CURRENT run touched are therefore held back
+        — only rows left fileless by an EARLIER run are genuinely orphaned.
+        """
+        def _norm(ids):
+            return {str(i) for i in ids} if ids else set()
+
+        protected_artists = _norm(protected_artist_ids)
+        protected_albums = _norm(protected_album_ids)
+
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                
+
                 # A discography row has no tracks by design, and a monitored
                 # artist may wait months for its first file.  The media server
                 # does not own either catalogue identity, so cleanup only
@@ -6852,36 +6874,76 @@ class MusicDatabase:
                                         WHERE t.album_id=al.id AND TRIM(f.path)<>''
                                           AND COALESCE(f.file_state,'active')='active')
                 """
-                cursor.execute(f"SELECT COUNT(*) FROM ({orphan_albums})")
-                orphaned_albums_count = cursor.fetchone()[0]
-                if orphaned_albums_count > 0:
-                    cursor.execute(
-                        "DELETE FROM lib2_media_server_mappings WHERE entity_type='album' "
-                        f"AND entity_id IN ({orphan_albums})")
-                    cursor.execute(f"UPDATE lib2_albums SET server_source=NULL,server_id=NULL "
-                                   f"WHERE id IN ({orphan_albums})")
-                    logger.info("Detached %d orphaned album mappings", orphaned_albums_count)
 
-                cursor.execute(f"SELECT COUNT(*) FROM ({orphan_artists})")
-                orphaned_artists_count = cursor.fetchone()[0]
-                if orphaned_artists_count > 0:
-                    cursor.execute(
-                        "DELETE FROM lib2_media_server_mappings WHERE entity_type='artist' "
-                        f"AND entity_id IN ({orphan_artists})")
-                    cursor.execute(f"UPDATE lib2_artists SET server_source=NULL,server_id=NULL "
-                                   f"WHERE id IN ({orphan_artists})")
-                    logger.info("Detached %d orphaned artist mappings", orphaned_artists_count)
-                
+                # Select the ids rather than counting, so the protected ones can
+                # be held back and the reported counts stay honest.
+                cursor.execute(orphan_artists)
+                artist_ids = [str(row[0]) for row in cursor.fetchall()]
+                cursor.execute(orphan_albums)
+                album_ids = [str(row[0]) for row in cursor.fetchall()]
+
+                # An artist that owns an album this run just wrote was written
+                # by the same run, one step earlier. Nothing cascades here (the
+                # mapping is detached, not deleted), but stripping its stamp is
+                # the same race on the same rows, so it is held back too rather
+                # than resting on the caller having remembered both.
+                if protected_albums:
+                    owners = list(protected_albums)
+                    for start_ix in range(0, len(owners), 500):
+                        chunk = owners[start_ix:start_ix + 500]
+                        placeholders = ','.join('?' * len(chunk))
+                        cursor.execute(
+                            "SELECT DISTINCT primary_artist_id FROM lib2_albums "
+                            f"WHERE id IN ({placeholders})", chunk)
+                        protected_artists |= {
+                            str(row[0]) for row in cursor.fetchall() if row[0] is not None}
+
+                artists_to_remove = [i for i in artist_ids if i not in protected_artists]
+                albums_to_remove = [i for i in album_ids if i not in protected_albums]
+                artists_held = len(artist_ids) - len(artists_to_remove)
+                albums_held = len(album_ids) - len(albums_to_remove)
+
+                def _detach(entity_type, table, ids):
+                    # Chunked: SQLite caps the number of bound variables, and an
+                    # orphan sweep after a big scan can exceed it.
+                    for start_ix in range(0, len(ids), 500):
+                        chunk = ids[start_ix:start_ix + 500]
+                        placeholders = ','.join('?' * len(chunk))
+                        cursor.execute(
+                            "DELETE FROM lib2_media_server_mappings "
+                            f"WHERE entity_type=? AND entity_id IN ({placeholders})",
+                            (entity_type, *chunk))
+                        cursor.execute(
+                            f"UPDATE {table} SET server_source=NULL, server_id=NULL "
+                            f"WHERE id IN ({placeholders})", chunk)
+
+                if albums_to_remove:
+                    _detach('album', 'lib2_albums', albums_to_remove)
+                    logger.info("Detached %d orphaned album mappings", len(albums_to_remove))
+
+                if artists_to_remove:
+                    _detach('artist', 'lib2_artists', artists_to_remove)
+                    logger.info("Detached %d orphaned artist mappings", len(artists_to_remove))
+
+                if artists_held or albums_held:
+                    logger.info(
+                        f"Kept the server stamp on {artists_held} artists and "
+                        f"{albums_held} albums this run just wrote - fileless for "
+                        f"now, not orphaned")
+
                 conn.commit()
-                
+
                 return {
-                    'orphaned_artists_removed': orphaned_artists_count,
-                    'orphaned_albums_removed': orphaned_albums_count
+                    'orphaned_artists_removed': len(artists_to_remove),
+                    'orphaned_albums_removed': len(albums_to_remove),
+                    'artists_protected': artists_held,
+                    'albums_protected': albums_held,
                 }
-                
+
         except Exception as e:
             logger.error(f"Error cleaning up orphaned records: {e}")
-            return {'orphaned_artists_removed': 0, 'orphaned_albums_removed': 0}
+            return {'orphaned_artists_removed': 0, 'orphaned_albums_removed': 0,
+                    'artists_protected': 0, 'albums_protected': 0}
     
     def merge_duplicate_artists(self) -> Dict[str, int]:
         """Fold catalogue rows that are the same artist under the same server.
@@ -11793,6 +11855,87 @@ class MusicDatabase:
             logger.error(f"Error updating wishlist retry status: {e}")
             return False
     
+    def reset_wishlist_retry_backoff(self, spotify_track_ids: Optional[List[str]] = None,
+                                     profile_id: Optional[int] = None) -> int:
+        """Clear the retry clock on failing wishlist tracks. Returns rows changed.
+
+        The progressive backoff (4h → 24h → 7d) is anchored on retry_count and
+        last_attempted, both stamped by update_wishlist_retry after every failed
+        cycle. When a whole run fails for an EXTERNAL reason — slskd down, no
+        candidates returned — hundreds of tracks get stamped together and then
+        sit out the next 24 hours or 7 days in lockstep, long after the source
+        came back (#1196: 634 of 674 stuck at retry 3-4). Nothing ever cleared
+        these counters short of the track succeeding, so "the source recovered"
+        was not a state the wishlist could act on.
+
+        Only rows that actually carry a failure are touched, so a successful
+        track's history is left alone, and the count returned is the honest
+        number of tracks unstuck.
+        """
+        try:
+            ids = [str(t) for t in (spotify_track_ids or []) if t]
+            if spotify_track_ids is not None and not ids:
+                return 0
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                # The CLOCK, not the failure: every wishlist row carries a
+                # failure_reason (it is why the track is on the list), so that
+                # column identifies nothing. retry_count / last_attempted are
+                # what the backoff actually reads, so they are what "has
+                # something to unstick" means — and it keeps the returned count
+                # honest instead of reporting untouched rows as cleared.
+                clauses = ["(retry_count > 0 OR last_attempted IS NOT NULL)"]
+                params: List[Any] = []
+                if profile_id is not None:
+                    clauses.append("profile_id = ?")
+                    params.append(profile_id)
+                if ids:
+                    # A wishlist row's id is per-ALBUM here: the same source
+                    # track on two releases is stored as `<track>::<album>`
+                    # (the namespace sanitize of the duplicate-album work). A
+                    # caller that did not come from the wishlist processor only
+                    # knows the bare source id, so a plain IN () matched nothing
+                    # and #1196 silently unstuck zero rows. Same bare-or-
+                    # composite resolution mark_track_download_result uses.
+                    # chunked: sqlite caps host parameters (999 by default) and a
+                    # wishlist this feature exists for is bigger than that
+                    changed = 0
+                    per_id = 1 if any("::" in i for i in ids) else 2
+                    chunk_size = max(1, 500 // per_id)
+                    for start in range(0, len(ids), chunk_size):
+                        chunk = ids[start:start + chunk_size]
+                        id_params: List[Any] = []
+                        terms = []
+                        for one in chunk:
+                            if "::" in one:
+                                terms.append("spotify_track_id = ?")
+                                id_params.append(one)
+                            else:
+                                terms.append(
+                                    "(spotify_track_id = ? OR spotify_track_id LIKE ?)")
+                                id_params.extend((one, f"{one}::%"))
+                        cursor.execute(
+                            f"""UPDATE wishlist_tracks
+                                SET retry_count = 0, last_attempted = NULL
+                                WHERE {' AND '.join(clauses)}
+                                  AND ({' OR '.join(terms)})""",
+                            (*params, *id_params),
+                        )
+                        changed += cursor.rowcount
+                    conn.commit()
+                    return changed
+                cursor.execute(
+                    f"""UPDATE wishlist_tracks
+                        SET retry_count = 0, last_attempted = NULL
+                        WHERE {' AND '.join(clauses)}""",
+                    tuple(params),
+                )
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error resetting wishlist retry backoff: {e}")
+            return 0
+
     def get_wishlist_count(self, profile_id: int = 1, category: Optional[str] = None) -> int:
         """Get the total number of tracks in the wishlist for the given profile,
         optionally filtered by category ('singles' or 'albums')."""
@@ -14205,6 +14348,53 @@ class MusicDatabase:
                     'has_next': False,
                 }
             }
+
+    def get_unmatched_import_summary(self) -> Dict[str, Any]:
+        """How many library tracks are parked under 'Unknown Artist' (#1202).
+
+        a file that imports with unreadable tags and no acoustid hit falls all
+        the way back to filename-only identification, which files it under a
+        made-up 'Unknown Artist' as its own one-track album. nothing ever said
+        that happened, so the track just quietly landed in a bucket you had no
+        reason to open. re-identify has always been able to fix it, but you had
+        to already know to go looking on a fake artist's page.
+
+        returns the total, plus the artist row holding the most of them so the
+        banner can link straight there. the same name can exist more than once
+        (one row per server source), which is why this sums rather than taking
+        the first row it finds.
+
+        Library v2 keeps discography and wishlist rows beside the owned ones,
+        so this counts only tracks that have a live file — a browse-only
+        "Unknown Artist" release is not a failed import and must not raise a
+        banner telling the user to go re-identify something they never had.
+        """
+        empty = {'count': 0, 'artist_id': None}
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT ar.id AS artist_id, COUNT(DISTINCT t.id) AS track_count
+                    FROM lib2_artists ar
+                    JOIN lib2_albums al ON al.primary_artist_id = ar.id
+                    JOIN lib2_tracks t ON t.album_id = al.id
+                    JOIN lib2_track_files f ON f.track_id = t.id
+                    WHERE LOWER(TRIM(ar.name)) = 'unknown artist'
+                      AND f.path IS NOT NULL AND TRIM(f.path) <> ''
+                      AND COALESCE(f.file_state, 'active') = 'active'
+                    GROUP BY ar.id
+                """)
+                rows = cursor.fetchall()
+
+            total = sum(int(r['track_count'] or 0) for r in rows)
+            if total <= 0:
+                # an empty Unknown Artist row is not worth telling anyone about
+                return empty
+            biggest = max(rows, key=lambda r: int(r['track_count'] or 0))
+            return {'count': total, 'artist_id': biggest['artist_id']}
+        except Exception as e:
+            logger.error(f"Error building unmatched-import summary: {e}")
+            return empty
 
     # ==================== Enhanced Library Management Methods ====================
 

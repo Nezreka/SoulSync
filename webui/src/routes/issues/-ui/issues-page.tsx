@@ -146,9 +146,13 @@ function IssueBoardHeader({
       }
       title="Issues"
       subtitle={
+        // Named against Library Maintenance on purpose. These two look like the
+        // same page and are not: nothing here is ever written by a scan, every
+        // row is a person reporting something (api/issues.py is the only writer).
+        // "Isn't this what Library Maintenance shows as well?" (#1210)
         isAdmin
-          ? 'Manage and resolve reported library problems'
-          : 'Track and resolve library problems'
+          ? 'Problems people reported by hand — automated scans live in Library Maintenance'
+          : 'Problems you reported — automated scans live in Library Maintenance'
       }
       actions={
         <div className={styles.issuesFilters} id="issues-filters">

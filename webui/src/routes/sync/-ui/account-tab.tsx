@@ -1,13 +1,19 @@
 /**
- * The Tidal and Qobuz account-vertical tabs (sync-services.js 4-227 and
- * 1516-1720): click Refresh to load the account's playlists, cards render
- * instantly from metadata, tracks fetch per-playlist in the background and
- * auto-mirror, then the saved discovery states hydrate (with the P5b
- * resume-on-in-flight fix). The two differ only in their FRESH card click:
- * Tidal opens the shared modal immediately with whatever tracks are cached
- * (#867 — the backend discovery fetch is the source of truth, 152-166);
- * Qobuz fetches the track list behind a loading overlay first and refuses to
- * open without tracks (1648-1680).
+ * The Tidal, Qobuz and YouTube Music account-vertical tabs (sync-services.js
+ * 4-227 and 1516-1720 for the first two; YTMusicTab has no vanilla line —
+ * it's the new YouTube Music ACCOUNT vertical, added alongside the existing
+ * youtube URL-paste one). Click Refresh to load the account's playlists,
+ * cards render instantly from metadata, tracks fetch per-playlist in the
+ * background and auto-mirror, then the saved discovery states hydrate (with
+ * the P5b resume-on-in-flight fix). They differ only in their FRESH card
+ * click: Tidal opens the shared modal immediately with whatever tracks are
+ * cached (#867 — the backend discovery fetch is the source of truth,
+ * 152-166); Qobuz and YouTube Music fetch the track list behind a loading
+ * overlay first and refuse to open without tracks (1648-1680) — YouTube
+ * Music follows Qobuz's shape rather than Tidal's #867 treatment because
+ * that treatment was a deliberate, not-yet-extended choice for the existing
+ * verticals (see the `openModalImmediately` note in -sync.sources.ts); a
+ * brand-new vertical has no standing to claim it unilaterally.
  *
  * Declared divergences (the P5a/P5b pattern): card clicks open the React
  * DiscoveryModal in every phase (the vanilla's downloading branches reopened
@@ -54,8 +60,8 @@ import { hydrateStatesForLoaded } from './url-import-tab';
  */
 const TRACK_CRAWL_CONCURRENCY = 3;
 
-/** The qobuz fresh-click track projection (sync-services.js 1657-1661). */
-function qobuzFreshTracks(tracks: unknown[]): Record<string, unknown>[] {
+/** The fresh-click track projection (sync-services.js 1657-1661). */
+function normalizeFreshTracks(tracks: unknown[]): Record<string, unknown>[] {
   return (tracks as Record<string, unknown>[]).map((t) => ({
     id: t.id,
     name: t.name,
@@ -67,14 +73,14 @@ function qobuzFreshTracks(tracks: unknown[]): Record<string, unknown>[] {
 }
 
 interface AccountTabChrome {
-  base: 'tidal' | 'qobuz';
+  base: 'tidal' | 'qobuz' | 'ytmusic';
   title: string;
   refreshBtnId: string;
   refreshBtnClass: string;
   containerId: string;
   initialPlaceholder: string;
   loadingPlaceholder: string;
-  /** 'Tidal' | 'Qobuz' — the toast/placeholder noun. */
+  /** 'Tidal' | 'Qobuz' | 'YouTube Music' — the toast/placeholder noun. */
   noun: string;
   cardIdPrefix: string;
   cardClassName: string;
@@ -253,15 +259,15 @@ function AccountVerticalTab({
         onOpen(sourceId);
         return;
       }
-      // Qobuz: fetch the track list behind the overlay first (1649-1680).
+      // Qobuz (1649-1680) / YouTube Music: fetch the track list behind the overlay first.
       let tracks = Array.isArray(playlist.tracks) ? (playlist.tracks as unknown[]) : [];
       if (tracks.length === 0) {
         window.showLoadingOverlay?.(`Loading ${asString(playlist.name)}...`);
         try {
-          const fullData = await fetchAccountPlaylist('qobuz', sourceId);
+          const fullData = await fetchAccountPlaylist(chrome.base, sourceId);
           const fetched = Array.isArray(fullData.tracks) ? (fullData.tracks as unknown[]) : [];
           if (fetched.length > 0) {
-            tracks = qobuzFreshTracks(fetched);
+            tracks = normalizeFreshTracks(fetched);
             setPlaylistTracks(sourceId, tracks);
           }
         } catch {
@@ -376,6 +382,39 @@ export function QobuzTab({
         noun: 'Qobuz',
         cardIdPrefix: 'qobuz-card',
         cardClassName: 'qobuz-playlist-card',
+      }}
+      vertical={vertical}
+      onOpen={onOpen}
+    />
+  );
+}
+
+/**
+ * The YouTube Music ACCOUNT vertical (not present in the vanilla JS code).
+ * Browses the signed-in account's own library playlists (+ Liked Music),
+ * the auth-based counterpart to the `youtube` tab's URL-paste flow.
+ */
+export function YTMusicTab({
+  vertical,
+  onOpen,
+}: {
+  vertical: SourceVertical;
+  onOpen: (sourceId: string) => void;
+}) {
+  return (
+    <AccountVerticalTab
+      config={SYNC_SOURCES.ytmusic}
+      chrome={{
+        base: 'ytmusic',
+        title: 'Your YouTube Music Playlists',
+        refreshBtnId: 'ytmusic-refresh-btn',
+        refreshBtnClass: 'ytmusic',
+        containerId: 'ytmusic-playlist-container',
+        initialPlaceholder: "Click 'Refresh' to load your YouTube Music playlists.",
+        loadingPlaceholder: '🔄 Loading YouTube Music playlists...',
+        noun: 'YouTube Music',
+        cardIdPrefix: 'ytmusic-card',
+        cardClassName: 'ytmusic-playlist-card',
       }}
       vertical={vertical}
       onOpen={onOpen}

@@ -47,6 +47,10 @@ describe('playMixNow', () => {
     stubFetch({
       success: true,
       tracks: [{ id: 1, file_path: '/m/a.flac', title: 'A' }],
+      queue_tracks: [
+        { id: 1, file_path: '/m/a.flac', title: 'A' },
+        { title: 'B', artist: 'X', playback_status: 'missing' },
+      ],
       matched: 1,
       total: 2,
     });
@@ -54,7 +58,8 @@ describe('playMixNow', () => {
     expect(outcome).toBe('played');
     expect(played).toHaveLength(1);
     expect(played[0].name).toBe('Daily Mix 1');
-    expect(toasts[0].msg).toContain('Playing 1 of 2');
+    expect(played[0].tracks).toHaveLength(2);
+    expect(toasts[0].msg).toContain('preloading 1 missing');
   });
 
   it('says all-owned when everything matched', async () => {
@@ -63,12 +68,18 @@ describe('playMixNow', () => {
     expect(toasts[0].msg).toContain('Playing all 1');
   });
 
-  it('nothing owned: honest toast, no playback', async () => {
-    stubFetch({ success: true, tracks: [], matched: 0, total: 5 });
+  it('nothing owned: queues the missing rows for automatic acquisition', async () => {
+    stubFetch({
+      success: true,
+      tracks: [],
+      queue_tracks: [{ title: 'A', artist: 'X', playback_status: 'missing' }],
+      matched: 0,
+      total: 1,
+    });
     const outcome = await playMixNow([{ title: 'A', artist: 'X' }], 'Mix');
-    expect(outcome).toBe('empty');
-    expect(played).toHaveLength(0);
-    expect(toasts[0].msg).toContain('library yet');
+    expect(outcome).toBe('played');
+    expect(played).toHaveLength(1);
+    expect(toasts[0].msg).toContain('preloading 1 missing');
   });
 
   it('a failed resolve never plays and says so', async () => {
@@ -89,7 +100,7 @@ describe('resolveMixPlayable', () => {
     const spy = vi.fn();
     vi.stubGlobal('fetch', spy);
     const res = await resolveMixPlayable([]);
-    expect(res).toEqual({ rows: [], matched: 0, total: 0 });
+    expect(res).toEqual({ rows: [], queueRows: [], matched: 0, total: 0 });
     expect(spy).not.toHaveBeenCalled();
   });
 

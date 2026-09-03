@@ -4419,12 +4419,21 @@ async function lazyLoadSimilarArtistImages(container, signal) {
             const artistId = bubble.getAttribute('data-artist-id');
             const artistSource = bubble.getAttribute('data-artist-source') || '';
             const artistPlugin = bubble.getAttribute('data-artist-plugin') || '';
+            const artistName = bubble.querySelector('.similar-artist-bubble-name')?.textContent || '';
             if (!artistId) return;
 
             try {
                 const params = new URLSearchParams();
                 if (artistSource) params.set('source', artistSource);
                 if (artistPlugin) params.set('plugin', artistPlugin);
+                // The endpoint documents `name` as REQUIRED for sources that
+                // store no artist image of their own — MusicBrainz resolves
+                // through its url-relations first and then falls back to an
+                // iTunes/Deezer lookup BY NAME. This caller never sent it, so
+                // that fallback could not run and every such artist kept the
+                // placeholder forever (#1201). The name is right here on the
+                // bubble.
+                if (artistName) params.set('name', artistName);
 
                 const imageUrl = params.toString()
                     ? `/api/artist/${encodeURIComponent(artistId)}/image?${params.toString()}`
@@ -4438,8 +4447,21 @@ async function lazyLoadSimilarArtistImages(container, signal) {
                 if (data.success && data.image_url) {
                     const imageContainer = bubble.querySelector('.similar-artist-bubble-image');
                     if (imageContainer) {
-                        const artistName = bubble.querySelector('.similar-artist-bubble-name')?.textContent || 'Artist';
-                        imageContainer.innerHTML = `<img src="${data.image_url}" alt="${artistName}">`;
+                        // built as NODES, not interpolated html: an artist name
+                        // (or a source-supplied url) carrying a quote broke out
+                        // of the attribute and injected markup.
+                        const img = document.createElement('img');
+                        img.src = data.image_url;
+                        img.alt = artistName || 'Artist';
+                        img.onerror = () => {
+                            imageContainer.innerHTML = '';
+                            const fb = document.createElement('div');
+                            fb.className = 'similar-artist-bubble-image-fallback';
+                            fb.textContent = '🎵';
+                            imageContainer.appendChild(fb);
+                            bubble.setAttribute('data-needs-image', 'true');
+                        };
+                        imageContainer.replaceChildren(img);
                         bubble.setAttribute('data-needs-image', 'false');
                         console.log(`✅ Loaded image for similar artist ${artistId}`);
                     }

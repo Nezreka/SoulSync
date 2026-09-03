@@ -590,6 +590,7 @@ def _build_artist_detail_release_card(release: Dict[str, Any],
             'track_completion': 'checking',
             'explicit': typed_album.explicit,
             'secondary_types': _normalize_secondary_types(getattr(typed_album, 'secondary_types', None)),
+            'external_urls': typed_album.external_urls or {},
         }
         if typed_album.release_date:
             card['release_date'] = typed_album.release_date
@@ -632,6 +633,7 @@ def _build_artist_detail_release_card(release: Dict[str, Any],
         'secondary_types': _normalize_secondary_types(
             _extract_lookup_value(release, 'secondary_types', 'secondary-types', default=[])
         ),
+        'external_urls': _extract_lookup_value(release, 'external_urls', default={}) or {},
     }
 
     if release_date:

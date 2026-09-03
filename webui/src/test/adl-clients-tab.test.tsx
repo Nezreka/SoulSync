@@ -403,13 +403,18 @@ describe('the add box', () => {
     const { container } = render(<AdlClientsTab />);
     await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
     fireEvent.click(pill(container, 'torrent'));
+    // the input folds behind a reveal button since the redesign
+    await waitFor(() => expect(container.querySelector('.adl-client-add-toggle')).not.toBeNull());
+    fireEvent.click(container.querySelector('.adl-client-add-toggle') as HTMLElement);
     await waitFor(() => expect(container.querySelector('.adl-client-add-input')).not.toBeNull());
     const input = container.querySelector('.adl-client-add-input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'magnet:?xt=urn:btih:abc' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(body).toBeTruthy());
     expect(body).toEqual({ url: 'magnet:?xt=urn:btih:abc' });
-    await waitFor(() => expect(input.value).toBe(''));
+    // success folds the box back to its toggle
+    await waitFor(() => expect(container.querySelector('.adl-client-add-toggle')).not.toBeNull());
+    expect(container.querySelector('.adl-client-add-input')).toBeNull();
     expect(toasts[0]).toBe('Sent to the torrent client');
   });
 });

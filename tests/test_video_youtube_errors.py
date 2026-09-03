@@ -202,3 +202,116 @@ def test_the_live_history_is_re_judged_without_a_migration():
                for v, errs in live.items()}
     revived = [v for v, n in strikes.items() if n < 3]
     assert revived == ["O4-YG3L8pog"]
+
+
+# ── the failure kinds that are OUR problem, not the video's ──────────────────
+# Roadmap: "Separate unavailable, members-only, private, age-gated, cookie-needed,
+# throttled, postprocessing, and disk-space failures in row state."
+#
+# The load-bearing idea: a full disk, a rate-limit window and a missing ffmpeg say
+# NOTHING about the video. Folding them into the generic three-strike budget means
+# a disk that filled overnight permanently blacklists every video queued while it
+# was full — long after the disk was cleared, with a message blaming YouTube.
+
+import pytest
+
+from core.youtube_errors import (
+    AGE_GATED,
+    BLOCKED,
+    COOKIES,
+    DISK,
+    GONE,
+    POSTPROCESS,
+    THROTTLED,
+    classify,
+    failure_weight,
+    human_reason,
+    needs_user_action,
+    strikes_for,
+)
+
+
+@pytest.mark.parametrize("text,kind", [
+    ("ERROR: unable to write data: [Errno 28] No space left on device", DISK),
+    ("Disk quota exceeded", DISK),
+    ("ERROR: Postprocessing: ffmpeg not found", POSTPROCESS),
+    ("You have requested merging of multiple formats but ffmpeg is not installed", POSTPROCESS),
+    ("ERROR: unable to download video data: HTTP Error 429: Too Many Requests", THROTTLED),
+    ("We're processing too many requests. Try again later.", THROTTLED),
+    ("ERROR: Sign in to confirm your age. This video may be inappropriate for some users.", AGE_GATED),
+    ("This video is age-restricted", AGE_GATED),
+    ("The provided cookies are no longer valid", COOKIES),
+    ("ERROR: Login required to access this content", COOKIES),
+])
+def test_each_failure_kind_is_told_apart(text, kind):
+    assert classify(text) == kind
+
+
+def test_an_age_gate_is_split_out_but_the_bot_gate_is_not():
+    """yt-dlp phrases an age gate as a sign-in prompt, and 'update yt-dlp' does
+    nothing for it — so that one is worth splitting out.
+
+    The BOT gate is not, however much it looks like one. It says "Sign in to
+    confirm you're not a bot. Use --cookies-from-browser", and #1126 was exactly
+    that message on a datacenter IP, where the reporter re-exported cookies twice
+    and it changed nothing. Reading it as a cookie problem sends people to do the
+    thing that already failed. It stays BLOCKED."""
+    assert classify("Sign in to confirm your age") == AGE_GATED
+    bot = ("Sign in to confirm you're not a bot. "
+           "Use --cookies-from-browser or --cookies for the authentication.")
+    assert classify(bot) == BLOCKED
+    assert "yt-dlp" in (human_reason(bot) or "")
+    # ...and a real 403 with no sign-in text still reads as blocked too.
+    assert classify("ERROR: unable to download video data: HTTP Error 403: Forbidden") == BLOCKED
+
+
+def test_a_gone_video_still_wins_over_everything():
+    """A members-only video's text also mentions signing in. Permanent has to win,
+    or a paywalled video would be retried forever as a cookie problem."""
+    assert classify("Join this channel to get access. Please sign in.") == GONE
+
+
+def test_our_own_problems_do_not_spend_the_videos_budget():
+    # A disk that filled overnight must not blacklist everything queued while full.
+    assert failure_weight("No space left on device", max_fail=3) == 0
+    assert failure_weight("HTTP Error 429: Too Many Requests", max_fail=3) == 0
+    # A missing ffmpeg IS worth counting: it will not fix itself, and the message
+    # says so, but retrying a few times costs nothing and covers a transient remux.
+    assert failure_weight("Postprocessing: ffmpeg not found", max_fail=3) == 1
+    # Unchanged: gone spends everything, ordinary failures spend one.
+    assert failure_weight("Private video", max_fail=3) == 3
+    assert failure_weight("Connection reset by peer", max_fail=3) == 1
+
+
+def test_a_disk_failure_still_stops_costing_searches_eventually():
+    """Weight 0 must not mean 'retry hourly forever'. A row still reporting a full
+    disk a month later is not a live problem any more."""
+    fresh = [{"error": "No space left on device", "days_ago": 1}] * 5
+    assert strikes_for(fresh, max_fail=3) == 0
+    stale = [{"error": "No space left on device", "days_ago": 60}] * 5
+    assert strikes_for(stale, max_fail=3) == 5
+
+
+@pytest.mark.parametrize("text,phrase", [
+    ("No space left on device", "disk space"),
+    ("Postprocessing: ffmpeg not found", "ffmpeg"),
+    ("HTTP Error 429: Too Many Requests", "rate-limiting"),
+    ("Sign in to confirm your age", "cookies"),
+    ("The provided cookies are no longer valid", "cookies"),
+])
+def test_each_reason_names_the_actual_fix(text, phrase):
+    """The point of splitting these out is that the message changes. A user told
+    'update yt-dlp' for a full disk goes and does the wrong thing."""
+    assert phrase in (human_reason(text) or "").lower()
+
+
+def test_needs_user_action_separates_waiting_on_you_from_still_trying():
+    for waiting in ("No space left on device", "Postprocessing: ffmpeg not found",
+                    "Sign in to confirm your age", "The provided cookies are no longer valid"):
+        assert needs_user_action(waiting) is True
+    # A bot gate is NOT in this set: nothing the operator does to their cookies
+    # clears it, so parking it under "waiting on you" would be a dead end.
+    for trying in ("HTTP Error 429: Too Many Requests", "Connection reset by peer",
+                   "HTTP Error 403: Forbidden", "Premieres in 3 days",
+                   "Sign in to confirm you're not a bot"):
+        assert needs_user_action(trying) is False

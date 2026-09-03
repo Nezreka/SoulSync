@@ -286,7 +286,7 @@ class AmazonDownloadClient(DownloadSourcePlugin):
             if stream.decryption_key:
                 if self._engine is not None:
                     self._engine.update_record(
-                        "amazon", download_id, {"state": "decrypting", "progress": 1.0}
+                        "amazon", download_id, {"state": "decrypting", "progress": 100.0}
                     )
                 try:
                     self._decrypt_with_ffmpeg(enc_path, out_path, stream.decryption_key)
@@ -382,7 +382,14 @@ class AmazonDownloadClient(DownloadSourcePlugin):
                         {
                             "transferred": downloaded,
                             "size": total,
-                            "progress": downloaded / total if total else 0.0,
+                            # PERCENT, like every other download client. this
+                            # alone reported a 0-1 fraction, which forced the
+                            # shared status normaliser to guess the unit — and
+                            # that guess turned the first 1% of every OTHER
+                            # engine's download into 50-100% on the page
+                            # (0.5 -> 50, 1.0 -> 100). one outlier, four
+                            # victims; fix the outlier.
+                            "progress": (downloaded / total * 100) if total else 0.0,
                         },
                     )
                     last_report = now

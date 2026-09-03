@@ -85,7 +85,9 @@ describe('the active-downloads route', () => {
     expect(container.querySelector('.adl-layout')).not.toBeNull();
     expect(container.querySelector('.adl-main')).not.toBeNull();
     expect(container.querySelector('.adl-container')).not.toBeNull();
-    expect(container.querySelector('#adl-batch-panel')).not.toBeNull();
+    // the 366px side panel is dead — batches are groups in the main list now
+    expect(container.querySelector('#adl-batch-panel')).toBeNull();
+    expect(container.querySelector('#adl-view-tabs')).not.toBeNull();
   });
 
   it('keeps the ids the helper tour points at', async () => {
@@ -105,14 +107,16 @@ describe('the active-downloads route', () => {
     await settled();
 
     await waitFor(() => expect(container.querySelectorAll('.adl-row')).toHaveLength(2));
-    expect(container.querySelector('#adl-count')?.textContent).toBe('1 active / 2 total');
+    const nums = [...container.querySelectorAll('.adl-stat-num')].map((n) => n.textContent);
+    // active / queued / failed / total
+    expect(nums).toEqual(['1', '0', '0', '2']);
   });
 
   it('shows the empty state with nothing to list', async () => {
     const { container } = renderRoute();
     await settled();
     await waitFor(() => expect(container.querySelector('#adl-empty')).not.toBeNull());
-    expect(container.querySelector('#adl-empty')?.textContent).toContain('No downloads yet');
+    expect(container.querySelector('#adl-empty')?.textContent).toContain('Nothing downloading');
   });
 
   it('filters the list when a pill is clicked', async () => {
@@ -133,16 +137,7 @@ describe('the active-downloads route', () => {
     expect(container.querySelector('.adl-row-title')?.textContent).toBe('Xtal');
   });
 
-  it('renders batch cards and the empty batch panel', async () => {
-    const empty = renderRoute();
-    await settled();
-    await waitFor(() =>
-      expect(empty.container.querySelector('.adl-batch-empty-title')?.textContent).toBe(
-        'Nothing downloading',
-      ),
-    );
-    cleanup();
-
+  it('renders a batch as a list group with the panel card promoted to its header', async () => {
     stub({
       batches: [
         {
@@ -158,19 +153,20 @@ describe('the active-downloads route', () => {
           queued: 6,
         },
       ],
+      downloads: [row({ task_id: 'bt1', batch_id: 'b1', batch_name: 'My Batch' })],
     });
     const withBatch = renderRoute();
     await settled();
-    await waitFor(() =>
-      expect(withBatch.container.querySelector('.adl-batch-card')).not.toBeNull(),
-    );
-    expect(withBatch.container.querySelector('.adl-batch-card-name')?.textContent).toBe('My Batch');
-    expect(withBatch.container.querySelector('.adl-batch-card-meta')?.textContent).toContain(
+    await waitFor(() => expect(withBatch.container.querySelector('.adl-group')).not.toBeNull());
+    expect(withBatch.container.querySelector('.adl-group-name')?.textContent).toBe('My Batch');
+    expect(withBatch.container.querySelector('.adl-group-phase')?.textContent).toContain(
       '3/10 tracks',
     );
-    expect(withBatch.container.querySelector('.adl-batch-panel-title')?.textContent).toBe(
-      'Batches (1)',
+    expect(withBatch.container.querySelector('.adl-group-stats')?.textContent).toBe(
+      '3 done · 1 active · 6 queued',
     );
+    // live batch groups start open, with real rows inside
+    expect(withBatch.container.querySelectorAll('.adl-group-rows .adl-row')).toHaveLength(1);
   });
 
   it('shows the review banner and quarantine rows under the ⚠ filter', async () => {
@@ -225,9 +221,7 @@ describe('the active-downloads route', () => {
     await settled();
 
     await waitFor(() =>
-      expect(container.querySelector('[data-filter="unverified"]')?.textContent).toBe(
-        '🛡 Quarantine',
-      ),
+      expect(container.querySelector('[data-filter="unverified"]')?.textContent).toBe('Quarantine'),
     );
 
     act(() => (container.querySelector('[data-filter="unverified"]') as HTMLElement).click());

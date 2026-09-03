@@ -20,8 +20,14 @@ from core.video.download_config import (
 
 
 def test_modes_are_video_only():
-    assert SOURCES == ("soulseek", "torrent", "usenet")
-    assert MODES == ("soulseek", "torrent", "usenet", "hybrid")
+    """No streaming sources — those are music-only. EXT.to joined the list in
+    861936c7a so it can be named explicitly in a hybrid chain; it is still a
+    torrent underneath (the grab files it as one), it is just discoverable as
+    its own lane."""
+    assert SOURCES == ("soulseek", "torrent", "usenet", "extto")
+    assert MODES == ("soulseek", "torrent", "usenet", "extto", "hybrid")
+    for music_only in ("spotify", "tidal", "qobuz", "deezer", "youtube"):
+        assert music_only not in SOURCES
 
 
 def test_normalize_mode():

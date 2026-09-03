@@ -9,13 +9,19 @@ working. Import from ``core.youtube_errors`` in new code.
 
 from core.youtube_errors import *          # noqa: F401,F403 - re-export
 from core.youtube_errors import (           # noqa: F401 - explicit for linters
+    AGE_GATED,
     BLOCKED,
+    COOKIES,
+    DISK,
     GONE,
     NOT_YET,
+    POSTPROCESS,
+    THROTTLED,
     TRANSIENT,
     classify,
     failure_weight,
     human_reason,
     looks_like_stale_ytdlp,
+    needs_user_action,
     strikes_for,
 )

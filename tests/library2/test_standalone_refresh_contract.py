@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from database.music_database import MusicDatabase
 
+# The lifted module resolves the database through its own injected getter.
+_db_holder = {}
+
 
 def _configure_paths(monkeypatch, web_server, transfer, staging):
     values = {
@@ -17,12 +20,22 @@ def _configure_paths(monkeypatch, web_server, transfer, staging):
         lambda key, default=None: values.get(key, default),
     )
     monkeypatch.setattr(web_server, "docker_resolve_path", lambda path: path)
+    # The db-update family lives in api/database_admin.py since the 3.3.2 lift
+    # and reads its own module-level config_manager/docker_resolve_path, which
+    # configure() injects at boot. Point those at the same stubs, or the scan
+    # walks the real configured Transfer folder instead of tmp_path.
+    from api import database_admin as db_admin
+
+    monkeypatch.setattr(db_admin, "config_manager", web_server.config_manager)
+    monkeypatch.setattr(db_admin, "docker_resolve_path", lambda path: path)
+    monkeypatch.setattr(db_admin, "get_database", lambda: _db_holder["db"])
 
 
 def test_standalone_full_refresh_uses_strict_native_import_without_clearing(
     tmp_path, monkeypatch,
 ):
     import web_server
+    from api import database_admin as db_admin
 
     transfer = tmp_path / "Transfer"
     staging = tmp_path / "Staging"
@@ -31,6 +44,7 @@ def test_standalone_full_refresh_uses_strict_native_import_without_clearing(
     audio = transfer / "song.flac"
     audio.write_bytes(b"test")
     db = MusicDatabase(str(tmp_path / "music.db"))
+    _db_holder["db"] = db
     _configure_paths(monkeypatch, web_server, transfer, staging)
     monkeypatch.setattr(web_server, "get_database", lambda: db)
     monkeypatch.setattr(
@@ -47,16 +61,16 @@ def test_standalone_full_refresh_uses_strict_native_import_without_clearing(
         ),
     )
     finished, errors = [], []
-    monkeypatch.setattr(web_server, "_db_update_phase_callback", lambda *_: None)
-    monkeypatch.setattr(web_server, "add_activity_item", lambda *_: None)
+    monkeypatch.setattr(db_admin, "_db_update_phase_callback", lambda *_: None)
+    monkeypatch.setattr(db_admin, "add_activity_item", lambda *_: None)
     monkeypatch.setattr(
-        web_server, "_db_update_finished_callback", lambda *args: finished.append(args),
+        db_admin, "_db_update_finished_callback", lambda *args: finished.append(args),
     )
     monkeypatch.setattr(
-        web_server, "_db_update_error_callback", lambda error: errors.append(error),
+        db_admin, "_db_update_error_callback", lambda error: errors.append(error),
     )
 
-    web_server._run_soulsync_full_refresh()
+    db_admin._run_soulsync_full_refresh()
 
     assert errors == []
     assert imports == [(str(audio), True)]
@@ -67,6 +81,7 @@ def test_standalone_deep_scan_routes_missing_files_through_rescan(
     tmp_path, monkeypatch,
 ):
     import web_server
+    from api import database_admin as db_admin
 
     transfer = tmp_path / "Transfer"
     staging = tmp_path / "Staging"
@@ -90,6 +105,7 @@ def test_standalone_deep_scan_routes_missing_files_through_rescan(
             "VALUES(?,?,1,'active')", (track, str(missing)),
         ).lastrowid
 
+    _db_holder["db"] = db
     _configure_paths(monkeypatch, web_server, transfer, staging)
     monkeypatch.setattr(web_server, "get_database", lambda: db)
     rescans = []
@@ -100,16 +116,16 @@ def test_standalone_deep_scan_routes_missing_files_through_rescan(
         ),
     )
     finished, errors = [], []
-    monkeypatch.setattr(web_server, "_db_update_phase_callback", lambda *_: None)
-    monkeypatch.setattr(web_server, "add_activity_item", lambda *_: None)
+    monkeypatch.setattr(db_admin, "_db_update_phase_callback", lambda *_: None)
+    monkeypatch.setattr(db_admin, "add_activity_item", lambda *_: None)
     monkeypatch.setattr(
-        web_server, "_db_update_finished_callback", lambda *args: finished.append(args),
+        db_admin, "_db_update_finished_callback", lambda *args: finished.append(args),
     )
     monkeypatch.setattr(
-        web_server, "_db_update_error_callback", lambda error: errors.append(error),
+        db_admin, "_db_update_error_callback", lambda error: errors.append(error),
     )
 
-    web_server._run_soulsync_deep_scan()
+    db_admin._run_soulsync_deep_scan()
 
     assert errors == []
     assert rescans == [(db, [file_id])]

@@ -70,3 +70,71 @@ def test_enabling_a_job_does_not_stop_it():
     w._current_job_id = 'lyrics_filler'
     w.set_job_enabled('lyrics_filler', True)
     assert _should_stop(w) is False
+
+
+# ── run_job_now returns whether it actually queued (#1192) ────────────────────
+# the quality-check automation reads this return; it was None on EVERY path,
+# so the automation reported "library worker unavailable" 1,689 runs in a row
+# while the scan it triggered ran fine. the handler tests never caught it
+# because they stubbed the seam with a lambda that returned True.
+
+def test_run_job_now_reports_queued_truthfully():
+    w = _worker()
+    w._jobs = {'quality_upgrade': object()}      # registry loaded, job known
+    assert w.run_job_now('quality_upgrade') is True
+    assert w._force_run_queue == ['quality_upgrade']
+    # asking again while queued is still a successful trigger, not a dupe
+    assert w.run_job_now('quality_upgrade') is True
+    assert w._force_run_queue == ['quality_upgrade']
+
+
+def test_run_job_now_refuses_an_unknown_job():
+    w = _worker()
+    w._jobs = {'quality_upgrade': object()}
+    assert w.run_job_now('not_a_job') is False
+    assert w._force_run_queue == []
+
+
+# ── a disabled job must stay off for BACKGROUND triggers (#1207) ─────────────
+# wishx switched Quality Upgrade Finder off to free up resources and it kept
+# running. his import automation force-queued it on every scan, and the forced
+# path skips _pick_next_job, which is the only place the per-job toggle is
+# read. a weekly job ran 12 times in two days. a human clicking Run Now still
+# overrides the toggle, that is what the button means.
+
+def _worker_with_job(enabled):
+    w = _worker()
+    w._jobs = {'quality_upgrade': object()}
+    w.get_job_config = lambda job_id: {'enabled': enabled}
+    return w
+
+
+def test_a_background_trigger_will_not_run_a_disabled_job():
+    w = _worker_with_job(enabled=False)
+    assert w.run_job_now('quality_upgrade', respect_enabled=True) is False
+    assert w._force_run_queue == []
+
+
+def test_a_background_trigger_runs_an_enabled_job():
+    w = _worker_with_job(enabled=True)
+    assert w.run_job_now('quality_upgrade', respect_enabled=True) is True
+    assert w._force_run_queue == ['quality_upgrade']
+
+
+def test_a_human_run_now_still_overrides_the_toggle():
+    """The Tools button is an explicit instruction, toggle or not."""
+    w = _worker_with_job(enabled=False)
+    assert w.run_job_now('quality_upgrade') is True
+    assert w._force_run_queue == ['quality_upgrade']
+
+
+def test_an_unreadable_config_does_not_block_the_run():
+    """Fail OPEN: refusing on a bad config read would silently stop work."""
+    w = _worker()
+    w._jobs = {'quality_upgrade': object()}
+
+    def _boom(_job_id):
+        raise RuntimeError('config gone')
+
+    w.get_job_config = _boom
+    assert w.run_job_now('quality_upgrade', respect_enabled=True) is True

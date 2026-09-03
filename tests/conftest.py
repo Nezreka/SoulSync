@@ -1345,6 +1345,16 @@ def reset_state(_inert_video_enrichment_engine, _inert_video_download_monitor):
     # every bit of it a previous test's reservation.
     from core.prowlarr_throttle import _reset_for_tests as _reset_prowlarr_throttle
     _reset_prowlarr_throttle()
+    # Video download-source cooldowns (core.automation.handlers.
+    # video_process_wishlist): two process-wide dicts keyed by (item, transport).
+    # Two client refusals put that pair on a SIX HOUR cooldown, and the test
+    # items all look alike ('A' on torrent), so one test recording refusals made
+    # every later test in the process find its candidates cooled and grab
+    # nothing. That is how eight refusal-walk tests failed together with an
+    # empty `tried` list while each passed alone. Fourth module-global of this
+    # exact shape; same treatment.
+    from core.automation.handlers.video_process_wishlist import reset_source_cooldowns
+    reset_source_cooldowns()
     # Enrichment status TTL cache (core.enrichment.api): a cached stats dict
     # must never leak into the next test's registry (same service id, new fake).
     from core.enrichment.api import _invalidate_status_cache

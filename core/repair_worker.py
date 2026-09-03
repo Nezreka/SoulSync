@@ -1310,7 +1310,8 @@ class RepairWorker:
             remaining -= chunk
         return self._stop_event.is_set()
 
-    def run_job_now(self, job_id: str, scope: Optional[dict] = None):
+    def run_job_now(self, job_id: str, scope: Optional[dict] = None,
+                    respect_enabled: bool = False) -> bool:
         """Queue a job for immediate execution by the main worker loop.
 
         Uses a thread-safe queue instead of spawning a separate thread
@@ -1324,6 +1325,20 @@ class RepairWorker:
         not declare ``supports_file_scope``. Silently widening it to the whole
         library is how "run Library Reorganize for this artist" came to move
         every file in the library while the API answered ``scope_files: 180``.
+
+        Returns True when the job is queued (or already waiting), the same
+        contract as the video worker's run_job_now. it never returned
+        ANYTHING, so the quality-check automation read None as "library
+        worker unavailable" on every run while the scan it triggered ran
+        fine behind its back (#1192).
+
+        respect_enabled is for NON-HUMAN callers. a person clicking Run Now
+        means it, toggle or not, so that stays the default. an automation is
+        different: wishx turned Quality Upgrade Finder off to free up
+        resources and it kept running anyway, because his import automation
+        force-queued it on every scan. a weekly job ran 12 times in two days
+        (#1207). the toggle is the user's statement about resources, so a
+        background trigger has to honour it.
         """
         from core.repair_jobs import JOB_ID_MIGRATIONS
 
@@ -1341,6 +1356,16 @@ class RepairWorker:
                     "a single artist's files — it would run library-wide. Run it "
                     "from Library Health & Repair instead."
                 )
+
+        if respect_enabled:
+            try:
+                if not self.get_job_config(job_id).get('enabled', True):
+                    logger.info("Job %s is disabled, not running it for a background trigger", job_id)
+                    return False
+            except Exception:
+                # config unreadable, fall through and run. refusing on a bad
+                # read would silently stop scheduled work.
+                logger.debug("Could not read config for %s, allowing the run", job_id, exc_info=True)
 
         with self._force_run_lock:
             if scope:

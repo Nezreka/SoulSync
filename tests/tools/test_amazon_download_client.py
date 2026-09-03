@@ -464,9 +464,17 @@ class TestDecryptWithFfmpeg:
         out = tmp_path / "track.flac"
 
         with patch("shutil.which", return_value=None):
-            # Ensure tools/ffmpeg.exe also absent
-            with pytest.raises(RuntimeError, match="ffmpeg is required"):
-                client._decrypt_with_ffmpeg(enc, out, "deadbeef1234")
+            # the tools/ fallback must ALSO be absent — redirect the module's
+            # Path so the candidate resolves under this empty tmp dir instead
+            # of the real repo tools/, where a live server may have
+            # auto-downloaded ffmpeg (that's exactly what broke this test on
+            # aug 26: a rig server dropped tools/ffmpeg and a REAL ffmpeg ran)
+            with patch(
+                "core.amazon_download_client.Path",
+                lambda *a, **k: tmp_path / "iso" / "x" / "marker",
+            ):
+                with pytest.raises(RuntimeError, match="ffmpeg is required"):
+                    client._decrypt_with_ffmpeg(enc, out, "deadbeef1234")
 
     def test_uses_tools_ffmpeg_when_not_on_path(self, tmp_path):
         client = _make_client(tmp_path)

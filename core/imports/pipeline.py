@@ -2654,6 +2654,13 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             with tasks_lock:
                 if task_id in download_tasks:
                     _mark_task_completed(task_id, context.get('track_info'))
+                    # The playback queue polls the task status and needs the
+                    # verified library path before it can replace its original
+                    # ``missing`` row with a playable one.  The inner pipeline
+                    # cannot persist this itself because this wrapper removes
+                    # task_id/batch_id while post-processing runs.  Keep the
+                    # path on the task at the same point we mark it completed.
+                    download_tasks[task_id]['final_file_path'] = expected_final_path
                     download_tasks[task_id]['metadata_enhanced'] = True
                     if context.get('_verification_status'):
                         download_tasks[task_id]['verification_status'] = context['_verification_status']

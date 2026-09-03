@@ -158,6 +158,8 @@
                 '<em>' + esc(source.kind) + '</em></div>' +
                 '<div class="vsr-basic-source-meta"><span class="vsr-basic-source-query">' + esc(q) + '</span>' +
                 '<span class="vsr-basic-source-action" data-vsr-basic-state>Queued</span></div></div>' +
+                '<div class="vsr-basic-source-counts" data-vsr-basic-counts aria-live="polite"></div>' +
+                '<div class="vsr-basic-query-list" data-vsr-basic-queries></div>' +
                 '<div class="vsr-basic-hits" data-vsr-basic-hits></div>' +
             '</section>';
         }).join('');
@@ -219,6 +221,40 @@
 
     function basicHitKey(r, sourceId) {
         return sourceId + '|' + (r.info_url || r.guid || r.download_url || r.filename || r.title || '');
+    }
+
+    function basicSourceCounts(rows, sourceId) {
+        var counts = { usable: 0, review: 0, noLink: 0 };
+        (rows || []).forEach(function (r) {
+            r = r || {};
+            if (r.accepted === false || r.rejected) counts.review += 1;
+            if (!basicHitGrabbable(r, sourceId)) counts.noLink += 1;
+            if (r.accepted !== false && basicHitGrabbable(r, sourceId)) counts.usable += 1;
+        });
+        return counts;
+    }
+
+    function basicSourceCountHTML(rows, sourceId, done) {
+        if (!done) return '';
+        var c = basicSourceCounts(rows, sourceId);
+        return '<span class="vsr-basic-count vsr-basic-count--usable">' + c.usable + ' usable</span>' +
+            '<span class="vsr-basic-count vsr-basic-count--review">' + c.review + ' review</span>' +
+            '<span class="vsr-basic-count vsr-basic-count--nolink">' + c.noLink + ' no link</span>';
+    }
+
+    function basicSourceCountText(rows, sourceId, done) {
+        if (!done) return 'Searching';
+        var c = basicSourceCounts(rows, sourceId);
+        if (!(rows || []).length) return 'No matches';
+        return c.usable + ' usable / ' + c.review + ' review / ' + c.noLink + ' no link';
+    }
+
+    function basicQueryHTML(queries) {
+        queries = (queries || []).filter(Boolean);
+        if (!queries.length) return '';
+        return '<span class="vsr-basic-query-label">Queries</span>' + queries.slice(0, 6).map(function (q) {
+            return '<span class="vsr-basic-query-chip">' + esc(q) + '</span>';
+        }).join('') + (queries.length > 6 ? '<span class="vsr-basic-query-more">+' + (queries.length - 6) + '</span>' : '');
     }
 
     // Age from an indexer's publish date. Indexers state an ISO timestamp; the
@@ -295,14 +331,25 @@
 
     function basicResultHTML(r, sourceId, index) {
         r = r || {};
+        var cfg = BASIC_SEARCH_SOURCES[sourceId] || {};
         var bits = [r.quality_label || r.resolution, r.source, r.codec, r.audio, r.hdr, r.group].filter(Boolean);
-        var provider = r.username || (r.indexer_id ? String(r.indexer_id).toUpperCase() : 'Source');
-        var protocol = (r.protocol || '').toString().toUpperCase() || 'SEARCH';
+        var provider = r.username || (r.indexer_id ? String(r.indexer_id).toUpperCase() : (cfg.label || 'Source'));
+        var transport = (cfg.source || r.source || sourceId || 'search').toString();
+        var protocol = (r.protocol || transport).toString().toUpperCase() || 'SEARCH';
         var locator = r.download_url || r.magnet_uri ? 'Ready link' : (r.info_url ? 'Detail page' : 'Result only');
         var accepted = r.accepted === false ? 'Review' : 'Candidate';
         var analysis = r.rejected ? '<details class="vsr-basic-hit-analysis"><summary>Why review?</summary><p>' + esc(r.rejected) + '</p></details>' : '';
+        var visibleNote = r.rejected ? '<p class="vsr-basic-hit-note"><span>Review</span>' + esc(r.rejected) + '</p>' : '';
+        var origin = r.indexer_id || sourceId;
+        var sourceLine = [
+            '<span class="vsr-basic-source-chip">' + esc(provider) + '</span>',
+            '<span>' + esc(protocol) + '</span>',
+            '<span>' + esc(transport === 'extto' ? 'torrent via EXT.to' : transport) + '</span>',
+            origin ? '<span>' + esc(origin) + '</span>' : ''
+        ].filter(Boolean).join('');
         var chipHtml = bits.length ? bits.slice(0, 7).map(function (b) { return '<span>' + esc(b) + '</span>'; }).join('') : '<span>Release</span>';
         var grabbable = basicHitGrabbable(r, sourceId);
+        var grabLabel = grabbable && r.accepted === false ? 'Try anyway' : (grabbable ? 'Identify' : 'No link');
         var key = basicHitKey(r, sourceId);
         var d = r.info_url ? basicDetail[r.info_url] : null;
         if (d === false) d = null;                       // looked, nothing came back
@@ -320,9 +367,10 @@
                   '" alt="" loading="lazy" decoding="async">'
                 : '') +
             '<div class="vsr-basic-hit-main">' +
-                '<div class="vsr-basic-hit-kicker"><span>' + esc(provider) + '</span><em>' + esc(protocol) + '</em></div>' +
+                '<div class="vsr-basic-hit-kicker">' + sourceLine + '</div>' +
                 '<strong title="' + esc(r.title || '') + '">' + esc(r.title || 'Untitled release') + '</strong>' +
                 '<div class="vsr-basic-hit-tags">' + chipHtml + '</div>' +
+                visibleNote +
                 basicExtrasHTML(r, d) +
                 analysis +
             '</div>' +
@@ -332,7 +380,7 @@
                 '<span class="vsr-basic-hit-linkstate">' + esc(locator) + '</span>' +
                 '<span class="vsr-basic-hit-verdict">' + esc(accepted) + '</span>' +
                 '<button class="vsr-basic-hit-grab" type="button" data-vsr-basic-grab="' + esc(sourceId) + ':' + index + '"' +
-                    (grabbable ? '' : ' disabled') + '>' + (grabbable ? 'Identify' : 'No link') + '</button>' +
+                    (grabbable ? '' : ' disabled') + '>' + esc(grabLabel) + '</button>' +
             '</div>' +
             '<span class="vsr-fresh-chev" aria-hidden="true"></span>' +
             (open ? basicFactsHTML(r, sourceId, d) : '') +
@@ -392,32 +440,39 @@
         });
     }
 
-    function renderBasicHits(card, rows, done, error, totalFiles) {
+    function renderBasicHits(card, rows, done, error, totalFiles, queries) {
         var state = card.querySelector('[data-vsr-basic-state]');
         var hits = card.querySelector('[data-vsr-basic-hits]');
+        var sourceId = card.getAttribute('data-vsr-basic-card');
+        var countsHost = card.querySelector('[data-vsr-basic-counts]');
+        var queryHost = card.querySelector('[data-vsr-basic-queries]');
         if (!hits) return;
         if (error) {
             if (state) state.textContent = 'Needs setup';
-            var errTab = document.querySelector('[data-vsr-basic-source-tab="' + card.getAttribute('data-vsr-basic-card') + '"] [data-vsr-basic-tab-count]');
+            if (countsHost) countsHost.innerHTML = '';
+            if (queryHost) queryHost.innerHTML = basicQueryHTML(queries);
+            var errTab = document.querySelector('[data-vsr-basic-source-tab="' + sourceId + '"] [data-vsr-basic-tab-count]');
             if (errTab) errTab.textContent = 'Needs setup';
             hits.innerHTML = '<div class="vsr-basic-source-note">' + esc(error) + '</div>';
             return;
         }
         rows = rows || [];
         var label = done ? (rows.length ? rows.length + ' found' : 'No matches') : 'Searching';
+        var countText = basicSourceCountText(rows, sourceId, done);
         card.classList.toggle('is-searching', !done);
         if (state) state.innerHTML = done ? esc(label) : '<span class="vsr-basic-loader-dot" aria-hidden="true"></span>' + esc(label);
-        var tabBtn = document.querySelector('[data-vsr-basic-source-tab="' + card.getAttribute('data-vsr-basic-card') + '"]');
+        if (countsHost) countsHost.innerHTML = basicSourceCountHTML(rows, sourceId, done);
+        if (queryHost) queryHost.innerHTML = basicQueryHTML(queries);
+        var tabBtn = document.querySelector('[data-vsr-basic-source-tab="' + sourceId + '"]');
         var tab = tabBtn && tabBtn.querySelector('[data-vsr-basic-tab-count]');
         if (tabBtn) tabBtn.classList.toggle('is-searching', !done);
-        if (tab) tab.textContent = label;
+        if (tab) tab.textContent = countText;
         if (!rows.length) {
             hits.innerHTML = '<div class="vsr-basic-source-note ' + (!done ? 'vsr-basic-source-note--loading' : '') + '">' + (done
                 ? (totalFiles ? 'Files were found, but none matched as video releases.' : 'No matching releases found.')
                 : '<span class="vsr-basic-loader" aria-hidden="true"><i></i><i></i><i></i></span><span>Searching this source...</span>') + '</div>';
             return;
         }
-        var sourceId = card.getAttribute('data-vsr-basic-card');
         var shown = rows.slice(0, 12);
         basicRowsBySource[sourceId] = shown;   // what the Identify buttons index into
         hits.innerHTML = shown.map(function (r, i) { return basicResultHTML(r, sourceId, i); }).join('') +
@@ -434,16 +489,17 @@
             fetch('/api/video/downloads/search/start', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify(body) }).then(_json).then(function (d) {
                 if (token !== basicSeq || !card.isConnected) return;
-                if (d && d.error) { renderBasicHits(card, [], true, d.error); return; }
-                if (!d || !d.id) { renderBasicHits(card, d ? d.results : [], true); return; }
-                pollBasicSearch(token, card, body, d.id, d.poll_ms);
+                if (d && d.error) { renderBasicHits(card, [], true, d.error, 0, d.queries || []); return; }
+                if (!d || !d.id) { renderBasicHits(card, d ? d.results : [], true, null, 0, d ? d.queries : []); return; }
+                renderBasicHits(card, [], false, null, 0, d.queries || []);
+                pollBasicSearch(token, card, body, d.id, d.poll_ms, d.queries || []);
             }).catch(function () {
                 if (token === basicSeq && card.isConnected) renderBasicHits(card, [], true, 'Search failed.');
             });
         });
     }
 
-    function pollBasicSearch(token, card, body, id, pollMs) {
+    function pollBasicSearch(token, card, body, id, pollMs, queries) {
         var started = Date.now(), lastN = -1, stable = 0, total = 0;
         var maxMs = Math.min(80000, pollMs || 60000);
         function tick() {
@@ -456,10 +512,10 @@
                 if (rows.length === lastN) stable++; else { stable = 0; lastN = rows.length; }
                 var elapsed = Date.now() - started;
                 var done = elapsed >= maxMs || rows.length >= 25 || (rows.length > 0 && elapsed > 20000 && stable >= 6);
-                renderBasicHits(card, rows, done, null, total);
+                renderBasicHits(card, rows, done, null, total, (d && d.queries) || queries || []);
                 if (!done) setTimeout(tick, 1500);
             }).catch(function () {
-                if (token === basicSeq && card.isConnected) renderBasicHits(card, [], true, 'Search polling failed.');
+                if (token === basicSeq && card.isConnected) renderBasicHits(card, [], true, 'Search polling failed.', 0, queries || []);
             });
         }
         tick();

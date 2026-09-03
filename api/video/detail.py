@@ -28,6 +28,90 @@ def register_routes(bp):
             return jsonify({"error": "not found"}), 404
         return jsonify({"success": True, "monitored": bool(body.get("monitored"))})
 
+    @bp.route("/detail/<kind>/<int:library_id>/overrides", methods=["PUT"])
+    def video_title_overrides(kind, library_id):
+        """Per-title acquisition overrides: which sources to try, which release
+        groups to insist on or refuse, and whether to reach for season packs.
+
+        Empty lists and 'auto' mean FOLLOW THE GLOBAL CONFIG. That is the only
+        safe reading of an unset override: an empty allow-list treated as a
+        filter would quietly stop the title being grabbed by anything."""
+        from . import get_video_db
+        if kind not in ("movie", "show"):
+            return jsonify({"success": False, "error": "kind must be movie|show"}), 400
+        body = request.get_json(silent=True) or {}
+        fields = {}
+        for key in ("preferred_sources", "release_group_allow", "release_group_block",
+                    "manual_aliases"):
+            if key in body:
+                if not isinstance(body[key], list):
+                    return jsonify({"success": False, "error": "%s must be a list" % key}), 400
+                fields[key] = body[key]
+        if kind == "show" and "pack_preference" in body:
+            if str(body["pack_preference"]) not in ("auto", "prefer", "never"):
+                return jsonify({"success": False,
+                                "error": "pack_preference must be auto|prefer|never"}), 400
+            fields["pack_preference"] = body["pack_preference"]
+        if not fields:
+            return jsonify({"success": False, "error": "nothing to set"}), 400
+        db = get_video_db()
+        if not db.set_title_overrides(kind, library_id, **fields):
+            return jsonify({"success": False, "error": "Title not found."}), 404
+        return jsonify({"success": True, **db.title_overrides(kind, library_id)})
+
+    @bp.route("/detail/<kind>/<int:item_id>/acquisition", methods=["GET"])
+    def video_title_acquisition(kind, item_id):
+        """This title's CURRENT acquisition state in one roll-up - owned, wanted,
+        queued, downloading, failed, ignored. The history endpoint above says what
+        already happened; this says where things stand."""
+        from . import get_video_db
+        if kind not in ("movie", "show"):
+            return jsonify({"error": "bad kind"}), 400
+        db = get_video_db()
+        detail = db.movie_detail(item_id) if kind == "movie" else db.show_detail(item_id)
+        if not detail:
+            return jsonify({"error": "not found"}), 404
+        state = db.acquisition_state(kind, item_id, tmdb_id=detail.get("tmdb_id"))
+        return jsonify({"success": True, **state})
+
+    @bp.route("/episode/monitor", methods=["POST"])
+    def video_set_episode_monitor():
+        """Monitor or unmonitor a single episode, addressed by show tmdb id +
+        season/episode. That is the identity the calendar carries; it never has
+        the local episode row id."""
+        from . import get_video_db
+        body = request.get_json(silent=True) or {}
+        try:
+            tmdb_id = int(body["tmdb_id"])
+            season = int(body["season_number"])
+            episode = int(body["episode_number"])
+        except (KeyError, TypeError, ValueError):
+            return jsonify({"success": False,
+                            "error": "tmdb_id, season_number and episode_number required"}), 400
+        if "monitored" not in body:
+            return jsonify({"success": False, "error": "monitored required"}), 400
+        moved = get_video_db().set_episode_monitored(
+            tmdb_id, season, episode, bool(body.get("monitored")))
+        if not moved:
+            return jsonify({"success": False, "error": "No such episode."}), 404
+        return jsonify({"success": True, "monitored": bool(body.get("monitored"))})
+
+    @bp.route("/detail/show/<int:library_id>/season/<int:season_number>/monitor",
+              methods=["POST"])
+    def video_set_season_monitor(library_id, season_number):
+        """Monitor or unmonitor a whole season at once. Unmonitoring is how you
+        tell the wishlist drain to stop hunting a season you don't want."""
+        from . import get_video_db
+        body = request.get_json(silent=True) or {}
+        if "monitored" not in body:
+            return jsonify({"success": False, "error": "monitored required"}), 400
+        moved = get_video_db().set_season_monitored(
+            library_id, season_number, bool(body.get("monitored")))
+        if not moved:
+            return jsonify({"success": False, "error": "No episodes in that season."}), 404
+        return jsonify({"success": True, "monitored": bool(body.get("monitored")),
+                        "episodes": moved})
+
     # ── Manage sidebar: metadata edits + field locks + watched ────────────────
     @bp.route("/detail/<kind>/<int:item_id>/metadata", methods=["PUT"])
     def video_edit_metadata(kind, item_id):

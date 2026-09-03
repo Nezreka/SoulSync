@@ -208,6 +208,7 @@ def test_artist_detail_card_typed_path():
     assert card['release_date'] == '2024-11-22'
     assert card['image_url'] == 'https://i.scdn.co/640.jpg'
     assert card['track_count'] == 12
+    assert card['external_urls'] == {'spotify': 'https://open.spotify.com/album/sp123'}
 
 
 def test_artist_detail_card_legacy_path_no_source():
@@ -224,3 +225,33 @@ def test_artist_detail_card_legacy_path_no_source():
     assert card['id'] == 'sp123'
     assert card['name'] == 'GNX'
     assert card['year'] == '2024'
+
+
+def test_artist_detail_card_legacy_path_carries_external_urls():
+    """Regression: the legacy duck-typed branch used to drop `external_urls`
+    entirely, so a Discogs album's card had nothing but the internal
+    `m`/`r`-tagged `id` to build a "View on Discogs" link from -- producing a
+    404 (discogs.com/release/r5743831 instead of .../release/5743831). This
+    is the branch that actually handles Discogs releases (a `discogs_client.Album`
+    instance isn't a dict, so it skips the typed path above and lands here)."""
+    legacy_discogs_release = {
+        'id': 'r5743831',
+        'name': 'Watermelon Dandies',
+        'album_type': 'album',
+        'year': '1981',
+        'external_urls': {
+            'discogs': 'https://www.discogs.com/release/5743831-Naoya-Matsuoka-Watermelon-Dandies',
+        },
+    }
+    card = discography._build_artist_detail_release_card(legacy_discogs_release)
+    assert card['id'] == 'r5743831'  # id itself is untouched by this fix
+    assert card['external_urls'] == {
+        'discogs': 'https://www.discogs.com/release/5743831-Naoya-Matsuoka-Watermelon-Dandies',
+    }
+
+
+def test_artist_detail_card_legacy_path_missing_external_urls_defaults_empty():
+    """A release with no external_urls at all must not crash the card build."""
+    canonical = {'id': 'sp123', 'name': 'GNX', 'album_type': 'album'}
+    card = discography._build_artist_detail_release_card(canonical)
+    assert card['external_urls'] == {}

@@ -28,6 +28,8 @@ from database.video_database import VideoDatabase
 
 _ROOT = Path(__file__).resolve().parent.parent
 _WS = (_ROOT / "web_server.py").read_text(encoding="utf-8")
+# the mirrored playlist routes moved to api/mirrored_playlists.py (aug 26 lift)
+_MPL = (_ROOT / "api" / "mirrored_playlists.py").read_text(encoding="utf-8")
 
 
 # ── 1. music delete_profile: schema-derived sweep ────────────────────────────
@@ -160,8 +162,8 @@ _MIRROR_GATE_MARKERS = (
 
 def _by_id_mirrored_routes():
     return re.findall(
-        r"@app\.route\('/api/mirrored-playlists/<int:playlist_id>[^']*'[^)]*\)\s*\n"
-        r"def (\w+)\(playlist_id\):((?:\n(?!@app\.route).*)*)", _WS)
+        r"@bp\.route\('/api/mirrored-playlists/<int:playlist_id>[^']*'[^)]*\)\s*\n"
+        r"def (\w+)\(playlist_id\):((?:\n(?!@bp\.route).*)*)", _MPL)
 
 
 def test_every_by_id_mirrored_route_is_gated():

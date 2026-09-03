@@ -118,8 +118,14 @@ export async function fetchServerPlaylistData(): Promise<{
 /** The mirrored rows a server playlist's NAME matches (openServerPlaylistEditor, 158). */
 export interface MirroredMatch {
   id: number;
+  /** The UPSTREAM name. The server-playlist match keys on this, so a rename
+      must not touch it (#1219). */
   name: string;
+  /** The alias when the user has renamed this mirror, else the upstream name.
+      The endpoint sends both; showing this is what makes a rename useful. */
+  display_name?: string;
   source?: string;
+  source_ref?: string;
   owner?: string;
   track_count?: number;
   updated_at?: string;

@@ -10,11 +10,12 @@
 (function () {
     'use strict';
     var API = '/api/video';
-    var SOURCES = ['soulseek', 'torrent', 'usenet'];
+    var SOURCES = ['torrent', 'extto', 'soulseek', 'usenet'];
     // Real service logos, same sources the music side uses (torrent/usenet have no logo → emoji).
     var DL_INFO = {
         soulseek: { name: 'Soulseek', logo: '/static/img/brands/slskd.png', emoji: '🎵' },
         torrent: { name: 'Torrent', logo: null, emoji: '🧲' },
+        extto: { name: 'EXT.to', logo: null, emoji: 'EX' },
         usenet: { name: 'Usenet', logo: null, emoji: '📰' }
     };
     var SRV_INFO = {
@@ -25,7 +26,7 @@
         tmdb: { name: 'TMDB', logo: '/static/img/brands/tmdb.svg', emoji: '🎬' },
         tvdb: { name: 'TVDB', logo: '/static/img/brands/tvdb.svg', emoji: '📺' }
     };
-    var SRC_LABEL = { soulseek: 'Soulseek', torrent: 'Torrent', usenet: 'Usenet' };
+    var SRC_LABEL = { soulseek: 'Soulseek', torrent: 'Torrent', extto: 'EXT.to', usenet: 'Usenet' };
     var SRV_LABEL = { plex: 'Plex', jellyfin: 'Jellyfin' };
 
     // A service logo (img, with emoji fallback on load error) — mirrors the music _ssCard media.

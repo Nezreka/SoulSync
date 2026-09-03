@@ -262,7 +262,8 @@ def register_routes(bp):
                 from core.video.youtube_enrichment import get_youtube_date_enricher
                 enr = get_youtube_date_enricher()
                 for c in channels:
-                    if not db.channel_dates_enriched_recently(c["youtube_id"]):
+                    hours = db.youtube_archive_recheck_hours(c["youtube_id"], default_hours=24)
+                    if not db.channel_dates_enriched_recently(c["youtube_id"], within_hours=hours):
                         enr.enqueue(c["youtube_id"], c.get("title"))
             except Exception:
                 pass
@@ -274,33 +275,58 @@ def register_routes(bp):
 
     @bp.route("/youtube/channel/<channel_id>/settings", methods=["GET"])
     def video_youtube_channel_settings(channel_id):
-        """Per-channel overrides (custom show-name + quality), plus the global quality
-        default so the modal can show 'using default' until the user overrides."""
+        """Per-source overrides, plus the global quality default so the modal can
+        show 'using default' until the user overrides."""
         from . import get_video_db
         from core.video.youtube_quality import default_profile, load as load_quality
         db = get_video_db()
-        return jsonify({"success": True, "settings": db.get_channel_settings(channel_id) or {},
+        kind = str(request.args.get("kind") or "channel").strip().lower()
+        settings = db.get_playlist_settings(channel_id) if kind == "playlist" else db.get_channel_settings(channel_id)
+        return jsonify({"success": True, "settings": settings or {},
                         "default_quality": load_quality(db) or default_profile()})
 
     @bp.route("/youtube/channel/<channel_id>/settings", methods=["POST"])
     def video_youtube_channel_settings_save(channel_id):
-        """Save per-channel overrides. A blank custom_name / absent quality clears that
-        override (falls back to the channel title / global quality). Body:
-        {custom_name?, quality?{...}}."""
+        """Save per-source overrides. Blank/default values clear the override. Body:
+        {custom_name?, quality?{...}, retry_policy?, archive_recheck_days?, filters...}."""
         from . import get_video_db
         from core.video.youtube_quality import normalize as normalize_quality
         db = get_video_db()
         body = request.get_json(silent=True) or {}
+        kind = str(request.args.get("kind") or body.get("kind") or "channel").strip().lower()
         out = {}
         name = str(body.get("custom_name") or "").strip()
         if name:
             out["custom_name"] = name
         if body.get("quality"):       # falsy/absent → no override (use the global default)
             out["quality"] = normalize_quality(body.get("quality"))
-        keep = str(body.get("retention") or "").strip()
-        if keep and keep != "all":    # blank/'all' → no policy (keep everything)
-            out["retention"] = keep
-        db.set_channel_settings(channel_id, out)
+        if kind != "playlist":
+            for key in ("title_include", "title_exclude"):
+                val = str(body.get(key) or "").strip()
+                if val:
+                    out[key] = val
+            try:
+                mins = int(body.get("min_minutes") or 0)
+            except (TypeError, ValueError):
+                mins = 0
+            if mins > 0:
+                out["min_minutes"] = mins
+            keep = str(body.get("retention") or "").strip()
+            if keep and keep != "all":    # blank/'all' → no policy (keep everything)
+                out["retention"] = keep
+        retry = str(body.get("retry_policy") or "").strip().lower()
+        if retry in ("aggressive", "manual"):
+            out["retry_policy"] = retry
+        try:
+            days = int(body.get("archive_recheck_days") or 0)
+        except (TypeError, ValueError):
+            days = 0
+        if days > 0:
+            out["archive_recheck_days"] = max(1, min(days, 365))
+        if kind == "playlist":
+            db.set_playlist_settings(channel_id, out)
+        else:
+            db.set_channel_settings(channel_id, out)
         return jsonify({"success": True, "settings": out})
 
     @bp.route("/youtube/wishlist", methods=["GET"])

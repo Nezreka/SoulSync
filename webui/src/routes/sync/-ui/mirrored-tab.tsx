@@ -591,7 +591,14 @@ export function MirroredTab({
       // poller (2048-2057). React has no open-modal DOM to probe, so the state
       // itself is the whole test.
       const existing = vertical.states[hash];
-      if (existing && existing.phase !== 'fresh') {
+      // ...but only when that state actually HAS the playlist. A state with no
+      // tracks is a wedged one (a start that patched 'discovering' onto an empty
+      // state, or a poll that died before the first payload), and reopening it
+      // just re-showed "Playlist (0 tracks) / Starting discovery..." forever.
+      // Falling through re-prepares and heals it.
+      const hasPlaylist =
+        Number((existing?.playlist as { track_count?: number } | undefined)?.track_count ?? 0) > 0;
+      if (existing && existing.phase !== 'fresh' && hasPlaylist) {
         onOpen(hash);
         if (existing.phase === 'discovering') vertical.resumeDiscovery(hash);
         return;

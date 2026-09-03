@@ -1203,6 +1203,31 @@ def process_wishlist_automatically(
                 # playlist-scoped Pipeline trigger, which is scheduled work
                 # too, not a manual override.
                 _backoff = apply_backoff if apply_backoff is not None else (automation_id is not None)
+                # "The user asked for this run" — the same condition that skips
+                # backoff. Named because the empty-category branch below needs it too.
+                _is_user_initiated = not _backoff
+
+                # A manual run is the user saying "the source is back, try
+                # again". Selection already ignored backoff for these, but the
+                # stored counters were left untouched, so the NEXT scheduled
+                # cycle still saw retry_count=4 and sat the track out for
+                # another 7 days — tracks that failed during an outage stayed
+                # stranded long after it ended (#1196, Zombiehamser: 634 of 674
+                # stuck at retry 3-4). Clearing the clock for the tracks this
+                # run is about to attempt makes the recovery real.
+                if _is_user_initiated:
+                    try:
+                        _cleared = music_database.reset_wishlist_retry_backoff(
+                            [t.get('spotify_track_id') or t.get('track_id') or t.get('id')
+                             for t in wishlist_tracks])
+                        if _cleared:
+                            logger.info(
+                                f"[Auto-Wishlist] Manual run — cleared retry backoff on "
+                                f"{_cleared} previously-failing track(s)")
+                    except Exception:
+                        # bookkeeping must never stop the actual run
+                        logger.exception("[Auto-Wishlist] Could not clear retry backoff")
+
                 if _backoff:
                     from datetime import datetime as _dt, timezone as _tz
 
@@ -1240,13 +1265,32 @@ def process_wishlist_automatically(
 
                 # If no tracks in this category, skip to next cycle immediately
                 if len(filtered_tracks) == 0 and not scoped:
-                    logger.warning(f"ℹ️ [Auto-Wishlist] No {current_cycle} tracks in wishlist, toggling cycle and scheduling next run")
-
-                    # Toggle cycle
                     next_cycle = 'singles' if current_cycle == 'albums' else 'albums'
-                    set_wishlist_cycle(lambda: music_database, next_cycle)
-                    logger.info(f"[Auto-Wishlist] Cycle toggled: {current_cycle} → {next_cycle}")
-                    return
+
+                    # A SCHEDULED run can afford to wait for its next tick, but
+                    # a user click must never be a silent no-op: Zombiehamser
+                    # pressed "process wishlist" against 674 tracks and got no
+                    # batch and "no active work" because the hidden cycle
+                    # happened to sit on the empty category (#1196). One click =
+                    # one real attempt, so try the other category right now.
+                    _other, _ = filter_wishlist_tracks_by_category(wishlist_tracks, next_cycle)
+                    if _is_user_initiated and _other:
+                        logger.info(
+                            f"[Auto-Wishlist] No {current_cycle} tracks — user-initiated run, "
+                            f"switching to {next_cycle} ({len(_other)} track(s)) instead of idling")
+                        set_wishlist_cycle(lambda: music_database, next_cycle)
+                        current_cycle = next_cycle
+                        filtered_tracks = _other
+                    else:
+                        logger.warning(f"ℹ️ [Auto-Wishlist] No {current_cycle} tracks in wishlist, toggling cycle and scheduling next run")
+                        set_wishlist_cycle(lambda: music_database, next_cycle)
+                        logger.info(f"[Auto-Wishlist] Cycle toggled: {current_cycle} → {next_cycle}")
+                        runtime.update_automation_progress(
+                            automation_id, log_line=(
+                                f'No {current_cycle} tracks this cycle — switched to '
+                                f'{next_cycle} for the next run'),
+                            log_type='info')
+                        return
 
                 # Use filtered tracks for processing — stamp original index
                 wishlist_tracks = filtered_tracks

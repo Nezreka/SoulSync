@@ -320,16 +320,18 @@ function useSyncBand() {
         name?: string;
         total?: number;
         tracks?: unknown[];
+        queue_tracks?: unknown[];
       };
       if (!data.success) throw new Error(data.error || 'failed');
-      const tracks = data.tracks || [];
+      const tracks = data.queue_tracks || data.tracks || [];
       if (!tracks.length) {
-        window.showToast?.('None of those tracks are in your library yet', 'info');
+        window.showToast?.('That playlist has no usable track metadata', 'info');
         return;
       }
-      if (data.total && tracks.length < data.total) {
+      const ownedCount = data.tracks?.length || 0;
+      if (data.total && ownedCount < data.total) {
         window.showToast?.(
-          `Playing ${tracks.length} of ${data.total} — the rest aren't in your library`,
+          `Queued ${data.total} tracks — preloading ${data.total - ownedCount} missing`,
           'info',
         );
       }

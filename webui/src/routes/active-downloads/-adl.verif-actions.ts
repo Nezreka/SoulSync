@@ -326,6 +326,41 @@ export async function quarantineDeleteEntry(
   }
 }
 
+/**
+ * Delete every candidate in one group (#1208).
+ *
+ * A track that failed verification a hundred times shows as one row with "99
+ * more" folded behind it, and the row's own Delete only removes the candidate
+ * it belongs to - the count ticks 99, 98, 97, each with its own confirm. This
+ * is one confirm and one request; the server resolves the group.
+ */
+export async function quarantineDeleteGroup(
+  entry: AdlQuarantineEntry,
+  count: number,
+  onDone: () => void,
+): Promise<void> {
+  const name = entry.expected_track || entry.original_filename || entry.filename || 'this track';
+  const confirmed = await window.showConfirmDialog?.({
+    title: 'Delete All Candidates',
+    message: `This permanently deletes all ${count} quarantined candidates for "${name}" and their metadata sidecars. Cannot be undone.`,
+    confirmText: `Delete all ${count}`,
+    cancelText: 'Cancel',
+    destructive: true,
+  });
+  if (!confirmed) return;
+  try {
+    const data = await quarantineDelete(entry.id, { siblings: true });
+    if (data.success) {
+      // The server's tally, not the UI's - the list can be a few seconds stale.
+      const gone = data.deleted ?? count;
+      toast(`Deleted ${gone} quarantined file${gone === 1 ? '' : 's'}`, 'success');
+      onDone();
+    } else toast(data.error || 'Delete failed', 'error');
+  } catch {
+    toast('Delete failed', 'error');
+  }
+}
+
 /** Stagger between bulk quarantine approvals — each spawns a re-import thread. */
 export const QUARANTINE_APPROVE_STAGGER_MS = 500;
 

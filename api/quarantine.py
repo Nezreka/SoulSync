@@ -147,13 +147,39 @@ def review_queue_summary():
 
 @bp.route('/api/quarantine/<entry_id>', methods=['DELETE'])
 def delete_quarantine_item(entry_id):
-    """Delete a single quarantined file + sidecar."""
+    """Delete a quarantined file + sidecar.
+
+    With ``?siblings=1``, every other entry sharing its group key goes too
+    (#1208). One rejected track can pile up a hundred candidates, and clearing
+    them a row at a time - each with its own confirm - is not a review workflow.
+    Same grouping the UI folds rows by, and the same one approve already uses
+    for its sibling cleanup.
+    """
     try:
         from core.imports.quarantine import delete_quarantine_entry
+        want_siblings = str(request.args.get('siblings', '')).lower() in ('1', 'true', 'yes')
+        # Read the siblings BEFORE deleting: the group key is looked up THROUGH
+        # this entry, so once its sidecar is gone the group is unfindable.
+        sibling_ids = []
+        if want_siblings:
+            from core.imports.quarantine import find_quarantine_siblings
+            try:
+                sibling_ids = find_quarantine_siblings(_get_quarantine_dir(), entry_id)
+            except Exception as sib_exc:
+                logger.warning(f"[Quarantine] Sibling lookup for {entry_id} failed: {sib_exc}")
         ok = delete_quarantine_entry(_get_quarantine_dir(), entry_id)
         if not ok:
             return jsonify({"success": False, "error": "Entry not found"}), 404
-        return jsonify({"success": True})
+        deleted = 1
+        for sib_id in sibling_ids:
+            try:
+                if delete_quarantine_entry(_get_quarantine_dir(), sib_id):
+                    deleted += 1
+            except Exception as sib_exc:
+                logger.warning(f"[Quarantine] Failed deleting sibling {sib_id}: {sib_exc}")
+        if deleted > 1:
+            logger.info(f"[Quarantine] Deleted {entry_id} + {deleted - 1} sibling candidate(s)")
+        return jsonify({"success": True, "deleted": deleted})
     except Exception as e:
         logger.error(f"[Quarantine] Error deleting {entry_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500

@@ -175,9 +175,14 @@ def test_wing_it_batch_no_longer_blanket_skips_wishlist():
 def test_backoff_applies_to_scheduled_cycles_only():
     src = (_ROOT / "core" / "wishlist" / "processing.py").read_text(encoding="utf-8")
     assert "split_due_for_retry" in src
-    gate = src[src.index("split_due_for_retry") - 700:src.index("split_due_for_retry")]
-    assert "automation_id is not None" in gate     # manual Process Now bypasses
-    assert "apply_backoff" in gate                 # pipelines can opt in explicitly
+    # Structural, not a character window: the old version measured 700 chars
+    # back from split_due_for_retry and broke the moment anything landed
+    # between the gate and its use (#1196 put the clock reset there).
+    gate_line = next(ln for ln in src.splitlines()
+                     if ln.strip().startswith("_backoff = apply_backoff"))
+    assert "automation_id is not None" in gate_line   # manual Process Now bypasses
+    assert "apply_backoff" in gate_line               # pipelines can opt in explicitly
+    assert src.index("if _backoff:") < src.index("split_due_for_retry")
 
 
 # ── configurable ignore TTL ──────────────────────────────────────────────────
@@ -227,3 +232,179 @@ def test_wing_it_track_on_the_wishlist_accrues_backoff(tmp_path):
     assert row['retry_count'] == 4
     # 4 failures earns the top cooldown tier, so it stops being retried hourly.
     assert cooldown_seconds(row['retry_count']) == 7 * 24 * 3600
+
+
+# ── #1196 (Zombiehamser): stranded after the source came back ────────────────
+# 674 tracks, 634 failing with "No matching track found" at retry 3-4 from a
+# period when slskd was unreachable. After the source recovered, scheduled
+# cycles kept sitting them out (24h / 7d) because the counters were stamped
+# during the outage and nothing ever cleared them — and pressing "process
+# wishlist" created no batch at all.
+
+def test_manual_run_clears_the_retry_clock_on_failing_tracks(tmp_path):
+    """A manual run means "the source is back". Selection already ignored
+    backoff for it, but leaving retry_count=4 in the row meant the NEXT
+    scheduled cycle still stranded the track for another 7 days."""
+    from database.music_database import MusicDatabase
+    from core.wishlist.processing import record_failed_attempt
+
+    db = MusicDatabase(database_path=str(tmp_path / 'm.db'))
+    _wishlisted_track(db, sp_id='trk1')
+    _wishlisted_track(db, sp_id='trk2')
+    svc = _ForwardingService(db)
+    for _ in range(4):
+        record_failed_attempt(svc, {'id': 'trk1'}, 'No matching track found', 1)
+    record_failed_attempt(svc, {'id': 'trk2'}, 'No matching track found', 1)
+
+    # A wishlist row's id is per-ALBUM on this branch (`<track>::<album>`), so
+    # index by the SOURCE track id the caller actually holds.
+    def _by_source_id(database):
+        return {str(r['spotify_track_id']).split('::')[0]: r
+                for r in database.get_wishlist_tracks()}
+
+    rows = _by_source_id(db)
+    assert rows['trk1']['retry_count'] == 4          # 7-day cooldown earned
+    assert cooldown_seconds(rows['trk1']['retry_count']) == 7 * 24 * 3600
+
+    cleared = db.reset_wishlist_retry_backoff(['trk1', 'trk2'])
+    assert cleared == 2
+    rows = _by_source_id(db)
+    assert rows['trk1']['retry_count'] == 0
+    assert rows['trk1']['last_attempted'] is None
+    # ...and the track is due again on the very next scheduled cycle
+    assert is_due(rows['trk1'], datetime.utcnow()) is True
+
+
+def test_reset_only_touches_rows_that_actually_failed(tmp_path):
+    from database.music_database import MusicDatabase
+    from core.wishlist.processing import record_failed_attempt
+
+    db = MusicDatabase(database_path=str(tmp_path / 'm.db'))
+    _wishlisted_track(db, sp_id='failed_one')
+    _wishlisted_track(db, sp_id='never_tried')
+    svc = _ForwardingService(db)
+    record_failed_attempt(svc, {'id': 'failed_one'}, 'No matching track found', 1)
+
+    # a never-attempted row has nothing to unstick, so it is not counted
+    assert db.reset_wishlist_retry_backoff(['never_tried']) == 0
+    assert db.reset_wishlist_retry_backoff(['failed_one']) == 1
+    # an empty id list must not become "reset everything"
+    assert db.reset_wishlist_retry_backoff([]) == 0
+
+
+def test_reset_survives_a_wishlist_larger_than_sqlites_parameter_cap(tmp_path):
+    """674 ids is fine; the chunking exists so a five-figure wishlist is too."""
+    from database.music_database import MusicDatabase
+    from core.wishlist.processing import record_failed_attempt
+
+    db = MusicDatabase(database_path=str(tmp_path / 'm.db'))
+    _wishlisted_track(db, sp_id='real_one')
+    svc = _ForwardingService(db)
+    record_failed_attempt(svc, {'id': 'real_one'}, 'No matching track found', 1)
+
+    ids = [f'ghost_{i}' for i in range(1500)] + ['real_one']
+    assert db.reset_wishlist_retry_backoff(ids) == 1
+
+
+def _auto_runtime(db, batches):
+    """A runtime stub that drives the real process_wishlist_automatically."""
+    import contextlib
+    import threading
+
+    from core.wishlist.processing import WishlistAutoProcessingRuntime
+
+    class _Profiles:
+        def get_all_profiles(self):
+            return [{'id': 1, 'name': 'me'}]
+
+    class _Executor:
+        def submit(self, fn, *a, **k):
+            class _F:
+                def result(self, *_a, **_k):
+                    return None
+
+                def add_done_callback(self, *_a, **_k):
+                    pass
+            return _F()
+
+    return WishlistAutoProcessingRuntime(
+        processing_guard=lambda: contextlib.nullcontext(True),
+        is_actually_processing=lambda: False,
+        app_context_factory=lambda: contextlib.nullcontext(None),
+        get_profiles_database=lambda: _Profiles(),
+        get_music_database=lambda: db,
+        download_batches=batches,
+        tasks_lock=threading.RLock(),
+        update_automation_progress=lambda *a, **k: None,
+        automation_engine=None,
+        missing_download_executor=_Executor(),
+        run_full_missing_tracks_process=lambda *a, **k: None,
+        get_batch_max_concurrent=lambda: 3,
+        get_active_server=lambda: 'plex',
+        current_time_fn=lambda: 0.0,
+    )
+
+
+@pytest.fixture()
+def _wishlist_singles(tmp_path, monkeypatch):
+    """A singles-only wishlist stranded at retry 4, cycle parked on 'albums'.
+
+    The service is a module singleton bound to the app database rather than
+    injected through the runtime, so it has to be pointed at the fixture db.
+    """
+    from database.music_database import MusicDatabase
+    import core.wishlist.service as svc
+    from core.wishlist.state import set_wishlist_cycle
+
+    db = MusicDatabase(database_path=str(tmp_path / 'm.db'))
+    for i in range(3):
+        _wishlisted_track(db, sp_id=f'u{i}')
+        for _ in range(4):
+            db.update_wishlist_retry(f'u{i}', success=False,
+                                     error_message='No matching track found')
+
+    service = svc.WishlistService()
+    service._database = db
+    monkeypatch.setattr(svc, '_wishlist_service', service)
+    monkeypatch.setattr('core.wishlist.processing.get_wishlist_service', lambda: service)
+    set_wishlist_cycle(lambda: db, 'albums')       # the EMPTY half — the coin flip
+    return db
+
+
+def test_a_user_click_never_idles_on_the_empty_half_of_the_cycle(_wishlist_singles):
+    """The hidden albums/singles cycle made "process wishlist" a coin flip: if
+    the cycle sat on the empty category the run toggled it and returned — no
+    batch, no work, no message. That is what Zombiehamser hit (#1196).
+
+    Behavioural on purpose: this drives the real entry point, because a
+    source-text assertion would still pass if the branch stopped being
+    reachable (an earlier guard bailing first is exactly what happened while
+    building the harness for this)."""
+    from core.wishlist.processing import process_wishlist_automatically
+    from core.wishlist.state import get_wishlist_cycle
+
+    db = _wishlist_singles
+    batches: dict = {}
+    process_wishlist_automatically(_auto_runtime(db, batches),
+                                   automation_id=None, apply_backoff=None)
+
+    assert batches, "a user click produced no batch"
+    assert get_wishlist_cycle(lambda: db) == 'singles'
+    # ...and the same click unstuck the 7-day backoff clock
+    assert {r['retry_count'] for r in db.get_wishlist_tracks()} == {0}
+
+
+def test_a_scheduled_run_keeps_its_old_cadence(_wishlist_singles):
+    """The fix must not turn scheduled cycles into category-hunters: an empty
+    category still toggles and waits for the next tick, and the retry clock is
+    left alone (only a user saying "go" clears it)."""
+    from core.wishlist.processing import process_wishlist_automatically
+    from core.wishlist.state import get_wishlist_cycle
+
+    db = _wishlist_singles
+    batches: dict = {}
+    process_wishlist_automatically(_auto_runtime(db, batches), automation_id='auto-1')
+
+    assert batches == {}
+    assert get_wishlist_cycle(lambda: db) == 'singles'      # toggled for next tick
+    assert {r['retry_count'] for r in db.get_wishlist_tracks()} == {4}

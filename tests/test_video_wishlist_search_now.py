@@ -14,11 +14,14 @@ invisible upgrade watch). This suite covers the three additions:
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import pytest
 from flask import Flask
 
 from database.video_database import VideoDatabase
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture()
@@ -149,6 +152,24 @@ def test_search_all_respects_drain_guard_and_gates(client, db, monkeypatch):
     del calls
 
 
+def test_user_triggered_prepare_keeps_owned_cutoff_items(monkeypatch):
+    from core.video import wishlist_search as ws
+    from core.automation.handlers import video_process_wishlist as vpw
+
+    items = [{"tmdb_id": 202, "title": "Owned Movie", "owned": 1, "owned_resolutions": "1080p"}]
+    monkeypatch.setattr(vpw, "_default_active_keys", lambda media_type: set())
+    monkeypatch.setattr(vpw, "annotate_upgrades", lambda items, *a, **k: [])
+
+    background_shape = ws._prepare(items, "movie", user_initiated=False)
+    user_shape = ws._prepare(items, "movie", user_initiated=True)
+    try:
+        assert background_shape == []
+        assert user_shape == items
+    finally:
+        ws._finish(user_shape, "movie")
+
+
+
 # ---------------------------------------------------------------------------
 # Page annotations: downloading + upgrade_from
 # ---------------------------------------------------------------------------
@@ -220,8 +241,15 @@ def test_js_search_now_buttons_on_all_three_levels():
 def test_js_search_all_button_wired_and_scoped():
     assert "data-vwsh-searchall" in _INDEX
     assert "'/api/video/wishlist/search-all'" in _WSH_JS
-    # hidden on the YouTube tab (it has its own drain)
-    assert "state.tab === 'youtube' || !has" in _WSH_JS
+    # The button used to be HIDDEN on the YouTube tab ("it has its own drain").
+    # Searching genuinely means nothing there - the video IS the release - but
+    # hiding it left that tab with no bulk action at all, and once a video could
+    # be waiting out a retry backoff the only override was clicking every row.
+    # Same button, different verb: it searches on the TMDB tabs and downloads on
+    # YouTube, through the drain's own enqueue path.
+    assert "sa.hidden = !has" in _WSH_JS
+    assert "'/api/video/wishlist/youtube/download-all'" in _WSH_JS
+    assert "Download all waiting" in _WSH_JS
     assert ".vwsh-searchall[hidden] { display: none; }" in _CSS
 
 
@@ -231,3 +259,30 @@ def test_css_covers_new_states_and_touch():
     # search buttons must stay reachable on touch (no hover)
     assert ("@media (hover: none) { .vwsh-movie-art .vwsh-hunt, .vwsh-nebula .vwsh-epc-hunt, "
             ".vwsh-nebula .vwsh-szn-hunt { opacity: 1; } }") in _CSS
+
+
+def test_search_now_reports_missing_target_before_dispatch(client, db, monkeypatch):
+    from core.automation.handlers import video_process_wishlist as vpw
+    db.add_movie_to_wishlist(303, "No Folder")
+    monkeypatch.setattr(vpw, "_default_target_dir", lambda mt: "")
+    out = client.post("/api/video/wishlist/search", json={"scope": "movie", "tmdb_id": 303}).get_json()
+    assert out["queued"] == 0
+    assert out["missing_target"] == "movie"
+
+
+def test_search_all_reports_unconfigured_kinds(client, db, monkeypatch):
+    from core.automation.handlers import video_process_wishlist as vpw
+    monkeypatch.setattr(vpw, "_backfill_movie_available_dates", lambda limit=25: None)
+    monkeypatch.setattr(vpw, "_default_target_dir", lambda mt: "")
+    db.add_movie_to_wishlist(304, "No Movie Folder")
+    db.add_episodes_to_wishlist(700, "No TV Folder", [{"season_number": 1, "episode_number": 1}])
+    out = client.post("/api/video/wishlist/search-all").get_json()
+    assert out["kinds"] == {"movie": "unconfigured", "episode": "unconfigured"}
+
+
+
+def test_service_switch_exposes_extto_as_hybrid_source():
+    src = (ROOT / "webui" / "static" / "video" / "video-service-status.js").read_text(encoding="utf-8")
+    assert "var SOURCES = ['torrent', 'extto', 'soulseek', 'usenet'];" in src
+    assert "extto: { name: 'EXT.to'" in src
+    assert "extto: 'EXT.to'" in src

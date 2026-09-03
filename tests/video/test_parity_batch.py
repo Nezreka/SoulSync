@@ -66,7 +66,33 @@ def test_grab_endpoint_refuses_when_low(client, monkeypatch):
                json={"kind": "movie", "title": "Heat", "source": "soulseek",
                      "username": "p", "filename": "f.mkv"})
     assert r.status_code == 507
-    assert "nearly full" in r.get_json()["error"]
+    # The message names the drive and the floor, so the user knows which disk to
+    # clear rather than being told "a drive" is full.
+    err = r.get_json()["error"]
+    assert "/media/Movies" in err and "10 GB minimum" in err
+
+
+def test_grab_endpoint_refuses_when_the_SCRATCH_drive_is_low(client, monkeypatch):
+    """The live failure this guard was widened for: the library drive had 13TB
+    free and eighteen downloads still died on `[Errno 28] No space left on
+    device`, because the volume the file is assembled on was full and nothing
+    looked at it."""
+    c, db = client
+    db.set_setting("movies_path", "/media/Movies")
+    from core.video import disk_guard as dg
+    monkeypatch.setattr(dg, "scratch_dir", lambda: "/scratch")
+    monkeypatch.setattr(dg, "_same_volume", lambda a, b: False)
+    monkeypatch.setattr(dg, "free_gb",
+                        lambda p: 0.5 if str(p).startswith("/scratch") else 13000.0)
+    from core.video import organization
+    organization.save(db, {**organization.load(db), "min_free_disk_gb": 10})
+    r = c.post("/api/video/downloads/grab",
+               json={"kind": "movie", "title": "Heat", "source": "soulseek",
+                     "username": "p", "filename": "f.mkv"})
+    assert r.status_code == 507
+    err = r.get_json()["error"]
+    assert "/scratch" in err and "temporary" in err
+    assert "/media/Movies" not in err, "pointing at the drive with 13TB free is the bug"
 
 
 def test_drain_enqueue_skips_when_low(monkeypatch, client):

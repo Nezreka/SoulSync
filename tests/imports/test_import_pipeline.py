@@ -978,6 +978,72 @@ def test_verification_wrapper_applies_quarantine_entry_id_on_integrity_failure(m
         runtime_state.matched_downloads_context.update(original_ctx)
 
 
+def test_verification_wrapper_persists_final_path_for_playback_queue(tmp_path, monkeypatch):
+    """A completed playback-prefetch task must expose its imported path.
+
+    The queue status endpoint only turns a ``missing`` player row into a ready
+    row when ``final_file_path`` is present.  The verification wrapper owns
+    task completion, so it must copy the path produced by the inner importer.
+    """
+    task_id, batch_id, context_key = "play-task", "play-batch", "play-context"
+    final_path = tmp_path / "Library" / "Artist" / "Album" / "01 - Track.flac"
+    final_path.parent.mkdir(parents=True)
+    final_path.write_bytes(b"audio")
+    context = {
+        "track_info": {"name": "Track"},
+        "task_id": task_id,
+        "batch_id": batch_id,
+    }
+
+    def _fake_inner(_key, inner_context, _source, _runtime, metadata_runtime=None):
+        inner_context["_final_processed_path"] = str(final_path)
+        # On this branch a file on disk is only half an import: the wrapper
+        # refuses to report success unless the inner pipeline set this after a
+        # strict Library-v2 registration (L2-002). A stub that skips it is
+        # standing in for a FAILED import, not a completed one.
+        inner_context["_pipeline_import_succeeded"] = True
+
+    monkeypatch.setattr(import_pipeline, "post_process_matched_download", _fake_inner)
+
+    original_tasks = dict(runtime_state.download_tasks)
+    original_contexts = dict(runtime_state.matched_downloads_context)
+    try:
+        runtime_state.download_tasks.clear()
+        runtime_state.download_tasks[task_id] = {
+            "track_info": context["track_info"],
+            "status": "post_processing",
+            "playlist_id": "playback_queue",
+        }
+        runtime_state.matched_downloads_context.clear()
+        runtime_state.matched_downloads_context[context_key] = context
+        completion = []
+        runtime = types.SimpleNamespace(
+            automation_engine=None,
+            on_download_completed=lambda b, t, success: completion.append((b, t, success)),
+            web_scan_manager=None,
+            repair_worker=None,
+        )
+
+        import_pipeline.post_process_matched_download_with_verification(
+            context_key,
+            context,
+            "/downloads/Artist - Track.flac",
+            task_id,
+            batch_id,
+            runtime,
+        )
+
+        task = runtime_state.download_tasks[task_id]
+        assert task["status"] == "completed"
+        assert task["final_file_path"] == str(final_path)
+        assert completion == [(batch_id, task_id, True)]
+    finally:
+        runtime_state.download_tasks.clear()
+        runtime_state.download_tasks.update(original_tasks)
+        runtime_state.matched_downloads_context.clear()
+        runtime_state.matched_downloads_context.update(original_contexts)
+
+
 # ---------------------------------------------------------------------------
 # Next-best-candidate retry on AcoustID / integrity quarantine. When a
 # verification or integrity check quarantines the wrong/broken file, the wrapper

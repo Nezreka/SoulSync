@@ -66,7 +66,6 @@ _BASELINE = {
     "core.js": 12,
     "downloads.js": 6,
     "init.js": 4,
-    "library-globals.js": 0,
     "settings.js": 3,
     "setup-wizard.js": 1,
     "stats-automations.js": 4,
@@ -90,6 +89,26 @@ def _npx() -> str | None:
     return None
 
 
+def _shell_globals() -> set[str]:
+    """Window names supplied by the typescript shell bundle (src/shell).
+
+    Ports of former classic scripts publish through the SHELL_WINDOW_EXPORTS
+    contract in src/shell/index.ts, plus a few state objects that self-assign
+    inside their modules (window.X = ...). Both are real globals at runtime -
+    the vanilla scripts' bare reads resolve through the scope chain to them.
+    """
+    names: set[str] = set()
+    index_ts = _WEBUI / "src" / "shell" / "index.ts"
+    if index_ts.exists():
+        text = index_ts.read_text(encoding="utf-8")
+        block = text.split("SHELL_WINDOW_EXPORTS = {", 1)[1].split("} as const", 1)[0]
+        names |= {m.group(1) for m in re.finditer(r"^\s*([A-Za-z_$][\w$]*),", block, re.M)}
+    for path in (_WEBUI / "src" / "shell").glob("*.ts"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        names |= {m.group(1) for m in re.finditer(r"window\.([A-Za-z_$][\w$]*)\s*=", text)}
+    return names
+
+
 def _globals_excluding(target: Path) -> set[str]:
     """Top-level declarations from everything EXCEPT the file being linted."""
     names: set[str] = set()
@@ -101,6 +120,7 @@ def _globals_excluding(target: Path) -> set[str]:
 
     index = (_WEBUI / "index.html").read_text(encoding="utf-8", errors="replace")
     names |= set(_DECL_INDENTED.findall(index)) | set(_VAR_INDENTED.findall(index))
+    names |= _shell_globals()
     return names
 
 

@@ -142,7 +142,7 @@ class TestClearCompletedEndpoint:
         # Worker reports one live import — folder_hash hash-LIVE
         fake_worker = MagicMock()
         fake_worker._snapshot_active.return_value = [{'folder_hash': 'hash-LIVE'}]
-        monkeypatch.setattr('web_server.auto_import_worker', fake_worker)
+        monkeypatch.setattr('api.import_routes.auto_import_worker', fake_worker)
         monkeypatch.setattr('api.auto_import.get_database', lambda: fake_db)  # routes live in api/auto_import.py now
 
         resp = app_test_client.post('/api/auto-import/clear-completed')
@@ -173,7 +173,7 @@ class TestClearCompletedEndpoint:
         fake_db, conn = seeded_db
         fake_worker = MagicMock()
         fake_worker._snapshot_active.return_value = [{'folder_hash': 'hash-LIVE'}]
-        monkeypatch.setattr('web_server.auto_import_worker', fake_worker)
+        monkeypatch.setattr('api.import_routes.auto_import_worker', fake_worker)
         monkeypatch.setattr('api.auto_import.get_database', lambda: fake_db)  # routes live in api/auto_import.py now
 
         resp = app_test_client.post('/api/auto-import/clear-completed')
@@ -197,7 +197,7 @@ class TestClearCompletedEndpoint:
 
         fake_worker = MagicMock()
         fake_worker._snapshot_active.return_value = []  # nothing active
-        monkeypatch.setattr('web_server.auto_import_worker', fake_worker)
+        monkeypatch.setattr('api.import_routes.auto_import_worker', fake_worker)
         monkeypatch.setattr('api.auto_import.get_database', lambda: fake_db)  # routes live in api/auto_import.py now
 
         resp = app_test_client.post('/api/auto-import/clear-completed')
@@ -216,7 +216,7 @@ class TestClearCompletedEndpoint:
         bails early — no DB access, clear error. Pre-fix this branch
         was already in place; pinning ensures the active-hash refactor
         didn't accidentally start touching the worker before the guard."""
-        monkeypatch.setattr('web_server.auto_import_worker', None)
+        monkeypatch.setattr('api.import_routes.auto_import_worker', None)
         resp = app_test_client.post('/api/auto-import/clear-completed')
         assert resp.status_code == 500
         body = resp.get_json()
@@ -231,7 +231,7 @@ class TestClearCompletedEndpoint:
         fake_db, conn = seeded_db
         fake_worker = MagicMock()
         fake_worker._snapshot_active.return_value = []
-        monkeypatch.setattr('web_server.auto_import_worker', fake_worker)
+        monkeypatch.setattr('api.import_routes.auto_import_worker', fake_worker)
         monkeypatch.setattr('api.auto_import.get_database', lambda: fake_db)  # routes live in api/auto_import.py now
 
         app_test_client.post('/api/auto-import/clear-completed')
@@ -246,7 +246,7 @@ class TestClearCompletedEndpoint:
 def test_approve_endpoint_triggers_import_scan(app_test_client, monkeypatch):
     worker = MagicMock(running=True)
     worker.approve_item.return_value = {'success': True}
-    monkeypatch.setattr('web_server.auto_import_worker', worker)
+    monkeypatch.setattr('api.import_routes.auto_import_worker', worker)
     monkeypatch.setattr('web_server.threading.Thread', _ImmediateThread)
 
     response = app_test_client.post('/api/auto-import/approve/17')
@@ -262,7 +262,7 @@ def test_approve_all_triggers_one_scan_after_all_tokens_are_stored(
     worker = MagicMock(running=True)
     worker.get_results.return_value = [{'id': 1}, {'id': 2}]
     worker.approve_item.return_value = {'success': True}
-    monkeypatch.setattr('web_server.auto_import_worker', worker)
+    monkeypatch.setattr('api.import_routes.auto_import_worker', worker)
     monkeypatch.setattr('web_server.threading.Thread', _ImmediateThread)
 
     response = app_test_client.post('/api/auto-import/approve-all')

@@ -126,6 +126,33 @@ def register_routes(bp):
             else:
                 abort(404)
 
+            # Media-server art gets the SAME disk cache the TMDB branch above has
+            # had. Without it every poster in a grid re-fetches from Plex/Jellyfin
+            # on EVERY page view, and only the browser cache stood between the
+            # server and that cost - so a hard refresh, a second device or a
+            # cleared cache paid for the whole grid again.
+            #
+            # That cost is not theoretical: a Plex poster transcode measures ~97ms
+            # on a LAN server, a grid page renders 60 of them, and the app runs one
+            # gunicorn worker with eight threads. Sixty blocking proxy fetches
+            # therefore occupy every thread for the better part of a second while
+            # the page's own API calls queue behind them. Caching turns the repeat
+            # visit into a local file read and a 304.
+            #
+            # An authenticated URL is what gets cached (the token is a query param)
+            # - the same thing the music side does for Navidrome covers, and the
+            # cache explicitly supports LAN hosts for exactly this reason.
+            full_url = url
+            if params:
+                from urllib.parse import urlencode
+                full_url += ("&" if "?" in full_url else "?") + urlencode(params)
+            cached = _cached_file(full_url)
+            if cached is not None:
+                resp = send_file(cached.path, mimetype=cached.mime_type, conditional=True)
+                resp.headers["Cache-Control"] = "public, max-age=86400"
+                resp.headers["X-SoulSync-Image-Cache"] = cached.status
+                return resp
+
             upstream = requests.get(url, params=params, timeout=15, stream=True)
             if upstream.status_code != 200 and fallback:
                 upstream = requests.get(fallback, params=params, timeout=15, stream=True)

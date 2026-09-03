@@ -47,6 +47,10 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   window.SoulSyncWebShellBridge = undefined;
+  delete document.body.dataset.artistSource;
+  delete window.playTrackList;
+  delete window.showLoadingOverlay;
+  delete window.hideLoadingOverlay;
 });
 
 /**
@@ -130,4 +134,10 @@ describe('artist-detail route', () => {
     await waitFor(() => expect(history.location.pathname).toBe('/library'));
     expect(history.canGoBack()).toBe(false);
   });
+  // Upstream's three play-button tests (`loads an album tracklist...`, `plays an
+  // owned album...`, `still plays what it can...`) are not carried here: they
+  // click `.release-card-play-btn`, which lives in the legacy artist-detail
+  // release card this branch deleted for Library v2. The helper they exercise,
+  // -artist-detail.owned-tracks.ts, IS kept with its own unit test - it is what
+  // a Library-v2 play button would be built on.
 });

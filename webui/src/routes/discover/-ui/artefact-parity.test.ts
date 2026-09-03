@@ -33,7 +33,10 @@ const JS =
   readFileSync(
     resolve(process.cwd(), 'src/routes/discover/__fixtures__/-vanilla-discover.js'),
     'utf8',
-  ) + readFileSync(resolve(process.cwd(), 'static/discover-section-controller.js'), 'utf8');
+  );
+  // discover-section-controller.js was deleted outright in the aug 26 TS
+  // migration (dead code: its consumer, the vanilla discover page, is long
+  // gone) - the fixture below already carries the vanilla class vocabulary.
 const CSS = readdirSync(resolve(process.cwd(), 'static'))
   .filter((f) => f.endsWith('.css'))
   .map((f) => readFileSync(resolve(process.cwd(), 'static', f), 'utf8'))

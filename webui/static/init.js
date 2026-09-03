@@ -497,6 +497,7 @@ bootstrapServerAppearanceSettings();
 
 // ── Profile System ─────────────────────────────────────────────
 let currentProfile = null;
+let profileLoginMode = false;
 const PROFILE_CONTEXT_CHANGED_EVENT = 'ss:webui-profile-context-changed';
 
 function notifyProfileContextChanged() {
@@ -614,6 +615,7 @@ async function initProfileSystem() {
         // Check if a session already has a profile selected
         const currentRes = await fetch('/api/profiles/current');
         const currentData = await currentRes.json();
+        profileLoginMode = !!currentData.login_mode;
         // Login mode: show the sign-in screen and defer everything else until
         // the user authenticates.
         if (currentData.login_required) {
@@ -1245,8 +1247,10 @@ async function handleProfileClick(profile) {
         profileCount = (d.profiles || []).length;
     } catch (e) { }
 
-    if (profile.has_pin && profileCount > 1) {
-        showPinDialog(profile);
+    if (profileLoginMode && currentProfile && profile.id !== currentProfile.id) {
+        showPinDialog(profile, 'password');
+    } else if (profile.has_pin && profileCount > 1) {
+        showPinDialog(profile, 'pin');
     } else {
         const wasSwitching = !!currentProfile;
         await selectProfile(profile.id);
@@ -1259,7 +1263,7 @@ async function handleProfileClick(profile) {
     }
 }
 
-function showPinDialog(profile) {
+function showPinDialog(profile, mode = 'pin') {
     const dialog = document.getElementById('profile-pin-dialog');
     const avatar = document.getElementById('profile-pin-avatar');
     const nameEl = document.getElementById('profile-pin-name');
@@ -1285,17 +1289,25 @@ function showPinDialog(profile) {
     dialog.style.display = 'flex';
     setTimeout(() => input.focus(), 100);
 
+    const isPasswordMode = mode === 'password';
+    input.placeholder = isPasswordMode ? 'Password' : 'Enter PIN';
+    input.maxLength = isPasswordMode ? 200 : 6;
+    const forgot = document.getElementById('profile-pin-forgot');
+    if (forgot) forgot.style.display = isPasswordMode ? 'none' : '';
+
     const wasSwitching = !!currentProfile;
     const handleSubmit = async () => {
-        const pin = input.value;
-        if (!pin) return;
+        const secret = input.value;
+        if (!secret) return;
         submit.disabled = true;
         submit.textContent = 'Verifying...';
         try {
             const res = await fetch('/api/profiles/select', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ profile_id: profile.id, pin })
+                body: JSON.stringify(isPasswordMode
+                    ? { profile_id: profile.id, password: secret }
+                    : { profile_id: profile.id, pin: secret })
             });
             const data = await res.json();
             if (data.success) {
@@ -1310,7 +1322,7 @@ function showPinDialog(profile) {
                 initApp();
                 return;
             } else {
-                errorEl.textContent = data.error || 'Invalid PIN';
+                errorEl.textContent = data.error || (isPasswordMode ? 'Invalid password' : 'Invalid PIN');
                 errorEl.style.display = '';
                 input.value = '';
                 input.focus();
@@ -2728,6 +2740,33 @@ function showSelfEditForm() {
     nameInput.placeholder = 'Profile name';
     form.appendChild(nameInput);
 
+    // PIN
+    const pinLabel = document.createElement('label');
+    pinLabel.className = 'profile-settings-label';
+    pinLabel.textContent = currentProfile.has_pin ? 'Change PIN' : 'Add PIN';
+    form.appendChild(pinLabel);
+
+    const pinInput = document.createElement('input');
+    pinInput.type = 'password';
+    pinInput.className = 'profile-input';
+    pinInput.maxLength = 6;
+    pinInput.placeholder = currentProfile.has_pin ? 'New PIN (leave blank to keep)' : 'New PIN (optional)';
+    form.appendChild(pinInput);
+
+    // Login password
+    const passwordLabel = document.createElement('label');
+    passwordLabel.className = 'profile-settings-label';
+    passwordLabel.textContent = currentProfile.has_password ? 'Change Login Password' : 'Add Login Password';
+    form.appendChild(passwordLabel);
+
+    const passwordInput = document.createElement('input');
+    passwordInput.type = 'password';
+    passwordInput.className = 'profile-input';
+    passwordInput.maxLength = 200;
+    passwordInput.autocomplete = 'new-password';
+    passwordInput.placeholder = currentProfile.has_password ? 'New password (leave blank to keep)' : 'New password (optional)';
+    form.appendChild(passwordInput);
+
     // Home page
     const homeLabel = document.createElement('label');
     homeLabel.className = 'profile-settings-label';
@@ -2769,6 +2808,30 @@ function showSelfEditForm() {
             });
             const data = await res.json();
             if (data.success) {
+                const pin = pinInput.value.trim();
+                if (pin) {
+                    const pinRes = await fetch(`/api/profiles/${currentProfile.id}/set-pin`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ pin })
+                    });
+                    const pinData = await pinRes.json();
+                    if (!pinData.success) { alert(pinData.error || 'Failed to update PIN'); return; }
+                    currentProfile.has_pin = true;
+                }
+
+                const password = passwordInput.value;
+                if (password) {
+                    const passwordRes = await fetch(`/api/profiles/${currentProfile.id}/set-password`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ password })
+                    });
+                    const passwordData = await passwordRes.json();
+                    if (!passwordData.success) { alert(passwordData.error || 'Failed to update password'); return; }
+                    currentProfile.has_password = !!passwordData.has_password;
+                }
+
                 currentProfile.name = newName;
                 currentProfile.home_page = homeSelect.value || null;
                 updateProfileIndicator();

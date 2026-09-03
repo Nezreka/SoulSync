@@ -6,7 +6,7 @@ import { server } from '@/test/msw';
 
 import type { AdlDownload } from './-adl.types';
 
-import { groupBySection, useAdlDownloads } from './-adl.use-downloads';
+import { useAdlDownloads } from './-adl.use-downloads';
 
 const row = (over: Partial<AdlDownload> = {}): AdlDownload =>
   ({
@@ -256,6 +256,7 @@ describe('header counts', () => {
     expect(result.current.counts).toEqual({
       active: 2,
       queued: 1,
+      failed: 0,
       total: 4,
       completedOrFailed: 1,
     });
@@ -341,18 +342,6 @@ describe('batch cards', () => {
     expect(result.current.batchOpacity('b1', 'downloading')).toBe(1);
   });
 
-  it('expands and collapses batches independently', async () => {
-    stubDownloads([], [batch(), batch({ batch_id: 'b2' })]);
-    const { result } = await mounted();
-
-    act(() => result.current.toggleBatchExpanded('b1'));
-    expect(result.current.state.expandedBatches.has('b1')).toBe(true);
-    expect(result.current.state.expandedBatches.has('b2')).toBe(false);
-
-    act(() => result.current.toggleBatchExpanded('b1'));
-    expect(result.current.state.expandedBatches.has('b1')).toBe(false);
-  });
-
   it('gives each batch its own ETA sample array, stable across calls', async () => {
     const { result } = await mounted();
     const a1 = result.current.rateSamplesFor('b1');
@@ -360,33 +349,5 @@ describe('batch cards', () => {
     const b = result.current.rateSamplesFor('b2');
     expect(a1).toBe(a2);
     expect(a1).not.toBe(b);
-  });
-});
-
-describe('groupBySection', () => {
-  it('routes every status class to a section, cancelled included', () => {
-    const sections = groupBySection([
-      row({ task_id: 'a', status: 'downloading' }),
-      row({ task_id: 'b', status: 'pending' }),
-      row({ task_id: 'c', status: 'already_owned' }),
-      row({ task_id: 'd', status: 'not_found' }),
-      row({ task_id: 'e', status: 'cancelled' }),
-      row({ task_id: 'f', status: 'total_nonsense' }),
-    ]);
-    const byKey = Object.fromEntries(sections.map((s) => [s.key, s.items.map((i) => i.task_id)]));
-    expect(byKey.active).toEqual(['a']);
-    // 'total_nonsense' maps to queued, matching the vanilla's default branch.
-    expect(byKey.queued).toEqual(['b', 'f']);
-    expect(byKey.completed).toEqual(['c']);
-    expect(byKey.failed).toEqual(['d', 'e']);
-  });
-
-  it('always returns the four sections in render order', () => {
-    expect(groupBySection([]).map((s) => s.key)).toEqual([
-      'active',
-      'queued',
-      'completed',
-      'failed',
-    ]);
   });
 });

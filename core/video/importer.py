@@ -78,7 +78,7 @@ def quality_score(parsed: Any) -> int:
 
 def _scope_of(dl: dict) -> str:
     """The import scope from the search context, falling back to the download kind.
-    Only 'movie' and 'episode' are placeable; packs/youtube are gated out upstream."""
+    Only 'movie', 'episode', and client-backed 'youtube' rows are placeable; packs are gated out upstream."""
     ctx = _search_ctx(dl)
     sc = str(ctx.get("scope") or "").lower()
     if sc in ("movie", "episode", "season", "series"):
@@ -88,6 +88,8 @@ def _scope_of(dl: dict) -> str:
         return "movie"
     if k in ("show", "tv", "episode"):
         return "episode"
+    if k == "youtube":
+        return "youtube"
     return k or "movie"
 
 
@@ -108,7 +110,38 @@ def _ctx(dl: dict) -> dict:
         "episode": sc.get("episode"),
         "episode_title": sc.get("episode_title"),
         "air_date": sc.get("air_date"),
+        "channel": sc.get("channel"),
+        "video_title": sc.get("video_title"),
+        "published_at": sc.get("published_at"),
+        "youtube_id": sc.get("youtube_id"),
     }
+
+
+def _user_replace_policy(dl: dict) -> bool:
+    """True when the row came from a direct user click rather than the background drain.
+
+    This is deliberately narrower than forced manual import: the normal sanity gates
+    still protect the library, but valid equal-quality replacements are allowed so a
+    corrupt copy can be recovered without pretending the new file is an upgrade.
+    """
+    ctx = _search_ctx(dl)
+    return str(ctx.get("import_policy") or "").lower() == "user_replace"
+
+
+def _unique_dest(dest: dict, names: list[str]) -> dict:
+    existing = {str(n).casefold() for n in (names or [])}
+    filename = str(dest.get("filename") or "")
+    if filename.casefold() not in existing:
+        return dest
+    stem, ext = os.path.splitext(filename)
+    for n in range(2, 1000):
+        candidate = f"{stem} ({n}){ext}"
+        if candidate.casefold() not in existing:
+            return {**dest, "filename": candidate,
+                    "path": os.path.join(dest["dir"], candidate)}
+    suffix = uuid.uuid4().hex[:8]
+    candidate = f"{stem} ({suffix}){ext}"
+    return {**dest, "filename": candidate, "path": os.path.join(dest["dir"], candidate)}
 
 
 def _reject(reason: str, bad_release: bool = False) -> dict:
@@ -183,7 +216,7 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
     if not force:
         if is_sample(name, dl.get("size_bytes")):
             return _reject("Looks like a sample, not the feature", bad_release=True)
-        if scope not in ("movie", "episode"):
+        if scope not in ("movie", "episode", "youtube"):
             return _reject("Season/complete packs need manual import")
         if scope == "episode":
             if ctx.get("season") is None or ctx.get("episode") is None:
@@ -201,8 +234,8 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
                     return _reject("Release is S%02dE%02d, not the episode requested"
                                    % (parsed.get("season") or 0, parsed.get("episode") or 0))
     else:
-        if scope not in ("movie", "episode"):
-            return _reject("Pick a movie or an episode to place this file")
+        if scope not in ("movie", "episode", "youtube"):
+            return _reject("Pick a movie, an episode, or a YouTube video to place this file")
         if scope == "episode" and (ctx.get("season") is None or ctx.get("episode") is None):
             return _reject("Pick a season and episode to place this file")
 
@@ -239,16 +272,25 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
     if scope == "episode" and parsed.get("episode_end") \
             and parsed.get("season") == ctx.get("season"):
         ep, ep_end = parsed.get("episode"), parsed.get("episode_end")
-    fields = {
-        "title": ctx.get("title"), "year": ctx.get("year"),
-        "series": ctx.get("title"), "season": ctx.get("season"),
-        "episode": ep, "episode_end": ep_end, "episode_title": ctx.get("episode_title"),
-        "air_date": ctx.get("air_date"),
-        "quality": quality, "resolution": parsed.get("resolution"),
-        "source": parsed.get("source"), "codec": parsed.get("codec"),
-        "tmdbid": media_id if scope == "movie" else None,
-        "tvdbid": media_id if scope == "episode" else None,
-    }
+    if scope == "youtube":
+        fields = {
+            "channel": ctx.get("channel") or ctx.get("title") or dl.get("title"),
+            "title": ctx.get("video_title") or ctx.get("title") or dl.get("title"),
+            "published_at": ctx.get("published_at") or ctx.get("air_date") or dl.get("year"),
+            "date": ctx.get("published_at") or ctx.get("air_date") or dl.get("year"),
+            "youtube_id": ctx.get("youtube_id") or media_id,
+        }
+    else:
+        fields = {
+            "title": ctx.get("title"), "year": ctx.get("year"),
+            "series": ctx.get("title"), "season": ctx.get("season"),
+            "episode": ep, "episode_end": ep_end, "episode_title": ctx.get("episode_title"),
+            "air_date": ctx.get("air_date"),
+            "quality": quality, "resolution": parsed.get("resolution"),
+            "source": parsed.get("source"), "codec": parsed.get("codec"),
+            "tmdbid": media_id if scope == "movie" else None,
+            "tvdbid": media_id if scope == "episode" else None,
+        }
     dest = organization.render_path(scope, root, fields, settings, ext)
     # The library already owns this item at a REAL, resolved location
     # (``library_dir`` — the server-stored path re-rooted by the video path
@@ -260,32 +302,50 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
                 "path": os.path.join(library_dir, dest["filename"])}
     # Where poster.jpg goes: the movie folder, or the SHOW root for an episode
     # (parent of the Season folder) — so it isn't dropped per-season.
-    artwork_dir = dest["dir"] if scope == "movie" else os.path.dirname(dest["dir"])
+    artwork_dir = dest["dir"] if scope in ("movie", "youtube") else os.path.dirname(dest["dir"])
 
-    existing = _existing_match(scope, dest["dir"], ctx, list_dir)
+    existing_names = []
+    try:
+        existing_names = [str(n) for n in (list_dir(dest["dir"]) or [])]
+    except Exception:   # noqa: BLE001 - collision avoidance is best-effort
+        existing_names = []
+    if scope == "youtube":
+        want = str(dest.get("filename") or "").casefold()
+        existing = next((n for n in existing_names
+                         if ext_of(n) in VIDEO_EXTS and str(n).casefold() == want), None)
+    else:
+        existing = _existing_match(scope, dest["dir"], ctx, lambda _d: existing_names)
     if existing:
         # A forced placement replaces whatever's there (the user chose to put it here).
         if force:
             return {"action": "upgrade", "dest": dest, "quality_label": quality,
                     "replace_path": os.path.join(dest["dir"], existing), "artwork_dir": artwork_dir}
+        new_score = quality_score(parsed)
+        old_score = quality_score(parse_release(existing))
+        if _user_replace_policy(dl):
+            if new_score >= old_score:
+                return {"action": "upgrade", "dest": dest, "quality_label": quality,
+                        "replace_path": os.path.join(dest["dir"], existing), "artwork_dir": artwork_dir}
+            return {"action": "import", "dest": _unique_dest(dest, existing_names),
+                    "quality_label": quality, "artwork_dir": artwork_dir,
+                    "kept_existing": os.path.join(dest["dir"], existing)}
         # Idempotent re-import: the file already sits at the EXACT path we'd write. This is
-        # the crash-recovery case — an import that finished the copy but died before the row
+        # the crash-recovery case - an import that finished the copy but died before the row
         # flipped to 'completed' (e.g. a restart), so the monitor re-drives it. The goal (this
-        # item in the library, here) is already met → report it done instead of the misleading
+        # item in the library, here) is already met -> report it done instead of the misleading
         # "not an upgrade" failure that would otherwise leave a landed download looking failed.
         if existing == dest["filename"]:
             return {"action": "already_placed", "dest": dest, "quality_label": quality,
                     "artwork_dir": artwork_dir}
         if not settings.get("replace_existing", True):
-            return _reject("Already in the library (%s) — replace is turned off" % existing)
-        new_score = quality_score(parsed)
-        old_score = quality_score(parse_release(existing))
+            return _reject("Already in the library (%s) - replace is turned off" % existing)
         if new_score > old_score:
             return {"action": "upgrade", "dest": dest, "quality_label": quality,
                     "replace_path": os.path.join(dest["dir"], existing), "artwork_dir": artwork_dir}
         return _reject("Not an upgrade over the copy already in the library (%s)" % existing)
 
-    return {"action": "import", "dest": dest, "quality_label": quality, "artwork_dir": artwork_dir}
+    return {"action": "import", "dest": _unique_dest(dest, existing_names),
+            "quality_label": quality, "artwork_dir": artwork_dir}
 
 
 def plan_subs(src_path: str, dest_path: str, list_dir: Callable) -> list:
@@ -359,6 +419,14 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
     move_mode = settings.get("transfer_mode") == "move"
     try:
         fs.makedirs(dest["dir"])
+        replace_path = plan.get("replace_path")
+        same_replace = bool(replace_path) and os.path.normcase(os.path.abspath(replace_path)) == \
+            os.path.normcase(os.path.abspath(dest["path"]))
+        if same_replace:
+            try:
+                (recycle or fs.remove)(replace_path)
+            except Exception:   # noqa: BLE001 - a failed pre-recycle falls through to copy error/manual import
+                pass
         if move_mode:
             fs.move(src_path, dest["path"])
         else:
@@ -369,7 +437,7 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
                     fs.copy(sub_src, sub_dst)
                 except Exception:   # noqa: BLE001 - a subtitle that won't copy isn't fatal
                     pass
-        if plan["action"] == "upgrade" and plan.get("replace_path"):
+        if plan["action"] == "upgrade" and plan.get("replace_path") and not same_replace:
             try:
                 (recycle or fs.remove)(plan["replace_path"])
             except Exception:   # noqa: BLE001 - failing to delete the old file isn't fatal

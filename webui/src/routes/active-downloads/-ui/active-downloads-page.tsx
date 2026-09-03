@@ -1,11 +1,19 @@
 import { useNavigate } from '@tanstack/react-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import type { AdlBatch, AdlDeletedEntry, AdlDownload, AdlQuarantineEntry } from '../-adl.types';
 import type { ReviewActionHandlers } from './adl-review';
 
-import { cancelBatch, cancelTask, clearCompleted, setDeletedRetention } from '../-adl.api';
-import { verificationHistoryId, unverifiedKey } from '../-adl.helpers';
+import {
+  cancelBatch,
+  cancelTask,
+  clearCompleted,
+  downloadBatchNext,
+  downloadTaskNext,
+  setDeletedRetention,
+} from '../-adl.api';
+import { batchSummary, isTerminalPhase } from '../-adl.batch';
+import { formatSpeed, verificationHistoryId, unverifiedKey } from '../-adl.helpers';
 import { useAdlDownloads } from '../-adl.use-downloads';
 import { groupQuarantine, useAdlVerification } from '../-adl.use-verification';
 import {
@@ -22,6 +30,7 @@ import {
   quarantineAudit,
   quarantineCompare,
   quarantineDeleteEntry,
+  quarantineDeleteGroup,
   quarantinePlayEntry,
   quarantineRecoverEntry,
   reviewableHistoryIds,
@@ -31,10 +40,10 @@ import {
   unverifiedDelete,
   unverifiedPlay,
 } from '../-adl.verif-actions';
-import { AdlBatchPanel } from './adl-batch-panel';
 import { AdlClientsTab } from './adl-clients';
+import { AdlGroupedList } from './adl-groups';
 import { AdlHeader } from './adl-header';
-import { AdlList, ADL_EMPTY_TEXT, BatchFilterBanner } from './adl-list';
+import { ADL_EMPTY_TEXT, BatchFilterBanner } from './adl-list';
 import {
   AdlDeletedList,
   AdlQuarantineList,
@@ -49,6 +58,12 @@ export function ActiveDownloadsPage() {
   const navigate = useNavigate();
   const verification = useAdlVerification();
   const [cancelAllPending, setCancelAllPending] = useState(false);
+  /**
+   * Checked unverified rows, by history id. Kept as raw checks and
+   * intersected with what is on screen — a row that ages out of the list
+   * silently drops out of the selection instead of ghost-acting.
+   */
+  const [checkedUnverified, setCheckedUnverified] = useState<ReadonlySet<string>>(new Set());
 
   // The downloads poll drives the quarantine refresh on its 7th tick, so the
   // review queue picks up entries created mid-batch without a click.
@@ -111,6 +126,35 @@ export function ActiveDownloadsPage() {
     [refresh],
   );
 
+  const onDownloadNext = useCallback(
+    async (dl: AdlDownload) => {
+      try {
+        const data = await downloadTaskNext(dl.task_id);
+        if (data.success) {
+          toast(`"${dl.title || 'Track'}" will download next`, 'success');
+          refresh();
+        } else toast(data.error || 'Could not move track', 'error');
+      } catch {
+        toast('Could not move track', 'error');
+      }
+    },
+    [refresh],
+  );
+
+  const onDownloadBatchNext = useCallback(
+    async (batch: AdlBatch) => {
+      try {
+        const data = await downloadBatchNext(batch.batch_id);
+        if (data.success) {
+          toast(`"${batch.batch_name || 'Batch'}" will download next`, 'success');
+          refresh();
+        } else toast(data.error || 'Could not prioritize batch', 'error');
+      } catch {
+        toast('Could not prioritize batch', 'error');
+      }
+    },
+    [refresh],
+  );
   const onClearCompleted = useCallback(async () => {
     // This also wipes the persisted history tail and the review queue, so it
     // is confirmed rather than instant.
@@ -234,7 +278,33 @@ export function ActiveDownloadsPage() {
     ? state.batches.find((b) => b.batch_id === state.filterBatchId)
     : null;
 
+  // Hero sub-line: combined live speed off the 2s narration payloads, and the
+  // combined ETA off the same per-batch rate samples the old panel strip used.
+  const liveSpeed = state.downloads.reduce(
+    (sum, d) => sum + (d.status === 'downloading' ? (d.live_detail?.speed ?? 0) : 0),
+    0,
+  );
+  const activeBatches = state.batches.filter((b) => !isTerminalPhase(b.phase));
+  const summary = batchSummary(activeBatches, downloads.rateSamplesFor, Date.now());
+
   const showClients = state.filter === 'clients';
+  const visibleUnverifiedIds = useMemo(
+    () =>
+      reviewing
+        ? visible.map((dl) => verificationHistoryId(dl)).filter((id): id is string => Boolean(id))
+        : [],
+    [reviewing, visible],
+  );
+  const selectedIds = visibleUnverifiedIds.filter((id) => checkedUnverified.has(id));
+  const toggleChecked = useCallback((id: string) => {
+    setCheckedUnverified((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  const clearChecked = useCallback(() => setCheckedUnverified(new Set()), []);
   const showQuarantine = reviewing && verification.state.subView === 'quarantine';
   const showDeleted = reviewing && verification.state.subView === 'deleted';
   const quarantineGroups = showQuarantine ? groupQuarantine(verification.state.quarantine) : [];
@@ -257,6 +327,8 @@ export function ActiveDownloadsPage() {
                 ? (verification.state.summary?.total ?? null)
                 : (verification.state.summary?.quarantine ?? null)
             }
+            speedText={formatSpeed(liveSpeed)}
+            etaText={summary?.eta ?? ''}
             onFilter={downloads.setFilter}
             onCancelAll={() => void onCancelAll()}
             onClearCompleted={() => void onClearCompleted()}
@@ -283,12 +355,25 @@ export function ActiveDownloadsPage() {
                 verification.state.quarantineLoaded || verification.state.summary !== null
               }
               onSubView={verification.setSubView}
+              selectedCount={selectedIds.length}
               onApproveAll={() =>
                 void approveAllUnverified(reviewableHistoryIds(state.downloads), refresh)
               }
               onCleanOrphans={() => void cleanOrphans(refresh)}
               onDeleteAll={() =>
                 void deleteAllUnverified(reviewableHistoryIds(state.downloads), refresh)
+              }
+              onApproveSelected={() =>
+                void approveAllUnverified(selectedIds, () => {
+                  clearChecked();
+                  refresh();
+                })
+              }
+              onDeleteSelected={() =>
+                void deleteAllUnverified(selectedIds, () => {
+                  clearChecked();
+                  refresh();
+                })
               }
               onQuarantineApproveAll={() =>
                 void approveAllQuarantine(verification.state.quarantine, refreshQuarantine)
@@ -338,6 +423,9 @@ export function ActiveDownloadsPage() {
                   onToggleDetails={verification.toggleQuarantine}
                   onToggleGroup={verification.toggleGroup}
                   handlersFor={quarantineHandlers}
+                  onDeleteGroup={(entry, count) =>
+                    void quarantineDeleteGroup(entry, count, refreshQuarantine)
+                  }
                 />
               )}
             </div>
@@ -348,48 +436,54 @@ export function ActiveDownloadsPage() {
                   {ADL_EMPTY_TEXT}
                 </div>
               ) : (
-                visible.map((dl) => (
-                  <AdlUnverifiedRow
-                    key={unverifiedKey(dl)}
-                    dl={dl}
-                    open={verification.state.openUnverified.has(unverifiedKey(dl))}
-                    onToggle={() => verification.toggleUnverified(unverifiedKey(dl))}
-                    handlers={unverifiedHandlers(dl)}
-                  />
-                ))
+                visible.map((dl) => {
+                  const historyId = verificationHistoryId(dl);
+                  return (
+                    <AdlUnverifiedRow
+                      key={unverifiedKey(dl)}
+                      dl={dl}
+                      open={verification.state.openUnverified.has(unverifiedKey(dl))}
+                      onToggle={() => verification.toggleUnverified(unverifiedKey(dl))}
+                      handlers={unverifiedHandlers(dl)}
+                      selected={historyId ? checkedUnverified.has(historyId) : false}
+                      onSelect={historyId ? () => toggleChecked(historyId) : undefined}
+                    />
+                  );
+                })
               )}
             </div>
           ) : (
             // Passed through, not wrapped in `void`: the row awaits it to keep
             // its cancel button locked until the request settles.
-            <AdlList rows={visible} filter={state.filter} onCancel={onCancelRow} />
+            <AdlGroupedList
+              rows={visible}
+              allRows={state.downloads}
+              batches={downloads.visibleBatches}
+              history={state.batchHistory}
+              filterBatchId={state.filterBatchId}
+              statusFiltered={state.filter !== 'all'}
+              batchOpacity={downloads.batchOpacity}
+              samplesFor={downloads.rateSamplesFor}
+              onFilterBatch={downloads.toggleBatchFilter}
+              onCancelBatch={(batch) => void onCancelBatch(batch)}
+              onOpenBatchModal={(batch) =>
+                window.openDownloadBatchModal?.(
+                  batch.batch_id,
+                  batch.playlist_id || '',
+                  batch.batch_name || 'Download',
+                )
+              }
+              onOpenFullHistory={() => window.openLibraryHistoryModal?.()}
+              onCancelRow={onCancelRow}
+              onDownloadNext={onDownloadNext}
+              onDownloadBatchNext={onDownloadBatchNext}
+              // The empty-state links are in-app routes; the router owns those,
+              // not the legacy shell navigator.
+              onNavigate={(page) => void navigate({ to: `/${page}` })}
+            />
           )}
         </div>
       </div>
-
-      <AdlBatchPanel
-        batches={downloads.visibleBatches}
-        downloads={state.downloads}
-        history={state.batchHistory}
-        expandedBatches={state.expandedBatches}
-        filterBatchId={state.filterBatchId}
-        batchOpacity={downloads.batchOpacity}
-        samplesFor={downloads.rateSamplesFor}
-        onToggleBatch={downloads.toggleBatchExpanded}
-        onFilterBatch={downloads.toggleBatchFilter}
-        onCancelBatch={(batch) => void onCancelBatch(batch)}
-        onOpenBatchModal={(batch) =>
-          window.openDownloadBatchModal?.(
-            batch.batch_id,
-            batch.playlist_id || '',
-            batch.batch_name || 'Download',
-          )
-        }
-        onOpenFullHistory={() => window.openLibraryHistoryModal?.()}
-        // The empty-panel links are in-app routes; the router owns those,
-        // not the legacy shell navigator.
-        onNavigate={(page) => void navigate({ to: `/${page}` })}
-      />
     </div>
   );
 }

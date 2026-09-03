@@ -3605,44 +3605,93 @@
 
 @media (max-width: 768px) {
     /* ── Downloads page (.adl-*) ──
-       Had ZERO mobile rules. Desktop is a two-column layout: the main list
-       (.adl-main, flex:1) + a fixed 366px batch panel with a left border that
-       scrolls independently. On a phone that doesn't fit — stack it. */
-    .adl-layout {
-        flex-direction: column;
-        gap: 16px;
-    }
-    .adl-batch-panel {
-        width: 100%;
-        flex-shrink: 1;
-        border-left: none;
-        border-top: 1px solid rgba(255, 255, 255, 0.06);
-        padding: 14px 4px 0;
-        overflow-y: visible;        /* grows in the page flow instead of own scroll */
-    }
+       The redesign is single-column already; the phone pass is about row
+       anatomy. Desktop rows are art + text + a right-hand status column,
+       which squeezed titles to ~10 chars (and review rows to NOTHING).
+       On a phone the text owns line one and everything else wraps under it. */
 
-    /* Header: title + controls sat in one row; stack so the pills get full width. */
-    .adl-header {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 10px;
+    .adl-hero {
+        gap: 10px 14px;
     }
-    .adl-title { font-size: 1.3rem; }
-    .adl-controls {
-        flex-direction: column;
-        align-items: stretch;
+    .adl-hero-stats {
+        gap: 18px;
+        width: 100%;
+        justify-content: space-between;
+    }
+    .adl-stat { min-width: 0; }
+    .adl-stat-num { font-size: 1.4rem; }
+    .adl-hero-actions {
+        width: 100%;
+    }
+    .adl-cancel-all-btn,
+    .adl-clear-btn { flex: 1 1 auto; padding: 8px 13px; }
+
+    /* view tabs spread across the full width; status chips scroll */
+    .adl-view-tabs {
+        width: 100%;
+    }
+    .adl-view-tab {
+        flex: 1 1 auto;
+        padding: 9px 6px 11px;
+        font-size: 0.82rem;
+    }
+    .adl-status-chips {
+        width: 100%;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+        padding-bottom: 9px;
+    }
+    .adl-status-chips::-webkit-scrollbar { display: none; }
+    .adl-pill { flex-shrink: 0; padding: 5px 12px; }
+
+    /* row: art + info on line one, status chip + chevron wrap to line two,
+       indented under the text instead of amputating the title */
+    .adl-row {
+        flex-wrap: wrap;
+        row-gap: 6px;
+    }
+    .adl-row-info {
+        /* wide enough to stay beside the art (rail included), narrow enough
+           that the status chip can't fit on line one and wraps below */
+        flex: 1 1 180px;
+        min-width: 180px;
+    }
+    .adl-row-status {
+        margin-left: 52px;
+    }
+    .adl-row-chevron { display: none; }
+
+    /* review rows had it worst: badges + five buttons ate the entire width
+       and the title rendered zero chars. Same cure: actions wrap below. */
+    .verif-quar-row .verif-actions {
+        flex-basis: 100%;
+        margin-left: 52px;
+        flex-wrap: wrap;
+        row-gap: 6px;
+    }
+    .adl-deleted-header {
+        flex-wrap: wrap;
         gap: 8px;
     }
-    /* Filter pills (All / Active / Queued / Completed / Failed) + count +
-       Cancel All / Clear Completed: wrap instead of overflowing off-screen. */
-    .adl-filter-pills {
-        flex-wrap: wrap;
-        justify-content: flex-start;
+
+    /* group headers: drop the stat line (900px already does) and the source
+       tag; keep name, phase, progress and the actions tappable */
+    .adl-group-header {
+        padding: 10px 8px 10px 14px;
+        gap: 10px;
     }
-    .adl-pill { padding: 6px 12px; }
-    /* Action buttons full-width-friendly so they're tappable. */
-    .adl-cancel-all-btn,
-    .adl-clear-btn { flex: 1 1 auto; }
+    .adl-group-source { display: none; }
+    .adl-group-act,
+    .adl-group-chevron { width: 36px; height: 36px; }
+
+    /* the banners (batch filter, review sub-views, clients tabs) wrap;
+       nothing may clip off the right edge */
+    .adl-batch-filter-banner {
+        flex-wrap: wrap;
+        row-gap: 6px;
+    }
+    .verif-banner-spacer { display: none; }
 }
 
 @media (max-width: 768px) {

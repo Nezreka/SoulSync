@@ -117,6 +117,22 @@ def _fetch_musicmap_similar_artist_names(artist_name: str) -> List[str]:
     return similar_artist_names
 
 
+def _cached_artist_image_url(url: Optional[str]) -> Optional[str]:
+    """Register a remote artist image with the cache and return its local URL.
+
+    Fails OPEN: any problem (cache disabled, registration error) yields the
+    original url, so a broken cache can never be worse than the raw link.
+    """
+    if not url or not str(url).startswith(('http://', 'https://')):
+        return url
+    try:
+        from core.image_cache import cached_image_url
+        return cached_image_url(url) or url
+    except Exception as exc:   # noqa: BLE001 - never fail a listing over art
+        logger.debug("similar-artist image cache registration failed: %s", exc)
+        return url
+
+
 def _build_similar_artist_payload(artist_data: Any, source: str) -> Optional[Dict[str, Any]]:
     artist_id = _extract_lookup_value(artist_data, 'id', 'artist_id', 'spotify_id', 'itunes_id', 'deezer_id')
     if not artist_id:
@@ -151,7 +167,15 @@ def _build_similar_artist_payload(artist_data: Any, source: str) -> Optional[Dic
     return {
         'id': str(artist_id),
         'name': str(name or artist_id),
-        'image_url': _extract_artist_image_url(artist_data),
+        # Served FIRST-PARTY through SoulSync's image cache, like every other
+        # artwork surface (core.metadata.artwork._browser_safe_image_url does
+        # the same). These bubbles were the one place still handing the
+        # browser a raw third-party CDN url, so a privacy browser or content
+        # blocker dropped the request and the bubble stayed empty while the
+        # url itself was perfectly valid — wishx saw exactly that in Brave
+        # AND LibreWolf, with his hover-preview extension (which fetches from
+        # the extension context, not the page) still showing the image (#1201).
+        'image_url': _cached_artist_image_url(_extract_artist_image_url(artist_data)),
         'genres': genres,
         'popularity': popularity,
         'source': source,
@@ -215,13 +239,17 @@ def _match_musicmap_similar_artist(
         if source == 'itunes' and not payload.get('image_url') and hasattr(client, 'get_artist'):
             try:
                 full_artist = client.get_artist(str(matched_id))
+                # BOTH assignments go through the cache like the builder's —
+                # this late enrichment path was writing raw CDN urls straight
+                # onto the payload, so an iTunes-sourced bubble kept the exact
+                # third-party link #1201 is about.
                 image_url = _extract_artist_image_url(full_artist)
                 if image_url:
-                    payload['image_url'] = image_url
+                    payload['image_url'] = _cached_artist_image_url(image_url)
                 elif hasattr(client, '_get_artist_image_from_albums'):
                     album_image_url = client._get_artist_image_from_albums(str(matched_id))
                     if album_image_url:
-                        payload['image_url'] = album_image_url
+                        payload['image_url'] = _cached_artist_image_url(album_image_url)
             except Exception as exc:
                 logger.debug("Could not enrich iTunes image for %s: %s", matched_id, exc)
 

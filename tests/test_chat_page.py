@@ -268,3 +268,73 @@ class TestReactionLiveUpdate:
                       _CHAT_JS.index("function _reapplyPendingReactions") + 900]
         assert "delete state.pendingReactions[pk]" in fn   # confirmed → stop forcing
         assert "_addReactor(m, emoji, me)" in fn           # meanwhile keep it visible
+
+
+class TestPollHiccupTolerance:
+    """#1194 (wishx): "chat is unavailable more often than it's available".
+
+    One slow slskd answer against the 5s hydrate timeout made the page WIPE a
+    working room with the full error screen until the next good poll — on a
+    busy install the 4s loop flapped between chat and the error page all day.
+    A failed poll over rendered content now keeps the room and shows a quiet
+    reconnecting pill; the full problem screen needs a cold load or three
+    consecutive misses.
+    """
+
+    def test_failed_polls_route_through_the_streak_not_straight_to_the_wipe(self):
+        # both pollers (room + dm) tolerate hiccups
+        assert _CHAT_JS.count("pollProblem(") >= 2
+        assert "pollRecovered()" in _CHAT_JS
+        assert "failStreak" in _CHAT_JS
+        # the full wipe is gated on no-content-yet or a real streak
+        assert "state.failStreak >= 3" in _CHAT_JS
+
+    def test_the_gate_is_per_view_not_the_room_message_store(self):
+        """state.msgs is the ROOM store and openPm does NOT clear it, so
+        reading it from the DM view answers with the room's leftovers: a DM
+        that fails right after you open it would sit on "Loading..." behind a
+        pill instead of saying what is wrong. The gate is a per-view flag,
+        reset on every switch and set only where that view paints."""
+        assert "renderedOk" in _CHAT_JS
+        # read each call's FULL argument span, not just the line the call name
+        # is on: these are multi-line calls, and a line-scoped assertion passed
+        # happily against a deliberately regressed gate (caught by negative-
+        # checking this very test).
+        parts = _CHAT_JS.split("pollProblem(")
+        # parts[0] precedes the first occurrence; a segment whose PRECEDING
+        # text ends in "function " is the definition, not a call site.
+        calls = [seg for head, seg in zip(parts[:-1], parts[1:])
+                 if not head.endswith("function ")]
+        assert len(calls) >= 2
+        for call in calls:
+            depth, args = 1, []
+            for ch in call:
+                if ch == '(':
+                    depth += 1
+                elif ch == ')':
+                    depth -= 1
+                    if depth == 0:
+                        break
+                args.append(ch)
+            args = ''.join(args)
+            assert "state.msgs" not in args, args
+            assert "renderedOk" in args, args
+        # cleared on BOTH view switches
+        open_room = _CHAT_JS.split("function openRoom", 1)[1].split("function ", 1)[0]
+        open_pm = _CHAT_JS.split("function openPm", 1)[1].split("function ", 1)[0]
+        assert "renderedOk = false" in open_room
+        assert "renderedOk = false" in open_pm
+
+    def test_the_pill_never_touches_the_rendered_messages(self):
+        # the pill inserts BEFORE the messages host; innerHTML of the room is
+        # only rewritten by renderProblem (cold load / real outage)
+        assert "insertBefore(pill, head)" in _CHAT_JS
+        assert "chat-reconnect-pill" in _CHAT_JS
+        css = (_ROOT / "webui" / "static" / "style.css").read_text(encoding="utf-8", errors="replace")
+        assert ".chat-reconnect-pill" in css
+
+    def test_recovery_clears_both_streak_and_pill(self):
+        recovered = _CHAT_JS.split("function pollRecovered", 1)[1].split("}", 1)[0]
+        assert "failStreak = 0" in recovered
+        body = _CHAT_JS.split("function pollRecovered", 1)[1][:200]
+        assert "_reconnectPill(false)" in body

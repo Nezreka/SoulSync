@@ -14,6 +14,7 @@ export type SyncTabId =
   | 'deezer'
   | 'deezer-link'
   | 'youtube'
+  | 'ytmusic'
   | 'beatport'
   | 'listenbrainz-sync'
   | 'lastfm-sync'
@@ -41,9 +42,9 @@ export interface SyncTab {
 }
 
 /**
- * All fifteen, in the order the strip renders them. `server` is first and is
+ * All sixteen, in the order the strip renders them. `server` is first and is
  * the default; a divider follows it (index.html 2253), separating "your media
- * server" from the fifteen sources.
+ * server" from the sources.
  */
 export const SYNC_TABS: readonly SyncTab[] = [
   { id: 'server', label: 'Server Playlists', icon: 'server-icon' },
@@ -55,6 +56,7 @@ export const SYNC_TABS: readonly SyncTab[] = [
   { id: 'deezer', label: 'Deezer', icon: 'deezer-icon' },
   { id: 'deezer-link', label: 'Deezer Link', icon: 'deezer-icon', link: true },
   { id: 'youtube', label: 'YouTube', icon: 'youtube-icon' },
+  { id: 'ytmusic', label: 'YouTube Music', icon: 'ytmusic-icon' },
   { id: 'beatport', label: 'Beatport', icon: 'beatport-icon' },
   // 3760-3763: the id is `listenbrainz-sync`, NOT `listenbrainz`, because the
   // vanilla resolves panels by `${tabId}-tab-content` and the DISCOVER page
