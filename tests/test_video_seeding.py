@@ -224,7 +224,7 @@ def test_seed_mode_config_defaults_and_normalizes(db):
     assert load(db)["seed_mode"] == "soulsync"
 
 
-def test_client_mode_pushes_limit_and_releases(db, monkeypatch):
+def test_client_mode_pushes_limit_but_keeps_managing_until_goal_is_met(db, monkeypatch):
     from core.video.download_config import save
     save(db, {"seed_time_goal_hours": 408, "seed_mode": "client"})
     _torrent_row(db, ref="abc", title="Heat")
@@ -232,15 +232,31 @@ def test_client_mode_pushes_limit_and_releases(db, monkeypatch):
     monkeypatch.setattr("core.torrent_clients.get_active_adapter", lambda: object())
     monkeypatch.setattr("core.torrent_clients.share_limits.push_seed_goal",
                         lambda a, ref, r, h: pushes.append((ref, r, h)) or True)
-    # In client mode the sweep must NOT poll the client for status.
-    import core.video.client_download as cd
-    monkeypatch.setattr(cd, "_get_status",
-                        lambda src, ref: (_ for _ in ()).throw(AssertionError("polled in client mode")))
+    monkeypatch.setattr(seeding, "_status",
+                        lambda ref: (SimpleNamespace(ratio=0.1, seeding_time=1000), True))
     out = seeding.sweep()
-    assert out == {"status": "completed", "checked": 1, "released": 1, "seeding": 0}
+    assert out == {"status": "completed", "checked": 1, "released": 0, "seeding": 1}
     assert pushes == [("abc", 0.0, 408)]
-    assert db.torrents_awaiting_seed_release() == []   # released → handed to client
+    assert len(db.torrents_awaiting_seed_release()) == 1
 
+
+def test_client_mode_removes_after_pushed_goal_is_met(db, monkeypatch):
+    from core.video.download_config import save
+    save(db, {"seed_time_goal_hours": 24, "seed_mode": "client", "seed_remove_data": True})
+    _torrent_row(db, ref="abc", title="Heat")
+    pushes = []
+    removed = []
+    monkeypatch.setattr("core.torrent_clients.get_active_adapter", lambda: object())
+    monkeypatch.setattr("core.torrent_clients.share_limits.push_seed_goal",
+                        lambda a, ref, r, h: pushes.append((ref, r, h)) or True)
+    monkeypatch.setattr(seeding, "_status",
+                        lambda ref: (SimpleNamespace(ratio=0.1, seeding_time=48 * 3600), True))
+    monkeypatch.setattr(seeding, "_remove", lambda ref, delete_files: removed.append((ref, delete_files)) or True)
+    out = seeding.sweep()
+    assert out["released"] == 1 and out["seeding"] == 0
+    assert pushes == [("abc", 0.0, 24)]
+    assert removed == [("abc", True)]
+    assert db.torrents_awaiting_seed_release() == []
 
 def test_client_mode_push_failure_falls_back_to_soulsync(db, monkeypatch):
     """A failed/unsupported client push must NOT leave the grab unmanaged (e.g. a

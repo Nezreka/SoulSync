@@ -152,9 +152,9 @@ def _sweep_inner() -> Dict[str, Any]:
                 "checked": 0, "released": 0, "seeding": 0}
 
     # Client mode (arr-style): hand the ratio/time goal to the torrent client so
-    # IT enforces, then release the row. If the push fails or the client can't
-    # take share limits (non-qBit), fall through to SoulSync's own management so
-    # the goal still gets enforced — never leave a grab unmanaged.
+    # it has native limits too. SoulSync still keeps the row managed until the
+    # goal is actually met, because the Settings checkbox promises that SoulSync
+    # can remove/delete the client's copy after the seed goal.
     client_mode = cfg.get("seed_mode") == "client"
     adapter = None
     push_seed_goal = None
@@ -177,12 +177,10 @@ def _sweep_inner() -> Dict[str, Any]:
 
         row_ratio, row_hours = goal_for(dl, cfg)
         if client_mode and push_seed_goal(adapter, ref, row_ratio, row_hours):
-            db.update_video_download(dl["id"], seed_released=1)
-            released += 1
-            logger.info("seeding: handed '%s' to the torrent client (client mode)", dl.get("title"))
-            continue
-        # soulsync mode, OR client-mode push failed → SoulSync polls + removes.
-
+            logger.info("seeding: refreshed client seed limits for '%s' (client mode)", dl.get("title"))
+        # SoulSync polls + removes in both modes. In client mode qBittorrent may
+        # also enforce its own limits, but we do not mark the row released until
+        # the configured removal/delete policy has actually run.
         if not row_ratio and not row_hours:
             # this tracker is exempt (or nothing applies to it). leave it
             # seeding forever, that is what "no goal" means. costs no client
