@@ -6096,6 +6096,37 @@ body[data-side="video"] #gsearch-aura {
 [data-video-only] .server-config-container { max-width: 560px; }
 
 /* ── Dashboard system-health strip ─────────────────────────────────────── */
+/* Stuck-row diagnostics drawer. Opens in place under the row it explains — the
+   evidence belongs beside the thing it is evidence about, not in a modal that
+   loses which row you were looking at. */
+.vwsh-failing-btn { cursor: pointer; font: inherit; background: none; border: none; padding: 0; }
+.vwsh-failing-btn:hover { text-decoration: underline; }
+.vwsh-diag {
+    grid-column: 1 / -1; margin: 8px 0 2px; padding: 12px 14px; border-radius: 10px;
+    background: rgba(0,0,0,0.28); border: 1px solid rgba(255,255,255,0.09);
+    font-size: 12px; line-height: 1.5;
+}
+.vwsh-diag-loading { color: rgba(255,255,255,0.5); }
+.vwsh-diag-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 3px 18px;
+}
+.vwsh-diag-line { display: flex; gap: 8px; min-width: 0; }
+.vwsh-diag-k { flex: none; width: 96px; color: rgba(255,255,255,0.45); }
+.vwsh-diag-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: rgba(255,255,255,0.82); }
+/* A missing id is the answer often enough to earn a colour. */
+.vwsh-diag-line--gap .vwsh-diag-v { color: #fbbf24; }
+.vwsh-diag-line--live .vwsh-diag-v { color: #38bdf8; }
+.vwsh-diag-rels { margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.07); padding-top: 8px; }
+.vwsh-diag-src { margin: 8px 0 4px; font-weight: 700; color: rgba(255,255,255,0.66); }
+.vwsh-diag-rel { display: flex; gap: 12px; padding: 2px 0; min-width: 0; }
+.vwsh-diag-rel-t { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; color: rgba(255,255,255,0.7); font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px; }
+.vwsh-diag-rel-w { flex: none; max-width: 45%; color: rgba(255,255,255,0.5); }
+.vwsh-diag-rel--ok .vwsh-diag-rel-w { color: #4ade80; }
+.vwsh-diag-rel--none { color: rgba(255,255,255,0.4); font-style: italic; }
+
 /* ── Import subscriptions (ytdl-sub / Kometa) ─────────────────────────────── */
 .vwlp-import-btn {
     display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto;

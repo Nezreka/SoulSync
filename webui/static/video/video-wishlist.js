@@ -105,6 +105,98 @@
         return out;
     }
 
+    // ── stuck-row diagnostics drawer ─────────────────────────────────────────
+    // The tooltip above says how often a row was searched and the headline
+    // refusal. It cannot say WHICH releases came back, why each one lost, where
+    // the file would land, which ids the search was keyed on, or whether
+    // something is already downloading. Answering "why is this stuck" used to
+    // mean reading three screens and guessing. This is that answer, in place.
+    function diagKey(row, scope) {
+        var q = 'kind=' + (scope === 'movie' ? 'movie' : 'episode') +
+                '&tmdb_id=' + encodeURIComponent(row.tmdb_id != null ? row.tmdb_id : row.show_tmdb_id);
+        if (row.season_number != null) q += '&season_number=' + row.season_number;
+        if (row.episode_number != null) q += '&episode_number=' + row.episode_number;
+        return q;
+    }
+
+    function diagRowsHTML(d) {
+        var row = d.row || {}, ids = d.ids || {};
+        var bits = [];
+        function line(k, v, cls) {
+            return '<div class="vwsh-diag-line' + (cls ? ' ' + cls : '') + '">' +
+                '<span class="vwsh-diag-k">' + esc(k) + '</span>' +
+                '<span class="vwsh-diag-v">' + esc(v == null || v === '' ? '—' : v) + '</span></div>';
+        }
+        bits.push(line('Attempts', (row.search_attempts || 0) + ' searches'));
+        bits.push(line('Last tried', row.last_search_at));
+        bits.push(line('Latest reason', row.last_refusal));
+        // A row stuck for want of an id looks exactly like one nobody seeds.
+        bits.push(line('TMDB', ids.tmdb_id));
+        bits.push(line('TVDB', ids.tvdb_id, ids.tvdb_id ? '' : 'vwsh-diag-line--gap'));
+        bits.push(line('IMDb', ids.imdb_id, ids.imdb_id ? '' : 'vwsh-diag-line--gap'));
+        bits.push(line('Would land in', d.target_dir));
+
+        // Already downloading? Then it is not stuck at all.
+        (d.downloads || []).forEach(function (dl) {
+            bits.push(line('In flight', (dl.status || '?') +
+                (dl.progress ? ' · ' + Math.round(dl.progress) + '%' : '') +
+                (dl.release_title ? ' · ' + dl.release_title : ''), 'vwsh-diag-line--live'));
+        });
+
+        // The individual releases, per source, with the rule that refused each.
+        var snap = row.search_snapshot || {};
+        var srcs = snap.sources || {};
+        var order = (snap.chain && snap.chain.length) ? snap.chain : Object.keys(srcs);
+        var blocks = order.map(function (name) {
+            var s = srcs[name];
+            if (!s) return '';
+            var head = '<div class="vwsh-diag-src">' + esc(name) + ' — ' +
+                (!s.ran ? 'could not search: ' + esc(s.reason || 'unknown')
+                        : (s.results || 0) + ' found, ' + (s.accepted || 0) + ' usable') + '</div>';
+            var rows = (s.samples || []).map(function (x) {
+                return '<div class="vwsh-diag-rel' + (x.accepted ? ' vwsh-diag-rel--ok' : '') + '">' +
+                    '<span class="vwsh-diag-rel-t">' + esc(x.title || '?') + '</span>' +
+                    '<span class="vwsh-diag-rel-w">' + esc(x.accepted ? 'usable' : (x.rejected || '—')) + '</span>' +
+                    '</div>';
+            }).join('');
+            return head + (rows || '<div class="vwsh-diag-rel vwsh-diag-rel--none">no releases recorded — ' +
+                'this row has not been searched since receipts were added</div>');
+        }).join('');
+
+        return '<div class="vwsh-diag-grid">' + bits.join('') + '</div>' +
+            (blocks ? '<div class="vwsh-diag-rels">' + blocks + '</div>' : '');
+    }
+
+    function openDiagDrawer(btn, row, scope) {
+        var host = btn.closest('[data-vwsh-diag-host]');
+        if (!host) return;
+        var panel = host.querySelector('[data-vwsh-diag]');
+        if (panel) {   // already open — close it
+            panel.remove();
+            btn.setAttribute('aria-expanded', 'false');
+            return;
+        }
+        panel = document.createElement('div');
+        panel.className = 'vwsh-diag';
+        panel.setAttribute('data-vwsh-diag', '');
+        panel.innerHTML = '<div class="vwsh-diag-loading">Reading the last search\u2026</div>';
+        host.appendChild(panel);
+        btn.setAttribute('aria-expanded', 'true');
+        fetch('/api/video/wishlist/diagnostics?' + diagKey(row, scope),
+              { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!panel.isConnected) return;
+                panel.innerHTML = (d && d.success)
+                    ? diagRowsHTML(d)
+                    : '<div class="vwsh-diag-loading">Nothing recorded for this row yet.</div>';
+            })
+            .catch(function () {
+                if (panel.isConnected) panel.innerHTML =
+                    '<div class="vwsh-diag-loading">Could not read the diagnostics.</div>';
+            });
+    }
+
     function statusPill(status, tip) {
         var s = STATUS[status] || STATUS.wanted;
         return '<span class="vwsh-st ' + s[1] + '"' + (tip ? ' title="' + esc(tip) + '"' : '') + '>' + s[0] + '</span>';
@@ -394,9 +486,12 @@
         // TMDB shows the SxEx label; a YouTube video shows just its upload date.
         // Repeatedly-failing marker (#liveleak-failing-hub) — same rule as movies.
         var fails = Number(e.search_attempts) || 0;
+        // The warning marker is now the handle for the drawer: the thing you
+        // hover to ask "why" should be the thing you click to find out.
         var failTxt = (fails >= 3 && (st === 'wanted' || st === 'upgrade'))
-            ? ' · <span class="vwsh-failing-inline" title="' + esc(failWhy(e, fails)) +
-                '">&#9888; ' + fails + '</span>'
+            ? ' · <button class="vwsh-failing-inline vwsh-failing-btn" type="button" data-vwsh-why ' +
+                'aria-expanded="false" title="' + esc(failWhy(e, fails)) +
+                '">&#9888; ' + fails + '</button>'
             : '';
         // A skipped YouTube video used to show nothing at all — the same blank
         // row whether it was queued, deleted, or backing off. It carries the
@@ -414,7 +509,7 @@
         var rm = yt
             ? 'data-vwsh-rm="yt-video" data-id="' + esc(e.source_id) + '"'
             : 'data-vwsh-rm="episode" data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '"';
-        return '<div class="vwsh-epc' + (yt ? ' vwsh-epc--youtube' : '') + '" data-vwsh-ep data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '"' +
+        return '<div class="vwsh-epc' + (yt ? ' vwsh-epc--youtube' : '') + '" data-vwsh-ep data-vwsh-diag-host data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '"' +
             (yt ? ' data-src-id="' + esc(e.source_id) + '"' : '') + '>' + thumb +
             '<div class="vwsh-epc-body">' +
                 '<div class="vwsh-epc-title" title="' + esc(t) + '">' + esc(t) + '</div>' +
@@ -926,6 +1021,20 @@
     }
 
     function onGridClick(e) {
+        // The drawer reads the row's own data-attributes rather than re-deriving
+        // the identity, so it always asks about the row it is attached to.
+        var why = e.target.closest('[data-vwsh-why]');
+        if (why) {
+            e.preventDefault(); e.stopPropagation();
+            var host = why.closest('[data-vwsh-diag-host]');
+            var isEp = host && host.hasAttribute('data-e');
+            openDiagDrawer(why, {
+                tmdb_id: host && host.getAttribute('data-tmdb'),
+                season_number: isEp ? host.getAttribute('data-s') : null,
+                episode_number: isEp ? host.getAttribute('data-e') : null,
+            }, isEp ? 'episode' : 'movie');
+            return;
+        }
         var pick = e.target.closest('[data-vwsh-pick]');
         if (pick) { e.preventDefault(); e.stopPropagation(); doPick(pick); return; }
         var ytNow = e.target.closest('[data-vwsh-yt-now]');
