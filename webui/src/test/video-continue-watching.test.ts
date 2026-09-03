@@ -98,9 +98,20 @@ describe('the rail', () => {
     expect(shown.indexOf('loadContinueWatching')).toBeLessThan(shown.indexOf('loadUpcoming'));
   });
 
-  it('uses one delegated click handler, since cards are re-rendered on poll', () => {
-    // Per-card listeners would leak on every refresh.
-    expect(JS).toContain("card.closest('[data-video-continue-rail]')");
+  it('is a real link, so middle-click and new-tab work', () => {
+    // It was a <button> calling window.openVideoDetail, which does not exist -
+    // so clicking a card did nothing at all. Every other video surface links
+    // with a plain href, and a button swallows middle-click, ctrl-click and
+    // "open in new tab".
+    expect(JS).toContain("'<a class=\"vcw-card\" href=\"' + href + '\" '");
+    expect(JS).toContain("'/video-detail/library/'");
+    expect(JS).not.toContain('window.openVideoDetail');
+  });
+
+  it('sends a show to the show page and a movie to the movie page', () => {
+    const card = extractFunction('_continueCard', JS);
+    expect(card).toContain("it.kind === 'show' ? 'show/' + it.show_id");
+    expect(card).toContain("'movie/' + it.id");
   });
 });
 
@@ -122,14 +133,24 @@ describe('the card layout', () => {
     expect(card).toContain('max-width: 264px');
   });
 
-  it('keeps the play affordance out of the way until hover', () => {
-    const play = CSS.slice(CSS.indexOf('.vcw-play {'), CSS.indexOf('.vcw-badge'));
-    expect(play).toContain('opacity: 0');
-    expect(CSS).toContain('.vcw-card:hover .vcw-play');
+  it('does not promise playback it cannot deliver', () => {
+    // SoulSync does not play video - the media server does - so a play triangle
+    // on this card is a lie. It opens the title, and the chevron says so.
+    const card = extractFunction('_continueCard', JS);
+    expect(card).toContain('vcw-open');
+    expect(card).not.toContain('vcw-play');
+    expect(card).not.toContain('&#9654;');
+  });
+
+  it('keeps the open affordance out of the way until hover', () => {
+    const open = CSS.slice(CSS.indexOf('.vcw-open {'), CSS.indexOf('.vcw-badge'));
+    expect(open).toContain('opacity: 0');
+    expect(CSS).toContain('.vcw-card:hover .vcw-open');
   });
 
   it('respects a reduced-motion preference', () => {
     const rm = CSS.slice(CSS.indexOf('@media (prefers-reduced-motion: reduce)'));
     expect(rm).toContain('.vcw-card:hover .vcw-art { transform: none; }');
+    expect(rm).toContain('.vcw-open');
   });
 });

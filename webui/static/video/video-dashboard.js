@@ -150,20 +150,26 @@
     function _continueCard(it) {
         var pct = _pct(it);
         var left = _remaining(it);
-        // Already a proxy path when there is art at all, and '' when there
-        // is none — the cue to draw a letter tile instead of a dead image.
         var img = it.image_url || '';
         // An up-next card has no progress to show, so it says what it IS
         // instead. Drawing a 0% bar would read as "stalled".
         var meta = it.reason === 'up_next' ? 'Up next' : left;
-        return '<button type="button" class="vcw-card" ' +
+        // A real <a href>, not a button with a click handler. Every other video
+        // surface links this way, and it is what makes middle-click, ctrl-click
+        // and "open in new tab" work — a button swallows all three.
+        var href = '/video-detail/library/' + (it.kind === 'show' ? 'show/' + it.show_id
+                                                                 : 'movie/' + it.id);
+        return '<a class="vcw-card" href="' + href + '" ' +
             'data-vcw-kind="' + _esc(it.kind) + '" data-vcw-id="' + _esc(it.id) + '"' +
             (it.show_id ? ' data-vcw-show="' + _esc(it.show_id) + '"' : '') +
             ' title="' + _esc(it.title + (it.subtitle ? ' — ' + it.subtitle : '')) + '">' +
             '<span class="vcw-art"' + (img ? ' style="background-image:url(\'' + _esc(img) + '\')"' : '') + '>' +
                 (img ? '' : '<span class="vcw-art-fallback">' + _esc((it.title || '?').charAt(0).toUpperCase()) + '</span>') +
                 (it.reason === 'up_next' ? '<span class="vcw-badge">Up next</span>' : '') +
-                '<span class="vcw-play" aria-hidden="true">&#9654;</span>' +
+                // An arrow, not a play triangle. SoulSync does not play video —
+                // the media server does — so a ▶ here promises something this
+                // click cannot deliver. It opens the title, and says so.
+                '<span class="vcw-open" aria-hidden="true">&rsaquo;</span>' +
                 (pct > 0 ? '<span class="vcw-bar"><span class="vcw-bar-fill" style="width:' + pct + '%"></span></span>' : '') +
             '</span>' +
             '<span class="vcw-meta">' +
@@ -171,7 +177,7 @@
                 '<span class="vcw-sub">' + _esc(it.subtitle || '') + '</span>' +
                 (meta ? '<span class="vcw-left">' + _esc(meta) + '</span>' : '') +
             '</span>' +
-        '</button>';
+        '</a>';
     }
 
     function loadContinueWatching() {
@@ -189,20 +195,6 @@
             })
             .catch(function () { section.hidden = true; });
     }
-
-    // One delegated handler for the rail — the cards are re-rendered on every
-    // poll, so per-card listeners would leak.
-    document.addEventListener('click', function (ev) {
-        var card = ev.target.closest && ev.target.closest('.vcw-card');
-        if (!card || !card.closest('[data-video-continue-rail]')) return;
-        var kind = card.getAttribute('data-vcw-kind');
-        var id = card.getAttribute('data-vcw-show') || card.getAttribute('data-vcw-id');
-        // Straight to the title. Playback itself belongs to the media server,
-        // and the detail page is where every play route already lives.
-        if (typeof window.openVideoDetail === 'function') {
-            window.openVideoDetail(kind === 'show' ? 'show' : 'movie', id);
-        }
-    });
 
     // Attention badges: open issues (everyone) + pending maintenance findings
     // (admins — the repair API is admin-gated; a 403 just leaves it hidden).

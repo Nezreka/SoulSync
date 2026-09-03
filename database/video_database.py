@@ -3016,67 +3016,60 @@ class VideoDatabase:
                     "last_viewed_at": r["last_viewed_at"],
                 })
 
-            # ── episodes: in progress, else the next one you own ─────────────
-            # Read the most recent watched episode PER SHOW, then decide.
+            # ── shows ────────────────────────────────────────────────────────
+            # The episode itself comes from show_next_up, which is ALREADY the
+            # app's definition of "next up" - the detail page's Play CTA reads
+            # it. Writing a second one here is how the two would start
+            # disagreeing about what you are meant to watch, and it would have
+            # missed what that one gets right: specials sort last, so a season 0
+            # extra never jumps the queue.
+            #
+            # A show only appears at all once you have STARTED it: show_next_up
+            # returns None when nothing has been watched, which is what keeps
+            # this a resume rail rather than a list of everything you own.
             for r in conn.execute(f"""
-                SELECT e.id, e.show_id, e.season_number, e.episode_number, e.title,
-                       e.still_url, e.runtime_minutes, e.view_offset_ms, e.last_viewed_at,
-                       s.title AS show_title, s.poster_url AS show_poster,
-                       s.backdrop_url AS show_backdrop, s.tmdb_id AS show_tmdb
-                FROM episodes e
-                JOIN shows s ON s.id = e.show_id
+                SELECT s.id, s.title, s.poster_url, s.backdrop_url, s.tmdb_id,
+                       MAX(e.last_viewed_at) AS seen_at
+                FROM shows s JOIN episodes e ON e.show_id = s.id
                 WHERE e.last_viewed_at IS NOT NULL{scope_s}
-                ORDER BY e.last_viewed_at DESC
+                GROUP BY s.id
+                ORDER BY seen_at DESC LIMIT 100
             """, args_s):
-                if any(x.get("kind") == "show" and x.get("show_id") == r["show_id"] for x in out):
-                    continue        # already have this show's card
-                # An episode still is the picture people recognise; the show's
-                # backdrop is the next best thing, its poster the last resort.
-                image = (_art_url("episode", r["id"], "poster") if r["still_url"]
-                         else _art_url("show", r["show_id"], "backdrop") if r["show_backdrop"]
-                         else _art_url("show", r["show_id"], "poster") if r["show_poster"]
-                         else "")
-                base = {
-                    "kind": "show", "show_id": r["show_id"], "tmdb_id": r["show_tmdb"],
-                    "title": r["show_title"], "image_url": image,
-                    "last_viewed_at": r["last_viewed_at"],
-                }
-                if self._resumable(r["view_offset_ms"], r["runtime_minutes"]):
-                    base.update({
-                        "reason": "in_progress", "id": r["id"],
-                        "subtitle": "S%d E%d · %s" % (r["season_number"], r["episode_number"],
-                                                      r["title"] or ""),
-                        "season_number": r["season_number"],
-                        "episode_number": r["episode_number"],
-                        "runtime_minutes": r["runtime_minutes"],
-                        "view_offset_ms": r["view_offset_ms"],
-                    })
-                    out.append(base)
-                    continue
-                # Finished it — offer the next OWNED, unwatched episode.
-                nxt = conn.execute("""
-                    SELECT id, season_number, episode_number, title, still_url, runtime_minutes
-                    FROM episodes
-                    WHERE show_id = ? AND has_file = 1
-                          AND COALESCE(play_count, 0) = 0
-                          AND (season_number > ? OR (season_number = ? AND episode_number > ?))
-                    ORDER BY season_number, episode_number LIMIT 1
-                """, (r["show_id"], r["season_number"], r["season_number"],
-                      r["episode_number"])).fetchone()
+                nxt = self.show_next_up(r["id"])
                 if not nxt:
-                    continue        # caught up: nothing to offer, so no card
-                base.update({
-                    "reason": "up_next", "id": nxt["id"],
-                    "subtitle": "S%d E%d · %s" % (nxt["season_number"], nxt["episode_number"],
+                    continue        # caught up, or nothing owned: no card
+                ep = conn.execute(
+                    "SELECT id, still_url FROM episodes WHERE show_id=? AND "
+                    "season_number=? AND episode_number=?",
+                    (r["id"], nxt["season_number"], nxt["episode_number"])).fetchone()
+                resume = bool(nxt.get("resume"))
+                if resume and not self._resumable(nxt.get("view_offset_ms"),
+                                                  nxt.get("runtime_minutes")):
+                    # started, but only by a few seconds - a misclick, not a
+                    # resume point. Fall through to offering it fresh.
+                    resume = False
+                # An episode's own still is the picture you recognise; the
+                # show's backdrop is next best, its poster the last resort.
+                image = (_art_url("episode", ep["id"], "poster")
+                         if ep and ep["still_url"]
+                         else _art_url("show", r["id"], "backdrop") if r["backdrop_url"]
+                         else _art_url("show", r["id"], "poster") if r["poster_url"]
+                         else "")
+                out.append({
+                    "kind": "show", "show_id": r["id"], "tmdb_id": r["tmdb_id"],
+                    "id": (ep["id"] if ep else None),
+                    "reason": "in_progress" if resume else "up_next",
+                    "title": r["title"],
+                    "subtitle": "S%d E%d · %s" % (nxt["season_number"],
+                                                  nxt["episode_number"],
                                                   nxt["title"] or ""),
                     "season_number": nxt["season_number"],
                     "episode_number": nxt["episode_number"],
-                    "runtime_minutes": nxt["runtime_minutes"],
-                    "view_offset_ms": 0,
-                    "image_url": (_art_url("episode", nxt["id"], "poster")
-                                  if nxt["still_url"] else image),
+                    "runtime_minutes": nxt.get("runtime_minutes"),
+                    "view_offset_ms": nxt.get("view_offset_ms") if resume else 0,
+                    "image_url": image,
+                    "last_viewed_at": r["seen_at"],
                 })
-                out.append(base)
         except sqlite3.Error:
             logger.exception("continue_watching failed")
             return []
