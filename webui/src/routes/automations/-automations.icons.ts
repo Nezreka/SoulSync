@@ -24,6 +24,8 @@ export const AUTOMATION_ICONS: Record<string, string> = {
   discovery_completed: '🔍',
   notify_only: '🔔',
   discord_webhook: '💬',
+  ntfy: '📡',
+  gotify: '📬',
   pushbullet: '🔔',
   telegram: '✉️',
   webhook: '🌐',
@@ -115,6 +117,8 @@ export function automationIcon(type: string | null | undefined): string {
 /** Notification/then-action label. Two carry their own icon inline. */
 export function formatNotify(type: string | null | undefined): string {
   if (type === 'discord_webhook') return 'Discord';
+  if (type === 'ntfy') return 'ntfy';
+  if (type === 'gotify') return 'Gotify';
   if (type === 'pushbullet') return 'Pushbullet';
   if (type === 'telegram') return 'Telegram';
   if (type === 'webhook') return 'Webhook';

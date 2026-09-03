@@ -2534,6 +2534,7 @@ const _autoIcons = {
     scan_library: '\uD83D\uDD04', refresh_mirrored: '\uD83D\uDCC2', sync_playlist: '\uD83D\uDD01',
     discover_playlist: '\uD83D\uDD0D', discovery_completed: '\uD83D\uDD0D',
     notify_only: '\uD83D\uDD14', discord_webhook: '\uD83D\uDCAC', pushbullet: '\uD83D\uDD14', telegram: '\u2709\uFE0F', webhook: '\uD83C\uDF10',
+    ntfy: '\uD83D\uDCE1', gotify: '\uD83D\uDCEC',
     signal_received: '\u26A1', fire_signal: '\u26A1', run_script: '\uD83D\uDCBB',
     // Phase 3
     wishlist_processing_completed: '\u2705', watchlist_scan_completed: '\u2705',
@@ -2980,6 +2981,8 @@ const AUTO_HUB_REFERENCE = {
                 { type: 'discord_webhook', label: 'Discord Webhook', desc: 'Send a message to a Discord channel via webhook' },
                 { type: 'telegram', label: 'Telegram', desc: 'Send a message to a Telegram chat via bot' },
                 { type: 'pushbullet', label: 'Pushbullet', desc: 'Send a push notification via Pushbullet' },
+                { type: 'ntfy', label: 'ntfy', desc: 'Publish to an ntfy topic, on ntfy.sh or your own server' },
+                { type: 'gotify', label: 'Gotify', desc: 'Send a message to your Gotify server' },
             ]
         },
         {
@@ -4257,6 +4260,8 @@ async function _autoTestNotify(slotKey) {
 function _autoFormatNotify(type) {
     if (type === 'discord_webhook') return 'Discord';
     if (type === 'pushbullet') return 'Pushbullet';
+    if (type === 'ntfy') return 'ntfy';
+    if (type === 'gotify') return 'Gotify';
     if (type === 'telegram') return 'Telegram';
     if (type === 'webhook') return 'Webhook';
     if (type === 'fire_signal') return '\u26A1 Signal';
@@ -5291,6 +5296,77 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         </div>
         ${_notifyVarHtml(slotKey)}`;
     }
+    if (blockType === 'ntfy') {
+        // Server defaults to ntfy.sh but most people self-host, so it is the
+        // first field rather than a hidden assumption. Auth is optional: a
+        // private topic on your own box usually has none.
+        return `<div class="config-row">
+            <label>Server</label>
+            <input type="text" id="cfg-${slotKey}-server" value="${_escAttr(config.server || '')}" placeholder="https://ntfy.sh (or your own server)">
+        </div>
+        <div class="config-row">
+            <label>Topic</label>
+            <input type="text" id="cfg-${slotKey}-topic" value="${_escAttr(config.topic || '')}" placeholder="soulsync">
+        </div>
+        <div class="config-row">
+            <label>Title</label>
+            <input type="text" id="cfg-${slotKey}-title" value="${_escAttr(config.title || '{name}')}" placeholder="Notification title">
+        </div>
+        <div class="config-row">
+            <label>Message</label>
+            <textarea id="cfg-${slotKey}-message" placeholder="Message with {variables}...">${config.message || 'Completed with status: {status}'}</textarea>
+        </div>
+        <div class="config-row">
+            <label>Priority</label>
+            <select id="cfg-${slotKey}-priority">
+                ${[['1','Min'],['2','Low'],['3','Default'],['4','High'],['5','Urgent']].map(function (o) {
+                    return '<option value="' + o[0] + '"' + (String(config.priority || '3') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+                }).join('')}
+            </select>
+        </div>
+        <div class="config-row">
+            <label>Tags</label>
+            <input type="text" id="cfg-${slotKey}-tags" value="${_escAttr(config.tags || '')}" placeholder="Comma separated, e.g. white_check_mark,cd">
+        </div>
+        <div class="config-row">
+            <label>Access Token</label>
+            <input type="text" id="cfg-${slotKey}-token" value="${_escAttr(config.token || '')}" placeholder="tk_... (optional, wins over username/password)">
+        </div>
+        <div class="config-row">
+            <label>Username</label>
+            <input type="text" id="cfg-${slotKey}-username" value="${_escAttr(config.username || '')}" placeholder="Optional, for basic auth">
+        </div>
+        <div class="config-row">
+            <label>Password</label>
+            <input type="password" id="cfg-${slotKey}-password" value="${_escAttr(config.password || '')}" placeholder="Optional">
+        </div>
+        ${_notifyVarHtml(slotKey)}`;
+    }
+    if (blockType === 'gotify') {
+        // Gotify's priority runs 0-10, NOT ntfy's 1-5. The two look alike and
+        // are not, so they get their own control rather than a shared one.
+        return `<div class="config-row">
+            <label>Server URL</label>
+            <input type="text" id="cfg-${slotKey}-server" value="${_escAttr(config.server || '')}" placeholder="http://your-nas:8080">
+        </div>
+        <div class="config-row">
+            <label>Application Token</label>
+            <input type="text" id="cfg-${slotKey}-token" value="${_escAttr(config.token || '')}" placeholder="An APP token, not a client token">
+        </div>
+        <div class="config-row">
+            <label>Title</label>
+            <input type="text" id="cfg-${slotKey}-title" value="${_escAttr(config.title || '{name}')}" placeholder="Notification title">
+        </div>
+        <div class="config-row">
+            <label>Message</label>
+            <textarea id="cfg-${slotKey}-message" placeholder="Message with {variables}...">${config.message || 'Completed with status: {status}'}</textarea>
+        </div>
+        <div class="config-row">
+            <label>Priority (0-10)</label>
+            <input type="number" min="0" max="10" id="cfg-${slotKey}-priority" value="${_escAttr(String(config.priority === undefined ? 5 : config.priority))}">
+        </div>
+        ${_notifyVarHtml(slotKey)}`;
+    }
     if (blockType === 'webhook') {
         const url = _escAttr(config.url || '');
         const hdrs = (config.headers || '').replace(/"/g, '&quot;');
@@ -5727,6 +5803,31 @@ function _readPlacedConfig(slotKey) {
             chat_id: document.getElementById('cfg-' + slotKey + '-chat_id')?.value?.trim() || '',
             thread_id: document.getElementById('cfg-' + slotKey + '-thread_id')?.value?.trim() || '',
             message: document.getElementById('cfg-' + slotKey + '-message')?.value || '',
+        };
+    }
+    if (type === 'ntfy') {
+        const _v = (f) => document.getElementById('cfg-' + slotKey + '-' + f)?.value?.trim() || '';
+        return {
+            server: _v('server'),
+            topic: _v('topic'),
+            title: document.getElementById('cfg-' + slotKey + '-title')?.value || '',
+            message: document.getElementById('cfg-' + slotKey + '-message')?.value || '',
+            priority: _v('priority'),
+            tags: _v('tags'),
+            token: _v('token'),
+            username: _v('username'),
+            // NOT trimmed: a password may legitimately start or end with a space
+            password: document.getElementById('cfg-' + slotKey + '-password')?.value || '',
+        };
+    }
+    if (type === 'gotify') {
+        const _v = (f) => document.getElementById('cfg-' + slotKey + '-' + f)?.value?.trim() || '';
+        return {
+            server: _v('server'),
+            token: _v('token'),
+            title: document.getElementById('cfg-' + slotKey + '-title')?.value || '',
+            message: document.getElementById('cfg-' + slotKey + '-message')?.value || '',
+            priority: _v('priority'),
         };
     }
     if (type === 'webhook') {
