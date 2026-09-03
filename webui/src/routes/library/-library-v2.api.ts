@@ -1096,6 +1096,33 @@ export interface LibraryV2ArtistTrackFile {
   added_at: string | null;
 }
 
+/**
+ * One playable file per track for the artist Play button.
+ *
+ * A superset of the Manage-Track-Files row in the fields the queue needs, and
+ * a different SCOPE: it follows track credits, so a release the artist only
+ * guests on is included, and each row names the artist actually credited on
+ * that track instead of leaving the page's artist to stand in for all of them.
+ */
+export interface LibraryV2ArtistPlaybackFile {
+  file_id: number;
+  track_id: number;
+  track_title: string | null;
+  track_number: number | null;
+  disc_number: number | null;
+  duration: number | null;
+  album_id: number;
+  album_title: string | null;
+  album_image_url: string | null;
+  artist_id: number | null;
+  artist_name: string | null;
+  path: string;
+  format: string | null;
+  bitrate: number | null;
+  file_state: string;
+  is_primary: boolean;
+}
+
 /** C2 (Manage Track Files): every physical file this artist owns, flat and
  *  paginated — feeds the "Files" tab whose selection drives the ADR-05
  *  preview/delete above. */
@@ -1114,6 +1141,34 @@ export async function fetchLibraryV2ArtistTrackFiles(
     pagination?: LibraryV2Pagination;
   }>(apiClient.get(`library/v2/artists/${artistId}/track-files`, { searchParams: params }));
   if (!payload.success) throw new Error(payload.error || 'Track files failed');
+  return {
+    files: payload.files ?? [],
+    pagination: payload.pagination ?? {
+      page,
+      limit,
+      total_count: 0,
+      total_pages: 0,
+      has_prev: false,
+      has_next: false,
+    },
+  };
+}
+
+/** One page of the artist's play queue (credit-scoped, one file per track). */
+export async function fetchLibraryV2ArtistPlaybackFiles(
+  artistId: number,
+  { page = 1, limit = 100 }: { page?: number; limit?: number } = {},
+): Promise<{ files: LibraryV2ArtistPlaybackFile[]; pagination: LibraryV2Pagination }> {
+  const params = new URLSearchParams();
+  params.set('page', String(page));
+  params.set('limit', String(limit));
+  const payload = await readJson<{
+    success: boolean;
+    error?: string;
+    files?: LibraryV2ArtistPlaybackFile[];
+    pagination?: LibraryV2Pagination;
+  }>(apiClient.get(`library/v2/artists/${artistId}/play-queue`, { searchParams: params }));
+  if (!payload.success) throw new Error(payload.error || 'Play queue failed');
   return {
     files: payload.files ?? [],
     pagination: payload.pagination ?? {
@@ -2082,7 +2137,7 @@ export function rankSearchResultQuality(r: SourceSearchResult): number {
   const lossless = q.includes('flac') || q.includes('alac') || q.includes('wav');
   if (lossless && bitDepth > 16) return 4;
   if (lossless) return 3;
-  const kbps = bitrateKbps(r.bitrate) ?? 0;
+  const kbps = bitrateKbps(r.bitrate, q) ?? 0;
   if (kbps >= 256 || q.includes('320')) return 2;
   if (q) return 1;
   return 0;

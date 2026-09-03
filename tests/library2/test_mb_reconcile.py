@@ -85,8 +85,8 @@ def test_title_match_assigns_release_group_mbid(legacy_db, imported_conn):
 
     assert stats["assigned"] == 1
     row = imported_conn.execute(
-        "SELECT musicbrainz_id FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
-    assert row["musicbrainz_id"] == SAWANO_RG
+        "SELECT musicbrainz_release_group_id AS rg FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
+    assert row["rg"] == SAWANO_RG
 
 
 def test_cross_language_duplicate_is_folded_into_library_row(legacy_db, imported_conn):
@@ -113,9 +113,9 @@ def test_cross_language_duplicate_is_folded_into_library_row(legacy_db, imported
     assert imported_conn.execute(
         "SELECT COUNT(*) c FROM lib2_albums WHERE id=?", (en_id,)).fetchone()["c"] == 0
     survivor = imported_conn.execute(
-        "SELECT musicbrainz_id, external_ids FROM lib2_albums WHERE id=?",
+        "SELECT musicbrainz_release_group_id AS rg, external_ids FROM lib2_albums WHERE id=?",
         (jp_id,)).fetchone()
-    assert survivor["musicbrainz_id"] == SAWANO_RG
+    assert survivor["rg"] == SAWANO_RG
     # The survivor keeps its own deezer id; the alternative lives as edition.
     assert json.loads(survivor["external_ids"])["deezer"] == "196470602"
     alt = imported_conn.execute(
@@ -222,8 +222,8 @@ def test_mismatched_track_counts_never_share_a_release_group(legacy_db, imported
     assert stats["merged"] == 0
     assert stats["review"] == 0
     assert imported_conn.execute(
-        "SELECT musicbrainz_id FROM lib2_albums WHERE id=?",
-        (other_id,)).fetchone()["musicbrainz_id"] is None
+        "SELECT musicbrainz_release_group_id AS rg FROM lib2_albums WHERE id=?",
+        (other_id,)).fetchone()["rg"] is None
 
 
 def test_default_client_unwraps_registry_search_adapter(
@@ -249,8 +249,8 @@ def test_default_client_unwraps_registry_search_adapter(
 
     assert stats["assigned"] == 1
     row = imported_conn.execute(
-        "SELECT musicbrainz_id FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
-    assert row["musicbrainz_id"] == SAWANO_RG
+        "SELECT musicbrainz_release_group_id AS rg FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
+    assert row["rg"] == SAWANO_RG
 
 
 def test_machine_auto_monitored_trackless_duplicate_still_folds(
@@ -282,8 +282,8 @@ def test_machine_auto_monitored_trackless_duplicate_still_folds(
     assert imported_conn.execute(
         "SELECT COUNT(*) c FROM lib2_albums WHERE id=?", (en_id,)).fetchone()["c"] == 0
     assert imported_conn.execute(
-        "SELECT musicbrainz_id FROM lib2_albums WHERE id=?",
-        (jp_id,)).fetchone()["musicbrainz_id"] == SAWANO_RG
+        "SELECT musicbrainz_release_group_id AS rg FROM lib2_albums WHERE id=?",
+        (jp_id,)).fetchone()["rg"] == SAWANO_RG
 
 
 def test_date_fallback_respects_title_matched_holder_track_count(
@@ -314,8 +314,8 @@ def test_date_fallback_respects_title_matched_holder_track_count(
 
     assert stats["assigned"] == 1     # only the OST, via title
     assert imported_conn.execute(
-        "SELECT musicbrainz_id FROM lib2_albums WHERE id=?",
-        (ep_id,)).fetchone()["musicbrainz_id"] is None
+        "SELECT musicbrainz_release_group_id AS rg FROM lib2_albums WHERE id=?",
+        (ep_id,)).fetchone()["rg"] is None
     assert stats["review"] == 0
 
 
@@ -364,3 +364,140 @@ def test_auto_monitored_duplicate_with_placeholder_tracks_folds_and_unmirrors(
     ops = imported_conn.execute(
         "SELECT op FROM lib2_mirror_outbox").fetchall()
     assert any(r["op"] == "wishlist_remove" for r in ops)
+
+
+# --- release id vs release-group id -----------------------------------------
+#
+# `lib2_albums.musicbrainz_id` is the concrete MB *release* — the id a file's
+# MUSICBRAINZ_ALBUMID tag carries and the one `lib2_release_editions` stores.
+# The group this module assigns is a different entity with a different id, and
+# a column that held both made a tagged album invisible to the reconcile and
+# pointed the UI's /release/ link at a group.
+
+SAWANO_RELEASE = "3f7c9a12-6d21-4e4c-8b5a-2c9f0e1d7a44"
+
+
+def test_a_tagged_album_still_gets_its_release_group(legacy_db, imported_conn):
+    """An album carrying the release id from its files is NOT "already done"."""
+    aid = _artist_id(imported_conn)
+    _set_artist_mbid(imported_conn, aid)
+    album_id = _seed_album(
+        imported_conn, aid,
+        title="TVアニメ「進撃の巨人」Season 2 オリジナルサウンドトラック",
+        release_date="2017-06-07", expected_track_count=33)
+    imported_conn.execute(
+        "UPDATE lib2_albums SET musicbrainz_id=? WHERE id=?", (SAWANO_RELEASE, album_id))
+    imported_conn.commit()
+
+    stats = R.reconcile_artist_release_groups(
+        legacy_db, aid, client=FakeMBClient(_sawano_groups()))
+
+    assert stats["assigned"] == 1
+    row = imported_conn.execute(
+        "SELECT musicbrainz_id, musicbrainz_release_group_id AS rg "
+        "FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
+    assert row["rg"] == SAWANO_RG
+    # ...and the release id it came in with is untouched.
+    assert row["musicbrainz_id"] == SAWANO_RELEASE
+
+
+def test_a_group_id_left_in_the_release_column_is_moved(legacy_db, imported_conn):
+    """The repair for what an earlier run wrote into the wrong column.
+
+    Membership in this artist's browsed group list is the proof: a uuid that IS
+    one of their release groups cannot also be one of their releases."""
+    aid = _artist_id(imported_conn)
+    _set_artist_mbid(imported_conn, aid)
+    album_id = _seed_album(
+        imported_conn, aid,
+        title="TVアニメ「進撃の巨人」Season 2 オリジナルサウンドトラック",
+        release_date="2017-06-07", expected_track_count=33)
+    imported_conn.execute(
+        "UPDATE lib2_albums SET musicbrainz_id=?, external_ids=? WHERE id=?",
+        (SAWANO_RG, json.dumps({"musicbrainz": SAWANO_RG, "deezer": "196470602"}),
+         album_id))
+    imported_conn.commit()
+
+    stats = R.reconcile_artist_release_groups(
+        legacy_db, aid, client=FakeMBClient(_sawano_groups()))
+
+    assert stats["renamespaced"] == 1
+    row = imported_conn.execute(
+        "SELECT musicbrainz_id, musicbrainz_release_group_id AS rg, external_ids "
+        "FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
+    assert row["rg"] == SAWANO_RG
+    assert row["musicbrainz_id"] is None
+    external = json.loads(row["external_ids"])
+    # The stale key would be promoted straight back into the release column.
+    assert "musicbrainz" not in external
+    assert external["deezer"] == "196470602"
+
+
+def test_a_real_release_id_is_left_where_it_is(legacy_db, imported_conn):
+    aid = _artist_id(imported_conn)
+    _set_artist_mbid(imported_conn, aid)
+    album_id = _seed_album(imported_conn, aid, title="Some Other Record")
+    imported_conn.execute(
+        "UPDATE lib2_albums SET musicbrainz_id=? WHERE id=?", (SAWANO_RELEASE, album_id))
+    imported_conn.commit()
+
+    stats = R.reconcile_artist_release_groups(
+        legacy_db, aid, client=FakeMBClient(_sawano_groups()))
+
+    assert stats["renamespaced"] == 0
+    assert imported_conn.execute(
+        "SELECT musicbrainz_id FROM lib2_albums WHERE id=?",
+        (album_id,)).fetchone()["musicbrainz_id"] == SAWANO_RELEASE
+
+
+def test_a_group_id_left_in_external_ids_is_moved(legacy_db, imported_conn):
+    """The discography sync used to store MB's browse id — a release GROUP —
+    under the `musicbrainz` key, which is the release namespace. Rows written
+    before that was fixed are repaired here, by the same membership proof."""
+    aid = _artist_id(imported_conn)
+    _set_artist_mbid(imported_conn, aid)
+    album_id = _seed_album(
+        imported_conn, aid,
+        title="TVアニメ「進撃の巨人」Season 2 オリジナルサウンドトラック",
+        origin="discography", release_date="2017-06-07", expected_track_count=33)
+    imported_conn.execute(
+        "UPDATE lib2_albums SET external_ids=? WHERE id=?",
+        (json.dumps({"musicbrainz": SAWANO_RG}), album_id))
+    imported_conn.commit()
+
+    stats = R.reconcile_artist_release_groups(
+        legacy_db, aid, client=FakeMBClient(_sawano_groups()))
+
+    assert stats["renamespaced"] == 1
+    row = imported_conn.execute(
+        "SELECT musicbrainz_id, musicbrainz_release_group_id AS rg, external_ids "
+        "FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
+    assert row["rg"] == SAWANO_RG
+    assert row["musicbrainz_id"] is None
+    assert "musicbrainz" not in json.loads(row["external_ids"])
+
+
+def test_a_release_id_in_external_ids_survives_the_repair(legacy_db, imported_conn):
+    """Only a browsed GROUP id moves. A concrete release id under the same key
+    is what belongs there and must be left alone."""
+    aid = _artist_id(imported_conn)
+    _set_artist_mbid(imported_conn, aid)
+    album_id = _seed_album(
+        imported_conn, aid,
+        title="TVアニメ「進撃の巨人」Season 2 オリジナルサウンドトラック",
+        release_date="2017-06-07", expected_track_count=33)
+    imported_conn.execute(
+        "UPDATE lib2_albums SET external_ids=? WHERE id=?",
+        (json.dumps({"musicbrainz": SAWANO_RELEASE}), album_id))
+    imported_conn.commit()
+
+    stats = R.reconcile_artist_release_groups(
+        legacy_db, aid, client=FakeMBClient(_sawano_groups()))
+
+    assert stats["renamespaced"] == 0
+    # ...and the title pass still assigns the group to its own column.
+    row = imported_conn.execute(
+        "SELECT musicbrainz_release_group_id AS rg, external_ids "
+        "FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
+    assert row["rg"] == SAWANO_RG
+    assert json.loads(row["external_ids"])["musicbrainz"] == SAWANO_RELEASE

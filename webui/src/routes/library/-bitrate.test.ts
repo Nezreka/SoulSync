@@ -38,6 +38,30 @@ describe('bitrateKbps', () => {
     expect(bitrateKbps(0)).toBeNull();
     expect(bitrateKbps(Number.NaN)).toBeNull();
   });
+
+  // A five-figure kbit/s number is not a mislabelled bit/s one when the codec
+  // is lossless -- it is what multichannel and DSD actually measure. The
+  // magnitude-only threshold divided these by 1,000 and printed "28 kbps".
+  it.each([
+    ['24/192 5.1 PCM', 27_648, 'flac'],
+    ['DSD512 stereo', 45_158, 'dsf'],
+    ['32/384 8-channel', 98_304, 'wav'],
+  ])('keeps %s in kbit/s', (_label, value, format) => {
+    expect(bitrateKbps(value as number, format as string)).toBe(value);
+  });
+
+  it('still converts a lossless bits/s number', () => {
+    // A 16/44.1 stereo FLAC is ~900 kbit/s; in bit/s it clears the lossless
+    // ceiling by a wide margin, so raising that ceiling costs nothing here.
+    expect(bitrateKbps(900_000, 'flac')).toBe(900);
+  });
+
+  it('holds a lossy format to the stereo-shaped threshold', () => {
+    // Nothing lossy reaches 25,000 kbit/s, so a number that big is bit/s
+    // whatever the container claims.
+    expect(bitrateKbps(320_000, 'mp3')).toBe(320);
+    expect(bitrateKbps(320, 'mp3')).toBe(320);
+  });
 });
 
 describe('isVariableBitrate', () => {

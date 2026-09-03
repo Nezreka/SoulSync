@@ -4422,6 +4422,50 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             },
         })
 
+    @app.route("/api/library/v2/artists/<int:artist_id>/play-queue")
+    def lib2_artist_play_queue(artist_id):
+        """What the artist Play button queues: one playable file per track,
+        scoped by CREDIT rather than by album artist.
+
+        The Files tab's endpoint above answers a different question — its
+        ``primary_artist_id`` scope exists so a selection matches what the
+        delete preview will see — and reusing it here dropped every release
+        the artist only guests on, which the artist page itself shows."""
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2 import queries as Q
+        try:
+            page = int(request.args.get("page", 1))
+            limit = int(request.args.get("limit", 100))
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "page/limit must be integers"}), 400
+        if page < 1 or not 1 <= limit <= 500:
+            return jsonify({
+                "success": False,
+                "error": "page must be positive and limit must be between 1 and 500",
+            }), 400
+        conn = _conn()
+        try:
+            if not conn.execute(
+                "SELECT 1 FROM lib2_artists WHERE id=?", (artist_id,)
+            ).fetchone():
+                return jsonify({"success": False, "error": "Artist not found"}), 404
+            files, total = Q.list_artist_playback_files(
+                conn, artist_id, page=page, limit=limit)
+        finally:
+            conn.close()
+        total_pages = (total + limit - 1) // limit if limit else 0
+        return jsonify({
+            "success": True,
+            "files": files,
+            "pagination": {
+                "page": page, "limit": limit, "total_count": total,
+                "total_pages": total_pages,
+                "has_prev": page > 1, "has_next": page < total_pages,
+            },
+        })
+
     @app.route("/api/library/v2/tracks/<int:track_id>/canonical", methods=["POST"])
     def lib2_set_canonical(track_id):
         """Link/unlink a track to the canonical recording it duplicates.

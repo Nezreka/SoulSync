@@ -16,6 +16,17 @@ rows, and folds rows that turn out to share one RG:
   user instead of a silent merge (same philosophy as
   ``lib2_recording_review``, ADR-04).
 
+A release group is NOT a release. ``lib2_albums.musicbrainz_id`` holds the
+concrete MB *release* id (what a file's ``MUSICBRAINZ_ALBUMID`` tag carries and
+what ``lib2_release_editions.musicbrainz_id`` stores); the group id this module
+assigns lives in ``lib2_albums.musicbrainz_release_group_id``. They used to
+share one column, which cost three things at once: an album the importer had
+already tagged looked "assigned" and was skipped, the fold compared ids from
+two namespaces that can never match, and the UI's "open on MusicBrainz" link
+resolved a group id under ``/release/``. Any group id still sitting in the
+release column is moved across on the next run — the browse result names this
+artist's groups, so recognising one is exact rather than a guess.
+
 MB is rate-limited (1 req/s, enforced by the client decorator), so this runs
 OUTSIDE the discography hot path — the refresh endpoint kicks it as a
 background thread; it is also directly callable/testable with an injected
@@ -49,6 +60,10 @@ CREATE TABLE IF NOT EXISTS lib2_release_group_review (
 """
 
 _PAGE_SIZE = 100
+
+# Where a release-GROUP mbid lives. ``lib2_albums.musicbrainz_id`` is the
+# concrete release, and the two are not interchangeable (see module docstring).
+_RG_COLUMN = "musicbrainz_release_group_id"
 
 
 def _full_date(value: Any) -> Optional[str]:
@@ -103,11 +118,66 @@ def _fetch_all_release_groups(client: Any, artist_mbid: str) -> List[Dict[str, A
         offset += _PAGE_SIZE
 
 
+def _renamespace_group_ids(cursor: Any, artist_id: int,
+                           group_mbids: set) -> int:
+    """Move release-GROUP ids out of the two places that hold release ids.
+
+    Three writers put a MusicBrainz id on an album, and they did not agree on
+    which entity they meant. The importer and the embedded-tag reconcile store
+    the concrete release from a file's ``MUSICBRAINZ_ALBUMID`` tag (promoted
+    column + ``external_ids['musicbrainz']``); the discography sync stored what
+    MusicBrainz's browse returns, which is the release GROUP; and this module
+    used to stamp the group onto the promoted column as well.
+
+    The two cannot be told apart by shape — both are uuids — but they CAN be
+    told apart by membership: an id that appears in this artist's browsed
+    release-group list is a group id, full stop. Those move to the group
+    column; everything else is left exactly where it is.
+    """
+    if not group_mbids:
+        return 0
+    rows = cursor.execute(
+        """SELECT al.id, al.musicbrainz_id, al.external_ids,
+                  al.musicbrainz_release_group_id
+             FROM lib2_album_artists aa JOIN lib2_albums al ON al.id = aa.album_id
+            WHERE aa.artist_id = ?""",
+        (artist_id,),
+    ).fetchall()
+    moved = 0
+    for row in rows:
+        external = _external_ids(row["external_ids"])
+        promoted = str(row["musicbrainz_id"] or "").strip()
+        json_value = external.get("musicbrainz", "")
+        group_id = next(
+            (value for value in (promoted, json_value) if value in group_mbids), None)
+        if not group_id:
+            continue
+        # Whichever of the two carried the group id loses it; a genuine release
+        # id in the other one stays.
+        if json_value in group_mbids:
+            external.pop("musicbrainz", None)
+        cursor.execute(
+            f"""UPDATE lib2_albums
+                   SET musicbrainz_id=CASE WHEN ? THEN NULL ELSE musicbrainz_id END,
+                       external_ids=?,
+                       {_RG_COLUMN}=COALESCE(NULLIF({_RG_COLUMN}, ''), ?),
+                       updated_at=CURRENT_TIMESTAMP
+                 WHERE id=?""",
+            (promoted in group_mbids,
+             json.dumps(external, sort_keys=True, separators=(",", ":")),
+             group_id, row["id"]))
+        moved += cursor.rowcount
+        logger.info("Album %s: %s is a release group, not a release — moved to %s",
+                    row["id"], group_id, _RG_COLUMN)
+    return moved
+
+
 def _album_rows(conn: Any, artist_id: int) -> List[Dict[str, Any]]:
     rows = conn.execute(
         """SELECT al.id, al.title, al.album_type, al.origin, al.monitored,
                   al.release_date, al.expected_track_count, al.track_count,
-                  al.musicbrainz_id, al.spotify_id, al.external_ids,
+                  al.musicbrainz_id, al.musicbrainz_release_group_id,
+                  al.spotify_id, al.external_ids,
                   (SELECT COUNT(*) FROM lib2_tracks t WHERE t.album_id = al.id) AS track_rows,
                   (SELECT COUNT(*) FROM lib2_track_files tf
                     JOIN lib2_tracks t2 ON t2.id = tf.track_id
@@ -299,7 +369,7 @@ def reconcile_artist_release_groups(database: Any, artist_id: int, *,
     """Assign MB release-group MBIDs to one artist's albums and fold rows
     that share a group. Returns stats; safe to re-run (idempotent)."""
     stats: Dict[str, Any] = {
-        "assigned": 0, "merged": 0, "review": 0,
+        "assigned": 0, "merged": 0, "review": 0, "renamespaced": 0,
         "release_groups": 0, "skipped": None,
     }
     conn = database._get_connection()
@@ -329,15 +399,18 @@ def reconcile_artist_release_groups(database: Any, artist_id: int, *,
 
         by_title: Dict[str, List[Dict[str, Any]]] = {}
         by_date: Dict[str, List[Dict[str, Any]]] = {}
+        group_mbids = set()
         for group in groups:
             if not group.get("id") or not group.get("title"):
                 continue
+            group_mbids.add(str(group["id"]))
             by_title.setdefault(release_title_key(group["title"]), []).append(group)
             date = _full_date(group.get("first-release-date"))
             if date:
                 by_date.setdefault(date, []).append(group)
 
         cursor = conn.cursor()
+        stats["renamespaced"] = _renamespace_group_ids(cursor, artist_id, group_mbids)
         albums = _album_rows(conn, artist_id)
         # Track counts already claiming each RG (pre-existing + title pass) —
         # the date fallback below must stay count-compatible with them, or a
@@ -345,28 +418,28 @@ def reconcile_artist_release_groups(database: Any, artist_id: int, *,
         # steal the day's only release group.
         holder_counts: Dict[str, List[Optional[int]]] = {}
         for album in albums:
-            if album["musicbrainz_id"]:
+            if album[_RG_COLUMN]:
                 holder_counts.setdefault(
-                    str(album["musicbrainz_id"]), []).append(_expected_count(album))
+                    str(album[_RG_COLUMN]), []).append(_expected_count(album))
 
         def _assign(album: Dict[str, Any], rg_mbid: str) -> None:
             cursor.execute(
-                "UPDATE lib2_albums SET musicbrainz_id=?, updated_at=CURRENT_TIMESTAMP "
-                "WHERE id=? AND (musicbrainz_id IS NULL OR musicbrainz_id='')",
+                f"UPDATE lib2_albums SET {_RG_COLUMN}=?, updated_at=CURRENT_TIMESTAMP "
+                f"WHERE id=? AND ({_RG_COLUMN} IS NULL OR {_RG_COLUMN}='')",
                 (rg_mbid, album["id"]))
             if cursor.rowcount:
                 stats["assigned"] += 1
-                album["musicbrainz_id"] = rg_mbid
+                album[_RG_COLUMN] = rg_mbid
                 holder_counts.setdefault(rg_mbid, []).append(_expected_count(album))
 
         for album in albums:
-            if album["musicbrainz_id"]:
+            if album[_RG_COLUMN]:
                 continue
             rg_mbid = _match_by_title(album, by_title)
             if rg_mbid:
                 _assign(album, rg_mbid)
         for album in albums:
-            if album["musicbrainz_id"]:
+            if album[_RG_COLUMN]:
                 continue
             rg_mbid = _match_by_date(album, by_date)
             if not rg_mbid:
@@ -380,8 +453,8 @@ def reconcile_artist_release_groups(database: Any, artist_id: int, *,
 
         shared: Dict[str, List[Dict[str, Any]]] = {}
         for album in _album_rows(conn, artist_id):
-            if album["musicbrainz_id"]:
-                shared.setdefault(str(album["musicbrainz_id"]), []).append(album)
+            if album[_RG_COLUMN]:
+                shared.setdefault(str(album[_RG_COLUMN]), []).append(album)
 
         for rg_mbid, members in shared.items():
             if len(members) < 2:

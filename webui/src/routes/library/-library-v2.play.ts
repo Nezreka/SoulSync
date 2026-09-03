@@ -22,7 +22,7 @@
  * truth that can disagree with the one on screen.
  */
 
-import type { LibraryV2ArtistTrackFile } from './-library-v2.api';
+import type { LibraryV2ArtistPlaybackFile } from './-library-v2.api';
 import type { LibraryV2AlbumDetail, LibraryV2Track } from './-library-v2.types';
 
 export interface PlayQueueRow {
@@ -106,9 +106,13 @@ export function albumQueueRows(
     });
 }
 
-/** Queue rows for everything an artist owns, album by album. */
+/** Queue rows for everything an artist owns, album by album.
+ *
+ *  Fed by the credit-scoped play-queue endpoint, so a release the artist only
+ *  guests on is here too — and each row carries the artist actually credited
+ *  on that track, which on a compilation is not the artist whose page this is. */
 export function artistQueueRows(
-  files: LibraryV2ArtistTrackFile[],
+  files: LibraryV2ArtistPlaybackFile[],
   artistName: string,
 ): PlayQueueRow[] {
   // The Files tab lists every physical copy, so a lossless master and its
@@ -116,7 +120,7 @@ export function artistQueueRows(
   // plays the same song twice. Keep one file per track, preferring the primary
   // and otherwise the first that turns up, so a track whose only copy is not
   // flagged primary is still played rather than silently dropped.
-  const perTrack = new Map<number, LibraryV2ArtistTrackFile>();
+  const perTrack = new Map<number, LibraryV2ArtistPlaybackFile>();
   for (const file of files) {
     if (!isPlayable(file)) continue;
     const held = perTrack.get(file.track_id);
@@ -135,17 +139,17 @@ export function artistQueueRows(
         lib2_track_id: file.track_id,
         legacy_track_id: null,
         server_track_id: null,
-        lib2_artist_id: null,
+        lib2_artist_id: file.artist_id ?? null,
         title,
         name: title,
-        artist: artistName,
+        artist: file.artist_name || artistName,
         album: file.album_title || 'Unknown Album',
         file_path: file.path,
         is_library: true as const,
-        image_url: null,
+        image_url: file.album_image_url ?? null,
         format: file.format ?? null,
         bitrate: file.bitrate ?? null,
-        duration: null,
+        duration: file.duration ?? null,
         track_number: file.track_number ?? null,
         disc_number: file.disc_number ?? null,
       };

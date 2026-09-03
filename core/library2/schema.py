@@ -98,7 +98,8 @@ CREATE TABLE IF NOT EXISTS lib2_albums (
     release_date TEXT,
     year INTEGER,
     spotify_id TEXT,
-    musicbrainz_id TEXT,
+    musicbrainz_id TEXT,                              -- MB *release* id, same namespace as lib2_release_editions.musicbrainz_id
+    musicbrainz_release_group_id TEXT,                -- MB *release group*: the level several pressings share (core/library2/mb_reconcile.py)
     external_ids TEXT NOT NULL DEFAULT '{}',
     enrichment TEXT NOT NULL DEFAULT '{}',            -- provider-keyed payload (lastfm stats/wiki, discogs release detail, bandcamp)
     image_url TEXT,
@@ -536,6 +537,18 @@ _ADDED_COLUMNS = (
     # instead of guessing from the outside.
     ("lib2_artists", "soul_id_path",
      "ALTER TABLE lib2_artists ADD COLUMN soul_id_path TEXT"),
+    # A release and a release GROUP are different MusicBrainz entities with
+    # different ids, and lib2_albums.musicbrainz_id had been asked to hold
+    # both: the importer and the embedded-tag reconcile write the concrete
+    # release id a file's MUSICBRAINZ_ALBUMID tag carries (the same namespace
+    # lib2_release_editions.musicbrainz_id uses), while mb_reconcile wrote the
+    # release-group id it browses. Mixing them meant a tagged album was skipped
+    # by the reconcile, grouping compared ids that could never match, and the
+    # "open on MusicBrainz" link resolved a group id under /release/. The group
+    # gets its own column; mb_reconcile moves any group id it recognises out of
+    # the release column on its next run.
+    ("lib2_albums", "musicbrainz_release_group_id",
+     "ALTER TABLE lib2_albums ADD COLUMN musicbrainz_release_group_id TEXT"),
 )
 
 
@@ -1034,6 +1047,14 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
                        "ON lib2_tracks(album_soul_id)")
     except Exception as e:  # noqa: BLE001
         logger.error("soul_id index failed (will retry next start): %s", e)
+    # Release-group MBID. Same placement rule: the column arrives in the
+    # additive migration above, so it cannot be declared in ``_INDEXES``.
+    # mb_reconcile groups an artist's albums by this value on every run.
+    try:
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_lib2_albums_rg_mbid "
+                       "ON lib2_albums(musicbrainz_release_group_id)")
+    except Exception as e:  # noqa: BLE001
+        logger.error("release-group index failed (will retry next start): %s", e)
     # Multi-file primary model (audit P1-07 / ADR-03): elect a primary where
     # missing, repair accidental extras, and keep the invariant via triggers
     # so every write path participates without changes.

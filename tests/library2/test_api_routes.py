@@ -2140,6 +2140,55 @@ def test_track_files_endpoint_404s_for_unknown_artist(api):
     assert resp.status_code == 404
 
 
+def test_play_queue_endpoint_is_credit_scoped(api):
+    """The artist Play button's own endpoint: it follows track CREDITS, so a
+    release the artist only guests on is queued too — the Files-tab endpoint
+    above is scoped to albums whose primary artist is this one and drops it."""
+    client, db, ids = api
+    with _conn(db) as conn:
+        host = conn.execute(
+            "INSERT INTO lib2_artists(name) VALUES('Somebody Else')").lastrowid
+        album = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Their Record')",
+            (host,)).lastrowid
+        track = conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, track_number) "
+            "VALUES(?, 'Guest Spot', 1)", (album,)).lastrowid
+        conn.execute(
+            "INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+            "VALUES(?, ?, 'primary', 0)", (track, host))
+        conn.execute(
+            "INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+            "VALUES(?, ?, 'featured', 1)", (track, ids["artist"]))
+        conn.execute(
+            "INSERT INTO lib2_track_files(track_id, path, format) "
+            "VALUES(?, '/m/guest-spot.flac', 'flac')", (track,))
+        conn.commit()
+
+    resp = client.get(f"/api/library/v2/artists/{ids['artist']}/play-queue").get_json()
+    assert resp["success"] is True
+    paths = {f["path"] for f in resp["files"]}
+    assert "/m/guest-spot.flac" in paths
+    guest_row = next(f for f in resp["files"] if f["path"] == "/m/guest-spot.flac")
+    assert guest_row["artist_name"] == "Somebody Else"
+    # ...and the Files tab still answers its own, narrower question.
+    files = client.get(
+        f"/api/library/v2/artists/{ids['artist']}/track-files").get_json()
+    assert "/m/guest-spot.flac" not in {f["path"] for f in files["files"]}
+
+
+def test_play_queue_endpoint_404s_for_unknown_artist(api):
+    client, _db, _ids = api
+    assert client.get("/api/library/v2/artists/999999/play-queue").status_code == 404
+
+
+def test_play_queue_endpoint_rejects_a_bad_page(api):
+    client, _db, ids = api
+    assert client.get(
+        f"/api/library/v2/artists/{ids['artist']}/play-queue?limit=9000"
+    ).status_code == 400
+
+
 def test_track_file_primary_endpoint_persists_manual_choice(api):
     client, db, ids = api
     with _conn(db) as conn:

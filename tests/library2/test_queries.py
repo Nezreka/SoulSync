@@ -291,6 +291,95 @@ def test_list_artist_track_files_scopes_paginates_and_excludes_deleted(imported_
     assert filtered[0]["track_title"] == "Track 2"
 
 
+def test_play_queue_follows_credits_and_names_each_track_artist(imported_conn):
+    """The artist Play button asks a different question than the Files tab.
+
+    ``list_artist_track_files`` is scoped to albums whose PRIMARY artist is this
+    one, deliberately, so a Manage-Track-Files selection matches what the delete
+    preview sees. The artist PAGE shows releases reached through track credits
+    too, so a play queue built from the Files-tab scope silently omits exactly
+    those songs — and labels the rest with the page's artist."""
+    guest_id = imported_conn.execute(
+        "INSERT INTO lib2_artists(name) VALUES('Guest Artist')").lastrowid
+    host_id = imported_conn.execute(
+        "INSERT INTO lib2_artists(name) VALUES('Host Artist')").lastrowid
+
+    own_album = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Their Own Record')",
+        (guest_id,)).lastrowid
+    own_track = imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number, duration) "
+        "VALUES(?, 'Own Song', 1, 200000)", (own_album,)).lastrowid
+    imported_conn.execute(
+        "INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+        "VALUES(?, ?, 'primary', 0)", (own_track, guest_id))
+    imported_conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path, format, file_state, is_primary) "
+        "VALUES(?, '/music/own.flac', 'flac', 'active', 1)", (own_track,))
+
+    # A record by someone else that this artist is only credited ON.
+    other_album = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, image_url) "
+        "VALUES(?, 'Somebody Else Record', '/art/else.jpg')", (host_id,)).lastrowid
+    feature = imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number) "
+        "VALUES(?, 'The Feature', 1)", (other_album,)).lastrowid
+    imported_conn.execute(
+        "INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+        "VALUES(?, ?, 'primary', 0)", (feature, host_id))
+    imported_conn.execute(
+        "INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+        "VALUES(?, ?, 'featured', 1)", (feature, guest_id))
+    imported_conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path, format, file_state, is_primary) "
+        "VALUES(?, '/music/feature.flac', 'flac', 'active', 1)", (feature,))
+    imported_conn.commit()
+
+    files, total = Q.list_artist_playback_files(imported_conn, guest_id, limit=500)
+    by_path = {f["path"]: f for f in files}
+    assert total == 2
+    # The Files-tab scope sees only the first of these.
+    assert set(by_path) == {"/music/own.flac", "/music/feature.flac"}
+    assert Q.list_artist_track_files(imported_conn, guest_id, limit=500)[1] == 1
+
+    # Each row names the artist actually credited on that track.
+    assert by_path["/music/own.flac"]["artist_name"] == "Guest Artist"
+    assert by_path["/music/feature.flac"]["artist_name"] == "Host Artist"
+    assert by_path["/music/feature.flac"]["artist_id"] == host_id
+    assert by_path["/music/feature.flac"]["album_image_url"] == "/art/else.jpg"
+    assert by_path["/music/own.flac"]["duration"] == 200000
+
+
+def test_play_queue_keeps_one_file_per_track(imported_conn):
+    """A lossless master and its retained lossy companion are ONE recording.
+
+    Deduping here rather than in the client is what makes pagination safe: the
+    two copies can land on different pages, where no client can see both."""
+    artist_id = imported_conn.execute(
+        "INSERT INTO lib2_artists(name) VALUES('Retained Copies')").lastrowid
+    album_id = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Record')",
+        (artist_id,)).lastrowid
+    track_id = imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?, 'Song', 1)",
+        (album_id,)).lastrowid
+    imported_conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path, format, file_state, is_primary) "
+        "VALUES(?, '/music/song.flac', 'flac', 'active', 1)", (track_id,))
+    imported_conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path, format, file_state, is_primary) "
+        "VALUES(?, '/music/song.mp3', 'mp3', 'active', 0)", (track_id,))
+    # ...and a deleted copy is not playable at all.
+    imported_conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path, format, file_state, is_primary) "
+        "VALUES(?, '/music/gone.flac', 'flac', 'deleted', 0)", (track_id,))
+    imported_conn.commit()
+
+    files, total = Q.list_artist_playback_files(imported_conn, artist_id, limit=500)
+    assert total == 1
+    assert [f["path"] for f in files] == ["/music/song.flac"]
+
+
 def test_artist_index_and_detail_query_counts_do_not_scale_with_rows(imported_conn):
     def select_count(call):
         statements = []

@@ -156,4 +156,59 @@ def write_provider_enrichment(
         f"UPDATE {table} SET updated_at=CURRENT_TIMESTAMP WHERE id=?", (entity_id,))
 
 
-__all__ = ["write_provider_enrichment"]
+def claim_provider_id(conn, *, entity_type: str, entity_id: int, service: str,
+                      provider_id: Any) -> bool:
+    """Write one provider id ONLY while the row still has none. Returns whether
+    this call is the one that landed it.
+
+    ``write_provider_enrichment`` writes outright, which is right for a worker
+    reporting the answer it just fetched. A gap-fill is a different operation:
+    it says "if nobody knows this id, here is one from a file's tags" — and
+    read-then-write cannot express that across connections. An enrichment
+    worker running concurrently can settle the same entity in the window
+    between the read and the write, and the outright write then replaces a
+    freshly matched id with a tag that may be years old.
+
+    So the guard lives in the statement, exactly as the legacy tables' guarded
+    ``UPDATE ... WHERE id-column IS NULL OR ''`` did. Emptiness is tested the
+    way :func:`core.library2.worker_support.stored_provider_id` reads it —
+    promoted column first, then the ``external_ids`` key — because a claim that
+    used a narrower definition would overwrite an id stored only as JSON.
+    """
+    from .provider_ids import external_id_sql, normalize_provider_name
+
+    entity = _entity(entity_type)
+    table = _TABLES[entity]
+    key = normalize_provider_name(service)
+    if not key:
+        raise ValueError(f"service is required: {service!r}")
+    value = str(provider_id or "").strip()
+    if not value:
+        return False
+    entity_id = int(entity_id)
+
+    # json_extract/json_set both raise on a malformed column, and a row whose
+    # external_ids somehow is not JSON must be claimable, not fatal.
+    valid_json = ("CASE WHEN json_valid(COALESCE(NULLIF(external_ids, ''), '{}')) "
+                  "THEN COALESCE(NULLIF(external_ids, ''), '{}') ELSE '{}' END")
+    json_guard = f"COALESCE({external_id_sql(valid_json, key)}, '') = ''"
+    promoted = _PROMOTED.get(key)
+    if promoted and promoted not in _columns(conn, table):
+        promoted = None
+    promoted_guard = f" AND COALESCE({promoted}, '') = ''" if promoted else ""
+    promoted_set = f", {promoted}=?" if promoted else ""
+    params = [value]
+    if promoted:
+        params.append(value)
+    params.append(entity_id)
+
+    cursor = conn.execute(
+        f"""UPDATE {table}
+               SET external_ids=json_set({valid_json}, '$.{key}', ?){promoted_set},
+                   updated_at=CURRENT_TIMESTAMP
+             WHERE id=? AND {json_guard}{promoted_guard}""",
+        params)
+    return bool(cursor.rowcount)
+
+
+__all__ = ["write_provider_enrichment", "claim_provider_id"]

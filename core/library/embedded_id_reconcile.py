@@ -26,6 +26,13 @@ Split into a PURE planning layer and a thin DB apply layer:
   Columns are introspected first so a schema version missing a provider's
   columns is skipped, not errored.
 
+The Library-v2 path (:func:`_reconcile_library2`) keeps both properties with
+lib2's own writers: ``claim_provider_id`` carries the same "only while empty"
+guard into one statement, and the artist a file's ``*_artist_id`` tag names is
+resolved through ``lib2_track_artists`` — that tag describes who performed the
+TRACK, so on a compilation or a featured track it is not the album's primary
+artist and must not be written there.
+
 Scope note: the MusicBrainz *recording* (track) ID is intentionally not
 reconciled — on ID3 it lives in a ``UFID`` frame the shared reader
 doesn't surface and the Vorbis ``musicbrainz_trackid`` convention is
@@ -126,6 +133,22 @@ def _clean(value: Any) -> Optional[str]:
     return s or None
 
 
+def _single_value(value: Any) -> Optional[str]:
+    """One embedded tag value, or None when the tag holds a LIST.
+
+    ``read_embedded_tags`` flattens a multi-valued frame by joining it with
+    ``", "``, which is exactly what a featured-artist file does to
+    ``musicbrainz_artistid``: "A feat. B" carries both performers' ids. None of
+    the fields this module fills can hold two ids, so a joined value is not a
+    smaller version of the answer — it is a different kind of value, and
+    storing it would write an id no provider will ever resolve.
+    """
+    text = _clean(value)
+    if text is None or ", " in text:
+        return None
+    return text
+
+
 def plan_reconcile(
     embedded_tags: Optional[Dict[str, Any]],
     current_ids: Optional[Dict[str, Dict[str, Any]]],
@@ -151,7 +174,7 @@ def plan_reconcile(
     queued: Dict[tuple, str] = {}  # (entity, id_col) already queued this pass
 
     for embedded_key, entity, id_col, status_col in _RECONCILE_FIELDS:
-        new_val = _clean(tags.get(embedded_key))
+        new_val = _single_value(tags.get(embedded_key))
         if not new_val:
             continue
 
@@ -307,7 +330,7 @@ def _reconcile_library2(conn, read_tags, track_ids, page_size, on_progress,
     """Native counterpart of :func:`reconcile_library` for the lib2 catalogue."""
     from core.library2.provider_attempts import record_attempt
     from core.library2.worker_support import stored_provider_id
-    from core.library2.provider_writes import write_provider_enrichment
+    from core.library2.provider_writes import claim_provider_id
 
     totals = ReconcileTotals()
     cur = conn.cursor()
@@ -338,7 +361,15 @@ def _reconcile_library2(conn, read_tags, track_ids, page_size, on_progress,
             if by_server else page
         )
         rows = cur.execute(f"""
-            SELECT t.id, t.album_id, al.primary_artist_id AS artist_id, t.title,
+            SELECT t.id, t.album_id, t.title,
+                   al.primary_artist_id AS album_artist_id,
+                   -- The artist an `*_artist_id` tag names is the one who
+                   -- PERFORMED this track, which on a compilation or a
+                   -- featured track is not the album's primary artist.
+                   (SELECT ta.artist_id FROM lib2_track_artists ta
+                     WHERE ta.track_id=t.id
+                     ORDER BY CASE WHEN ta.role='primary' THEN 0 ELSE 1 END,
+                              ta.position, ta.artist_id LIMIT 1) AS credit_artist_id,
                    (SELECT f.path FROM lib2_track_files f WHERE f.track_id=t.id
                      AND COALESCE(f.file_state,'active')<>'deleted'
                      ORDER BY f.is_primary DESC, f.id LIMIT 1) AS file_path
@@ -353,21 +384,36 @@ def _reconcile_library2(conn, read_tags, track_ids, page_size, on_progress,
                 if not tags:
                     totals.unreadable += 1
                     continue
-                entity_ids = {'track': row['id'], 'album': row['album_id'],
-                              'artist': row['artist_id']}
+                entity_ids = {
+                    'track': row['id'],
+                    'album': row['album_id'],
+                    # Fall back to the album's artist only where the track has
+                    # no credit of its own; a row with credits is answered by
+                    # them, so the guest on someone else's record can no longer
+                    # stamp their provider id onto the album artist.
+                    'artist': row['credit_artist_id'] or row['album_artist_id'],
+                }
                 for tag, entity, _column, status_column in _RECONCILE_FIELDS:
-                    value = _clean(tags.get(tag))
+                    value = _single_value(tags.get(tag))
                     if not value:
                         continue
                     service = status_column.removesuffix('_match_status')
                     entity_id = entity_ids[entity]
+                    if entity_id is None:
+                        continue
                     existing = stored_provider_id(conn, entity, entity_id, service)
                     if existing:
                         totals.conflicts += int(existing != value)
                         continue
-                    write_provider_enrichment(
-                        conn, entity_type=entity, entity_id=entity_id,
-                        service=service, provider_id=value)
+                    # Guarded write, not a plain one: an enrichment worker may
+                    # have settled this entity between the read above and now,
+                    # and a gap-fill must never replace what it found.
+                    if not claim_provider_id(conn, entity_type=entity,
+                                             entity_id=entity_id, service=service,
+                                             provider_id=value):
+                        winner = stored_provider_id(conn, entity, entity_id, service)
+                        totals.conflicts += int(bool(winner) and winner != value)
+                        continue
                     record_attempt(conn, entity_type=entity, entity_id=entity_id,
                                    service=service, status='matched')
                     totals.ids_filled += 1

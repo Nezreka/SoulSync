@@ -48,6 +48,7 @@ import {
   fetchLibraryV2ArtistSettings,
   fetchLibraryV2MatchArtistReleases,
   fetchLibraryV2Artists,
+  fetchLibraryV2ArtistPlaybackFiles,
   fetchLibraryV2ArtistTrackFiles,
   fetchLibraryV2Duplicates,
   fetchLibraryV2FileDeletePreview,
@@ -436,7 +437,7 @@ function retentionQualityInfo(file: LibraryV2TrackFile): { label: string; title:
       acquired.sample_rate
         ? `${Number((acquired.sample_rate / 1000).toFixed(acquired.sample_rate % 1000 === 0 ? 0 : 1))}kHz`
         : null,
-      acquired.bitrate ? `${bitrateKbps(acquired.bitrate)} kbps` : null,
+      acquired.bitrate ? `${bitrateKbps(acquired.bitrate, acquired.format)} kbps` : null,
     ].filter(Boolean);
     if (acquiredParts.length === 0) return null;
     const transformLabel =
@@ -10002,8 +10003,9 @@ export function AlbumPlayButton({
 
 /** Play everything the artist owns, album by album.
  *
- *  Reads the flat track-file list the Files tab uses rather than walking each
- *  album: one request instead of one per release. It is paginated, so this
+ *  Reads a flat, credit-scoped file list rather than walking each album: one
+ *  request instead of one per release, and it covers the releases the artist
+ *  only guests on the same way the page above does. It is paginated, so this
  *  caps at the first pages — a queue is something you listen to, not an
  *  export, and an unbounded fetch on a 900-album artist would stall the click. */
 export function ArtistPlayButton({
@@ -10028,10 +10030,10 @@ export function ArtistPlayButton({
         void (async () => {
           try {
             const collected: Awaited<
-              ReturnType<typeof fetchLibraryV2ArtistTrackFiles>
+              ReturnType<typeof fetchLibraryV2ArtistPlaybackFiles>
             >['files'] = [];
             for (let page = 1; page <= ARTIST_PLAY_MAX_PAGES; page += 1) {
-              const batch = await fetchLibraryV2ArtistTrackFiles(artistId, { page, limit: 100 });
+              const batch = await fetchLibraryV2ArtistPlaybackFiles(artistId, { page, limit: 100 });
               collected.push(...batch.files);
               if (page >= (batch.pagination?.total_pages ?? 1)) break;
             }

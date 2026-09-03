@@ -158,15 +158,16 @@ describe('ArtistPlayButton', () => {
       },
     ];
     let call = 0;
+    const asked: string[] = [];
     vi.stubGlobal(
       'fetch',
-      vi.fn(
-        async () =>
-          new Response(JSON.stringify(pages[call++] ?? pages[1]), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          }),
-      ),
+      vi.fn(async (input: RequestInfo | URL) => {
+        asked.push(String((input as Request).url ?? input));
+        return new Response(JSON.stringify(pages[call++] ?? pages[1]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
     );
 
     renderWithQuery(<ArtistPlayButton artistId={7} artistName="Aphex Twin" />);
@@ -176,6 +177,9 @@ describe('ArtistPlayButton', () => {
     const [rows, context] = (window.playTrackList as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(context).toBe('Aphex Twin');
     expect((rows as Array<{ title: string }>).map((r) => r.title)).toEqual(['Xtal', 'Tha']);
+    // Not the Manage-Track-Files endpoint: that one is scoped to albums whose
+    // PRIMARY artist is this one, so it drops every guest credit the page shows.
+    expect(asked.every((url) => url.includes('/play-queue'))).toBe(true);
   });
 
   it('reports an empty library instead of an empty queue', async () => {

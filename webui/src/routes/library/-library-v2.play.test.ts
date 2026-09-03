@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { LibraryV2ArtistTrackFile } from './-library-v2.api';
+import type { LibraryV2ArtistPlaybackFile } from './-library-v2.api';
 import { albumQueueRows, artistQueueRows } from './-library-v2.play';
 import type { LibraryV2AlbumDetail, LibraryV2Track } from './-library-v2.types';
 
@@ -177,24 +177,25 @@ describe('albumQueueRows', () => {
 });
 
 describe('artistQueueRows', () => {
-  const file = (over: Partial<LibraryV2ArtistTrackFile> = {}): LibraryV2ArtistTrackFile => ({
+  const file = (
+    over: Partial<LibraryV2ArtistPlaybackFile> = {},
+  ): LibraryV2ArtistPlaybackFile => ({
     file_id: 1,
     track_id: 100,
     track_title: 'Xtal',
     track_number: 1,
     disc_number: 1,
+    duration: 292000,
     album_id: 5,
     album_title: 'Selected Ambient Works',
+    album_image_url: '/art/saw.jpg',
+    artist_id: 7,
+    artist_name: 'Aphex Twin',
     path: '/music/x.flac',
-    size: null,
     format: 'FLAC',
     bitrate: 900,
-    sample_rate: null,
-    bit_depth: null,
-    quality_tier: null,
     file_state: 'active',
     is_primary: true,
-    added_at: null,
     ...over,
   });
 
@@ -235,5 +236,42 @@ describe('artistQueueRows', () => {
   it('leaves out a file the catalogue no longer counts as present', () => {
     const rows = artistQueueRows([file({ file_state: 'deleted' })], 'Aphex Twin');
     expect(rows).toEqual([]);
+  });
+
+  it("names each track's own credit, not the page's artist", () => {
+    // A compilation this artist appears on: labelling every row with the page
+    // artist claims they performed songs they did not.
+    const [own, guest] = artistQueueRows(
+      [
+        file({ track_id: 1 }),
+        file({
+          track_id: 2,
+          album_id: 9,
+          album_title: 'Various: Artificial Intelligence',
+          artist_id: 12,
+          artist_name: 'Autechre',
+        }),
+      ],
+      'Aphex Twin',
+    );
+    expect(own.artist).toBe('Aphex Twin');
+    expect(own.lib2_artist_id).toBe(7);
+    expect(guest.artist).toBe('Autechre');
+    // "Go to artist" from the queue must reach whoever actually made it.
+    expect(guest.lib2_artist_id).toBe(12);
+  });
+
+  it('falls back to the page artist when a row carries no credit', () => {
+    const [row] = artistQueueRows(
+      [file({ artist_id: null, artist_name: null })],
+      'Aphex Twin',
+    );
+    expect(row.artist).toBe('Aphex Twin');
+    expect(row.lib2_artist_id).toBeNull();
+  });
+
+  it('carries the release artwork into the queue', () => {
+    const [row] = artistQueueRows([file()], 'Aphex Twin');
+    expect(row.image_url).toBe('/art/saw.jpg');
   });
 });

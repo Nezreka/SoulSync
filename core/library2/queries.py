@@ -760,6 +760,111 @@ def list_artist_track_files(conn, artist_id: int, *, search: str = "",
     return files, total
 
 
+def list_artist_playback_files(conn, artist_id: int, *, page: int = 1,
+                               limit: int = 100
+                               ) -> Tuple[List[Dict[str, Any]], int]:
+    """Paginated play queue for one artist: one playable file per track.
+
+    Deliberately NOT ``list_artist_track_files``. That one answers "which files
+    does this artist's Manage-Track-Files selection cover", and its scope is
+    ``lib2_albums.primary_artist_id`` on purpose, so a selection lines up with
+    what the ADR-05 delete preview will see. Playback asks a different
+    question: ``get_artist`` shows a release the artist only guests on — it
+    reaches it through ``lib2_track_artists`` — and a Play button that omitted
+    those songs would contradict the page it sits on.
+
+    Each row also carries the track's OWN primary credit. Without it a
+    compilation queue labels every song with the page's artist, which is wrong
+    on exactly the releases this scope was widened to include.
+
+    One file per track (primary first, then quality) is done here rather than
+    left to the caller: a lossless master and its retained lossy companion are
+    two rows for ONE recording, and pagination would otherwise split the pair
+    across pages where no client-side dedupe can see both.
+    """
+    from core.library2.artist_aliases import resolve_alias_group
+    from core.library2.track_files import primary_order
+
+    page = max(1, int(page))
+    limit = max(1, min(int(limit), 500))
+    offset = (page - 1) * limit
+    artist_ids = resolve_alias_group(conn, artist_id)
+    marks = ",".join("?" for _ in artist_ids)
+    params = [*artist_ids, *artist_ids]
+
+    scope = f"""
+        WITH scope_tracks AS (
+            SELECT t.id AS track_id
+              FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id
+             WHERE al.primary_artist_id IN ({marks})
+            UNION
+            SELECT ta.track_id
+              FROM lib2_track_artists ta
+             WHERE ta.artist_id IN ({marks})
+        ),
+        ranked AS (
+            SELECT tf.id AS file_id, tf.track_id, tf.path, tf.format, tf.bitrate,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY tf.track_id ORDER BY {primary_order('tf')}
+                   ) AS rank
+              FROM scope_tracks s
+              JOIN lib2_track_files tf ON tf.track_id = s.track_id
+             WHERE COALESCE(tf.file_state, 'active') = 'active'
+               AND COALESCE(tf.path, '') <> ''
+        )"""
+
+    total = conn.execute(
+        f"{scope} SELECT COUNT(*) AS c FROM ranked WHERE rank = 1", params
+    ).fetchone()["c"]
+
+    rows = conn.execute(
+        f"""{scope}
+        SELECT r.file_id, r.track_id, r.path, r.format, r.bitrate,
+               t.title AS track_title, t.track_number, t.disc_number, t.duration,
+               al.id AS album_id, al.title AS album_title,
+               al.image_url AS album_image_url,
+               ar.id AS artist_id, ar.name AS artist_name
+          FROM ranked r
+          JOIN lib2_tracks t ON t.id = r.track_id
+          JOIN lib2_albums al ON al.id = t.album_id
+          LEFT JOIN lib2_artists ar ON ar.id = (
+              SELECT ta.artist_id FROM lib2_track_artists ta
+               WHERE ta.track_id = t.id
+               ORDER BY CASE WHEN ta.role = 'primary' THEN 0 ELSE 1 END,
+                        ta.position, ta.artist_id
+               LIMIT 1)
+         WHERE r.rank = 1
+         ORDER BY al.title, al.id, t.disc_number, t.track_number, t.id
+         LIMIT ? OFFSET ?""",
+        [*params, limit, offset],
+    ).fetchall()
+
+    files = [
+        {
+            "file_id": r["file_id"],
+            "track_id": r["track_id"],
+            "track_title": r["track_title"],
+            "track_number": r["track_number"],
+            "disc_number": r["disc_number"],
+            "duration": r["duration"],
+            "album_id": r["album_id"],
+            "album_title": r["album_title"],
+            "album_image_url": r["album_image_url"],
+            "artist_id": r["artist_id"],
+            "artist_name": r["artist_name"],
+            "path": r["path"],
+            "format": r["format"],
+            "bitrate": r["bitrate"],
+            # The client filters on these the same way it does for the Files
+            # tab; both are already guaranteed by the query above.
+            "file_state": "active",
+            "is_primary": True,
+        }
+        for r in rows
+    ]
+    return files, total
+
+
 def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
     """Artist detail: header + albums and singles grouped separately.
 

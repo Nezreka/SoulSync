@@ -413,3 +413,91 @@ def test_reconcile_library_native_scope_uses_mapping_after_server_switch():
     assert conn.execute(
         "SELECT spotify_id FROM lib2_tracks WHERE id=1"
     ).fetchone()[0] == 'mapped'
+
+
+# ---------------------------------------------------------------------------
+# Whose id is it? — an `*_artist_id` tag names the TRACK's performer
+# ---------------------------------------------------------------------------
+
+def _make_compilation_db():
+    """A Various-Artists compilation: the album artist is not the performer."""
+    conn = sqlite3.connect(':memory:')
+    conn.row_factory = sqlite3.Row
+    ensure_library_v2_schema(conn)
+    cur = conn.cursor()
+    cur.execute("INSERT INTO lib2_artists(id,name) VALUES (1,'Various Artists'),(2,'Real Performer')")
+    cur.execute("INSERT INTO lib2_albums(id,primary_artist_id,title) VALUES (1,1,'A Compilation')")
+    cur.execute("INSERT INTO lib2_tracks(id,album_id,title) VALUES (1,1,'Their Song')")
+    cur.execute("INSERT INTO lib2_track_artists(track_id,artist_id,role,position) "
+                "VALUES (1,2,'primary',0)")
+    cur.execute("INSERT INTO lib2_track_files(track_id,path,is_primary) VALUES (1,'/a.flac',1)")
+    conn.commit()
+    return conn, cur
+
+
+def test_artist_tag_lands_on_the_credited_performer_not_the_album_artist():
+    """The bug this pins: every artist tag was written to the album's primary
+    artist, so the first track of a compilation stamped its performer's MBID
+    onto Various Artists — and marked it matched, so enrichment never
+    corrected it."""
+    conn, cur = _make_compilation_db()
+    totals = reconcile_library(
+        conn, _reader({'/a.flac': {'musicbrainz_artistid': 'PERFORMER-MBID'}}))
+
+    assert totals.ids_filled == 1
+    assert cur.execute(
+        "SELECT musicbrainz_id FROM lib2_artists WHERE id=2").fetchone()[0] == 'PERFORMER-MBID'
+    assert cur.execute(
+        "SELECT musicbrainz_id FROM lib2_artists WHERE id=1").fetchone()[0] is None
+
+
+def test_artist_tag_falls_back_to_the_album_artist_without_credits():
+    conn, cur = _make_compilation_db()
+    cur.execute("DELETE FROM lib2_track_artists")
+    conn.commit()
+
+    reconcile_library(conn, _reader({'/a.flac': {'musicbrainz_artistid': 'ONLY-GUESS'}}))
+
+    assert cur.execute(
+        "SELECT musicbrainz_id FROM lib2_artists WHERE id=1").fetchone()[0] == 'ONLY-GUESS'
+
+
+def test_a_joined_multi_value_tag_is_not_written_as_one_id():
+    """"A feat. B" carries both performers' ids in one frame, and the tag
+    reader joins them with ', '. That string is not an id."""
+    conn, cur = _make_compilation_db()
+    totals = reconcile_library(
+        conn, _reader({'/a.flac': {'musicbrainz_artistid': 'MBID-A, MBID-B'}}))
+
+    assert totals.ids_filled == 0
+    assert cur.execute(
+        "SELECT musicbrainz_id FROM lib2_artists WHERE id=2").fetchone()[0] is None
+
+
+def test_a_worker_that_wins_the_race_keeps_its_id(monkeypatch):
+    """The window the guard closes: an enrichment worker settles the entity
+    between this job's read and its write. The guard is in the statement, so
+    the fill affects no rows instead of replacing a fresher match."""
+    from core.library2 import worker_support
+
+    real = worker_support.stored_provider_id
+    conn, cur = _make_compilation_db()
+    cur.execute("UPDATE lib2_artists SET musicbrainz_id='WORKER-WON' WHERE id=2")
+    conn.commit()
+    # ...but this job read the row a moment earlier, when it was still empty.
+    # Only that FIRST read is stale; everything after it sees the real row.
+    reads = []
+
+    def _stale_once(*args, **kwargs):
+        reads.append(1)
+        return None if len(reads) == 1 else real(*args, **kwargs)
+
+    monkeypatch.setattr(worker_support, 'stored_provider_id', _stale_once)
+
+    totals = reconcile_library(
+        conn, _reader({'/a.flac': {'musicbrainz_artistid': 'STALE-TAG'}}))
+
+    assert totals.ids_filled == 0
+    assert totals.conflicts == 1
+    assert cur.execute(
+        "SELECT musicbrainz_id FROM lib2_artists WHERE id=2").fetchone()[0] == 'WORKER-WON'
