@@ -6096,33 +6096,37 @@ body[data-side="video"] #gsearch-aura {
 [data-video-only] .server-config-container { max-width: 560px; }
 
 /* ── Dashboard system-health strip ─────────────────────────────────────── */
-.vdash-health { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
-/* the [hidden] attr's UA `display:none` loses to the class rule above, leaving an
-   empty flex box + margin — this restores hidden so a healthy strip takes NO space */
-.vdash-health[hidden] { display: none; }
-.vdash-health-chip {
-    padding: 8px 14px; border-radius: 10px; font-size: 12.5px; line-height: 1.45;
-    background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25);
-    color: #f5d9a8;
+/* System health, as symbols in the notification panel header. Health is a STATE,
+   so it sits on a surface you consult rather than in the event history, where
+   reading an entry marks it done and a dismissed warning is one you no longer
+   have. Detail lives behind a click. */
+.notif-health { display: inline-flex; align-items: center; margin-left: auto; }
+.notif-health-btn {
+    display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+    padding: 3px 9px; border-radius: 999px; font: inherit; font-size: 11.5px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.75);
 }
-.vdash-health-chip--error {
-    background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.3); color: #f5b5b5;
-}
-.vdash-health-chip--ok {
-    background: rgba(34, 197, 94, 0.08); border-color: rgba(34, 197, 94, 0.24); color: #b8efc9;
-}
+.notif-health-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.notif-health-btn--error { border-color: rgba(239,68,68,0.45); }
+.notif-health-btn--warning { border-color: rgba(245,158,11,0.45); }
+.notif-health-btn--ok { border-color: rgba(34,197,94,0.32); }
+.notif-health-sym { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.notif-health-sym--error { color: #f5b5b5; }
+.notif-health-sym--warn { color: #f5d9a8; }
+.notif-health-sym--ok { color: #b8efc9; }
 
-/* The healthy checks collapse behind one line. Knowing a source is fine is worth
-   a word, not a paragraph, and a strip of green prose is where a real warning
-   goes to hide. */
-.vdash-health-more {
-    display: block; width: 100%; text-align: left; cursor: pointer;
-    font: inherit; font-size: 12.5px;
+.notif-health-row {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 11px 14px; border-bottom: 1px solid rgba(255,255,255,0.06);
 }
-.vdash-health-more::after { content: ' ⌄'; opacity: 0.6; }
-.vdash-health-more[aria-expanded="true"]::after { content: ' ⌃'; }
-.vdash-health-more:hover { background: rgba(34, 197, 94, 0.14); }
-.vdash-health-detail { display: contents; }
+.notif-health-row:last-child { border-bottom: none; }
+.notif-health-ico { flex: none; font-size: 14px; line-height: 1.5; }
+.notif-health-text { min-width: 0; }
+.notif-health-label { font-size: 13px; font-weight: 700; color: #fff; margin-bottom: 2px; }
+.notif-health-detail { font-size: 12px; line-height: 1.5; color: rgba(255,255,255,0.62); }
+.notif-health-row--error .notif-health-label { color: #f5b5b5; }
+.notif-health-row--warning .notif-health-label { color: #f5d9a8; }
 
 /* ── Import subscriptions (ytdl-sub / Kometa) ─────────────────────────────── */
 .vwlp-import-btn {

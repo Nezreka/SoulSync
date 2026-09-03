@@ -5457,6 +5457,87 @@ function _updateNotifBadge() {
     }
 }
 
+// ── system health, as symbols in the panel header ────────────────────────────
+// Health is a STATE, not an event: "slskd is unreachable" stays true until it is
+// fixed. So it does not belong in the notification history, where reading an
+// entry marks it done and a dismissed warning is a warning you no longer have.
+// It lives in the header of that panel instead — always visible while the panel
+// is open, costing one line, with the detail a click away.
+let _notifHealth = null;
+
+function _notifHealthHTML() {
+    if (!_notifHealth) return '';
+    const checks = _notifHealth.checks || [];
+    if (!checks.length) return '';
+    const n = s => checks.filter(c => c.status === s).length;
+    const bits = [];
+    // Only non-zero counts get a symbol: a "0 problems" badge is noise, and the
+    // green tick already carries that news.
+    if (n('error')) bits.push(`<span class="notif-health-sym notif-health-sym--error">🔴 ${n('error')}</span>`);
+    if (n('warning')) bits.push(`<span class="notif-health-sym notif-health-sym--warn">⚠️ ${n('warning')}</span>`);
+    if (n('ok')) bits.push(`<span class="notif-health-sym notif-health-sym--ok">✓ ${n('ok')}</span>`);
+    const worst = n('error') ? 'error' : n('warning') ? 'warning' : 'ok';
+    return `<button class="notif-health-btn notif-health-btn--${worst}" type="button"
+                onclick="_openHealthModal()" title="System health — click for detail">${bits.join('')}</button>`;
+}
+
+function _seedNotifHealth() {
+    return fetch('/api/video/health', { headers: { Accept: 'application/json' } })
+        .then(r => (r.ok ? r.json() : null))
+        .then(h => {
+            _notifHealth = h;
+            const host = document.querySelector('[data-notif-health]');
+            if (host) host.innerHTML = _notifHealthHTML();
+        })
+        .catch(() => { /* the panel is useful without it */ });
+}
+
+function _closeHealthModal() {
+    const ov = document.getElementById('notif-health-overlay');
+    if (ov) { ov.classList.remove('visible'); setTimeout(() => ov.remove(), 200); }
+}
+
+function _healthRowsHTML() {
+    const checks = (_notifHealth && _notifHealth.checks) || [];
+    if (!checks.length) return '<div class="notif-panel-empty">Nothing to report.</div>';
+    const icons = { error: '\ud83d\udd34', warning: '\u26a0\ufe0f', ok: '\u2713' };
+    const esc = s => String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return checks.map(c => `
+        <div class="notif-health-row notif-health-row--${c.status}">
+            <span class="notif-health-ico">${icons[c.status] || '\u2139\ufe0f'}</span>
+            <div class="notif-health-text">
+                <div class="notif-health-label">${esc(c.label)}</div>
+                <div class="notif-health-detail">${esc(c.detail)}</div>
+            </div>
+        </div>`).join('');
+}
+
+function _openHealthModal() {
+    _closeNotifPanel();
+    _closeHealthModal();
+    const overlay = document.createElement('div');
+    overlay.id = 'notif-health-overlay';
+    overlay.className = 'notif-history-overlay';
+    overlay.innerHTML = `
+        <div class="notif-history-modal">
+            <div class="notif-history-header">
+                <span class="notif-history-title">\ud83e\ude7a System Health</span>
+                <button class="notif-history-close" onclick="_closeHealthModal()">\u2715</button>
+            </div>
+            <div class="notif-history-body" data-notif-health-body>${_healthRowsHTML()}</div>
+        </div>`;
+    overlay.addEventListener('click', e => { if (e.target === overlay) _closeHealthModal(); });
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+    // Re-read on open: the panel may have been sitting there a while, and stale
+    // health is the one thing this modal must not show.
+    return _seedNotifHealth().then(() => {
+        const body = overlay.querySelector('[data-notif-health-body]');
+        if (body) body.innerHTML = _healthRowsHTML();
+    });
+}
+
 function toggleNotifPanel() {
     if (_notifState.panelOpen) {
         _closeNotifPanel();
@@ -5483,6 +5564,7 @@ function _openNotifPanel() {
     panel.innerHTML = `
         <div class="notif-panel-header">
             <span class="notif-panel-title">Notifications</span>
+            <span class="notif-health" data-notif-health>${_notifHealthHTML()}</span>
             <button class="notif-panel-clear" onclick="_openNotifHistory()">History</button>
             ${entries.length > 0 ? '<button class="notif-panel-clear" onclick="_clearNotifHistory()">Clear All</button>' : ''}
         </div>
@@ -5493,6 +5575,7 @@ function _openNotifPanel() {
     `;
 
     document.body.appendChild(panel);
+    _seedNotifHealth();   // system health symbols (see _notifHealthHTML)
     _seedNotifSys();      // fresh system numbers even when the socket is down
     _seedOverlayTask();   // refresh the Active cards from the server on open (socket keeps them live after)
     _seedCollectionSyncTask();
