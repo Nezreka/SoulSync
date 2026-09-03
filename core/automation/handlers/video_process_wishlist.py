@@ -632,6 +632,37 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
     return cands, "; ".join(source_notes) or None
 
 
+# How many individual releases a snapshot keeps per source. Enough to answer
+# "why didn't this download" without unbounded growth: a busy search returns 180
+# hits and storing them all, per wishlist row, per hour, would be a database of
+# torrent names. Ten is enough to see a pattern.
+AUDIT_SAMPLE_LIMIT = 10
+
+
+def audit_samples(cands, limit: int = AUDIT_SAMPLE_LIMIT) -> List[Dict[str, Any]]:
+    """The individual releases behind a source's verdict, best-first, bounded.
+
+    The summary line ("15 results, none were this release") could not answer WHY
+    any single release lost - twice in one day that meant searching Boulder's
+    live Prowlarr by hand to find out. These are the receipts that make the
+    stored evidence enough on its own. Pure.
+    """
+    out: List[Dict[str, Any]] = []
+    for c in (cands or [])[:max(0, int(limit))]:
+        if not isinstance(c, dict):
+            continue
+        out.append({
+            "title": str(c.get("title") or c.get("filename") or "")[:200],
+            "accepted": bool(c.get("accepted")),
+            # The rule that turned it down, verbatim, so the drawer can group by it.
+            "rejected": (str(c.get("rejected"))[:200] if c.get("rejected") else None),
+            "quality": str(c.get("quality_label") or "")[:60] or None,
+            "source": str(c.get("source") or "")[:20] or None,
+            "seeders": c.get("seeders"),
+        })
+    return out
+
+
 def source_outcome(cands, err=None) -> Dict[str, Any]:
     """One source's result for the last search, as a storable fact.
 
@@ -642,7 +673,7 @@ def source_outcome(cands, err=None) -> Dict[str, Any]:
     of the rest. Pure."""
     if cands is None:
         return {"ran": False, "results": 0, "accepted": 0, "rejected": 0,
-                "reason": err or "search didn't run"}
+                "reason": err or "search didn't run", "samples": []}
     accepted = sum(1 for c in cands if c.get("accepted"))
     rejected = [c for c in cands if not c.get("accepted")]
     reason = None
@@ -653,7 +684,8 @@ def source_outcome(cands, err=None) -> Dict[str, Any]:
         except Exception:   # noqa: BLE001 - a snapshot must never break a search
             reason = None
     return {"ran": True, "results": len(cands), "accepted": accepted,
-            "rejected": len(rejected), "reason": reason}
+            "rejected": len(rejected), "reason": reason,
+            "samples": audit_samples(cands)}
 
 
 def _default_search(item: Dict[str, Any], media_type: str):

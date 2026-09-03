@@ -154,6 +154,39 @@ def register_routes(bp):
             logger.exception("wishlist manual search failed")
             return jsonify({"success": False, "error": "Search failed to start"}), 500
 
+    @bp.route("/wishlist/diagnostics", methods=["GET"])
+    def video_wishlist_diagnostics():
+        """Everything known about ONE stuck row, in one call.
+
+        The row's tooltip could say how often it had been searched and the
+        headline refusal. It could not say where the file would land, which
+        external ids the search was keyed on, whether something was already
+        downloading, or WHY any individual release lost - which is what turns
+        "why is this stuck" from a guess into an answer.
+        """
+        from . import get_video_db
+        kind = str(request.args.get("kind") or "").lower()
+        if kind not in ("movie", "episode"):
+            return jsonify({"success": False, "error": "kind must be movie|episode"}), 400
+        try:
+            tmdb_id = int(request.args.get("tmdb_id"))
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "tmdb_id required"}), 400
+
+        def _opt(name):
+            v = request.args.get(name)
+            try:
+                return int(v) if v not in (None, "") else None
+            except (TypeError, ValueError):
+                return None
+
+        data = get_video_db().wishlist_row_diagnostics(
+            kind, tmdb_id, season_number=_opt("season_number"),
+            episode_number=_opt("episode_number"))
+        if not data.get("row"):
+            return jsonify({"success": False, "error": "No such wishlist row."}), 404
+        return jsonify({"success": True, **data})
+
     @bp.route("/wishlist/retry", methods=["POST"])
     def video_wishlist_retry_all_sources():
         """User-forced retry for a stale row: clear backoff/evidence and search every source."""

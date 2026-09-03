@@ -3470,6 +3470,73 @@ class VideoDatabase:
     # is showing what TMDB knew last time anyone asked.
     SCHEDULE_STALE_DAYS = 7
 
+    def wishlist_row_diagnostics(self, kind: str, tmdb_id, *, season_number=None,
+                                 episode_number=None) -> dict:
+        """Everything known about ONE stuck wishlist row, in one read.
+
+        The row's own tooltip could say how many times it had been searched and
+        the headline refusal. It could not say where the file would go, which
+        external ids the search was keyed on, or whether something was already
+        downloading for it — so answering "why is this stuck" meant reading three
+        screens and guessing. This is that answer as one object.
+        """
+        out: dict = {"row": None, "ids": {}, "target_dir": None, "downloads": []}
+        if kind not in ("movie", "episode"):
+            return out
+        conn = self._get_connection()
+        try:
+            where = "kind=? AND tmdb_id=?"
+            args = [str(kind), tmdb_id]
+            if season_number is not None:
+                where += " AND season_number=?"
+                args.append(int(season_number))
+                if episode_number is not None:
+                    where += " AND episode_number=?"
+                    args.append(int(episode_number))
+            r = conn.execute(
+                "SELECT kind, tmdb_id, title, episode_title, season_number, episode_number, "
+                "status, library_id, date_added, air_date, search_attempts, last_search_at, "
+                "last_refusal, last_refusal_quality, search_snapshot, quality_profile_id "
+                "FROM video_wishlist WHERE " + where + " ORDER BY id DESC LIMIT 1",
+                args).fetchone()
+            if not r:
+                return out
+            row = dict(r)
+            try:
+                row["search_snapshot"] = json.loads(row.get("search_snapshot") or "null")
+            except (TypeError, ValueError):
+                row["search_snapshot"] = None
+            out["row"] = row
+
+            # The external ids the search was actually keyed on. A row that is
+            # stuck because it has no tvdb id looks identical to one that is
+            # stuck because nobody seeds it, until you can see this.
+            tbl = "movies" if kind == "movie" else "shows"
+            ids = conn.execute(
+                "SELECT tmdb_id, tvdb_id, imdb_id, id AS library_id FROM %s WHERE tmdb_id=?" % tbl,
+                (tmdb_id,)).fetchone()
+            out["ids"] = dict(ids) if ids else {"tmdb_id": tmdb_id, "tvdb_id": None,
+                                                "imdb_id": None, "library_id": None}
+
+            # Anything already in flight for this title, so a row that looks
+            # stuck but is actually mid-download says so.
+            out["downloads"] = [dict(d) for d in conn.execute(
+                "SELECT id, status, progress, release_title, source, error, created_at "
+                "FROM video_downloads WHERE media_id=? AND status NOT IN "
+                "('completed','cancelled') ORDER BY id DESC LIMIT 5", (str(tmdb_id),))]
+        except sqlite3.Error:
+            logger.exception("wishlist_row_diagnostics failed")
+            return out
+        finally:
+            conn.close()
+
+        try:
+            key = "movies_path" if kind == "movie" else "tv_path"
+            out["target_dir"] = self.get_setting(key) or None
+        except Exception:   # noqa: BLE001 - a diagnostic must never raise
+            out["target_dir"] = None
+        return out
+
     def source_health_snapshot(self, days: int = 7) -> dict:
         """What each download source actually DID lately, read off the receipts
         every wishlist search already stores.
