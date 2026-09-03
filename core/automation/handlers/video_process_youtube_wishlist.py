@@ -313,9 +313,9 @@ def _default_enqueue_alternate(video: Dict[str, Any], best: Dict[str, Any],
     from core.video import disk_guard, organization
     from core.video.download_monitor import ensure_started
     db = get_video_db()
-    ok_room, free = disk_guard.has_room(root, organization.load(db))
-    if not ok_room:
-        return {"ok": False, "error": "Only %.1f GB free on %s" % (free or 0, root)}
+    room = disk_guard.check_room(root, organization.load(db))
+    if not room["ok"]:
+        return {"ok": False, "error": disk_guard.shortfall_message(room, root)}
     source = str(best.get("source") or "soulseek").lower()
     transport_source = "torrent" if source == "extto" else source
     if transport_source == "soulseek":
@@ -367,10 +367,10 @@ def _default_enqueue(video: Dict[str, Any], root: str) -> Any:
     from core.video import disk_guard, organization
     from core.video.sources import resolve_video_server
     db = get_video_db()
-    ok_room, free = disk_guard.has_room(root, organization.load(db))
-    if not ok_room:
-        logger.warning("disk guard: %.1f GB free on %s — not queuing %s",
-                       free or 0, root, video.get("video_title"))
+    room = disk_guard.check_room(root, organization.load(db))
+    if not room["ok"]:
+        logger.warning("disk guard: %s — not queuing %s",
+                       disk_guard.shortfall_message(room, root), video.get("video_title"))
         return None
     ctx = enqueue_ctx(video, db.get_youtube_source_settings(video.get("channel_id")))
     ctx["server_source"] = resolve_video_server()

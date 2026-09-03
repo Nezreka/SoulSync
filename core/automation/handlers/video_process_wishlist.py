@@ -717,11 +717,11 @@ def _default_enqueue(item: Dict[str, Any], best: Dict[str, Any], candidates: Lis
     from core.video.download_monitor import ensure_started
     from core.video.slskd_search import build_query
     name = display_name(item, media_type)
-    ok_room, free = disk_guard.has_room(target_dir, organization.load(get_video_db()))
-    if not ok_room:
-        logger.warning("disk guard: %.1f GB free on %s — skipping grab of %s",
-                       free or 0, target_dir, name)
-        return {"ok": False, "error": "Only %.1f GB free on %s" % (free or 0, target_dir)}
+    room = disk_guard.check_room(target_dir, organization.load(get_video_db()))
+    if not room["ok"]:
+        msg = disk_guard.shortfall_message(room, target_dir)
+        logger.warning("disk guard: %s — skipping grab of %s", msg, name)
+        return {"ok": False, "error": msg}
     source = str(best.get("source") or "soulseek").lower()
     transport_source = "torrent" if source == "extto" else source
     if transport_source == "soulseek":

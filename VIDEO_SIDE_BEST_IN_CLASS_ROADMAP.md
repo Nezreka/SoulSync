@@ -80,7 +80,7 @@ This is the working checklist for making SoulSync's video side feel better than 
 
 - [ ] Add source-health snapshots for Prowlarr, EXT.to/FlareSolverr, qBittorrent, slskd, and YouTube.
 - [ ] Track Prowlarr per-indexer result counts and failures so weak indexers become visible.
-- [ ] Add disk and temp-space guardrails before YouTube and torrent postprocessing starts.
+- [x] Add disk and temp-space guardrails. The guard read only the DESTINATION drive, which is how Boulder lost 18 YouTube downloads to `[Errno 28] No space left on device` while that destination had thirteen terabytes free: the volume the file was being assembled on had 500MB and nothing looked at it. `check_room` now reads both and names WHICH one is short, because "Only 0.5 GB free on H:\Media" about a drive with terabytes spare reads as a SoulSync bug and gets dismissed. Off still means off, an unreadable probe still answers "has room", and one volume is only reported once. Commit: this phase.
 - [ ] Add an import-list setup check for users who want Radarr/Sonarr-like external discovery.
 - [ ] Emit structured acquisition audit events so the UI can explain exactly why an item did or did not download.
 
