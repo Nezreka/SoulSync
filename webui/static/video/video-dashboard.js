@@ -150,7 +150,9 @@
     function _continueCard(it) {
         var pct = _pct(it);
         var left = _remaining(it);
-        var img = it.image_url || it.poster_url || '';
+        // Already a proxy path when there is art at all, and '' when there
+        // is none — the cue to draw a letter tile instead of a dead image.
+        var img = it.image_url || '';
         // An up-next card has no progress to show, so it says what it IS
         // instead. Drawing a 0% bar would read as "stalled".
         var meta = it.reason === 'up_next' ? 'Up next' : left;

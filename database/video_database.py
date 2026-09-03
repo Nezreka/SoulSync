@@ -443,6 +443,22 @@ def youtube_surrogate_id(source_id: str) -> int:
     return int(h[:15], 16)  # 60 bits — comfortably inside SQLite's signed 64-bit INTEGER
 
 
+def _art_url(kind: str, item_id, art: str | None) -> str:
+    """The image-proxy path for a piece of artwork, or '' when there is none.
+
+    Never the stored url. TMDB writes absolute links that load anywhere, but a
+    Plex or Jellyfin scan writes a path relative to a server the browser has no
+    route to - so a rail built from stored urls shows art only for the items
+    that happen to have been enriched, which is exactly how it looked.
+
+    'poster' on an episode is its still: get_art_ref maps the column, so the
+    proxy stays artwork-agnostic.
+    """
+    if not art or not item_id:
+        return ""
+    return "/api/video/%s/%s/%s" % (art, kind, item_id)
+
+
 class VideoDatabase:
     """Connection + schema manager for the isolated video library DB."""
 
@@ -2988,8 +3004,13 @@ class VideoDatabase:
                     "kind": "movie", "reason": "in_progress",
                     "id": r["id"], "tmdb_id": r["tmdb_id"],
                     "title": r["title"], "subtitle": str(r["year"] or ""),
-                    "image_url": r["backdrop_url"] or r["poster_url"],
-                    "poster_url": r["poster_url"],
+                    # The PROXY path, never the stored one. A TMDB url is
+                    # absolute and loads anywhere; a Plex/Jellyfin path is
+                    # relative to a server the browser cannot reach, so half the
+                    # rail came up blank depending on which had been enriched.
+                    "image_url": _art_url("movie", r["id"], "backdrop"
+                                          if r["backdrop_url"] else "poster"
+                                          if r["poster_url"] else None),
                     "runtime_minutes": r["runtime_minutes"],
                     "view_offset_ms": r["view_offset_ms"],
                     "last_viewed_at": r["last_viewed_at"],
@@ -3009,11 +3030,15 @@ class VideoDatabase:
             """, args_s):
                 if any(x.get("kind") == "show" and x.get("show_id") == r["show_id"] for x in out):
                     continue        # already have this show's card
-                image = r["still_url"] or r["show_backdrop"] or r["show_poster"]
+                # An episode still is the picture people recognise; the show's
+                # backdrop is the next best thing, its poster the last resort.
+                image = (_art_url("episode", r["id"], "poster") if r["still_url"]
+                         else _art_url("show", r["show_id"], "backdrop") if r["show_backdrop"]
+                         else _art_url("show", r["show_id"], "poster") if r["show_poster"]
+                         else "")
                 base = {
                     "kind": "show", "show_id": r["show_id"], "tmdb_id": r["show_tmdb"],
                     "title": r["show_title"], "image_url": image,
-                    "poster_url": r["show_poster"],
                     "last_viewed_at": r["last_viewed_at"],
                 }
                 if self._resumable(r["view_offset_ms"], r["runtime_minutes"]):
@@ -3048,7 +3073,8 @@ class VideoDatabase:
                     "episode_number": nxt["episode_number"],
                     "runtime_minutes": nxt["runtime_minutes"],
                     "view_offset_ms": 0,
-                    "image_url": nxt["still_url"] or image,
+                    "image_url": (_art_url("episode", nxt["id"], "poster")
+                                  if nxt["still_url"] else image),
                 })
                 out.append(base)
         except sqlite3.Error:

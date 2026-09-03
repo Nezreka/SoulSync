@@ -38,7 +38,11 @@ def _movie(db, title, *, runtime=100, offset=None, viewed="2026-09-01", has_file
         "server_id": "m-" + title, "title": title, "year": 2020,
         "runtime_minutes": runtime})
     conn = db._get_connection()
-    conn.execute("UPDATE movies SET view_offset_ms=?, last_viewed_at=?, has_file=? WHERE id=?",
+    # backdrop_url is written by ENRICHMENT, not by the scan upsert, so it has
+    # to be set directly here. Worth knowing in itself: a freshly scanned,
+    # un-enriched movie has only a poster, and the rail falls back to it.
+    conn.execute("UPDATE movies SET view_offset_ms=?, last_viewed_at=?, has_file=?,"
+                 " backdrop_url='/b.jpg' WHERE id=?",
                  (offset, viewed, has_file, mid))
     conn.commit()
     conn.close()
@@ -175,15 +179,49 @@ def test_a_card_carries_what_the_ui_needs_without_a_second_lookup(db):
     _movie(db, "Arrival", runtime=100, offset=50 * 60_000)
     row = db.continue_watching()[0]
     for key in ("kind", "reason", "id", "title", "subtitle", "image_url",
-                "poster_url", "runtime_minutes", "view_offset_ms", "last_viewed_at"):
+                "runtime_minutes", "view_offset_ms", "last_viewed_at"):
         assert key in row, f"card is missing {key}"
 
 
 def test_an_episode_prefers_its_own_still_over_the_show_art(db):
     """A landscape still of the actual episode is the picture people recognise;
-    falling back to the show poster is a worse but acceptable answer."""
+    falling back to the show backdrop is a worse but acceptable answer."""
     _show(db, "Silo", [(1, 1, 1, 0, 12 * 60_000, "2026-09-02", 50)])
-    assert db.continue_watching()[0]["image_url"] == "/still.jpg"
+    url = db.continue_watching()[0]["image_url"]
+    assert "/episode/" in url
+
+
+# ── artwork must go through the proxy ────────────────────────────────────────
+def test_art_is_a_proxy_path_not_the_stored_url(db):
+    """TMDB writes absolute links that load anywhere; a Plex or Jellyfin scan
+    writes a path relative to a server the browser has no route to. Emitting the
+    stored url meant art appeared only for the items that happened to have been
+    enriched - half the rail came up blank."""
+    _movie(db, "Arrival", runtime=100, offset=50 * 60_000)
+    url = db.continue_watching()[0]["image_url"]
+    assert url.startswith("/api/video/"), url
+    assert "/b.jpg" not in url and "/p.jpg" not in url
+
+
+def test_a_movie_prefers_its_backdrop_and_falls_back_to_the_poster(db):
+    _movie(db, "Arrival", runtime=100, offset=50 * 60_000)
+    assert "/backdrop/movie/" in db.continue_watching()[0]["image_url"]
+
+    conn = db._get_connection()
+    conn.execute("UPDATE movies SET backdrop_url = NULL")
+    conn.commit()
+    conn.close()
+    assert "/poster/movie/" in db.continue_watching()[0]["image_url"]
+
+
+def test_an_item_with_no_art_at_all_gets_an_empty_string(db):
+    """Which is the UI's cue to draw a letter tile rather than a broken image."""
+    _movie(db, "Arrival", runtime=100, offset=50 * 60_000)
+    conn = db._get_connection()
+    conn.execute("UPDATE movies SET backdrop_url = NULL, poster_url = NULL")
+    conn.commit()
+    conn.close()
+    assert db.continue_watching()[0]["image_url"] == ""
 
 
 def test_the_row_is_bounded(db):
