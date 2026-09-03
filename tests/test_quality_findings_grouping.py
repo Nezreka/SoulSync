@@ -215,3 +215,58 @@ def test_grouping_reads_whatever_key_the_job_happened_to_use(worker):
     groups = worker.get_finding_albums(group_by='album')
     assert [(g['artist'], g['album']) for g in groups] == [
         ('Common', 'Usual Keys'), ('Legacy', 'Old Keys')]
+
+# ── the score IS tier_score, not a lookalike ─────────────────────────────────
+_PARITY_CASES = [
+    ('mp3', 128, None, None), ('mp3', 192, None, None), ('mp3', 256, None, None),
+    ('mp3', 320, None, None), ('mp3', None, None, None),
+    ('aac', 128, None, None), ('aac', 256, None, None), ('opus', 128, None, None),
+    ('ogg', 320, None, None), ('wma', 128, None, None), ('weirdfmt', 64, None, None),
+    ('flac', 1411, 44100, 16), ('flac', 2304, 96000, 24), ('flac', 9216, 192000, 24),
+    ('flac', None, None, None), ('alac', 1411, 44100, 16),
+    ('wav', 1411, 44100, 16), ('wav', 9216, 192000, 24), ('dsf', 5644, 2822400, 1),
+]
+
+
+def test_the_sql_score_is_tier_score_transcribed_not_reinvented(worker):
+    """Every score, not just the order.
+
+    The first version of this was a flat "format base + bitrate/1000" that only
+    looked like tier_score. tier_score has TWO branches - lossless scores on
+    sample rate and bit depth and ignores bitrate entirely, lossy scores on
+    bitrate capped at 320 - and the flat version matched neither. It put ALAC
+    below FLAC (tier_score puts it above, because ALAC never earns the hi-res
+    bonus) and sent DSD to the top of the list. Two definitions of "better
+    audio" in one app is how the ranker and the scanner start disagreeing.
+    """
+    import json as _json
+    import sqlite3
+    from core.quality.model import AudioQuality
+    from core.repair_worker import RepairWorker
+
+    conn = sqlite3.connect(':memory:')
+    conn.execute("CREATE TABLE t (details_json TEXT)")
+    for fmt, br, sr, bd in _PARITY_CASES:
+        conn.execute("INSERT INTO t VALUES (?)", (_json.dumps({
+            'current_format': fmt, 'current_bitrate': br,
+            'current_sample_rate': sr, 'current_bit_depth': bd}),))
+
+    got = [round(r[0], 6) for r in conn.execute(
+        f"SELECT {RepairWorker._QUALITY_SCORE_SQL} FROM t ORDER BY rowid")]
+    want = [round(AudioQuality(format=f, bitrate=b, sample_rate=s, bit_depth=d).tier_score(), 6)
+            for f, b, s, d in _PARITY_CASES]
+
+    assert got == want, "the SQL score drifted from AudioQuality.tier_score()"
+
+
+def test_lossless_ignores_bitrate_the_way_tier_score_does(worker):
+    """A FLAC's bitrate is a consequence of its sample rate and depth, so
+    tier_score reads the spec directly. Scoring lossless on bitrate would rank
+    a 24/48 file above a 16/192 one on file size alone."""
+    _add(worker, artist='A', album='X', fmt='flac', bitrate=9999,
+         sample_rate=44100, bit_depth=16, quality='FLAC 16/44')
+    _add(worker, artist='A', album='X', fmt='flac', bitrate=1,
+         sample_rate=192000, bit_depth=24, quality='FLAC 24/192')
+
+    # worst first: the 16/44 file, despite carrying the far larger bitrate
+    assert _labels(worker, 'quality') == ['FLAC 16/44', 'FLAC 24/192']

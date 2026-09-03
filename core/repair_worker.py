@@ -1233,22 +1233,32 @@ class RepairWorker:
     # sorting by severity handed back 320, then 192, then 256 - it was showing
     # scan order and calling it severity.
     #
-    # This mirrors AudioQuality.tier_score(): the format base dominates and
-    # bitrate only ever tie-breaks WITHIN a format (divided by 1000, so 320kbps
-    # adds 0.32 and can never lift an mp3 over an aac). Same philosophy as the
-    # ranker - cross-format priority belongs to the user's ranked list, not to
-    # a bitrate number. Sample rate and bit depth separate FLAC 16 from FLAC 24.
+    # This is AudioQuality.tier_score() transcribed into SQL, branch for branch,
+    # and a test asserts the two order an identical set identically. tier_score
+    # has TWO branches and an earlier flat formula here matched neither: lossless
+    # (flac/wav) scores on sample rate and bit depth and ignores bitrate, while
+    # everything else scores on bitrate capped at 320kbps. Inventing a second
+    # definition of "better audio" put ALAC on the wrong side of FLAC and sent
+    # DSD to the top of the list.
     #
     # Computed from current_format/current_bitrate, which every quality finding
     # has already stored, so old findings sort correctly without a rescan.
     _QUALITY_SCORE_SQL = (
-        "(CASE lower(COALESCE(json_extract(details_json, '$.current_format'), '')) "
-        "WHEN 'dsf' THEN 102 WHEN 'flac' THEN 100 WHEN 'alac' THEN 98 "
-        "WHEN 'wav' THEN 95 WHEN 'ogg' THEN 70 WHEN 'opus' THEN 65 "
-        "WHEN 'aac' THEN 60 WHEN 'mp3' THEN 50 WHEN 'wma' THEN 30 ELSE 10 END "
-        "+ COALESCE(json_extract(details_json, '$.current_bitrate'), 0) / 1000.0 "
-        "+ COALESCE(json_extract(details_json, '$.current_sample_rate'), 0) / 1000000.0 "
-        "+ COALESCE(json_extract(details_json, '$.current_bit_depth'), 0) / 1000.0)"
+        "(CASE WHEN lower(COALESCE(json_extract(details_json, '$.current_format'), '')) "
+        "        IN ('flac', 'wav') THEN "
+        "   (CASE lower(json_extract(details_json, '$.current_format')) "
+        "      WHEN 'flac' THEN 100 ELSE 95 END) "
+        "   + MIN(COALESCE(json_extract(details_json, '$.current_sample_rate'), 44100) "
+        "         / 192000.0, 1.0) * 20 "
+        "   + MAX(COALESCE(json_extract(details_json, '$.current_bit_depth'), 16) - 16, 0) "
+        "         / 8.0 * 10 "
+        "ELSE "
+        "   (CASE lower(COALESCE(json_extract(details_json, '$.current_format'), '')) "
+        "      WHEN 'dsf' THEN 102 WHEN 'alac' THEN 98 WHEN 'ogg' THEN 70 "
+        "      WHEN 'opus' THEN 65 WHEN 'aac' THEN 60 WHEN 'mp3' THEN 50 "
+        "      WHEN 'wma' THEN 30 ELSE 10 END) "
+        "   + MIN(COALESCE(json_extract(details_json, '$.current_bitrate'), 0) / 320.0, 1.0) * 10 "
+        "END)"
     )
 
     _FINDING_SORTS = {
