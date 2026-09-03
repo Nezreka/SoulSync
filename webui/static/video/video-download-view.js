@@ -419,7 +419,14 @@
     // send an identical request (incl. the auto-retry candidate pool).
     function buildGrabPayload(panel, r) {
         var p = panel._search || {};
-        var src = p.source || 'soulseek';   // the DOWNLOAD source this panel actually searched
+        // The ROW's own source wins over the panel's. A torrent search returns
+        // Prowlarr and EXT.to hits together (EXT.to is the other half of that
+        // lane), and they are not grabbed the same way: an EXT.to row carries an
+        // info_url and no magnet yet, so it has to reach the backend labelled
+        // 'extto' or the magnet is never resolved and the grab fails on a
+        // missing download URL. Falls back to the panel source for every row
+        // that does not carry one.
+        var src = r.source || p.source || 'soulseek';
         var container = panel.closest('[data-vgm-dl-content]');
         var o = (container && (container._opts || container._dl)) || {};
         var payload = {
@@ -447,6 +454,10 @@
             payload.username = r.username;          // indexer name (display only)
             payload.filename = r.filename || r.title;
             payload.candidates = [];
+            // EXT.to resolves its magnet at grab time, once, for the release you
+            // actually picked - these are what it resolves FROM.
+            payload.info_url = r.info_url;
+            payload.magnet_id = r.magnet_id;
         }
         return payload;
     }

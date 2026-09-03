@@ -160,3 +160,53 @@ def test_picking_extto_alone_still_works(search):
                              "hits": [_hit("Arrival.2016.WEB-EXT", indexer="extto")]}
     resp = search(source="extto")
     assert any("EXT" in t for t in _titles(resp))
+
+# ── the grab has to be able to act on what the search returned ───────────────
+def test_an_extto_row_says_extto_even_inside_a_torrent_search(search):
+    """The grab endpoint keys magnet resolution off source='extto'.
+
+    These rows carry an info_url and NO download_url - resolving 25 magnets to
+    draw a result list would take minutes behind Cloudflare, so the one you pick
+    is resolved at grab time. A row arriving labelled 'torrent' therefore hits
+    the "Missing the release's download URL" guard, and the user sees a bare
+    "grab failed" with nothing to act on. Merging EXT.to into this lane without
+    this tagging is exactly the regression that caused it.
+    """
+    prowlarr_hit = _hit("Arrival 2016 1080p BluRay x264-GRP", indexer="nyaa")
+    extto_hit = _hit("Arrival.2016.1080p.WEB.H264-EXT", indexer="extto")
+    extto_hit["download_url"] = ""              # not resolved yet, by design
+    extto_hit["info_url"] = "https://ext.to/torrent/123"
+    extto_hit["magnet_id"] = "123"
+    search.state["prowlarr"] = {"configured": True, "hits": [prowlarr_hit]}
+    search.state["extto"] = {"configured": True, "hits": [extto_hit]}
+
+    rows = search().get_json()["results"]
+    by_source = {r.get("source") for r in rows}
+    assert "extto" in by_source, "an EXT.to row was not labelled as one"
+    assert "torrent" in by_source, "the Prowlarr rows lost their source"
+
+    ext_row = next(r for r in rows if r.get("source") == "extto")
+    # ...and it carries what grab-time magnet resolution needs
+    assert ext_row.get("info_url") == "https://ext.to/torrent/123"
+
+
+def test_a_plain_prowlarr_row_keeps_the_searched_source(search):
+    search.state["prowlarr"] = {"configured": True, "hits": [_hit("Arrival 2016 1080p")]}
+    search.state["extto"] = {"configured": True, "hits": []}
+    rows = search().get_json()["results"]
+    assert rows and all(r.get("source") == "torrent" for r in rows)
+
+
+def test_a_soulseek_row_is_not_relabelled(search):
+    """Only the torrent lane is mixed. Soulseek rows must not be touched."""
+    import core.video.slskd_search as ss
+    search.state["prowlarr"] = {"configured": True, "hits": []}
+    ss_hits = {"configured": True, "hits": [_hit("Arrival 2016 1080p", indexer="")]}
+    import pytest as _pytest
+    monkey = _pytest.MonkeyPatch()
+    try:
+        monkey.setattr(ss, "slskd_search", lambda *a, **kw: ss_hits)
+        rows = search(source="soulseek").get_json()["results"]
+        assert rows and all(r.get("source") == "soulseek" for r in rows)
+    finally:
+        monkey.undo()
