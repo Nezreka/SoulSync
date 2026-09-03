@@ -40,10 +40,24 @@ def test_results_that_were_all_another_title_are_not_double_counted():
     """The evidence line opens with its own count; saying it twice reads broken."""
     line = exhausted_reason({
         "searches": 2, "hits": 6, "accepted": 0,
-        "refusals": [{"rejected": "Wrong season"}] * 6,
+        # A wrong TITLE. "Wrong season" is deliberately not used here any more:
+        # the same show's other season means the show IS carried and this
+        # instalment is simply not out, which is a wait rather than a miss.
+        "refusals": [{"rejected": "Wrong title (Foo — wanted Bar)"}] * 6,
     })
     assert line == "6 results, none were this release"
     assert line.count("results") == 1
+
+
+def test_the_same_shows_other_episodes_read_as_a_wait_not_a_miss():
+    """Boulder's live case: 180 hits for Big Brother, all S28E01-E25, wanting
+    S28E27 which aired that day. The show is exceptionally well covered and the
+    old line called it a failure."""
+    line = exhausted_reason({
+        "searches": 2, "hits": 6, "accepted": 0,
+        "refusals": [{"rejected": "Wrong episode"}] * 6,
+    })
+    assert line == "6 results for this title, but not this release yet"
 
 
 def test_candidates_that_were_tried_and_never_landed():

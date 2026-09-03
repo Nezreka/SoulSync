@@ -247,8 +247,11 @@ def test_results_that_were_all_some_other_title_say_that_instead():
     they just weren't this item. That difference is the user's next move."""
     from core.video.wishlist_evidence import IDENTITY, refusal_line, summarize_search
 
-    s = summarize_search([{"rejected": "Wrong season"}, {"rejected": "Wrong year"}],
-                         noun="episode")
+    # A wrong TITLE is another item. ("Wrong season" used to stand in for this
+    # and no longer can - the same show's other season proves the show IS
+    # carried, which is a wait, not a miss. See test_awaiting_release.py.)
+    s = summarize_search([{"rejected": "Wrong title (Foo — wanted Bar)"},
+                          {"rejected": "Wrong year"}], noun="episode")
     assert s["kind"] == IDENTITY
     assert refusal_line(s) == "2 results, none were this episode"
 
