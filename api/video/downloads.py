@@ -1089,6 +1089,28 @@ def register_routes(bp):
         # the importer deletes the file out from under the seeding torrent, and the
         # seeding sweep's source='torrent' query never sees the row. EXT.to keeps its
         # identity in username/indexer_id, same as thepiratebay and 1337x already do.
+        # Room FIRST, before anything expensive. Resolving an EXT.to magnet is a
+        # Cloudflare challenge that can run half a minute, and a grab that the
+        # disk guard was always going to refuse should not pay for it: Boulder's
+        # 507 took 39.9 seconds to arrive, all of it spent earning a magnet that
+        # was then thrown away.
+        db = get_video_db()
+        paths = {k: db.get_setting(k) or "" for k in ("movies_path", "tv_path", "youtube_path")}
+        if not paths["movies_path"]:
+            paths["movies_path"] = db.get_setting("transfer_path") or ""
+        target = target_dir_for(body.get("kind"), paths)
+        from core.video import disk_guard, organization
+        room = disk_guard.check_room(
+            target, organization.load(db),
+            # the scratch volume only has to fit THIS release, not the library's
+            # headroom preference
+            needed_gb=(int(body.get("size_bytes") or 0) / (1024 ** 3)) or None)
+        if not room["ok"]:
+            return jsonify({"ok": False,
+                            "error": disk_guard.shortfall_message(room, target)}), 507
+        if not target:
+            return jsonify({"ok": False, "error": "Set the library folder for this type on Settings → Downloads."}), 400
+
         if source == "extto":
             source = "torrent"
             body["username"] = body.get("username") or "EXT.to"
@@ -1111,18 +1133,6 @@ def register_routes(bp):
         if source in ("torrent", "usenet") and not body.get("download_url"):
             return jsonify({"ok": False, "error": "Missing the release's download URL."}), 400
 
-        db = get_video_db()
-        paths = {k: db.get_setting(k) or "" for k in ("movies_path", "tv_path", "youtube_path")}
-        if not paths["movies_path"]:
-            paths["movies_path"] = db.get_setting("transfer_path") or ""
-        target = target_dir_for(body.get("kind"), paths)
-        from core.video import disk_guard, organization
-        room = disk_guard.check_room(target, organization.load(get_video_db()))
-        if not room["ok"]:
-            return jsonify({"ok": False,
-                            "error": disk_guard.shortfall_message(room, target)}), 507
-        if not target:
-            return jsonify({"ok": False, "error": "Set the library folder for this type on Settings → Downloads."}), 400
 
         # In-flight dedup — if this exact episode is already downloading/queued, don't
         # start a duplicate (e.g. grabbing an episode that a pack grab already queued).

@@ -222,6 +222,9 @@ class QBittorrentAdapter:
                 return existing
             logger.warning("qBittorrent /torrents/add unexpected body: %r", resp.text[:200])
             return None
+        expected = _magnet_hash(url_or_magnet)
+        if expected:
+            return expected
         new_hash = self._poll_for_new_hash(before)
         if not new_hash:
             # Same adoption rule on the silent-duplicate path: some builds answer

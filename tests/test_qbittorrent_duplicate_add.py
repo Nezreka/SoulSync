@@ -104,11 +104,20 @@ def test_an_ok_response_that_adds_nothing_also_adopts_a_known_hash():
     assert a._add_torrent_sync(_MAGNET, "soulsync", None) == _HASH
 
 
-def test_a_normal_add_is_untouched():
-    """The happy path must not be routed through any of this."""
+def test_a_normal_torrent_url_add_is_untouched():
+    """URL/file adds still need qBittorrent's discovered hash."""
     a = _adapter([], "Ok.")
     a._poll_for_new_hash = lambda before: "brandnewhash"
-    assert a._add_torrent_sync(_MAGNET, "soulsync", None) == "brandnewhash"
+    assert a._add_torrent_sync("https://indexer/dl.torrent", "soulsync", None) == "brandnewhash"
+
+
+def test_a_magnet_returns_its_own_hash_even_if_another_torrent_appears():
+    """qBittorrent gives /add no id, so the adapter used to diff the global
+    torrent list and could adopt an unrelated concurrent add. A v1 magnet
+    already names the id SoulSync must poll; use that instead of guessing."""
+    a = _adapter([], "Ok.")
+    a._poll_for_new_hash = lambda before: "some-other-new-hash"
+    assert a._add_torrent_sync(_MAGNET, "soulsync", None) == _HASH
 
 
 def test_a_failed_info_lookup_still_aborts_early():
