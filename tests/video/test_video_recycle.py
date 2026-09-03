@@ -278,3 +278,137 @@ def test_settings_ui_has_the_recycle_fields():
         assert frag in _SETTINGS_JS, frag
     for frag in ('id="vo-recycle"', 'id="vo-recycle-days"', 'id="vo-recycle-path"'):
         assert frag in _INDEX, frag
+
+
+# ── the browsable bin: manifest / list / restore / purge (Aug 27) ────────────
+def test_discard_records_the_original_path_in_the_manifest(db, tmp_path):
+    f = _mkfile(tmp_path / "Movies" / "Heat (1995)" / "Heat (1995) 1080p.mkv")
+    res = recycle.discard(str(f), _settings(), db, reason="upgrade replaced")
+    trash = Path(res["trash_path"]).parent
+    manifest = json.loads((trash / ".soulsync_recycle.json").read_text(encoding="utf-8"))
+    entry = manifest[Path(res["trash_path"]).name]
+    assert entry["original_path"] == str(f)
+    assert entry["reason"] == "upgrade replaced"
+    assert entry["deleted_at"]
+
+
+def test_list_entries_sees_manifested_and_legacy_side_by_side(db, tmp_path):
+    f = _mkfile(tmp_path / "Movies" / "A" / "a.mkv")
+    recycle.discard(str(f), _settings(), db, reason="dup")
+    # a legacy entry: stamped name, no manifest row (pre-manifest discard)
+    legacy = _mkfile(tmp_path / "Movies" / "ss_recycle" / "20250101_120000_old.mkv", b"yy")
+    items = recycle.list_entries(_settings(), db)
+    by_name = {i["name"]: i for i in items}
+    assert any(n.endswith("_a.mkv") for n in by_name)
+    manifested = next(i for n, i in by_name.items() if n.endswith("_a.mkv"))
+    assert manifested["original_path"] == str(f)
+    assert manifested["size"] == 1
+    old = by_name[legacy.name]
+    assert old["original_path"] is None       # origin unrecorded, honestly
+    assert old["age_seconds"] is not None     # but the stamp still dates it
+
+
+def test_restore_puts_a_manifested_file_back_exactly(db, tmp_path):
+    f = _mkfile(tmp_path / "Movies" / "Heat (1995)" / "Heat (1995).mkv")
+    res = recycle.discard(str(f), _settings(), db)
+    entry = recycle.list_entries(_settings(), db)[0]
+    out = recycle.restore_entry(entry["trash_dir"], entry["name"], _settings(), db)
+    assert out["success"] and out["restored_to"] == str(f)
+    assert f.exists()
+    assert not Path(res["trash_path"]).exists()
+    # the manifest row went with it
+    assert recycle.list_entries(_settings(), db) == []
+
+
+def test_restore_refuses_to_overwrite_an_existing_file(db, tmp_path):
+    f = _mkfile(tmp_path / "Movies" / "B" / "b.mkv")
+    recycle.discard(str(f), _settings(), db)
+    _mkfile(tmp_path / "Movies" / "B" / "b.mkv", b"new one")   # reappeared
+    entry = recycle.list_entries(_settings(), db)[0]
+    out = recycle.restore_entry(entry["trash_dir"], entry["name"], _settings(), db)
+    assert not out["success"]
+    # bin entry untouched — nothing was clobbered
+    assert recycle.list_entries(_settings(), db)
+
+
+def test_legacy_restore_lands_in_restored_for_a_rescan(db, tmp_path):
+    legacy = _mkfile(tmp_path / "Movies" / "ss_recycle" / "20250101_120000_old movie.mkv")
+    entry = recycle.list_entries(_settings(), db)[0]
+    out = recycle.restore_entry(entry["trash_dir"], entry["name"], _settings(), db)
+    assert out["success"]
+    assert Path(out["restored_to"]) == tmp_path / "Movies" / "_restored" / "old movie.mkv"
+    assert not legacy.exists()
+
+
+def test_purge_entry_deletes_for_good(db, tmp_path):
+    f = _mkfile(tmp_path / "Movies" / "C" / "c.mkv")
+    recycle.discard(str(f), _settings(), db)
+    entry = recycle.list_entries(_settings(), db)[0]
+    assert recycle.purge_entry(entry["trash_dir"], entry["name"], _settings(), db)["success"]
+    assert recycle.list_entries(_settings(), db) == []
+
+
+def test_mutations_reject_paths_outside_the_configured_bins(db, tmp_path):
+    """A client-supplied dir/name pair is untrusted input — anything that is
+    not exactly a configured trash dir plus a bare entry name is refused."""
+    f = _mkfile(tmp_path / "Movies" / "D" / "d.mkv")
+    recycle.discard(str(f), _settings(), db)
+    entry = recycle.list_entries(_settings(), db)[0]
+    outside = _mkfile(tmp_path / "elsewhere" / "20250101_120000_x.mkv")
+    assert not recycle.purge_entry(str(outside.parent), outside.name, _settings(), db)["success"]
+    assert outside.exists()
+    assert not recycle.restore_entry(entry["trash_dir"], "../" + entry["name"], _settings(), db)["success"]
+    assert not recycle.purge_entry(entry["trash_dir"], ".soulsync_recycle.json", _settings(), db)["success"]
+
+
+def test_bin_api_routes_exist_and_the_page_wires_the_tabs():
+    """The parity contract: recycle endpoints + the Review/Clients panes."""
+    api_src = (_ROOT / "api" / "video" / "downloads.py").read_text(encoding="utf-8")
+    assert '"/downloads/recycle"' in api_src
+    assert '"/downloads/recycle/restore"' in api_src
+    assert '"/downloads/recycle/purge"' in api_src
+    tabs_js = (_ROOT / "webui" / "static" / "video" / "video-downloads-tabs.js").read_text(encoding="utf-8")
+    assert "data-vrev-restore" in tabs_js and "data-vrev-purge" in tabs_js
+    assert "/api/clients/" in tabs_js                     # shared adapters, one pane
+    page_js = (_ROOT / "webui" / "static" / "video" / "video-downloads-page.js").read_text(encoding="utf-8")
+    assert "function setView(" in page_js
+    assert 'data-vdpg-view="review"' in _INDEX and 'data-vdpg-view="clients"' in _INDEX
+    assert "data-vdpg-pane" in _INDEX
+    assert "video-downloads-tabs.js" in _INDEX            # the script actually loads
+
+
+def test_purge_drops_the_manifest_rows_of_the_files_it_deleted(db, tmp_path, monkeypatch):
+    """A manifest row outlives its file unless the purge says otherwise — an
+    install purging for years would grow a sidecar full of ghosts."""
+    import json as _json
+    f = _mkfile(tmp_path / "Movies" / "E" / "e.mkv")
+    res = recycle.discard(str(f), _settings(), db)
+    trash = Path(res["trash_path"]).parent
+    name = Path(res["trash_path"]).name
+    manifest_path = trash / ".soulsync_recycle.json"
+    assert name in _json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    # Age it past the keep window. The patch must stay FAITHFUL: the real
+    # entry_age_seconds returns None for anything without our stamp prefix,
+    # which is exactly what keeps the purge from eating the manifest (and any
+    # foreign file in an override folder). A blanket "everything is old" patch
+    # deleted the sidecar and the test caught it.
+    real_age = recycle.entry_age_seconds
+    monkeypatch.setattr(
+        recycle, "entry_age_seconds",
+        lambda n, now=None: None if real_age(n) is None else 99 * 86400)
+    removed, _freed = recycle.purge_old_detailed(_settings(recycle_keep_days=7), db)
+    assert removed == 1
+    assert not Path(res["trash_path"]).exists()
+    assert _json.loads(manifest_path.read_text(encoding="utf-8")) == {}
+
+
+def test_the_clients_pane_stops_polling_when_you_leave_the_page():
+    """The page's own poller checks _onPage(); the clients pane's 10s timer
+    did not, so it kept hitting /api/clients forever after navigation."""
+    js = (_ROOT / "webui" / "static" / "video" / "video-downloads-tabs.js").read_text(encoding="utf-8")
+    tick = js.split("_ctimer = setInterval(", 1)[1].split("}, 10000)", 1)[0]
+    assert "document.hidden" in tick
+    assert "onDownloadsPage()" in tick
+    assert "clearInterval(_ctimer)" in tick
+    assert 'data-video-subpage="video-downloads"' in js

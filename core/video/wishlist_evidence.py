@@ -38,11 +38,21 @@ SWARM = "swarm"                # exists, but nobody is sharing it
 SIZE = "size"                  # exists, but over the size cap
 BLOCKED = "blocked"            # exists, but you blocked it
 OTHER = "other"
+NOT_FOUND = "not_found"    # the search itself came back empty
+# The show IS on the indexers — this episode is not, yet. A different situation
+# from every other kind here, and the commonest one on a healthy install.
+AWAITING = "awaiting"
 
 # Matched against the reason strings core.video.quality_eval actually produces.
 _IDENTITY = ("wrong title", "wrong year", "wrong season", "wrong episode",
              "not a single episode", "is a tv release, not the movie",
              "release is s", "not the episode requested")
+# The identity refusals that mean "right show, wrong instalment". Separating
+# these out is the difference between "nothing here is your show" and "your show
+# is well covered, this episode has not been posted yet" - which on a healthy
+# install is most of what a wishlist is doing at any moment.
+_WRONG_INSTALMENT = ("wrong season", "wrong episode", "not a single episode",
+                     "release is s", "not the episode requested")
 _SWARM = ("no seeders", "seeder(s)")
 _SIZE = ("size cap",)
 _BLOCKED = ("blocklisted",)
@@ -119,6 +129,51 @@ def summarize_refusals(candidates: Iterable[Any]) -> Optional[Dict[str, Any]]:
             "seen": seen}
 
 
+def summarize_search(candidates: Iterable[Any], *, noun: str = "release") -> Optional[Dict[str, Any]]:
+    """The receipt for a fruitless search, INCLUDING the two empty-handed cases.
+
+    :func:`summarize_refusals` answers a narrower question - "which of your rules
+    turned down the best release we found" - and returns None both when nothing
+    was found at all and when everything found was some other title. Those are
+    the two commonest ways a row gets stuck, so the row was left showing a
+    warning badge and forty attempts with no sentence beside it. On the live
+    install that was 144 of 147 stuck rows: a 1999 film nobody seeds reads
+    exactly like one waiting for next week's episode.
+
+    "Nothing found" is not an actionable refusal and must not pretend to be one
+    (:func:`is_actionable` still says no) - but it IS the answer to "why is this
+    stuck", and it is the honest one.
+    """
+    summary = summarize_refusals(candidates)
+    if summary:
+        return summary
+    total = sum(1 for c in candidates or [] if isinstance(c, dict))
+    if not total:
+        return {"quality_label": None, "reason": "Nothing found for this search",
+                "kind": NOT_FOUND, "seen": 1}
+    # Results came back and none were accepted. WHY they were not is the whole
+    # difference between a problem and a wait: releases for the right show but a
+    # different episode mean the show is well covered and this instalment simply
+    # is not out yet, which is not a fault and must not be reported as one.
+    instalment = sum(1 for c in candidates or []
+                     if isinstance(c, dict)
+                     and any(p in str(c.get("rejected") or "").lower()
+                             for p in _WRONG_INSTALMENT))
+    if instalment:
+        return {"quality_label": None,
+                "reason": "%d result%s for this title, but not this %s yet"
+                          % (total, "" if total == 1 else "s", noun),
+                # seen=1 keeps refusal_line from appending "(15 releases)" to a
+                # sentence that already opens with the count.
+                "kind": AWAITING, "seen": 1, "matched": instalment}
+    # Every result was some other title. Saying how many stops it reading as
+    # "nobody has it" when the truth is "the search brought back noise".
+    return {"quality_label": None,
+            "reason": "%d result%s, none were this %s"
+                      % (total, "" if total == 1 else "s", noun),
+            "kind": IDENTITY, "seen": 1}
+
+
 def refusal_line(summary: Any) -> Optional[str]:
     """One sentence for the wishlist row. Names the tier AND the rule, because
     either alone leaves the user guessing: "720p" doesn't say why it was refused,
@@ -137,9 +192,22 @@ def refusal_line(summary: Any) -> Optional[str]:
 
 def is_actionable(summary: Any) -> bool:
     """Whether the user could plausibly do something about it. A quality, size or
-    blocklist refusal is a setting they own; a dead swarm is not."""
+    blocklist refusal is a setting they own; a dead swarm is not, and neither is
+    an episode that has not been released."""
     return isinstance(summary, dict) and summary.get("kind") in (QUALITY, SIZE, BLOCKED)
 
 
-__all__ = ["classify_refusal", "summarize_refusals", "refusal_line", "is_actionable",
-           "IDENTITY", "QUALITY", "SWARM", "SIZE", "BLOCKED", "OTHER"]
+def is_waiting(summary: Any) -> bool:
+    """Whether this row is simply WAITING rather than stuck.
+
+    An episode that aired today and has not been posted yet reads identically to
+    one nothing can find, and on a healthy install the first is most of the
+    wishlist at any moment. Callers use this to stop a normal wait wearing the
+    same badge as a fault.
+    """
+    return isinstance(summary, dict) and summary.get("kind") == AWAITING
+
+
+__all__ = ["classify_refusal", "summarize_refusals", "summarize_search", "refusal_line",
+           "is_actionable", "is_waiting", "IDENTITY", "QUALITY", "SWARM", "SIZE",
+           "BLOCKED", "OTHER", "NOT_FOUND", "AWAITING"]

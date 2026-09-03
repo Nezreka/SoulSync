@@ -109,6 +109,31 @@ def test_not_an_upgrade_is_rejected():
     assert p["action"] == "reject" and "upgrade" in p["reason"].lower()
 
 
+def test_user_initiated_equal_quality_replaces_existing():
+    dl = _movie_dl("The Matrix 1999 1080p BluRay")
+    ctx = json.loads(dl["search_ctx"])
+    ctx.update({"user_initiated": True, "import_policy": "user_replace"})
+    dl["search_ctx"] = json.dumps(ctx)
+    folder = os.path.join("/lib/movies", "The Matrix (1999)")
+    fs_dirs = {folder: ["The Matrix (1999) Bluray-1080p.mkv"]}
+    p = importer.plan_import(dl, "/dl/x/matrix.1080p.mkv", list_dir=lambda d: fs_dirs.get(d, []))
+    assert p["action"] == "upgrade"
+    assert p["replace_path"] == os.path.join(folder, "The Matrix (1999) Bluray-1080p.mkv")
+
+
+def test_user_initiated_lower_quality_lands_beside_existing():
+    dl = _movie_dl("The Matrix 1999 720p HDTV")
+    ctx = json.loads(dl["search_ctx"])
+    ctx.update({"user_initiated": True, "import_policy": "user_replace"})
+    dl["search_ctx"] = json.dumps(ctx)
+    folder = os.path.join("/lib/movies", "The Matrix (1999)")
+    fs_dirs = {folder: ["The Matrix (1999) Bluray-1080p.mkv"]}
+    p = importer.plan_import(dl, "/dl/x/matrix.720p.mkv", list_dir=lambda d: fs_dirs.get(d, []))
+    assert p["action"] == "import"
+    assert p["dest"]["path"].endswith(os.path.join("The Matrix (1999)", "The Matrix (1999) HDTV-720p.mkv"))
+    assert p["kept_existing"].endswith("The Matrix (1999) Bluray-1080p.mkv")
+
+
 def test_already_placed_reports_completed_not_failed():
     # Crash-recovery: the file already sits at the EXACT path we'd write (a copy that
     # finished before the row flipped to 'completed', then a restart re-drove the import).
@@ -119,6 +144,19 @@ def test_already_placed_reports_completed_not_failed():
     p = importer.plan_import(dl, "/dl/x/matrix.mkv", list_dir=lambda d: fs_dirs.get(d, []))
     assert p["action"] == "already_placed"
     assert p["dest"]["path"].endswith(os.path.join("The Matrix (1999)", "The Matrix (1999) Bluray-1080p.mkv"))
+
+
+def test_user_initiated_same_filename_replaces_instead_of_short_circuiting():
+    dl = _movie_dl("The Matrix 1999 1080p BluRay")
+    ctx = json.loads(dl["search_ctx"])
+    ctx.update({"user_initiated": True, "import_policy": "user_replace"})
+    dl["search_ctx"] = json.dumps(ctx)
+    folder = os.path.join("/lib/movies", "The Matrix (1999)")
+    fs = FakeFS({folder: ["The Matrix (1999) Bluray-1080p.mkv"]})
+    patch = importer.run_import(dl, "/dl/x/matrix.mkv", fs=fs)
+    assert patch["status"] == "completed"
+    assert fs.copied and fs.copied[0][1].endswith("The Matrix (1999) Bluray-1080p.mkv")
+    assert os.path.join(folder, "The Matrix (1999) Bluray-1080p.mkv") in fs.removed
 
 
 def test_run_import_already_placed_completes_without_recopy():

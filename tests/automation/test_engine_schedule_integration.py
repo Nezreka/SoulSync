@@ -564,3 +564,29 @@ def test_wishlist_processor_rename_is_idempotent_when_clean():
     AutomationEngine(db)._fix_wishlist_processor_rename()
     db.delete_automation.assert_not_called()
     assert not any(c.kwargs.get('name') for c in db.update_automation.call_args_list)
+
+
+
+def test_rss_sync_migrates_legacy_hourly_system_row_to_15_minutes():
+    db = MagicMock()
+    db.get_system_automation_by_action.return_value = {
+        'id': 77, 'is_system': 1, 'trigger_type': 'schedule',
+        'trigger_config': json.dumps({'interval': 1, 'unit': 'hours'})}
+    eng = AutomationEngine(db)
+    eng._default_tz = 'UTC'
+    eng._fix_rss_sync_cadence()
+
+    db.update_automation.assert_called_once()
+    args, kwargs = db.update_automation.call_args
+    assert args[0] == 77
+    assert json.loads(kwargs['trigger_config']) == {'interval': 15, 'unit': 'minutes'}
+    assert kwargs['next_run']
+
+
+def test_rss_sync_cadence_migration_leaves_custom_rows_alone():
+    db = MagicMock()
+    db.get_system_automation_by_action.return_value = {
+        'id': 77, 'is_system': 1, 'trigger_type': 'schedule',
+        'trigger_config': json.dumps({'interval': 5, 'unit': 'minutes'})}
+    AutomationEngine(db)._fix_rss_sync_cadence()
+    db.update_automation.assert_not_called()

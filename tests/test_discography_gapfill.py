@@ -130,10 +130,11 @@ def test_edition_uncertainty_shows_both():
 # ── wiring contracts ─────────────────────────────────────────────────────────
 
 def test_endpoint_is_conservative_and_additive():
-    ws = (_ROOT / "web_server.py").read_text(encoding="utf-8")
+    # the artist family moved to api/artist_detail.py (aug 26 lift)
+    ws = (_ROOT / "api" / "artist_detail.py").read_text(encoding="utf-8")
     assert "/discography/gap-fill" in ws
     fn = ws[ws.index("def get_artist_discography_gap_fill"):]
-    fn = fn[:fn.index("@app.route")]
+    fn = fn[:fn.index("@bp.route")]
     assert "artist_source_ids.get(s)" in fn          # verified-id sources only
     assert "allow_fallback=False" in fn              # no cross-source double count
     # other-source fetches carry NO artist name — the per-source lookup has an

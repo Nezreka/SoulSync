@@ -56,12 +56,18 @@
         failed: ['Failed', 'vwsh-st--failed'],
         monitored: ['Not out yet', 'vwsh-st--monitored'],
         upgrade: ['⇪ Upgrading', 'vwsh-st--upgrade'],
+        muted: ['Muted', 'vwsh-st--monitored'],
     };
     // The pill tells the TRUTH, not the stale status column: an active download
     // row wins, then the upgrade watch (owned below cutoff), then the column.
-    function liveStatus(it) {
+    // `muted` rides on the SHOW row and episodes are what get rendered, so the
+    // caller passes it down. An un-followed show's episodes are no longer
+    // searched by the drain; the pill says that rather than leaving them
+    // looking merely stuck.
+    function liveStatus(it, showMuted) {
         if (it.downloading) return 'downloading';
         if (it.upgrade_from) return 'upgrade';
+        if ((showMuted || it.muted) && (!it.status || it.status === 'wanted')) return 'muted';
         return STATUS[it.status] ? it.status : 'wanted';
     }
     // Why a row keeps coming back empty. The count alone ("13") says a row is
@@ -71,8 +77,124 @@
     function failWhy(row, fails) {
         var out = fails + ' searches without a grab';
         if (row && row.last_search_at) out += ' · last tried ' + row.last_search_at;
-        if (row && row.last_refusal) return out + '\n' + row.last_refusal;
-        return out + ' — try Search now, or a different quality profile';
+        var per = sourceLines(row);
+        if (per.length) out += '\n\n' + per.join('\n');
+        else if (row && row.last_refusal) return out + '\n' + row.last_refusal;
+        else return out + ' — try Search now, or a different quality profile';
+        return out;
+    }
+    // Per-source diagnostics for a stuck row. One attempt count and one refusal
+    // line described a search that may have asked three different sources, so
+    // "stuck on 40" could equally mean prowlarr was never configured, slskd
+    // returns nothing, or every source finds it and the profile refuses them
+    // all. The drain stores what each source actually did; this reads it back.
+    function sourceLines(row) {
+        var snap = row && row.search_snapshot;
+        if (!snap || !snap.sources) return [];
+        var order = (snap.chain && snap.chain.length) ? snap.chain : Object.keys(snap.sources);
+        var out = [];
+        for (var i = 0; i < order.length; i++) {
+            var name = order[i], s = snap.sources[name];
+            if (!s) continue;
+            if (!s.ran) { out.push('• ' + name + ': could not search — ' + (s.reason || 'unknown')); continue; }
+            if (!s.results) { out.push('• ' + name + ': found nothing'); continue; }
+            if (s.accepted) { out.push('• ' + name + ': ' + s.accepted + ' usable of ' + s.results); continue; }
+            out.push('• ' + name + ': ' + s.results + ' found, none accepted' +
+                     (s.reason ? ' — ' + s.reason : ''));
+        }
+        return out;
+    }
+
+    // ── stuck-row diagnostics drawer ─────────────────────────────────────────
+    // The tooltip above says how often a row was searched and the headline
+    // refusal. It cannot say WHICH releases came back, why each one lost, where
+    // the file would land, which ids the search was keyed on, or whether
+    // something is already downloading. Answering "why is this stuck" used to
+    // mean reading three screens and guessing. This is that answer, in place.
+    function diagKey(row, scope) {
+        var q = 'kind=' + (scope === 'movie' ? 'movie' : 'episode') +
+                '&tmdb_id=' + encodeURIComponent(row.tmdb_id != null ? row.tmdb_id : row.show_tmdb_id);
+        if (row.season_number != null) q += '&season_number=' + row.season_number;
+        if (row.episode_number != null) q += '&episode_number=' + row.episode_number;
+        return q;
+    }
+
+    function diagRowsHTML(d) {
+        var row = d.row || {}, ids = d.ids || {};
+        var bits = [];
+        function line(k, v, cls) {
+            return '<div class="vwsh-diag-line' + (cls ? ' ' + cls : '') + '">' +
+                '<span class="vwsh-diag-k">' + esc(k) + '</span>' +
+                '<span class="vwsh-diag-v">' + esc(v == null || v === '' ? '—' : v) + '</span></div>';
+        }
+        bits.push(line('Attempts', (row.search_attempts || 0) + ' searches'));
+        bits.push(line('Last tried', row.last_search_at));
+        bits.push(line('Latest reason', row.last_refusal));
+        // A row stuck for want of an id looks exactly like one nobody seeds.
+        bits.push(line('TMDB', ids.tmdb_id));
+        bits.push(line('TVDB', ids.tvdb_id, ids.tvdb_id ? '' : 'vwsh-diag-line--gap'));
+        bits.push(line('IMDb', ids.imdb_id, ids.imdb_id ? '' : 'vwsh-diag-line--gap'));
+        bits.push(line('Would land in', d.target_dir));
+
+        // Already downloading? Then it is not stuck at all.
+        (d.downloads || []).forEach(function (dl) {
+            bits.push(line('In flight', (dl.status || '?') +
+                (dl.progress ? ' · ' + Math.round(dl.progress) + '%' : '') +
+                (dl.release_title ? ' · ' + dl.release_title : ''), 'vwsh-diag-line--live'));
+        });
+
+        // The individual releases, per source, with the rule that refused each.
+        var snap = row.search_snapshot || {};
+        var srcs = snap.sources || {};
+        var order = (snap.chain && snap.chain.length) ? snap.chain : Object.keys(srcs);
+        var blocks = order.map(function (name) {
+            var s = srcs[name];
+            if (!s) return '';
+            var head = '<div class="vwsh-diag-src">' + esc(name) + ' — ' +
+                (!s.ran ? 'could not search: ' + esc(s.reason || 'unknown')
+                        : (s.results || 0) + ' found, ' + (s.accepted || 0) + ' usable') + '</div>';
+            var rows = (s.samples || []).map(function (x) {
+                return '<div class="vwsh-diag-rel' + (x.accepted ? ' vwsh-diag-rel--ok' : '') + '">' +
+                    '<span class="vwsh-diag-rel-t">' + esc(x.title || '?') + '</span>' +
+                    '<span class="vwsh-diag-rel-w">' + esc(x.accepted ? 'usable' : (x.rejected || '—')) + '</span>' +
+                    '</div>';
+            }).join('');
+            return head + (rows || '<div class="vwsh-diag-rel vwsh-diag-rel--none">no releases recorded — ' +
+                'this row has not been searched since receipts were added</div>');
+        }).join('');
+
+        return '<div class="vwsh-diag-grid">' + bits.join('') + '</div>' +
+            (blocks ? '<div class="vwsh-diag-rels">' + blocks + '</div>' : '');
+    }
+
+    function openDiagDrawer(btn, row, scope) {
+        var host = btn.closest('[data-vwsh-diag-host]');
+        if (!host) return;
+        var panel = host.querySelector('[data-vwsh-diag]');
+        if (panel) {   // already open — close it
+            panel.remove();
+            btn.setAttribute('aria-expanded', 'false');
+            return;
+        }
+        panel = document.createElement('div');
+        panel.className = 'vwsh-diag';
+        panel.setAttribute('data-vwsh-diag', '');
+        panel.innerHTML = '<div class="vwsh-diag-loading">Reading the last search\u2026</div>';
+        host.appendChild(panel);
+        btn.setAttribute('aria-expanded', 'true');
+        fetch('/api/video/wishlist/diagnostics?' + diagKey(row, scope),
+              { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!panel.isConnected) return;
+                panel.innerHTML = (d && d.success)
+                    ? diagRowsHTML(d)
+                    : '<div class="vwsh-diag-loading">Nothing recorded for this row yet.</div>';
+            })
+            .catch(function () {
+                if (panel.isConnected) panel.innerHTML =
+                    '<div class="vwsh-diag-loading">Could not read the diagnostics.</div>';
+            });
     }
 
     function statusPill(status, tip) {
@@ -86,10 +208,17 @@
     // "Search now" — the manual override Sonarr users expect: skips the release
     // gate for THIS item and runs the drain's search/pick/enqueue immediately.
     function huntBtn(scope, attrs) {
-        return '<button class="vwsh-hunt" type="button" title="Search now" aria-label="Search now" ' +
+        return '<button class="vwsh-hunt" type="button" title="Auto search now" aria-label="Auto search now" ' +
             'data-vwsh-hunt="' + scope + '"' + attrs + '>' +
             '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
             'stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>' +
+            '</button>';
+    }
+    function retryBtn(scope, attrs) {
+        return '<button class="vwsh-hunt vwsh-retry" type="button" title="Retry with all sources" aria-label="Retry with all sources" ' +
+            'data-vwsh-retry="' + scope + '"' + attrs + '>' +
+            '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+            'stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>' +
             '</button>';
     }
 
@@ -133,6 +262,7 @@
             '" data-vwsh-src="' + (owned ? 'library' : 'tmdb') + '" data-vwsh-id="' + esc(owned ? it.library_id : it.tmdb_id) + '">' +
             '<div class="vwsh-movie-art">' + art + '<div class="vwsh-movie-scrim"></div>' +
             statusPill(st, tip) + failChip +
+            (fails >= 3 && st !== 'downloading' ? retryBtn('movie', ' data-tmdb="' + esc(it.tmdb_id) + '"') : '') +
             (st === 'downloading' ? '' : huntBtn('movie', ' data-tmdb="' + esc(it.tmdb_id) + '"')) +
             (st === 'downloading' ? '' : pickBtn('vwsh-hunt', 'movie',
                 ' data-tmdb="' + esc(it.tmdb_id) + '" data-title="' + esc(it.title || '') +
@@ -351,16 +481,26 @@
         var yt = sh.source === 'youtube';
         var pimg = function (u) { return (yt && window.VideoYoutube) ? VideoYoutube.img(u) : u; };
         var t = e.title || (yt ? 'Untitled' : ('Episode ' + e.episode_number));
-        var st = liveStatus(e);
+        var st = liveStatus(e, sh.muted);
         var date = fmtDate(e.air_date);
         // TMDB shows the SxEx label; a YouTube video shows just its upload date.
         // Repeatedly-failing marker (#liveleak-failing-hub) — same rule as movies.
         var fails = Number(e.search_attempts) || 0;
+        // The warning marker is now the handle for the drawer: the thing you
+        // hover to ask "why" should be the thing you click to find out.
         var failTxt = (fails >= 3 && (st === 'wanted' || st === 'upgrade'))
-            ? ' · <span class="vwsh-failing-inline" title="' + esc(failWhy(e, fails)) +
-                '">&#9888; ' + fails + '</span>'
+            ? ' · <button class="vwsh-failing-inline vwsh-failing-btn" type="button" data-vwsh-why ' +
+                'aria-expanded="false" title="' + esc(failWhy(e, fails)) +
+                '">&#9888; ' + fails + '</button>'
             : '';
-        var metaTxt = yt ? (date || 'Video') : ('S' + se.season_number + '·E' + e.episode_number + (date ? ' · ' + esc(date) : '') +
+        // A skipped YouTube video used to show nothing at all — the same blank
+        // row whether it was queued, deleted, or backing off. It carries the
+        // same fields as a TV row now, so it renders the same way.
+        var ytTxt = !yt ? '' : (e.unavailable
+            ? ' · <span class="vwsh-failing-inline" title="' + esc(e.last_refusal || '') + '">&#9888; unavailable</span>'
+            : (fails ? ' · <span class="vwsh-failing-inline" title="' + esc(e.last_refusal || failWhy(e, fails)) +
+                       '">&#9888; ' + fails + '</span>' : ''));
+        var metaTxt = yt ? (esc(date || 'Video') + ytTxt) : ('S' + se.season_number + '·E' + e.episode_number + (date ? ' · ' + esc(date) : '') +
             (e.upgrade_from ? ' · ⇪ ' + esc(e.upgrade_from) : '') + failTxt);
         var thumb = e.still_url
             ? '<span class="vwsh-epc-thumb"><img src="' + esc(sized(pimg(e.still_url), 342)) + '" alt="" loading="lazy" ' +
@@ -369,13 +509,24 @@
         var rm = yt
             ? 'data-vwsh-rm="yt-video" data-id="' + esc(e.source_id) + '"'
             : 'data-vwsh-rm="episode" data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '"';
-        return '<div class="vwsh-epc" data-vwsh-ep data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '"' +
+        return '<div class="vwsh-epc' + (yt ? ' vwsh-epc--youtube' : '') + '" data-vwsh-ep data-vwsh-diag-host data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '"' +
             (yt ? ' data-src-id="' + esc(e.source_id) + '"' : '') + '>' + thumb +
             '<div class="vwsh-epc-body">' +
                 '<div class="vwsh-epc-title" title="' + esc(t) + '">' + esc(t) + '</div>' +
-                '<div class="vwsh-epc-meta"><span class="vwsh-ep-dot vwsh-ep-dot--' + st + '"></span>' + (yt ? esc(metaTxt) : metaTxt) + '</div>' +
+                '<div class="vwsh-epc-meta"><span class="vwsh-ep-dot vwsh-ep-dot--' + st + '"></span>' + metaTxt + '</div>' +
             '</div>' +
-            (yt || st === 'downloading' ? ''
+            (!yt && fails >= 3 && st !== 'downloading'
+                ? retryBtn('episode', ' data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '"')
+                : '') +
+            (yt
+                ? (st === 'downloading' ? ''
+                    : '<button class="vwsh-epc-hunt vwsh-epc-hunt--yt" type="button" data-vwsh-yt-now="' + esc(e.source_id) +
+                      '" data-ch="' + esc(sh.youtube_id || '') + '" data-cht="' + esc(sh.title || '') +
+                      '" data-vt="' + esc(t) + '" data-pub="' + esc(e.air_date || '') +
+                      '" title="Download this video now, ignoring the retry wait">' +
+                      '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+                      '<polygon points="5,3 19,12 5,21"/></svg></button>')
+                : st === 'downloading' ? ''
                 : '<button class="vwsh-epc-hunt" type="button" data-vwsh-hunt="episode" data-tmdb="' + esc(sh.tmdb_id) +
                   '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '" title="Search now">' +
                   '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
@@ -389,8 +540,8 @@
 
     // Same rule as the failing badges: repeated searches without a grab, and only
     // while the item is still wanted (a downloading item isn't "failing").
-    function isFailingItem(x) {
-        var st = liveStatus(x);
+    function isFailingItem(x, showMuted) {
+        var st = liveStatus(x, showMuted);
         return (Number(x.search_attempts) || 0) >= 3 && (st === 'wanted' || st === 'upgrade');
     }
 
@@ -402,7 +553,7 @@
         } else if (state.tab === 'show') {
             (rawItems || []).forEach(function (sh) {
                 (sh.seasons || []).forEach(function (se) {
-                    (se.episodes || []).forEach(function (e) { if (isFailingItem(e)) n += 1; });
+                    (se.episodes || []).forEach(function (e) { if (isFailingItem(e, sh.muted)) n += 1; });
                 });
             });
         }
@@ -473,13 +624,52 @@
             : state.tab === 'show' ? state.counts.show > 0
             : (state.ytVideo > 0 || state.ytChannel > 0);
         btn.hidden = !has;
-        // "Search all missing" — TMDB tabs only (YouTube has its own drain), and
-        // only when there's something to search.
+        // The bulk action. On the TMDB tabs it searches; on YouTube there is
+        // nothing to search (the video IS the release) so it downloads instead.
+        // Hiding it there left that tab with no bulk action at all.
         var sa = $('[data-vwsh-searchall]');
-        if (sa) sa.hidden = state.tab === 'youtube' || !has;
+        if (sa) {
+            sa.hidden = !has;
+            var yt = state.tab === 'youtube';
+            sa.setAttribute('data-vwsh-mode', yt ? 'youtube' : 'search');
+            var label = sa.lastChild;
+            if (label && label.nodeType === 3) label.nodeValue = yt ? ' Download all waiting' : ' Search all missing';
+            sa.title = yt
+                ? 'Queue every waiting video now instead of waiting for the automation — skips the retry wait, ignores nothing else'
+                : 'Search every eligible wishlist item now instead of waiting for the hourly automation';
+        }
     }
 
     // ── manual acquisition (per-item 'Search now' + 'Search all missing') ─────
+    // YouTube's "Search now". There is nothing to search — the video IS the
+    // release — so it enqueues the download directly, ignoring the retry wait
+    // and the unavailable mark. A user asking for it out-ranks both.
+    function doYtNow(btn) {
+        if (btn.disabled) return;
+        btn.disabled = true; btn.classList.add('vwsh-hunt--busy');
+        fetch('/api/video/youtube/download', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                video_id: btn.getAttribute('data-vwsh-yt-now'),
+                channel_id: btn.getAttribute('data-ch') || null,
+                channel_title: btn.getAttribute('data-cht') || null,
+                video_title: btn.getAttribute('data-vt') || null,
+                published_at: btn.getAttribute('data-pub') || null,
+            }),
+        }).then(function (r) { return r.json(); })
+            .then(function (res) {
+                if (!res || !res.success) throw new Error((res && res.error) || 'failed');
+                if (typeof showToast === 'function')
+                    showToast(res.already ? 'Already downloading' : 'Downloading now', 'success');
+                btn.classList.remove('vwsh-hunt--busy');
+            })
+            .catch(function (err) {
+                btn.disabled = false; btn.classList.remove('vwsh-hunt--busy');
+                if (typeof showToast === 'function')
+                    showToast((err && err.message) || 'Could not start that download', 'error');
+            });
+    }
+
     function doHunt(btn) {
         if (btn.disabled) return;
         var payload = { scope: btn.getAttribute('data-vwsh-hunt'),
@@ -492,6 +682,12 @@
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (res) {
                 if (!res || !res.success) throw new Error();
+                if (res.missing_target) {
+                    if (typeof showToast === 'function')
+                        showToast('Set the ' + (res.missing_target === 'movie' ? 'Movies' : 'TV') + ' library folder in Video Settings first', 'error');
+                    btn.disabled = false; btn.classList.remove('vwsh-hunt--busy');
+                    return;
+                }
                 if (typeof showToast === 'function') {
                     showToast(res.queued
                         ? 'Searching for ' + res.queued + ' item' + (res.queued === 1 ? '' : 's') + '… grabs land in Downloads'
@@ -506,24 +702,88 @@
                 if (typeof showToast === 'function') showToast('Search could not start', 'error');
             });
     }
+    // YouTube's half of the bulk action: queue everything that is waiting. The
+    // click out-ranks the retry backoff, the same way "Search all missing"
+    // out-ranks the movie/TV drain's gates. Deleted videos stay skipped.
+    function downloadAllWaiting(btn) {
+        btn.disabled = true;
+        fetch('/api/video/wishlist/youtube/download-all', { method: 'POST' })
+            .then(function (r) { return r.json(); })
+            .then(function (res) {
+                if (!res || !res.success) throw new Error((res && res.error) || 'failed');
+                var msg;
+                if (res.queued) {
+                    msg = 'Queued ' + res.queued + ' video' + (res.queued === 1 ? '' : 's') +
+                          ' — ' + res.started + ' downloading now, the rest drain automatically';
+                } else if (res.refused) {
+                    msg = 'Nothing queued — the disk-space guard held ' + res.refused + ' back';
+                } else if (res.already) {
+                    msg = res.already + ' already downloading';
+                } else if (res.unavailable) {
+                    msg = 'Nothing to queue — ' + res.unavailable +
+                          ' video(s) are unavailable (deleted, private or members-only)';
+                } else {
+                    msg = 'Nothing waiting to download';
+                }
+                if (typeof showToast === 'function')
+                    showToast(msg, res.queued ? 'success' : 'info');
+                btn.disabled = false;
+                load();
+            })
+            .catch(function (err) {
+                btn.disabled = false;
+                if (typeof showToast === 'function')
+                    showToast((err && err.message) || 'Could not start the downloads', 'error');
+            });
+    }
+
+    function doRetry(btn) {
+        if (btn.disabled) return;
+        var payload = { scope: btn.getAttribute('data-vwsh-retry'),
+            tmdb_id: parseInt(btn.getAttribute('data-tmdb'), 10) };
+        if (btn.hasAttribute('data-s')) payload.season_number = parseInt(btn.getAttribute('data-s'), 10);
+        if (btn.hasAttribute('data-e')) payload.episode_number = parseInt(btn.getAttribute('data-e'), 10);
+        btn.disabled = true; btn.classList.add('vwsh-hunt--busy');
+        fetch('/api/video/wishlist/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload) })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) {
+                if (!res || !res.success) throw new Error();
+                if (typeof showToast === 'function')
+                    showToast(res.queued ? 'Retrying with all sources — grabs land in Downloads' : 'Nothing queued for retry',
+                        res.queued ? 'success' : 'info');
+                btn.classList.remove('vwsh-hunt--busy');
+                load();
+            })
+            .catch(function () {
+                btn.disabled = false; btn.classList.remove('vwsh-hunt--busy');
+                if (typeof showToast === 'function') showToast('Retry could not start', 'error');
+            });
+    }
+
     function searchAllMissing() {
         var btn = $('[data-vwsh-searchall]'); if (!btn || btn.disabled) return;
+        if (state.tab === 'youtube') { downloadAllWaiting(btn); return; }
         btn.disabled = true;
         fetch('/api/video/wishlist/search-all', { method: 'POST' })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (res) {
                 if (!res || !res.success) throw new Error();
                 var k = res.kinds || {};
-                var going = [];
+                var going = [], missing = [];
                 if (k.movie === 'started') going.push('movies');
                 if (k.episode === 'started') going.push('episodes');
+                if (k.movie === 'unconfigured') missing.push('Movies');
+                if (k.episode === 'unconfigured') missing.push('TV');
                 if (typeof showToast === 'function') {
                     showToast(going.length
                         ? 'Searching wishlist ' + going.join(' + ') + ' now — grabs land in Downloads'
-                        : (k.movie === 'busy' || k.episode === 'busy'
-                            ? 'A wishlist search is already running'
-                            : 'Nothing eligible to search right now'),
-                        going.length ? 'success' : 'info');
+                        : (missing.length
+                            ? 'Set the ' + missing.join(' and ') + ' library folder' + (missing.length === 1 ? '' : 's') + ' in Video Settings first'
+                            : (k.movie === 'busy' || k.episode === 'busy'
+                                ? 'A wishlist search is already running'
+                                : 'Nothing eligible to search right now')),
+                        going.length ? 'success' : (missing.length ? 'error' : 'info'));
                 }
                 btn.disabled = false;
             })
@@ -761,8 +1021,26 @@
     }
 
     function onGridClick(e) {
+        // The drawer reads the row's own data-attributes rather than re-deriving
+        // the identity, so it always asks about the row it is attached to.
+        var why = e.target.closest('[data-vwsh-why]');
+        if (why) {
+            e.preventDefault(); e.stopPropagation();
+            var host = why.closest('[data-vwsh-diag-host]');
+            var isEp = host && host.hasAttribute('data-e');
+            openDiagDrawer(why, {
+                tmdb_id: host && host.getAttribute('data-tmdb'),
+                season_number: isEp ? host.getAttribute('data-s') : null,
+                episode_number: isEp ? host.getAttribute('data-e') : null,
+            }, isEp ? 'episode' : 'movie');
+            return;
+        }
         var pick = e.target.closest('[data-vwsh-pick]');
         if (pick) { e.preventDefault(); e.stopPropagation(); doPick(pick); return; }
+        var ytNow = e.target.closest('[data-vwsh-yt-now]');
+        if (ytNow) { e.preventDefault(); e.stopPropagation(); doYtNow(ytNow); return; }
+        var retry = e.target.closest('[data-vwsh-retry]');
+        if (retry) { e.preventDefault(); e.stopPropagation(); doRetry(retry); return; }
         var hunt = e.target.closest('[data-vwsh-hunt]');
         if (hunt) { e.preventDefault(); e.stopPropagation(); doHunt(hunt); return; }
         var rm = e.target.closest('[data-vwsh-rm]');

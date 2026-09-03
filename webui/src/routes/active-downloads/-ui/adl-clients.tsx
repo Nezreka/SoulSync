@@ -318,12 +318,18 @@ function bucketCounts<T>(items: T[], stateOf: (item: T) => string): Map<string, 
 }
 
 function AddBox({
+  label,
   placeholder,
   onAdd,
 }: {
+  /** The reveal button's text ("+ add torrent"). */
+  label: string;
   placeholder: string;
   onAdd: (url: string) => Promise<boolean>;
 }) {
+  // Folded by default: a permanently open bare input right under the filter
+  // input read as two lookalike text boxes stacked.
+  const [open, setOpen] = useState(false);
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const submit = () => {
@@ -331,9 +337,24 @@ function AddBox({
     setBusy(true);
     void onAdd(url.trim()).then((ok) => {
       setBusy(false);
-      if (ok) setUrl('');
+      if (ok) {
+        setUrl('');
+        setOpen(false);
+      }
     });
   };
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="adl-filter-banner-clear adl-client-add-toggle"
+        title={placeholder}
+        onClick={() => setOpen(true)}
+      >
+        {label}
+      </button>
+    );
+  }
   return (
     <div className="adl-client-addbox">
       <input
@@ -341,9 +362,11 @@ function AddBox({
         className="adl-client-search adl-client-add-input"
         placeholder={placeholder}
         value={url}
+        autoFocus
         onChange={(event) => setUrl(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === 'Enter') submit();
+          if (event.key === 'Escape') setOpen(false);
         }}
       />
       <button
@@ -353,6 +376,14 @@ function AddBox({
         onClick={submit}
       >
         {busy ? 'Adding…' : '+ Add'}
+      </button>
+      <button
+        type="button"
+        className="adl-filter-banner-clear"
+        title="Close without adding"
+        onClick={() => setOpen(false)}
+      >
+        ✕
       </button>
     </div>
   );
@@ -775,8 +806,7 @@ export function AdlClientsTab() {
     />
   );
 
-  const connectedWithItems = (state: ClientState<unknown>) =>
-    Boolean(state.overview?.connected);
+  const connectedWithItems = (state: ClientState<unknown>) => Boolean(state.overview?.connected);
 
   const activeVisible =
     tab === 'soulseek' ? slskdVisible : tab === 'torrent' ? torrentVisible : usenetVisible;
@@ -786,10 +816,7 @@ export function AdlClientsTab() {
       : tab === 'torrent'
         ? (torrent.overview?.items ?? [])
         : (usenet.overview?.items ?? []);
-  const stateCounts = bucketCounts(
-    activeAll as { state: string }[],
-    (item) => item.state,
-  );
+  const stateCounts = bucketCounts(activeAll as { state: string }[], (item) => item.state);
   const downSpeed = activeVisible.reduce(
     (sum, item) =>
       sum +
@@ -929,6 +956,7 @@ export function AdlClientsTab() {
 
       {tab === 'torrent' && activeHealth === 'ok' ? (
         <AddBox
+          label="+ add torrent"
           placeholder="paste a magnet link or .torrent url to send it to the client…"
           onAdd={async (url) => {
             try {
@@ -948,6 +976,7 @@ export function AdlClientsTab() {
       ) : null}
       {tab === 'usenet' && activeHealth === 'ok' ? (
         <AddBox
+          label="+ add nzb"
           placeholder="paste an .nzb url to send it to the client…"
           onAdd={async (url) => {
             try {

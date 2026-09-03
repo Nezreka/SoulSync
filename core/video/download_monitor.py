@@ -299,7 +299,10 @@ def write_sidecars(db, dl, dest_path, settings, fs):
     the monitor and the manual-import endpoint."""
     try:
         from core.video import sidecars
-        scope = "movie" if str(dl.get("kind") or "").lower() == "movie" else "episode"
+        kind = str(dl.get("kind") or "").lower()
+        if kind == "youtube":
+            return
+        scope = "movie" if kind == "movie" else "episode"
         tmdb_id, _imdb = _media_ids(db, dl)
         detail = None
         if tmdb_id is not None:
@@ -418,6 +421,8 @@ def retry_another_release(db, dl) -> dict:
     kicked = False
     try:
         kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
+        if kind == "youtube":
+            return {"status": "failed", "wishlist_search": False}
         if tmdb_id:
             if already_failed:
                 _wishlist_failed(db, dl)   # make sure the row is back on the wishlist
@@ -461,6 +466,8 @@ def _wishlist_ids(db, dl):
     media_id = dl.get("media_id")
     if kind == "movie":
         return "movie", (_as_int(media_id) if is_tmdb else db.movie_tmdb_id(media_id)), None, None, ctx
+    if kind == "youtube":
+        return "youtube", media_id, None, None, ctx
     return ("show", (_as_int(media_id) if is_tmdb else db.show_tmdb_id(media_id)),
             ctx.get("season"), ctx.get("episode"), ctx)
 
@@ -478,7 +485,7 @@ def _owned_library_dir(db, dl):
 
         from core.video.path_resolver import resolve_video_file_path, video_base_dirs
         kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
-        if not tmdb_id:
+        if kind == "youtube" or not tmdb_id:
             return None
         stored = db.video_stored_file_path("movie" if kind == "movie" else "episode",
                                            tmdb_id=int(tmdb_id), season=sn, episode=en)
@@ -523,9 +530,10 @@ def _wishlist_obtained(db, dl, upd=None) -> None:
     open on a label we can't parse). An empty cutoff ('always chase the best')
     never removes — those rows stay upgrade-eligible forever. Best-effort."""
     try:
-        kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
+        kind, tmdb_id, sn, en, ctx = _wishlist_ids(db, dl)
         if not tmdb_id:
             return
+        user_initiated = str((ctx or {}).get("import_policy") or "").lower() == "user_replace"
         try:
             from core.video.quality_eval import meets_cutoff, resolution_rank
             from core.video.quality_profile import profile_by_id
@@ -533,12 +541,17 @@ def _wishlist_obtained(db, dl, upd=None) -> None:
             # judged under the profile the grab was made with (per-title, P2)
             profile = profile_by_id(db, dl.get("quality_profile_id"))
             if resolution_rank(label) and not meets_cutoff(label, profile):
-                logger.info("video download %s: '%s' landed below the cutoff — kept on the "
-                            "wishlist for a future upgrade", dl.get("id"), label)
-                return
+                if not user_initiated:
+                    logger.info("video download %s: '%s' landed below the cutoff - kept on the "
+                                "wishlist for a future upgrade", dl.get("id"), label)
+                    return
+                logger.info("video download %s: '%s' landed below the cutoff from a user-triggered search - removing wishlist row",
+                            dl.get("id"), label)
         except Exception:   # noqa: BLE001 - judgment failure → classic remove-on-obtain
             logger.debug("wishlist cutoff judgment failed; removing row", exc_info=True)
-        if kind == "movie":
+        if kind == "youtube":
+            db.remove_youtube_from_wishlist("video", str(tmdb_id))
+        elif kind == "movie":
             db.remove_from_wishlist("movie", tmdb_id=int(tmdb_id))
         elif sn is not None and en is not None:
             db.remove_from_wishlist("episode", tmdb_id=int(tmdb_id), season_number=sn, episode_number=en)
@@ -703,7 +716,7 @@ def _requery_worker(dl_id) -> None:
     from core.video.quality_eval import evaluate_release
     from core.video.quality_profile import profile_by_id
     from core.video.release_parse import parse_release
-    from core.video.retry import merge_candidates, plan_retry
+    from core.video.retry import exhausted_reason, merge_candidates, plan_retry
     try:
         db = _db_provider() if _db_provider else None
         if db is None:
@@ -711,6 +724,9 @@ def _requery_worker(dl_id) -> None:
         first = db.get_video_download(dl_id) or {}
         # requery under the profile the ORIGINAL grab was judged with (P2)
         profile = profile_by_id(db, first.get("quality_profile_id"))
+        # What the retries actually SAW, so giving up can say why instead of the
+        # one generic sentence every exhausted download used to record.
+        seen = {"searches": 0, "hits": 0, "accepted": 0, "refusals": []}
         for _ in range(8):   # hard loop cap on top of the attempt budget
             row = db.get_video_download(dl_id)
             if not row or row.get("status") != "searching":
@@ -733,6 +749,8 @@ def _requery_worker(dl_id) -> None:
             db.update_video_download(dl_id, tried_queries=json.dumps(tq),
                                      attempts=int(row.get("attempts") or 0) + 1)
             polled = _search_for_retry(query)
+            seen["searches"] += 1
+            seen["hits"] += len(polled.get("hits") or [])
             accepted = []
             blocked_users = db.blocked_usernames()
             from api.video.downloads import _parse_text
@@ -749,6 +767,12 @@ def _requery_worker(dl_id) -> None:
                                      size_gb=round((hit.get("size_bytes") or 0) / (1024 ** 3), 1))
                 if v["accepted"]:
                     accepted.append(hit)
+                    seen["accepted"] += 1
+                else:
+                    # Every refusal, so the summary counts the same population it
+                    # describes (and can name the rule that turned the best down).
+                    seen["refusals"].append({"rejected": v.get("rejected"),
+                                             "quality_label": v.get("quality_label")})
             row2 = db.get_video_download(dl_id)
             if not row2 or row2.get("status") != "searching":
                 return
@@ -763,7 +787,7 @@ def _requery_worker(dl_id) -> None:
             # this query gave nothing usable → loop tries the next query (or fails)
         # Exhausted every retry — fail for real, and (like _fail_or_retry) put it
         # back on the wishlist + archive it so it isn't silently lost.
-        err = "No working release found after retries"
+        err = exhausted_reason(seen, (db.get_video_download(dl_id) or {}).get("tried_files"))
         final = db.get_video_download(dl_id) or {"id": dl_id}
         db.update_video_download(dl_id, status="failed", error=err, completed_at=_now())
         _wishlist_failed(db, final)

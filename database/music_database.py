@@ -426,6 +426,8 @@ class MusicDatabase:
                     bitrate INTEGER,
                     file_size INTEGER,  -- bytes; populated by deep scan from media-server API
                     year INTEGER,  -- per-track release year from file tags (albums.year is canonical)
+                    acquired_quality_json TEXT,  -- quality before intentional downsample/lossy retention
+                    retention_json TEXT,  -- JSON transform provenance for the retained representation
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (album_id) REFERENCES albums (id) ON DELETE CASCADE,
@@ -1763,6 +1765,12 @@ class MusicDatabase:
             if cols and 'quality_profile_id' not in cols:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN quality_profile_id INTEGER DEFAULT NULL")
                 logger.info("Added quality_profile_id column to tracks table (quality-profile pipeline)")
+            if cols and 'acquired_quality_json' not in cols:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN acquired_quality_json TEXT DEFAULT NULL")
+                logger.info("Added acquired_quality_json column to tracks table (retention provenance)")
+            if cols and 'retention_json' not in cols:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN retention_json TEXT DEFAULT NULL")
+                logger.info("Added retention_json column to tracks table (retention provenance)")
         except Exception as e:
             logger.error("Error adding library quality-profile column: %s", e)
 
@@ -2794,6 +2802,8 @@ class MusicDatabase:
                     track_title TEXT,
                     track_artist TEXT,
                     track_album TEXT,
+                    acquired_quality_json TEXT,
+                    retention_json TEXT,
                     status TEXT DEFAULT 'completed',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -2828,6 +2838,9 @@ class MusicDatabase:
                     added_external = True
             if added_external:
                 logger.info(f"Added external-ID columns to track_downloads: {', '.join(external_id_cols)}")
+            for _col in ('acquired_quality_json', 'retention_json'):
+                if _col not in td_columns:
+                    cursor.execute(f"ALTER TABLE track_downloads ADD COLUMN {_col} TEXT")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_spotify_id ON track_downloads (spotify_track_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_itunes_id ON track_downloads (itunes_track_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_deezer_id ON track_downloads (deezer_track_id)")
@@ -7550,52 +7563,103 @@ class MusicDatabase:
                 logger.error(f"Error clearing {server_source} database data: {e}")
                 raise
     
-    def cleanup_orphaned_records(self) -> Dict[str, int]:
-        """Remove artists and albums that have no associated tracks"""
+    def cleanup_orphaned_records(self, protected_artist_ids=None,
+                                 protected_album_ids=None) -> Dict[str, int]:
+        """Remove artists and albums that have no associated tracks.
+
+        Rows the CURRENT scan run wrote are protected (#1216). A run inserts the
+        album row first and its tracks after, so between those two steps a real
+        album legitimately has zero tracks. If the server's track list for that
+        album comes back short on that one call - no exception, no timeout, just
+        an incomplete answer - this cleanup deletes the album the same run just
+        created. That is not a recoverable loss: with the row gone the server
+        stops reporting the album as recently added, so no later incremental
+        scan rediscovers it either. The album is simply gone until a deep scan.
+
+        Only rows left trackless by an EARLIER run are genuinely orphaned, so
+        the caller passes the ids it touched and they are held back.
+        """
+        def _norm(ids):
+            return {str(i) for i in ids} if ids else set()
+
+        protected_artists = _norm(protected_artist_ids)
+        protected_albums = _norm(protected_album_ids)
+
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                
-                # Find orphaned artists (no tracks)
+
+                # Select the ids rather than counting, so the protected ones can
+                # be held back and the reported counts stay honest.
                 cursor.execute("""
-                    SELECT COUNT(*) FROM artists 
+                    SELECT id FROM artists
                     WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks WHERE artist_id IS NOT NULL)
                 """)
-                orphaned_artists_count = cursor.fetchone()[0]
-                
-                # Find orphaned albums (no tracks)
+                artist_ids = [str(row[0]) for row in cursor.fetchall()]
+
                 cursor.execute("""
-                    SELECT COUNT(*) FROM albums 
+                    SELECT id FROM albums
                     WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)
                 """)
-                orphaned_albums_count = cursor.fetchone()[0]
-                
-                # Delete orphaned artists
-                if orphaned_artists_count > 0:
-                    cursor.execute("""
-                        DELETE FROM artists 
-                        WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks WHERE artist_id IS NOT NULL)
-                    """)
-                    logger.info(f"Removed {orphaned_artists_count} orphaned artists")
-                
-                # Delete orphaned albums  
-                if orphaned_albums_count > 0:
-                    cursor.execute("""
-                        DELETE FROM albums 
-                        WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)
-                    """)
-                    logger.info(f"Removed {orphaned_albums_count} orphaned albums")
-                
+                album_ids = [str(row[0]) for row in cursor.fetchall()]
+
+                # An artist delete CASCADES to its albums (PRAGMA foreign_keys is
+                # ON), so an artist owning a protected album is not deletable
+                # either - dropping it would take the protected row with it and
+                # put #1216 straight back. The worker always writes the artist
+                # before its albums, so today it protects both; this keeps the
+                # guarantee here rather than resting on that.
+                if protected_albums:
+                    owners = list(protected_albums)
+                    for start in range(0, len(owners), 500):
+                        chunk = owners[start:start + 500]
+                        placeholders = ','.join('?' * len(chunk))
+                        cursor.execute(
+                            f"SELECT DISTINCT artist_id FROM albums WHERE id IN ({placeholders})",
+                            chunk)
+                        protected_artists |= {
+                            str(row[0]) for row in cursor.fetchall() if row[0] is not None}
+
+                artists_to_remove = [i for i in artist_ids if i not in protected_artists]
+                albums_to_remove = [i for i in album_ids if i not in protected_albums]
+                artists_held = len(artist_ids) - len(artists_to_remove)
+                albums_held = len(album_ids) - len(albums_to_remove)
+
+                def _delete(table, ids):
+                    # Chunked: SQLite caps the number of bound variables, and an
+                    # orphan sweep after a big scan can exceed it.
+                    for start in range(0, len(ids), 500):
+                        chunk = ids[start:start + 500]
+                        placeholders = ','.join('?' * len(chunk))
+                        cursor.execute(
+                            f"DELETE FROM {table} WHERE id IN ({placeholders})", chunk)
+
+                if artists_to_remove:
+                    _delete('artists', artists_to_remove)
+                    logger.info(f"Removed {len(artists_to_remove)} orphaned artists")
+
+                if albums_to_remove:
+                    _delete('albums', albums_to_remove)
+                    logger.info(f"Removed {len(albums_to_remove)} orphaned albums")
+
+                if artists_held or albums_held:
+                    logger.info(
+                        f"Kept {artists_held} artists and {albums_held} albums this run "
+                        f"just wrote - trackless for now, not orphaned")
+
                 conn.commit()
-                
+
                 return {
-                    'orphaned_artists_removed': orphaned_artists_count,
-                    'orphaned_albums_removed': orphaned_albums_count
+                    'orphaned_artists_removed': len(artists_to_remove),
+                    'orphaned_albums_removed': len(albums_to_remove),
+                    'artists_protected': artists_held,
+                    'albums_protected': albums_held,
                 }
-                
+
         except Exception as e:
             logger.error(f"Error cleaning up orphaned records: {e}")
-            return {'orphaned_artists_removed': 0, 'orphaned_albums_removed': 0}
+            return {'orphaned_artists_removed': 0, 'orphaned_albums_removed': 0,
+                    'artists_protected': 0, 'albums_protected': 0}
     
     def merge_duplicate_artists(self) -> Dict[str, int]:
         """
@@ -12526,6 +12590,69 @@ class MusicDatabase:
             logger.error(f"Error updating wishlist retry status: {e}")
             return False
     
+    def reset_wishlist_retry_backoff(self, spotify_track_ids: Optional[List[str]] = None,
+                                     profile_id: Optional[int] = None) -> int:
+        """Clear the retry clock on failing wishlist tracks. Returns rows changed.
+
+        The progressive backoff (4h → 24h → 7d) is anchored on retry_count and
+        last_attempted, both stamped by update_wishlist_retry after every failed
+        cycle. When a whole run fails for an EXTERNAL reason — slskd down, no
+        candidates returned — hundreds of tracks get stamped together and then
+        sit out the next 24 hours or 7 days in lockstep, long after the source
+        came back (#1196: 634 of 674 stuck at retry 3-4). Nothing ever cleared
+        these counters short of the track succeeding, so "the source recovered"
+        was not a state the wishlist could act on.
+
+        Only rows that actually carry a failure are touched, so a successful
+        track's history is left alone, and the count returned is the honest
+        number of tracks unstuck.
+        """
+        try:
+            ids = [str(t) for t in (spotify_track_ids or []) if t]
+            if spotify_track_ids is not None and not ids:
+                return 0
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                # The CLOCK, not the failure: every wishlist row carries a
+                # failure_reason (it is why the track is on the list), so that
+                # column identifies nothing. retry_count / last_attempted are
+                # what the backoff actually reads, so they are what "has
+                # something to unstick" means — and it keeps the returned count
+                # honest instead of reporting untouched rows as cleared.
+                clauses = ["(retry_count > 0 OR last_attempted IS NOT NULL)"]
+                params: List[Any] = []
+                if profile_id is not None:
+                    clauses.append("profile_id = ?")
+                    params.append(profile_id)
+                if ids:
+                    # chunked: sqlite caps host parameters (999 by default) and a
+                    # wishlist this feature exists for is bigger than that
+                    changed = 0
+                    for start in range(0, len(ids), 500):
+                        chunk = ids[start:start + 500]
+                        placeholders = ",".join("?" for _ in chunk)
+                        cursor.execute(
+                            f"""UPDATE wishlist_tracks
+                                SET retry_count = 0, last_attempted = NULL
+                                WHERE {' AND '.join(clauses)}
+                                  AND spotify_track_id IN ({placeholders})""",
+                            (*params, *chunk),
+                        )
+                        changed += cursor.rowcount
+                    conn.commit()
+                    return changed
+                cursor.execute(
+                    f"""UPDATE wishlist_tracks
+                        SET retry_count = 0, last_attempted = NULL
+                        WHERE {' AND '.join(clauses)}""",
+                    tuple(params),
+                )
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error resetting wishlist retry backoff: {e}")
+            return 0
+
     def get_wishlist_count(self, profile_id: int = 1, category: Optional[str] = None) -> int:
         """Get the total number of tracks in the wishlist for the given profile,
         optionally filtered by category ('singles' or 'albums')."""
@@ -15007,6 +15134,48 @@ class MusicDatabase:
                 }
             }
 
+    def get_unmatched_import_summary(self) -> Dict[str, Any]:
+        """How many library tracks are parked under 'Unknown Artist' (#1202).
+
+        a file that imports with unreadable tags and no acoustid hit falls all
+        the way back to filename-only identification, which files it under a
+        made-up 'Unknown Artist' as its own one-track album. nothing ever said
+        that happened, so the track just quietly landed in a bucket you had no
+        reason to open. re-identify has always been able to fix it, but you had
+        to already know to go looking on a fake artist's page.
+
+        returns the total, plus the artist row holding the most of them so the
+        banner can link straight there. the same name can exist more than once
+        (one row per server source), which is why this sums rather than taking
+        the first row it finds.
+
+        tracks hang off albums, not off the artist directly, so this walks
+        artist -> album -> track the same way get_library_artists does.
+        """
+        empty = {'count': 0, 'artist_id': None}
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT ar.id AS artist_id, COUNT(DISTINCT t.id) AS track_count
+                    FROM artists ar
+                    LEFT JOIN albums al ON al.artist_id = ar.id
+                    LEFT JOIN tracks t ON t.album_id = al.id
+                    WHERE LOWER(TRIM(ar.name)) = 'unknown artist'
+                    GROUP BY ar.id
+                """)
+                rows = cursor.fetchall()
+
+            total = sum(int(r['track_count'] or 0) for r in rows)
+            if total <= 0:
+                # an empty Unknown Artist row is not worth telling anyone about
+                return empty
+            biggest = max(rows, key=lambda r: int(r['track_count'] or 0))
+            return {'count': total, 'artist_id': biggest['artist_id']}
+        except Exception as e:
+            logger.error(f"Error building unmatched-import summary: {e}")
+            return empty
+
     def get_artist_discography(self, artist_id) -> Dict[str, Any]:
         """
         Get complete artist information and their releases from the database.
@@ -16473,7 +16642,9 @@ class MusicDatabase:
                                musicbrainz_recording_id: Optional[str] = None,
                                audiodb_id: Optional[str] = None,
                                soul_id: Optional[str] = None,
-                               isrc: Optional[str] = None) -> Optional[int]:
+                               isrc: Optional[str] = None,
+                               acquired_quality_json: Optional[str] = None,
+                               retention_json: Optional[str] = None) -> Optional[int]:
         """Record a download with full source provenance. Returns the record ID.
 
         External-ID kwargs (spotify_track_id et al.) capture the metadata-
@@ -16509,13 +16680,15 @@ class MusicDatabase:
                  source_size, audio_quality, track_title, track_artist, track_album, status,
                  bit_depth, sample_rate, bitrate,
                  spotify_track_id, itunes_track_id, deezer_track_id, tidal_track_id,
-                 qobuz_track_id, musicbrainz_recording_id, audiodb_id, soul_id, isrc)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 qobuz_track_id, musicbrainz_recording_id, audiodb_id, soul_id, isrc,
+                 acquired_quality_json, retention_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (track_id, file_path, source_service, source_username, source_filename,
                   source_size, audio_quality, track_title, track_artist, track_album, status,
                   bit_depth, sample_rate, bitrate,
                   spotify_track_id, itunes_track_id, deezer_track_id, tidal_track_id,
-                  qobuz_track_id, musicbrainz_recording_id, audiodb_id, soul_id, isrc))
+                  qobuz_track_id, musicbrainz_recording_id, audiodb_id, soul_id, isrc,
+                  acquired_quality_json, retention_json))
             conn.commit()
             return cursor.lastrowid
         except Exception as e:
@@ -16569,7 +16742,8 @@ class MusicDatabase:
         number of columns updated. Called from
         ``insert_or_update_media_track`` immediately after the row is
         inserted/updated so freshly synced media-server rows pick up
-        whatever IDs SoulSync already knew at download time.
+        whatever identity and retention provenance SoulSync already knew at
+        download time.
         """
         if not track_id or not file_path:
             return 0
@@ -16591,6 +16765,8 @@ class MusicDatabase:
             'audiodb_id': 'audiodb_id',
             'soul_id': 'soul_id',
             'isrc': 'isrc',
+            'acquired_quality_json': 'acquired_quality_json',
+            'retention_json': 'retention_json',
         }
 
         updates: Dict[str, str] = {}
@@ -20547,4 +20723,3 @@ def close_database():
                 # Ignore threading errors during shutdown
                 logger.debug("db instance close: %s", e)
         _database_instances.clear()
-

@@ -4,7 +4,6 @@ import type { RateSample } from './-adl.helpers';
 import type { AdlBatch, AdlBatchHistoryEntry, AdlDownload, AdlFilter } from './-adl.types';
 
 import { fetchBatchHistory, fetchDownloads } from './-adl.api';
-import { statusClass } from './-adl.helpers';
 import {
   ADL_BATCH_HISTORY_POLL_MS,
   ADL_FILTER_STATUSES,
@@ -21,7 +20,6 @@ export interface AdlDownloadsState {
   filter: AdlFilter;
   /** When set, the list shows only this batch. */
   filterBatchId: string | null;
-  expandedBatches: ReadonlySet<string>;
   /** False until the first fetch settles, so the empty state does not flash. */
   loaded: boolean;
 }
@@ -30,11 +28,16 @@ export interface AdlDownloadsController {
   state: AdlDownloadsState;
   /** Rows after the batch filter and the status filter, in server order. */
   visible: AdlDownload[];
-  counts: { active: number; queued: number; total: number; completedOrFailed: number };
+  counts: {
+    active: number;
+    queued: number;
+    failed: number;
+    total: number;
+    completedOrFailed: number;
+  };
   hasRunningWork: boolean;
   setFilter: (filter: AdlFilter) => void;
   toggleBatchFilter: (batchId: string) => void;
-  toggleBatchExpanded: (batchId: string) => void;
   refresh: () => Promise<void>;
   refreshHistory: () => Promise<void>;
   /** Batches still worth a card, oldest terminal ones already faded out. */
@@ -78,7 +81,6 @@ export function useAdlDownloads({
     batchHistory: [],
     filter: 'all',
     filterBatchId: null,
-    expandedBatches: new Set<string>(),
     loaded: false,
   });
 
@@ -149,15 +151,6 @@ export function useAdlDownloads({
     }));
   }, []);
 
-  const toggleBatchExpanded = useCallback((batchId: string) => {
-    setState((prev) => {
-      const next = new Set(prev.expandedBatches);
-      if (next.has(batchId)) next.delete(batchId);
-      else next.add(batchId);
-      return { ...prev, expandedBatches: next };
-    });
-  }, []);
-
   /**
    * Rows for the list.
    *
@@ -199,12 +192,15 @@ export function useAdlDownloads({
     const queued = state.downloads.filter((d) =>
       ADL_FILTER_STATUSES.queued.includes(d.status),
     ).length;
+    const failed = state.downloads.filter((d) =>
+      ADL_FILTER_STATUSES.failed.includes(d.status),
+    ).length;
     const completedOrFailed = state.downloads.filter(
       (d) =>
         ADL_FILTER_STATUSES.completed.includes(d.status) ||
         ADL_FILTER_STATUSES.failed.includes(d.status),
     ).length;
-    return { active, queued, total: state.downloads.length, completedOrFailed };
+    return { active, queued, failed, total: state.downloads.length, completedOrFailed };
   }, [state.downloads]);
 
   /** Cancel All only appears when there is something cancellable. */
@@ -261,41 +257,10 @@ export function useAdlDownloads({
     hasRunningWork,
     setFilter,
     toggleBatchFilter,
-    toggleBatchExpanded,
     refresh,
     refreshHistory,
     visibleBatches,
     batchOpacity,
     rateSamplesFor,
   };
-}
-
-/** Group the visible rows into the four rendered sections, in order. */
-export function groupBySection(rows: AdlDownload[]): {
-  key: string;
-  label: string;
-  items: AdlDownload[];
-}[] {
-  const groups: Record<string, AdlDownload[]> = {
-    active: [],
-    queued: [],
-    completed: [],
-    failed: [],
-  };
-  for (const dl of rows) {
-    const cls = statusClass(dl.status);
-    // `cancelled` has its own class but belongs in the Failed section — the
-    // vanilla's else-branch caught it, and dropping that would leave every
-    // cancelled row unrendered.
-    if (cls === 'active') groups.active.push(dl);
-    else if (cls === 'queued') groups.queued.push(dl);
-    else if (cls === 'completed') groups.completed.push(dl);
-    else groups.failed.push(dl);
-  }
-  return [
-    { key: 'active', label: 'Active', items: groups.active },
-    { key: 'queued', label: 'Queued', items: groups.queued },
-    { key: 'completed', label: 'Completed', items: groups.completed },
-    { key: 'failed', label: 'Failed', items: groups.failed },
-  ];
 }

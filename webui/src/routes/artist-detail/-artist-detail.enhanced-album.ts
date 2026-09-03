@@ -9,9 +9,26 @@ import { filterJiosaavnEntries } from './-artist-detail.enrichment';
  * getServiceUrl and makeClickableBadge (library.js:3783-4012, 5917).
  */
 
+/**
+ * Discogs tags an album id's type into the id itself ('m12345' master /
+ * 'r12345' release, see core/discogs_client.py._tag_discogs_album_id) because
+ * release N and master N are different albums sharing one numeric namespace.
+ * A bare (untagged, pre-existing) id has nothing to strip and defaults to
+ * 'release' -- matching _discogs_album_endpoints()'s own legacy fallback.
+ */
+function untagDiscogsAlbumId(id: string): { id: string; kind: 'master' | 'release' } {
+  const match = /^([mr])(\d+)$/.exec(id);
+  if (!match) return { id, kind: 'release' };
+  return { id: match[2], kind: match[1] === 'm' ? 'master' : 'release' };
+}
+
 /** External links per service and entity type; null when the service has none. */
 export function getServiceUrl(service: string, entityType: string, id: unknown): string | null {
   if (!id) return null;
+  if (service === 'discogs' && entityType === 'album') {
+    const { id: bareId, kind } = untagDiscogsAlbumId(String(id));
+    return `https://www.discogs.com/${kind}/${bareId}`;
+  }
   const urls: Record<string, Record<string, string>> = {
     spotify: {
       artist: `https://open.spotify.com/artist/${id}`,
@@ -52,10 +69,10 @@ export function getServiceUrl(service: string, entityType: string, id: unknown):
       album: `https://www.qobuz.com/album/${id}`,
       track: `https://www.qobuz.com/track/${id}`,
     },
-    // Discogs has no per-track page, and Amazon no artist page.
+    // Discogs has no per-track page, and Amazon no artist page. (Discogs
+    // album is handled above -- its id needs master/release routing.)
     discogs: {
       artist: `https://www.discogs.com/artist/${id}`,
-      album: `https://www.discogs.com/release/${id}`,
     },
     amazon: {
       album: `https://music.amazon.com/albums/${id}`,
@@ -97,8 +114,12 @@ export function albumIdBadges(album: EnhancedAlbum): AlbumIdBadge[] {
   return filterJiosaavnEntries(ALBUM_ID_FIELDS, 'svc')
     .filter((field) => album[field.key])
     .map((field) => {
-      const id = String(album[field.key]);
-      const url = getServiceUrl(field.svc, 'album', id);
+      const rawId = String(album[field.key]);
+      const url = getServiceUrl(field.svc, 'album', rawId);
+      // The Discogs id may carry its internal master/release tag (see
+      // untagDiscogsAlbumId above) -- getServiceUrl needs that to route the
+      // link, but the badge itself should only ever display the bare id.
+      const id = field.svc === 'discogs' ? untagDiscogsAlbumId(rawId).id : rawId;
       return {
         service: field.svc,
         label: field.label,
@@ -739,13 +760,22 @@ export function queueTrackPayload(
   album: EnhancedAlbum,
   artist: Record<string, unknown> | undefined,
 ) {
+  const sourceTrack =
+    ((track as unknown as { _sourceTrack?: Record<string, unknown> })._sourceTrack as
+      | Record<string, unknown>
+      | undefined) || {};
+  const filePath = track.file_path || '';
   return {
+    ...sourceTrack,
     title: track.title || 'Unknown Track',
+    name: track.title || 'Unknown Track',
     artist: String(artist?.name || '') || 'Unknown Artist',
+    artists: track.artists || sourceTrack.artists || [{ name: String(artist?.name || '') }],
     album: album.title || 'Unknown Album',
-    file_path: track.file_path,
-    filename: track.file_path,
-    is_library: true,
+    file_path: filePath,
+    filename: filePath,
+    is_library: Boolean(filePath),
+    playback_status: filePath ? 'ready' : 'missing',
     image_url: album.thumb_url || artist?.thumb_url || null,
     id: track.id,
     artist_id: artist?.id ?? null,

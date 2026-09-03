@@ -1032,21 +1032,46 @@ class RepairWorker:
             remaining -= chunk
         return self._stop_event.is_set()
 
-    def run_job_now(self, job_id: str):
+    def run_job_now(self, job_id: str, respect_enabled: bool = False) -> bool:
         """Queue a job for immediate execution by the main worker loop.
 
         Uses a thread-safe queue instead of spawning a separate thread
         to avoid race conditions with the main loop's _run_job().
+
+        Returns True when the job is queued (or already waiting), the same
+        contract as the video worker's run_job_now. it never returned
+        ANYTHING, so the quality-check automation read None as "library
+        worker unavailable" on every run while the scan it triggered ran
+        fine behind its back (#1192).
+
+        respect_enabled is for NON-HUMAN callers. a person clicking Run Now
+        means it, toggle or not, so that stays the default. an automation is
+        different: wishx turned Quality Upgrade Finder off to free up
+        resources and it kept running anyway, because his import automation
+        force-queued it on every scan. a weekly job ran 12 times in two days
+        (#1207). the toggle is the user's statement about resources, so a
+        background trigger has to honour it.
         """
         self._ensure_jobs_loaded()
         if job_id not in self._jobs:
             logger.warning("Unknown job: %s", job_id)
-            return
+            return False
+
+        if respect_enabled:
+            try:
+                if not self.get_job_config(job_id).get('enabled', True):
+                    logger.info("Job %s is disabled, not running it for a background trigger", job_id)
+                    return False
+            except Exception:
+                # config unreadable, fall through and run. refusing on a bad
+                # read would silently stop scheduled work.
+                logger.debug("Could not read config for %s, allowing the run", job_id, exc_info=True)
 
         with self._force_run_lock:
             if job_id not in self._force_run_queue:
                 self._force_run_queue.append(job_id)
                 logger.info("Job %s queued for immediate run", job_id)
+        return True
 
     def _update_progress(self, scanned: int, total: int):
         """Callback for jobs to report progress."""
@@ -3274,6 +3299,41 @@ class RepairWorker:
         if self._config_manager:
             download_folder = self._config_manager.get('soulseek.download_path', '')
         transfer_norm = os.path.normpath(self.transfer_folder)
+
+        # Never move the file the keeper points at. Two rows can carry the same
+        # path (#1210), and when they did, "remove the other copy" moved the only
+        # file there was and left the kept row pointing at nothing. The detector
+        # no longer produces those groups, but this is the layer that actually
+        # deletes, so it checks for itself.
+        keep_resolved = ''
+        if best.get('file_path'):
+            keep_resolved = _resolve_file_path(
+                best['file_path'], self.transfer_folder, download_folder,
+                config_manager=self._config_manager) or ''
+        if not keep_resolved:
+            # No usable path for the copy we are keeping, so there is no way to
+            # prove the files below aren't that same copy. Refuse rather than
+            # guess: a duplicate left on disk is fixable, the only copy of a
+            # song is not.
+            return {
+                'success': False,
+                'error': ('Could not resolve the file for the copy being kept, so no '
+                          'duplicate was removed. Check Settings > Library > Music Paths.'),
+                'files_deleted': 0,
+                'files_failed': 0,
+            }
+
+        def _is_keeper_file(candidate):
+            if not keep_resolved or not candidate:
+                return False
+            try:
+                if os.path.exists(keep_resolved) and os.path.exists(candidate):
+                    return os.path.samefile(keep_resolved, candidate)
+            except OSError:
+                pass
+            return (os.path.normcase(os.path.normpath(candidate))
+                    == os.path.normcase(os.path.normpath(keep_resolved)))
+
         from core.repair_jobs.base import deleted_quarantine_root
         deleted_root = deleted_quarantine_root(self.transfer_folder)
         files_deleted = 0
@@ -3307,6 +3367,15 @@ class RepairWorker:
                     "did not resolve to an existing file). DB row kept and file left "
                     "on disk — check your Docker volume mapping and Settings > Library "
                     "> Music Paths.%s", fpath, navidrome_hint)
+                continue
+            if _is_keeper_file(resolved):
+                # Same file as the copy being kept: drop the extra database row
+                # so the phantom duplicate stops coming back, but leave the file
+                # exactly where it is.
+                logger.warning(
+                    "Duplicate cleanup: %r is the same file as the copy being kept. "
+                    "Removing the extra database row only, the file is untouched.", resolved)
+                db_remove_ids.append(tid)
                 continue
             try:
                 dest = self._quarantine_dest(resolved, deleted_root)
@@ -4932,12 +5001,33 @@ class RepairWorker:
         if not file_path:
             return {'success': False, 'error': 'No file path associated with this finding'}
 
-        # Read fresh from current settings — not from finding details
+        # Read the track's assigned quality profile LIVE. Finding details only
+        # carry its id; codec/bitrate/delete-original may have changed since
+        # the scan. Fall back to legacy globals for old findings/installations.
         codec = 'mp3'
         bitrate = '320'
-        if self._config_manager:
+        delete_original = False
+        profile = None
+        profile_id = details.get('quality_profile_id') if isinstance(details, dict) else None
+        try:
+            from core.quality.selection import load_profile_by_id
+            # A NULL assignment deliberately means "use the current default".
+            # load_profile_by_id(None) performs that live resolution, so a
+            # default-profile change between scan and apply is respected.
+            profile = load_profile_by_id(profile_id)
+        except Exception as e:
+            logger.debug("Could not resolve lossy-converter profile %r: %s", profile_id, e)
+        if isinstance(profile, dict) and 'lossy_copy_enabled' in profile:
+            if not profile.get('lossy_copy_enabled'):
+                return {'success': False, 'error': 'Lossy Copy is disabled for this track profile'}
+            codec = str(profile.get('lossy_copy_codec') or 'mp3').lower()
+            bitrate = str(profile.get('lossy_copy_bitrate') or '320')
+            delete_original = bool(profile.get('lossy_copy_delete_original'))
+        elif self._config_manager:
             codec = self._config_manager.get('lossy_copy.codec', 'mp3').lower()
             bitrate = self._config_manager.get('lossy_copy.bitrate', '320')
+            delete_original = bool(
+                self._config_manager.get('lossy_copy.delete_original', False))
         # Opus max per-channel bitrate is 256kbps — cap to avoid encoding failures
         if codec == 'opus' and int(bitrate) > 256:
             bitrate = '256'
@@ -4972,6 +5062,9 @@ class RepairWorker:
 
         if not os.path.exists(resolved):
             return {'success': False, 'error': f'Source file not found: {file_path}'}
+
+        from core.imports.file_ops import probe_audio_quality
+        acquired_quality = probe_audio_quality(resolved)
 
         out_path = os.path.splitext(resolved)[0] + out_ext
         # Safety invariant: ffmpeg runs with -y, so refuse to convert a file onto
@@ -5063,13 +5156,6 @@ class RepairWorker:
                 except Exception as e:
                     logger.debug("Failed to embed cover art in lossy copy: %s", e)
 
-            # Blasphemy Mode — uses the job's own setting, not the global lossy_copy one
-            delete_original = False
-            if self._config_manager:
-                job_settings = self._config_manager.get('repair.jobs.lossy_converter.settings', {})
-                if isinstance(job_settings, dict):
-                    delete_original = job_settings.get('delete_original', False)
-
             if delete_original:
                 try:
                     from mutagen import File as MutagenFile
@@ -5081,9 +5167,23 @@ class RepairWorker:
                         try:
                             conn = self.db._get_connection()
                             cursor = conn.cursor()
+                            from core.quality.retention import quality_json, transforms_json
+                            output_quality = probe_audio_quality(out_path)
+                            retention_json = transforms_json([{
+                                'type': 'lossy_copy',
+                                'source_replaced': True,
+                                'codec': codec,
+                                'bitrate': bitrate,
+                                'output_quality': (
+                                    output_quality.to_dict() if output_quality else None),
+                            }])
                             cursor.execute(
-                                "UPDATE tracks SET file_path = ? WHERE id = ?",
-                                (new_db_path, entity_id)
+                                """UPDATE tracks
+                                      SET file_path=?, acquired_quality_json=?,
+                                          retention_json=?, updated_at=CURRENT_TIMESTAMP
+                                    WHERE id=?""",
+                                (new_db_path, quality_json(acquired_quality),
+                                 retention_json, entity_id)
                             )
                             conn.commit()
                             conn.close()

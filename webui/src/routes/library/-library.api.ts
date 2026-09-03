@@ -6,6 +6,7 @@ import {
   LIBRARY_PAGE_SIZE,
   type LibraryArtistsResponse,
   type LibrarySearch,
+  type UnmatchedSummary,
 } from './-library.types';
 
 export const LIBRARY_QUERY_KEY = ['library'] as const;
@@ -58,5 +59,23 @@ export function libraryArtistsQueryOptions(profileId: number, search: LibrarySea
     queryKey: [...LIBRARY_QUERY_KEY, 'artists', profileId, params] as const,
     queryFn: () =>
       readJson<LibraryArtistsResponse>(apiClient.get('library/artists', { searchParams: params })),
+  });
+}
+
+/**
+ * How many tracks landed under "Unknown Artist" because their tags were
+ * unreadable on import (#1202).
+ *
+ * Its own query rather than a field on the artists response: the grid refetches
+ * on every letter, search and page change, and this number does not move with
+ * any of them. Failure is not worth surfacing — a missing banner is strictly
+ * better than an error where a banner would go — so the caller treats a
+ * rejected query as "nothing to report".
+ */
+export function libraryUnmatchedQueryOptions() {
+  return queryOptions({
+    queryKey: [...LIBRARY_QUERY_KEY, 'unmatched'] as const,
+    queryFn: () => readJson<UnmatchedSummary>(apiClient.get('library/unmatched-summary')),
+    staleTime: 60_000,
   });
 }

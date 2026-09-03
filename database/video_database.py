@@ -43,6 +43,39 @@ def _publish_video_event(event_type: str, data: dict) -> None:
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
+from core.video.wishlist_backoff import due_sql as _due_sql, retry_delay_hours as _retry_delay_hours
+
+
+def _load_snapshot(raw):
+    """The stored per-source snapshot, or None. A corrupt blob is not worth an
+    error on a page of wishlist rows - it just means no diagnostics for that one."""
+    if not raw:
+        return None
+    try:
+        out = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return out if isinstance(out, dict) else None
+
+
+def _yt_skip_reason(state) -> str | None:
+    """One sentence for a wished YouTube video that isn't downloading, or None
+    when nothing is holding it back. Mirrors the movie/TV rows' last_refusal."""
+    if not isinstance(state, dict) or not state:
+        return None
+    if state.get("permanent"):
+        return "Unavailable — deleted, private or members-only"
+    attempts = int(state.get("attempts") or 0)
+    if not attempts:
+        return None
+    wait = _retry_delay_hours(int(state.get("strikes") or 0))
+    since = state.get("hours_since_last")
+    if wait and since is not None and float(since) < wait:
+        return ("%d failed attempt%s — waiting %dh before the next try"
+                % (attempts, "" if attempts == 1 else "s", wait))
+    return "%d failed attempt%s — will try again on the next run" % (
+        attempts, "" if attempts == 1 else "s")
+
 SCHEMA_VERSION = 47   # v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
@@ -179,6 +212,10 @@ _COLUMN_MIGRATIONS = [
     # processor via core.video.wishlist_evidence.
     ("video_wishlist", "last_refusal", "TEXT"),
     ("video_wishlist", "last_refusal_quality", "TEXT"),
+    # Per-source outcome of the LAST drain search: what each source in the
+    # chain returned, so "stuck" can be read per source instead of as one
+    # number. JSON: {source: {ran, results, accepted, rejected, reason}}.
+    ("video_wishlist", "search_snapshot", "TEXT"),
     # video_downloads — media identity for the Downloads page cards (poster + open).
     ("video_downloads", "media_id", "TEXT"),
     ("video_downloads", "media_source", "TEXT"),
@@ -260,6 +297,26 @@ _COLUMN_MIGRATIONS = [
     # series type (P8, Sonarr parity): standard | daily | anime — drives how the
     # drain QUERIES for episodes (SxxExx vs air date vs absolute number).
     ("shows", "series_type", "TEXT"),
+    # Per-title acquisition overrides (arr-parity P2). JSON lists / a keyword;
+    # NULL or empty means "follow the global config", which is the only safe
+    # reading of an unset override — an empty allow-list that FILTERED would
+    # stop the title being grabbed by anything.
+    # Manual alternative titles — the arr answer to a release the scene names
+    # differently. Radarr and Sonarr both let you add one by hand; TMDB's alias
+    # list covers most shows ("Big Brother US" comes straight from it) and simply
+    # has nothing for others ("Password (2022)" returns an empty list), which is a
+    # DATA gap, not a matching-logic one. Guessing at it by stripping brackets
+    # collides two real shows; being told the name once does not.
+    ("movies", "manual_aliases", "TEXT"),
+    ("shows", "manual_aliases", "TEXT"),
+    ("movies", "preferred_sources", "TEXT"),
+    ("movies", "release_group_allow", "TEXT"),
+    ("movies", "release_group_block", "TEXT"),
+    ("shows", "preferred_sources", "TEXT"),
+    ("shows", "release_group_allow", "TEXT"),
+    ("shows", "release_group_block", "TEXT"),
+    # shows only: auto | prefer | never. Movies have no season packs.
+    ("shows", "pack_preference", "TEXT"),
     ("video_wishlist", "still_url", "TEXT"),   # episode still thumbnail (captured at add time)
     ("video_wishlist", "season_poster_url", "TEXT"),   # the episode's season poster
     ("video_wishlist", "episode_overview", "TEXT"),    # episode synopsis
@@ -2090,6 +2147,80 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def youtube_download_recovered(self, days: int = 3) -> bool:
+        """Has a YouTube download SUCCEEDED since the most recent failure?
+
+        Without this the health tile keeps reporting a cleared problem: Boulder's
+        C: drive filled on the 31st, produced 18 'no space left on device' rows,
+        was cleared the next day - and the tile went on demanding he free space he
+        had already freed, because the failures were still inside its window. A
+        light that stays red after the fault is fixed is a light you learn to
+        ignore.
+        """
+        conn = self._get_connection()
+        try:
+            window = ("-%d days" % max(1, int(days)),)
+            last_fail = conn.execute(
+                "SELECT MAX(COALESCE(completed_at, grabbed_at)) FROM video_download_history "
+                "WHERE source='youtube' AND outcome='failed' "
+                "AND COALESCE(completed_at, grabbed_at) >= datetime('now', ?)", window).fetchone()[0]
+            if not last_fail:
+                return False
+            last_ok = conn.execute(
+                "SELECT MAX(COALESCE(completed_at, grabbed_at)) FROM video_download_history "
+                "WHERE source='youtube' AND outcome='completed' "
+                "AND COALESCE(completed_at, grabbed_at) >= datetime('now', ?)", window).fetchone()[0]
+            return bool(last_ok and str(last_ok) > str(last_fail))
+        except sqlite3.Error:
+            logger.exception("youtube_download_recovered failed")
+            return False
+        finally:
+            conn.close()
+
+    def youtube_retry_state(self, max_fail: int = 3) -> dict:
+        """``{video_id: {"strikes", "permanent", "attempts", "hours_since_last"}}``.
+
+        The YouTube lane used to give up permanently after three strikes, with
+        nothing to un-stick it: on Boulder's install all 17 wished videos were
+        capped, ten of them on *transient* errors alone - retryable failures that
+        happened to land three times. A bad afternoon killed the video forever.
+
+        Only a GONE failure (deleted, private, members-only) is genuinely
+        permanent. Everything else gets the same treatment the movie/TV wishlist
+        gets: wait longer each time, never stop. ``hours_since_last`` is what the
+        caller measures that wait against.
+        """
+        from core.youtube_errors import GONE, classify, strikes_for
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT media_id, error, "
+                "  julianday('now') - julianday(COALESCE(completed_at, grabbed_at)) AS days_ago "
+                "FROM video_download_history "
+                "WHERE source='youtube' AND outcome='failed' AND media_id IS NOT NULL"
+            ).fetchall()
+        except sqlite3.Error:
+            logger.exception("youtube_retry_state failed")
+            return {}
+        finally:
+            conn.close()
+
+        by_video: dict = {}
+        for r in rows:
+            by_video.setdefault(r["media_id"], []).append(
+                {"error": r["error"], "days_ago": r["days_ago"]})
+
+        out: dict = {}
+        for vid, hist in by_video.items():
+            ages = [h["days_ago"] for h in hist if h["days_ago"] is not None]
+            out[vid] = {
+                "strikes": strikes_for(hist, max_fail=max_fail),
+                "permanent": any(classify(h["error"]) == GONE for h in hist),
+                "attempts": len(hist),
+                "hours_since_last": (min(ages) * 24.0) if ages else None,
+            }
+        return out
+
     def youtube_failed_counts(self, max_fail: int = 3) -> dict:
         """{video_id: strike count} from the permanent history — so the processor can
         stop re-grabbing a video that keeps failing instead of retrying it forever.
@@ -2312,6 +2443,86 @@ class VideoDatabase:
         except sqlite3.Error:
             logger.exception("title_download_history failed")
             return []
+        finally:
+            conn.close()
+
+    def acquisition_state(self, kind: str, library_id: int, tmdb_id=None) -> dict:
+        """Where this title stands right now, in one shape.
+
+        The unit is what the user acts on: a movie is one unit, a show is its
+        episodes, so a show's numbers are episode counts and a movie's are 0 or 1.
+
+        'ignored' is un-owned AND unmonitored - the drain is deliberately not
+        hunting it. Without its own bucket it hides inside 'wanted' and the page
+        claims to be looking for something nothing is looking for.
+
+        'queued' and 'downloading' come from the live queue and are a SUBSET of
+        'wanted', not a sibling of it: a wished episode that is mid-grab is still
+        wished. Callers that want disjoint buckets must say so in their labels.
+        """
+        counts = {k: 0 for k in ("owned", "wanted", "queued", "downloading",
+                                 "failed", "ignored")}
+        out = {"counts": counts, "total": 0, "kind": kind}
+        if kind not in ("movie", "show"):
+            return out
+        conn = self._get_connection()
+        try:
+            if kind == "movie":
+                row = conn.execute(
+                    "SELECT has_file, monitored, tmdb_id FROM movies WHERE id=?",
+                    (int(library_id),)).fetchone()
+                if not row:
+                    return out
+                tmdb_id = row["tmdb_id"] if tmdb_id is None else tmdb_id
+                out["total"] = 1
+                if row["has_file"]:
+                    counts["owned"] = 1
+                elif not row["monitored"]:
+                    counts["ignored"] = 1
+                wl_kind = "movie"
+            else:
+                row = conn.execute("SELECT tmdb_id FROM shows WHERE id=?",
+                                   (int(library_id),)).fetchone()
+                if not row:
+                    return out
+                tmdb_id = row["tmdb_id"] if tmdb_id is None else tmdb_id
+                eps = conn.execute(
+                    "SELECT has_file, monitored FROM episodes WHERE show_id=?",
+                    (int(library_id),)).fetchall()
+                out["total"] = len(eps)
+                for e in eps:
+                    if e["has_file"]:
+                        counts["owned"] += 1
+                    elif not e["monitored"]:
+                        counts["ignored"] += 1
+                wl_kind = "episode"
+
+            if tmdb_id:
+                for w in conn.execute(
+                        "SELECT status FROM video_wishlist WHERE kind=? AND tmdb_id=?",
+                        (wl_kind, tmdb_id)):
+                    st = (w["status"] or "").strip().lower()
+                    if st == "failed":
+                        counts["failed"] += 1
+                    elif st != "downloaded":     # downloaded rows are 'owned' now
+                        counts["wanted"] += 1
+
+            # Live grabs, matched under BOTH identities the title can carry - a
+            # grab started from the TMDB preview page keeps the tmdb identity even
+            # after the title lands in the library (same rule as the history view).
+            idents = [("library", str(library_id))]
+            if tmdb_id:
+                idents.append(("tmdb", str(tmdb_id)))
+            where = " OR ".join("(media_source=? AND media_id=?)" for _ in idents)
+            args = [v for pair in idents for v in pair]
+            for d in conn.execute(
+                    "SELECT status FROM video_downloads WHERE (" + where + ") "
+                    "AND status IN ('queued','downloading','importing')", args):
+                counts["queued" if d["status"] == "queued" else "downloading"] += 1
+            return out
+        except sqlite3.Error:
+            logger.exception("acquisition_state failed")
+            return out
         finally:
             conn.close()
 
@@ -3246,11 +3457,13 @@ class VideoDatabase:
                 "SELECT e.id, e.show_id, e.season_number, e.episode_number, e.title, "
                 "e.overview, e.air_date, e.runtime_minutes, e.rating, e.has_file, e.monitored, "
                 "e.still_url, (e.still_url IS NOT NULL AND e.still_url<>'') AS has_still, "
-                "s.tmdb_id AS show_tmdb_id, "
+                "s.tmdb_id AS show_tmdb_id, w.status AS wishlist_status, "
                 "s.title AS show_title, s.network, s.airs_time, s.year AS show_year, s.status AS show_status, "
                 "(s.poster_url IS NOT NULL AND s.poster_url<>'') AS show_has_poster, "
                 "(s.backdrop_url IS NOT NULL AND s.backdrop_url<>'') AS show_has_backdrop "
                 "FROM episodes e JOIN shows s ON s.id = e.show_id "
+                "LEFT JOIN video_wishlist w ON w.kind='episode' AND w.tmdb_id = s.tmdb_id "
+                "  AND w.season_number = e.season_number AND w.episode_number = e.episode_number "
                 "WHERE " + srv_where + " "
                 "AND e.air_date IS NOT NULL AND e.air_date >= ? AND e.air_date <= ?" + wl_where + " "
                 "ORDER BY e.air_date, COALESCE(s.sort_title, s.title) COLLATE NOCASE, "
@@ -3259,6 +3472,216 @@ class VideoDatabase:
             return [dict(r) for r in rows]
         finally:
             conn.close()
+
+    # How long a schedule may go unrefreshed before the calendar is lying about
+    # what is coming. A week covers a missed nightly run; beyond that the window
+    # is showing what TMDB knew last time anyone asked.
+    SCHEDULE_STALE_DAYS = 7
+
+    def indexer_health_snapshot(self, days: int = 14) -> list:
+        """Per-INDEXER counts, read off the same search receipts.
+
+        A transport-level check says "torrent found 180 releases"; it cannot say
+        that six of your eight indexers produced all of them and two have
+        returned nothing for a fortnight. Prowlarr will happily keep querying a
+        dead tracker, and the only visible symptom is searches that are slower
+        than they need to be.
+
+        ``[{indexer, results, accepted, rows}]``, busiest first. No network:
+        health runs on a page load and probing a dead tracker is the case that
+        hangs it.
+        """
+        agg: dict = {}
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT search_snapshot FROM video_wishlist "
+                "WHERE search_snapshot IS NOT NULL AND last_search_at IS NOT NULL "
+                "AND last_search_at >= datetime('now', ?)",
+                ("-%d days" % max(1, int(days)),)).fetchall()
+        except sqlite3.Error:
+            logger.exception("indexer_health_snapshot failed")
+            return []
+        finally:
+            conn.close()
+
+        for r in rows:
+            try:
+                snap = json.loads(r["search_snapshot"] or "{}")
+            except (TypeError, ValueError):
+                continue
+            seen_here = set()
+            for o in (snap.get("sources") or {}).values():
+                if not isinstance(o, dict):
+                    continue
+                for s in (o.get("samples") or []):
+                    name = str((s or {}).get("indexer") or "").strip()
+                    if not name:
+                        continue
+                    cur = agg.setdefault(name, {"indexer": name, "results": 0,
+                                                "accepted": 0, "rows": 0})
+                    cur["results"] += 1
+                    if s.get("accepted"):
+                        cur["accepted"] += 1
+                    if name not in seen_here:
+                        seen_here.add(name)
+                        cur["rows"] += 1
+        return sorted(agg.values(), key=lambda x: (-x["results"], x["indexer"]))
+
+    def wishlist_row_diagnostics(self, kind: str, tmdb_id, *, season_number=None,
+                                 episode_number=None) -> dict:
+        """Everything known about ONE stuck wishlist row, in one read.
+
+        The row's own tooltip could say how many times it had been searched and
+        the headline refusal. It could not say where the file would go, which
+        external ids the search was keyed on, or whether something was already
+        downloading for it — so answering "why is this stuck" meant reading three
+        screens and guessing. This is that answer as one object.
+        """
+        out: dict = {"row": None, "ids": {}, "target_dir": None, "downloads": []}
+        if kind not in ("movie", "episode"):
+            return out
+        conn = self._get_connection()
+        try:
+            where = "kind=? AND tmdb_id=?"
+            args = [str(kind), tmdb_id]
+            if season_number is not None:
+                where += " AND season_number=?"
+                args.append(int(season_number))
+                if episode_number is not None:
+                    where += " AND episode_number=?"
+                    args.append(int(episode_number))
+            r = conn.execute(
+                "SELECT kind, tmdb_id, title, episode_title, season_number, episode_number, "
+                "status, library_id, date_added, air_date, search_attempts, last_search_at, "
+                "last_refusal, last_refusal_quality, search_snapshot, quality_profile_id "
+                "FROM video_wishlist WHERE " + where + " ORDER BY id DESC LIMIT 1",
+                args).fetchone()
+            if not r:
+                return out
+            row = dict(r)
+            try:
+                row["search_snapshot"] = json.loads(row.get("search_snapshot") or "null")
+            except (TypeError, ValueError):
+                row["search_snapshot"] = None
+            out["row"] = row
+
+            # The external ids the search was actually keyed on. A row that is
+            # stuck because it has no tvdb id looks identical to one that is
+            # stuck because nobody seeds it, until you can see this.
+            tbl = "movies" if kind == "movie" else "shows"
+            ids = conn.execute(
+                "SELECT tmdb_id, tvdb_id, imdb_id, id AS library_id FROM %s WHERE tmdb_id=?" % tbl,
+                (tmdb_id,)).fetchone()
+            out["ids"] = dict(ids) if ids else {"tmdb_id": tmdb_id, "tvdb_id": None,
+                                                "imdb_id": None, "library_id": None}
+
+            # Anything already in flight for this title, so a row that looks
+            # stuck but is actually mid-download says so.
+            out["downloads"] = [dict(d) for d in conn.execute(
+                "SELECT id, status, progress, release_title, source, error, created_at "
+                "FROM video_downloads WHERE media_id=? AND status NOT IN "
+                "('completed','cancelled') ORDER BY id DESC LIMIT 5", (str(tmdb_id),))]
+        except sqlite3.Error:
+            logger.exception("wishlist_row_diagnostics failed")
+            return out
+        finally:
+            conn.close()
+
+        try:
+            key = "movies_path" if kind == "movie" else "tv_path"
+            out["target_dir"] = self.get_setting(key) or None
+        except Exception:   # noqa: BLE001 - a diagnostic must never raise
+            out["target_dir"] = None
+        return out
+
+    def source_health_snapshot(self, days: int = 7) -> dict:
+        """What each download source actually DID lately, read off the receipts
+        every wishlist search already stores.
+
+        Deliberately no network. Health is collected on a dashboard load, and a
+        live probe of a source that is down is exactly the case that hangs the
+        page — Boulder's slskd port has been closed for weeks. The stored
+        per-source outcome is better evidence anyway: it says what happened when
+        the source was really asked, not whether a socket opens.
+
+        ``{source: {searches, ran, results, accepted, reason}}`` where ``ran`` is
+        how many of those searches the source could even perform. A source that
+        never ran is not "finding nothing" — it is not working, and the two must
+        never read the same.
+        """
+        out: dict = {}
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT search_snapshot FROM video_wishlist "
+                "WHERE search_snapshot IS NOT NULL AND last_search_at IS NOT NULL "
+                "AND last_search_at >= datetime('now', ?)",
+                ("-%d days" % max(1, int(days)),)).fetchall()
+        except sqlite3.Error:
+            logger.exception("source_health_snapshot failed")
+            return out
+        finally:
+            conn.close()
+
+        for r in rows:
+            try:
+                snap = json.loads(r["search_snapshot"] or "{}")
+            except (TypeError, ValueError):
+                continue
+            for src, o in (snap.get("sources") or {}).items():
+                if not isinstance(o, dict):
+                    continue
+                cur = out.setdefault(str(src), {"searches": 0, "ran": 0, "results": 0,
+                                                "accepted": 0, "reason": None})
+                cur["searches"] += 1
+                if o.get("ran"):
+                    cur["ran"] += 1
+                    cur["results"] += int(o.get("results") or 0)
+                    cur["accepted"] += int(o.get("accepted") or 0)
+                elif not cur["reason"]:
+                    # Keep the first reason a source gave for not running; they
+                    # repeat, and one is enough to act on.
+                    cur["reason"] = o.get("reason")
+        return out
+
+    def calendar_schedule_freshness(self) -> dict:
+        """When the airing schedules were last refreshed, and whether that is
+        long enough ago to distrust the calendar.
+
+        A calendar that has not refreshed is not empty — it is confidently wrong,
+        showing last month's idea of next week. Nothing recorded this before, so
+        a never-refreshed install reads as stale rather than as fine.
+        """
+        raw = None
+        try:
+            raw = self.get_setting("airing_schedule_refreshed_at")
+        except Exception:   # noqa: BLE001 - freshness is a nicety, never a blocker
+            logger.exception("calendar_schedule_freshness failed")
+        if not raw:
+            return {"refreshed_at": None, "stale": True, "age_days": None}
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT julianday('now') - julianday(?) AS age", (str(raw),)).fetchone()
+            age = row["age"] if row and row["age"] is not None else None
+        except sqlite3.Error:
+            age = None
+        finally:
+            conn.close()
+        if age is None:
+            return {"refreshed_at": str(raw), "stale": True, "age_days": None}
+        return {"refreshed_at": str(raw), "age_days": round(float(age), 2),
+                "stale": float(age) > self.SCHEDULE_STALE_DAYS}
+
+    def mark_airing_schedule_refreshed(self) -> None:
+        """Stamp a successful schedule refresh. Called by the automation handler."""
+        try:
+            from datetime import datetime, timezone
+            self.set_setting("airing_schedule_refreshed_at",
+                             datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
+        except Exception:   # noqa: BLE001 - never break a refresh over its receipt
+            logger.exception("mark_airing_schedule_refreshed failed")
 
     def calendar_movie_releases(self, start_date: str, end_date: str) -> list[dict]:
         """Movie release events in [start_date, end_date] (ISO) for WISHLISTED
@@ -4522,6 +4945,9 @@ class VideoDatabase:
                 "has_poster": bool(meta["has_poster"]) if meta else False,
                 "episode_total": len(ep_list),
                 "episode_owned": owned,
+                # how much of the season the drain is still hunting — the season
+                # bar's monitor toggle reads this to know which way to flip.
+                "episode_monitored": sum(1 for e in ep_list if e["monitored"]),
                 "episodes": ep_list,
             })
 
@@ -4532,6 +4958,9 @@ class VideoDatabase:
             "sort_title": show["sort_title"],
             "quality_profile_id": show["quality_profile_id"] or 0,
             "series_type": show["series_type"] or "standard",
+            # per-title acquisition overrides, so the manage panel renders what
+            # is actually set rather than a blank form
+            **self.title_overrides("show", show["id"]),
             "locked_fields": sorted(self._parse_locked(show["locked_fields"])),
             "watched": (show["watched_episodes"] or 0) >= total > 0,
             "watched_episodes": show["watched_episodes"] or 0,   # raw count for "N of M watched"
@@ -4610,6 +5039,44 @@ class VideoDatabase:
                                (1 if monitored else 0, item_id))
             conn.commit()
             return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def set_episode_monitored(self, show_tmdb_id, season_number, episode_number,
+                              monitored: bool) -> int:
+        """Flip 'monitored' on ONE episode, addressed the way the calendar knows
+        it: by the show's tmdb id plus season/episode. The calendar never has the
+        local episode row id, and looking one up client-side just to say "stop
+        hunting this" would be a round trip for nothing."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE episodes SET monitored=? WHERE season_number=? AND episode_number=? "
+                "AND show_id IN (SELECT id FROM shows WHERE tmdb_id=?)",
+                (1 if monitored else 0, int(season_number), int(episode_number),
+                 int(show_tmdb_id)))
+            conn.commit()
+            return int(cur.rowcount or 0)
+        except (sqlite3.Error, TypeError, ValueError):
+            logger.exception("set_episode_monitored failed")
+            return 0
+        finally:
+            conn.close()
+
+    def set_season_monitored(self, show_id: int, season_number: int, monitored: bool) -> int:
+        """Flip 'monitored' on every episode of one season. Returns how many rows
+        moved. Season monitoring is per-EPISODE in this schema (there is no
+        seasons.monitored), so the season is just the set of its episodes."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE episodes SET monitored=? WHERE show_id=? AND season_number=?",
+                (1 if monitored else 0, int(show_id), int(season_number)))
+            conn.commit()
+            return int(cur.rowcount or 0)
+        except sqlite3.Error:
+            logger.exception("set_season_monitored failed")
+            return 0
         finally:
             conn.close()
 
@@ -5904,14 +6371,19 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def movie_wishlist_to_download(self) -> list:
+    def movie_wishlist_to_download(self, due_only: bool = True) -> list:
         """Wished movies ready to grab: only ``status='wanted'`` (released) — skips
         'monitored' (unreleased). OWNED titles are included, annotated with
         ``owned`` + ``owned_resolutions`` (the library files' resolutions,
         comma-joined) — the 'upgrade until cutoff' semantics: the drain skips
         owned items that already meet the cutoff and only accepts strictly
         better releases for the rest, which is what keeps the old
-        owned-re-download loop broken. Newest year first."""
+        owned-re-download loop broken. Newest year first.
+
+        ``due_only`` applies the retry backoff (#wishlist-backoff): a row that has
+        failed repeatedly waits longer and longer before the automatic drain tries
+        it again. Pass False for a user-initiated "search everything now" and for
+        RSS matching, which spends no searches."""
         conn = self._get_connection()
         try:
             return [dict(r) for r in conn.execute(
@@ -5930,6 +6402,8 @@ class VideoDatabase:
                 "(SELECT m.imdb_id FROM movies m WHERE m.tmdb_id=w.tmdb_id) AS imdb_id "
                 "FROM video_wishlist w "
                 "WHERE w.kind='movie' AND w.status='wanted' AND w.tmdb_id IS NOT NULL "
+                + (" AND " + _due_sql("w") + " " if due_only else "")
+                +
                 # release-window gate: only search once within a week of release (early scene
                 # releases appear a few days out). A further-off movie stays wished but isn't
                 # hunted — no risk of grabbing a wrong-titled or fake 'release' before it exists.
@@ -5985,13 +6459,16 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def episode_wishlist_to_download(self) -> list:
+    def episode_wishlist_to_download(self, due_only: bool = True) -> list:
         """Wished episodes READY to grab: aired (or air-date-unknown), never episodes still in
         the future. Upcoming episodes CAN sit on the wishlist now (e.g. pre-ordered from the
         calendar), but the drain must not hunt for a release that can't exist yet — so this
         skips ``air_date`` in the future. OWNED episodes are included with the same
         ``owned``/``owned_resolutions`` annotation as movies (upgrade-until semantics; the
-        drain does the cutoff/strictly-better judging). Newest air date first."""
+        drain does the cutoff/strictly-better judging). Newest air date first.
+
+        ``due_only`` applies the retry backoff — see
+        :meth:`movie_wishlist_to_download`."""
         conn = self._get_connection()
         try:
             return [dict(r) for r in conn.execute(
@@ -6019,6 +6496,16 @@ class VideoDatabase:
                 "(SELECT MAX(s.tvdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS tvdb_id, "
                 "(SELECT MAX(s.imdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS imdb_id "
                 "FROM video_wishlist w WHERE w.kind='episode' AND w.tmdb_id IS NOT NULL "
+                + (" AND " + _due_sql("w") + " " if due_only else "")
+                # Un-following a show means stop bothering with it. The airing scan
+                # already refuses to ADD episodes for a muted show; episodes wished
+                # BEFORE the mute kept being hunted every hour regardless, which is
+                # the opposite of what the user just asked for. They stay on the
+                # wishlist (removing them would be a decision the user didn't make);
+                # they just stop costing searches.
+                + " AND NOT EXISTS (SELECT 1 FROM video_watchlist v "
+                "  WHERE v.kind='show' AND v.tmdb_id = w.tmdb_id AND v.state='mute') "
+                +
                 # release-window gate: search an episode only once it's within a week of air
                 # (early scene releases show up a few days out) — a further-off episode stays on
                 # the wishlist but isn't searched yet, so the drain never hunts a release that
@@ -6188,7 +6675,8 @@ class VideoDatabase:
 
     def record_wishlist_search_outcome(self, kind: str, tmdb_id, grabbed: bool,
                                        season_number=None, episode_number=None,
-                                       refusal=None, refusal_quality=None) -> None:
+                                       refusal=None, refusal_quality=None,
+                                       snapshot=None) -> None:
         """Track consecutive fruitless drain searches per wishlist row
         (#liveleak-failing-hub): a grab resets the counter, a genuinely
         fruitless search (no results / all rejected) increments it. Searches
@@ -6205,28 +6693,98 @@ class VideoDatabase:
         try:
             where = "kind=? AND tmdb_id=?"
             args = [str(kind), tmdb_id]
-            if season_number is not None and episode_number is not None:
-                where += " AND season_number=? AND episode_number=?"
-                args += [int(season_number), int(episode_number)]
+            if season_number is not None:
+                where += " AND season_number=?"
+                args += [int(season_number)]
+                if episode_number is not None:
+                    where += " AND episode_number=?"
+                    args += [int(episode_number)]
+            # The per-source snapshot is written on BOTH paths: on a grab it is
+            # the receipt for what worked, and clearing it would throw away the
+            # only record of which source actually delivered.
+            snap = None
+            if snapshot is not None:
+                try:
+                    snap = json.dumps(snapshot) if not isinstance(snapshot, str) else snapshot
+                except (TypeError, ValueError):
+                    snap = None
             if grabbed:
                 # It landed — the receipt is history, and leaving it would explain
                 # a row that is no longer stuck.
                 conn.execute(
                     "UPDATE video_wishlist SET search_attempts=0, "
                     "last_search_at=datetime('now'), last_refusal=NULL, "
-                    "last_refusal_quality=NULL WHERE " + where, args)
+                    "last_refusal_quality=NULL, "
+                    "search_snapshot=COALESCE(?, search_snapshot) WHERE " + where,
+                    [snap] + args)
             else:
                 conn.execute(
                     "UPDATE video_wishlist SET "
                     "search_attempts=COALESCE(search_attempts,0)+1, "
                     "last_search_at=datetime('now'), last_refusal=?, "
-                    "last_refusal_quality=? WHERE " + where,
-                    [refusal, refusal_quality] + args)
+                    "last_refusal_quality=?, "
+                    "search_snapshot=COALESCE(?, search_snapshot) WHERE " + where,
+                    [refusal, refusal_quality, snap] + args)
             conn.commit()
         except sqlite3.Error:
             logger.exception("record_wishlist_search_outcome failed")
         finally:
             conn.close()
+
+    def record_wishlist_search_note(self, kind: str, tmdb_id, note,
+                                    season_number=None, episode_number=None,
+                                    refusal_quality=None) -> None:
+        """Store a visible wishlist reason without changing the fruitless-search
+        counter. Client/import refusals mean a release exists but could not be
+        landed, so they should explain the stuck row without pretending the
+        search came back empty."""
+        if not str(note or "").strip():
+            return
+        conn = self._get_connection()
+        try:
+            where = "kind=? AND tmdb_id=?"
+            args = [str(kind), tmdb_id]
+            if season_number is not None:
+                where += " AND season_number=?"
+                args += [int(season_number)]
+                if episode_number is not None:
+                    where += " AND episode_number=?"
+                    args += [int(episode_number)]
+            conn.execute(
+                "UPDATE video_wishlist SET last_search_at=datetime('now'), "
+                "last_refusal=?, last_refusal_quality=? WHERE " + where,
+                [str(note).strip(), refusal_quality] + args)
+            conn.commit()
+        except sqlite3.Error:
+            logger.exception("record_wishlist_search_note failed")
+        finally:
+            conn.close()
+
+    def reset_wishlist_search_state(self, kind: str, tmdb_id, *, season_number=None,
+                                    episode_number=None) -> int:
+        """Clear retry backoff/refusal evidence for a user-forced retry."""
+        conn = self._get_connection()
+        try:
+            where = "kind=? AND tmdb_id=?"
+            args = [str(kind), tmdb_id]
+            if season_number is not None:
+                where += " AND season_number=?"
+                args.append(int(season_number))
+                if episode_number is not None:
+                    where += " AND episode_number=?"
+                    args.append(int(episode_number))
+            cur = conn.execute(
+                "UPDATE video_wishlist SET search_attempts=0, last_search_at=NULL, "
+                "last_refusal=NULL, last_refusal_quality=NULL, search_snapshot=NULL WHERE " + where,
+                args)
+            conn.commit()
+            return int(cur.rowcount or 0)
+        except sqlite3.Error:
+            logger.exception("reset_wishlist_search_state failed")
+            return 0
+        finally:
+            conn.close()
+
 
     def query_wishlist(self, kind: str, *, search=None, sort="added", page=1, limit=60) -> dict:
         """One paged slice of the wishlist. kind='movie' → movie cards; kind='show'
@@ -6251,7 +6809,7 @@ class VideoDatabase:
                 total = conn.execute("SELECT COUNT(*) c FROM video_wishlist" + wsql, args).fetchone()["c"]
                 rows = conn.execute(
                     "SELECT tmdb_id, title, poster_url, year, status, library_id, date_added, "
-                    "search_attempts, last_search_at, last_refusal, last_refusal_quality "
+                    "search_attempts, last_search_at, last_refusal, last_refusal_quality, search_snapshot "
                     "FROM video_wishlist" + wsql + " ORDER BY " + order + " LIMIT ? OFFSET ?",
                     args + [limit, (page - 1) * limit]).fetchall()
                 items = [{"kind": "movie", "tmdb_id": r["tmdb_id"], "title": r["title"],
@@ -6260,7 +6818,8 @@ class VideoDatabase:
                           "search_attempts": r["search_attempts"] or 0,
                           "last_search_at": r["last_search_at"],
                           "last_refusal": r["last_refusal"],
-                          "last_refusal_quality": r["last_refusal_quality"]} for r in rows]
+                          "last_refusal_quality": r["last_refusal_quality"],
+                          "search_snapshot": _load_snapshot(r["search_snapshot"])} for r in rows]
             else:   # shows (grouped from episode rows)
                 where, args = ["kind='episode'"], []
                 if s:
@@ -6283,7 +6842,8 @@ class VideoDatabase:
                     eps = conn.execute(
                         "SELECT season_number, episode_number, episode_title, still_url, "
                         "episode_overview, season_poster_url, air_date, status, "
-                        "search_attempts, last_search_at, last_refusal, last_refusal_quality "
+                        "search_attempts, last_search_at, last_refusal, last_refusal_quality, "
+                        "search_snapshot "
                         "FROM video_wishlist WHERE kind='episode' AND tmdb_id=? "
                         "ORDER BY season_number, episode_number", (sr["tmdb_id"],)).fetchall()
                     by_season: dict = {}
@@ -6296,14 +6856,21 @@ class VideoDatabase:
                             "search_attempts": e["search_attempts"] or 0,
                             "last_search_at": e["last_search_at"],
                             "last_refusal": e["last_refusal"],
-                            "last_refusal_quality": e["last_refusal_quality"]})
+                            "last_refusal_quality": e["last_refusal_quality"],
+                            "search_snapshot": _load_snapshot(e["search_snapshot"])})
                         if e["season_poster_url"] and e["season_number"] not in season_poster:
                             season_poster[e["season_number"]] = e["season_poster_url"]
                     seasons = [{"season_number": sn, "poster_url": season_poster.get(sn),
                                 "episodes": by_season[sn]} for sn in sorted(by_season)]
+                    # A muted show's episodes are no longer searched (the drain
+                    # skips them), so say so — otherwise they read as stuck.
+                    muted = conn.execute(
+                        "SELECT 1 FROM video_watchlist WHERE kind='show' AND tmdb_id=? "
+                        "AND state='mute'", (sr["tmdb_id"],)).fetchone() is not None
                     items.append({"kind": "show", "tmdb_id": sr["tmdb_id"], "title": sr["title"],
                                   "poster_url": sr["poster_url"], "library_id": sr["library_id"],
-                                  "wanted": sr["wanted"], "done": sr["done"] or 0, "seasons": seasons})
+                                  "wanted": sr["wanted"], "done": sr["done"] or 0,
+                                  "muted": muted, "seasons": seasons})
         finally:
             conn.close()
         total_pages = max(1, (total + limit - 1) // limit)
@@ -6412,6 +6979,105 @@ class VideoDatabase:
             return None
         finally:
             conn.close()
+
+    # ── per-title acquisition overrides (P2) ─────────────────────────────────
+    _OVERRIDE_LISTS = ("preferred_sources", "release_group_allow", "release_group_block",
+                       "manual_aliases")
+    _PACK_PREFS = ("auto", "prefer", "never")
+
+    @staticmethod
+    def _load_override_list(raw) -> list:
+        """A stored JSON list back to a list of strings. Anything unreadable
+        degrades to [] — 'follow the global config' — never to a filter that
+        would silently stop grabbing the title."""
+        try:
+            v = json.loads(raw) if raw else []
+        except (TypeError, ValueError):
+            return []
+        if not isinstance(v, list):
+            return []
+        return [str(x).strip() for x in v if str(x).strip()]
+
+    def title_overrides(self, kind: str, library_id) -> dict:
+        """This title's acquisition overrides. Empty lists and 'auto' mean the
+        global config applies."""
+        out = {k: [] for k in self._OVERRIDE_LISTS}
+        out["pack_preference"] = "auto"
+        tbl = "movies" if kind == "movie" else "shows"
+        if kind not in ("movie", "show"):
+            return out
+        cols = list(self._OVERRIDE_LISTS) + (["pack_preference"] if kind == "show" else [])
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT %s FROM %s WHERE id=?" % (", ".join(cols), tbl),
+                               (int(library_id),)).fetchone()
+            if not row:
+                return out
+            for k in self._OVERRIDE_LISTS:
+                out[k] = self._load_override_list(row[k])
+            if kind == "show":
+                pref = (row["pack_preference"] or "auto").strip().lower()
+                out["pack_preference"] = pref if pref in self._PACK_PREFS else "auto"
+            return out
+        except sqlite3.Error:
+            logger.exception("title_overrides failed")
+            return out
+        finally:
+            conn.close()
+
+    def set_title_overrides(self, kind: str, library_id, **values) -> bool:
+        """Replace this title's overrides. Only the keys passed are written."""
+        if kind not in ("movie", "show"):
+            return False
+        tbl = "movies" if kind == "movie" else "shows"
+        sets, args = [], []
+        for k in self._OVERRIDE_LISTS:
+            if k not in values:
+                continue
+            clean = [str(x).strip() for x in (values[k] or []) if str(x).strip()]
+            sets.append("%s=?" % k)
+            args.append(json.dumps(clean) if clean else None)
+        if kind == "show" and "pack_preference" in values:
+            pref = str(values.get("pack_preference") or "auto").strip().lower()
+            sets.append("pack_preference=?")
+            args.append(pref if pref in self._PACK_PREFS else "auto")
+        if not sets:
+            return False
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("UPDATE %s SET %s WHERE id=?" % (tbl, ", ".join(sets)),
+                               args + [int(library_id)])
+            conn.commit()
+            return cur.rowcount > 0
+        except sqlite3.Error:
+            logger.exception("set_title_overrides failed")
+            return False
+        finally:
+            conn.close()
+
+    def title_overrides_for(self, kind: str, *, tmdb_id=None, library_id=None) -> dict:
+        """The engine's lookup, shaped like quality_profile_id_for: the library
+        row wins, tmdb id resolves a title the drain only knows by that."""
+        out = {k: [] for k in self._OVERRIDE_LISTS}
+        out["pack_preference"] = "auto"
+        if kind not in ("movie", "show"):
+            return out
+        if library_id:
+            return self.title_overrides(kind, library_id)
+        if tmdb_id:
+            tbl = "movies" if kind == "movie" else "shows"
+            conn = self._get_connection()
+            try:
+                row = conn.execute("SELECT id FROM %s WHERE tmdb_id=?" % tbl,
+                                   (int(tmdb_id),)).fetchone()
+            except sqlite3.Error:
+                logger.exception("title_overrides_for failed")
+                row = None
+            finally:
+                conn.close()
+            if row:
+                return self.title_overrides(kind, row["id"])
+        return out
 
     def set_title_quality_profile(self, kind: str, library_id, profile_id) -> bool:
         """Assign a quality profile to an owned movie/show (NULL/0 = Default).
@@ -7342,14 +8008,10 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def get_channel_settings(self, channel_id) -> dict:
-        """Per-channel YouTube overrides — ``{custom_name?, quality?}`` — or {} if none.
-        ``custom_name`` overrides the show-name (the ``$channel`` folder token); ``quality``
-        is a youtube_quality profile that forces a different quality than the global default
-        for this channel. Kept in the settings KV store, so no schema change."""
-        if not channel_id:
+    def _youtube_source_settings(self, prefix: str, source_id) -> dict:
+        if not source_id:
             return {}
-        raw = self.get_setting("youtube_channel_settings:" + str(channel_id))
+        raw = self.get_setting(prefix + str(source_id))
         if not raw:
             return {}
         try:
@@ -7359,16 +8021,72 @@ class VideoDatabase:
         except (ValueError, TypeError):
             return {}
 
-    def set_channel_settings(self, channel_id, settings: dict) -> bool:
-        """Persist per-channel overrides (or clear them with an empty/blank dict)."""
-        if not channel_id:
+    def _set_youtube_source_settings(self, prefix: str, source_id, settings: dict) -> bool:
+        if not source_id:
             return False
         import json
         clean = settings if isinstance(settings, dict) else {}
         # Drop empty values so a blank form clears the override rather than storing noise.
         clean = {k: v for k, v in clean.items() if v not in (None, "", {})}
-        self.set_setting("youtube_channel_settings:" + str(channel_id), json.dumps(clean))
+        self.set_setting(prefix + str(source_id), json.dumps(clean))
         return True
+
+    def get_channel_settings(self, channel_id) -> dict:
+        """Per-channel YouTube overrides — folder name, quality, filters, retention,
+        retry policy and archive cadence. Kept in settings KV; no schema churn."""
+        return self._youtube_source_settings("youtube_channel_settings:", channel_id)
+
+    def set_channel_settings(self, channel_id, settings: dict) -> bool:
+        """Persist per-channel overrides (or clear them with an empty/blank dict)."""
+        return self._set_youtube_source_settings("youtube_channel_settings:", channel_id, settings)
+
+    def get_playlist_settings(self, playlist_id) -> dict:
+        """Per-playlist YouTube overrides, same shape as channel settings where relevant."""
+        return self._youtube_source_settings("youtube_playlist_settings:", playlist_id)
+
+    def set_playlist_settings(self, playlist_id, settings: dict) -> bool:
+        """Persist per-playlist overrides (or clear them with an empty/blank dict)."""
+        return self._set_youtube_source_settings("youtube_playlist_settings:", playlist_id, settings)
+
+    def get_youtube_source_settings(self, source_id) -> dict:
+        """Settings for a source id used as a YouTube wishlist parent. Channels win;
+        playlist settings cover playlist-sourced rows whose parent is the playlist id."""
+        return self.get_channel_settings(source_id) or self.get_playlist_settings(source_id)
+
+    def youtube_archive_recheck_hours(self, source_id, default_hours: int = 24) -> int:
+        """Per-source archive recheck cadence in hours. ``0``/missing = default."""
+        settings = self.get_youtube_source_settings(source_id) or {}
+        try:
+            days = int(settings.get("archive_recheck_days") or 0)
+        except (TypeError, ValueError):
+            days = 0
+        if days <= 0:
+            return max(1, int(default_hours or 24))
+        return max(1, min(days, 365)) * 24
+
+    def mark_youtube_source_checked(self, source_id, kind: str = "playlist") -> None:
+        sid = str(source_id or "")
+        if not sid:
+            return
+        self.set_setting("youtube_%s_checked_at:%s" % (kind or "source", sid),
+                         datetime.now(timezone.utc).isoformat(timespec="seconds"))
+
+    def youtube_source_checked_recently(self, source_id, kind: str = "playlist",
+                                        within_hours: int = 24) -> bool:
+        sid = str(source_id or "")
+        if not sid:
+            return False
+        raw = self.get_setting("youtube_%s_checked_at:%s" % (kind or "source", sid))
+        if not raw:
+            return False
+        try:
+            dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            age = datetime.now(timezone.utc) - dt.astimezone(timezone.utc)
+            return age.total_seconds() < max(1, int(within_hours or 24)) * 3600
+        except (TypeError, ValueError):
+            return False
 
     def get_playlist_seen(self, playlist_id) -> list:
         """The video ids already accounted for in a followed playlist — the membership
@@ -7405,6 +8123,29 @@ class VideoDatabase:
             return [r["source_id"] for r in conn.execute(
                 "SELECT source_id FROM video_wishlist WHERE kind='video' AND parent_source_id=?",
                 (str(channel_id),))]
+        finally:
+            conn.close()
+
+    def clear_completed_youtube_from_wishlist(self) -> int:
+        """Remove wished YouTube videos that have already landed.
+
+        Completion normally unwishes at worker finish, but a crash/restart can
+        leave a completed history/download row beside a still-wanted wishlist
+        row. The next drain should heal that before reporting backlog."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("""
+                DELETE FROM video_wishlist
+                WHERE kind='video' AND source='youtube' AND source_id IN (
+                    SELECT media_id FROM video_download_history
+                    WHERE source='youtube' AND outcome='completed' AND media_id IS NOT NULL
+                    UNION
+                    SELECT media_id FROM video_downloads
+                    WHERE source='youtube' AND status='completed' AND media_id IS NOT NULL
+                )
+            """)
+            conn.commit()
+            return int(cur.rowcount or 0)
         finally:
             conn.close()
 
@@ -7610,6 +8351,11 @@ class VideoDatabase:
                 "FROM video_wishlist" + wsql +
                 " GROUP BY parent_source_id ORDER BY " + order + " LIMIT ? OFFSET ?",
                 args + [limit, (page - 1) * limit]).fetchall()
+            # Why a wished video isn't downloading. The movie/TV rows have carried
+            # their attempt count and refusal reason for a while; YouTube rows
+            # showed nothing at all, which is how 17 skipped videos looked
+            # identical to an empty wishlist. One history read for the page.
+            retry = self.youtube_retry_state()
             items = []
             for cr in chan_rows:
                 vids = conn.execute(
@@ -7626,10 +8372,16 @@ class VideoDatabase:
                 for yr in sorted(by_year, reverse=True):   # newest year first
                     eps = []
                     for i, v in enumerate(by_year[yr]):
+                        st = retry.get(v["source_id"]) or {}
                         eps.append({"episode_number": i + 1, "title": v["episode_title"],
                                     "still_url": v["still_url"], "overview": v["episode_overview"],
                                     "air_date": v["air_date"], "status": v["status"],
-                                    "source_id": v["source_id"]})
+                                    "source_id": v["source_id"],
+                                    # named to match the movie/TV rows, so the UI
+                                    # has one shape to render for both lanes
+                                    "search_attempts": int(st.get("attempts") or 0),
+                                    "unavailable": bool(st.get("permanent")),
+                                    "last_refusal": _yt_skip_reason(st)})
                     poster = next((e["still_url"] for e in eps if e["still_url"]), cr["poster_url"])
                     seasons.append({"season_number": yr, "year": yr, "poster_url": poster, "episodes": eps})
                 items.append({
@@ -7666,6 +8418,7 @@ class VideoDatabase:
             "kind": "movie", "id": m["id"], "title": m["title"], "year": m["year"],
             "sort_title": m["sort_title"],
             "quality_profile_id": m["quality_profile_id"] or 0,
+            **self.title_overrides("movie", m["id"]),
             "locked_fields": sorted(self._parse_locked(m["locked_fields"])),
             "watched": (m["play_count"] or 0) > 0,
             # Continue Watching raw state (v45): last watched + resume position

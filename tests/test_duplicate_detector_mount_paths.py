@@ -7,6 +7,10 @@ that point at the same physical file as a duplicate group. The new
 ``_is_same_physical_file`` helper filters those pairs out.
 """
 
+import os
+
+import pytest
+
 from core.repair_jobs.duplicate_detector import _is_same_physical_file
 
 
@@ -32,13 +36,43 @@ class TestIsSamePhysicalFile:
         p2 = "/b/Artist/Album/track.flac"
         assert not _is_same_physical_file(p1, p2, 120.0, 130.0)
 
-    def test_legit_duplicate_under_same_root_is_not_filtered(self) -> None:
-        """Same Artist/Album/file under the same root means the rows
-        are actually duplicates of a re-download, not the same physical
-        file at different mounts. Detector should still flag those."""
-        p1 = "/app/Transfer/Artist/Album/track.flac"
-        p2 = "/app/Transfer/Artist/Album/track.flac"
-        assert not _is_same_physical_file(p1, p2, 200.0, 200.0)
+    def test_identical_paths_are_one_file_not_a_duplicate_pair(self) -> None:
+        """Two rows carrying the SAME path are one file recorded twice.
+
+        This asserted the opposite, on the reasoning that a shared root meant
+        "duplicates of a re-download". A re-download to the same path
+        overwrites the file, it cannot produce a second one. Flagging the pair
+        made the job report a file as a duplicate of itself, and clicking keep
+        moved the only copy to the deleted folder (#1210)."""
+        p = "/app/Transfer/Artist/Album/track.flac"
+        assert _is_same_physical_file(p, p, 200.0, 200.0)
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX case-sensitivity only")
+    def test_paths_differing_only_in_case_are_two_files_on_posix(self) -> None:
+        """Linux is case-sensitive, and that is where this mostly runs (Docker).
+
+        The identical-path short-circuit was first written with .lower(), which
+        made these two look like one file and quietly hid a real duplicate.
+        normcase is a no-op on POSIX, so the pair stays flaggable here."""
+        assert not _is_same_physical_file(
+            "/music/Artist/Album/Song.flac",
+            "/music/Artist/Album/song.flac",
+            200.0, 200.0,
+        )
+
+    def test_windows_drive_path_pair_still_matches(self) -> None:
+        """Same file, written the way two different scanners would store it:
+        backslashes vs forward slashes, different drive-letter case.
+
+        Named for what it checks rather than for the equality short-circuit —
+        on POSIX normcase is a no-op, so these two are NOT byte-identical and
+        this actually lands on the mount-root branch below. Kept because that
+        combination is worth pinning either way."""
+        assert _is_same_physical_file(
+            "C:\\Music\\Artist\\Album\\track.flac",
+            "c:/music/artist/album/track.flac",
+            200.0, 200.0,
+        )
 
     def test_legit_duplicate_under_sibling_albums_is_not_filtered(self) -> None:
         """Two genuinely-duplicate downloads under different parent

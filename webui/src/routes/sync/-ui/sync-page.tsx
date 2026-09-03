@@ -29,7 +29,7 @@ import { normalizeSyncTab } from '../-sync.shell';
 import { useAutoSync } from '../-sync.use-autosync';
 import { useSyncHistory } from '../-sync.use-history';
 import { useSyncPage } from '../-sync.use-page';
-import { QobuzTab, TidalTab } from './account-tab';
+import { QobuzTab, TidalTab, YTMusicTab } from './account-tab';
 import { DeezerArlTab, SpotifyTab } from './account-tabs';
 import { ActivityModal, type ActivityTab } from './activity-modal';
 import { AddPlaylistSheet } from './add-playlist-sheet';
@@ -284,6 +284,12 @@ export function SyncPage() {
         onOpen={(sourceId) => openSourceModal('youtube', sourceId)}
         pendingUrl={pendingFor('youtube')}
         onPendingConsumed={clearPending}
+      />
+    ),
+    ytmusic: (
+      <YTMusicTab
+        vertical={page.verticals.ytmusic}
+        onOpen={(sourceId) => openSourceModal('ytmusic', sourceId)}
       />
     ),
     'listenbrainz-sync': (

@@ -342,3 +342,24 @@ def test_the_manual_grab_records_the_indexer_too(tmp_path, monkeypatch):
         assert row["indexer_id"] == 7, "the UI grab path dropped the indexer id"
     finally:
         videoapi._video_db = None
+
+
+
+def test_extto_is_a_valid_video_hybrid_source():
+    from core.video import download_config
+
+    class DB:
+        def __init__(self):
+            self.settings = {}
+
+        def get_setting(self, key):
+            return self.settings.get(key)
+
+        def set_setting(self, key, value):
+            self.settings[key] = value
+
+    db = DB()
+    out = download_config.save(db, {"download_mode": "hybrid",
+                                    "hybrid_order": ["torrent", "extto", "soulseek", "extto"]})
+    assert out["hybrid_order"] == ["torrent", "extto", "soulseek"]
+    assert download_config.load(db)["hybrid_order"] == ["torrent", "extto", "soulseek"]

@@ -4756,7 +4756,13 @@ function _taskClampPct(value, fallback = 0) {
     let pct = Number(value);
     if (!Number.isFinite(pct)) pct = Number(fallback);
     if (!Number.isFinite(pct)) pct = 0;
-    if (pct > 0 && pct <= 1) pct *= 100;
+    // Tolerate a 0-1 FRACTION, but never mistake an honest 1% for one (#1197).
+    // `pct <= 1` meant a scan sitting at exactly 1 percent — the value every
+    // long job reports for a while — was multiplied to 100, so the card read
+    // "100%" while the counts underneath said 2,347 / 157,122. it corrected
+    // itself at 2%, which is why it looked like another automation finishing
+    // had caused it. an integer 1 is one percent; only a real fraction is <1.
+    if (pct > 0 && pct < 1) pct *= 100;
     return Math.max(0, Math.min(100, Math.round(pct)));
 }
 
@@ -4891,7 +4897,15 @@ function _musicRepairActiveHTML() {
         const cls = t.status === 'error' ? 'error' : (t.status === 'finished' ? 'done' : '');
         const line = `${(done || 0).toLocaleString()} / ${total ? total.toLocaleString() : '…'}` +
             (t.current_item ? ' · ' + _escToast(t.current_item) : '');
-        return _taskCardHTML(t.name || t.job_name || 'Library maintenance', pct, line, cls, _notifActionHTML('Open Tools', 'tools'));
+        // display_name is what the server has always sent (_repair_job_start in
+        // web_server.py puts it in the progress state); this read the wrong key,
+        // so every running job rendered as the same generic "Library
+        // maintenance" card and four at once were indistinguishable (#1211).
+        // t.id is the job_id and beats the generic label if a state ever lands
+        // without a display name.
+        const jobName = t.display_name || t.name || t.job_name || t.id || 'Library maintenance';
+        // _taskCardHTML escapes the title itself, so no _escToast here.
+        return _taskCardHTML(jobName, pct, line, cls, _notifActionHTML('Open Tools', 'tools'));
     }).join('');
 }
 
@@ -5443,6 +5457,87 @@ function _updateNotifBadge() {
     }
 }
 
+// ── system health, as symbols in the panel header ────────────────────────────
+// Health is a STATE, not an event: "slskd is unreachable" stays true until it is
+// fixed. So it does not belong in the notification history, where reading an
+// entry marks it done and a dismissed warning is a warning you no longer have.
+// It lives in the header of that panel instead — always visible while the panel
+// is open, costing one line, with the detail a click away.
+let _notifHealth = null;
+
+function _notifHealthHTML() {
+    if (!_notifHealth) return '';
+    const checks = _notifHealth.checks || [];
+    if (!checks.length) return '';
+    const n = s => checks.filter(c => c.status === s).length;
+    const bits = [];
+    // Only non-zero counts get a symbol: a "0 problems" badge is noise, and the
+    // green tick already carries that news.
+    if (n('error')) bits.push(`<span class="notif-health-sym notif-health-sym--error">🔴 ${n('error')}</span>`);
+    if (n('warning')) bits.push(`<span class="notif-health-sym notif-health-sym--warn">⚠️ ${n('warning')}</span>`);
+    if (n('ok')) bits.push(`<span class="notif-health-sym notif-health-sym--ok">✓ ${n('ok')}</span>`);
+    const worst = n('error') ? 'error' : n('warning') ? 'warning' : 'ok';
+    return `<button class="notif-health-btn notif-health-btn--${worst}" type="button"
+                onclick="_openHealthModal()" title="System health — click for detail">${bits.join('')}</button>`;
+}
+
+function _seedNotifHealth() {
+    return fetch('/api/video/health', { headers: { Accept: 'application/json' } })
+        .then(r => (r.ok ? r.json() : null))
+        .then(h => {
+            _notifHealth = h;
+            const host = document.querySelector('[data-notif-health]');
+            if (host) host.innerHTML = _notifHealthHTML();
+        })
+        .catch(() => { /* the panel is useful without it */ });
+}
+
+function _closeHealthModal() {
+    const ov = document.getElementById('notif-health-overlay');
+    if (ov) { ov.classList.remove('visible'); setTimeout(() => ov.remove(), 200); }
+}
+
+function _healthRowsHTML() {
+    const checks = (_notifHealth && _notifHealth.checks) || [];
+    if (!checks.length) return '<div class="notif-panel-empty">Nothing to report.</div>';
+    const icons = { error: '\ud83d\udd34', warning: '\u26a0\ufe0f', ok: '\u2713' };
+    const esc = s => String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return checks.map(c => `
+        <div class="notif-health-row notif-health-row--${c.status}">
+            <span class="notif-health-ico">${icons[c.status] || '\u2139\ufe0f'}</span>
+            <div class="notif-health-text">
+                <div class="notif-health-label">${esc(c.label)}</div>
+                <div class="notif-health-detail">${esc(c.detail)}</div>
+            </div>
+        </div>`).join('');
+}
+
+function _openHealthModal() {
+    _closeNotifPanel();
+    _closeHealthModal();
+    const overlay = document.createElement('div');
+    overlay.id = 'notif-health-overlay';
+    overlay.className = 'notif-history-overlay';
+    overlay.innerHTML = `
+        <div class="notif-history-modal">
+            <div class="notif-history-header">
+                <span class="notif-history-title">\ud83e\ude7a System Health</span>
+                <button class="notif-history-close" onclick="_closeHealthModal()">\u2715</button>
+            </div>
+            <div class="notif-history-body" data-notif-health-body>${_healthRowsHTML()}</div>
+        </div>`;
+    overlay.addEventListener('click', e => { if (e.target === overlay) _closeHealthModal(); });
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+    // Re-read on open: the panel may have been sitting there a while, and stale
+    // health is the one thing this modal must not show.
+    return _seedNotifHealth().then(() => {
+        const body = overlay.querySelector('[data-notif-health-body]');
+        if (body) body.innerHTML = _healthRowsHTML();
+    });
+}
+
 function toggleNotifPanel() {
     if (_notifState.panelOpen) {
         _closeNotifPanel();
@@ -5469,6 +5564,7 @@ function _openNotifPanel() {
     panel.innerHTML = `
         <div class="notif-panel-header">
             <span class="notif-panel-title">Notifications</span>
+            <span class="notif-health" data-notif-health>${_notifHealthHTML()}</span>
             <button class="notif-panel-clear" onclick="_openNotifHistory()">History</button>
             ${entries.length > 0 ? '<button class="notif-panel-clear" onclick="_clearNotifHistory()">Clear All</button>' : ''}
         </div>
@@ -5479,6 +5575,7 @@ function _openNotifPanel() {
     `;
 
     document.body.appendChild(panel);
+    _seedNotifHealth();   // system health symbols (see _notifHealthHTML)
     _seedNotifSys();      // fresh system numbers even when the socket is down
     _seedOverlayTask();   // refresh the Active cards from the server on open (socket keeps them live after)
     _seedCollectionSyncTask();

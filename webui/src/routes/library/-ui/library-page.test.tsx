@@ -35,33 +35,56 @@ async function record(input: RequestInfo | URL): Promise<string> {
   return url;
 }
 
-function stubFetch(artists: LibraryArtist[], total = artists.length, pages = 1) {
+function stubFetch(
+  artists: LibraryArtist[],
+  total = artists.length,
+  pages = 1,
+  /** #1202 banner payload; `fail` makes the request reject. */
+  unmatched: { count: number; artist_id: string | number | null } | 'fail' | null = null,
+) {
   requested = [];
   sent = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = await record(input);
+      if (url.includes('/api/library/unmatched-summary')) {
+        if (unmatched === 'fail') return new Response('nope', { status: 500 });
+        return new Response(JSON.stringify({ success: true, ...(unmatched ?? { count: 0, artist_id: null }) }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       if (url.includes('/api/watchlist/')) {
         return new Response(JSON.stringify({ success: true }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
-      const body = url.includes('/api/library/artists')
-        ? {
-            success: true,
-            artists,
-            pagination: {
-              page: Number(new URL(url, 'http://x').searchParams.get('page') ?? 1),
-              limit: 75,
-              total_count: total,
-              total_pages: pages,
-              has_prev: Number(new URL(url, 'http://x').searchParams.get('page') ?? 1) > 1,
-              has_next: Number(new URL(url, 'http://x').searchParams.get('page') ?? 1) < pages,
-            },
-          }
-        : {};
+      const body =
+        url.includes('/api/artist/') && url.includes('/top-tracks')
+          ? {
+              success: true,
+              source: 'spotify',
+              tracks: [
+                { id: 'sp-1', name: 'Xtal', artists: [{ name: 'Aphex Twin' }] },
+                { id: 'sp-2', name: 'Tha', artists: [{ name: 'Aphex Twin' }] },
+              ],
+            }
+          : url.includes('/api/library/artists')
+            ? {
+                success: true,
+                artists,
+                pagination: {
+                  page: Number(new URL(url, 'http://x').searchParams.get('page') ?? 1),
+                  limit: 75,
+                  total_count: total,
+                  total_pages: pages,
+                  has_prev: Number(new URL(url, 'http://x').searchParams.get('page') ?? 1) > 1,
+                  has_next: Number(new URL(url, 'http://x').searchParams.get('page') ?? 1) < pages,
+                },
+              }
+            : {};
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -74,7 +97,11 @@ function renderPage(entry = '/library') {
   const queryClient = createTestQueryClient();
   const history = createMemoryHistory({ initialEntries: [entry] });
   const router = createAppRouter({ history, queryClient });
-  return { router, ...render(<AppRouterProvider router={router} queryClient={queryClient} />) };
+  return {
+    router,
+    queryClient,
+    ...render(<AppRouterProvider router={router} queryClient={queryClient} />),
+  };
 }
 
 const libraryCalls = () => requested.filter((u) => u.includes('/api/library/artists'));
@@ -96,6 +123,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   delete window.SoulSyncWebShellBridge;
   delete window.showLibraryDownloadsSection;
+  delete window.playTrackList;
 });
 
 describe('LibraryPage rendering', () => {
@@ -130,6 +158,23 @@ describe('LibraryPage rendering', () => {
     fireEvent.click(document.querySelector('.library-radio-btn')!);
     expect(window.startLibraryRadio).toHaveBeenCalled();
     delete window.startLibraryRadio;
+  });
+
+  it("plays an artist's ranked top tracks in provider order", async () => {
+    window.playTrackList = vi.fn();
+    renderPage();
+    await screen.findByText('Aphex Twin');
+
+    fireEvent.click(document.querySelector('.library-artist-play-btn')!);
+
+    await waitFor(() => expect(window.playTrackList).toHaveBeenCalledTimes(1));
+    expect(window.playTrackList).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({ title: 'Xtal', artist: 'Aphex Twin' }),
+        expect.objectContaining({ title: 'Tha', artist: 'Aphex Twin' }),
+      ],
+      'Aphex Twin — Top Tracks',
+    );
   });
 });
 
@@ -464,5 +509,77 @@ describe('LibraryPage pagination', () => {
 
     fireEvent.click(screen.getByText('Next →'));
     await waitFor(() => expect(router.state.location.search).toMatchObject({ page: 2 }));
+  });
+});
+
+describe('LibraryPage unmatched-imports banner (#1202)', () => {
+  const banner = () => document.querySelector('.library-unmatched-banner');
+
+  /**
+   * Absence only proves something once the query has actually settled.
+   * Asserting straight after the grid renders passes while the request is
+   * still in flight, which made these pass against a banner with no guard
+   * at all.
+   */
+  const settled = async (queryClient: ReturnType<typeof createTestQueryClient>) => {
+    await waitFor(() =>
+      expect(queryClient.getQueryState(['library', 'unmatched'])?.status).not.toBe('pending'),
+    );
+  };
+
+  it('names the count and links straight at the Unknown Artist row', async () => {
+    stubFetch([artist({ id: 1, name: 'Aphex Twin' })], 1, 1, { count: 7, artist_id: 'u1' });
+    renderPage();
+    await waitFor(() => expect(banner()).not.toBeNull());
+    expect(banner()!.textContent).toContain('7 tracks imported without a match');
+    // the whole point is getting to where re-identify lives
+    expect(document.querySelector('.library-unmatched-btn')?.getAttribute('href')).toBe(
+      '/artist-detail/library/u1',
+    );
+  });
+
+  it('says track, not tracks, for a single one', async () => {
+    stubFetch([artist({ id: 1 })], 1, 1, { count: 1, artist_id: 'u1' });
+    renderPage();
+    await waitFor(() => expect(banner()).not.toBeNull());
+    expect(banner()!.textContent).toContain('1 track imported');
+    expect(banner()!.textContent).not.toContain('1 tracks');
+  });
+
+  it('stays away entirely on a clean library', async () => {
+    stubFetch([artist({ id: 1, name: 'Aphex Twin' })], 1, 1, { count: 0, artist_id: null });
+    const { queryClient } = renderPage();
+    await screen.findByText('Aphex Twin');
+    await settled(queryClient);
+    expect(banner()).toBeNull();
+  });
+
+  it('stays away on a zero count even if a row id comes back with it', async () => {
+    // The backend nulls the id whenever the count is 0, so this combination
+    // should never arrive — but "0 tracks imported without a match" is the
+    // worst thing this banner could say, so the count guard stands on its own.
+    stubFetch([artist({ id: 1, name: 'Aphex Twin' })], 1, 1, { count: 0, artist_id: 'u1' });
+    const { queryClient } = renderPage();
+    await screen.findByText('Aphex Twin');
+    await settled(queryClient);
+    expect(banner()).toBeNull();
+  });
+
+  it('stays away when the count exists but the row id does not', async () => {
+    // Without an id there is nowhere to send them, and a banner that cannot
+    // answer "show me" is worse than no banner.
+    stubFetch([artist({ id: 1, name: 'Aphex Twin' })], 1, 1, { count: 4, artist_id: null });
+    const { queryClient } = renderPage();
+    await screen.findByText('Aphex Twin');
+    await settled(queryClient);
+    expect(banner()).toBeNull();
+  });
+
+  it('stays away when the request fails, and the grid still renders', async () => {
+    stubFetch([artist({ id: 1, name: 'Aphex Twin' })], 1, 1, 'fail');
+    const { queryClient } = renderPage();
+    await screen.findByText('Aphex Twin');
+    await settled(queryClient);
+    expect(banner()).toBeNull();
   });
 });

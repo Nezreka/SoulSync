@@ -6,7 +6,8 @@
     "check": "oxfmt --check src && oxlint --type-check src",
     "dev": "vite",
     "fix": "oxfmt src && oxlint --type-check src --fix",
-    "build": "vite build",
+    "build": "vite build && vite build -c vite.shell.config.ts",
+    "build:shell": "vite build -c vite.shell.config.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test"

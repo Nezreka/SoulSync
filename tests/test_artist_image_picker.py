@@ -172,9 +172,10 @@ def test_endpoint_cache_is_id_keyed_and_forgives_empties():
     """Source pins: two same-name artists must not share a cache slot, and an
     empty result (one transient source hiccup) must not stick for 15 minutes."""
     from pathlib import Path
-    ws = (Path(__file__).resolve().parent.parent / "web_server.py").read_text(
+    # the artist family moved to api/artist_detail.py (aug 26 lift)
+    ws = (Path(__file__).resolve().parent.parent / "api" / "artist_detail.py").read_text(
         encoding="utf-8", errors="replace")
-    handler = ws.split("def get_artist_art_options")[1].split("\n@app.route")[0]
+    handler = ws.split("def get_artist_art_options")[1].split("\n@bp.route")[0]
     # FLIPPED (#1069, matvei4iz): this pin used to assert int(artist_id) — the
     # bug itself. artists.id is TEXT since the id-columns migration; Navidrome/
     # Jellyfin ids are strings and int() 400'd the whole picker for them.
@@ -184,7 +185,7 @@ def test_endpoint_cache_is_id_keyed_and_forgives_empties():
     assert "_ART_OPTIONS_EMPTY_TTL_S = 60" in ws
     # the apply endpoint: no casts either, and the cache invalidation pops the
     # ID-keyed slot (it used to pop a NAME-keyed one — a dead pop)
-    apply_h = ws.split("def set_artist_art")[1].split("\n@app.route")[0]
+    apply_h = ws.split("def set_artist_art")[1].split("\n@bp.route")[0]
     assert "int(artist_id)" not in apply_h
     assert "_ART_OPTIONS_CACHE.pop(('artist', artist_id), None)" in apply_h
 
@@ -220,9 +221,10 @@ def test_custom_url_apply_rejects_non_images():
     """Source pins: pasted URLs must not poison the thumb/poster/artist.jpg —
     downloaded bytes are magic-sniffed BEFORE anything is pinned."""
     from pathlib import Path
-    ws = (Path(__file__).resolve().parent.parent / "web_server.py").read_text(
+    # the artist family moved to api/artist_detail.py (aug 26 lift)
+    ws = (Path(__file__).resolve().parent.parent / "api" / "artist_detail.py").read_text(
         encoding="utf-8", errors="replace")
-    handler = ws.split("def set_artist_art")[1].split("\n@app.route")[0]
+    handler = ws.split("def set_artist_art")[1].split("\n@bp.route")[0]
     assert "_looks_like_image(image_bytes)" in handler
     assert "doesn't point to an image" in handler
     # download+validate happens BEFORE the DB pin
@@ -230,7 +232,7 @@ def test_custom_url_apply_rejects_non_images():
 
 
 def test_image_sniffer():
-    import web_server as ws
+    from api import artist_detail as ws
     assert ws._looks_like_image(b"\xff\xd8\xff\xe0" + b"0" * 20) is True     # jpeg
     assert ws._looks_like_image(b"\x89PNG\r\n\x1a\n" + b"0" * 20) is True    # png
     assert ws._looks_like_image(b"RIFF\x00\x00\x00\x00WEBP" + b"0" * 8) is True

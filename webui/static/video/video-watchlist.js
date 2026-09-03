@@ -52,7 +52,7 @@
     // back-catalog cog + the shared follow eye; opens the studio detail page.
     function studioCard(it) {
         var logo = it.poster_url
-            ? '<img class="vwlp-studio-logo" src="' + esc(it.poster_url) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
+            ? '<img class="vwlp-studio-logo" src="' + esc(sized(it.poster_url, 500)) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
             : '<span class="vwlp-studio-ph">&#127902;</span>';
         var eye = wlBtn({ kind: 'studio', tmdbId: it.tmdb_id, title: it.title, poster: it.poster_url });
         var cog = '<button type="button" data-vwlp-ssettings="' + esc(it.tmdb_id) + '" data-title="' + esc(it.title) + '" ' +
@@ -83,6 +83,29 @@
         return '<span class="vwlp-pill">' + esc(status) + '</span>';
     }
 
+    // Ask for a THUMBNAIL, not the original.
+    //
+    // The cards are 158px wide (128 on small screens) and were being handed the
+    // full-size art: Plex returns a ~2000x3000 poster when no width is asked for,
+    // which the browser then decodes to ~24MB of bitmap PER CARD and scales down.
+    // Sixty of those is over a gigabyte of texture behind a grid of thumbnails,
+    // and it shows up as the compositor taking most of a second to repaint a
+    // hover. 342 covers a 158px cell at 2x DPR.
+    //
+    // Same helper the wishlist page has used for a while - the proxy takes ?w=,
+    // and a TMDB url gets its size segment rewritten instead.
+    function sized(url, w) {
+        if (!url) return url;
+        if (url.indexOf('/api/video/poster/') !== -1 || url.indexOf('/api/video/backdrop/') !== -1) {
+            return url + (url.indexOf('?') === -1 ? '?' : '&') + 'w=' + w;
+        }
+        if (url.indexOf('image.tmdb.org') !== -1) {
+            var b = w <= 185 ? 185 : (w <= 342 ? 342 : (w <= 500 ? 500 : 780));
+            return url.replace(/\/t\/p\/[^/]+\//, '/t/p/w' + b + '/');
+        }
+        return url;
+    }
+
     function cardHTML(it, kind) {
         // SPA open target: library shows open by library id ('library' source);
         // people + un-owned shows open by tmdb id ('tmdb').
@@ -91,7 +114,7 @@
         var href = '/video-detail/' + source + '/' + kind + '/' + openId;
         var ph = kind === 'person' ? '👤' : '📺';   // 👤 / 📺
         var art = it.poster_url
-            ? '<img class="vwlp-card-img" src="' + esc(it.poster_url) + '" alt="" loading="lazy" ' +
+            ? '<img class="vwlp-card-img" src="' + esc(sized(it.poster_url, 342)) + '" alt="" loading="lazy" ' +
               'onload="this.classList.add(\'vwlp-loaded\')" onerror="this.style.display=\'none\'">'
             : '<div class="vwlp-card-ph">' + ph + '</div>';
         var btn = window.VideoGet

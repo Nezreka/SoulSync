@@ -73,6 +73,10 @@ function initializeMediaPlayer() {
     if (miniShuffleBtn) miniShuffleBtn.addEventListener('click', (e) => { e.stopPropagation(); handleNpShuffle(); });
     if (miniRepeatBtn) miniRepeatBtn.addEventListener('click', (e) => { e.stopPropagation(); handleNpRepeat(); });
 
+    // Auto-download is off by default and profile-scoped. A user must enable it
+    // from the queue header before SoulSync starts background acquisitions.
+    try { npAutoDownloadQueue = localStorage.getItem(npAutoDownloadStorageKey()) === '1'; } catch (_) {}
+
     // Restore a previously-saved queue (does not auto-play)
     npRestoreQueue();
 }
@@ -1409,6 +1413,243 @@ let npVizInitialized = false;
 let npCrossfadeOn = false;
 let npSleepMinutes = 0;       // 0 = off
 let npSleepTimerId = null;
+let npAutoDownloadQueue = false;
+let npQueueRequestCounter = 0;
+let npQueuePrefetchRequest = null;
+let npQueuePrefetchReschedule = false;
+let npQueuePrefetchTimer = null;
+let npQueuePrefetchPoller = null;
+const npQueuePrefetchBatchIds = new Set();
+const NP_QUEUE_PREFETCH_TERMINAL = new Set(['failed', 'not_found', 'cancelled', 'quarantined']);
+
+function npQueueIdentity(track) {
+    const source = String(track?.source || track?.metadata_source || '').trim().toLowerCase();
+    const sourceId = String(track?.source_track_id || track?.spotify_track_id || track?.tidal_track_id ||
+        track?.deezer_id || track?.itunes_track_id || track?.musicbrainz_recording_id || track?.track_id || '').trim();
+    if (source && sourceId) return `source:${source}:${sourceId}`;
+    const title = String(track?.title || track?.name || '').trim().toLowerCase();
+    const artistValues = Array.isArray(track?.artists) ? track.artists : [];
+    const artists = artistValues.map(value => String(typeof value === 'object' ? value?.name : value || '').trim().toLowerCase()).filter(Boolean);
+    if (!artists.length) artists.push(String(track?.artist || track?.artist_name || '').trim().toLowerCase());
+    const rawAlbum = track?.album;
+    const album = String(typeof rawAlbum === 'object' ? (rawAlbum?.name || rawAlbum?.title || '') :
+        (rawAlbum || track?.album_title || '')).trim().toLowerCase();
+    return `metadata:${title}|${artists.join('|')}|${album}`;
+}
+
+function npPrepareQueueTrack(rawTrack) {
+    const track = { ...(rawTrack || {}) };
+    track.title = track.title || track.name || 'Unknown Track';
+    track.name = track.name || track.title;
+    if (!track.artist) {
+        const first = Array.isArray(track.artists) ? track.artists[0] : null;
+        track.artist = typeof first === 'object' ? first?.name : first;
+    }
+    track.artist = track.artist || track.artist_name || 'Unknown Artist';
+    if (!Array.isArray(track.artists) || !track.artists.length) track.artists = [{ name: track.artist }];
+    if (typeof track.album === 'object') track.album = track.album?.name || track.album?.title || '';
+    track.album = track.album || track.album_title || 'Unknown Album';
+    track.file_path = track.file_path || track.filename || '';
+    track.filename = track.file_path;
+    track.is_library = Boolean(track.file_path);
+    track.playback_status = track.file_path ? 'ready' : (track.playback_status || 'missing');
+    track._queue_identity = npQueueIdentity(track);
+    if (!track._queue_request_id) {
+        const existing = npQueue.find(item => item?._queue_identity === track._queue_identity && item?._queue_request_id);
+        track._queue_request_id = existing?._queue_request_id ||
+            `npq-${Date.now().toString(36)}-${(++npQueueRequestCounter).toString(36)}`;
+    }
+    return track;
+}
+
+function npPrepareQueueTracks(rawTracks) {
+    const requestIdByIdentity = new Map();
+    return (rawTracks || []).map(rawTrack => {
+        const track = npPrepareQueueTrack(rawTrack);
+        const sharedRequestId = requestIdByIdentity.get(track._queue_identity);
+        if (sharedRequestId) {
+            track._queue_request_id = sharedRequestId;
+        } else {
+            requestIdByIdentity.set(track._queue_identity, track._queue_request_id);
+        }
+        return track;
+    });
+}
+
+function npQueueTrackNeedsDownload(track) {
+    return Boolean(track && !track.file_path && track.title && track.artist &&
+        !NP_QUEUE_PREFETCH_TERMINAL.has(track.playback_status));
+}
+
+function npAutoDownloadStorageKey() {
+    const profile = String(window._currentProfileName || 'default');
+    return `soulsync-queue-auto-download:${profile}`;
+}
+
+function npQueueStatusLabel(track) {
+    switch (track?.playback_status) {
+        case 'requesting': return 'Preparing…';
+        case 'pending':
+        case 'queued': return 'Queued';
+        case 'searching': return 'Searching…';
+        case 'downloading': return track.download_progress > 0 ? `Downloading ${Math.round(track.download_progress)}%` : 'Downloading…';
+        case 'post_processing': return 'Verifying…';
+        case 'ready': return 'Ready';
+        case 'failed': return 'Download failed';
+        case 'not_found': return 'Not found';
+        case 'cancelled': return 'Cancelled';
+        case 'quarantined': return 'Quarantined';
+        default: return track?.file_path ? '' : 'Missing';
+    }
+}
+
+function npApplyQueuePrefetchState(requestIds, state, finalPath = '', progress = 0, error = '') {
+    const ids = new Set((requestIds || []).map(String));
+    let changed = false;
+    npQueue.forEach(track => {
+        if (!ids.has(String(track?._queue_request_id || ''))) return;
+        if (finalPath) {
+            track.file_path = finalPath;
+            track.filename = finalPath;
+            track.is_library = true;
+            track.playback_status = 'ready';
+            track.playback_error = '';
+        } else {
+            track.playback_status = state || track.playback_status;
+            track.download_progress = Number(progress || 0);
+            track.playback_error = error || '';
+        }
+        changed = true;
+    });
+    return changed;
+}
+
+function npStartQueuePrefetchPolling() {
+    if (npQueuePrefetchPoller || npQueuePrefetchBatchIds.size === 0) return;
+    npQueuePrefetchPoller = setInterval(npPollQueuePrefetch, 2000);
+    npPollQueuePrefetch();
+}
+
+function npStopQueuePrefetchPolling() {
+    if (npQueuePrefetchPoller) clearInterval(npQueuePrefetchPoller);
+    npQueuePrefetchPoller = null;
+}
+
+async function npPollQueuePrefetch() {
+    if (npQueuePrefetchBatchIds.size === 0) {
+        npStopQueuePrefetchPolling();
+        return;
+    }
+    const query = [...npQueuePrefetchBatchIds].map(id => `batch_ids=${encodeURIComponent(id)}`).join('&');
+    try {
+        const response = await fetch(`/api/playback/queue/prefetch/status?${query}`, { cache: 'no-store' });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Queue download status unavailable');
+        let changed = false;
+        Object.entries(data.batches || {}).forEach(([batchId, batch]) => {
+            const tasks = Array.isArray(batch?.tasks) ? batch.tasks : [];
+            tasks.forEach(task => {
+                const info = task.track_info || {};
+                const requestIds = Array.isArray(info._queue_request_ids) && info._queue_request_ids.length
+                    ? info._queue_request_ids
+                    : [info._queue_request_id].filter(Boolean);
+                if (!requestIds.length) return;
+                const state = task.quarantine_entry_id ? 'quarantined' : String(task.status || 'queued');
+                const finalPath = state === 'completed' ? String(task.final_file_path || '') : '';
+                changed = npApplyQueuePrefetchState(
+                    requestIds,
+                    finalPath ? 'ready' : state,
+                    finalPath,
+                    task.progress,
+                    task.error_message,
+                ) || changed;
+            });
+            const terminal = ['complete', 'error', 'cancelled'].includes(batch?.phase) &&
+                tasks.every(task => ['completed', 'failed', 'not_found', 'cancelled'].includes(task.status));
+            if (terminal) npQueuePrefetchBatchIds.delete(batchId);
+        });
+        if (changed) renderNpQueue();
+        if (npQueuePrefetchBatchIds.size === 0) npStopQueuePrefetchPolling();
+    } catch (error) {
+        console.warn('Queue prefetch status failed:', error.message);
+    }
+}
+
+async function npPrefetchMissingQueueTracks() {
+    if (!npAutoDownloadQueue) return;
+    if (npQueuePrefetchRequest) return npQueuePrefetchRequest;
+    const missing = npQueue.filter(npQueueTrackNeedsDownload);
+    if (!missing.length) return;
+    missing.forEach(track => { track.playback_status = 'requesting'; });
+    renderNpQueue();
+    npQueuePrefetchRequest = (async () => {
+        try {
+            const response = await fetch('/api/playback/queue/prefetch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tracks: missing }),
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) throw new Error(data.error || 'Could not prefetch queue');
+            (data.items || []).forEach(item => {
+                npApplyQueuePrefetchState(
+                    item.request_ids || [],
+                    item.state || 'queued',
+                    item.final_path || '',
+                );
+            });
+            (data.batch_ids || []).forEach(id => npQueuePrefetchBatchIds.add(String(id)));
+            if (data.queued > 0) showToast(`Preloading ${data.queued} missing queue track${data.queued === 1 ? '' : 's'}`, 'info');
+            renderNpQueue();
+            npStartQueuePrefetchPolling();
+        } catch (error) {
+            missing.forEach(track => {
+                if (track.playback_status === 'requesting') {
+                    track.playback_status = 'failed';
+                    track.playback_error = error.message;
+                }
+            });
+            renderNpQueue();
+            showToast(`Queue prefetch failed: ${error.message}`, 'error');
+        } finally {
+            npQueuePrefetchRequest = null;
+            if (npQueuePrefetchReschedule) {
+                npQueuePrefetchReschedule = false;
+                npScheduleQueuePrefetch();
+            }
+        }
+    })();
+    return npQueuePrefetchRequest;
+}
+
+function npScheduleQueuePrefetch() {
+    if (!npAutoDownloadQueue) return;
+    if (npQueuePrefetchRequest) {
+        npQueuePrefetchReschedule = true;
+        return;
+    }
+    if (npQueuePrefetchTimer) clearTimeout(npQueuePrefetchTimer);
+    npQueuePrefetchTimer = setTimeout(() => {
+        npQueuePrefetchTimer = null;
+        npPrefetchMissingQueueTracks();
+    }, 80);
+}
+
+async function npEnsureQueueTrackReady(track) {
+    if (track?.file_path) return track;
+    if (!npAutoDownloadQueue) throw new Error('Auto-download is disabled for missing queue tracks');
+    await npPrefetchMissingQueueTracks();
+    const deadline = Date.now() + 45 * 60 * 1000;
+    while (!track.file_path && Date.now() < deadline) {
+        if (NP_QUEUE_PREFETCH_TERMINAL.has(track.playback_status)) {
+            throw new Error(track.playback_error || npQueueStatusLabel(track));
+        }
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        await npPollQueuePrefetch();
+    }
+    if (!track.file_path) throw new Error('Download timed out after 45 minutes');
+    return track;
+}
 
 function npQueueHasNext() {
     if (npQueue.length === 0) return false;
@@ -1590,6 +1831,20 @@ function initExpandedPlayer() {
     }
     const queueClearBtn = document.getElementById('np-queue-clear');
     if (queueClearBtn) queueClearBtn.addEventListener('click', () => { clearQueue(); });
+
+    const autoDownloadBtn = document.getElementById('np-autodownload-btn');
+    if (autoDownloadBtn) {
+        autoDownloadBtn.classList.toggle('active', npAutoDownloadQueue);
+        autoDownloadBtn.setAttribute('aria-pressed', npAutoDownloadQueue ? 'true' : 'false');
+        autoDownloadBtn.addEventListener('click', () => {
+            npAutoDownloadQueue = !npAutoDownloadQueue;
+            autoDownloadBtn.classList.toggle('active', npAutoDownloadQueue);
+            autoDownloadBtn.setAttribute('aria-pressed', npAutoDownloadQueue ? 'true' : 'false');
+            try { localStorage.setItem(npAutoDownloadStorageKey(), npAutoDownloadQueue ? '1' : '0'); } catch (_) {}
+            showToast(npAutoDownloadQueue ? 'Queue auto-download enabled' : 'Queue auto-download disabled', 'info');
+            if (npAutoDownloadQueue) npScheduleQueuePrefetch();
+        });
+    }
 
     // Radio mode button
     const radioBtn = document.getElementById('np-radio-btn');
@@ -2159,10 +2414,11 @@ function npSetPlayContext(text) {
 }
 
 function addToQueue(track) {
-    npQueue.push(track);
+    npQueue.push(npPrepareQueueTrack(track));
     showToast('Added to queue', 'success');
     renderNpQueue();
     updateNpPrevNextButtons();
+    npScheduleQueuePrefetch();
     // If nothing is currently playing, auto-play the first queued track
     if (!currentTrack) {
         playQueueItem(npQueue.length - 1);
@@ -2176,10 +2432,11 @@ function playNext(track) {
         addToQueue(track);
         return;
     }
-    npQueue.splice(npQueueIndex + 1, 0, track);
+    npQueue.splice(npQueueIndex + 1, 0, npPrepareQueueTrack(track));
     showToast('Playing next', 'success');
     renderNpQueue();
     updateNpPrevNextButtons();
+    npScheduleQueuePrefetch();
 }
 
 function removeFromQueue(index) {
@@ -2201,12 +2458,16 @@ function removeFromQueue(index) {
         playQueueItem(npQueueIndex);
     }
     renderNpQueue();
+    npScheduleQueuePrefetch();
     updateNpPrevNextButtons();
+    if (!npQueue.some(track => !track.file_path)) npStopQueuePrefetchPolling();
 }
 
 function clearQueue() {
     npQueue = [];
     npQueueIndex = -1;
+    npQueuePrefetchBatchIds.clear();
+    npStopQueuePrefetchPolling();
     renderNpQueue();
     updateNpPrevNextButtons();
 }
@@ -2282,6 +2543,24 @@ async function playQueueItem(index) {
     const track = npQueue[index];
 
     try {
+        if (!track.file_path) {
+            setTrackInfo({
+                title: track.title,
+                artist: track.artist,
+                album: track.album || 'Waiting for download',
+                filename: '',
+                is_library: false,
+                image_url: track.image_url,
+                download_pending: true,
+            });
+            showLoadingAnimation();
+            const loadingText = document.querySelector('.loading-text');
+            if (loadingText) loadingText.textContent = 'Downloading queued track…';
+            renderNpQueue();
+            await npEnsureQueueTrackReady(track);
+            track.is_library = true;
+            if (loadingText) loadingText.textContent = 'Loading track…';
+        }
         if (track.is_library) {
             // Library track playback flow
             await stopStream();
@@ -2412,8 +2691,16 @@ function renderNpQueue() {
         info.appendChild(artist);
         item.appendChild(info);
 
-        // Active row → equalizer animation; others → duration
-        if (i === npQueueIndex) {
+        // Missing rows expose acquisition progress; ready rows keep the normal
+        // equalizer/duration affordance.
+        const queueStatus = npQueueStatusLabel(track);
+        if (!track.file_path || (track.playback_status && track.playback_status !== 'ready')) {
+            const status = document.createElement('span');
+            status.className = `np-queue-item-status ${track.playback_status || 'missing'}`;
+            status.textContent = queueStatus || 'Missing';
+            if (track.playback_error) status.title = track.playback_error;
+            item.appendChild(status);
+        } else if (i === npQueueIndex) {
             const eq = document.createElement('div');
             eq.className = 'np-queue-item-eq';
             eq.innerHTML = '<i></i><i></i><i></i>';
@@ -2464,11 +2751,20 @@ function npRestoreQueue() {
         if (!raw) return;
         const data = JSON.parse(raw);
         if (data && Array.isArray(data.queue) && data.queue.length) {
-            npQueue = data.queue;
+            npQueue = npPrepareQueueTracks(data.queue).map(track => {
+                const restored = track;
+                if (!restored.file_path) {
+                    restored.playback_status = 'missing';
+                    restored.playback_error = '';
+                    restored.download_progress = 0;
+                }
+                return restored;
+            });
             // Don't claim a track is "playing" on a fresh load — nothing is.
             npQueueIndex = -1;
             renderNpQueue();
             updateNpPrevNextButtons();
+            npScheduleQueuePrefetch();
         }
     } catch (e) { /* corrupt entry — ignore */ }
 }
@@ -2521,6 +2817,7 @@ function npReorderQueue(from, to) {
     }
     renderNpQueue();
     updateNpPrevNextButtons();
+    npScheduleQueuePrefetch();
 }
 
 // Up-next peek: show the track that plays after the current one.
@@ -3156,24 +3453,30 @@ async function startLibraryRadio() {
 }
 window.startLibraryRadio = startLibraryRadio;
 
-// Play a resolved LIBRARY track list as the queue (a synced playlist, a mix —
-// anything already shaped like /api/library/radio rows). Replaces the queue,
-// plays from the top, labels the "Playing from" context. Radio mode is left
-// OFF: a playlist has an end, and auto-queueing similar tracks after it is
-// the radio button's call, not this one's.
+// Play an acquisition-aware track list. Owned rows start immediately; missing
+// rows enter the same queue and are downloaded, verified and imported ahead of
+// playback. Radio mode stays off because a playlist still has a fixed end.
 async function playTrackList(tracks, contextName) {
-    var list = (tracks || []).filter(function (t) { return t && t.file_path; });
+    var list = (tracks || []).filter(function (t) {
+        if (!t) return false;
+        if (t.file_path) return true;
+        const title = t.title || t.name;
+        const firstArtist = Array.isArray(t.artists) ? t.artists[0] : null;
+        const artist = t.artist || t.artist_name || (typeof firstArtist === 'object' ? firstArtist?.name : firstArtist);
+        return Boolean(title && artist);
+    });
     if (!list.length) {
-        showToast('None of these tracks are in your library yet', 'info');
+        showToast('This list has no usable track metadata', 'info');
         return;
     }
     npCancelCrossfade();
     npRadioMode = false;
     clearQueue();
     if (audioPlayer && !audioPlayer.paused) audioPlayer.pause();
-    npQueue = list.map(npMapRadioTrack);
+    npQueue = npPrepareQueueTracks(list);
     renderNpQueue();
     npSetPlayContext(contextName || 'Playlist');
+    npScheduleQueuePrefetch();
     await playQueueItem(0);
 }
 window.playTrackList = playTrackList;

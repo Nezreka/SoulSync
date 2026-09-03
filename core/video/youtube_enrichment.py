@@ -139,7 +139,14 @@ class YoutubeDateEnricher:
         from core.video import youtube as yt
         db = self._db_factory()
         cid = str(channel_id or "").strip()
-        if not cid or db.channel_dates_enriched_recently(cid):
+        if not cid:
+            return
+        hours = 24
+        try:
+            hours = db.youtube_archive_recheck_hours(cid, default_hours=24)
+        except Exception:   # noqa: BLE001 - cadence is optional; default stays daily
+            pass
+        if db.channel_dates_enriched_recently(cid, within_hours=hours):
             return
         self._current = self._titles.get(cid) or cid
         logger.debug("Enriching dates for %s (%s)", self._current, cid)

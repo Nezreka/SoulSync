@@ -1,5 +1,5 @@
 import { HttpResponse, http } from 'msw';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { server } from '@/test/msw';
 
@@ -7,6 +7,8 @@ import {
   cancelBatch,
   cancelTask,
   clearCompleted,
+  downloadBatchNext,
+  downloadTaskNext,
   fetchBatchHistory,
   fetchDownloads,
   fetchQuarantine,
@@ -113,9 +115,7 @@ describe('the reads never throw', () => {
 
   it('fetchQuarantine rejects a non-array entries field', async () => {
     server.use(
-      http.get('/api/quarantine/list', () =>
-        HttpResponse.json({ success: true, entries: 'nope' }),
-      ),
+      http.get('/api/quarantine/list', () => HttpResponse.json({ success: true, entries: 'nope' })),
     );
     const result = await fetchQuarantine();
     expect('error' in result).toBe(true);
@@ -171,6 +171,25 @@ describe('cancelling', () => {
     expect(seen[0].url.pathname).toBe('/api/playlists/a%2Fb/cancel_batch');
   });
 
+  it('moves a queued task to the next slot by task_id', async () => {
+    const seen = capture('post', '/api/downloads/task/download-next', {
+      success: true,
+      task_id: 'task-1',
+    });
+    await downloadTaskNext('task-1');
+    expect(seen[0].url.pathname).toBe('/api/downloads/task/download-next');
+    expect(JSON.parse(seen[0].body)).toEqual({ task_id: 'task-1' });
+  });
+
+  it('prioritizes a whole batch by batch_id', async () => {
+    const seen = capture('post', '/api/downloads/batch/download-next', {
+      success: true,
+      batch_id: 'batch-1',
+    });
+    await downloadBatchNext('batch-1');
+    expect(seen[0].url.pathname).toBe('/api/downloads/batch/download-next');
+    expect(JSON.parse(seen[0].body)).toEqual({ batch_id: 'batch-1' });
+  });
   it('clears completed with no body', async () => {
     const seen = capture('post', '/api/downloads/clear-completed', {
       success: true,

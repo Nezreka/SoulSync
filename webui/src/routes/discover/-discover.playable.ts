@@ -13,6 +13,7 @@ import { normalizeTrack } from './-discover.helpers';
 
 export interface PlayableResolution {
   rows: Record<string, unknown>[];
+  queueRows: Record<string, unknown>[];
   matched: number;
   total: number;
 }
@@ -33,7 +34,7 @@ export function toPlayablePairs(tracks: unknown[]): { artist: string; title: str
 
 export async function resolveMixPlayable(tracks: unknown[]): Promise<PlayableResolution | null> {
   const pairs = toPlayablePairs(tracks);
-  if (!pairs.length) return { rows: [], matched: 0, total: 0 };
+  if (!pairs.length) return { rows: [], queueRows: [], matched: 0, total: 0 };
   try {
     const response = await fetch('/api/discover/resolve-playable', {
       method: 'POST',
@@ -43,12 +44,18 @@ export async function resolveMixPlayable(tracks: unknown[]): Promise<PlayableRes
     const data = (await response.json()) as {
       success?: boolean;
       tracks?: Record<string, unknown>[];
+      queue_tracks?: Record<string, unknown>[];
       matched?: number;
       total?: number;
     };
     if (!data?.success) return null;
     return {
       rows: Array.isArray(data.tracks) ? data.tracks : [],
+      queueRows: Array.isArray(data.queue_tracks)
+        ? data.queue_tracks
+        : Array.isArray(data.tracks)
+          ? data.tracks
+          : [],
       matched: data.matched ?? 0,
       total: data.total ?? 0,
     };
@@ -70,15 +77,16 @@ export async function playMixNow(
     window.showToast?.('Could not check your library right now', 'error');
     return 'failed';
   }
-  if (res.matched === 0) {
-    window.showToast?.('None of these tracks are in your library yet — download them first', 'info');
+  if (res.queueRows.length === 0) {
+    window.showToast?.('This mix has no playable track metadata', 'info');
     return 'empty';
   }
-  void window.playTrackList?.(res.rows as never, contextName);
+  void window.playTrackList?.(res.queueRows as never, contextName);
+  const missing = Math.max(0, res.total - res.matched);
   window.showToast?.(
     res.matched === res.total
       ? `Playing all ${res.matched} tracks`
-      : `Playing ${res.matched} of ${res.total} — the rest are a download away`,
+      : `Queued ${res.total} tracks — preloading ${missing} missing`,
     'success',
   );
   return 'played';

@@ -1,10 +1,11 @@
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AdlDownload, AdlQuarantineEntry } from '../-adl.types';
+import type { AdlDeletedEntry, AdlDownload, AdlQuarantineEntry } from '../-adl.types';
 import type { ReviewActionHandlers } from './adl-review';
 
 import {
+  AdlDeletedRow,
   AdlQuarantineList,
   AdlQuarantineRow,
   AdlReviewBanner,
@@ -245,7 +246,8 @@ describe('AdlQuarantineRow', () => {
       <AdlQuarantineRow entry={entry()} open={false} onToggle={vi.fn()} handlers={handlers()} />,
     );
     const approve = full.container.querySelector('.verif-act-ok') as HTMLElement;
-    expect(approve.textContent).toBe('✔');
+    // labeled since the redesign: glyph + the word
+    expect(approve.textContent).toBe('✔Approve');
     expect(approve.getAttribute('title')).toContain('re-import this exact file');
 
     cleanup();
@@ -258,7 +260,7 @@ describe('AdlQuarantineRow', () => {
       />,
     );
     const recover = legacy.container.querySelector('.verif-act-ok') as HTMLElement;
-    expect(recover.textContent).toBe('⤴');
+    expect(recover.textContent).toBe('⤴Recover');
     expect(recover.getAttribute('title')).toContain('Recover to Staging');
   });
 
@@ -345,6 +347,9 @@ describe('AdlReviewBanner', () => {
     onQuarantineApproveAll: vi.fn(),
     onQuarantineClearAll: vi.fn(),
     deletedCount: 4,
+    selectedCount: 0,
+    onApproveSelected: vi.fn(),
+    onDeleteSelected: vi.fn(),
     onRestoreAllDeleted: vi.fn(),
     onEmptyDeleted: vi.fn(),
   };
@@ -386,6 +391,33 @@ describe('AdlReviewBanner', () => {
     expect(quar.container.textContent).toContain('🗑 Clear all');
   });
 
+  it('narrows the bulk buttons to the selection when rows are checked', () => {
+    const onApproveSelected = vi.fn();
+    const { container } = render(
+      <AdlReviewBanner {...props} selectedCount={2} onApproveSelected={onApproveSelected} />,
+    );
+    expect(container.textContent).toContain('✔ Approve selected (2)');
+    expect(container.textContent).toContain('🗑 Delete selected (2)');
+    expect(container.textContent).not.toContain('Approve all');
+    fireEvent.click(
+      [...container.querySelectorAll('.adl-filter-banner-clear')].find((b) =>
+        b.textContent?.includes('Approve selected'),
+      ) as HTMLElement,
+    );
+    expect(onApproveSelected).toHaveBeenCalled();
+  });
+
+  it('hides bulk buttons over an empty view — a promise the click cannot keep', () => {
+    const unv = render(<AdlReviewBanner {...props} unverifiedCount={0} />);
+    expect(unv.container.textContent).not.toContain('Approve all');
+    cleanup();
+    const quar = render(<AdlReviewBanner {...props} subView="quarantine" quarantineCount={0} />);
+    expect(quar.container.textContent).not.toContain('Approve all');
+    cleanup();
+    const del = render(<AdlReviewBanner {...props} subView="deleted" deletedCount={0} />);
+    expect(del.container.textContent).not.toContain('Empty bin');
+  });
+
   it('routes each bulk button to its own handler', () => {
     const onApproveAll = vi.fn();
     const onDeleteAll = vi.fn();
@@ -397,5 +429,38 @@ describe('AdlReviewBanner', () => {
     fireEvent.click(buttons[2]);
     expect(onApproveAll).toHaveBeenCalled();
     expect(onDeleteAll).toHaveBeenCalled();
+  });
+});
+
+describe('AdlDeletedRow source labels', () => {
+  const entry = (source: string | null): AdlDeletedEntry => ({
+    id: 'd1',
+    name: '01-02 New Pammy.flac',
+    rel: 'album_bundle_orphans/b_stalled/01-02 New Pammy.flac',
+    size: 1234,
+    deleted_at: null,
+    source,
+    original_path: '/app/storage/album_bundle_staging/b_stalled/01-02 New Pammy.flac',
+  });
+  const handlers = { onRestore: vi.fn(), onPurge: vi.fn() };
+
+  it('names a rescued album bundle so it is not an unexplained file (#1210)', () => {
+    const { container } = render(
+      <AdlDeletedRow entry={entry('album_bundle_orphan')} handlers={handlers} />,
+    );
+    expect(container.textContent).toContain('Stalled album download');
+  });
+
+  it('still names the two older sources', () => {
+    const { container } = render(<AdlDeletedRow entry={entry('repair')} handlers={handlers} />);
+    expect(container.textContent).toContain('Repair tool');
+    cleanup();
+    const dupe = render(<AdlDeletedRow entry={entry('duplicate-cleaner')} handlers={handlers} />);
+    expect(dupe.container.textContent).toContain('Duplicate cleaner');
+  });
+
+  it('says nothing rather than guessing for an unknown source', () => {
+    const { container } = render(<AdlDeletedRow entry={entry(null)} handlers={handlers} />);
+    expect(container.querySelector('.adl-row-batch')).toBeNull();
   });
 });

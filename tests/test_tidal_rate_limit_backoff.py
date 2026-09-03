@@ -71,9 +71,14 @@ def test_retries_then_succeeds():
 
 def test_non_429_4xx_returns_immediately_no_retry():
     c = _client()
+    # patch the client's own backoff seam, NOT time.sleep: patching
+    # core.tidal_download_client.time.sleep mutates the STDLIB module
+    # process-wide, and any background thread leaked by an earlier test that
+    # happens to sleep inside the window trips assert_not_called - an
+    # order-dependent failure seen in full-suite runs (aug 26).
     with patch('core.tidal_download_client.http_requests.get',
                side_effect=[_resp(403)]) as g, \
-         patch('core.tidal_download_client.time.sleep') as sleep:
+         patch.object(type(c), '_sleep_with_shutdown') as sleep:
         out = c._get_with_rate_limit_retry('http://x')
     assert out.status_code == 403
     assert g.call_count == 1

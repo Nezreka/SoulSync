@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
 import re
 from pathlib import Path
 from typing import Any
+
+from utils.logging_config import get_logger
 
 # Album grouping lives in core.imports.album_naming; this module keeps the
 # imported helper because the path builder still needs it.
@@ -23,7 +24,7 @@ from core.imports.context import (
     normalize_import_context,
 )
 
-logger = logging.getLogger("imports.paths")
+logger = get_logger("imports.paths")
 
 
 def artist_letter(artist, symbol_fallback=None):
@@ -590,15 +591,25 @@ def _coerce_int(value: Any, default: int = 1) -> int:
     return coerced if coerced > 0 else default
 
 
-def _reachable_original_dir(original_path: Any) -> str | None:
-    """Directory of an enhance/upgrade's existing library file, or ``None``.
+def _reachable_original_file(original_path: Any) -> str | None:
+    """An enhance/upgrade's existing library file AS THIS PROCESS SEES IT, or ``None``.
 
     ``None`` means "do not replace in place": either the recorded path can't be
     mapped onto anything this process can see, or its folder no longer exists.
     The caller then builds the normal template destination (#1109) instead of
     trying to ``makedirs`` a media-server-only root such as ``/music``.
 
-    Note this only ever RETURNS an existing directory — it never creates one.
+    Returns the resolved FILE, not just its folder, because the caller needs
+    both halves of the destination to come from the SAME candidate. It used to
+    return only the parent, leaving the caller to rebuild the filename from the
+    RECORDED path with ``os.path.basename`` — which does not split backslashes
+    on posix. A library scanned on Windows (``\\\\server\\share\\...``) while
+    SoulSync runs in Linux therefore produced a destination whose "filename"
+    was the entire recorded path, and every upgrade died on the move (#1215).
+    The resolver already normalizes separators; keeping its answer whole is the
+    fix.
+
+    Note this only ever RETURNS an existing file — it never creates anything.
     That is the whole point: the old behaviour created the media server's path
     inside the container.
     """
@@ -630,7 +641,7 @@ def _reachable_original_dir(original_path: Any) -> str | None:
                 "[Enhance] original sits in a library root (%s) — filing the "
                 "upgrade by template instead of replacing in place", parent)
             continue
-        return parent
+        return candidate
     return None
 
 
@@ -683,11 +694,12 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         except (json.JSONDecodeError, TypeError):
             source_info = {}
     if source_info.get("enhance") and source_info.get("original_file_path"):
-        original_dir = _reachable_original_dir(source_info["original_file_path"])
-        if original_dir:
-            original_stem = os.path.splitext(
-                os.path.basename(source_info["original_file_path"]))[0]
-            final_path = os.path.join(original_dir, original_stem + file_ext)
+        original_file = _reachable_original_file(source_info["original_file_path"])
+        if original_file:
+            # Folder AND stem from the resolved file, swapping only the
+            # extension. Splitting the RECORDED path here is what produced a
+            # windows path as a filename (#1215).
+            final_path = os.path.splitext(original_file)[0] + file_ext
             logger.info("[Enhance] Using original file location: %s", final_path)
             return final_path, True
         # #1109: `original_file_path` is the path as RECORDED, which is usually

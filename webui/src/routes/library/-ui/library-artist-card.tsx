@@ -22,6 +22,10 @@ interface Props {
   onToggleWatch?: () => void;
   /** True while that toggle is in flight — the badge label shows "…". */
   watchPending?: boolean;
+  /** Replace the player queue with this artist's ranked top tracks. */
+  onPlay?: () => void;
+  /** True while the top-tracks list is being resolved. */
+  playPending?: boolean;
 }
 
 /**
@@ -119,6 +123,8 @@ export function LibraryArtistCard({
   href,
   onToggleWatch,
   watchPending,
+  onPlay,
+  playPending,
 }: Props) {
   const badges = buildArtistBadges(artist);
   const { primary, overflow, needsOverflow } = splitBadgeColumns(badges);
@@ -127,6 +133,7 @@ export function LibraryArtistCard({
   const tracks = trackCountLabel(artist.track_count);
   const hasImage = Boolean(artist.image_url && artist.image_url.trim() !== '');
   const onWatchClick = badgeClickHandler(watchPending ? undefined : onToggleWatch);
+  const onPlayClick = badgeClickHandler(playPending ? undefined : onPlay);
 
   // Only the UNWATCHED badge acts: the vanilla handler gated the toggle on
   // `badge.dataset.unwatched`, so a "Watching" badge swallowed its click and
@@ -199,6 +206,24 @@ export function LibraryArtistCard({
       <div className="library-artist-image">
         <ArtistImage artist={artist} hasImage={hasImage} />
       </div>
+
+      <span
+        className="library-artist-play-btn"
+        role="button"
+        tabIndex={0}
+        aria-label={`Play top tracks by ${artist.name}`}
+        aria-disabled={playPending || undefined}
+        title={`Play ${artist.name}'s top tracks`}
+        onClick={onPlayClick}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          e.preventDefault();
+          e.stopPropagation();
+          if (!playPending) onPlay?.();
+        }}
+      >
+        {playPending ? '…' : '▶'}
+      </span>
 
       <div className="library-artist-info">
         <h3 className="library-artist-name" title={artist.name}>

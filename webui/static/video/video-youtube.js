@@ -223,6 +223,9 @@
     function _keepOpt(v, label, sel) {
         return '<option value="' + v + '"' + ((sel || 'all') === v ? ' selected' : '') + '>' + label + '</option>';
     }
+    function _retryOpt(v, label, sel) {
+        return '<option value="' + v + '"' + ((sel || 'default') === v ? ' selected' : '') + '>' + label + '</option>';
+    }
 
     function _csetForm(title, s, q, dq, kind) {
         var on = !!s.quality;                         // a stored override → start enabled
@@ -236,7 +239,7 @@
             '<div class="vyt-cset-hint">Overrides the <code>$channel</code> folder/show name when this ' + noun +
                 '’s videos download. Blank = use the ' + noun + '’s real name.</div>' +
             '<label class="vyt-cset-toggle"><input type="checkbox" data-cset-qon' + (on ? ' checked' : '') +
-                '> Force a specific quality for this channel</label>' +
+                '> Force a specific quality for this ' + noun + '</label>' +
             '<div class="vyt-cset-q" data-cset-q' + (on ? '' : ' hidden') + '>' +
                 '<div class="vyt-cset-row"><span>Max resolution</span><select data-cset-res>' + _opt(_RES, b.max_resolution || '1080p') + '</select></div>' +
                 '<div class="vyt-cset-row"><span>Codec</span><select data-cset-cod>' + _opt(_COD, b.video_codec || 'any') + '</select></div>' +
@@ -245,6 +248,15 @@
                 '<label class="vyt-cset-ck"><input type="checkbox" data-cset-hdr' + (b.allow_hdr ? ' checked' : '') + '> Allow HDR</label>' +
             '</div>' +
             '<div class="vyt-cset-hint">Off = use the global YouTube quality from Settings.</div>' +
+            '<label class="vyt-cset-lbl">Retry failed videos</label>' +
+            '<select class="vyt-cset-in" data-cset-retry>' +
+                _retryOpt('default', 'Default backoff', s.retry_policy) +
+                _retryOpt('aggressive', 'Aggressive retry', s.retry_policy) +
+                _retryOpt('manual', 'Manual after failure', s.retry_policy) +
+            '</select>' +
+            '<label class="vyt-cset-lbl">Archive recheck days</label>' +
+            '<input class="vyt-cset-in" data-cset-recheck type="number" min="0" max="365" step="1" value="' +
+                esc(s.archive_recheck_days || '') + '" placeholder="Default">' +
             // content filters + retention — channels only (playlists mirror the whole thing)
             (kind === 'playlist' ? '' :
                 '<label class="vyt-cset-lbl">Only titles matching (optional)</label>' +
@@ -285,7 +297,8 @@
         ov.querySelector('.vyt-cset-x').addEventListener('click', close);
         var body = ov.querySelector('.vyt-cset-body'), saveBtn = ov.querySelector('.vyt-cset-save');
 
-        fetch('/api/video/youtube/channel/' + encodeURIComponent(channelId) + '/settings',
+        fetch('/api/video/youtube/channel/' + encodeURIComponent(channelId) + '/settings?kind=' +
+                encodeURIComponent(kind === 'playlist' ? 'playlist' : 'channel'),
             { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.json(); })
             .then(function (d) {
@@ -309,6 +322,10 @@
             var keepEl = body.querySelector('[data-cset-keep]');
             // '' for 'Everything' → dropped server-side → keep-all (clears any prior policy)
             payload.retention = (keepEl && keepEl.value !== 'all') ? keepEl.value : '';
+            var retryEl = body.querySelector('[data-cset-retry]');
+            payload.retry_policy = retryEl ? retryEl.value : 'default';
+            var recheckEl = body.querySelector('[data-cset-recheck]');
+            payload.archive_recheck_days = recheckEl ? recheckEl.value.trim() : '';
             var qon = body.querySelector('[data-cset-qon]');
             if (qon && qon.checked) {
                 payload.quality = {
@@ -320,12 +337,13 @@
                 };
             }
             saveBtn.disabled = true;
-            fetch('/api/video/youtube/channel/' + encodeURIComponent(channelId) + '/settings',
+            fetch('/api/video/youtube/channel/' + encodeURIComponent(channelId) + '/settings?kind=' +
+                encodeURIComponent(kind === 'playlist' ? 'playlist' : 'channel'),
                 { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
                   body: JSON.stringify(payload) })
                 .then(function (r) { return r.json(); })
                 .then(function () {
-                    if (typeof showToast === 'function') showToast('Channel settings saved', 'success');
+                    if (typeof showToast === 'function') showToast((kind === 'playlist' ? 'Playlist' : 'Channel') + ' settings saved', 'success');
                     close();
                 })
                 .catch(function () { saveBtn.disabled = false; if (typeof showToast === 'function') showToast('Save failed', 'error'); });

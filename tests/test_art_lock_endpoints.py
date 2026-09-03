@@ -95,7 +95,8 @@ def _locked(db, table, row_id):
 def test_applying_album_art_locks_the_row(client, seeded, monkeypatch):
     # The endpoint also writes cover.jpg next to the tracks; there is no such
     # folder here, and that half is best-effort anyway.
-    monkeypatch.setattr(web_server, '_derive_album_folder', lambda *a, **k: None)
+    from api import artist_detail as _artist_detail
+    monkeypatch.setattr(_artist_detail, '_derive_album_folder', lambda *a, **k: None)
 
     r = client.post('/api/album/alb-1/art', json={'url': CUSTOM})
 
@@ -108,7 +109,8 @@ def test_applying_album_art_locks_the_row(client, seeded, monkeypatch):
 # ── releasing it hands the art back ──────────────────────────────────────────
 
 def test_deleting_album_art_releases_the_lock(client, seeded, monkeypatch):
-    monkeypatch.setattr(web_server, '_derive_album_folder', lambda *a, **k: None)
+    from api import artist_detail as _artist_detail
+    monkeypatch.setattr(_artist_detail, '_derive_album_folder', lambda *a, **k: None)
     client.post('/api/album/alb-1/art', json={'url': CUSTOM})
     assert _locked(seeded, 'albums', 'alb-1') == 1
 
@@ -169,7 +171,8 @@ def test_releasing_an_unknown_artist_is_404(client, seeded):
 
 def test_the_delete_route_did_not_displace_the_post_route(client, seeded, monkeypatch):
     """Both verbs live on the same URL; registering DELETE must not shadow POST."""
-    monkeypatch.setattr(web_server, '_derive_album_folder', lambda *a, **k: None)
+    from api import artist_detail as _artist_detail
+    monkeypatch.setattr(_artist_detail, '_derive_album_folder', lambda *a, **k: None)
     assert client.post('/api/album/alb-1/art', json={'url': CUSTOM}).status_code == 200
     assert client.delete('/api/album/alb-1/art').status_code == 200
     # …and a verb nobody registered is still rejected.

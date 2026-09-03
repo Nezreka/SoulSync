@@ -1,9 +1,9 @@
 """GET /api/sync/history/<id>/play — the Listen button's resolver.
 
 Stubbed db + resolver (the hermetic pattern from the radio endpoint test):
-this file owns the endpoint's parsing — spotify-shaped cached tracks (name +
-artists as dicts) resolved per track, unmatched ones skipped, `total` honest
-about the playlist's real size — not the matcher, which has its own coverage.
+this file owns the endpoint's parsing — provider-shaped cached tracks resolved
+in one batch, with owned rows playable now and unmatched rows retained for the
+queue's automatic acquisition path.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ def client():
     return web_server.app.test_client()
 
 
-def test_resolves_matched_tracks_and_skips_the_rest(client, monkeypatch):
+def test_resolves_owned_tracks_and_retains_missing_queue_rows(client, monkeypatch):
     entry = {
         'playlist_name': 'Hot Hits',
         'tracks_json': json.dumps([
@@ -75,7 +75,12 @@ def test_resolves_matched_tracks_and_skips_the_rest(client, monkeypatch):
     assert t == {'id': 't1', 'title': 'Owned Song', 'artist': 'Ado',
                  'album': 'Kyougen', 'file_path': '/m/o.flac',
                  'image_url': None, 'bitrate': 1411, 'duration': 200,
-                 'artist_id': 'ar1', 'album_id': 'al1'}
+                 'artist_id': 'ar1', 'album_id': 'al1', 'is_library': True}
+    assert [row['title'] for row in body['queue_tracks']] == [
+        'Owned Song', 'Missing Song', 'String Artist'
+    ]
+    assert body['queue_tracks'][1]['playback_status'] == 'missing'
+    assert body['queue_tracks'][1]['artists'] == [{'name': 'Nobody'}]
     # ONE batch resolution for the whole playlist (the per-track version
     # full-scanned the tracks table once per song — minutes on a big
     # library), and artists-as-strings parse too (older cached entries).

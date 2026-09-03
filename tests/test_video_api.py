@@ -76,6 +76,9 @@ def test_library_management_is_admin_only(tmp_path):
     gated = [
         ("post", "/api/video/bulk/start"),
         ("post", "/api/video/monitor"),
+        ("post", "/api/video/detail/show/5/season/1/monitor"),
+        ("put", "/api/video/detail/movie/5/overrides"),
+        ("post", "/api/video/episode/monitor"),
         ("post", "/api/video/poster/set"),
         ("post", "/api/video/downloads/blocklist"),
         ("put", "/api/video/detail/movie/5/metadata"),
@@ -1529,3 +1532,394 @@ def test_download_history_routes_registered():
     rules = {r.rule for r in app.url_map.iter_rules()}
     assert "/api/video/downloads/history" in rules
     assert "/api/video/downloads/history/<int:history_id>" in rules
+
+
+# ── #1213: video's own server creds must survive a half-filled save ──────────
+
+def _no_music_servers(monkeypatch):
+    """A fresh install: music has no Plex/Jellyfin to inherit from."""
+    import core.settings as cs
+
+    class CM:
+        def get_plex_config(self): return {}
+        def get_jellyfin_config(self): return {}
+        def get_active_media_server(self): return None
+    monkeypatch.setattr(cs, "config_manager", CM())
+
+
+def test_half_filled_video_creds_come_back(tmp_path, monkeypatch):
+    """#1213: on a fresh install, typing only the Jellyfin URL made it vanish. The
+    settings form saves on change, then re-reads - and the GET was returning the
+    EFFECTIVE config, where a url without a key isn't a usable override, so it fell
+    through to music's (empty) one and blanked the field the user had just typed.
+    The form has to show what video STORED, half-filled or not."""
+    _no_music_servers(monkeypatch)
+    c = _client_as(tmp_path, is_admin=True)
+
+    # url first, key not typed yet (exactly what a blur into the key field posts)
+    assert c.post("/api/video/server-config",
+                  json={"jellyfin": {"base_url": "http://jf:8096", "api_key": ""},
+                        "plex": {"base_url": "", "token": ""}}).status_code == 200
+    j = c.get("/api/video/server-config").get_json()["jellyfin"]
+    assert j["base_url"] == "http://jf:8096"
+    assert j["has_key"] is False and j["inherited"] is False
+
+    # ...and now the key: both halves stick.
+    assert c.post("/api/video/server-config",
+                  json={"jellyfin": {"base_url": "http://jf:8096", "api_key": "abc123"}}
+                  ).status_code == 200
+    j = c.get("/api/video/server-config").get_json()["jellyfin"]
+    assert j["base_url"] == "http://jf:8096" and j["has_key"] is True
+    assert j["api_key"] and "abc123" not in j["api_key"]     # masked, never echoed
+
+
+def test_key_first_video_creds_come_back(tmp_path, monkeypatch):
+    """The other order from the report: Plex token typed before the URL."""
+    _no_music_servers(monkeypatch)
+    c = _client_as(tmp_path, is_admin=True)
+    assert c.post("/api/video/server-config",
+                  json={"plex": {"base_url": "", "token": "tok"}}).status_code == 200
+    p = c.get("/api/video/server-config").get_json()["plex"]
+    assert p["has_token"] is True and p["base_url"] == "" and p["inherited"] is False
+
+
+def test_music_creds_still_shown_when_video_has_none(tmp_path, monkeypatch):
+    """Unchanged behaviour: with no video override at all, the form shows music's
+    connection flagged as inherited."""
+    import core.settings as cs
+
+    class CM:
+        def get_plex_config(self): return {"base_url": "http://p", "token": "t"}
+        def get_jellyfin_config(self): return {}
+        def get_active_media_server(self): return "plex"
+    monkeypatch.setattr(cs, "config_manager", CM())
+
+    c = _client_as(tmp_path, is_admin=True)
+    body = c.get("/api/video/server-config").get_json()
+    assert body["plex"]["base_url"] == "http://p"
+    assert body["plex"]["has_token"] is True and body["plex"]["inherited"] is True
+    assert body["jellyfin"]["base_url"] == "" and body["jellyfin"]["inherited"] is True
+
+
+def test_video_override_hides_the_inherited_value(tmp_path, monkeypatch):
+    """A video-side URL must not be overwritten by music's, even before its token
+    is filled in - otherwise the user's half-typed override disappears."""
+    import core.settings as cs
+
+    class CM:
+        def get_plex_config(self): return {"base_url": "http://music-plex", "token": "t"}
+        def get_jellyfin_config(self): return {}
+        def get_active_media_server(self): return "plex"
+    monkeypatch.setattr(cs, "config_manager", CM())
+
+    c = _client_as(tmp_path, is_admin=True)
+    c.post("/api/video/server-config", json={"plex": {"base_url": "http://video-plex"}})
+    p = c.get("/api/video/server-config").get_json()["plex"]
+    assert p["base_url"] == "http://video-plex" and p["inherited"] is False
+    assert p["has_token"] is False
+
+
+def _seed_two_season_show(db):
+    """A show with two seasons of two episodes each, all monitored by default."""
+    return db.upsert_show_tree("plex", {"server_id": "s1", "title": "Show", "seasons": [
+        {"season_number": 1, "server_id": "se1", "episodes": [
+            {"episode_number": 1, "title": "E1", "server_id": "ep1"},
+            {"episode_number": 2, "title": "E2", "server_id": "ep2"}]},
+        {"season_number": 2, "server_id": "se2", "episodes": [
+            {"episode_number": 1, "title": "E3", "server_id": "ep3"},
+            {"episode_number": 2, "title": "E4", "server_id": "ep4"}]}]})
+
+
+def _season(detail, number):
+    return next(s for s in detail["seasons"] if s["season_number"] == number)
+
+
+def test_season_monitor_endpoint_flips_only_that_season(tmp_path):
+    """Unmonitoring season 1 must not stop the drain hunting season 2 — the whole
+    point of a season-level toggle is that it is narrower than the show one."""
+    client, videoapi = _make_client(tmp_path)
+    try:
+        db = videoapi._video_db
+        sid = _seed_two_season_show(db)
+        assert _season(db.show_detail(sid), 1)["episode_monitored"] == 2
+
+        r = client.post("/api/video/detail/show/%d/season/1/monitor" % sid,
+                        json={"monitored": False})
+        assert r.status_code == 200
+        assert r.get_json() == {"success": True, "monitored": False, "episodes": 2}
+
+        detail = db.show_detail(sid)
+        assert _season(detail, 1)["episode_monitored"] == 0
+        assert _season(detail, 2)["episode_monitored"] == 2, "season 2 must be untouched"
+        assert all(not e["monitored"] for e in _season(detail, 1)["episodes"])
+
+        # ...and back on.
+        assert client.post("/api/video/detail/show/%d/season/1/monitor" % sid,
+                           json={"monitored": True}).status_code == 200
+        assert _season(db.show_detail(sid), 1)["episode_monitored"] == 2
+    finally:
+        videoapi._video_db = None
+
+
+def test_season_monitor_endpoint_rejects_bad_input(tmp_path):
+    client, videoapi = _make_client(tmp_path)
+    try:
+        sid = _seed_two_season_show(videoapi._video_db)
+        # An omitted flag is a bug in the caller, not "unmonitor everything".
+        assert client.post("/api/video/detail/show/%d/season/1/monitor" % sid,
+                           json={}).status_code == 400
+        # A season with no episodes moves nothing and says so.
+        assert client.post("/api/video/detail/show/%d/season/99/monitor" % sid,
+                           json={"monitored": False}).status_code == 404
+        assert client.post("/api/video/detail/show/999999/season/1/monitor",
+                           json={"monitored": False}).status_code == 404
+    finally:
+        videoapi._video_db = None
+
+
+def test_acquisition_state_partitions_a_show_by_what_you_can_act_on(tmp_path):
+    """Owned / ignored / wanted / failed must not double-count, and 'ignored' must
+    not hide inside 'wanted': an unmonitored episode is one nothing is hunting,
+    which is the opposite of wanted."""
+    client, videoapi = _make_client(tmp_path)
+    try:
+        db = videoapi._video_db
+        sid = db.upsert_show_tree("plex", {
+            "server_id": "s1", "title": "Show", "tmdb_id": 1396, "seasons": [
+                {"season_number": 1, "server_id": "se1", "episodes": [
+                    {"episode_number": 1, "title": "E1", "server_id": "ep1",
+                     "file": {"relative_path": "e1.mkv", "size_bytes": 10}},
+                    {"episode_number": 2, "title": "E2", "server_id": "ep2"},
+                    {"episode_number": 3, "title": "E3", "server_id": "ep3"},
+                    {"episode_number": 4, "title": "E4", "server_id": "ep4"}]}]})
+        # E4 is deliberately not hunted.
+        with db.connect() as c:
+            c.execute("UPDATE episodes SET monitored=0 WHERE show_id=? AND episode_number=4", (sid,))
+            c.execute("INSERT INTO video_wishlist (kind, tmdb_id, title, season_number, "
+                      "episode_number, status) VALUES ('episode', 1396, 'Show', 1, 2, 'wanted')")
+            c.execute("INSERT INTO video_wishlist (kind, tmdb_id, title, season_number, "
+                      "episode_number, status) VALUES ('episode', 1396, 'Show', 1, 3, 'failed')")
+            c.commit()
+
+        body = client.get("/api/video/detail/show/%d/acquisition" % sid).get_json()
+        assert body["total"] == 4
+        assert body["counts"] == {"owned": 1, "wanted": 1, "queued": 0,
+                                  "downloading": 0, "failed": 1, "ignored": 1}
+    finally:
+        videoapi._video_db = None
+
+
+def test_acquisition_state_counts_live_grabs_under_both_identities(tmp_path):
+    """A grab started from the TMDB preview keeps the tmdb identity after the title
+    lands in the library, so scoping by library id alone loses it."""
+    client, videoapi = _make_client(tmp_path)
+    try:
+        db = videoapi._video_db
+        sid = db.upsert_show_tree("plex", {
+            "server_id": "s1", "title": "Show", "tmdb_id": 1396, "seasons": [
+                {"season_number": 1, "server_id": "se1", "episodes": [
+                    {"episode_number": 1, "title": "E1", "server_id": "ep1"}]}]})
+        with db.connect() as c:
+            c.execute("INSERT INTO video_downloads (kind, media_source, media_id, status) "
+                      "VALUES ('show', 'library', ?, 'queued')", (str(sid),))
+            c.execute("INSERT INTO video_downloads (kind, media_source, media_id, status) "
+                      "VALUES ('show', 'tmdb', '1396', 'downloading')")
+            # 'importing' is still in flight, not finished.
+            c.execute("INSERT INTO video_downloads (kind, media_source, media_id, status) "
+                      "VALUES ('show', 'tmdb', '1396', 'importing')")
+            # ...but a finished one must not be counted as in-flight.
+            c.execute("INSERT INTO video_downloads (kind, media_source, media_id, status) "
+                      "VALUES ('show', 'tmdb', '1396', 'completed')")
+            # ...and another title's grab must not leak in.
+            c.execute("INSERT INTO video_downloads (kind, media_source, media_id, status) "
+                      "VALUES ('show', 'tmdb', '9999', 'downloading')")
+            c.commit()
+
+        counts = client.get("/api/video/detail/show/%d/acquisition" % sid).get_json()["counts"]
+        assert counts["queued"] == 1
+        assert counts["downloading"] == 2, "downloading + importing are both in flight"
+    finally:
+        videoapi._video_db = None
+
+
+def test_acquisition_state_for_a_movie_is_one_unit(tmp_path):
+    client, videoapi = _make_client(tmp_path)
+    try:
+        db = videoapi._video_db
+        mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Film", "tmdb_id": 27205})
+        assert client.get("/api/video/detail/movie/%d/acquisition" % mid
+                          ).get_json()["counts"]["owned"] == 0
+        with db.connect() as c:
+            c.execute("UPDATE movies SET monitored=0 WHERE id=?", (mid,))
+            c.commit()
+        body = client.get("/api/video/detail/movie/%d/acquisition" % mid).get_json()
+        assert body["total"] == 1
+        assert body["counts"]["ignored"] == 1 and body["counts"]["wanted"] == 0
+    finally:
+        videoapi._video_db = None
+
+
+def test_acquisition_endpoint_rejects_bad_targets(tmp_path):
+    client, videoapi = _make_client(tmp_path)
+    try:
+        assert client.get("/api/video/detail/bogus/1/acquisition").status_code == 400
+        assert client.get("/api/video/detail/show/999999/acquisition").status_code == 404
+    finally:
+        videoapi._video_db = None
+
+
+def test_title_overrides_round_trip_and_default_to_following_global(tmp_path):
+    """Empty means FOLLOW THE GLOBAL CONFIG. An empty allow-list read as a filter
+    would stop the title being grabbed by anything, which is the opposite of not
+    having set one."""
+    client, videoapi = _make_client(tmp_path)
+    try:
+        db = videoapi._video_db
+        sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "Show", "tmdb_id": 1396})
+
+        # Untouched title: everything empty, packs on auto.
+        assert db.title_overrides("show", sid) == {
+            "preferred_sources": [], "release_group_allow": [],
+            "release_group_block": [], "manual_aliases": [], "pack_preference": "auto"}
+
+        r = client.put("/api/video/detail/show/%d/overrides" % sid, json={
+            "preferred_sources": ["torrent", "usenet"],
+            "release_group_allow": ["NTb"], "release_group_block": ["YIFY"],
+            "pack_preference": "never"})
+        assert r.status_code == 200
+        assert db.title_overrides("show", sid) == {
+            "preferred_sources": ["torrent", "usenet"], "release_group_allow": ["NTb"],
+            "release_group_block": ["YIFY"], "manual_aliases": [], "pack_preference": "never"}
+        # ...and the detail payload carries them, so the panel opens populated.
+        assert db.show_detail(sid)["release_group_block"] == ["YIFY"]
+
+        # Clearing goes back to following the global config, not to "allow none".
+        client.put("/api/video/detail/show/%d/overrides" % sid,
+                   json={"release_group_allow": [], "preferred_sources": []})
+        cur = db.title_overrides("show", sid)
+        assert cur["release_group_allow"] == [] and cur["preferred_sources"] == []
+        assert cur["release_group_block"] == ["YIFY"], "untouched keys must survive"
+    finally:
+        videoapi._video_db = None
+
+
+def test_title_overrides_reject_junk(tmp_path):
+    client, videoapi = _make_client(tmp_path)
+    try:
+        db = videoapi._video_db
+        mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Film", "tmdb_id": 27205})
+        url = "/api/video/detail/movie/%d/overrides" % mid
+        assert client.put(url, json={"preferred_sources": "torrent"}).status_code == 400
+        assert client.put(url, json={}).status_code == 400
+        assert client.put("/api/video/detail/bogus/1/overrides",
+                          json={"preferred_sources": []}).status_code == 400
+        assert client.put("/api/video/detail/movie/999999/overrides",
+                          json={"preferred_sources": []}).status_code == 404
+        # A movie has no season packs, so the key is simply not its business.
+        assert "pack_preference" not in db.title_overrides("movie", mid) or \
+            db.title_overrides("movie", mid)["pack_preference"] == "auto"
+    finally:
+        videoapi._video_db = None
+
+
+def test_show_pack_preference_is_validated(tmp_path):
+    client, videoapi = _make_client(tmp_path)
+    try:
+        db = videoapi._video_db
+        sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "tmdb_id": 1})
+        url = "/api/video/detail/show/%d/overrides" % sid
+        assert client.put(url, json={"pack_preference": "sometimes"}).status_code == 400
+        assert client.put(url, json={"pack_preference": "prefer"}).status_code == 200
+        assert db.title_overrides("show", sid)["pack_preference"] == "prefer"
+    finally:
+        videoapi._video_db = None
+
+
+def test_overrides_survive_unreadable_storage(tmp_path):
+    """A hand-mangled column must degrade to 'follow the global config' rather
+    than to a filter nothing can satisfy."""
+    _, videoapi = _make_client(tmp_path)
+    try:
+        db = videoapi._video_db
+        sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "tmdb_id": 1})
+        with db.connect() as c:
+            c.execute("UPDATE shows SET release_group_allow='not json', "
+                      "preferred_sources='{\"a\": 1}', pack_preference='wat' WHERE id=?", (sid,))
+            c.commit()
+        cur = db.title_overrides("show", sid)
+        assert cur["release_group_allow"] == []
+        assert cur["preferred_sources"] == []
+        assert cur["pack_preference"] == "auto"
+    finally:
+        videoapi._video_db = None
+
+
+def test_engine_lookup_resolves_a_title_by_tmdb_id(tmp_path):
+    """The drain often knows only the tmdb id; the library row still has to win."""
+    _, videoapi = _make_client(tmp_path)
+    try:
+        db = videoapi._video_db
+        sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "tmdb_id": 1396})
+        db.set_title_overrides("show", sid, release_group_block=["YIFY"])
+        assert db.title_overrides_for("show", tmdb_id=1396)["release_group_block"] == ["YIFY"]
+        assert db.title_overrides_for("show", library_id=sid)["release_group_block"] == ["YIFY"]
+        # An unknown title follows the global config.
+        assert db.title_overrides_for("show", tmdb_id=999999)["release_group_block"] == []
+    finally:
+        videoapi._video_db = None
+
+
+def test_a_manual_alias_reaches_the_release_matcher(tmp_path, monkeypatch):
+    """The arr answer to a name TMDB does not know.
+
+    TMDB's alias list already carries "Big Brother US" for "Big Brother (US)" —
+    that path works. It returns [] for "Password (2022)", so that show could
+    never match a release, and the fix is to be TOLD the name rather than to
+    infer it: stripping a title's bracket collides "Avatar: The Last Airbender
+    (2024)" with the 2005 series on 85 of Boulder's titles.
+    """
+    import api.video as videoapi
+    from database.video_database import VideoDatabase
+    videoapi._video_db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    try:
+        db = videoapi._video_db
+        sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "Password (2022)",
+                                           "tmdb_id": 203254})
+        # No TMDB aliases for this one, which is the whole point.
+        import core.video.enrichment.engine as eng_mod
+        monkeypatch.setattr(eng_mod, "get_video_enrichment_engine",
+                            lambda: type("E", (), {"alt_titles_for": lambda *a, **k: []})())
+
+        from core.automation.handlers.video_process_wishlist import _acceptable_titles
+        assert _acceptable_titles("Password (2022)", "show", 203254) == ["Password (2022)"]
+
+        db.set_title_overrides("show", sid, manual_aliases=["Password"])
+        got = _acceptable_titles("Password (2022)", "show", 203254)
+        assert got == ["Password (2022)", "Password"], "primary stays first"
+
+        # ...and the gate now takes the release the scene actually ships.
+        from core.video.release_parse import titles_match
+        assert titles_match("Password 2022 S03E14 1080p WEB h264-EDITH", got) is True
+        # ...while an unrelated show is still refused.
+        assert titles_match("Jeopardy S40E01 1080p", got) is False
+    finally:
+        videoapi._video_db = None
+
+
+def test_a_broken_alias_lookup_never_blocks_a_grab(tmp_path, monkeypatch):
+    """An alias set is an assist. If reading it fails the title still gets
+    hunted under its primary name."""
+    import api.video as videoapi
+    from database.video_database import VideoDatabase
+    videoapi._video_db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    try:
+        import core.video.enrichment.engine as eng_mod
+        monkeypatch.setattr(eng_mod, "get_video_enrichment_engine",
+                            lambda: type("E", (), {"alt_titles_for": lambda *a, **k: []})())
+        import api.video as v
+        monkeypatch.setattr(v, "get_video_db",
+                            lambda: (_ for _ in ()).throw(RuntimeError("db gone")))
+        from core.automation.handlers.video_process_wishlist import _acceptable_titles
+        assert _acceptable_titles("Password (2022)", "show", 203254) == ["Password (2022)"]
+    finally:
+        videoapi._video_db = None

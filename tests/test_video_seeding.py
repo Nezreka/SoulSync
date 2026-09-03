@@ -97,8 +97,7 @@ def test_sweep_releases_met_keeps_seeding_and_clears_forgotten(db, monkeypatch):
                 "keep": SimpleNamespace(ratio=0.2, seeding_time=None),
                 "gone": None}
     removed = []
-    import core.video.client_download as cd
-    monkeypatch.setattr(cd, "_get_status", lambda src, ref: statuses[ref])
+    monkeypatch.setattr(seeding, "_status", lambda ref: (statuses[ref], True))
     monkeypatch.setattr(seeding, "_remove", lambda ref, delete_files: removed.append((ref, delete_files)) or True)
     out = seeding.sweep()
     assert out == {"status": "completed", "checked": 3, "released": 2, "seeding": 1}
@@ -113,12 +112,52 @@ def test_failed_removal_retries_next_sweep(db, monkeypatch):
     from core.video.download_config import save
     save(db, {"seed_ratio_goal": 1.0})
     _torrent_row(db, ref="met")
-    import core.video.client_download as cd
-    monkeypatch.setattr(cd, "_get_status", lambda src, ref: SimpleNamespace(ratio=2.0, seeding_time=None))
+    monkeypatch.setattr(seeding, "_status",
+                        lambda ref: (SimpleNamespace(ratio=2.0, seeding_time=None), True))
     monkeypatch.setattr(seeding, "_remove", lambda ref, delete_files: False)
     out = seeding.sweep()
     assert out["released"] == 0 and out["seeding"] == 1
     assert len(db.torrents_awaiting_seed_release()) == 1   # still managed
+
+
+def test_a_client_that_does_not_answer_never_releases_anything(db, monkeypatch):
+    """A down qBittorrent must not look like "the torrent is gone".
+
+    Releasing is terminal: torrents_awaiting_seed_release filters released rows
+    out for good, so one sweep during a client restart would abandon seed
+    management for every row it touched, permanently and silently. The status
+    helper this used to call collapsed a refused connection and a genuinely
+    unknown torrent into the same None.
+    """
+    from core.video.download_config import save
+    save(db, {"seed_ratio_goal": 1.0})
+    _torrent_row(db, ref="a")
+    _torrent_row(db, ref="b")
+    removed = []
+    monkeypatch.setattr(seeding, "_status", lambda ref: (None, False))
+    monkeypatch.setattr(seeding, "_remove",
+                        lambda ref, delete_files: removed.append(ref) or True)
+
+    out = seeding.sweep()
+
+    assert out["released"] == 0, "a silent client released rows"
+    assert out["seeding"] == 2
+    assert removed == [], "nothing may be removed from a client that isn't answering"
+    # still managed, so the next sweep gets another go
+    assert sorted(r["client_ref"] for r in db.torrents_awaiting_seed_release()) == ["a", "b"]
+
+
+def test_a_torrent_the_client_genuinely_forgot_is_still_released(db, monkeypatch):
+    """The other side of the same coin: an ANSWERING client saying it has no
+    such torrent means there is nothing left to manage. That path has to keep
+    working, or the fix above would just wedge every forgotten row forever."""
+    from core.video.download_config import save
+    save(db, {"seed_ratio_goal": 1.0})
+    _torrent_row(db, ref="gone")
+    monkeypatch.setattr(seeding, "_status", lambda ref: (None, True))
+    out = seeding.sweep()
+    assert out["released"] == 1
+    assert db.torrents_awaiting_seed_release() == []
 
 
 def test_already_running_skip_keeps_the_one_return_shape(monkeypatch):
@@ -185,7 +224,7 @@ def test_seed_mode_config_defaults_and_normalizes(db):
     assert load(db)["seed_mode"] == "soulsync"
 
 
-def test_client_mode_pushes_limit_and_releases(db, monkeypatch):
+def test_client_mode_pushes_limit_but_keeps_managing_until_goal_is_met(db, monkeypatch):
     from core.video.download_config import save
     save(db, {"seed_time_goal_hours": 408, "seed_mode": "client"})
     _torrent_row(db, ref="abc", title="Heat")
@@ -193,15 +232,31 @@ def test_client_mode_pushes_limit_and_releases(db, monkeypatch):
     monkeypatch.setattr("core.torrent_clients.get_active_adapter", lambda: object())
     monkeypatch.setattr("core.torrent_clients.share_limits.push_seed_goal",
                         lambda a, ref, r, h: pushes.append((ref, r, h)) or True)
-    # In client mode the sweep must NOT poll the client for status.
-    import core.video.client_download as cd
-    monkeypatch.setattr(cd, "_get_status",
-                        lambda src, ref: (_ for _ in ()).throw(AssertionError("polled in client mode")))
+    monkeypatch.setattr(seeding, "_status",
+                        lambda ref: (SimpleNamespace(ratio=0.1, seeding_time=1000), True))
     out = seeding.sweep()
-    assert out == {"status": "completed", "checked": 1, "released": 1, "seeding": 0}
+    assert out == {"status": "completed", "checked": 1, "released": 0, "seeding": 1}
     assert pushes == [("abc", 0.0, 408)]
-    assert db.torrents_awaiting_seed_release() == []   # released → handed to client
+    assert len(db.torrents_awaiting_seed_release()) == 1
 
+
+def test_client_mode_removes_after_pushed_goal_is_met(db, monkeypatch):
+    from core.video.download_config import save
+    save(db, {"seed_time_goal_hours": 24, "seed_mode": "client", "seed_remove_data": True})
+    _torrent_row(db, ref="abc", title="Heat")
+    pushes = []
+    removed = []
+    monkeypatch.setattr("core.torrent_clients.get_active_adapter", lambda: object())
+    monkeypatch.setattr("core.torrent_clients.share_limits.push_seed_goal",
+                        lambda a, ref, r, h: pushes.append((ref, r, h)) or True)
+    monkeypatch.setattr(seeding, "_status",
+                        lambda ref: (SimpleNamespace(ratio=0.1, seeding_time=48 * 3600), True))
+    monkeypatch.setattr(seeding, "_remove", lambda ref, delete_files: removed.append((ref, delete_files)) or True)
+    out = seeding.sweep()
+    assert out["released"] == 1 and out["seeding"] == 0
+    assert pushes == [("abc", 0.0, 24)]
+    assert removed == [("abc", True)]
+    assert db.torrents_awaiting_seed_release() == []
 
 def test_client_mode_push_failure_falls_back_to_soulsync(db, monkeypatch):
     """A failed/unsupported client push must NOT leave the grab unmanaged (e.g. a
@@ -228,8 +283,8 @@ def test_client_mode_fallback_removes_when_goal_met(db, monkeypatch):
     monkeypatch.setattr("core.torrent_clients.get_active_adapter", lambda: object())
     monkeypatch.setattr("core.torrent_clients.share_limits.push_seed_goal",
                         lambda a, ref, r, h: False)
-    import core.video.client_download as cd
-    monkeypatch.setattr(cd, "_get_status", lambda src, ref: SimpleNamespace(ratio=5.0, seeding_time=48 * 3600))
+    monkeypatch.setattr(seeding, "_status",
+                        lambda ref: (SimpleNamespace(ratio=5.0, seeding_time=48 * 3600), True))
     removed = []
     monkeypatch.setattr(seeding, "_remove", lambda ref, delete_files: removed.append(ref) or True)
     out = seeding.sweep()

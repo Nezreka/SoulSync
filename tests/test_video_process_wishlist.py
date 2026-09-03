@@ -16,6 +16,10 @@ from core.automation.handlers.video_process_wishlist import (
     build_download_record,
     item_key,
     pick_best,
+    reset_source_cooldowns,
+    season_pack_requests,
+    source_cooldown_remaining,
+    note_source_refusal,
 )
 
 
@@ -33,6 +37,18 @@ def _cand(fn, *, accepted=True, score=10, user="u"):
 
 
 # ── pure ──────────────────────────────────────────────────────────────────────
+def test_repeated_client_refusals_cool_down_that_item_source():
+    reset_source_cooldowns()
+    item = {"tmdb_id": 1, "title": "A"}
+    cand = dict(_cand("A.1080p.mkv"), source="torrent")
+    assert source_cooldown_remaining(item, "movie", cand, now=100) == 0
+    note_source_refusal(item, "movie", cand, now=100, limit=2, cooldown_seconds=3600)
+    assert source_cooldown_remaining(item, "movie", cand, now=101) == 0
+    note_source_refusal(item, "movie", cand, now=102, limit=2, cooldown_seconds=3600)
+    assert source_cooldown_remaining(item, "movie", cand, now=103) > 3500
+    reset_source_cooldowns()
+
+
 def test_pick_best_takes_first_accepted():
     cands = [_cand("a", accepted=False), _cand("b", accepted=True), _cand("c", accepted=True)]
     assert pick_best(cands)["filename"] == "b"
@@ -53,9 +69,34 @@ def test_active_download_keys_reads_ctx_for_episodes():
     active = [
         {"kind": "movie", "media_id": "5"},
         {"kind": "episode", "media_id": "9", "search_ctx": json.dumps({"season": 1, "episode": 3})},
+        {"kind": "show", "media_id": "9", "search_ctx": json.dumps({"scope": "season", "season": 2})},
     ]
     keys = active_download_keys(active)
     assert ("movie", "5") in keys and ("episode", "9", 1, 3) in keys
+    assert ("season", "9", 2) in keys
+
+
+def test_season_pack_requests_group_many_missing_standard_episodes():
+    items = [
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2, "episode_number": 1},
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2, "episode_number": 2},
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2, "episode_number": 3},
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 3, "episode_number": 1},
+    ]
+    packs = season_pack_requests(items, active=set(), min_missing=3)
+    assert len(packs) == 1
+    assert item_key(packs[0], "episode") == ("season", "9", 2)
+    assert packs[0]["_pack_members"] == [(2, 1), (2, 2), (2, 3)]
+
+
+def test_season_pack_requests_skip_upgrades_special_numbering_and_active_members():
+    base = {"show_tmdb_id": 9, "show_title": "Show", "season_number": 2}
+    upgrade = [dict(base, episode_number=n, owned=1, owned_resolutions="720p") for n in (1, 2, 3)]
+    anime = [dict(base, episode_number=n, series_type="anime") for n in (1, 2, 3)]
+    active = [dict(base, episode_number=n) for n in (1, 2, 3)]
+    assert season_pack_requests(upgrade, active=set()) == []
+    assert season_pack_requests(anime, active=set()) == []
+    assert season_pack_requests(active, active={("episode", "9", 2, 2)}) == []
 
 
 def test_build_record_movie_shape():
@@ -81,6 +122,17 @@ def test_build_record_stashes_peer_availability_in_ctx():
     rec = build_download_record(item, best, [best], media_type="movie", target_dir="/m", query="q")
     assert json.loads(rec["search_ctx"])["peer"] == {
         "slots": 1, "queue": 0, "speed": 2100000, "availability": 0.15}
+
+
+def test_build_record_season_pack_shape():
+    item = {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2,
+            "episode_number": None, "poster_url": "/p.jpg", "tvdb_id": 123}
+    best = dict(_cand("Silo.S02.1080p", accepted=True), source="torrent", _client_ref="hash")
+    rec = build_download_record(item, best, [best], media_type="episode", target_dir="/tv", query="Silo S02")
+    ctx = json.loads(rec["search_ctx"])
+    assert rec["kind"] == "show" and rec["media_id"] == "9"
+    assert ctx["scope"] == "season" and ctx["season"] == 2 and "episode" not in ctx
+    assert ctx["tvdb_id"] == 123
 
 
 def test_build_record_episode_shape():
@@ -189,6 +241,87 @@ def test_episode_mode_keys_and_grabs():
     assert res["grabbed"] == 1 and enq[0][0] == ("episode", "9", 1, 3) and enq[0][2] == "/tv"
 
 
+def test_episode_mode_searches_season_pack_before_member_episodes():
+    items = [
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2, "episode_number": 1},
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2, "episode_number": 2},
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2, "episode_number": 3},
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 3, "episode_number": 1},
+    ]
+    searches = {
+        ("season", "9", 2): [dict(_cand("Silo.S02.1080p"), source="torrent")],
+        ("episode", "9", 3, 1): [dict(_cand("Silo.S03E01.1080p"), source="torrent")],
+    }
+    res, enq, seen, _ = _run(items, root="/tv", media_type="episode", searches=searches)
+    assert res["grabbed"] == 2 and res["searched"] == 2
+    assert seen == [("season", "9", 2), ("episode", "9", 3, 1)]
+    assert [e[0] for e in enq] == [("season", "9", 2), ("episode", "9", 3, 1)]
+
+
+def test_season_pack_auto_grab_ignores_soulseek_pack_candidates():
+    items = [
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2, "episode_number": 1},
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2, "episode_number": 2},
+        {"show_tmdb_id": 9, "show_title": "Silo", "season_number": 2, "episode_number": 3},
+    ]
+    res, enq, seen, _ = _run(items, root="/tv", media_type="episode", searches={
+        ("season", "9", 2): [dict(_cand("Silo/Season 2"), source="soulseek")],
+    })
+    assert res["grabbed"] == 0 and enq == []
+    assert seen == [("season", "9", 2)]
+
+
+def test_manual_retry_all_sources_combines_sources(monkeypatch):
+    import core.video.wishlist_search as ws
+    calls = []
+
+    def one(src, item, mt):
+        calls.append(src)
+        return ([dict(_cand(src + '.mkv'), source=src, score={'torrent': 5, 'usenet': 9, 'soulseek': 1}[src])], None)
+
+    import core.automation.handlers.video_process_wishlist as vpw
+    monkeypatch.setattr(vpw, '_search_one_source', one)
+    item = {"tmdb_id": 1, "title": "A"}
+    cands, err = ws._all_source_search(item, "movie")
+    assert calls == ["torrent", "usenet", "soulseek"] and err is None
+    assert cands[0]["source"] == "usenet"
+
+
+def test_client_refusal_cooldown_skips_reoffering_same_source():
+    reset_source_cooldowns()
+    try:
+        item = {"tmdb_id": 1, "title": "A"}
+        cand = dict(_cand("A.1080p.mkv"), source="torrent")
+        calls = []
+
+        def enqueue(_item, best, _cands, _mt, _target):
+            calls.append(best["filename"])
+            return {"ok": False, "error": "torrent already queued"}
+
+        deps = _Deps()
+        res = auto_video_process_wishlist(
+            {"_automation_id": "a", "max_concurrent": 1}, deps, media_type="movie",
+            fetch_items=lambda mt: [item], active_keys=lambda mt: set(), target_dir=lambda mt: "/movies",
+            search=lambda _item, _mt: [cand], enqueue=enqueue)
+        assert res["refused"] == 1 and calls == ["A.1080p.mkv"]
+
+        res = auto_video_process_wishlist(
+            {"_automation_id": "a", "max_concurrent": 1}, deps, media_type="movie",
+            fetch_items=lambda mt: [item], active_keys=lambda mt: set(), target_dir=lambda mt: "/movies",
+            search=lambda _item, _mt: [cand], enqueue=enqueue)
+        assert res["refused"] == 1 and calls == ["A.1080p.mkv", "A.1080p.mkv"]
+
+        res = auto_video_process_wishlist(
+            {"_automation_id": "a", "max_concurrent": 1}, deps, media_type="movie",
+            fetch_items=lambda mt: [item], active_keys=lambda mt: set(), target_dir=lambda mt: "/movies",
+            search=lambda _item, _mt: [cand], enqueue=enqueue)
+        assert res["refused"] == 1 and calls == ["A.1080p.mkv", "A.1080p.mkv"]
+        logs = " ".join(p.get("log_line") or "" for p in deps.progress)
+        assert "cooling down" in logs
+    finally:
+        reset_source_cooldowns()
+
+
 def test_top_level_error_is_caught_and_clears_guard():
     from core.automation.handlers.video_process_wishlist import is_running
 
@@ -264,6 +397,20 @@ def test_episode_wishlist_annotates_owned(db):
     assert rows[(1, 2)]["owned"] == 0
 
 
+def test_record_wishlist_search_outcome_can_scope_to_one_season(db):
+    db.add_episodes_to_wishlist(9, "Show", [
+        {"season_number": 1, "episode_number": 1},
+        {"season_number": 2, "episode_number": 1},
+        {"season_number": 2, "episode_number": 2},
+    ])
+    db.record_wishlist_search_outcome("episode", 9, False, season_number=2,
+                                      refusal="No season pack", refusal_quality="WEBDL-1080p")
+    rows = db.query_wishlist(kind="show")["items"][0]["seasons"]
+    by_season = {s["season_number"]: s for s in rows}
+    assert by_season[1]["episodes"][0].get("last_refusal") is None
+    assert {e.get("last_refusal") for e in by_season[2]["episodes"]} == {"No season pack"}
+
+
 # ── upgrade-until-cutoff (pure) ───────────────────────────────────────────────
 def test_pick_best_upgrade_requires_strictly_better():
     cands = [dict(_cand("a"), resolution="720p"),
@@ -297,11 +444,14 @@ def test_wishlist_obtained_gates_on_cutoff(db, monkeypatch):
     db.add_movie_to_wishlist(1, "Low", year="2020", status="wanted")
     db.add_movie_to_wishlist(2, "Done", year="2020", status="wanted")
     db.add_movie_to_wishlist(3, "Mystery", year="2020", status="wanted")
+    db.add_movie_to_wishlist(4, "User Asked", year="2020", status="wanted")
     monkeypatch.setattr("core.video.quality_profile.load",
                         lambda _db: {"cutoff_resolution": "1080p"})
     dl = {"id": 7, "kind": "movie", "media_source": "tmdb", "media_id": "1"}
     dm._wishlist_obtained(db, dl, {"quality_label": "WEBDL-720p"})
     dm._wishlist_obtained(db, dict(dl, media_id="2"), {"quality_label": "BluRay-2160p"})
     dm._wishlist_obtained(db, dict(dl, media_id="3"), {"quality_label": "who knows"})
+    user_dl = dict(dl, media_id="4", search_ctx=json.dumps({"import_policy": "user_replace"}))
+    dm._wishlist_obtained(db, user_dl, {"quality_label": "WEBDL-720p"})
     left = {r["tmdb_id"] for r in db.movie_wishlist_to_download()}
-    assert left == {1}         # below cutoff kept; met removed; unreadable removed (classic)
+    assert left == {1}         # background below cutoff kept; user-triggered below cutoff satisfied

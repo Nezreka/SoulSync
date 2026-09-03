@@ -39,6 +39,9 @@ class _FakeWorker:
 
 
 def test_search_survives_blank_listeners_and_hides_the_placeholder_star(client, monkeypatch):
+    # the route lives in api.listenbrainz_routes and reads lastfm_worker
+    # through a getter closing over web_server's global, so patching
+    # web_server still reaches it
     monkeypatch.setattr(web_server, 'lastfm_worker', _FakeWorker())
     r = client.get('/api/lastfm/search/tracks?q=ghost')
     assert r.status_code == 200
@@ -77,7 +80,8 @@ def test_reading_a_trackless_radio_never_deletes_it(client, monkeypatch):
         def delete_cached_playlist(mbid):
             deleted.append(mbid)
 
-    monkeypatch.setattr(web_server, '_get_profile_lb_manager',
+    from api import listenbrainz_routes
+    monkeypatch.setattr(listenbrainz_routes, '_get_profile_lb_manager',
                         lambda: (_SpyManager(), 'u', 'lb'))
     r = client.get('/api/discover/listenbrainz/playlist/lastfm_radio_abc123def456')
     assert r.status_code == 404

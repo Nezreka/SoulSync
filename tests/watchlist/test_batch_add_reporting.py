@@ -24,8 +24,14 @@ def client(tmp_path, monkeypatch):
     import database.music_database as music_database
     monkeypatch.setattr(music_database, "get_database", lambda *a, **k: db)
     monkeypatch.setattr(web_server, "get_database", lambda *a, **k: db)
-    monkeypatch.setattr(web_server, "get_current_profile_id", lambda: 1)
-    monkeypatch.setattr(web_server, "_get_metadata_fallback_source", lambda: "deezer")
+    # the route lives in api.artist_watchlist and holds its own injected
+    # seams - patching web_server's aliases never reached it, which made
+    # this test order-dependent (green only when an earlier test primed
+    # the shared singleton)
+    from api import artist_watchlist
+    monkeypatch.setattr(artist_watchlist, "get_database", lambda *a, **k: db)
+    monkeypatch.setattr(artist_watchlist, "get_current_profile_id", lambda: 1)
+    monkeypatch.setattr(artist_watchlist, "_get_metadata_fallback_source", lambda: "deezer")
     monkeypatch.setattr(web_server, "spotify_client", None)
     web_server.app.config["TESTING"] = True
     with web_server.app.test_client() as test_client:

@@ -201,3 +201,209 @@ def test_single_mode_only_tries_that_source(monkeypatch):
     })
     cands, err = w._default_search({"title": "X"}, "movie")
     assert calls == ["torrent"] and cands[0]["title"] == "tor"   # order ignored in single mode
+
+
+
+def test_extto_can_participate_in_hybrid_source_chain(monkeypatch):
+    calls = _hybrid(monkeypatch, "hybrid", ["torrent", "extto", "soulseek"], {
+        "torrent": ([], None),
+        "extto": ([{"accepted": True, "title": "ext hit", "source": "extto"}], None),
+    })
+    cands, err = w._default_search({"title": "X"}, "movie")
+    assert calls == ["torrent", "extto"]
+    assert cands[0]["source"] == "extto" and err is None
+
+
+def test_extto_auto_grab_uses_torrent_transport(monkeypatch):
+    grabbed = {}
+    monkeypatch.setattr("core.video.disk_guard.has_room", lambda target, org: (True, 999))
+    monkeypatch.setattr("core.video.organization.load", lambda db: {})
+    monkeypatch.setattr("core.video.download_monitor.ensure_started", lambda get_db: None)
+
+    def fake_grab(source, url, **kw):
+        grabbed["call"] = (source, url, kw)
+        return {"ok": True, "ref": "hash"}
+
+    monkeypatch.setattr("core.video.client_grab.grab", fake_grab)
+    rows = []
+
+    class DB:
+        def add_video_download(self, row):
+            rows.append(row)
+
+    monkeypatch.setattr("api.video.get_video_db", lambda: DB())
+    best = {"source": "extto", "title": "Silo S03E08 1080p WEB", "download_url": "magnet:?xt=1",
+            "magnet_uri": "magnet:?xt=1", "username": "EXT.to", "indexer_id": "extto",
+            "size_bytes": 1000, "accepted": True}
+    res = w._default_enqueue({"show_tmdb_id": 9, "show_title": "Silo", "season_number": 3,
+                              "episode_number": 8}, best, [best], "episode", "/tv")
+    assert res["ok"] is True
+    assert grabbed["call"][0] == "torrent"
+    assert rows[0]["source"] == "torrent"
+    assert rows[0]["username"] == "EXT.to" and rows[0]["indexer_id"] == "extto"
+
+
+def test_extto_auto_grab_resolves_the_winning_magnet_only(monkeypatch):
+    grabbed = {}
+    resolved = {}
+    monkeypatch.setattr("core.video.disk_guard.check_room", lambda target, org: {"ok": True})
+    monkeypatch.setattr("core.video.organization.load", lambda db: {})
+    monkeypatch.setattr("core.video.download_monitor.ensure_started", lambda get_db: None)
+
+    def fake_resolve(url, **kw):
+        resolved["call"] = (url, kw)
+        return {"ok": True, "magnet": "magnet:?xt=winner"}
+
+    def fake_grab(source, url, **kw):
+        grabbed["call"] = (source, url, kw)
+        return {"ok": True, "ref": "hash"}
+
+    monkeypatch.setattr("core.video.extto_search.resolve_magnet", fake_resolve)
+    monkeypatch.setattr("core.video.client_grab.grab", fake_grab)
+    rows = []
+
+    class DB:
+        def add_video_download(self, row):
+            rows.append(row)
+
+    monkeypatch.setattr("api.video.get_video_db", lambda: DB())
+    best = {"source": "extto", "title": "Silo S03E08 1080p WEB", "download_url": "",
+            "magnet_uri": "", "info_url": "https://ext.to/silo-1/", "magnet_id": "1",
+            "username": "EXT.to", "indexer_id": "extto", "size_bytes": 1000,
+            "accepted": True}
+    res = w._default_enqueue({"show_tmdb_id": 9, "show_title": "Silo", "season_number": 3,
+                              "episode_number": 8}, best, [best], "episode", "/tv")
+    assert res["ok"] is True
+    assert resolved["call"] == ("https://ext.to/silo-1/", {"magnet_id": "1"})
+    assert grabbed["call"] == ("torrent", "magnet:?xt=winner", {"fallback_magnet": "magnet:?xt=winner"})
+    assert rows[0]["source"] == "torrent" and rows[0]["client_ref"] == "hash"
+
+
+def test_torrent_search_includes_extto_hits(monkeypatch):
+    item = {"tmdb_id": 5, "title": "Interstellar", "year": "2014"}
+    monkeypatch.setattr("api.video.get_video_db", lambda: object())
+    monkeypatch.setattr("core.video.quality_profile.load_for_item", lambda db, item: {})
+    monkeypatch.setattr("core.video.prowlarr_search.prowlarr_search", lambda *a, **k: {
+        "configured": True,
+        "hits": [{"title": "Interstellar 2014 1080p Prowlarr", "accepted": True, "indexer_id": "7"}],
+    })
+    monkeypatch.setattr("core.video.extto_search.extto_search", lambda *a, **k: {
+        "configured": True,
+        "hits": [{"title": "Interstellar 2014 1080p EXT.to", "accepted": True,
+                  "indexer_id": "extto", "username": "EXT.to"}],
+    })
+    monkeypatch.setattr("api.video.downloads._evaluate_hits", lambda hits, *a, **k: list(hits))
+
+    cands, err = w._search_one_source("torrent", item, "movie")
+    assert err is None
+    assert [c["title"] for c in cands] == [
+        "Interstellar 2014 1080p Prowlarr", "Interstellar 2014 1080p EXT.to"]
+    assert cands[0]["source"] == "torrent"
+    assert cands[1]["source"] == "extto"
+
+
+def test_torrent_search_still_runs_when_extto_is_unconfigured(monkeypatch):
+    item = {"tmdb_id": 5, "title": "Interstellar", "year": "2014"}
+    monkeypatch.setattr("api.video.get_video_db", lambda: object())
+    monkeypatch.setattr("core.video.quality_profile.load_for_item", lambda db, item: {})
+    monkeypatch.setattr("core.video.prowlarr_search.prowlarr_search", lambda *a, **k: {
+        "configured": True,
+        "hits": [{"title": "Interstellar 2014 1080p Prowlarr", "accepted": True, "indexer_id": "7"}],
+    })
+    monkeypatch.setattr("core.video.extto_search.extto_search", lambda *a, **k: {
+        "configured": False,
+        "hits": [],
+    })
+    monkeypatch.setattr("api.video.downloads._evaluate_hits", lambda hits, *a, **k: list(hits))
+
+    cands, err = w._search_one_source("torrent", item, "movie")
+    assert [c["source"] for c in cands] == ["torrent"]
+    assert "EXT.to skipped" in err
+
+
+# ── the torrent lane has two halves; one failing must not sink the other ──────
+#
+# `_search_one_source` returned the moment Prowlarr said "not configured", so a
+# user running FlareSolverr WITHOUT Prowlarr got nothing from the torrent lane
+# while EXT.to sat there able to answer — the opposite of the intent that normal
+# torrent users get EXT.to automatically. The lane has only failed to search
+# when NEITHER half could run.
+
+def _lane(monkeypatch, *, prowlarr, extto):
+    """Drive _search_one_source('torrent', …) with both halves stubbed."""
+    monkeypatch.setattr("api.video.get_video_db", lambda: object())
+    monkeypatch.setattr("core.video.quality_profile.load_for_item", lambda db, item: {})
+    monkeypatch.setattr(w, "search_context",
+                        lambda item, mt: {"scope": "movie", "title": "X", "titles": ["X"]})
+    monkeypatch.setattr("core.video.prowlarr_search.prowlarr_search",
+                        lambda *a, **k: prowlarr)
+    monkeypatch.setattr(w, "_extto_hits_for_context", lambda ctx: extto)
+    monkeypatch.setattr("api.video.downloads._evaluate_hits",
+                        lambda hits, *a, **k: [dict(h) for h in hits])
+    return w._search_one_source("torrent", {"title": "X"}, "movie")
+
+
+def test_extto_still_answers_when_prowlarr_is_not_configured(monkeypatch):
+    cands, err = _lane(monkeypatch,
+                       prowlarr={"configured": False},
+                       extto=([{"title": "ext hit"}], None))
+    assert [c["title"] for c in cands] == ["ext hit"]
+    assert err and "Prowlarr" in err          # the degradation is still reported
+
+
+def test_extto_still_answers_when_prowlarr_errors(monkeypatch):
+    cands, err = _lane(monkeypatch,
+                       prowlarr={"configured": True, "error": "indexer timeout"},
+                       extto=([{"title": "ext hit"}], None))
+    assert [c["title"] for c in cands] == ["ext hit"]
+    assert err and "indexer timeout" in err
+
+
+def test_both_halves_down_is_a_real_search_failure(monkeypatch):
+    """None (not []) is what tells the caller the lane could not SEARCH — an
+    empty list would read as 'looked, found nothing' and stop the fallback."""
+    cands, err = _lane(monkeypatch,
+                       prowlarr={"configured": False},
+                       extto=(None, "EXT.to requires FlareSolverr"))
+    assert cands is None
+    assert "Prowlarr" in err and "FlareSolverr" in err
+
+
+def test_prowlarr_alone_still_works_when_extto_cannot_run(monkeypatch):
+    cands, err = _lane(monkeypatch,
+                       prowlarr={"configured": True, "hits": [{"title": "prowlarr hit"}]},
+                       extto=(None, "EXT.to requires FlareSolverr"))
+    assert [c["title"] for c in cands] == ["prowlarr hit"]
+    assert err and "EXT.to skipped" in err
+
+
+def test_both_halves_answering_are_merged(monkeypatch):
+    cands, err = _lane(monkeypatch,
+                       prowlarr={"configured": True, "hits": [{"title": "prowlarr hit"}]},
+                       extto=([{"title": "ext hit"}], None))
+    assert [c["title"] for c in cands] == ["prowlarr hit", "ext hit"]
+    assert err is None                        # nothing degraded, nothing to report
+
+
+def test_extto_running_but_empty_is_not_a_failure(monkeypatch):
+    """Configured, no error, zero hits = it looked and found nothing. That has to
+    stay distinct from 'could not run', or the chain stops falling back."""
+    cands, err = _lane(monkeypatch,
+                       prowlarr={"configured": False},
+                       extto=([], None))
+    assert cands == []                        # ran, found nothing
+    assert err and "Prowlarr" in err
+
+
+def test_usenet_is_prowlarr_only(monkeypatch):
+    """EXT.to is torrents. A usenet lane must not be rescued by it."""
+    monkeypatch.setattr("api.video.get_video_db", lambda: object())
+    monkeypatch.setattr("core.video.quality_profile.load_for_item", lambda db, item: {})
+    monkeypatch.setattr(w, "search_context",
+                        lambda item, mt: {"scope": "movie", "title": "X", "titles": ["X"]})
+    monkeypatch.setattr("core.video.prowlarr_search.prowlarr_search",
+                        lambda *a, **k: {"configured": False})
+    monkeypatch.setattr(w, "_extto_hits_for_context",
+                        lambda ctx: (_ for _ in ()).throw(AssertionError("EXT.to ran for usenet")))
+    cands, err = w._search_one_source("usenet", {"title": "X"}, "movie")
+    assert cands is None and "Prowlarr" in err

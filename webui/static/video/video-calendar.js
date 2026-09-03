@@ -305,7 +305,8 @@
                     '<span class="vcal-ag-time' + (tl ? '' : ' vcal-time--none') + '">' + (tl || 'Anytime') + '</span>' +
                     '<span class="vcal-ag-main"><span class="vcal-ag-title">' + esc(ep.show_title) + '</span>' +
                     '<span class="vcal-ag-sub">' + se + (ep.title ? ' · ' + esc(ep.title) : '') + '</span></span>' +
-                    (ep.has_file ? '<span class="vcal-flag" title="In your library">✓</span>' : '') +
+                    (ep.has_file ? '<span class="vcal-flag" title="In your library">✓</span>'
+                                 : acqBadge(ep, 'vcal-acq--sm')) +
                     '</a>';
             });
             html += '</div>';
@@ -376,7 +377,30 @@
         host.innerHTML = '<div class="vcal-bb-multi" data-count="' + list.length + '">' + panels + '</div>';
     }
 
+    // How each acquisition state reads on a card. `unaired` is deliberately
+    // absent: most of a calendar week is unaired, so badging it would bury the
+    // handful of rows that actually want attention.
+    var ACQ_LABEL = {
+        owned: ['In your library', 'vcal-acq--owned'],
+        downloading: ['Downloading', 'vcal-acq--live'],
+        queued: ['Queued', 'vcal-acq--live'],
+        failed: ['Failed', 'vcal-acq--bad'],
+        wanted: ['Wanted', 'vcal-acq--want'],
+        ignored: ['Not monitored', 'vcal-acq--mut'],
+        missing: ['Missing', 'vcal-acq--miss'],
+    };
+    function acqBadge(ep, extraClass) {
+        var meta = ACQ_LABEL[ep && ep.acq];
+        if (!meta) return '';
+        return '<span class="vcal-acq ' + meta[1] + (extraClass ? ' ' + extraClass : '') +
+            '" title="' + meta[0] + '">' + meta[0] + '</span>';
+    }
+
     function filterEps(eps) {
+        // 'needs' is the one that earns its place: aired, nothing has it, and
+        // nothing is looking for it. The server decides that, so the filter and
+        // the header count can never disagree.
+        if (state.filter === 'needs') return eps.filter(function (e) { return e.needs_action; });
         if (state.filter === 'owned') return eps.filter(function (e) { return e.has_file; });
         if (state.filter === 'missing') return eps.filter(function (e) { return !e.has_file; });
         return eps;
@@ -696,9 +720,21 @@
         var epTitle = ep.title || ('Episode ' + ep.episode_number);
         var tl = fmtMins(airMins(ep.airs_time));
         var when = fmtFullDate(ep.air_date) + ' · ' + (tl || 'Anytime');
-        var owned = ep.has_file
-            ? '<span class="vcm-badge vcm-badge--have">✓ In your library</span>'
-            : '<span class="vcm-badge vcm-badge--miss">Not in library</span>';
+        // "Not in library" was true of an episode downloading right now, one the
+        // drain was hunting, and one nothing had touched - three different
+        // situations wearing one label.
+        var ACQ_MODAL = {
+            owned: ['✓ In your library', 'vcm-badge--have'],
+            downloading: ['Downloading now', 'vcm-badge--live'],
+            queued: ['Queued to download', 'vcm-badge--live'],
+            failed: ['Download failed', 'vcm-badge--bad'],
+            wanted: ['On the wishlist', 'vcm-badge--want'],
+            ignored: ['Not monitored', 'vcm-badge--mut'],
+            unaired: ["Hasn't aired yet", 'vcm-badge--miss'],
+            missing: ['Missing - nothing is looking for it', 'vcm-badge--miss'],
+        };
+        var am = ACQ_MODAL[ep.acq] || (ep.has_file ? ACQ_MODAL.owned : ACQ_MODAL.missing);
+        var owned = '<span class="vcm-badge ' + am[1] + '">' + esc(am[0]) + '</span>';
         var tags = [owned];
         if (ep.runtime_minutes) tags.push('<span class="vcm-tag">' + ep.runtime_minutes + ' min</span>');
         if (ep.rating) tags.push('<span class="vcm-tag vcm-tag--star">★ ' + (Math.round(ep.rating * 10) / 10) + '</span>');
@@ -749,6 +785,17 @@
                     '<button class="vcm-btn vcm-btn--ghost" type="button" data-vcm-close>Close</button>' +
                     (wishable ? '<button class="vcm-btn vcm-btn--ghost vcm-btn--wish" type="button" data-vcm-wish disabled' +
                         (upcoming ? ' title="Grabs automatically once it airs"' : '') + '>＋ Wishlist episode</button>' : '') +
+                    // A failed row has already been searched; asking for it again
+                    // just re-runs the backoff. Retry clears that and tries every
+                    // source, which is the thing the user actually wants.
+                    (ep.acq === 'failed'
+                        ? '<button class="vcm-btn vcm-btn--ghost" type="button" data-vcm-retry ' +
+                          'title="Clear the retry backoff and search every source again">↺ Retry now</button>' : '') +
+                    // Unmonitor stops the drain hunting it, which is the honest
+                    // answer to "I do not want this episode".
+                    (!ep.has_file && ep.acq !== 'ignored' && ep.acq !== 'unaired'
+                        ? '<button class="vcm-btn vcm-btn--ghost" type="button" data-vcm-ignore ' +
+                          'title="Stop looking for this episode">Ignore</button>' : '') +
                     '<button class="vcm-btn vcm-btn--primary" type="button" data-vcm-open>Open full show page →</button>' +
                 '</div>' +
             '</div>';
@@ -771,6 +818,58 @@
                     } else { btn.disabled = false; }
                 })
                 .catch(function () { /* stays disabled */ });
+        }
+
+        // A failed row has already been searched and is sitting in backoff, so
+        // wishing it again changes nothing. This clears the backoff evidence and
+        // searches every source, which is what the user meant by "try again".
+        function retryThis(btn) {
+            btn.disabled = true; btn.textContent = 'Retrying\u2026';
+            fetch('/api/video/wishlist/retry', { method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scope: 'episode', tmdb_id: ep.show_tmdb_id,
+                    season_number: ep.season_number, episode_number: ep.episode_number }) })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (!res || !res.success) {
+                        btn.disabled = false; btn.textContent = '\u21ba Retry now';
+                        if (typeof showToast === 'function') showToast('Retry failed to start', 'error');
+                        return;
+                    }
+                    btn.textContent = '\u2713 Searching';
+                    if (typeof showToast === 'function') showToast('Cleared the backoff, searching every source', 'success');
+                    document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
+                })
+                .catch(function () {
+                    btn.disabled = false; btn.textContent = '\u21ba Retry now';
+                    if (typeof showToast === 'function') showToast('Retry failed to start', 'error');
+                });
+        }
+
+        // Unmonitoring is the honest form of "I don't want this episode": the
+        // drain stops hunting it and the calendar stops calling it missing.
+        function ignoreThis(btn) {
+            btn.disabled = true;
+            fetch('/api/video/episode/monitor', { method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tmdb_id: ep.show_tmdb_id, season_number: ep.season_number,
+                    episode_number: ep.episode_number, monitored: false }) })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (!res || !res.success) {
+                        btn.disabled = false;
+                        if (typeof showToast === 'function') showToast('Could not stop monitoring it', 'error');
+                        return;
+                    }
+                    ep.acq = 'ignored'; ep.monitored = 0; ep.needs_action = false;
+                    btn.textContent = '\u2713 Ignored';
+                    if (typeof showToast === 'function') showToast('No longer looking for that episode', 'info');
+                    render();   // the badge and the needs-action count both move
+                })
+                .catch(function () {
+                    btn.disabled = false;
+                    if (typeof showToast === 'function') showToast('Could not stop monitoring it', 'error');
+                });
         }
 
         function wishThis(btn) {
@@ -800,6 +899,10 @@
 
         ov.addEventListener('click', function (e) {
             if (e.target === ov || e.target.closest('[data-vcm-close]')) { closeModal(); return; }
+            var rbtn = e.target.closest('[data-vcm-retry]');
+            if (rbtn) { retryThis(rbtn); return; }
+            var ibtn = e.target.closest('[data-vcm-ignore]');
+            if (ibtn) { ignoreThis(ibtn); return; }
             var wbtn = e.target.closest('[data-vcm-wish]');
             if (wbtn) { if (!wbtn.disabled) wishThis(wbtn); return; }
             if (e.target.closest('[data-vcm-open]')) {

@@ -37,7 +37,8 @@ from datetime import datetime, timedelta
 
 import pytest
 
-WEB_SERVER = 'web_server.py'
+# the deezer playlist routes moved out of web_server.py (aug 25 lift)
+WEB_SERVER = 'api/source_playlists.py'
 
 
 def read_source():
@@ -51,9 +52,12 @@ def src():
 
 
 @pytest.fixture(scope='module')
-def format_status(src):
+def format_status():
     """The real ``_format_playlist_sync_status``, lifted out — it is pure, and
-    importing web_server drags the whole app in."""
+    importing web_server drags the whole app in. it STAYED in web_server.py
+    when the deezer routes moved out; the routes get it injected."""
+    with open('web_server.py', encoding='utf-8') as handle:
+        src = handle.read()
     i = src.index('def _format_playlist_sync_status(')
     ns = {'datetime': datetime}
     exec(src[i:src.index('\ndef ', i + 10)], ns)
@@ -64,7 +68,7 @@ def format_status(src):
 def endpoint(src):
     """The body of the ARL playlists route."""
     i = src.index("def get_deezer_arl_playlists():")
-    return src[i:src.index('\n@app.route', i)]
+    return src[i:src.index('\n@bp.route', i)]
 
 
 # ── the literal is gone ─────────────────────────────────────────────────────

@@ -51,6 +51,15 @@ def test_fix_surfaces_real_ffmpeg_error_not_banner(tmp_path, monkeypatch):
     flac = tmp_path / "01 - Track.flac"
     flac.write_bytes(b"x")
 
+    monkeypatch.setattr(
+        "core.quality.selection.load_profile_by_id",
+        lambda _profile_id: {
+            "lossy_copy_enabled": True,
+            "lossy_copy_codec": "opus",
+            "lossy_copy_bitrate": "256",
+            "lossy_copy_delete_original": False,
+        },
+    )
     monkeypatch.setattr(shutil, "which", lambda _: "/fake/ffmpeg")
     monkeypatch.setattr(
         subprocess, "run",
@@ -67,3 +76,28 @@ def test_fix_surfaces_real_ffmpeg_error_not_banner(tmp_path, monkeypatch):
     # ...banner absent.
     assert "ffmpeg version" not in err
     assert "configuration:" not in err
+
+
+def test_fix_resolves_unassigned_track_against_live_default(tmp_path, monkeypatch):
+    resolved_ids = []
+
+    def _load(profile_id):
+        resolved_ids.append(profile_id)
+        return {
+            "id": 99,
+            "name": "New Default",
+            "lossy_copy_enabled": False,
+        }
+
+    monkeypatch.setattr("core.quality.selection.load_profile_by_id", _load)
+
+    result = _worker(tmp_path)._fix_missing_lossy_copy(
+        "track", "1", str(tmp_path / "track.flac"),
+        {"quality_profile_id": None},
+    )
+
+    assert resolved_ids == [None]
+    assert result == {
+        "success": False,
+        "error": "Lossy Copy is disabled for this track profile",
+    }

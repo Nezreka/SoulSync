@@ -11,7 +11,8 @@ from core.metadata import artist_image as metadata_artist_image
 
 
 def _web_function_node(function_name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
-    source = Path("web_server.py").read_text(encoding="utf-8")
+    # the artist family moved to api/artist_detail.py (aug 26 lift)
+    source = Path("api/artist_detail.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name:

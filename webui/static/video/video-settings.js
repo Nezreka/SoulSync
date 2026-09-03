@@ -73,24 +73,36 @@
             })
             .catch(function () { showServerConfig('plex'); });
     }
+    // what the note under each server's fields says. a half-filled connection
+    // (url but no key, or key but no url) gets told what's still missing, so a
+    // save that only stored half of it doesn't read as done.
+    function connNote(server, hasUrl, hasSecret, inherited) {
+        var name = server === 'plex' ? 'Plex' : 'Jellyfin';
+        var secret = server === 'plex' ? 'token' : 'API key';
+        if (!hasUrl && !hasSecret) return 'Not connected — add a server URL and ' + secret + '.';
+        if (!hasSecret) return 'Add the ' + secret + ' to finish this connection.';
+        if (!hasUrl) return 'Add the server URL to finish this connection.';
+        if (inherited) return 'Inherited from your Music ' + name + ' connection — edit to use a different server for video.';
+        return 'Custom video connection.';
+    }
+    // never overwrite the field the user is typing in. a save fires on change, so
+    // this refresh can land while they're already filling in the next field.
+    function setConnValue(name, value) {
+        var el = connEl(name);
+        if (el && el !== document.activeElement) el.value = value;
+    }
     function loadConn() {
-        fetch(CONN_URL, { headers: { 'Accept': 'application/json' } })
+        return fetch(CONN_URL, { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 if (!d) return;
                 var p = d.plex || {}, j = d.jellyfin || {};
-                var pu = connEl('plex-url'); if (pu) pu.value = p.base_url || '';
-                var pt = connEl('plex-token'); if (pt) pt.value = p.has_token ? p.token : '';
-                var ju = connEl('jellyfin-url'); if (ju) ju.value = j.base_url || '';
-                var jk = connEl('jellyfin-key'); if (jk) jk.value = j.has_key ? j.api_key : '';
-                note('plex', p.base_url
-                    ? (p.inherited ? 'Inherited from your Music Plex connection — edit to use a different server for video.'
-                                   : 'Custom video connection.')
-                    : 'Not connected — add a server URL and token.');
-                note('jellyfin', j.base_url
-                    ? (j.inherited ? 'Inherited from your Music Jellyfin connection — edit to use a different server for video.'
-                                   : 'Custom video connection.')
-                    : 'Not connected — add a server URL and API key.');
+                setConnValue('plex-url', p.base_url || '');
+                setConnValue('plex-token', p.has_token ? p.token : '');
+                setConnValue('jellyfin-url', j.base_url || '');
+                setConnValue('jellyfin-key', j.has_key ? j.api_key : '');
+                note('plex', connNote('plex', !!p.base_url, !!p.has_token, !!p.inherited));
+                note('jellyfin', connNote('jellyfin', !!j.base_url, !!j.has_key, !!j.inherited));
             })
             .catch(function () { /* ignore */ });
     }
@@ -103,8 +115,10 @@
                 plex: { base_url: pu ? pu.value : '', token: pt ? pt.value : '' },
                 jellyfin: { base_url: ju ? ju.value : '', api_key: jk ? jk.value : '' }
             })
-        }).then(function () { loadConn(); if (!silent) toast('Connection saved', 'success'); })
-          .catch(function () { if (!silent) toast('Could not save connection', 'error'); });
+        }).then(function () {
+            if (!silent) toast('Connection saved', 'success');
+            return loadConn();       // refresh the notes once the save has landed
+        }).catch(function () { if (!silent) toast('Could not save connection', 'error'); });
     }
     // Toggle click: reveal that server's config immediately (like the music
     // toggle) and persist it as the active video server pick.

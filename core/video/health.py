@@ -10,6 +10,7 @@ status is the worst individual one.
 from __future__ import annotations
 
 import os
+import tempfile
 
 from utils.logging_config import get_logger
 
@@ -21,6 +22,264 @@ _ROOTS = (("movies_path", "Movie library"), ("tv_path", "TV library"),
 
 def _check(cid, label, status, detail) -> dict:
     return {"id": cid, "label": label, "status": status, "detail": detail}
+
+
+def _fmt_gb(v) -> str:
+    return "unknown" if v is None else "%.1f GB" % float(v)
+
+
+def _worse(a: str, b: str) -> str:
+    order = {"ok": 0, "warning": 1, "error": 2}
+    return b if order.get(b, 0) > order.get(a, 0) else a
+
+
+def _youtube_cookie_status() -> tuple[str, str]:
+    try:
+        from core.settings import config_manager
+        mode = str(config_manager.get("youtube.cookies_browser", "") or "").strip()
+        cookiefile = str(config_manager.get("youtube.cookies_file", "") or "").strip()
+    except Exception:   # noqa: BLE001
+        logger.debug("youtube cookie health probe failed", exc_info=True)
+        return "warning", "cookies: config unreadable"
+    if mode == "custom":
+        if not cookiefile:
+            return "warning", "cookies: custom file not set"
+        if not os.path.isfile(cookiefile):
+            return "warning", "cookies: file missing"
+        return "ok", "cookies: pasted file"
+    if mode:
+        return "ok", f"cookies: {mode} browser"
+    return "ok", "cookies: none"
+
+
+def _youtube_health_check(db, settings: dict) -> dict:
+    """One user-facing YouTube readiness tile: version, auth, disk, recent blockers."""
+    status = "ok"
+    bits = []
+
+    try:
+        from core.ytdlp_update import installed_version
+        ver = installed_version()
+    except Exception:   # noqa: BLE001
+        logger.debug("yt-dlp version health probe failed", exc_info=True)
+        ver = None
+    if ver:
+        bits.append(f"yt-dlp {ver}")
+    else:
+        status = _worse(status, "error")
+        bits.append("yt-dlp unavailable")
+
+    c_status, c_detail = _youtube_cookie_status()
+    status = _worse(status, c_status)
+    bits.append(c_detail)
+
+    try:
+        from core.video.disk_guard import free_gb
+        temp_free = free_gb(tempfile.gettempdir())
+        bits.append(f"temp: {_fmt_gb(temp_free)} free")
+        if temp_free is not None and temp_free < 2:
+            status = _worse(status, "warning")
+
+        out = str(db.get_setting("youtube_path") or "").strip()
+        if out:
+            out_free = free_gb(out)
+            if not os.path.isdir(out):
+                status = _worse(status, "error")
+                bits.append("output: unreachable")
+            else:
+                bits.append(f"output: {_fmt_gb(out_free)} free")
+                try:
+                    floor = float(settings.get("min_free_disk_gb") or 0)
+                except (TypeError, ValueError):
+                    floor = 0
+                if out_free is not None and ((floor and out_free < floor) or out_free < 2):
+                    status = _worse(status, "warning")
+        else:
+            bits.append("output: not configured")
+    except Exception:   # noqa: BLE001
+        logger.debug("youtube disk health probe failed", exc_info=True)
+        status = _worse(status, "warning")
+        bits.append("disk: probe failed")
+
+    try:
+        from core.youtube_errors import failure_summary
+        errors = db.youtube_recent_failure_errors(days=3) or []
+        if errors:
+            summary = failure_summary(errors)
+            top = str(summary["dominant"]).replace("_", " ")
+            # A download that SUCCEEDED after the last failure settles the question:
+            # whatever it was, it is over. Reporting it as a live fault is how a
+            # cleared disk kept demanding to be cleared.
+            if db.youtube_download_recovered(days=3):
+                bits.append("%d recent YouTube failure(s), mostly %s - downloads working again"
+                            % (summary["total"], top))
+            else:
+                # A standing problem the operator has to fix (no disk, no ffmpeg,
+                # no cookies) is an ERROR, not the same shade as a few timeouts:
+                # it will not clear on its own.
+                status = _worse(status, "error" if summary["needs_user_action"] else "warning")
+                reason = summary["reason"] or "see YouTube download history"
+                bits.append("%d recent YouTube failure(s), mostly %s: %s"
+                            % (summary["total"], top, reason))
+        else:
+            bits.append("recent failures: 0")
+    except Exception:   # noqa: BLE001
+        logger.debug("youtube failure health probe failed", exc_info=True)
+        status = _worse(status, "warning")
+        bits.append("recent failures: unreadable")
+
+    return _check("youtube_health", "YouTube", status, "; ".join(bits))
+
+
+# What each source is called in a snapshot, and how to say it out loud.
+_SOURCE_LABELS = {
+    "torrent": "Torrent indexers (Prowlarr / EXT.to)",
+    "usenet": "Usenet",
+    "soulseek": "Soulseek (slskd)",
+}
+
+
+def _source_health_checks(db) -> list:
+    """One check per download source that has actually been used lately.
+
+    The distinction that matters: a source that could not RUN is broken, and a
+    source that ran and found nothing is working. Those used to look identical
+    from the outside - "no results" - which is how a closed slskd port reads as
+    "nothing on Soulseek has what you want" for weeks.
+
+    Sources with no recent searches are omitted rather than reported healthy: an
+    untried source has told us nothing, and a green tile for one would be a
+    claim we cannot make.
+    """
+    out = []
+    try:
+        snap = db.source_health_snapshot(days=7) or {}
+    except Exception:   # noqa: BLE001 - health must never 500 over one probe
+        logger.debug("source health probe failed", exc_info=True)
+        return out
+
+    for src, s in sorted(snap.items()):
+        label = _SOURCE_LABELS.get(src, src.title())
+        # A source is only in the snapshot because it was searched, so there is
+        # no zero case to guard: an untried source simply is not here, which is
+        # the point - a green tile for one would be a claim we cannot make.
+        searches = int(s.get("searches") or 0)
+        ran = int(s.get("ran") or 0)
+        cid = "source_" + src
+        if ran == 0:
+            reason = s.get("reason") or "the search could not run"
+            out.append(_check(cid, label, "error",
+                              "couldn't run any of the last %d searches - %s" % (searches, reason)))
+        elif ran < searches:
+            reason = s.get("reason") or "the search could not run"
+            out.append(_check(cid, label, "warning",
+                              "ran %d of the last %d searches - %s" % (ran, searches, reason)))
+        elif not s.get("results"):
+            # It ran every time and found nothing. Not broken, but worth saying:
+            # an indexer set that returns nothing for a week is misconfigured
+            # more often than it is unlucky.
+            out.append(_check(cid, label, "warning",
+                              "ran %d searches and returned no releases at all" % ran))
+        elif not s.get("accepted"):
+            # The source works and nothing it returns is being grabbed. Reported
+            # healthy this is the most misleading tile on the page - 180 found, 0
+            # grabbed, green tick - so it warns. It deliberately does NOT name a
+            # cause: on Boulder's install four of six rows read "none were this
+            # release" (a MATCHING miss, where the profile never judged anything)
+            # and only two were the profile turning down a tier. Guessing between
+            # those sends the user to change the wrong setting.
+            out.append(_check(cid, label, "warning",
+                              "found %d releases across %d searches but none were grabbed - "
+                              "check the per-row reasons on the wishlist for whether they "
+                              "were the wrong release or turned down by your quality profile"
+                              % (s.get("results") or 0, ran)))
+        else:
+            out.append(_check(cid, label, "ok",
+                              "%d releases across %d searches, %d passed your quality profile"
+                              % (s.get("results") or 0, ran, s.get("accepted") or 0)))
+    return out
+
+
+def _indexer_health_checks(db) -> list:
+    """Name the indexers whose results never survive the quality profile.
+
+    NOT "indexers that returned nothing": these stats are built FROM search
+    receipts, so an indexer that returns nothing leaves no sample and cannot
+    appear here at all. A check for it could never fire — finding that out
+    before shipping it is the only reason this docstring exists. Seeing a truly
+    idle indexer needs Prowlarr's configured list, which is a network call, and
+    health runs on a page load.
+
+    What the receipts CAN show is an indexer that keeps answering with releases
+    none of which are ever usable — a tracker carrying the wrong region, the
+    wrong tier, or nothing but packs. That is real, actionable, and invisible in
+    the transport-level total.
+    """
+    out = []
+    try:
+        stats = db.indexer_health_snapshot(days=14) or []
+    except Exception:   # noqa: BLE001 - health must never 500 over one probe
+        logger.debug("indexer health probe failed", exc_info=True)
+        return out
+    # With one indexer there is nothing to compare it against, and a single
+    # source having a bad fortnight is the transport check's business.
+    if len(stats) < 2:
+        return out
+    # Enough results to mean something: one unusable hit is luck, twenty is a
+    # pattern.
+    barren = sorted(s["indexer"] for s in stats
+                    if s.get("results", 0) >= 20 and not s.get("accepted"))
+    if barren:
+        out.append(_check("indexers_barren", "Indexers", "warning",
+                          "%d of %d returned releases but never one you could use: %s"
+                          % (len(barren), len(stats), ", ".join(barren[:6]))))
+    return out
+
+
+def _import_list_checks(db) -> list:
+    """Whether configured import lists can ever actually run.
+
+    The failure this exists for is silent and total: you add a Trakt or IMDb
+    list, the UI saves it, the list page shows it — and if the
+    ``video_import_lists`` automation is disabled, nothing ever syncs. There is
+    no error, no empty state, no clue. A configured list and a working list look
+    identical from every screen.
+
+    Says nothing when no lists exist: not using the feature is not a fault.
+    """
+    out = []
+    try:
+        from core.video.import_lists import load_lists
+        lists = [x for x in (load_lists(db) or []) if x.get("enabled")]
+    except Exception:   # noqa: BLE001 - health must never 500 over one probe
+        logger.debug("import-list health probe failed", exc_info=True)
+        return out
+    if not lists:
+        return out
+
+    try:
+        # the automation store IS the music db, and core/video may not import it
+        # (test_core_video_imports_nothing_from_music). automations are shared by
+        # both sides, so we ask the automation package instead of reaching over.
+        from core.automation.api import system_automation_for
+        auto = system_automation_for("video_import_lists")
+    except Exception:   # noqa: BLE001 - the automation store is the music side's
+        logger.debug("import-list automation lookup failed", exc_info=True)
+        return out
+
+    names = ", ".join(sorted(x.get("name") or x.get("source") or "?" for x in lists)[:4])
+    if not auto:
+        out.append(_check("import_lists", "Import lists", "warning",
+                          "%d list(s) configured (%s) but the sync automation does not exist — "
+                          "they will never run" % (len(lists), names)))
+    elif not auto.get("enabled"):
+        out.append(_check("import_lists", "Import lists", "warning",
+                          "%d list(s) configured (%s) but 'Import Lists' is disabled in "
+                          "Automations — they will never run" % (len(lists), names)))
+    else:
+        out.append(_check("import_lists", "Import lists", "ok",
+                          "%d list(s) syncing: %s" % (len(lists), names)))
+    return out
 
 
 def collect(db) -> dict:
@@ -81,6 +340,23 @@ def collect(db) -> dict:
                                  "isn't running — restart or re-trigger a download"))
     except Exception:   # noqa: BLE001
         logger.debug("monitor health probe failed", exc_info=True)
+
+    # 5) YouTube readiness: always visible, because an OK tile tells users which
+    # moving parts are healthy before they start chasing a failed channel/video.
+    checks.append(_youtube_health_check(db, settings))
+
+    # 6) the other download sources, read off the receipts each search already
+    # leaves. No probing: health runs on a dashboard load and pinging a source
+    # that is down is the exact case that hangs the page.
+    checks.extend(_source_health_checks(db))
+
+    # 7) individual indexers that are contributing nothing. Only worth a line
+    # when there IS one — a healthy indexer set needs no commentary.
+    checks.extend(_indexer_health_checks(db))
+
+    # 8) import lists configured but never actually running — a silent no-op
+    # that looks exactly like a working setup.
+    checks.extend(_import_list_checks(db))
 
     order = {"error": 0, "warning": 1, "ok": 2}
     checks.sort(key=lambda c: order.get(c["status"], 3))

@@ -5,8 +5,10 @@ from collections import defaultdict
 from difflib import SequenceMatcher
 
 from core.imports.file_ops import _strip_slskd_dedup_suffix
-from core.quality.lossless import is_lossless_format
-from core.quality.source_map import format_from_extension
+from core.library.duplicate_rules import (
+    is_lossy_companion_pair as _is_lossy_companion_pair,
+    lossy_companion_exts,
+)
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -330,36 +332,14 @@ class DuplicateDetectorJob(RepairJob):
         if context.update_progress and processed_holder['count'] % 200 == 0:
             context.update_progress(processed_holder['count'], total)
 
-    _LOSSY_CODEC_EXTS = {'mp3': '.mp3', 'opus': '.opus', 'aac': '.m4a'}
-
     def _lossy_companion_exts(self, context: JobContext) -> set:
         """Extensions the lossy-copy feature writes next to lossless
         sources — from the global toggle and any quality profile that has
         it on. Empty set when nobody uses the feature, so nothing is ever
         skipped for users who don't."""
-        exts = set()
-        try:
-            cfg = context.config_manager
-            if cfg and cfg.get('lossy_copy.enabled', False):
-                codec = str(cfg.get('lossy_copy.codec', 'mp3')).lower()
-                exts.add(self._LOSSY_CODEC_EXTS.get(codec, '.mp3'))
-        except Exception as e:
-            logger.debug("lossy companion config read failed: %s", e)
-        try:
-            conn = context.db._get_connection()
-            try:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT lossy_copy_codec FROM quality_profiles"
-                    " WHERE lossy_copy_enabled = 1")
-                for (codec,) in cursor.fetchall():
-                    exts.add(self._LOSSY_CODEC_EXTS.get(
-                        str(codec or 'mp3').lower(), '.mp3'))
-            finally:
-                conn.close()
-        except Exception as e:
-            logger.debug("lossy companion profile read failed: %s", e)
-        return exts
+        return lossy_companion_exts(
+            context.config_manager, context.db, logger=logger,
+        )
 
     def _build_filename_buckets(self, *, buckets, found_groups):
         """Re-bucket all tracks by canonical filename stem.
@@ -420,30 +400,6 @@ def _normalize(text: str) -> str:
     return ''.join(c for c in t if c.isalnum() or c in '() ').strip()
 
 
-def _is_lossy_companion_pair(path1, path2, companion_exts) -> bool:
-    """True when the pair is a lossless file plus its intentional lossy copy:
-    same folder, same stem, one lossless / one lossy, and the lossy side's
-    extension is one the lossy-copy feature actually writes."""
-    if not companion_exts:
-        return False
-    p1 = str(path1 or '').replace('\\', '/')
-    p2 = str(path2 or '').replace('\\', '/')
-    d1, b1 = os.path.split(p1)
-    d2, b2 = os.path.split(p2)
-    if d1.lower() != d2.lower():
-        return False
-    s1, e1 = os.path.splitext(b1)
-    s2, e2 = os.path.splitext(b2)
-    if s1.lower() != s2.lower():
-        return False
-    lossless1 = is_lossless_format(format_from_extension(e1.lstrip('.').lower()))
-    lossless2 = is_lossless_format(format_from_extension(e2.lstrip('.').lower()))
-    if lossless1 == lossless2:
-        return False
-    lossy_ext = e2 if lossless1 else e1
-    return lossy_ext.lower() in companion_exts
-
-
 def _is_same_physical_file(p1, p2, dur1, dur2) -> bool:
     """Detect when two DB rows point at the same file mounted at different paths.
 
@@ -467,6 +423,14 @@ def _is_same_physical_file(p1, p2, dur1, dur2) -> bool:
         return False
     norm1 = str(p1).replace('\\', '/').rstrip('/')
     norm2 = str(p2).replace('\\', '/').rstrip('/')
+    # One path is one file. This has to come BEFORE the mount-root check
+    # below, which bails out whenever the roots match - and identical paths
+    # always match, so the job called a file a duplicate of itself and "keep
+    # this one" moved the only copy to the deleted folder (#1210).
+    # normcase, not lower(): on Linux, Song.flac and song.flac really are two
+    # files, and folding case would hide that duplicate instead.
+    if os.path.normcase(norm1) == os.path.normcase(norm2):
+        return True
     parts1 = [x for x in norm1.split('/') if x]
     parts2 = [x for x in norm2.split('/') if x]
     if len(parts1) < 3 or len(parts2) < 3:

@@ -13,6 +13,7 @@ import {
   progressSegments,
   showTrackProgressBar,
   statChips,
+  statLine,
   trackRowState,
 } from './-adl.batch';
 
@@ -121,6 +122,21 @@ describe('stat chips', () => {
 
   it('renders none for an untouched batch', () => {
     expect(statChips(batch({ completed: 0, failed: 0, active: 0, queued: 0 }))).toEqual([]);
+  });
+});
+
+describe('stat line', () => {
+  it('joins only the non-zero counters in done-failed-active-queued order', () => {
+    expect(statLine(batch({ completed: 3, failed: 1, active: 1, queued: 5 }))).toBe(
+      '3 done · 1 failed · 1 active · 5 queued',
+    );
+    expect(statLine(batch({ completed: 2, failed: 0, active: 1, queued: 0 }))).toBe(
+      '2 done · 1 active',
+    );
+  });
+
+  it('says nothing for an untouched batch', () => {
+    expect(statLine(batch({ completed: 0, failed: 0, active: 0, queued: 0 }))).toBe('');
   });
 });
 

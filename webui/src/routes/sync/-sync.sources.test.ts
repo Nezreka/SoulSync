@@ -203,7 +203,10 @@ describe('the endpoint table is anchored to the live vanilla', () => {
   // B's mutation run showed most endpoint strings could be renamed with the
   // suite green. These assert the real paths appear in the real sources.
   it('every configured endpoint path exists in webui/static', () => {
-    const ids = Object.keys(SYNC_SOURCES) as (keyof typeof SYNC_SOURCES)[];
+    // remove items not in the vanilla JS code
+    const ids = (Object.keys(SYNC_SOURCES) as (keyof typeof SYNC_SOURCES)[]).filter(
+      (id) => id !== 'ytmusic',
+    );
     for (const id of ids) {
       const api = SYNC_SOURCES[id].api;
       const paths = [
@@ -248,6 +251,7 @@ describe('discovery-completion toasts (the per-source drift, 9204/11076)', () =>
       // _discoveryCompleteToast, shared by youtube and the mirrored rows that
       // ride its poller (9204).
       youtube: 'Discovery complete!',
+      ytmusic: 'Discovery complete!',
       mirrored: 'Discovery complete!',
       // ListenBrainz words its own (11076, 11171).
       listenbrainz: 'ListenBrainz discovery complete!',

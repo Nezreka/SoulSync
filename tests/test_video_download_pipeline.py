@@ -134,6 +134,9 @@ class _WlDB:
     def remove_from_wishlist(self, scope, *, tmdb_id, season_number=None, episode_number=None):
         self.removed = (scope, tmdb_id, season_number, episode_number)
         return 1
+    def remove_youtube_from_wishlist(self, scope, source_id):
+        self.removed = (scope, source_id, None, None)
+        return 1
     def show_tmdb_id(self, show_id):
         return 999
     def movie_tmdb_id(self, movie_id):
@@ -157,6 +160,42 @@ def test_wishlist_obtained_removes_movie_and_resolves_library_tmdb():
                             "media_source": "library"})
     assert db.removed == ("movie", 888, None, None)   # tmdb resolved from the library id
 
+
+
+def test_wishlist_obtained_removes_client_backed_youtube_video():
+    from core.video.download_monitor import _wishlist_obtained
+    db = _WlDB()
+    _wishlist_obtained(db, {"id": 3, "kind": "youtube", "title": "V", "media_id": "yt1",
+                            "media_source": "youtube", "source": "torrent",
+                            "search_ctx": json.dumps({"scope": "youtube", "youtube_id": "yt1"})})
+    assert db.removed == ("video", "yt1", None, None)
+
+
+def test_plan_import_places_client_backed_youtube_video():
+    from core.video.importer import plan_import
+    dl = _dl(kind="youtube", source="torrent", media_source="youtube", media_id="yt9",
+             release_title="Chan.Deep Dive.2024.1080p", target_dir="/yt",
+             search_ctx=json.dumps({"scope": "youtube", "channel": "Chan",
+                                    "video_title": "Deep Dive", "published_at": "2024-04-05",
+                                    "youtube_id": "yt9"}))
+    plan = plan_import(dl, "/dl/Chan.Deep Dive.2024.1080p.mkv", list_dir=lambda d: [],
+                       settings={"youtube_template": "$channel/Season $year/$channel - $sxe - $title"})
+    assert plan["action"] == "import"
+    assert plan["dest"]["filename"] == "Chan - s2024e0405 - Deep Dive.mkv"
+    assert plan["dest"]["dir"].replace("\\", "/").endswith("/yt/Chan/Season 2024")
+
+
+def test_plan_import_replaces_same_youtube_destination_when_user_initiated():
+    from core.video.importer import plan_import
+    ctx = {"scope": "youtube", "channel": "Chan", "video_title": "Deep Dive",
+           "published_at": "2024-04-05", "youtube_id": "yt9", "import_policy": "user_replace"}
+    dl = _dl(kind="youtube", source="soulseek", media_source="youtube", media_id="yt9",
+             release_title="Chan.Deep Dive.2024.1080p", target_dir="/yt", search_ctx=json.dumps(ctx))
+    filename = "Chan - s2024e0405 - Deep Dive.mkv"
+    plan = plan_import(dl, "/dl/Chan.Deep Dive.2024.1080p.mkv", list_dir=lambda d: [filename],
+                       settings={"youtube_template": "$channel/Season $year/$channel - $sxe - $title"})
+    assert plan["action"] == "upgrade"
+    assert plan["replace_path"].replace("\\", "/").endswith("/yt/Chan/Season 2024/" + filename)
 
 def test_wishlist_failed_episode_tmdb_source():
     """A gave-up TMDB episode grab goes back on the wishlist under the show's tmdb_id."""

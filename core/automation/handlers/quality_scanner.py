@@ -17,14 +17,17 @@ from core.automation.deps import AutomationDeps
 def auto_start_quality_scan(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
     automation_id = config.get('_automation_id')
 
-    triggered = deps.run_repair_job_now('quality_upgrade')
+    # respect_enabled: this is an automation, not someone clicking Run Now.
+    # turning the job off in Tools has to mean off, or an import-triggered
+    # automation quietly force-runs a weekly scan a dozen times a day (#1207).
+    triggered = deps.run_repair_job_now('quality_upgrade', respect_enabled=True)
     if not triggered:
         deps.update_progress(
-            automation_id, status='error', phase='Unavailable',
-            log_line='Quality Upgrade job could not be triggered (library worker unavailable)',
-            log_type='error',
+            automation_id, status='finished', progress=100, phase='Skipped',
+            log_line='Quality Upgrade Finder is switched off in Tools, skipping',
+            log_type='info',
         )
-        return {'status': 'error', 'reason': 'library worker unavailable',
+        return {'status': 'skipped', 'reason': 'quality upgrade job is disabled',
                 '_manages_own_progress': True}
 
     deps.update_progress(

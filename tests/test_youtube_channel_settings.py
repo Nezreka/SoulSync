@@ -21,9 +21,13 @@ def db(tmp_path):
 # ── storage ───────────────────────────────────────────────────────────────────
 def test_channel_settings_roundtrip(db):
     assert db.get_channel_settings("UC1") == {}                      # none yet
-    db.set_channel_settings("UC1", {"custom_name": "My Show", "quality": {"max_resolution": "720p"}})
+    db.set_channel_settings("UC1", {
+        "custom_name": "My Show", "quality": {"max_resolution": "720p"},
+        "retry_policy": "manual", "archive_recheck_days": 7,
+    })
     cs = db.get_channel_settings("UC1")
     assert cs["custom_name"] == "My Show" and cs["quality"]["max_resolution"] == "720p"
+    assert cs["retry_policy"] == "manual" and cs["archive_recheck_days"] == 7
 
 
 def test_channel_settings_blank_clears(db):
@@ -35,6 +39,14 @@ def test_channel_settings_blank_clears(db):
 def test_channel_settings_isolated_per_channel(db):
     db.set_channel_settings("UC1", {"custom_name": "One"})
     assert db.get_channel_settings("UC2") == {}
+
+
+def test_playlist_settings_roundtrip_and_source_lookup(db):
+    db.set_playlist_settings("PL1", {"custom_name": "Playlist Show", "retry_policy": "aggressive",
+                                      "archive_recheck_days": 14})
+    assert db.get_playlist_settings("PL1")["retry_policy"] == "aggressive"
+    assert db.get_youtube_source_settings("PL1")["custom_name"] == "Playlist Show"
+    assert db.youtube_archive_recheck_hours("PL1") == 14 * 24
 
 
 # ── enqueue applies the overrides into search_ctx ─────────────────────────────
@@ -78,9 +90,13 @@ def test_channel_settings_api_roundtrip(tmp_path):
     client = app.test_client()
     try:
         r = client.post("/api/video/youtube/channel/UC1/settings",
-                        json={"custom_name": "My Show", "quality": {"max_resolution": "720p"}}).get_json()
+                        json={"custom_name": "My Show", "quality": {"max_resolution": "720p"},
+                              "title_include": "review", "min_minutes": "5",
+                              "retry_policy": "manual", "archive_recheck_days": "9"}).get_json()
         assert r["success"] and r["settings"]["custom_name"] == "My Show"
         assert r["settings"]["quality"]["max_resolution"] == "720p"   # normalized profile
+        assert r["settings"]["title_include"] == "review" and r["settings"]["min_minutes"] == 5
+        assert r["settings"]["retry_policy"] == "manual" and r["settings"]["archive_recheck_days"] == 9
 
         g = client.get("/api/video/youtube/channel/UC1/settings").get_json()
         assert g["settings"]["custom_name"] == "My Show"
@@ -89,5 +105,12 @@ def test_channel_settings_api_roundtrip(tmp_path):
         # blank custom_name + no quality clears the override
         client.post("/api/video/youtube/channel/UC1/settings", json={"custom_name": "", "quality": None})
         assert client.get("/api/video/youtube/channel/UC1/settings").get_json()["settings"] == {}
+
+        p = client.post("/api/video/youtube/channel/PL1/settings?kind=playlist",
+                        json={"custom_name": "List Show", "retry_policy": "aggressive",
+                              "archive_recheck_days": 21, "retention": "days_90"}).get_json()
+        assert p["settings"] == {"custom_name": "List Show", "retry_policy": "aggressive",
+                                  "archive_recheck_days": 21}
+        assert db.get_playlist_settings("PL1")["retry_policy"] == "aggressive"
     finally:
         videoapi._video_db = None

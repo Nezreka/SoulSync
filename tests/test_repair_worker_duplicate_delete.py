@@ -175,3 +175,86 @@ def test_skip_deleted_quarantine_leaves_nested_deleted_folder(tmp_path):
     dirs = ["deleted", "CD1"]
     skip_deleted_quarantine(nested_root, dirs, transfer)
     assert dirs == ["deleted", "CD1"]
+
+
+def test_two_rows_on_one_file_never_move_the_file(tmp_path):
+    """#1210 (ravi72munde): "I don't have duplicates, I accidentally deleted
+    couple of songs."
+
+    Two DB rows can point at the SAME path. The detector grouped them (its
+    same-file guard bailed out whenever the two roots matched, which is exactly
+    the identical-path case), and this function then moved "the other copy" —
+    the only file there was — into the deleted folder, leaving the row it kept
+    pointing at nothing.
+
+    The detector no longer builds that group, but this is the layer that
+    actually deletes, so it refuses on its own. The extra row still goes, since
+    a phantom row is worth cleaning up; the file must not be touched.
+    """
+    db, w = _worker(tmp_path)
+    only_copy = tmp_path / "Creep.flac"
+    only_copy.write_text("the only copy")
+    _insert_track(db, 1, "Creep", str(only_copy))
+    _insert_track(db, 2, "Creep", str(only_copy))
+
+    details = {'tracks': [
+        {'id': 1, 'file_path': str(only_copy), 'bitrate': 985},
+        {'id': 2, 'file_path': str(only_copy), 'bitrate': 985},
+    ], '_fix_action': '1'}
+
+    res = w._fix_duplicates('track', '1', str(only_copy), details)
+
+    assert only_copy.exists(), "the kept row's file was moved away"
+    assert only_copy.read_text() == "the only copy"
+    assert res['files_deleted'] == 0
+    # nothing was quarantined, because nothing should have been removed
+    assert not list((tmp_path / "Transfer" / ".deleted").rglob("*.flac"))
+    # the phantom second row is still cleaned up
+    assert _track_ids(db) == ['1']
+
+
+def test_keeper_file_is_spared_even_when_the_paths_are_spelled_differently(tmp_path):
+    """Same file reached through a redundant path spelling. samefile() catches
+    what a string compare would miss."""
+    db, w = _worker(tmp_path)
+    only_copy = tmp_path / "Creep.flac"
+    only_copy.write_text("the only copy")
+    odd_spelling = str(tmp_path / "." / "Creep.flac")
+    _insert_track(db, 1, "Creep", str(only_copy))
+    _insert_track(db, 2, "Creep", odd_spelling)
+
+    details = {'tracks': [
+        {'id': 1, 'file_path': str(only_copy), 'bitrate': 985},
+        {'id': 2, 'file_path': odd_spelling, 'bitrate': 985},
+    ], '_fix_action': '1'}
+
+    res = w._fix_duplicates('track', '1', str(only_copy), details)
+
+    assert only_copy.exists()
+    assert res['files_deleted'] == 0
+
+
+def test_refuses_when_the_keeper_file_cannot_be_found(tmp_path):
+    """If the copy being KEPT can't be located, there is no way to prove the
+    file about to be moved isn't that same copy — and if the keeper really is
+    missing, removing the other one leaves the user with nothing. Refuse.
+
+    A duplicate left on disk is fixable. The only copy of a song is not.
+    """
+    db, w = _worker(tmp_path)
+    w._config_manager = _Cfg()
+    dupe = tmp_path / "dupe.flac"
+    dupe.write_text("the only file that actually exists")
+    _insert_track(db, 1, "Song", "/gone/keeper.flac")
+    _insert_track(db, 2, "Song", str(dupe))
+
+    details = {'tracks': [
+        {'id': 1, 'file_path': "/gone/keeper.flac", 'bitrate': 1000},
+        {'id': 2, 'file_path': str(dupe), 'bitrate': 900},
+    ], '_fix_action': '1'}  # keep the one that isn't there
+
+    res = w._fix_duplicates('track', '1', "/gone/keeper.flac", details)
+
+    assert res['success'] is False
+    assert dupe.exists(), 'the only real file was removed'
+    assert _track_ids(db) == ['1', '2'], 'no rows should have been dropped'

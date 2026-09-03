@@ -12,7 +12,7 @@ import {
   sectionCountLabel,
   sectionTrackTotal,
 } from '../-artist-detail.enhanced';
-import { getAlbumTrackRows } from '../-artist-detail.enhanced-album';
+import { getAlbumTrackRows, queueTrackPayload } from '../-artist-detail.enhanced-album';
 import { syncVanillaEnhancedData, syncVanillaSelection } from '../-artist-detail.vanilla-state';
 import { AlbumMetaRow } from './album-meta-row';
 import { ArtistMetaPanel } from './artist-meta-panel';
@@ -270,6 +270,17 @@ function EnhancedAlbumWrapper({
     setAlbum(albumProp);
   }
   const meta = albumRowMeta(album);
+  const rows = getAlbumTrackRows(album);
+  const albumTitle = typeof album.title === 'string' && album.title ? album.title : 'Unknown';
+
+  const playAlbum = () => {
+    if (!rows.length) {
+      window.showToast?.(`No tracks found for ${albumTitle}`, 'info');
+      return;
+    }
+    const tracks = rows.map((track) => queueTrackPayload(track, album, artist));
+    void window.playTrackList?.(tracks, albumTitle);
+  };
 
   return (
     <div
@@ -306,6 +317,19 @@ function EnhancedAlbumWrapper({
           <span className="enhanced-album-meta-line">{meta.metaLine}</span>
         </div>
 
+        <button
+          type="button"
+          className="enhanced-album-play-btn"
+          aria-label={`Play ${albumTitle}`}
+          title={`Play ${albumTitle}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            playAlbum();
+          }}
+        >
+          ▶
+        </button>
+
         <span className={`enhanced-album-type-badge ${(type || 'album').toLowerCase()}`}>
           {type}
         </span>
@@ -325,7 +349,7 @@ function EnhancedAlbumWrapper({
             <>
               <ExpandedAlbumHeader
                 album={album}
-                rows={getAlbumTrackRows(album)}
+                rows={rows}
                 artistId={artist?.id}
                 artistName={String(artist?.name ?? '')}
                 isAdmin={isAdmin}

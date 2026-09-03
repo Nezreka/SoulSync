@@ -69,7 +69,8 @@ def test_excludes_shorts_and_future_premieres_from_picks_and_baseline():
 
 
 # ── handler ───────────────────────────────────────────────────────────────────
-def _run(playlists, videos_by_pl, *, wished=None, seen=None, backfill=5, today="2026-06-25"):
+def _run(playlists, videos_by_pl, *, wished=None, seen=None, backfill=5, today="2026-06-25",
+         source_settings=None, checked_recently=None, force=False):
     adds = []
     marked = {}
 
@@ -81,31 +82,40 @@ def _run(playlists, videos_by_pl, *, wished=None, seen=None, backfill=5, today="
         marked.setdefault(pid, []).extend(ids)
 
     deps = _Deps()
+    checked = []
+
+    def mark_checked(pid):
+        checked.append(pid)
+
     res = auto_video_scan_watchlist_playlists(
-        {"_automation_id": "a"}, deps,
+        {"_automation_id": "a", "force": force}, deps,
         fetch_playlists=lambda: playlists,
         fetch_videos=lambda pid: videos_by_pl.get(pid, []),
         wishlisted_ids=lambda pid: (wished or {}).get(pid, []),
         downloaded_ids=lambda pid: [], dismissed_ids=lambda pid: [],
         seen_ids=lambda pid: (seen or {}).get(pid, []),
         mark_seen=mark_seen, backfill_fn=lambda: backfill,
+        source_settings=source_settings or (lambda pid: {}),
+        checked_recently=checked_recently or (lambda pid, hours: False),
+        mark_checked=mark_checked,
         add_videos=add_videos, today_fn=lambda: today)
-    return res, adds, marked, deps
+    return res, adds, marked, deps, checked
 
 
 def test_handler_first_follow_caps_and_baselines():
     playlists = [{"playlist_id": "PL1", "title": "Best Sci-Fi", "poster_url": "/p.jpg"}]
     vids = [_vid("a"), _vid("b"), _vid("c")]
-    res, adds, marked, _ = _run(playlists, {"PL1": vids}, backfill=2)
+    res, adds, marked, _, checked = _run(playlists, {"PL1": vids}, backfill=2)
     assert res["status"] == "completed" and res["playlists"] == 1 and res["videos_added"] == 2
     assert adds == [("PL1", "Best Sci-Fi", ["a", "b"])]           # playlist-as-show, capped to 2
     assert set(marked["PL1"]) == {"a", "b", "c"}                  # whole list baselined
+    assert checked == ["PL1"]
 
 
 def test_handler_rerun_adds_only_new_additions():
     playlists = [{"playlist_id": "PL1", "title": "Mix"}]
     vids = [_vid("new"), _vid("old1"), _vid("old2")]
-    res, adds, marked, _ = _run(playlists, {"PL1": vids}, seen={"PL1": ["old1", "old2"]})
+    res, adds, marked, _, _ = _run(playlists, {"PL1": vids}, seen={"PL1": ["old1", "old2"]})
     assert adds == [("PL1", "Mix", ["new"])] and res["videos_added"] == 1
     assert marked["PL1"] == ["new"]
 
@@ -113,8 +123,35 @@ def test_handler_rerun_adds_only_new_additions():
 def test_handler_multiple_playlists_independent():
     playlists = [{"playlist_id": "PL1", "title": "A"}, {"playlist_id": "PL2", "title": "B"}]
     videos = {"PL1": [_vid("a1")], "PL2": [_vid("b1")]}
-    res, adds, _, _ = _run(playlists, videos, backfill=5)
+    res, adds, _, _, _ = _run(playlists, videos, backfill=5)
     assert res["playlists"] == 2 and res["videos_added"] == 2
+
+
+def test_playlist_recheck_window_skips_fetch_until_due():
+    playlists = [{"playlist_id": "PL1", "title": "Slow Archive"}]
+    calls = []
+
+    def settings(pid):
+        return {"archive_recheck_days": 14}
+
+    def recent(pid, hours):
+        calls.append((pid, hours))
+        return True
+
+    res, adds, marked, deps, checked = _run(
+        playlists, {"PL1": [_vid("a")]}, source_settings=settings, checked_recently=recent)
+    assert res["status"] == "completed" and res["videos_added"] == 0
+    assert calls == [("PL1", 14 * 24)]
+    assert adds == [] and marked == {} and checked == []
+    assert any("recheck window" in (p.get("log_line") or "") for p in deps.progress)
+
+
+def test_force_scan_ignores_playlist_recheck_window():
+    playlists = [{"playlist_id": "PL1", "title": "Force Me"}]
+    res, adds, _, _, checked = _run(
+        playlists, {"PL1": [_vid("a")]}, checked_recently=lambda pid, hours: True, force=True)
+    assert res["videos_added"] == 1
+    assert adds == [("PL1", "Force Me", ["a"])] and checked == ["PL1"]
 
 
 def test_one_unreachable_playlist_does_not_abort():
@@ -130,12 +167,14 @@ def test_one_unreachable_playlist_does_not_abort():
         fetch_playlists=lambda: playlists, fetch_videos=fetch_videos,
         wishlisted_ids=lambda pid: [], downloaded_ids=lambda pid: [], dismissed_ids=lambda pid: [],
         seen_ids=lambda pid: [], mark_seen=lambda pid, ids: None, backfill_fn=lambda: 5,
-        add_videos=lambda pl, v: len(v), today_fn=lambda: "2026-06-25")
+        add_videos=lambda pl, v: len(v), today_fn=lambda: "2026-06-25",
+        source_settings=lambda pid: {}, checked_recently=lambda pid, hours: False,
+        mark_checked=lambda pid: None)
     assert res["status"] == "completed" and res["videos_added"] == 1
 
 
 def test_empty_watchlist_is_a_clean_noop():
-    res, adds, _, _ = _run([], {})
+    res, adds, _, _, _ = _run([], {})
     assert res["status"] == "completed" and res["playlists"] == 0 and adds == []
 
 

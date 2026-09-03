@@ -524,6 +524,7 @@ def select_profile():
         except (TypeError, ValueError):
             return jsonify({'success': False, 'error': 'Invalid profile_id'}), 400
         pin = data.get('pin', '')
+        password = data.get('password', '')
 
         if not profile_id:
             return jsonify({'success': False, 'error': 'profile_id required'}), 400
@@ -533,13 +534,28 @@ def select_profile():
         if not profile:
             return jsonify({'success': False, 'error': 'Profile not found'}), 404
 
-        # Only enforce PIN when multiple profiles exist (PIN protects against profile switching)
-        all_profiles = database.get_all_profiles()
-        if len(all_profiles) > 1 and profile['has_pin']:
-            if not pin:
-                return jsonify({'success': False, 'error': 'PIN required', 'pin_required': True}), 401
-            if not database.verify_profile_pin(profile_id, pin):
-                return jsonify({'success': False, 'error': 'Invalid PIN'}), 401
+        if _require_login_enabled() and session.get('profile_id') != profile_id:
+            _ip = request.remote_addr or 'unknown'
+            _now = time.time()
+            _locked, _retry_after = _login_limiter.is_locked(_ip, _now)
+            if _locked:
+                return (jsonify({'success': False, 'error': 'Too many attempts - please wait and try again'}),
+                        429, {'Retry-After': str(_retry_after)})
+            if not password:
+                return jsonify({'success': False, 'error': 'Password required',
+                                'password_required': True}), 401
+            if not database.verify_profile_password(profile_id, password):
+                _login_limiter.record_failure(_ip, _now)
+                return jsonify({'success': False, 'error': 'Invalid password'}), 401
+            _login_limiter.record_success(_ip)
+        else:
+            # Only enforce PIN when multiple profiles exist (PIN protects against profile switching)
+            all_profiles = database.get_all_profiles()
+            if len(all_profiles) > 1 and profile['has_pin']:
+                if not pin:
+                    return jsonify({'success': False, 'error': 'PIN required', 'pin_required': True}), 401
+                if not database.verify_profile_pin(profile_id, pin):
+                    return jsonify({'success': False, 'error': 'Invalid PIN'}), 401
 
         session['profile_id'] = profile_id
         # If the admin PIN was just validated, also mark launch PIN as

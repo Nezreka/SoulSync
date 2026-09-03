@@ -22,6 +22,7 @@ export type SyncSourceId =
   | 'qobuz'
   | 'deezer'
   | 'youtube'
+  | 'ytmusic'
   | 'beatport'
   | 'spotify_public'
   | 'itunes_link'
@@ -300,6 +301,37 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       openModalImmediately: false,
       cardProgressFormat: 'slash-text',
       foundVariant: 'lenient',
+      downloadEntry: 'youtube',
+      discoveryCompleteToast: 'Discovery complete!',
+      resetErrorNoun: 'playlist',
+    },
+  },
+
+  ytmusic: {
+    id: 'ytmusic',
+    heroLabel: 'YouTube Music',
+    api: {
+      ...std('/api/ytmusic'),
+      updatePhase: (id) => `/api/ytmusic/update_phase/${id}`,
+      state: (id) => `/api/ytmusic/state/${id}`,
+      playlistsStates: '/api/ytmusic/playlists/states',
+      reset: (id) => `/api/ytmusic/reset/${id}`,
+      resetBody: 'none',
+    },
+    ids: { fakeHashPrefix: 'ytmusic_', vpidPrefix: 'ytmusic_', stateFlag: 'is_ytmusic_playlist' },
+    discovery: {
+      pollMs: 1000,
+      pollPolicy: 'always',
+      wingItInSocket: false,
+      wingItInPoll: false,
+      startBody: 'none',
+    },
+    sync: { pollMs: 1000, percentFormula: 'processed' },
+    ux: {
+      openModalImmediately: false,
+      cardProgressFormat: 'slash-text',
+      foundVariant: 'lenient',
+      // Shares youtube's download modal (M3U export + quality-profile chrome),
       downloadEntry: 'youtube',
       discoveryCompleteToast: 'Discovery complete!',
       resetErrorNoun: 'playlist',

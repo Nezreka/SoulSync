@@ -221,7 +221,17 @@ def test_a_movie_keeps_its_plain_title():
 
 def test_a_nameless_row_degrades_to_a_placeholder():
     assert display_name({}, "movie") == "?"
-    assert display_name({}, "episode") == "? S00E00"
+    # No episode number means a SEASON-scoped row (a season pack), and naming it
+    # "E00" invented an episode that was never wanted. A nameless row is that
+    # shape by default.
+    assert display_name({}, "episode") == "? S00"
+
+
+def test_a_season_row_is_not_named_after_a_phantom_episode():
+    assert display_name({"show_title": "Aussie Shore", "season_number": 2}, "episode") \
+        == "Aussie Shore S02"
+    assert display_name({"show_title": "Aussie Shore", "season_number": 2,
+                         "episode_number": 4}, "episode") == "Aussie Shore S02E04"
 
 
 def test_the_episode_refusal_message_carries_the_episode_name():
@@ -259,3 +269,19 @@ def test_the_drain_hands_over_the_best_refused_release():
     got = seen[0]
     assert got and got["quality_label"] == "720p WEB", "the best AVAILABILITY refusal"
     assert got["seen"] == 2, "the wrong-season hit is noise, not evidence"
+
+
+
+def test_a_refused_release_records_a_visible_note_without_search_outcome():
+    outcomes, notes = [], []
+    refuse = lambda *a: {"ok": False, "error": "No working release found after retries"}
+    auto_video_process_wishlist(
+        {"_automation_id": "a", "max_concurrent": 1}, _Deps(), media_type="movie",
+        fetch_items=lambda mt: [{"tmdb_id": 1, "title": "A"}],
+        active_keys=lambda mt: set(), target_dir=lambda mt: "/movies",
+        search=lambda it, mt: [_cand("A.2021.1080p.WEB", quality_label="WEBDL-1080p")],
+        enqueue=refuse,
+        record_outcome=lambda *a, **k: outcomes.append(a),
+        record_note=lambda it, mt, note, quality=None: notes.append((display_name(it, mt), note, quality)))
+    assert outcomes == []
+    assert notes == [("A", "Download client refused: No working release found after retries", "WEBDL-1080p")]

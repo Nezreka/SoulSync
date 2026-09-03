@@ -78,7 +78,7 @@ function ReviewButtons({
       </button>
       <button
         type="button"
-        className="verif-act verif-act-ok"
+        className="verif-act verif-act-ok verif-act-labeled"
         title={approveTitle}
         disabled={busy}
         onClick={() => {
@@ -88,14 +88,15 @@ function ReviewButtons({
         }}
       >
         {approveGlyph}
+        <span className="verif-act-label">{approveGlyph === '⤴' ? 'Recover' : 'Approve'}</span>
       </button>
       <button
         type="button"
-        className="verif-act verif-act-del"
+        className="verif-act verif-act-del verif-act-labeled"
         title={deleteTitle}
         onClick={handlers.onDelete}
       >
-        🗑
+        🗑<span className="verif-act-label">Delete</span>
       </button>
     </>
   );
@@ -115,11 +116,16 @@ export function AdlUnverifiedRow({
   open,
   onToggle,
   handlers,
+  selected,
+  onSelect,
 }: {
   dl: AdlDownload;
   open: boolean;
   onToggle: () => void;
   handlers: ReviewActionHandlers | null;
+  /** Multi-select for partial bulk approve/delete; absent = display-only row. */
+  selected?: boolean;
+  onSelect?: () => void;
 }) {
   const badge = reasonBadge(dl);
   const meta = [dl.artist, dl.album].filter(Boolean).join(' · ');
@@ -133,6 +139,16 @@ export function AdlUnverifiedRow({
       title="Click to show/hide details (why it was flagged, source, quality, file)"
       onClick={onToggle}
     >
+      {onSelect ? (
+        <input
+          type="checkbox"
+          className="verif-select"
+          checked={Boolean(selected)}
+          title="Select for bulk approve/delete"
+          onClick={(event) => event.stopPropagation()}
+          onChange={onSelect}
+        />
+      ) : null}
       <RowArt artwork={dl.artwork} />
       <div className="adl-row-info">
         <div className="adl-row-title">{dl.title || 'Unknown Track'}</div>
@@ -294,6 +310,7 @@ export function AdlQuarantineList({
   onToggleDetails,
   onToggleGroup,
   handlersFor,
+  onDeleteGroup,
 }: {
   groups: QuarantineGroup[];
   openDetails: ReadonlySet<string>;
@@ -301,6 +318,8 @@ export function AdlQuarantineList({
   onToggleDetails: (id: string) => void;
   onToggleGroup: (key: string) => void;
   handlersFor: (entry: AdlQuarantineEntry) => ReviewActionHandlers;
+  /** Delete a whole group of candidates at once; absent = per-row deletes only. */
+  onDeleteGroup?: (entry: AdlQuarantineEntry, count: number) => void;
 }) {
   return (
     <>
@@ -329,16 +348,31 @@ export function AdlQuarantineList({
               onToggle={() => onToggleDetails(first.id)}
               handlers={handlersFor(first)}
               altSlot={
-                <button
-                  type="button"
-                  className={`verif-quar-alt-btn${isOpen ? ' open' : ''}`}
-                  data-group-key={groupKey}
-                  data-alt-count={rest.length}
-                  title={`Show ${rest.length} more alternative candidate${rest.length === 1 ? '' : 's'} for this track`}
-                  onClick={() => onToggleGroup(groupKey)}
-                >
-                  {isOpen ? '▴' : '▾'} {rest.length} more
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className={`verif-quar-alt-btn${isOpen ? ' open' : ''}`}
+                    data-group-key={groupKey}
+                    data-alt-count={rest.length}
+                    title={`Show ${rest.length} more alternative candidate${rest.length === 1 ? '' : 's'} for this track`}
+                    onClick={() => onToggleGroup(groupKey)}
+                  >
+                    {isOpen ? '▴' : '▾'} {rest.length} more
+                  </button>
+                  {/* The row's own Delete only takes the one candidate it sits
+                      on. This takes the group (#1208). */}
+                  {onDeleteGroup ? (
+                    <button
+                      type="button"
+                      className="verif-quar-alt-btn verif-quar-alt-del"
+                      data-group-key={groupKey}
+                      title={`Permanently delete all ${group.members.length} quarantined candidates for this track`}
+                      onClick={() => onDeleteGroup(first, group.members.length)}
+                    >
+                      🗑 Delete all {group.members.length}
+                    </button>
+                  ) : null}
+                </>
               }
             />
             <div className={`verif-quar-alt-members${isOpen ? ' vqg-open' : ''}`}>
@@ -373,10 +407,13 @@ export function AdlReviewBanner({
   quarantineCount,
   quarantineLoaded,
   deletedCount,
+  selectedCount,
   onSubView,
   onApproveAll,
   onCleanOrphans,
   onDeleteAll,
+  onApproveSelected,
+  onDeleteSelected,
   onQuarantineApproveAll,
   onQuarantineClearAll,
   onRestoreAllDeleted,
@@ -388,10 +425,14 @@ export function AdlReviewBanner({
   quarantineCount: number;
   quarantineLoaded: boolean;
   deletedCount: number | null;
+  /** Checked unverified rows; the bulk buttons narrow to these when > 0. */
+  selectedCount: number;
   onSubView: (view: AdlSubView) => void;
   onApproveAll: () => void;
   onCleanOrphans: () => void;
   onDeleteAll: () => void;
+  onApproveSelected: () => void;
+  onDeleteSelected: () => void;
   onQuarantineApproveAll: () => void;
   onQuarantineClearAll: () => void;
   onRestoreAllDeleted: () => void;
@@ -428,45 +469,70 @@ export function AdlReviewBanner({
         🗑 Deleted{deletedCount == null ? '' : ` (${deletedCount})`}
       </button>
       <span className="verif-banner-spacer" />
+      {/* Bulk buttons only when the view has something to act on — a bulk
+          button over an empty list is a promise the click can't keep. */}
       {subView === 'deleted' ? (
-        <>
-          <button
-            type="button"
-            className="adl-filter-banner-clear"
-            title="Put every file back exactly where it was removed from"
-            onClick={onRestoreAllDeleted}
-          >
-            ↩ Restore all
-          </button>
-          <button
-            type="button"
-            className="adl-filter-banner-clear verif-bulk-danger"
-            title="Permanently delete everything in the bin"
-            onClick={onEmptyDeleted}
-          >
-            🗑 Empty bin
-          </button>
-        </>
+        (deletedCount ?? 0) > 0 ? (
+          <>
+            <button
+              type="button"
+              className="adl-filter-banner-clear"
+              title="Put every file back exactly where it was removed from"
+              onClick={onRestoreAllDeleted}
+            >
+              ↩ Restore all
+            </button>
+            <button
+              type="button"
+              className="adl-filter-banner-clear verif-bulk-danger"
+              title="Permanently delete everything in the bin"
+              onClick={onEmptyDeleted}
+            >
+              🗑 Empty bin
+            </button>
+          </>
+        ) : null
       ) : subView === 'quarantine' ? (
+        quarantineCount > 0 ? (
+          <>
+            <button
+              type="button"
+              className="adl-filter-banner-clear"
+              title="Approve + re-import every quarantined file (marked human-verified)"
+              onClick={onQuarantineApproveAll}
+            >
+              ✔ Approve all
+            </button>
+            <button
+              type="button"
+              className="adl-filter-banner-clear verif-bulk-danger"
+              title="Permanently delete every quarantined file"
+              onClick={onQuarantineClearAll}
+            >
+              🗑 Clear all
+            </button>
+          </>
+        ) : null
+      ) : selectedCount > 0 ? (
         <>
           <button
             type="button"
             className="adl-filter-banner-clear"
-            title="Approve + re-import every quarantined file (marked human-verified)"
-            onClick={onQuarantineApproveAll}
+            title="Mark every SELECTED entry as human-verified"
+            onClick={onApproveSelected}
           >
-            ✔ Approve all
+            ✔ Approve selected ({selectedCount})
           </button>
           <button
             type="button"
             className="adl-filter-banner-clear verif-bulk-danger"
-            title="Permanently delete every quarantined file"
-            onClick={onQuarantineClearAll}
+            title="Delete every SELECTED file from disk and remove its entry"
+            onClick={onDeleteSelected}
           >
-            🗑 Clear all
+            🗑 Delete selected ({selectedCount})
           </button>
         </>
-      ) : (
+      ) : unverifiedCount > 0 ? (
         <>
           <button
             type="button"
@@ -493,26 +559,74 @@ export function AdlReviewBanner({
             🗑 Delete all
           </button>
         </>
-      )}
+      ) : null}
     </div>
   );
 }
 
+const EXPLAINER_KEY = 'ss-adl-explainer-dismissed';
 
 /**
  * One line under the banner saying what the current sub-view actually IS —
  * uberdude72 and kvkarlsson both asked, so the page now answers.
+ *
+ * Answers ONCE, though: after "got it" it folds to an ⓘ toggle instead of
+ * being a permanent wall of text on every visit. localStorage is a per-viewer
+ * convenience here, so a private window simply sees the text again.
  */
 export function AdlReviewExplainer({ subView }: { subView: AdlSubView }) {
+  const [dismissed, setDismissed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(EXPLAINER_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+
   const text =
     subView === 'unverified'
-      ? "these files imported fine but AcoustID couldn't hard-confirm them. approve means \"i listened, it's the right track\" — it marks the file human-verified and nothing flags it again. the other buttons help you check first."
+      ? 'these files imported fine but AcoustID couldn\'t hard-confirm them. approve means "i listened, it\'s the right track" — it marks the file human-verified and nothing flags it again. the other buttons help you check first.'
       : subView === 'quarantine'
         ? 'these files failed verification and were never imported. approve pulls one out and imports it as if it had passed — nothing is renamed. delete removes the bad download for good.'
         : 'files removed by repair tools and the duplicate cleaner land here instead of dying, hidden from media servers. restore puts one back exactly where it was.';
+
+  if (dismissed) {
+    return (
+      <button
+        type="button"
+        className="adl-review-explainer-toggle"
+        title={text}
+        onClick={() => {
+          try {
+            localStorage.removeItem(EXPLAINER_KEY);
+          } catch {
+            /* per-viewer convenience only */
+          }
+          setDismissed(false);
+        }}
+      >
+        ⓘ what is this view?
+      </button>
+    );
+  }
+
   return (
     <div className="adl-review-explainer" data-subview={subView}>
       {text}
+      <button
+        type="button"
+        className="adl-filter-banner-clear adl-review-explainer-dismiss"
+        onClick={() => {
+          try {
+            localStorage.setItem(EXPLAINER_KEY, '1');
+          } catch {
+            /* per-viewer convenience only */
+          }
+          setDismissed(true);
+        }}
+      >
+        got it
+      </button>
     </div>
   );
 }
@@ -537,7 +651,12 @@ export function AdlDeletedRow({
       ? 'Repair tool'
       : entry.source === 'duplicate-cleaner'
         ? 'Duplicate cleaner'
-        : null;
+        : // An album download that stalled and never made it into the library.
+          // The startup sweep used to delete these outright (#1210); it puts
+          // them here now, so they need to say what they are.
+          entry.source === 'album_bundle_orphan'
+          ? 'Stalled album download'
+          : null;
   const ago = entry.deleted_at ? timeAgo(entry.deleted_at) || entry.deleted_at : 'age unknown';
   return (
     <div className="adl-row adl-row-completed verif-quar-row" data-deleted-id={entry.id}>
@@ -602,18 +721,21 @@ function RetentionSelect({
   onKeepDays: (days: number) => void;
 }) {
   return (
-    <select
-      className="adl-deleted-retention"
-      title="Files older than this are purged automatically. Only files deleted after this feature shipped carry an age; older ones are never auto-purged."
-      value={RETENTION_CHOICES.some((c) => c.value === keepDays) ? keepDays : 0}
-      onChange={(event) => onKeepDays(Number(event.target.value))}
-    >
-      {RETENTION_CHOICES.map((c) => (
-        <option key={c.value} value={c.value}>
-          {c.label}
-        </option>
-      ))}
-    </select>
+    <label className="adl-deleted-retention-label">
+      keep deleted files:
+      <select
+        className="adl-deleted-retention"
+        title="Files older than this are purged automatically. Only files deleted after this feature shipped carry an age; older ones are never auto-purged."
+        value={RETENTION_CHOICES.some((c) => c.value === keepDays) ? keepDays : 0}
+        onChange={(event) => onKeepDays(Number(event.target.value))}
+      >
+        {RETENTION_CHOICES.map((c) => (
+          <option key={c.value} value={c.value}>
+            {c.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -651,8 +773,7 @@ export function AdlDeletedList({
     <>
       <div className="adl-section-header adl-deleted-header">
         <span>
-          {entries.length} file{entries.length === 1 ? '' : 's'} ·{' '}
-          {formatBytes(totalSize) || '0 B'}
+          {entries.length} file{entries.length === 1 ? '' : 's'} · {formatBytes(totalSize) || '0 B'}
         </span>
         <RetentionSelect keepDays={keepDays} onKeepDays={onKeepDays} />
       </div>

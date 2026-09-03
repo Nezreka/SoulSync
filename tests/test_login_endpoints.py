@@ -45,6 +45,41 @@ def test_login_gate_blocks_then_authenticated_access(client, monkeypatch):
     assert client.post('/api/auth/logout').get_json()['success'] is True
     assert client.get(_GATED).status_code == 401                       # logged out → blocked again
 
+def test_login_mode_profile_switch_requires_target_password(client, monkeypatch):
+    from uuid import uuid4
+    from werkzeug.security import generate_password_hash
+
+    db = web_server.get_database()
+    suffix = uuid4().hex[:8]
+    source = db.create_profile(name=f'SwitchSource{suffix}')
+    target = db.create_profile(
+        name=f'SwitchTarget{suffix}',
+        pin_hash=generate_password_hash('1234', method='pbkdf2:sha256'),
+    )
+    db.set_profile_password(source, 'sourcepw')
+    db.set_profile_password(target, 'targetpw')
+    _enable_login(monkeypatch)
+
+    login = client.post('/api/auth/login', json={'username': f'SwitchSource{suffix}', 'password': 'sourcepw'})
+    assert login.status_code == 200
+
+    missing = client.post('/api/profiles/select', json={'profile_id': target})
+    assert missing.status_code == 401
+    assert missing.get_json()['password_required'] is True
+    assert client.get('/api/profiles/current').get_json()['profile']['id'] == source
+
+    pin_only = client.post('/api/profiles/select', json={'profile_id': target, 'pin': '1234'})
+    assert pin_only.status_code == 401
+    assert pin_only.get_json()['password_required'] is True
+    assert client.get('/api/profiles/current').get_json()['profile']['id'] == source
+
+    wrong = client.post('/api/profiles/select', json={'profile_id': target, 'password': 'wrong'})
+    assert wrong.status_code == 401
+    assert client.get('/api/profiles/current').get_json()['profile']['id'] == source
+
+    ok = client.post('/api/profiles/select', json={'profile_id': target, 'password': 'targetpw'})
+    assert ok.status_code == 200 and ok.get_json()['success'] is True
+    assert client.get('/api/profiles/current').get_json()['profile']['id'] == target
 
 def test_login_is_case_insensitive_on_username(client, monkeypatch):
     db = web_server.get_database()
