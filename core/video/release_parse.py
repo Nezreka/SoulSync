@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Any, Optional
+from typing import Any
 
 # Resolution — first match wins (most specific first).
 _RES = [
@@ -224,53 +224,6 @@ def normalize_title(s: Any) -> str:
     return _ARTICLE.sub("", s, count=1)
 
 
-# Region qualifiers a library title carries and a scene release usually does not.
-# These are the ones that also DISAMBIGUATE two real shows ("The Office (UK)" vs
-# "The Office (US)"), which is why they are handled rather than simply stripped.
-_REGIONS = frozenset({"us", "usa", "uk", "gb", "au", "nz", "ca", "ie", "za"})
-
-
-def _qualifier(title: Any) -> Optional[str]:
-    """The trailing parenthetical of a library title, normalized: 'Big Brother
-    (US)' → 'us', 'Insomnia (2024)' → '2024'. None when there isn't one."""
-    m = re.search(r"\(([^()]{1,20})\)\s*$", str(title or "").strip())
-    if not m:
-        return None
-    return normalize_title(m.group(1)) or None
-
-
-def base_titles(want_title: Any) -> set:
-    """Normalized titles with any trailing parenthetical qualifier REMOVED.
-
-    Plex hands us 'Big Brother (US)' and 'Insomnia (2024)'; the scene ships
-    'Big.Brother.S27E30' and 'Insomnia.S01E01'. The query ladder already strips
-    these (:func:`core.video.retry.title_variants`) — the MATCHER did not, so
-    SoulSync searched correctly, got the right releases back, and then rejected
-    every one of them as "Wrong title". Live on Boulder's install: fifteen
-    results a search, none accepted, for weeks.
-    """
-    if want_title is None:
-        return set()
-    items = [want_title] if isinstance(want_title, str) else list(want_title)
-    out = set()
-    for raw_title in items:
-        text = str(raw_title or "")
-        if not _qualifier(text):
-            continue
-        stripped = normalize_title(re.sub(r"\([^()]{1,20}\)\s*$", "", text))
-        if stripped:
-            out.add(stripped)
-    return out
-
-
-def wanted_regions(want_title: Any) -> set:
-    """The region qualifiers among the wanted titles ('us' for 'Big Brother (US)')."""
-    if want_title is None:
-        return set()
-    items = [want_title] if isinstance(want_title, str) else list(want_title)
-    return {q for q in (_qualifier(t) for t in items) if q in _REGIONS}
-
-
 def acceptable_titles(want_title: Any) -> set:
     """The set of normalized titles a release may legitimately carry. ``want_title`` is
     a single title OR an iterable of them (the film/show's primary title + its TMDB
@@ -297,11 +250,6 @@ def titles_match(release_name: Any, want_title: Any) -> bool:
     wants = acceptable_titles(want_title)
     if not wants:
         return True
-    # 'Big Brother' is an acceptable name for 'Big Brother (US)' — but NOT when
-    # the release carries a DIFFERENT region, which is the one case where the
-    # parenthetical is telling two real shows apart rather than decorating one.
-    bases = base_titles(want_title)
-    want_regions = wanted_regions(want_title)
     raw = str(release_name or "")
     cands = [raw]
     segs = [s for s in re.split(r"[\\/]+", raw) if s.strip()]
@@ -322,27 +270,7 @@ def titles_match(release_name: Any, want_title: Any) -> bool:
                 rest = got[len(want):].split()
                 if rest and all(tok in _EDITION_TOKENS for tok in rest):
                     return True
-        for base in bases:
-            if got != base and got.replace(" ", "") != base.replace(" ", ""):
-                continue
-            # An unqualified release matches the base name. If we wanted a
-            # specific region, only take it when the release does not claim a
-            # different one — 'The.Office.US' must never satisfy 'The Office (UK)'.
-            got_region = _release_region(cand)
-            if want_regions and got_region and got_region not in want_regions:
-                continue
-            return True
     return not saw_any
-
-
-def _release_region(release_name: Any) -> Optional[str]:
-    """A region token sitting in a release name's title region, if any. Read from
-    the raw name because normalize_title folds the separators the token rides on."""
-    text = re.sub(r"[^A-Za-z0-9]+", " ", str(release_name or "")).lower()
-    for tok in text.split():
-        if tok in _REGIONS:
-            return tok
-    return None
 
 
 def search_title(release_name: Any) -> str:
