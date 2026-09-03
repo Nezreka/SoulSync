@@ -1,3 +1,4 @@
+import { checkTracksBody, mergeOwnership } from '../-artist-detail.owned-tracks';
 import { useQuery } from '@tanstack/react-query';
 import { useRouterState } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -356,8 +357,29 @@ export function ArtistDetailPage() {
         album: track.album || track.album_title || album.name,
         image_url: track.image_url || album.image_url || artist.image_url,
       }));
+      // Resolve what the library already has BEFORE handing the queue over.
+      // These rows come from the metadata endpoint and never carry a
+      // file_path, and the player reads that as "download this first" - which
+      // fails outright when auto-download is off, even for an album owned in
+      // full. A failed lookup is not fatal: play what we have and let the
+      // normal download path deal with the rest.
+      let playable = tracks;
+      try {
+        const owned = await fetch('/api/library/check-tracks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(checkTracksBody(artist.name, String(album.name || ''), tracks)),
+        });
+        if (owned.ok) {
+          const ownedData = await owned.json();
+          if (ownedData?.success) playable = mergeOwnership(tracks, ownedData.owned_tracks);
+        }
+      } catch {
+        // ignored on purpose - see above
+      }
+
       window.hideLoadingOverlay?.();
-      await window.playTrackList?.(tracks, String(album.name || 'Album'));
+      await window.playTrackList?.(playable, String(album.name || 'Album'));
     } catch (error) {
       window.hideLoadingOverlay?.();
       window.showToast?.(`Could not play that album: ${(error as Error).message}`, 'error');
