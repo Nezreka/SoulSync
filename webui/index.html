@@ -922,6 +922,21 @@
                                 </button>
                             </div>
                         </div>
+                        <!-- Continue Watching — the resume rail.
+                             LEADS the page because "where was I" is the first
+                             question anyone brings to a media library, and it
+                             is the only half of this dashboard that is about
+                             WATCHING rather than owning.
+                             Hidden until it has rows: an empty resume rail on a
+                             fresh install is an advert for a feature you cannot
+                             use yet. video-dashboard.js unhides it. -->
+                        <section class="vcw" data-video-continue-section hidden>
+                            <div class="vcw-head">
+                                <h3 class="vcw-title">Continue watching</h3>
+                            </div>
+                            <div class="vcw-rail" data-video-continue-rail></div>
+                        </section>
+
                         <div class="dash-grid">
 
                             <!-- Recently Added -->

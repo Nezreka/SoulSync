@@ -114,6 +114,94 @@
         return bits.length ? '<div class="video-recent-year">' + _esc(bits.join(' · ')) + '</div>' : '';
     }
 
+    // ── Continue watching ────────────────────────────────────────────────
+    //
+    // The resume rail. Landscape cards, because a 16:9 still of the scene you
+    // stopped on is what you recognise - a portrait poster is how you BROWSE,
+    // not how you resume, which is why every player from Plex to Netflix
+    // switches shape for this row.
+    //
+    // The card answers one question: how much is left. Elapsed time is the
+    // number people are shown and the wrong one - "47 minutes in" needs the
+    // runtime to mean anything, "23 min left" is already the answer.
+
+    var CONTINUE_URL = '/api/video/dashboard/continue-watching';
+
+    /** "23 min left" — what remains, not what is spent. */
+    function _remaining(it) {
+        var total = Number(it.runtime_minutes || 0) * 60000;
+        var off = Number(it.view_offset_ms || 0);
+        if (!total) return '';
+        var left = Math.max(0, total - off);
+        var mins = Math.round(left / 60000);
+        if (mins <= 0) return '';
+        if (mins < 60) return mins + ' min left';
+        var h = Math.floor(mins / 60), m = mins % 60;
+        return m ? h + 'h ' + m + 'm left' : h + 'h left';
+    }
+
+    function _pct(it) {
+        var total = Number(it.runtime_minutes || 0) * 60000;
+        var off = Number(it.view_offset_ms || 0);
+        if (!total || off <= 0) return 0;
+        return Math.max(1, Math.min(100, Math.round(off / total * 100)));
+    }
+
+    function _continueCard(it) {
+        var pct = _pct(it);
+        var left = _remaining(it);
+        var img = it.image_url || it.poster_url || '';
+        // An up-next card has no progress to show, so it says what it IS
+        // instead. Drawing a 0% bar would read as "stalled".
+        var meta = it.reason === 'up_next' ? 'Up next' : left;
+        return '<button type="button" class="vcw-card" ' +
+            'data-vcw-kind="' + _esc(it.kind) + '" data-vcw-id="' + _esc(it.id) + '"' +
+            (it.show_id ? ' data-vcw-show="' + _esc(it.show_id) + '"' : '') +
+            ' title="' + _esc(it.title + (it.subtitle ? ' — ' + it.subtitle : '')) + '">' +
+            '<span class="vcw-art"' + (img ? ' style="background-image:url(\'' + _esc(img) + '\')"' : '') + '>' +
+                (img ? '' : '<span class="vcw-art-fallback">' + _esc((it.title || '?').charAt(0).toUpperCase()) + '</span>') +
+                (it.reason === 'up_next' ? '<span class="vcw-badge">Up next</span>' : '') +
+                '<span class="vcw-play" aria-hidden="true">&#9654;</span>' +
+                (pct > 0 ? '<span class="vcw-bar"><span class="vcw-bar-fill" style="width:' + pct + '%"></span></span>' : '') +
+            '</span>' +
+            '<span class="vcw-meta">' +
+                '<span class="vcw-name">' + _esc(it.title || '') + '</span>' +
+                '<span class="vcw-sub">' + _esc(it.subtitle || '') + '</span>' +
+                (meta ? '<span class="vcw-left">' + _esc(meta) + '</span>' : '') +
+            '</span>' +
+        '</button>';
+    }
+
+    function loadContinueWatching() {
+        var section = document.querySelector('[data-video-continue-section]');
+        var rail = document.querySelector('[data-video-continue-rail]');
+        if (!section || !rail) return;
+        fetch(CONTINUE_URL, { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var items = (d && d.items) || [];
+                // Nothing to resume: the whole band goes away. An empty rail
+                // headed "Continue watching" is worse than no rail.
+                section.hidden = items.length === 0;
+                rail.innerHTML = items.map(_continueCard).join('');
+            })
+            .catch(function () { section.hidden = true; });
+    }
+
+    // One delegated handler for the rail — the cards are re-rendered on every
+    // poll, so per-card listeners would leak.
+    document.addEventListener('click', function (ev) {
+        var card = ev.target.closest && ev.target.closest('.vcw-card');
+        if (!card || !card.closest('[data-video-continue-rail]')) return;
+        var kind = card.getAttribute('data-vcw-kind');
+        var id = card.getAttribute('data-vcw-show') || card.getAttribute('data-vcw-id');
+        // Straight to the title. Playback itself belongs to the media server,
+        // and the detail page is where every play route already lives.
+        if (typeof window.openVideoDetail === 'function') {
+            window.openVideoDetail(kind === 'show' ? 'show' : 'movie', id);
+        }
+    });
+
     // Attention badges: open issues (everyone) + pending maintenance findings
     // (admins — the repair API is admin-gated; a 403 just leaves it hidden).
     // Issues/Findings are EXCEPTION states, not destinations (unlike Watchlist/
@@ -394,6 +482,10 @@
     function onPageShown(e) {
         if (!e || e.detail !== DASHBOARD_ID) return;
         loadStats();
+        // First, because "where was I" is the first question anyone brings to a
+        // media library — and because this is the one band that changes while
+        // you are not looking at the page (you watched something on the TV).
+        loadContinueWatching();
         loadUpcoming();
         loadAttention();            // open issues + pending maintenance findings
         gateStudioCards();

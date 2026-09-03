@@ -6834,3 +6834,201 @@ body[data-side="video"] #gsearch-aura {
     .vwsh-nebula .vwsh-szn-go { opacity: 1; }
     .vwsh-nebula .vwsh-ep-grid { width: 100%; grid-template-columns: 1fr; max-height: none; }
 }
+
+/* ── Continue watching ───────────────────────────────────────────────────────
+   The resume rail. Landscape cards, because a 16:9 still of the scene you
+   stopped on is what you recognise — a portrait poster is how you BROWSE, not
+   how you resume, which is why every player switches shape for this row.
+   Hidden entirely when there is nothing to resume. */
+.vcw {
+    margin: 0 0 26px;
+}
+
+.vcw-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.vcw-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+    color: #fff;
+}
+
+/* A rail, not a grid: the row is ordered by recency, so the leftmost card is
+   the answer and the rest is overflow you scroll to. */
+.vcw-rail {
+    display: flex;
+    gap: 14px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 6px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+.vcw-rail::-webkit-scrollbar { height: 6px; }
+.vcw-rail::-webkit-scrollbar-track { background: transparent; }
+.vcw-rail::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.14);
+    border-radius: 3px;
+}
+.vcw-rail:hover::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.24); }
+
+.vcw-card {
+    flex: 0 0 264px;
+    /* A flex item defaults to min-width:auto, which refuses to shrink below the
+       min-content width of its nowrap title — so a long name widened the card
+       to 319px and no ellipsis ever appeared. Measured in Chrome; jsdom cannot
+       see this at all. */
+    min-width: 0;
+    max-width: 264px;
+    scroll-snap-align: start;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    padding: 0;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.vcw-art {
+    position: relative;
+    display: block;
+    aspect-ratio: 16 / 9;
+    border-radius: 10px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.05) center / cover no-repeat;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.42);
+    transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
+                box-shadow 0.22s ease;
+}
+.vcw-card:hover .vcw-art {
+    transform: translateY(-3px) scale(1.012);
+    box-shadow: 0 14px 30px rgba(0, 0, 0, 0.55);
+}
+.vcw-card:focus-visible .vcw-art {
+    outline: 2px solid rgb(var(--accent-rgb, 99, 102, 241));
+    outline-offset: 2px;
+}
+
+/* A letter tile rather than a broken-image icon: a rail of those reads as a
+   broken page, not as missing art. */
+.vcw-art-fallback {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 40px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.2);
+}
+
+/* The play affordance only appears on hover — at rest the artwork should be
+   the whole card, not a button sitting on a picture. */
+.vcw-play {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 46px;
+    height: 46px;
+    margin: -23px 0 0 -23px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    backdrop-filter: blur(6px);
+    color: #fff;
+    font-size: 15px;
+    padding-left: 3px;                 /* optical centring of the triangle */
+    opacity: 0;
+    transform: scale(0.88);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.vcw-card:hover .vcw-play,
+.vcw-card:focus-visible .vcw-play { opacity: 1; transform: scale(1); }
+
+.vcw-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(6px);
+    color: #fff;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+}
+
+/* The progress bar sits ON the art, flush to the bottom edge — the one place
+   it reads as "how far through this picture you are" rather than as a
+   separate widget. */
+.vcw-bar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.22);
+}
+.vcw-bar-fill {
+    display: block;
+    height: 100%;
+    background: rgb(var(--accent-rgb, 99, 102, 241));
+}
+
+.vcw-meta {
+    display: block;
+    min-width: 0;
+}
+.vcw-name {
+    display: block;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.vcw-sub {
+    display: block;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
+}
+/* "23 min left" is the number that answers the question, so it gets the accent
+   and the others stay quiet. */
+.vcw-left {
+    display: block;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: rgb(var(--accent-rgb, 99, 102, 241));
+    margin-top: 3px;
+}
+
+@media (max-width: 720px) {
+    .vcw-card { flex-basis: 208px; max-width: 208px; }
+    .vcw-play { width: 38px; height: 38px; margin: -19px 0 0 -19px; font-size: 13px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vcw-art, .vcw-play { transition: none; }
+    .vcw-card:hover .vcw-art { transform: none; }
+}

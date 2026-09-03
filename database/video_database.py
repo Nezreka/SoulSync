@@ -2913,6 +2913,153 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # What counts as "still watching". Both ends matter:
+    #   · past the tail credits and it is FINISHED, not in progress. Plex and
+    #     Netflix both retire a title around here; without it the row fills with
+    #     things you completed and never clears.
+    #   · a few seconds in is an accident - a wrong click, a preview - and a row
+    #     that remembers those is a row you stop trusting.
+    CONTINUE_DONE_RATIO = 0.92
+    CONTINUE_START_RATIO = 0.02
+    CONTINUE_MIN_START_MS = 30_000
+
+    @staticmethod
+    def _resumable(offset_ms, runtime_minutes) -> bool:
+        """Is this a real resume point rather than a finished title or a misclick?"""
+        try:
+            off = int(offset_ms or 0)
+        except (TypeError, ValueError):
+            return False
+        if off <= 0:
+            return False
+        try:
+            total = int(runtime_minutes or 0) * 60_000
+        except (TypeError, ValueError):
+            total = 0
+        if total <= 0:
+            # No runtime known (common on a thin scan). Trust the offset, but
+            # still discard the accidental few seconds.
+            return off >= VideoDatabase.CONTINUE_MIN_START_MS
+        if off >= total * VideoDatabase.CONTINUE_DONE_RATIO:
+            return False
+        return off >= min(VideoDatabase.CONTINUE_MIN_START_MS,
+                          total * VideoDatabase.CONTINUE_START_RATIO)
+
+    def continue_watching(self, server_source=None, limit=20) -> list:
+        """What you are part-way through, newest first — the dashboard's resume row.
+
+        Two things belong here and they are not the same:
+
+          IN PROGRESS  a movie or episode with a real resume point.
+          UP NEXT      a show whose last episode you FINISHED, offering the next
+                       one you own. Plex calls this On Deck. Without it the row
+                       empties the moment you finish an episode, which is exactly
+                       the moment you want the next one.
+
+        ONE ROW PER SHOW. A binge would otherwise push everything else off the
+        rail with eight episodes of the same thing, and the answer to "where was
+        I" is a single card.
+
+        Only OWNED rows (``has_file``): you cannot resume what you do not have.
+        """
+        limit = max(1, min(50, int(limit)))
+        conn = self._get_connection()
+        try:
+            conn.row_factory = sqlite3.Row
+            scope_m = " AND m.server_source = ?" if server_source else ""
+            scope_s = " AND s.server_source = ?" if server_source else ""
+            args_m = (server_source,) if server_source else ()
+            args_s = (server_source,) if server_source else ()
+
+            out = []
+
+            # ── movies in progress ───────────────────────────────────────────
+            for r in conn.execute(f"""
+                SELECT m.id, m.title, m.year, m.poster_url, m.backdrop_url,
+                       m.runtime_minutes, m.view_offset_ms, m.last_viewed_at, m.tmdb_id
+                FROM movies m
+                WHERE m.has_file = 1 AND COALESCE(m.view_offset_ms, 0) > 0
+                      AND m.last_viewed_at IS NOT NULL{scope_m}
+                ORDER BY m.last_viewed_at DESC LIMIT 200
+            """, args_m):
+                if not self._resumable(r["view_offset_ms"], r["runtime_minutes"]):
+                    continue
+                out.append({
+                    "kind": "movie", "reason": "in_progress",
+                    "id": r["id"], "tmdb_id": r["tmdb_id"],
+                    "title": r["title"], "subtitle": str(r["year"] or ""),
+                    "image_url": r["backdrop_url"] or r["poster_url"],
+                    "poster_url": r["poster_url"],
+                    "runtime_minutes": r["runtime_minutes"],
+                    "view_offset_ms": r["view_offset_ms"],
+                    "last_viewed_at": r["last_viewed_at"],
+                })
+
+            # ── episodes: in progress, else the next one you own ─────────────
+            # Read the most recent watched episode PER SHOW, then decide.
+            for r in conn.execute(f"""
+                SELECT e.id, e.show_id, e.season_number, e.episode_number, e.title,
+                       e.still_url, e.runtime_minutes, e.view_offset_ms, e.last_viewed_at,
+                       s.title AS show_title, s.poster_url AS show_poster,
+                       s.backdrop_url AS show_backdrop, s.tmdb_id AS show_tmdb
+                FROM episodes e
+                JOIN shows s ON s.id = e.show_id
+                WHERE e.last_viewed_at IS NOT NULL{scope_s}
+                ORDER BY e.last_viewed_at DESC
+            """, args_s):
+                if any(x.get("kind") == "show" and x.get("show_id") == r["show_id"] for x in out):
+                    continue        # already have this show's card
+                image = r["still_url"] or r["show_backdrop"] or r["show_poster"]
+                base = {
+                    "kind": "show", "show_id": r["show_id"], "tmdb_id": r["show_tmdb"],
+                    "title": r["show_title"], "image_url": image,
+                    "poster_url": r["show_poster"],
+                    "last_viewed_at": r["last_viewed_at"],
+                }
+                if self._resumable(r["view_offset_ms"], r["runtime_minutes"]):
+                    base.update({
+                        "reason": "in_progress", "id": r["id"],
+                        "subtitle": "S%d E%d · %s" % (r["season_number"], r["episode_number"],
+                                                      r["title"] or ""),
+                        "season_number": r["season_number"],
+                        "episode_number": r["episode_number"],
+                        "runtime_minutes": r["runtime_minutes"],
+                        "view_offset_ms": r["view_offset_ms"],
+                    })
+                    out.append(base)
+                    continue
+                # Finished it — offer the next OWNED, unwatched episode.
+                nxt = conn.execute("""
+                    SELECT id, season_number, episode_number, title, still_url, runtime_minutes
+                    FROM episodes
+                    WHERE show_id = ? AND has_file = 1
+                          AND COALESCE(play_count, 0) = 0
+                          AND (season_number > ? OR (season_number = ? AND episode_number > ?))
+                    ORDER BY season_number, episode_number LIMIT 1
+                """, (r["show_id"], r["season_number"], r["season_number"],
+                      r["episode_number"])).fetchone()
+                if not nxt:
+                    continue        # caught up: nothing to offer, so no card
+                base.update({
+                    "reason": "up_next", "id": nxt["id"],
+                    "subtitle": "S%d E%d · %s" % (nxt["season_number"], nxt["episode_number"],
+                                                  nxt["title"] or ""),
+                    "season_number": nxt["season_number"],
+                    "episode_number": nxt["episode_number"],
+                    "runtime_minutes": nxt["runtime_minutes"],
+                    "view_offset_ms": 0,
+                    "image_url": nxt["still_url"] or image,
+                })
+                out.append(base)
+        except sqlite3.Error:
+            logger.exception("continue_watching failed")
+            return []
+        finally:
+            conn.close()
+
+        out.sort(key=lambda x: str(x.get("last_viewed_at") or ""), reverse=True)
+        return out[:limit]
+
     def dashboard_stats(self, server_source=None) -> dict:
         """Live counts for the video dashboard, straight from video.db. Library
         counts are scoped to the active video server (``server_source``) so Plex
