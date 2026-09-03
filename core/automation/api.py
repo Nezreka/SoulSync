@@ -375,3 +375,16 @@ def get_history(database, automation_id: int, *, limit: int, offset: int) -> dic
                 pass
     data['automation_id'] = automation_id
     return data
+
+
+def system_automation_for(action_type: str) -> Optional[dict]:
+    """The system-seeded automation row for one action type, or None.
+
+    Lives here and not in the caller because the automation store IS the music
+    database, and core/video may not import it (pinned by
+    ``test_core_video_imports_nothing_from_music``). Automations are shared by
+    both sides, so the automation package is the honest owner of the lookup and
+    the video side asks it rather than reaching across the wall itself.
+    """
+    from database.music_database import MusicDatabase
+    return MusicDatabase().get_system_automation_by_action(action_type)

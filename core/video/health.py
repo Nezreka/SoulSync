@@ -258,8 +258,11 @@ def _import_list_checks(db) -> list:
         return out
 
     try:
-        from database.music_database import MusicDatabase
-        auto = MusicDatabase().get_system_automation_by_action("video_import_lists")
+        # the automation store IS the music db, and core/video may not import it
+        # (test_core_video_imports_nothing_from_music). automations are shared by
+        # both sides, so we ask the automation package instead of reaching over.
+        from core.automation.api import system_automation_for
+        auto = system_automation_for("video_import_lists")
     except Exception:   # noqa: BLE001 - the automation store is the music side's
         logger.debug("import-list automation lookup failed", exc_info=True)
         return out
