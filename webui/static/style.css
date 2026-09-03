@@ -81089,6 +81089,30 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-card-challenge-btns { display: flex; gap: 6px; flex-wrap: wrap; }
 
 /* ── chat file sharing (filepost.dev, chat P2) ── */
+/* A shared overlay template. Deliberately shaped like the file card beside it
+   — same footprint, same rhythm — because it IS the same gesture: someone
+   handed you something you can take. The accent stripe is what marks it as a
+   design rather than a download. */
+.chat-overlay-card {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 9px 12px; margin: 2px 0; max-width: 460px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-left: 3px solid rgb(var(--accent-rgb, 99, 102, 241));
+    border-radius: 11px;
+}
+.chat-overlay-icon { font-size: 18px; opacity: 0.85; }
+.chat-overlay-meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.chat-overlay-name {
+    font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-overlay-sub { font-size: 10.5px; color: rgba(255,255,255,0.4); }
+/* Amber, not red: missing art is a thing to know before you click, not a
+   failure. The template still imports and still renders everything else. */
+.chat-overlay-warn {
+    font-size: 10.5px; color: #f1c40f; margin-top: 2px;
+}
+
 .chat-file-card {
     display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
     padding: 9px 12px; margin: 2px 0; max-width: 460px;

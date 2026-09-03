@@ -180,3 +180,97 @@ def test_export_then_import_on_a_fresh_install_reproduces_the_design(client, tmp
     fresh = videoapi._video_db.list_overlay_templates()
     got = videoapi._video_db.get_overlay_template(fresh[0]["id"])
     assert got["definition"]["layers"] == DESIGN["layers"]
+
+
+# ── adopting a template shared into a chat room ──────────────────────────────
+#
+# Different question from the bulk file import. A reader does not need "how many
+# landed", they need "will this render on MY install" - because an image layer
+# points at asset://<sha1> living on the SENDER's machine. The definition
+# travels; the bytes do not.
+
+SHARE = {"version": 1, "canvas": {"w": 1000, "h": 1500}, "layers": [
+    {"id": "l1", "type": "text", "text": "4K"},
+    {"id": "l2", "type": "image", "src": "asset://aaaaaaaaaaaaaaaa.png"},
+]}
+
+
+def test_a_shared_template_is_adopted(client):
+    c, db = client
+    r = c.post("/api/video/overlays/templates/from-share",
+               json={"name": "From chat", "definition": SHARE}).get_json()
+    assert r["ok"] is True and r["name"] == "From chat"
+    assert [t["name"] for t in db.list_overlay_templates()] == ["From chat"]
+
+
+def test_it_names_the_images_you_do_not_have(client):
+    """The whole point of the card's warning. Content-addressed refs make the
+    answer precise rather than 'something is missing'."""
+    c, _ = client
+    r = c.post("/api/video/overlays/templates/from-share",
+               json={"name": "Needs art", "definition": SHARE}).get_json()
+    assert r["missing_assets"] == ["asset://aaaaaaaaaaaaaaaa.png"]
+
+
+def test_an_image_you_already_have_is_not_reported_missing(client, tmp_path, monkeypatch):
+    """Content addressing earns this: the same bytes are the same name, so a
+    template built on art you already uploaded just works."""
+    c, _ = client
+    from core.video.overlays.assets import AssetStore
+    store = AssetStore.default()
+    monkeypatch.setattr(store, "read_upload",
+                        lambda name: b"bytes" if name == "aaaaaaaaaaaaaaaa.png" else None)
+    monkeypatch.setattr(AssetStore, "default", staticmethod(lambda: store))
+
+    r = c.post("/api/video/overlays/templates/from-share",
+               json={"name": "Have art", "definition": SHARE}).get_json()
+    assert r["missing_assets"] == []
+
+
+def test_a_template_with_no_images_reports_nothing_missing(client):
+    """The common case must not be dressed up as a warning."""
+    c, _ = client
+    r = c.post("/api/video/overlays/templates/from-share",
+               json={"name": "Text only", "definition": DESIGN}).get_json()
+    assert r["missing_assets"] == []
+
+
+def test_missing_images_do_not_block_the_import(client, db_unused=None):
+    """A design you can see and finish beats a refusal."""
+    c, db = client
+    r = c.post("/api/video/overlays/templates/from-share",
+               json={"name": "Needs art", "definition": SHARE}).get_json()
+    assert r["ok"] is True
+    assert len(db.list_overlay_templates()) == 1
+
+
+def test_a_colliding_name_is_suffixed_not_skipped(client):
+    """Two people running the same starter pack collide constantly. Skipping
+    would leave the reader with nothing to look at after clicking."""
+    c, db = client
+    _make(db, "Corner badge")
+    r = c.post("/api/video/overlays/templates/from-share",
+               json={"name": "Corner badge", "definition": DESIGN}).get_json()
+    assert r["name"] == "Corner badge (2)"
+    assert len(db.list_overlay_templates()) == 2
+
+
+def test_the_same_share_twice_keeps_counting_up(client):
+    c, db = client
+    for expected in ("Corner badge", "Corner badge (2)", "Corner badge (3)"):
+        r = c.post("/api/video/overlays/templates/from-share",
+                   json={"name": "Corner badge", "definition": DESIGN}).get_json()
+        assert r["name"] == expected
+
+
+def test_junk_is_refused_by_the_SAME_validator_the_chat_card_used(client):
+    """A payload that rendered as a card cannot be refused here, and one that
+    never was a card cannot sneak in through this door."""
+    c, db = client
+    for bad in ({"name": "", "definition": DESIGN},
+                {"name": "X", "definition": {"layers": []}},
+                {"name": "X", "definition": "nope"},
+                {}):
+        r = c.post("/api/video/overlays/templates/from-share", json=bad)
+        assert r.status_code == 400, bad
+    assert db.list_overlay_templates() == []

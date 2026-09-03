@@ -86,6 +86,64 @@ def register_routes(bp):
             logger.exception("overlay template export failed")
             return jsonify({"error": "Export failed"}), 500
 
+    @bp.route("/overlays/templates/from-share", methods=["POST"])
+    def overlay_template_from_share():
+        """Adopt ONE template shared into a chat room.
+
+        Separate from the bulk file import because the answer a reader needs is
+        different: not "how many landed" but "will this actually render on my
+        install". An image layer points at asset://<sha1>, which lives on the
+        SENDER's machine — the definition travels, the bytes do not — so this
+        reports exactly which images are missing. Content-addressed refs make
+        that answer precise: a recipient who already has those bytes resolves
+        them for free, and anyone else knows the specific files to ask for.
+
+        The template is still created when images are missing. A design you can
+        see and finish is worth more than a refusal, and the missing layers are
+        named rather than silently blank.
+        """
+        from . import get_video_db
+        from core import chat_codec
+        from core.video.overlays.assets import AssetStore
+
+        body = request.get_json(silent=True) or {}
+        # Validated by the SAME codec the chat receive path uses, so a payload
+        # that rendered as a card cannot be refused here, and one that never
+        # was a card cannot sneak in through this door.
+        share = chat_codec.overlay_of({"o": {"n": body.get("name"),
+                                             "d": body.get("definition")}})
+        if not share:
+            return jsonify({"ok": False, "error": "That is not a usable overlay template."}), 400
+        try:
+            db = get_video_db()
+            name = share["n"]
+            existing = {" ".join(str(t.get("name") or "").split()).casefold()
+                        for t in db.list_overlay_templates() or []}
+            # A shared name collides far more often than a file import's does -
+            # two people run the same starter pack - so it is suffixed rather
+            # than skipped. Refusing the import would leave nothing to look at.
+            if name.casefold() in existing:
+                base, n = name, 2
+                while ("%s (%d)" % (base, n)).casefold() in existing and n < 50:
+                    n += 1
+                name = "%s (%d)" % (base, n)
+
+            store = AssetStore.default()
+            missing = [a for a in chat_codec.overlay_assets(share["d"])
+                       if store.read_upload(a[len("asset://"):]) is None]
+
+            tid = db.create_overlay_template(name, definition=share["d"])
+            if tid is None:
+                return jsonify({"ok": False, "error": "Could not save the template"}), 500
+            try:
+                _prerender_thumb(db, tid)
+            except Exception:   # noqa: BLE001 - a missing thumb is cosmetic
+                logger.debug("thumb prerender failed for shared template %s", tid, exc_info=True)
+            return jsonify({"ok": True, "id": tid, "name": name, "missing_assets": missing})
+        except Exception:
+            logger.exception("overlay share import failed")
+            return jsonify({"ok": False, "error": "Could not save the template"}), 500
+
     @bp.route("/overlays/templates/import", methods=["POST"])
     def overlay_templates_import():
         """Import shared templates. An existing NAME is skipped rather than

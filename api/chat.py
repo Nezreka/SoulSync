@@ -243,6 +243,16 @@ def _unwrap_room_messages(messages):
             f = chat_codec.file_of(dec)
             if f:
                 m["file"] = f
+            # A shared overlay template. The definition rides its own envelope
+            # key (protocol_of would reject layers-of-objects), and the card
+            # carries the asset refs it depends on so the reader is told what
+            # will be missing BEFORE they import rather than after.
+            ov = chat_codec.overlay_of(dec)
+            if ov:
+                m["overlay"] = {"n": ov["n"],
+                                "layers": len(ov["d"].get("layers") or []),
+                                "assets": chat_codec.overlay_assets(ov["d"]),
+                                "d": ov["d"]}
             # Edit carrier: the client fold replaces the target's displayed
             # text and keeps the history; the carrier itself stays a real
             # message (Soulseek can't unsend, so hiding it would lie).
@@ -1380,6 +1390,18 @@ def create_blueprint() -> Blueprint:
         rep = chat_codec.reply_of({"r": body.get("reply")})
         if rep:
             extra = {"r": rep}
+        # A shared overlay template. Validated by the SAME codec the receive
+        # path uses, so anything that leaves here is something a reader's card
+        # can render. Refused loudly rather than sent as a dud: a template that
+        # exceeds the wire limit would otherwise arrive truncated, which reads
+        # as a broken design rather than as a message that did not fit.
+        ovl = chat_codec.overlay_of({"o": body.get("overlay")})
+        if body.get("overlay") is not None and ovl is None:
+            return jsonify({"error": "That overlay template can't be shared "
+                                     "(it needs a name and at least one layer)."}), 400
+        if ovl:
+            extra = dict(extra or {})
+            extra["o"] = ovl
         fmeta = chat_codec.file_of({"f": body.get("file")})
         if fmeta:
             extra = dict(extra or {})
@@ -1419,6 +1441,14 @@ def create_blueprint() -> Blueprint:
             extra["ed"] = edit
         wrapped = chat_codec.encode(msg, extra)
         if wrapped is None:
+            # Name the half that did not fit. With a template attached the text
+            # is almost never the problem, and "message too long" sends someone
+            # to shorten a sentence that was already short.
+            if ovl:
+                layers = len((ovl.get("d") or {}).get("layers") or [])
+                return jsonify({"error": "That template is too big to send over chat "
+                                         "(%d layers). Export it to a file instead."
+                                         % layers}), 400
             return jsonify({"error": "message too long for Soulseek chat"}), 400
         room = _resolve_room(body.get("room"))
         if room is None:

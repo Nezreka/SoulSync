@@ -491,9 +491,11 @@
                     (r.n > 1 ? ' <b>' + r.n + '</b>' : '') + '</span>';
             }).join('') + '</div>';
         }
-        var bodyHtml = (m.file && m.file.n)
-            ? _fileCardHtml(m)
-            : (m.rich ? renderRich(showText) : renderPlain(showText));
+        var bodyHtml = (m.overlay && m.overlay.n)
+            ? _overlayCardHtml(m)
+            : (m.file && m.file.n)
+                ? _fileCardHtml(m)
+                : (m.rich ? renderRich(showText) : renderPlain(showText));
         // An edited message wears the marker; hovering it shows every prior
         // version, oldest first (the history is retained, not replaced).
         if (versions) {
@@ -512,6 +514,169 @@
         return '<div class="chat-line' + (me ? ' chat-line--me' : '') + '" title="' +
             attr(_fullTs(m.timestamp)) + '">' + replyRef +
             bodyHtml + actions + chips + '</div>';
+    }
+
+    // chat.js guards every showToast call (it can load without downloads.js,
+    // which defines it) — 45 places do this. One helper rather than a 46th
+    // hand-rolled guard.
+    function _ovToast(msg, kind) {
+        if (typeof showToast === 'function') showToast(msg, kind);
+    }
+
+    // Pick one of YOUR templates and send it. The list is names only — a
+    // gallery in a chat popover would be a second Overlay Studio to maintain,
+    // and the name is what you pick by anyway.
+    function _pickOverlayToShare() {
+        toggleAttachPanel(true);
+        fetch('/api/video/overlays/templates', { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var list = (d && d.templates) || [];
+                if (!list.length) {
+                    _ovToast('You have no overlay templates to share yet', 'info');
+                    return;
+                }
+                var names = list.map(function (t, i) { return (i + 1) + '. ' + (t.name || 'Untitled'); });
+                var pick = window.prompt('Share which overlay template?\n\n' +
+                                         names.join('\n') + '\n\nEnter a number:', '1');
+                if (pick === null) return;
+                var t = list[parseInt(pick, 10) - 1];
+                if (!t) { _ovToast('No template with that number', 'error'); return; }
+                // The gallery row is a summary; the DEFINITION has to be fetched
+                // before it can be sent.
+                fetch('/api/video/overlays/templates/' + t.id, { headers: { Accept: 'application/json' } })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (full) {
+                        var defn = full && (full.definition || (full.template || {}).definition);
+                        if (!defn || !defn.layers || !defn.layers.length) {
+                            _ovToast('That template has no layers to share', 'error');
+                            return;
+                        }
+                        _sendOverlayShare(t.name || 'Overlay template', defn);
+                    })
+                    .catch(function () { _ovToast('Could not read that template', 'error'); });
+            })
+            .catch(function () { _ovToast('Could not list your templates', 'error'); });
+    }
+
+    function _sendOverlayShare(name, definition) {
+        // Rooms only. A PM is sent as plaintext by design, so an envelope-only
+        // share would arrive as nothing at all rather than as a card.
+        if (state.view !== 'room') {
+            _ovToast('Overlay templates can only be shared in a room', 'info');
+            return;
+        }
+        postJSON('/api/chat/room/message', _tagRoomPayload({
+            message: '',
+            overlay: { n: name, d: definition },
+        })).then(function (res) {
+            if (res && res.ok) {
+                _ovToast('Shared "' + name + '"', 'success');
+                // The composer's own trick: clearing lastStamp forces the next
+                // poll to render authoritatively instead of diffing. There is
+                // no loadRoom() to call — only loadRooms(), which reloads the
+                // room LIST and would not bring the message back any sooner.
+                state.lastStamp = null;
+                state.stickBottom = true;
+            } else {
+                // The server names the half that did not fit - with a template
+                // attached, "message too long" would send someone to shorten a
+                // sentence that was already empty.
+                _ovToast((res && res.body && res.body.error) ||
+                          'Could not share that template', 'error');
+            }
+        });
+    }
+
+    // Definitions of the templates currently on screen, so the Add button can
+    // carry a short key instead of a few KB of JSON in an attribute.
+    var _overlayShares = { n: 0, map: {}, order: [] };
+    var OVERLAY_SHARE_KEEP = 40;
+
+    function _rememberOverlayShare(share) {
+        var key = 'ov' + (_overlayShares.n++);
+        _overlayShares.map[key] = share;
+        _overlayShares.order.push(key);
+        // Bounded on purpose. Each definition is a few KB and a busy room would
+        // otherwise hold every template ever scrolled past for the life of the
+        // tab. Forty covers everything on screen and then some.
+        while (_overlayShares.order.length > OVERLAY_SHARE_KEEP) {
+            delete _overlayShares.map[_overlayShares.order.shift()];
+        }
+        return key;
+    }
+
+    // Adopt a template someone shared. The definition is already on the
+    // message (it rode the envelope), so this is one POST and no fetching.
+    function _adoptSharedOverlay(btn) {
+        var o = _overlayShares.map[btn.getAttribute('data-chat-overlay-add')];
+        if (!o || !o.d) { _ovToast('That template is no longer on screen', 'error'); return; }
+        btn.disabled = true;
+        var was = btn.textContent;
+        btn.textContent = 'Adding\u2026';
+        fetch('/api/video/overlays/templates/from-share', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ name: o.n, definition: o.d })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d || !d.ok) {
+                    btn.disabled = false; btn.textContent = was;
+                    _ovToast((d && d.error) || 'Could not add that template', 'error');
+                    return;
+                }
+                btn.textContent = '\u2713 added';
+                var miss = (d.missing_assets || []).length;
+                // The missing half is said AFTER the success, not instead of
+                // it: the template really was added, it just has holes the
+                // sender has to send you separately.
+                _ovToast(miss
+                    ? 'Added "' + d.name + '" \u2014 ' + miss +
+                      (miss === 1 ? ' image is' : ' images are') +
+                      ' missing, ask the sender for them'
+                    : 'Added "' + d.name + '" to your overlays',
+                    miss ? 'info' : 'success');
+            })
+            .catch(function () {
+                btn.disabled = false; btn.textContent = was;
+                _ovToast('Could not add that template', 'error');
+            });
+    }
+
+    // ── shared overlay template (envelope 'o') ──────────────────────────
+    //
+    // A design, not a link: the whole template rides the message, so the card
+    // can say what it IS before anyone commits to adopting it — how many layers,
+    // and crucially how many images it depends on that this install does not
+    // have. Those refs are content-addressed (asset://<sha1>), so an image you
+    // already uploaded resolves for free and anything else is named exactly.
+    function _overlayCardHtml(m) {
+        var o = m.overlay || {};
+        var layers = Number(o.layers || 0);
+        var assets = (o.assets || []).length;
+        // The definition is far too large for a data- attribute, so it goes in
+        // a render-scoped registry and only the KEY rides the button. The file
+        // card can put its whole payload (a url) on the element; a template
+        // cannot, and inventing a lookup that does not exist is how the last
+        // card like this ended up doing nothing when clicked.
+        var key = _rememberOverlayShare({ n: o.n, d: o.d });
+        return '<div class="chat-overlay-card">' +
+            '<span class="chat-overlay-icon">\u25F0</span>' +
+            '<span class="chat-overlay-meta">' +
+                '<b class="chat-overlay-name">' + esc(o.n || 'Overlay template') + '</b>' +
+                '<span class="chat-overlay-sub">Overlay template \u00b7 ' +
+                    layers + (layers === 1 ? ' layer' : ' layers') + '</span>' +
+                // Said up front, not after the click: adopting a template whose
+                // art you lack leaves layers that paint nothing, and finding
+                // that out afterwards feels like a broken import.
+                (assets ? '<span class="chat-overlay-warn">Needs ' + assets +
+                          (assets === 1 ? ' image' : ' images') +
+                          ' you may not have</span>' : '') +
+            '</span>' +
+            '<button type="button" class="chat-embed-chip chat-overlay-add" ' +
+                'data-chat-overlay-add="' + key + '">\u2795 add to my overlays</button>' +
+        '</div>';
     }
 
     // ── shared file card (filepost.dev links dressed by envelope 'f') ────
@@ -4852,8 +5017,12 @@
             }
             t = e.target.closest('[data-chat-file-save]');
             if (t) { _saveFileToLibrary(t); return; }
+            t = e.target.closest('[data-chat-overlay-add]');
+            if (t) { _adoptSharedOverlay(t); return; }
             t = e.target.closest('[data-chat-attach-btn]');
             if (t) { toggleAttachPanel(); return; }
+            t = e.target.closest('[data-chat-attach-overlay]');
+            if (t) { _pickOverlayToShare(); return; }
             t = e.target.closest('[data-chat-spoiler]');
             if (t) { t.classList.add('chat-spoiler--shown'); return; }
             t = e.target.closest('[data-chat-fmt]');
