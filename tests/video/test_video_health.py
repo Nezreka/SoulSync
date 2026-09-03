@@ -373,3 +373,65 @@ def test_one_accepted_release_is_enough_to_be_healthy(db):
     _snap(db, 900, {"torrent": {"ran": True, "results": 60, "accepted": 1}})
     c = _src_check(collect(db), "torrent")
     assert c and c["status"] == "ok"
+
+
+# ── per-indexer visibility ───────────────────────────────────────────────────
+def _isnap(db, tmdb, samples, days_ago=0):
+    """A wishlist row whose snapshot carries per-release receipts."""
+    import json as _json
+    conn = db._get_connection()
+    conn.execute("INSERT INTO video_wishlist (kind, tmdb_id, title, status, "
+                 "last_search_at, search_snapshot) "
+                 "VALUES ('movie', ?, 'X', 'wanted', datetime('now', ?), ?)",
+                 (tmdb, "-%d days" % int(days_ago),
+                  _json.dumps({"chain": ["torrent"],
+                               "sources": {"torrent": {"ran": True, "results": len(samples),
+                                                       "accepted": sum(1 for s in samples
+                                                                       if s.get("accepted")),
+                                                       "samples": samples}}})))
+    conn.commit(); conn.close()
+
+
+def _rel(indexer, accepted=False):
+    return {"title": "R", "accepted": accepted, "rejected": None if accepted else "Wrong episode",
+            "indexer": indexer}
+
+
+def test_per_indexer_counts_come_from_the_search_receipts(db):
+    """A transport total ("torrent found 180") cannot say which tracker earned
+    it. No network: these are the receipts the search already wrote."""
+    _isnap(db, 1, [_rel("Good", accepted=True)] * 3 + [_rel("Weak")] * 2)
+    _isnap(db, 2, [_rel("Good")] * 4)
+    stats = {s["indexer"]: s for s in db.indexer_health_snapshot(days=14)}
+    assert stats["Good"]["results"] == 7 and stats["Good"]["accepted"] == 3
+    assert stats["Weak"]["results"] == 2 and stats["Weak"]["accepted"] == 0
+    # rows = how many wishlist items it turned up for, not how many releases
+    assert stats["Good"]["rows"] == 2 and stats["Weak"]["rows"] == 1
+
+
+def test_stale_receipts_fall_out_of_the_indexer_window(db):
+    _isnap(db, 3, [_rel("Old")] * 5, days_ago=30)
+    assert db.indexer_health_snapshot(days=14) == []
+
+
+def test_an_indexer_that_never_yields_a_usable_release_is_named(db):
+    """The failure a transport total hides: a tracker answering every search
+    with releases none of which survive the profile."""
+    _isnap(db, 4, [_rel("Barren")] * 25)
+    _isnap(db, 5, [_rel("Fine", accepted=True)] * 25)
+    c = next((x for x in collect(db)["checks"] if x["id"] == "indexers_barren"), None)
+    assert c and c["status"] == "warning"
+    assert "Barren" in c["detail"] and "Fine" not in c["detail"]
+
+
+def test_one_unusable_hit_is_luck_not_a_pattern(db):
+    _isnap(db, 6, [_rel("Unlucky")] * 3)
+    _isnap(db, 7, [_rel("Fine", accepted=True)] * 25)
+    assert not any(x["id"] == "indexers_barren" for x in collect(db)["checks"])
+
+
+def test_a_single_indexer_is_left_to_the_transport_check(db):
+    """With one indexer there is nothing to compare it against, and a lone
+    source having a bad fortnight is already the source check's business."""
+    _isnap(db, 8, [_rel("Only")] * 30)
+    assert not any(x["id"] == "indexers_barren" for x in collect(db)["checks"])

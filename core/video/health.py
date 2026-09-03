@@ -200,6 +200,42 @@ def _source_health_checks(db) -> list:
     return out
 
 
+def _indexer_health_checks(db) -> list:
+    """Name the indexers whose results never survive the quality profile.
+
+    NOT "indexers that returned nothing": these stats are built FROM search
+    receipts, so an indexer that returns nothing leaves no sample and cannot
+    appear here at all. A check for it could never fire — finding that out
+    before shipping it is the only reason this docstring exists. Seeing a truly
+    idle indexer needs Prowlarr's configured list, which is a network call, and
+    health runs on a page load.
+
+    What the receipts CAN show is an indexer that keeps answering with releases
+    none of which are ever usable — a tracker carrying the wrong region, the
+    wrong tier, or nothing but packs. That is real, actionable, and invisible in
+    the transport-level total.
+    """
+    out = []
+    try:
+        stats = db.indexer_health_snapshot(days=14) or []
+    except Exception:   # noqa: BLE001 - health must never 500 over one probe
+        logger.debug("indexer health probe failed", exc_info=True)
+        return out
+    # With one indexer there is nothing to compare it against, and a single
+    # source having a bad fortnight is the transport check's business.
+    if len(stats) < 2:
+        return out
+    # Enough results to mean something: one unusable hit is luck, twenty is a
+    # pattern.
+    barren = sorted(s["indexer"] for s in stats
+                    if s.get("results", 0) >= 20 and not s.get("accepted"))
+    if barren:
+        out.append(_check("indexers_barren", "Indexers", "warning",
+                          "%d of %d returned releases but never one you could use: %s"
+                          % (len(barren), len(stats), ", ".join(barren[:6]))))
+    return out
+
+
 def collect(db) -> dict:
     """{status, checks: [...]} — every check always present, worst-first sort."""
     checks = []
@@ -267,6 +303,10 @@ def collect(db) -> dict:
     # leaves. No probing: health runs on a dashboard load and pinging a source
     # that is down is the exact case that hangs the page.
     checks.extend(_source_health_checks(db))
+
+    # 7) individual indexers that are contributing nothing. Only worth a line
+    # when there IS one — a healthy indexer set needs no commentary.
+    checks.extend(_indexer_health_checks(db))
 
     order = {"error": 0, "warning": 1, "ok": 2}
     checks.sort(key=lambda c: order.get(c["status"], 3))

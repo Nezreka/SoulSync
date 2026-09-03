@@ -658,6 +658,10 @@ def audit_samples(cands, limit: int = AUDIT_SAMPLE_LIMIT) -> List[Dict[str, Any]
             "rejected": (str(c.get("rejected"))[:200] if c.get("rejected") else None),
             "quality": str(c.get("quality_label") or "")[:60] or None,
             "source": str(c.get("source") or "")[:20] or None,
+            # WHICH indexer produced it. The transport ("torrent") cannot tell a
+            # tracker pulling its weight from one that has returned nothing for a
+            # month; Prowlarr puts the indexer's name in `username`.
+            "indexer": str(c.get("indexer") or c.get("username") or "")[:60] or None,
             "seeders": c.get("seeders"),
         })
     return out

@@ -3470,6 +3470,56 @@ class VideoDatabase:
     # is showing what TMDB knew last time anyone asked.
     SCHEDULE_STALE_DAYS = 7
 
+    def indexer_health_snapshot(self, days: int = 14) -> list:
+        """Per-INDEXER counts, read off the same search receipts.
+
+        A transport-level check says "torrent found 180 releases"; it cannot say
+        that six of your eight indexers produced all of them and two have
+        returned nothing for a fortnight. Prowlarr will happily keep querying a
+        dead tracker, and the only visible symptom is searches that are slower
+        than they need to be.
+
+        ``[{indexer, results, accepted, rows}]``, busiest first. No network:
+        health runs on a page load and probing a dead tracker is the case that
+        hangs it.
+        """
+        agg: dict = {}
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT search_snapshot FROM video_wishlist "
+                "WHERE search_snapshot IS NOT NULL AND last_search_at IS NOT NULL "
+                "AND last_search_at >= datetime('now', ?)",
+                ("-%d days" % max(1, int(days)),)).fetchall()
+        except sqlite3.Error:
+            logger.exception("indexer_health_snapshot failed")
+            return []
+        finally:
+            conn.close()
+
+        for r in rows:
+            try:
+                snap = json.loads(r["search_snapshot"] or "{}")
+            except (TypeError, ValueError):
+                continue
+            seen_here = set()
+            for o in (snap.get("sources") or {}).values():
+                if not isinstance(o, dict):
+                    continue
+                for s in (o.get("samples") or []):
+                    name = str((s or {}).get("indexer") or "").strip()
+                    if not name:
+                        continue
+                    cur = agg.setdefault(name, {"indexer": name, "results": 0,
+                                                "accepted": 0, "rows": 0})
+                    cur["results"] += 1
+                    if s.get("accepted"):
+                        cur["accepted"] += 1
+                    if name not in seen_here:
+                        seen_here.add(name)
+                        cur["rows"] += 1
+        return sorted(agg.values(), key=lambda x: (-x["results"], x["indexer"]))
+
     def wishlist_row_diagnostics(self, kind: str, tmdb_id, *, season_number=None,
                                  episode_number=None) -> dict:
         """Everything known about ONE stuck wishlist row, in one read.
