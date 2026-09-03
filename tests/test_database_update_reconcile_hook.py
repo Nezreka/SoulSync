@@ -1,4 +1,8 @@
-"""A media scan only maps rows and emits completion; imports own side effects."""
+"""A media scan maps rows, runs its reconcile tail, then emits completion.
+
+It still creates no catalogue rows and moves no files — imports own that.
+The tail only READS file tags to gap-fill provider ids, which is why it is
+allowed here at all; see tests/test_post_scan_reconcile_v2.py."""
 
 from __future__ import annotations
 
@@ -10,6 +14,10 @@ def _bare_worker():
     w = DatabaseUpdateWorker.__new__(DatabaseUpdateWorker)
     w.callbacks = {'finished': [], 'error': [], 'progress_updated': [],
                    'phase_changed': [], 'artist_processed': []}
+    # __new__ skips __init__, so the post-scan hook attribute has to be set
+    # here the way a real worker sets it: absent by default, injected by the
+    # web layer when a scan is started.
+    w.post_scan_hook = None
     return w
 
 

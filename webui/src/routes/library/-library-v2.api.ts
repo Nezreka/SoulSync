@@ -1900,6 +1900,34 @@ export function libraryV2TrackFileTagsQueryOptions(trackId: number, enabled: boo
   });
 }
 
+/** The "these never got matched" banner's payload (#1202). */
+export interface LibraryV2UnmatchedSummary {
+  success?: boolean;
+  /** Tracks currently filed under Unknown Artist; 0 means no banner. */
+  count: number;
+  /** The catalogue artist holding the most of them, for the link. */
+  artist_id: number | null;
+}
+
+/**
+ * How many tracks landed under "Unknown Artist" because their tags were
+ * unreadable on import (#1202).
+ *
+ * Its own query rather than a field on the artists response: the grid refetches
+ * on every letter, search and page change, and this number does not move with
+ * any of them. Failure is not worth surfacing — a missing banner is strictly
+ * better than an error where a banner would go — so the caller treats a
+ * rejected query as "nothing to report".
+ */
+export function libraryV2UnmatchedQueryOptions() {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'unmatched'] as const,
+    queryFn: () =>
+      readJson<LibraryV2UnmatchedSummary>(apiClient.get('library/unmatched-summary')),
+    staleTime: 60_000,
+  });
+}
+
 export function libraryV2QualityProfilesQueryOptions() {
   return queryOptions({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'quality-profiles'],

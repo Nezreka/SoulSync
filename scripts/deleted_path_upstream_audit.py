@@ -17,18 +17,45 @@ than a deletion nobody saw.
     python3 scripts/deleted_path_upstream_audit.py --since 3.3.1    # since a tag
     python3 scripts/deleted_path_upstream_audit.py --upstream upstream/dev
 
-Exit code is 1 when anything is listed, so it can gate a sync.
+Decisions are recorded in ``scripts/deleted_path_reviewed.json`` so the list
+only ever shows work nobody has looked at yet. A tool that reprints the same
+seven commits every sync is a tool people stop reading. Record one with::
+
+    python3 scripts/deleted_path_upstream_audit.py --reviewed <sha> "why"
+
+Exit code is 1 when anything unreviewed is listed, so it can gate a sync.
 """
 
 from __future__ import annotations
 
 import argparse
 import collections
+import json
+import pathlib
 import subprocess
 import sys
 
 # Commit subjects that never carry a feature — no point asking about them.
 NOISE = ("Merge pull request", "Merge branch", "style(", "oxfmt", "docs(", "chore(tests)")
+
+LEDGER = pathlib.Path(__file__).with_name("deleted_path_reviewed.json")
+
+
+def load_ledger() -> dict[str, str]:
+    if not LEDGER.exists():
+        return {}
+    return json.loads(LEDGER.read_text(encoding="utf-8"))
+
+
+def record(sha: str, note: str) -> int:
+    """Mark one commit as decided, so it stops being reported."""
+    full = git("rev-parse", sha)
+    ledger = load_ledger()
+    ledger[full[:12]] = note
+    LEDGER.write_text(
+        json.dumps(dict(sorted(ledger.items())), indent=2) + "\n", encoding="utf-8")
+    print(f"recorded {full[:12]}: {note}")
+    return 0
 
 
 def git(*args: str) -> str:
@@ -57,7 +84,21 @@ def main() -> int:
         default=[],
         help="Only report deleted files under this prefix (repeatable).",
     )
+    parser.add_argument(
+        "--reviewed",
+        nargs=2,
+        metavar=("SHA", "NOTE"),
+        help="Record a decision about one commit and exit.",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Report everything, including commits already decided.",
+    )
     args = parser.parse_args()
+
+    if args.reviewed:
+        return record(*args.reviewed)
 
     base = args.since or git("merge-base", args.head, args.upstream)
     gone = deleted_paths(base, args.head)
@@ -86,12 +127,17 @@ def main() -> int:
             if line in gone:
                 touched[current].append(line)
 
+    ledger = {} if args.all else load_ledger()
     interesting = [
         (full, meta) for full, meta in commits.items()
-        if touched.get(full) and not any(n in meta[2] for n in NOISE)
+        if touched.get(full)
+        and not any(n in meta[2] for n in NOISE)
+        and full[:12] not in ledger
     ]
     if not interesting:
-        print(f"{len(gone)} deleted path(s) audited — upstream touched none of them.")
+        decided = len(ledger)
+        note = f", {decided} already decided" if decided else ""
+        print(f"{len(gone)} deleted path(s) audited — nothing new{note}.")
         return 0
 
     print(f"Upstream work in {len(gone)} path(s) this branch deleted, since {base[:12]}:\n")
@@ -106,6 +152,7 @@ def main() -> int:
 
     print(f"{len(interesting)} commit(s) to review. Each is either a feature to port")
     print("into the Library-v2 surface that replaced it, or a deliberate decline.")
+    print("Record one with:  --reviewed <sha> \"what was decided\"")
     return 1
 
 

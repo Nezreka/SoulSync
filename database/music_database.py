@@ -7516,6 +7516,7 @@ class MusicDatabase:
         catalogue rows. Size/bitrate update only the already-imported matching
         path; the scan cannot create or move file ownership.
         """
+        from core.library2.media_mappings import resolve_mapping
         from core.library2.media_server_sync import (
             resolve_album, resolve_artist, upsert_track,
         )
@@ -7620,6 +7621,13 @@ class MusicDatabase:
                     if nav_artist and nav_artist.lower() != (album_artist_name or '').lower():
                         track_artist = nav_artist
 
+                # Was the library already connected to this server song? The
+                # scan cannot CREATE a track — ownership is import-controlled —
+                # so "new" here means newly MAPPED, and that is the event the
+                # post-scan reconcile is scoped to. Read it before upsert_track
+                # writes the mapping, or every track looks familiar.
+                first_sight = resolve_mapping(
+                    cursor, "track", server_source, server_track_id) is None
                 catalogue_track_id = upsert_track(
                     cursor,
                     server_source=server_source,
@@ -7646,7 +7654,7 @@ class MusicDatabase:
                 except Exception as backfill_err:
                     logger.debug("Provenance ID backfill skipped for track %s: %s",
                                  catalogue_track_id, backfill_err)
-                return 'updated'
+                return 'inserted' if first_sight else 'updated'
             except sqlite3.OperationalError as e:
                 retry_count += 1
                 if retry_count >= max_retries:

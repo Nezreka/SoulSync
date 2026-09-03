@@ -414,3 +414,47 @@ def test_reconcile_finishes_unlink_completed_before_process_crash(
     assert imported_conn.execute(
         "SELECT status FROM lib2_file_delete_operations"
     ).fetchone()[0] == "completed"
+
+
+def test_two_rows_on_one_path_are_one_file_to_delete(imported_conn, legacy_db, tmp_path):
+    """#1210's shape cannot happen here, and this is why.
+
+    Upstream's duplicate cleaner grouped by DB row: a song filed on both an
+    album and a single carries two rows, and when both pointed at the same
+    file, "keep this one, remove the other" moved the only copy there was and
+    left the kept row pointing at nothing. The reporter lost songs to it.
+
+    Library v2 keys the preview on the RESOLVED REAL PATH, so two rows on one
+    file are one item to act on — you cannot be shown a second copy that does
+    not exist. Deleting it retires both catalogue rows together, so the DB
+    never disagrees with the disk either.
+    """
+    root = tmp_path / "music"
+    root.mkdir()
+    shared = root / "Xtal.flac"
+    shared.write_bytes(b"audio")
+
+    rows = imported_conn.execute(
+        "SELECT t.id, al.primary_artist_id FROM lib2_tracks t"
+        " JOIN lib2_albums al ON al.id = t.album_id"
+        " ORDER BY al.primary_artist_id, t.id"
+    ).fetchall()
+    artist_id = rows[0][1]
+    same_artist = [r[0] for r in rows if r[1] == artist_id][:2]
+    assert len(same_artist) == 2, "fixture needs two tracks under one artist"
+    album_track, single_track = same_artist
+    # The same physical file at two catalogue positions (docs §49: one
+    # recording, many releases).
+    album_file = _set_track_path(imported_conn, album_track, shared)
+    single_file = _set_track_path(imported_conn, single_track, shared)
+    assert album_file != single_file
+
+    preview = preview_entity_files(
+        legacy_db, entity="artists", entity_id=artist_id,
+        file_ids=[album_file, single_file],
+        config_manager=_Config([str(root)]),
+    )
+    paths = [item["path"] for item in preview["files"]]
+    assert len(paths) == 1, (
+        f"one file on disk must be one row to act on, got {paths}")
+    assert preview["file_count"] == 1

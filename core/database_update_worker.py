@@ -102,7 +102,27 @@ class DatabaseUpdateWorker:
                 logger.error(f"Error in callback for {signal_name}: {e}")
 
     def _emit_finished(self, *args):
-        """Complete a mapping-only media scan."""
+        """Run the post-scan hook, THEN announce completion.
+
+        The scan itself stays mapping-only: it never creates catalogue rows or
+        moves file ownership. The hook is the tail that reads the TAGS of the
+        files this run newly mapped and gap-fills provider ids the catalogue
+        does not have yet — no rows created, nothing moved, so it stays inside
+        that rule.
+
+        Order matters. While the hook runs the scan still reads as `running`,
+        so automations polling for completion, the dashboard card and the Tools
+        page all treat it as a normal phase and wait for it, instead of seeing
+        `finished` and walking away mid-reconcile.
+
+        Best-effort: a gap-fill is a nice-to-have, a scan finishing is not, so
+        a broken hook never swallows the completion signal.
+        """
+        if self.post_scan_hook:
+            try:
+                self.post_scan_hook(self)
+            except Exception as e:
+                logger.warning(f"post-scan hook failed (non-fatal): {e}")
         self._emit_signal('finished', *args)
 
 
@@ -1042,6 +1062,11 @@ class DatabaseUpdateWorker:
                                             track_success = self.database.insert_or_update_media_track(track, album_id, artist_id, server_source=self.server_type)
                                             if track_success:
                                                 total_processed_tracks += 1
+                                                # Newly MAPPED, not newly created: the row the
+                                                # library just connected to the server. The
+                                                # post-scan reconcile reads exactly these.
+                                                if track_success == 'inserted':
+                                                    self._new_track_ids.add(str(track.ratingKey))
                                                 logger.debug(f"Processed new track: {track.title}")
                                         except Exception as e:
                                             logger.warning(f"Failed to process track '{getattr(track, 'title', 'Unknown')}': {e}")
@@ -1536,6 +1561,8 @@ class DatabaseUpdateWorker:
                                         # catalogue and file ownership stay import-controlled.
                                         is_existing = skip_existing_tracks and self.database.track_exists_by_server(track_id_str, self.server_type)
                                         track_success = self.database.insert_or_update_media_track(track, alb_id, art_id, server_source=self.server_type)
+                                        if track_success == 'inserted':
+                                            self._new_track_ids.add(track_id_str)
                                         if is_existing:
                                             skipped_count += 1
                                         elif track_success:

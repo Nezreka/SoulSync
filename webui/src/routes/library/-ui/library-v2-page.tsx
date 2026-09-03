@@ -18,8 +18,9 @@ import { thumb } from '@/platform/artwork-thumb';
 import { getShellBridge } from '@/platform/shell/bridge';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
-import { bitrateKbps } from '../-bitrate';
+import { bitrateKbps, formatBitrate } from '../-bitrate';
 import { albumQueueRows, artistQueueRows } from '../-library-v2.play';
+import { getServiceUrl } from '../-library-v2.service-links';
 import { ArtistVideosSection } from '../../artist-detail/-ui/artist-videos-section';
 import {
   analyzeLibraryV2TrackReplayGain,
@@ -67,6 +68,7 @@ import {
   libraryV2ImportStatusQueryOptions,
   libraryV2MirrorStatusQueryOptions,
   libraryV2QualityProfilesQueryOptions,
+  libraryV2UnmatchedQueryOptions,
   libraryV2QueueStatusQueryOptions,
   libraryV2TrackFileTagsQueryOptions,
   libraryV2TrackSourceInfoQueryOptions,
@@ -469,17 +471,22 @@ function QualityDisplay({ file }: { file: LibraryV2Track['file'] | null | undefi
       ? `${Number((file.sample_rate / 1000).toFixed(file.sample_rate % 1000 === 0 ? 0 : 1))}kHz`
       : null;
   const resolution = [bitDepth, sampleRate].filter(Boolean).join('/');
-  const kbps = showBitrate ? bitrateKbps(file.bitrate) : null;
-  const qualityBadge = [fmt, resolution || null, kbps ? `${kbps} kbps` : null]
-    .filter(Boolean)
-    .join(' · ');
+  // An Opus/AAC bitrate is an average, not a setting — printed like a CBR
+  // number it invites "this Opus is worse than that MP3", which is the
+  // opposite of what it says.
+  const rate = showBitrate
+    ? formatBitrate(file.bitrate, file.format)
+    : { label: null, title: undefined };
+  const qualityBadge = [fmt, resolution || null, rate.label].filter(Boolean).join(' · ');
 
   if (!qualityBadge) return null;
   const retention = retentionQualityInfo(file);
 
   return (
     <span className={styles.qualityDisplay}>
-      <span className={styles.qualityTag}>{qualityBadge}</span>
+      <span className={styles.qualityTag} title={rate.title}>
+        {qualityBadge}
+      </span>
       {retention ? (
         <span className={styles.retentionQualityBadge} title={retention.title}>
           {retention.label}
@@ -1104,20 +1111,41 @@ export function MatchChips({
           .filter(Boolean)
           .join(' · ');
         const tip = `${s.label}: ${s.status} (${details})`;
+        // The chip itself keeps its job — click to (re)match. The catalogue
+        // also knows WHERE this id points, and until now could do nothing with
+        // it, so a matched chip gains a separate link out to the provider's
+        // own page. Discogs album ids route through master/release; a service
+        // with no page for this entity type simply gets no link.
+        const external = s.external_id
+          ? getServiceUrl(s.service, entityType, s.external_id)
+          : null;
         return (
-          <button
-            key={s.service}
-            type="button"
-            className={`${styles.matchChip} ${abbreviated ? styles.trackMatchChip : ''} ${matchChipClass(s.status)}`}
-            title={canWrite ? tip : 'Library changes require the admin profile'}
-            data-requires-write=""
-            disabled={!canWrite || (s.legacy_entity_id == null && s.library_v2_entity_id == null)}
-            onClick={() => {
-              if (canWrite) setActive(s);
-            }}
-          >
-            <span>{abbreviated ? getServiceAbbreviation(s.service) : s.label}</span>
-          </button>
+          <span key={s.service} className={styles.matchChipGroup}>
+            <button
+              type="button"
+              className={`${styles.matchChip} ${abbreviated ? styles.trackMatchChip : ''} ${matchChipClass(s.status)}`}
+              title={canWrite ? tip : 'Library changes require the admin profile'}
+              data-requires-write=""
+              disabled={!canWrite || (s.legacy_entity_id == null && s.library_v2_entity_id == null)}
+              onClick={() => {
+                if (canWrite) setActive(s);
+              }}
+            >
+              <span>{abbreviated ? getServiceAbbreviation(s.service) : s.label}</span>
+            </button>
+            {external ? (
+              <a
+                className={styles.matchChipLink}
+                href={external}
+                target="_blank"
+                rel="noreferrer noopener"
+                title={`Open this ${entityType} on ${s.label}`}
+                aria-label={`Open this ${entityType} on ${s.label}`}
+              >
+                ↗
+              </a>
+            ) : null}
+          </span>
         );
       })}
       {active && (active.legacy_entity_id != null || active.library_v2_entity_id != null) ? (
@@ -2126,18 +2154,36 @@ export function ArtistSettingsModal({
                 ) : null}
                 {providerIds.length > 0 ? (
                   <div className={styles.artistSettingsProviderIds}>
-                    {providerIds.map(([provider, id]) => (
-                      <button
-                        type="button"
-                        key={provider}
-                        title={`Copy ${provider} ID: ${id}`}
-                        onClick={() => void navigator.clipboard?.writeText(id)}
-                      >
-                        <strong>{provider}</strong>
-                        <span>{id}</span>
-                        <small>Copy</small>
-                      </button>
-                    ))}
+                    {providerIds.map(([provider, id]) => {
+                      // The catalogue knows the id; until now the only thing
+                      // the page could do with it was copy it. A service with
+                      // no artist page (Amazon) keeps the copy button.
+                      const url = getServiceUrl(provider, 'artist', id);
+                      return url ? (
+                        <a
+                          key={provider}
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          title={`Open on ${provider}: ${id}`}
+                        >
+                          <strong>{provider}</strong>
+                          <span>{id}</span>
+                          <small>Open</small>
+                        </a>
+                      ) : (
+                        <button
+                          type="button"
+                          key={provider}
+                          title={`Copy ${provider} ID: ${id}`}
+                          onClick={() => void navigator.clipboard?.writeText(id)}
+                        >
+                          <strong>{provider}</strong>
+                          <span>{id}</span>
+                          <small>Copy</small>
+                        </button>
+                      );
+                    })}
                   </div>
                 ) : null}
                 <ArtistMatchChips artist={artist} watchlistRowId={draft.watchlist_row_id} />
@@ -3490,8 +3536,8 @@ export function ManageTracksDuplicatesTab({ artistId }: { artistId: number }) {
   function fileText(side: { file: { format: string | null; bitrate: number | null } | null }) {
     if (!side.file) return 'no file';
     const fmt = (side.file.format ?? '').toUpperCase();
-    const kbps = bitrateKbps(side.file.bitrate);
-    return [fmt, kbps ? `${kbps} kbps` : null].filter(Boolean).join(' / ') || 'file';
+    const rate = formatBitrate(side.file.bitrate, side.file.format);
+    return [fmt, rate.label].filter(Boolean).join(' / ') || 'file';
   }
 
   return (
@@ -3667,9 +3713,10 @@ export function ArtistFilesTab({ artistId }: { artistId: number }) {
       parts.push(`${f.bit_depth}/${Math.round(f.sample_rate / 1000)}kHz`);
     }
     // bitrate is stored inconsistently (bps for some sources, already kbps
-    // for others) — same heuristic as QualityDisplay/fileText elsewhere.
-    const kbps = bitrateKbps(f.bitrate);
-    if (kbps) parts.push(`${kbps}kbps`);
+    // for others) — same heuristic as QualityDisplay/fileText elsewhere, and
+    // the same `~` on a codec whose number is an average.
+    const rate = formatBitrate(f.bitrate, f.format);
+    if (rate.label) parts.push(rate.label.replace(' kbps', 'kbps'));
     return parts.filter(Boolean).join(' · ') || '—';
   }
 
@@ -4256,6 +4303,56 @@ export function MirrorStatusBanner() {
 
 // --- artist overview ---------------------------------------------------------
 
+/**
+ * The "you have tracks nobody could identify" strip (#1202).
+ *
+ * A file that imports with unreadable tags gets parked under a made-up
+ * "Unknown Artist" as its own one-track album. Re-identify could always re-file
+ * it, but it lives on an artist page, which is the last place you would look
+ * for a track whose missing field IS the artist. So the library says so out
+ * loud and links straight there.
+ *
+ * Renders nothing at all when the count is 0 or the query failed. A banner that
+ * says "0 tracks" or "could not load" is worse than no banner.
+ *
+ * The link goes to the Library-v2 artist view (`?artist=<id>`), not upstream's
+ * `/artist-detail/library/<id>` — that page does not exist on this branch, and
+ * the id it would carry is a v2 id either way.
+ */
+function UnmatchedImportsBanner() {
+  const navigate = useNavigate();
+  const { data } = useQuery({ ...libraryV2UnmatchedQueryOptions(), retry: false });
+  const count = data?.count ?? 0;
+  if (count <= 0 || !data?.artist_id) return null;
+  const artistId = data.artist_id;
+
+  return (
+    <div className="library-unmatched-banner" role="status">
+      <span className="library-unmatched-icon" aria-hidden="true">
+        ?
+      </span>
+      <div className="library-unmatched-text">
+        <strong>
+          {count} {count === 1 ? 'track' : 'tracks'} imported without a match
+        </strong>
+        <span>
+          Their tags could not be read, so they are filed under Unknown Artist instead of the
+          album they belong to. Open the artist and use Re-identify on a track to put it back.
+        </span>
+      </div>
+      <button
+        type="button"
+        className="library-unmatched-btn"
+        onClick={() =>
+          void navigate({ search: (prev) => ({ ...prev, artist: artistId, page: 1 }) })
+        }
+      >
+        Show them
+      </button>
+    </div>
+  );
+}
+
 function ArtistIndexView() {
   const search = Route.useSearch();
   const navigate = useNavigate();
@@ -4338,6 +4435,8 @@ function ArtistIndexView() {
           <ImportButton hasArtists={artists.length > 0} />
         </div>
       </header>
+
+      <UnmatchedImportsBanner />
 
       <div className={styles.toolbar}>
         <LibrarySectionTabs />
@@ -5885,12 +5984,51 @@ function LegacyArtistHero({
   onPickImage?: () => void;
 }) {
   const [expandedBio, setExpandedBio] = useState(false);
+  const bioRef = useRef<HTMLDivElement | null>(null);
+  /** Has the bio been MEASURED to fit inside the collapsed box? Starts false,
+   *  so an unmeasurable environment offers the toggle rather than hiding a
+   *  reader's only way into a truncated bio. */
+  const [bioFits, setBioFits] = useState(false);
   // Legacy shipped the bio as raw HTML with Last.fm's trailing link; strip the
   // markup rather than render it — an artist bio is not a trusted template.
   const cleanBio = (bio ?? '')
     .replace(/<a\b[^>]*>.*?<\/a>/gi, '')
     .replace(/<[^>]+>/g, '')
     .trim();
+
+  /**
+   * Measure the collapsed bio so the toggle only offers what it can deliver.
+   *
+   * Re-measured on bio change AND on resize: the box is a fixed height but its
+   * WIDTH is fluid, so the same text wraps to more lines in a narrow column and
+   * a bio that fit at 1920 overflows on a laptop.
+   */
+  useEffect(() => {
+    const el = bioRef.current;
+    if (!el || !cleanBio) {
+      setBioFits(false);
+      return;
+    }
+    const measure = () => {
+      const node = bioRef.current;
+      if (!node) return;
+      // Measure the COLLAPSED height — while expanded the box grew to fit, so
+      // scrollHeight equals clientHeight and would report "it fits", then hide
+      // the Show less button the reader needs to get back.
+      const wasExpanded = node.classList.contains('expanded');
+      if (wasExpanded) node.classList.remove('expanded');
+      const { scrollHeight, clientHeight } = node;
+      if (wasExpanded) node.classList.add('expanded');
+      // An environment that cannot measure reports 0/0 — that is "unknown",
+      // never "it fits".
+      setBioFits(clientHeight > 0 && scrollHeight - clientHeight <= 4);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [cleanBio]);
   return (
     <div className="artist-hero-section">
       <div className="artist-hero-content">
@@ -5922,17 +6060,22 @@ function LegacyArtistHero({
             <div className="artist-genres-container">{genres.join(', ')}</div>
           ) : null}
           {cleanBio ? (
-            <div className={`artist-hero-bio${expandedBio ? ' expanded' : ''}`}>
+            <div
+              ref={bioRef}
+              className={`artist-hero-bio${expandedBio ? ' expanded' : ''}`}
+            >
               <span className="bio-text">{cleanBio}</span>
-              <span
-                className="artist-hero-bio-toggle"
-                onClick={() => setExpandedBio((v) => !v)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => e.key === 'Enter' && setExpandedBio((v) => !v)}
-              >
-                {expandedBio ? 'Show less' : 'Read more'}
-              </span>
+              {bioFits ? null : (
+                <span
+                  className="artist-hero-bio-toggle"
+                  onClick={() => setExpandedBio((v) => !v)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => e.key === 'Enter' && setExpandedBio((v) => !v)}
+                >
+                  {expandedBio ? 'Show less' : 'Read more'}
+                </span>
+              )}
             </div>
           ) : null}
           {listeners || playcount || followers ? (

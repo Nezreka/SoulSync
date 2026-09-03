@@ -8844,6 +8844,60 @@ def _reconcile_library_tracks(conn, track_ids=None, on_progress=None, should_sto
                              server_source=server_source)
 
 
+def _reconcile_after_scan(worker):
+    """Gap-fill embedded provider IDs for the tracks a scan newly mapped.
+
+    Runs as the FINAL phase of a library scan/deep-scan, before the `finished`
+    signal, so the whole thing reads as one running scan. Scoped to
+    `worker._new_track_ids` — the SERVER ids of the songs this run connected to
+    the catalogue for the first time. Files land with empty provider-id
+    columns, so reading their tags here keeps new music current without anyone
+    pressing the backfill button.
+
+    The ledger holds server ids, not catalogue ids, which is why
+    `server_source` goes with it: the reconcile resolves them through
+    `lib2_media_server_mappings`. Passing them bare would look up catalogue
+    rows by number and quietly reconcile the wrong tracks.
+
+    Best-effort throughout: it never raises into the scan flow.
+    """
+    try:
+        new_ids = list(getattr(worker, '_new_track_ids', None) or [])
+        if not new_ids:
+            return
+        n = len(new_ids)
+        try:
+            _db_update_phase_callback(
+                f"Reading file tags for {n} new track{'s' if n != 1 else ''}…")
+        except Exception:  # noqa: S110 — best-effort UI phase, never block the reconcile
+            pass
+
+        def _on_progress(totals, title):
+            try:
+                pct = (totals.processed / totals.total * 100) if totals.total else 100
+                _db_update_progress_callback(title, totals.processed, totals.total, pct)
+            except Exception:  # noqa: S110 — best-effort UI progress tick
+                pass
+
+        database = get_database()
+        conn = database._get_connection()
+        try:
+            totals = _reconcile_library_tracks(
+                conn, track_ids=new_ids, on_progress=_on_progress,
+                should_stop=lambda: bool(getattr(worker, 'should_stop', False)),
+                server_source=getattr(worker, 'server_type', None))
+            logger.info(
+                "[Reconcile] Post-scan: filled %d id(s) across %d row(s) from %d newly "
+                "mapped track(s) (%d unreadable, %d conflicts)",
+                totals.ids_filled, totals.entities_updated, totals.processed,
+                totals.unreadable, totals.conflicts,
+            )
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("[Reconcile] Post-scan reconcile failed (non-fatal): %s", e)
+
+
 _reconcile_ids_state = {
     'status': 'idle',          # idle | running | done
     'total': 0,
@@ -20890,12 +20944,7 @@ _cfg_dba(
     SOULSYNC_VERSION=SOULSYNC_VERSION,
     automation_engine=automation_engine,
     _automatic_wishlist_cleanup_after_db_update=_automatic_wishlist_cleanup_after_db_update,
-    # No scan hook here. Upstream's _reconcile_after_scan gap-fills embedded
-    # provider ids for rows a scan INSERTED, scoped by worker._new_track_ids
-    # against the legacy `tracks` table. This branch's scan writes lib2, never
-    # fills that set, and its worker has no post_scan_hook call - wiring the
-    # legacy version would be a no-op that reads as a working feature.
-    _reconcile_after_scan=None,
+    _reconcile_after_scan=_reconcile_after_scan,
     _update_automation_progress=_update_automation_progress,
     _amazon_worker=lambda: amazon_worker,
     _audiodb_worker=lambda: audiodb_worker,

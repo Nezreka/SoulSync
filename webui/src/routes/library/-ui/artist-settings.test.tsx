@@ -49,7 +49,7 @@ const settings = {
   watchlist_row_id: 11,
   watchlist_name: 'Drake',
   watchlist_image_url: 'https://img/drake.jpg',
-  provider_ids: { spotify: 'sp-drake', deezer: '246791' },
+  provider_ids: { spotify: 'sp-drake', deezer: '246791', amazon: 'B01' },
   monitor_new_items: 'all' as const,
   include_albums: true,
   include_eps: true,
@@ -146,7 +146,12 @@ describe('Library v2 Artist Settings', () => {
     renderModal();
 
     expect(await screen.findByText('Watchlist identity')).toBeInTheDocument();
-    expect(screen.getByTitle('Copy spotify ID: sp-drake')).toBeInTheDocument();
+    // A provider id the catalogue can turn into a page is a link now, not
+    // just something to copy into a browser bar by hand.
+    const spotify = screen.getByTitle('Open on spotify: sp-drake');
+    expect(spotify).toHaveAttribute('href', 'https://open.spotify.com/artist/sp-drake');
+    // Amazon has no artist page, so that one keeps the copy button.
+    expect(screen.getByTitle('Copy amazon ID: B01')).toBeInTheDocument();
     expect(await screen.findByText(/Effective: Lossless/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('checkbox', { name: /Auto-download new releases/ }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Singles' }));

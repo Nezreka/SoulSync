@@ -3106,6 +3106,35 @@ button.statusWarn:disabled {
   margin-top: 6px;
 }
 
+/* A chip and its "open on the provider" link travel together: the chip stays
+   the (re)match button it has always been, the arrow is a separate target. */
+.matchChipGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.matchChipLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 3px;
+  border-radius: 5px;
+  text-decoration: none;
+  color: var(--text-muted, #9aa0a6);
+  opacity: 0.65;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.matchChipLink:hover,
+.matchChipLink:focus-visible {
+  opacity: 1;
+  color: var(--text-primary, #e8eaed);
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .matchChip {
   display: inline-flex;
   align-items: center;

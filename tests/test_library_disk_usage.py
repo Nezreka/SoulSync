@@ -242,7 +242,12 @@ def test_insert_or_update_media_track_persists_size_for_object_with_file_size(db
     ).fetchone()[0]
     conn.close()
     assert row[0] == 42_000_000
-    assert result == 'updated' and history == 0
+    # 'inserted' = the run created the server MAPPING, not a catalogue row —
+    # nothing here creates tracks. This is the first sight of this server id,
+    # so the post-scan reconcile will read its tags
+    # (tests/test_post_scan_reconcile_v2.py). What this test cares about is
+    # that the write succeeded and imported nothing.
+    assert result == 'inserted' and history == 0
 
 
 def test_insert_or_update_media_track_preserves_size_on_null_re_sync(db: MusicDatabase) -> None:
