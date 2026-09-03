@@ -3470,6 +3470,56 @@ class VideoDatabase:
     # is showing what TMDB knew last time anyone asked.
     SCHEDULE_STALE_DAYS = 7
 
+    def source_health_snapshot(self, days: int = 7) -> dict:
+        """What each download source actually DID lately, read off the receipts
+        every wishlist search already stores.
+
+        Deliberately no network. Health is collected on a dashboard load, and a
+        live probe of a source that is down is exactly the case that hangs the
+        page — Boulder's slskd port has been closed for weeks. The stored
+        per-source outcome is better evidence anyway: it says what happened when
+        the source was really asked, not whether a socket opens.
+
+        ``{source: {searches, ran, results, accepted, reason}}`` where ``ran`` is
+        how many of those searches the source could even perform. A source that
+        never ran is not "finding nothing" — it is not working, and the two must
+        never read the same.
+        """
+        out: dict = {}
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT search_snapshot FROM video_wishlist "
+                "WHERE search_snapshot IS NOT NULL AND last_search_at IS NOT NULL "
+                "AND last_search_at >= datetime('now', ?)",
+                ("-%d days" % max(1, int(days)),)).fetchall()
+        except sqlite3.Error:
+            logger.exception("source_health_snapshot failed")
+            return out
+        finally:
+            conn.close()
+
+        for r in rows:
+            try:
+                snap = json.loads(r["search_snapshot"] or "{}")
+            except (TypeError, ValueError):
+                continue
+            for src, o in (snap.get("sources") or {}).items():
+                if not isinstance(o, dict):
+                    continue
+                cur = out.setdefault(str(src), {"searches": 0, "ran": 0, "results": 0,
+                                                "accepted": 0, "reason": None})
+                cur["searches"] += 1
+                if o.get("ran"):
+                    cur["ran"] += 1
+                    cur["results"] += int(o.get("results") or 0)
+                    cur["accepted"] += int(o.get("accepted") or 0)
+                elif not cur["reason"]:
+                    # Keep the first reason a source gave for not running; they
+                    # repeat, and one is enough to act on.
+                    cur["reason"] = o.get("reason")
+        return out
+
     def calendar_schedule_freshness(self) -> dict:
         """When the airing schedules were last refreshed, and whether that is
         long enough ago to distrust the calendar.

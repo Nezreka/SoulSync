@@ -244,3 +244,93 @@ def test_hidden_strip_takes_no_space():
     css = (_ROOT / "webui" / "static" / "video" / "video-side.css").read_text(encoding="utf-8")
     assert ".vdash-health[hidden] { display: none; }" in css
     assert ".vdash-health-chip--ok" in css
+
+
+# ── per-source health, read off the receipts each search already leaves ───────
+def _snap(db, tmdb, sources, days_ago=0):
+    """One wishlist row carrying a per-source search snapshot.
+
+    days_ago rides as a datetime MODIFIER, not as the whole time string: bound
+    as the latter, sqlite returns NULL and the row then falls out of the window
+    for being null rather than for being old, which makes the staleness test
+    pass without testing staleness.
+    """
+    import json as _json
+    conn = db._get_connection()
+    conn.execute("INSERT INTO video_wishlist (kind, tmdb_id, title, status, "
+                 "last_search_at, search_snapshot) "
+                 "VALUES ('movie', ?, 'X', 'wanted', datetime('now', ?), ?)",
+                 (tmdb, "-%d days" % int(days_ago),
+                  _json.dumps({"chain": list(sources), "sources": sources})))
+    conn.commit()
+    stored = conn.execute("SELECT last_search_at FROM video_wishlist WHERE tmdb_id=?",
+                          (tmdb,)).fetchone()[0]
+    conn.close()
+    assert stored, "the fixture wrote a NULL timestamp; the window test would be hollow"
+
+
+def _src_check(h, src):
+    return next((c for c in h["checks"] if c["id"] == "source_" + src), None)
+
+
+def test_a_source_that_cannot_run_is_an_error_not_an_empty_result(db):
+    """The distinction the whole check exists for. A closed slskd port used to
+    read as 'nothing on Soulseek has what you want' - for weeks."""
+    for i in range(3):
+        _snap(db, 100 + i, {"soulseek": {"ran": False, "results": 0, "accepted": 0,
+                                         "reason": "slskd is unreachable"}})
+    c = _src_check(collect(db), "soulseek")
+    assert c and c["status"] == "error"
+    assert "couldn't run" in c["detail"] and "slskd is unreachable" in c["detail"]
+
+
+def test_a_source_that_ran_and_found_nothing_is_only_a_warning(db):
+    """It is working. Worth saying - an indexer set returning nothing for a week
+    is misconfigured more often than unlucky - but it is not broken."""
+    for i in range(3):
+        _snap(db, 200 + i, {"torrent": {"ran": True, "results": 0, "accepted": 0}})
+    c = _src_check(collect(db), "torrent")
+    assert c and c["status"] == "warning"
+    assert "no releases at all" in c["detail"]
+
+
+def test_a_healthy_source_says_what_it_actually_delivered(db):
+    for i in range(2):
+        _snap(db, 300 + i, {"torrent": {"ran": True, "results": 7, "accepted": 2}})
+    c = _src_check(collect(db), "torrent")
+    assert c and c["status"] == "ok"
+    assert "14 releases" in c["detail"] and "4 passed" in c["detail"]
+
+
+def test_a_source_that_ran_only_sometimes_is_flagged_as_partial(db):
+    _snap(db, 400, {"usenet": {"ran": True, "results": 3, "accepted": 1}})
+    _snap(db, 401, {"usenet": {"ran": False, "results": 0, "accepted": 0,
+                               "reason": "no usenet client configured"}})
+    c = _src_check(collect(db), "usenet")
+    assert c and c["status"] == "warning"
+    assert "ran 1 of the last 2" in c["detail"]
+
+
+def test_an_untried_source_is_not_reported_at_all(db):
+    """A green tile for a source nobody has used would be a claim we cannot make."""
+    _snap(db, 500, {"torrent": {"ran": True, "results": 1, "accepted": 1}})
+    h = collect(db)
+    assert _src_check(h, "torrent") is not None
+    assert _src_check(h, "soulseek") is None
+    assert _src_check(h, "usenet") is None
+
+
+def test_stale_snapshots_fall_out_of_the_window(db):
+    """A source that was down a month ago is not down now."""
+    _snap(db, 600, {"soulseek": {"ran": False, "results": 0, "reason": "down"}},
+          days_ago=30)
+    assert _src_check(collect(db), "soulseek") is None
+
+
+def test_unreadable_snapshots_never_break_health(db):
+    conn = db._get_connection()
+    conn.execute("INSERT INTO video_wishlist (kind, tmdb_id, title, status, "
+                 "last_search_at, search_snapshot) "
+                 "VALUES ('movie', 700, 'X', 'wanted', datetime('now'), 'not json')")
+    conn.commit(); conn.close()
+    assert isinstance(collect(db)["checks"], list)

@@ -131,6 +131,62 @@ def _youtube_health_check(db, settings: dict) -> dict:
     return _check("youtube_health", "YouTube", status, "; ".join(bits))
 
 
+# What each source is called in a snapshot, and how to say it out loud.
+_SOURCE_LABELS = {
+    "torrent": "Torrent indexers (Prowlarr / EXT.to)",
+    "usenet": "Usenet",
+    "soulseek": "Soulseek (slskd)",
+}
+
+
+def _source_health_checks(db) -> list:
+    """One check per download source that has actually been used lately.
+
+    The distinction that matters: a source that could not RUN is broken, and a
+    source that ran and found nothing is working. Those used to look identical
+    from the outside - "no results" - which is how a closed slskd port reads as
+    "nothing on Soulseek has what you want" for weeks.
+
+    Sources with no recent searches are omitted rather than reported healthy: an
+    untried source has told us nothing, and a green tile for one would be a
+    claim we cannot make.
+    """
+    out = []
+    try:
+        snap = db.source_health_snapshot(days=7) or {}
+    except Exception:   # noqa: BLE001 - health must never 500 over one probe
+        logger.debug("source health probe failed", exc_info=True)
+        return out
+
+    for src, s in sorted(snap.items()):
+        label = _SOURCE_LABELS.get(src, src.title())
+        # A source is only in the snapshot because it was searched, so there is
+        # no zero case to guard: an untried source simply is not here, which is
+        # the point - a green tile for one would be a claim we cannot make.
+        searches = int(s.get("searches") or 0)
+        ran = int(s.get("ran") or 0)
+        cid = "source_" + src
+        if ran == 0:
+            reason = s.get("reason") or "the search could not run"
+            out.append(_check(cid, label, "error",
+                              "couldn't run any of the last %d searches - %s" % (searches, reason)))
+        elif ran < searches:
+            reason = s.get("reason") or "the search could not run"
+            out.append(_check(cid, label, "warning",
+                              "ran %d of the last %d searches - %s" % (ran, searches, reason)))
+        elif not s.get("results"):
+            # It ran every time and found nothing. Not broken, but worth saying:
+            # an indexer set that returns nothing for a week is misconfigured
+            # more often than it is unlucky.
+            out.append(_check(cid, label, "warning",
+                              "ran %d searches and returned no releases at all" % ran))
+        else:
+            out.append(_check(cid, label, "ok",
+                              "%d releases across %d searches, %d passed your quality profile"
+                              % (s.get("results") or 0, ran, s.get("accepted") or 0)))
+    return out
+
+
 def collect(db) -> dict:
     """{status, checks: [...]} — every check always present, worst-first sort."""
     checks = []
@@ -193,6 +249,11 @@ def collect(db) -> dict:
     # 5) YouTube readiness: always visible, because an OK tile tells users which
     # moving parts are healthy before they start chasing a failed channel/video.
     checks.append(_youtube_health_check(db, settings))
+
+    # 6) the other download sources, read off the receipts each search already
+    # leaves. No probing: health runs on a dashboard load and pinging a source
+    # that is down is the exact case that hangs the page.
+    checks.extend(_source_health_checks(db))
 
     order = {"error": 0, "warning": 1, "ok": 2}
     checks.sort(key=lambda c: order.get(c["status"], 3))
