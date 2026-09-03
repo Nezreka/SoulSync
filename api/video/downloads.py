@@ -970,21 +970,10 @@ def register_routes(bp):
         else:
             raw = mock_search(scope, title, year=body.get("year"), season=want_season,
                               episode=want_episode, season_end=season_end, source=source)
-        results = _evaluate_hits(raw, profile, scope, want_season, want_episode,
-                                 want_year=body.get("year"),
-                                 want_title=body.get("title"))
-        # An EXT.to hit inside a torrent search has to say so, exactly as the
-        # wishlist drain tags them. The grab endpoint keys the magnet resolution
-        # off source='extto': these rows carry an info_url and NO download_url
-        # (resolving 25 magnets to draw a list would take minutes), so one
-        # arriving labelled 'torrent' hits the "Missing the release's download
-        # URL" guard and the user sees a bare "grab failed".
-        for r in results:
-            if str(r.get("indexer_id") or "").lower() == "extto":
-                r["source"] = "extto"
-            elif source in ("torrent", "usenet", "soulseek"):
-                r["source"] = source
-        payload = {"scope": scope, "live": live, "queries": queries, "results": results}
+        payload = {"scope": scope, "live": live, "queries": queries,
+                   "results": _evaluate_hits(raw, profile, scope, want_season, want_episode,
+                                             want_year=body.get("year"),
+                                             want_title=body.get("title"))}
         # One half of the lane was down but the other answered: show the results
         # AND say what is missing, rather than silently returning a short list.
         if partial_note:
