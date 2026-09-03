@@ -1506,13 +1506,13 @@ const HELPER_CONTENT = {
 
     // View Toggle
     '.enhanced-view-toggle-btn[data-view="standard"]': {
-        title: 'Standard View',
-        description: 'Card grid view of releases. Click any card to open the download modal.',
+        title: 'Discography',
+        description: 'Every release your metadata sources say this artist put out, owned or not. Click any card to open the download modal.',
         docsId: 'lib-standard'
     },
     '.enhanced-view-toggle-btn[data-view="enhanced"]': {
-        title: 'Enhanced View',
-        description: 'Advanced management mode with accordion layout, inline editing, tag writing, and bulk operations. Admin-only feature.',
+        title: 'Your library',
+        description: 'Only what you actually own by this artist, with inline editing, tag writing and bulk operations. Admin-only, and absent entirely for an artist you own nothing by.',
         tips: [
             'Expand albums to see track tables with editable fields',
             'Select tracks across albums for batch operations',

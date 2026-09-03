@@ -160,21 +160,30 @@ export function DiscographyFilters({
           <div className="filter-divider" />
           <div className="filter-group">
             <span className="filter-label">View</span>
+            {/* "Standard" and "Enhanced" described how much UI you got, not what
+                you were looking at. They are two different SOURCES: the releases
+                a metadata provider says this artist put out, versus the ones
+                sitting in your library. A source-only artist has no library
+                record and so has no second view at all, which is the giveaway.
+                data-view keeps its old values - style.css and helper.js select
+                on them, and renaming them would only move the confusion. */}
             <button
               type="button"
               className={`enhanced-view-toggle-btn${enhanced ? '' : ' active'}`}
               data-view="standard"
+              title="Everything this artist released, from your metadata sources"
               onClick={() => onToggleEnhanced(false)}
             >
-              Standard
+              Discography
             </button>
             <button
               type="button"
               className={`enhanced-view-toggle-btn${enhanced ? ' active' : ''}`}
               data-view="enhanced"
+              title="What you actually own, with tags, quality and bulk editing"
               onClick={() => onToggleEnhanced(true)}
             >
-              Enhanced
+              Your library
             </button>
           </div>
         </>
