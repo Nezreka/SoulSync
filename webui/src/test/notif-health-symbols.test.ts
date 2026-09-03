@@ -18,7 +18,10 @@ import { extractFunction } from './vanilla-extract';
  */
 
 const JS = readFileSync(resolve(process.cwd(), 'static/downloads.js'), 'utf8');
-const CSS = readFileSync(resolve(process.cwd(), 'static/video/video-side.css'), 'utf8');
+// The notification panel is shared chrome, so its styles live with the panel
+// in style.css rather than in the video side's stylesheet.
+const CSS = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
+const VIDEO_CSS = readFileSync(resolve(process.cwd(), 'static/video/video-side.css'), 'utf8');
 const DASH = readFileSync(resolve(process.cwd(), 'static/video/video-dashboard.js'), 'utf8');
 const HTML = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
 
@@ -114,7 +117,13 @@ describe('the dashboard no longer carries it', () => {
     // Dead code that looks like a feature is worse than no code.
     expect(DASH).not.toContain('loadHealth');
     expect(HTML).not.toContain('data-vdash-health');
-    expect(CSS).not.toContain('.vdash-health-chip');
+    expect(VIDEO_CSS).not.toContain('.vdash-health-chip');
+  });
+
+  it('keeps shared chrome out of the video stylesheet', () => {
+    // The panel shows on every page. Styling it from video-side.css leaves the
+    // fix depending on which stylesheets a given page happens to load.
+    expect(VIDEO_CSS).not.toContain('.notif-health');
   });
 
   it('styles everything the new UI emits', () => {

@@ -232,18 +232,30 @@ def test_endpoint_and_dashboard_strip(db, tmp_path):
         assert any(c["id"] == "youtube_health" for c in body["checks"])
     finally:
         videoapi._video_db = None
-    assert "data-vdash-health" in _INDEX
-    assert "function loadHealth" in _DASH_JS and "loadHealth();" in _DASH_JS
-    assert "ok: '✓'" in _DASH_JS
+    # The UI moved off the dashboard into the notification panel header: health
+    # is a STATE, and it was spending a block of the page saying things were fine.
+    dl = (_ROOT / "webui" / "static" / "downloads.js").read_text(encoding="utf-8")
+    assert "_notifHealthHTML" in dl and "data-notif-health" in dl
+    assert "_openHealthModal" in dl
 
 
-def test_hidden_strip_takes_no_space():
-    """The strip's class rule sets display:flex, which overrides the [hidden]
-    attribute's UA display:none — without an explicit [hidden] rule an empty
-    healthy strip leaves a visible gap + margin above the header."""
+def test_the_old_dashboard_strip_is_gone_not_just_hidden():
+    """Dead code that looks like a feature is worse than no code: a hidden strip
+    still renders on the next person to call its loader."""
+    assert "data-vdash-health" not in _INDEX
+    assert "loadHealth" not in _DASH_JS
     css = (_ROOT / "webui" / "static" / "video" / "video-side.css").read_text(encoding="utf-8")
-    assert ".vdash-health[hidden] { display: none; }" in css
-    assert ".vdash-health-chip--ok" in css
+    assert ".vdash-health" not in css
+
+
+def test_the_panel_styles_live_with_the_panel():
+    """The notification panel is shared chrome shown on every page. Styling it
+    from the video stylesheet leaves the rules depending on which sheets a given
+    page happens to load."""
+    shared = (_ROOT / "webui" / "static" / "style.css").read_text(encoding="utf-8")
+    video = (_ROOT / "webui" / "static" / "video" / "video-side.css").read_text(encoding="utf-8")
+    assert ".notif-health-btn" in shared and ".notif-health-row" in shared
+    assert ".notif-health" not in video
 
 
 # ── per-source health, read off the receipts each search already leaves ───────
@@ -334,3 +346,30 @@ def test_unreadable_snapshots_never_break_health(db):
                  "VALUES ('movie', 700, 'X', 'wanted', datetime('now'), 'not json')")
     conn.commit(); conn.close()
     assert isinstance(collect(db)["checks"], list)
+
+
+def test_a_source_that_finds_everything_and_grabs_nothing_is_not_healthy(db):
+    """Live on Boulder's install the hour the check shipped: Prowlarr returned
+    180 releases across 13 searches and NONE passed his quality profile - and the
+    tile said green tick, working fine. The source IS working; the profile is
+    turning down everything it finds, and a green tick there is the most
+    misleading thing on the page."""
+    for i in range(3):
+        _snap(db, 800 + i, {"torrent": {"ran": True, "results": 60, "accepted": 0}})
+    c = _src_check(collect(db), "torrent")
+    assert c and c["status"] == "warning"
+    assert "180 releases" in c["detail"]
+    # It must NOT name a cause. On the live install four of six such rows were a
+    # MATCHING miss ("none were this release" - the profile never judged them)
+    # and only two were a tier being turned down. Guessing between those sends
+    # the user to change the wrong setting.
+    assert "may be too strict" not in c["detail"]
+    assert "none were grabbed" in c["detail"]
+
+
+def test_one_accepted_release_is_enough_to_be_healthy(db):
+    """The warning is for NOTHING getting through, not for a low pass rate - a
+    strict profile that still lands something is doing its job."""
+    _snap(db, 900, {"torrent": {"ran": True, "results": 60, "accepted": 1}})
+    c = _src_check(collect(db), "torrent")
+    assert c and c["status"] == "ok"

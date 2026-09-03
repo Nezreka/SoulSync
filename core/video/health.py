@@ -180,6 +180,19 @@ def _source_health_checks(db) -> list:
             # more often than it is unlucky.
             out.append(_check(cid, label, "warning",
                               "ran %d searches and returned no releases at all" % ran))
+        elif not s.get("accepted"):
+            # The source works and nothing it returns is being grabbed. Reported
+            # healthy this is the most misleading tile on the page - 180 found, 0
+            # grabbed, green tick - so it warns. It deliberately does NOT name a
+            # cause: on Boulder's install four of six rows read "none were this
+            # release" (a MATCHING miss, where the profile never judged anything)
+            # and only two were the profile turning down a tier. Guessing between
+            # those sends the user to change the wrong setting.
+            out.append(_check(cid, label, "warning",
+                              "found %d releases across %d searches but none were grabbed - "
+                              "check the per-row reasons on the wishlist for whether they "
+                              "were the wrong release or turned down by your quality profile"
+                              % (s.get("results") or 0, ran)))
         else:
             out.append(_check(cid, label, "ok",
                               "%d releases across %d searches, %d passed your quality profile"
