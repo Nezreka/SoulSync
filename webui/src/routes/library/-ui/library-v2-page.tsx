@@ -19,6 +19,8 @@ import { getShellBridge } from '@/platform/shell/bridge';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
 import { bitrateKbps } from '../-bitrate';
+import { albumQueueRows, artistQueueRows } from '../-library-v2.play';
+import { ArtistVideosSection } from '../../artist-detail/-ui/artist-videos-section';
 import {
   analyzeLibraryV2TrackReplayGain,
   blacklistLibraryV2Source,
@@ -6308,6 +6310,7 @@ function CatalogueArtistHero({
       coverage={matchStatus.data?.enrichmentCoverage}
       actions={
         <>
+          <ArtistPlayButton artistId={artist.id} artistName={artist.name} />
           <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} />
           {artist.monitored ? (
             <IconActionButton
@@ -6833,6 +6836,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               />
             </>
           )}
+          {/* The music-video shelf came in with upstream 26698e4b2, whose only
+              mount was the legacy artist-detail page this branch deleted — it
+              shipped unreachable. It belongs under the releases, the same place
+              upstream put it. */}
+          <ArtistVideosSection artistName={artist.name} />
           {modalAction && INTERACTIVE_RE.test(modalAction.action) ? (
             <InteractiveSearchModal
               initialQuery={buildSearchQuery(artist.name, modalAction.action, modalAction.entity)}
@@ -7299,6 +7307,12 @@ function AlbumBlock({
           </span>
         )}
         <span className={styles.albumActions}>
+          <AlbumPlayButton
+            albumId={album.id}
+            albumTitle={album.title}
+            artistName={artistName}
+            tracksPresent={album.tracks_present}
+          />
           <IconActionButton
             icon="automatic"
             title="Automatic Search — search missing/upgradable tracks on this album"
@@ -9782,6 +9796,117 @@ export function TrackPlayButton({
           albumTitle,
           artistName,
         );
+      }}
+    />
+  );
+}
+
+/** Pages of 100 track-files the artist play button will pull before it stops.
+ *  A queue is something you listen to, not an export. */
+const ARTIST_PLAY_MAX_PAGES = 10;
+
+/** Play a whole album, the same way TrackPlayButton plays one row: through the
+ *  shared Legacy player, not a second one.
+ *
+ *  The tracks are fetched on click rather than held: an artist page renders
+ *  every album block, and pre-loading each one's tracklist to grey out a button
+ *  would be dozens of requests for a button most visits never press. The album
+ *  summary already says whether anything is playable (`tracks_present`). */
+export function AlbumPlayButton({
+  albumId,
+  albumTitle,
+  artistName,
+  tracksPresent,
+}: {
+  albumId: number;
+  albumTitle: string;
+  artistName: string;
+  tracksPresent: number;
+}) {
+  const queryClient = useQueryClient();
+  const [pending, setPending] = useState(false);
+  const canPlay = tracksPresent > 0;
+  return (
+    <IconActionButton
+      icon="play"
+      title={canPlay ? `Play ${albumTitle}` : 'No files in the library for this release'}
+      disabled={!canPlay || pending}
+      onClick={() => {
+        if (!canPlay || pending) return;
+        setPending(true);
+        void (async () => {
+          try {
+            const album = await queryClient.fetchQuery(libraryV2AlbumQueryOptions(albumId));
+            const rows = albumQueueRows(album, artistName);
+            if (!rows.length) {
+              window.showToast?.('Nothing on this release is on disk yet', 'info');
+              return;
+            }
+            await window.playTrackList?.(rows, albumTitle || 'Album');
+          } catch (error) {
+            window.showToast?.(
+              mutationErrorMessage(error, `Could not play ${albumTitle}`),
+              'error',
+            );
+          } finally {
+            setPending(false);
+          }
+        })();
+      }}
+    />
+  );
+}
+
+/** Play everything the artist owns, album by album.
+ *
+ *  Reads the flat track-file list the Files tab uses rather than walking each
+ *  album: one request instead of one per release. It is paginated, so this
+ *  caps at the first pages — a queue is something you listen to, not an
+ *  export, and an unbounded fetch on a 900-album artist would stall the click. */
+export function ArtistPlayButton({
+  artistId,
+  artistName,
+}: {
+  artistId: number;
+  artistName: string;
+}) {
+  const [pending, setPending] = useState(false);
+  return (
+    <ActionButton
+      icon="play"
+      label={pending ? 'Loading…' : 'Play'}
+      title={`Play everything by ${artistName}`}
+      busy={pending}
+      // Playing is not a write: a read-only profile may listen to the library.
+      requiresWrite={false}
+      onClick={() => {
+        if (pending) return;
+        setPending(true);
+        void (async () => {
+          try {
+            const collected: Awaited<
+              ReturnType<typeof fetchLibraryV2ArtistTrackFiles>
+            >['files'] = [];
+            for (let page = 1; page <= ARTIST_PLAY_MAX_PAGES; page += 1) {
+              const batch = await fetchLibraryV2ArtistTrackFiles(artistId, { page, limit: 100 });
+              collected.push(...batch.files);
+              if (page >= (batch.pagination?.total_pages ?? 1)) break;
+            }
+            const rows = artistQueueRows(collected, artistName);
+            if (!rows.length) {
+              window.showToast?.(`Nothing by ${artistName} is on disk yet`, 'info');
+              return;
+            }
+            await window.playTrackList?.(rows, artistName);
+          } catch (error) {
+            window.showToast?.(
+              mutationErrorMessage(error, `Could not play ${artistName}`),
+              'error',
+            );
+          } finally {
+            setPending(false);
+          }
+        })();
       }}
     />
   );

@@ -552,7 +552,12 @@ describe('Library V2 artist detail — All Releases views', () => {
     renderArtist('/library?artist=1&header=rich');
 
     const bookmark = await screen.findByTitle('Bookmark — mark this track as wanted');
-    const monitor = document.querySelector('.artist-hero-actions svg path');
+    // The monitor toggle by its own label, not "the first icon in the hero" —
+    // the hero actions gained a Play button in front of it, and a positional
+    // lookup silently compares against whatever happens to be leftmost.
+    const monitor = screen
+      .getByLabelText(/^(Start|Stop) monitoring$/)
+      .querySelector('svg path');
     expect(bookmark.querySelector('svg path')?.getAttribute('d')).toBe(monitor?.getAttribute('d'));
   });
 });
