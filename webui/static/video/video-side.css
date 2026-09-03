@@ -6112,6 +6112,18 @@ body[data-side="video"] #gsearch-aura {
     background: rgba(34, 197, 94, 0.08); border-color: rgba(34, 197, 94, 0.24); color: #b8efc9;
 }
 
+/* The healthy checks collapse behind one line. Knowing a source is fine is worth
+   a word, not a paragraph, and a strip of green prose is where a real warning
+   goes to hide. */
+.vdash-health-more {
+    display: block; width: 100%; text-align: left; cursor: pointer;
+    font: inherit; font-size: 12.5px;
+}
+.vdash-health-more::after { content: ' ⌄'; opacity: 0.6; }
+.vdash-health-more[aria-expanded="true"]::after { content: ' ⌃'; }
+.vdash-health-more:hover { background: rgba(34, 197, 94, 0.14); }
+.vdash-health-detail { display: contents; }
+
 /* ── Import subscriptions (ytdl-sub / Kometa) ─────────────────────────────── */
 .vwlp-import-btn {
     display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto;

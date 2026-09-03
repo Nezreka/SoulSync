@@ -388,20 +388,47 @@
     }
     function loadHealth() {
         var host = document.querySelector('[data-vdash-health]');
-        if (!host) return;
-        fetch('/api/video/health', { headers: { Accept: 'application/json' } })
+        if (!host) return null;
+        // Returns the promise so a caller (and a test) can wait for the paint.
+        return fetch('/api/video/health', { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (h) {
                 if (!h || !(h.checks || []).length) { host.hidden = true; host.innerHTML = ''; return; }
                 var icons = { error: '🔴', warning: '⚠️', ok: '✓' };
-                host.innerHTML = h.checks.map(function (c) {
+                function chip(c) {
                     return '<div class="vdash-health-chip vdash-health-chip--' + c.status + '">' +
                         (icons[c.status] || 'ℹ️') + ' <strong>' + esc(c.label) + ':</strong> ' +
                         esc(c.detail) + '</div>';
-                }).join('');
+                }
+                var checks = h.checks || [];
+                var bad = checks.filter(function (c) { return c.status !== 'ok'; });
+                var good = checks.filter(function (c) { return c.status === 'ok'; });
+                // Problems get their whole sentence. Healthy checks collapse to one
+                // line: knowing a source is fine is worth a word, not a paragraph,
+                // and a strip of green prose is where a real warning goes to hide.
+                var summary = good.length
+                    ? '<button class="vdash-health-chip vdash-health-chip--ok vdash-health-more" ' +
+                      'type="button" data-vdash-health-more aria-expanded="false">' +
+                      '✓ ' + good.length + ' healthy: ' +
+                      esc(good.map(function (c) { return c.label; }).join(', ')) + '</button>' +
+                      '<div class="vdash-health-detail" data-vdash-health-detail hidden>' +
+                      good.map(chip).join('') + '</div>'
+                    : '';
+                host.innerHTML = bad.map(chip).join('') + summary;
                 host.hidden = false;
             }).catch(function () { host.hidden = true; });
     }
+
+    // One delegated listener, bound once: loadHealth() replaces its own innerHTML
+    // on every refresh, so a listener attached to the button would be thrown away.
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest && e.target.closest('[data-vdash-health-more]');
+        if (!btn) return;
+        var panel = btn.parentNode && btn.parentNode.querySelector('[data-vdash-health-detail]');
+        if (!panel) return;
+        panel.hidden = !panel.hidden;
+        btn.setAttribute('aria-expanded', panel.hidden ? 'false' : 'true');
+    });
 
     function onPageShown(e) {
         if (!e || e.detail !== DASHBOARD_ID) return;
