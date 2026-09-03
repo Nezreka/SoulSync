@@ -893,6 +893,7 @@ def register_routes(bp):
         want_season, want_episode, season_end = _search_ints(body)
         profile, _pid = _profile_for_request(get_video_db(), body)
         live = False
+        partial_note = None
         queries = _search_queries(body, source, scope, title, want_season, want_episode)
         if source == "soulseek":
             from core.video.slskd_search import build_query, slskd_search
@@ -924,17 +925,60 @@ def register_routes(bp):
                                    max_wait_seconds=MANUAL_SEARCH_MAX_WAIT_SECONDS,
                                    indexer_names=_basic_indexer_names(body),
                                    **_external_ids(body))
+            prowlarr_error = None
             if not pres.get("configured"):
-                return jsonify({"scope": scope, "results": [], "queries": queries,
-                                "error": "Prowlarr isn't configured — set its URL + key on Settings → Downloads."})
-            if pres.get("error"):
-                return jsonify({"scope": scope, "results": [], "queries": queries, "error": "Prowlarr: " + str(pres["error"])})
-            raw, live = pres["hits"], True
+                prowlarr_error = ("Prowlarr isn't configured — set its URL + key on "
+                                  "Settings → Downloads.")
+            elif pres.get("error"):
+                prowlarr_error = "Prowlarr: " + str(pres["error"])
+            raw = list(pres.get("hits") or [])
+            live = not prowlarr_error
+
+            # EXT.to is the OTHER HALF of the torrent lane, exactly as the
+            # wishlist drain treats it (video_process_wishlist._hits_for_context).
+            # This endpoint used to run Prowlarr alone, so the same search that
+            # found an EXT.to release in the background returned nothing here and
+            # EXT.to only appeared if you knew to pick it as its own source.
+            # Usenet stays Prowlarr-only: EXT.to is torrents.
+            extto_note = None
+            if source == "torrent":
+                from core.video.extto_search import extto_search
+                try:
+                    eres = extto_search(title, limit=25, timeout=EXTTO_PAGE_TIMEOUT_SECONDS,
+                                        resolve_magnets=False, max_candidates=1)
+                except Exception as exc:   # noqa: BLE001 - one half must not sink the lane
+                    eres = {"configured": True, "error": str(exc), "hits": []}
+                if not eres.get("configured"):
+                    extto_note = "EXT.to needs FlareSolverr — set flaresolverr.url."
+                elif eres.get("error"):
+                    extto_note = "EXT.to: " + str(eres["error"])
+                else:
+                    ehits = list(eres.get("hits") or [])
+                    if ehits:
+                        raw = raw + ehits
+                        live = True
+
+            # The lane has only genuinely failed when NEITHER half could run.
+            # Returning Prowlarr's error while EXT.to had results would hide
+            # them behind a message about a service the user may not even run.
+            if prowlarr_error and not raw:
+                err = prowlarr_error if not extto_note else prowlarr_error + " · " + extto_note
+                return jsonify({"scope": scope, "results": [], "queries": queries, "error": err})
+            notes = [n for n in (prowlarr_error, extto_note) if n]
+            if notes:
+                partial_note = " · ".join(notes)
         else:
             raw = mock_search(scope, title, year=body.get("year"), season=want_season,
                               episode=want_episode, season_end=season_end, source=source)
-        return jsonify({"scope": scope, "live": live, "queries": queries,
-                        "results": _evaluate_hits(raw, profile, scope, want_season, want_episode, want_year=body.get("year"), want_title=body.get("title"))})
+        payload = {"scope": scope, "live": live, "queries": queries,
+                   "results": _evaluate_hits(raw, profile, scope, want_season, want_episode,
+                                             want_year=body.get("year"),
+                                             want_title=body.get("title"))}
+        # One half of the lane was down but the other answered: show the results
+        # AND say what is missing, rather than silently returning a short list.
+        if partial_note:
+            payload["note"] = partial_note
+        return jsonify(payload)
 
     @bp.route("/downloads/search/start", methods=["POST"])
     def video_downloads_search_start():
