@@ -14,6 +14,8 @@
  * section, both come from index.html. The route is not flipped until P7.
  */
 
+import { useState } from 'react';
+
 import {
   BlacklistCard,
   ConfigMigrationCard,
@@ -27,6 +29,8 @@ import { BackupManagerCard, MediaScanCard, MetadataUpdaterCard } from './server-
 import { ToolsSection } from './tool-card';
 
 export function ToolsPage() {
+  const [tab, setTab] = useState<'operations' | 'tools'>('operations');
+
   return (
     <div className="page-shell tools-page-container" id="tools-page">
       <div className="tools-page-header">
@@ -56,43 +60,89 @@ export function ToolsPage() {
         </div>
       </div>
 
-      <MaintenanceHero />
+      {/* Two tabs instead of one page carrying both.
+          Operations used to scroll inside its own capped box while the tool
+          cards sat below it on the page, so the page had two scrollbars doing
+          different jobs and neither one showed you everything. The cap existed
+          only to keep the cards below reachable - once the cards are their own
+          tab, nothing needs capping and the maintenance surface scrolls with
+          the page like everything else.
+          Defaults to Operations: that is the half that has work waiting in it. */}
+      <div className="tools-tabs" role="tablist" aria-label="Tools sections">
+        {([
+          ['operations', 'Operations'],
+          ['tools', 'Tools'],
+        ] as const).map(([value, label]) => (
+          <button
+            type="button"
+            key={value}
+            role="tab"
+            id={`tools-tab-${value}`}
+            aria-selected={tab === value}
+            aria-controls={`tools-panel-${value}`}
+            className="tools-tab"
+            onClick={() => setTab(value)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
-      {/* Same container chassis as the maintenance job families, and the same
-          glow device, so the page reads as one system rather than a hero
-          followed by a strip of unrelated boxes. The blurbs answer "why would
-          I open this section", which a taxonomy title does not. */}
-      <ToolsSection
-        title="Database &amp; Scanning"
-        blurb="Reading your media server into SoulSync, and keeping the two in step."
-        glow="56,189,248"
+      {/* Both panels stay MOUNTED, hidden with the hidden attribute rather than
+          unmounted. The maintenance surface polls job progress and holds the
+          findings filter/page you were on; tearing it down on every tab flip
+          would restart the polling and throw that state away. */}
+      <div
+        role="tabpanel"
+        id="tools-panel-operations"
+        aria-labelledby="tools-tab-operations"
+        hidden={tab !== 'operations'}
       >
-        <DbUpdaterCard />
-        <ReconcileIdsCard />
-        <DuplicateCleanerCard />
-        <MediaScanCard />
-      </ToolsSection>
+        <MaintenanceHero />
+      </div>
 
-      <ToolsSection
-        title="Metadata &amp; Cache"
-        blurb="Enriching what SoulSync knows, and fixing what it got wrong."
-        glow="168,85,247"
+      <div
+        role="tabpanel"
+        id="tools-panel-tools"
+        aria-labelledby="tools-tab-tools"
+        hidden={tab !== 'tools'}
       >
-        <MetadataUpdaterCard />
-        <DiscoveryPoolCard />
-        <ManualLibraryMatchCard />
-      </ToolsSection>
+        {/* Same container chassis as the maintenance job families, and the same
+            glow device, so the page reads as one system rather than a hero
+            followed by a strip of unrelated boxes. The blurbs answer "why would
+            I open this section", which a taxonomy title does not. */}
+        <ToolsSection
+          title="Database &amp; Scanning"
+          blurb="Reading your media server into SoulSync, and keeping the two in step."
+          glow="56,189,248"
+        >
+          <DbUpdaterCard />
+          <ReconcileIdsCard />
+          <DuplicateCleanerCard />
+          <MediaScanCard />
+        </ToolsSection>
 
-      <ToolsSection
-        title="Management"
-        blurb="Backups, moving install, and the lists you have told SoulSync to respect."
-        glow="245,158,11"
-      >
-        <BackupManagerCard />
-        <ConfigMigrationCard />
-        <MetadataCacheCard />
-        <BlacklistCard />
-      </ToolsSection>
+        <ToolsSection
+          title="Metadata &amp; Cache"
+          blurb="Enriching what SoulSync knows, and fixing what it got wrong."
+          glow="168,85,247"
+        >
+          <MetadataUpdaterCard />
+          <DiscoveryPoolCard />
+          <ManualLibraryMatchCard />
+        </ToolsSection>
+
+        <ToolsSection
+          title="Management"
+          blurb="Backups, moving install, and the lists you have told SoulSync to respect."
+          glow="245,158,11"
+        >
+          <BackupManagerCard />
+          <ConfigMigrationCard />
+          <MetadataCacheCard />
+          <BlacklistCard />
+        </ToolsSection>
+      </div>
     </div>
   );
 }

@@ -67474,13 +67474,57 @@ body.max-performance #page-particles-canvas {
 }
 
 /* ── The maintenance surface: one scroll, four sections ──
-   The three tabs are gone. The hero itself is the scroll container so the
-   section nav can stick to the top of it — and so the page below (the tool
-   cards) stays reachable however much maintenance work is outstanding. */
+   It used to be its own capped scroll box (max-height + overflow:auto) so the
+   tool cards sitting below it on the page stayed reachable. That gave the page
+   two scrollbars doing different jobs. The tool cards are their own tab now, so
+   nothing needs capping: this scrolls with the page, and the section nav sticks
+   to the viewport instead of to a box. */
 .tools-maintenance-hero {
-    max-height: min(84vh, 1040px);
-    overflow: hidden auto;
+    overflow: visible;
     scroll-behavior: smooth;
+}
+
+/* The 3px accent line was clipped by the hero's own overflow:hidden; with that
+   gone it has to round its own top corners or it juts past them. */
+.tools-maintenance-hero::before {
+    border-radius: 16px 16px 0 0;
+}
+
+/* ── Tools / Operations tabs ── */
+.tools-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tools-tab {
+    appearance: none;
+    background: none;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    color: rgba(255, 255, 255, 0.5);
+    padding: 9px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.tools-tab:hover {
+    color: #fff;
+}
+
+.tools-tab[aria-selected="true"] {
+    color: #fff;
+    border-bottom-color: rgb(var(--accent-rgb, 99, 102, 241));
+}
+
+.tools-tab:focus-visible {
+    outline: 2px solid rgb(var(--accent-rgb, 99, 102, 241));
+    outline-offset: -2px;
+    border-radius: 4px;
 }
 
 .repair-section-nav {
