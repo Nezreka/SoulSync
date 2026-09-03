@@ -184,6 +184,12 @@ def _build_discography_release_dict(release: Any, artist_id: str,
             'external_urls': typed_album.external_urls or {},
             'explicit': typed_album.explicit,
             'secondary_types': _normalize_secondary_types(getattr(typed_album, 'secondary_types', None)),
+            # MusicBrainz models a release GROUP above the concrete releases,
+            # and its discography browse returns that level: `id` is then a
+            # release-group mbid, not a release one. Carrying the group id
+            # explicitly is what lets a consumer tell the two apart instead of
+            # filing a group under the release namespace.
+            'release_group_id': getattr(typed_album, 'release_group_id', None),
         }
 
     release_id = _extract_lookup_value(release, 'id', 'album_id', 'release_id')
@@ -210,6 +216,8 @@ def _build_discography_release_dict(release: Any, artist_id: str,
         'secondary_types': _normalize_secondary_types(
             _extract_lookup_value(release, 'secondary_types', 'secondary-types', default=[])
         ),
+        'release_group_id': _extract_lookup_value(
+            release, 'release_group_id', 'release-group-id'),
     }
 
 
@@ -591,6 +599,7 @@ def _build_artist_detail_release_card(release: Dict[str, Any],
             'explicit': typed_album.explicit,
             'secondary_types': _normalize_secondary_types(getattr(typed_album, 'secondary_types', None)),
             'external_urls': typed_album.external_urls or {},
+            'release_group_id': getattr(typed_album, 'release_group_id', None),
         }
         if typed_album.release_date:
             card['release_date'] = typed_album.release_date
@@ -634,6 +643,10 @@ def _build_artist_detail_release_card(release: Dict[str, Any],
             _extract_lookup_value(release, 'secondary_types', 'secondary-types', default=[])
         ),
         'external_urls': _extract_lookup_value(release, 'external_urls', default={}) or {},
+        # Survives the two-stage build: this card is usually made FROM a
+        # canonical dict, so dropping the group id here would lose it again.
+        'release_group_id': _extract_lookup_value(
+            release, 'release_group_id', 'release-group-id'),
     }
 
     if release_date:

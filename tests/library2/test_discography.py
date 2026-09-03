@@ -1467,3 +1467,120 @@ def test_expand_warms_artwork_for_new_releases(
         "SELECT id FROM lib2_albums WHERE title='Scorpion'"
     ).fetchone()["id"]
     assert ("album", new_id) in targets
+
+
+# ---------------------------------------------------------------------------
+# MusicBrainz release GROUPS are not releases
+#
+# MB's discography browse projects release groups, so the id on every card is a
+# group mbid. Stored under `external_ids['musicbrainz']` it sat in the release
+# namespace, where a file's MUSICBRAINZ_ALBUMID tag and the "open on
+# MusicBrainz" /release/ link both live.
+# ---------------------------------------------------------------------------
+
+MB_GROUP = "9c5c1a2e-1f77-4c1e-9f43-1b2d3e4f5a60"
+MB_RELEASE = "1d0e2f3a-4b5c-4d6e-8f90-a1b2c3d4e5f6"
+
+
+@pytest.fixture
+def fake_mb_discography(monkeypatch):
+    """A MusicBrainz catalog: `id` and `release_group_id` are the same value."""
+    payload = {
+        "albums": [{
+            "id": MB_GROUP, "title": "Certified Lover Boy", "album_type": "album",
+            "release_date": "2021-09-03", "year": "2021", "track_count": 21,
+            "image_url": None, "release_group_id": MB_GROUP,
+        }],
+        "eps": [], "singles": [], "success": True, "source": "musicbrainz",
+    }
+    monkeypatch.setattr(
+        "core.metadata.discography.get_artist_detail_discography",
+        lambda artist_id, artist_name="", options=None: payload)
+    monkeypatch.setattr(
+        "core.library2.provider_adapters.fetch_album_tracklist",
+        lambda *_args, **_kwargs: None)
+    return payload
+
+
+def test_a_musicbrainz_group_id_is_not_stored_as_a_release_id(
+        legacy_db, imported_conn, fake_mb_discography):
+    stats = D.expand_artist_discography(legacy_db, _artist_id(imported_conn))
+    assert stats["added"] == 1
+
+    row = imported_conn.execute(
+        "SELECT musicbrainz_id, musicbrainz_release_group_id AS rg, external_ids "
+        "FROM lib2_albums WHERE title='Certified Lover Boy'").fetchone()
+    assert row["rg"] == MB_GROUP
+    # Neither place that means "the concrete release" may hold it.
+    assert row["musicbrainz_id"] is None
+    assert "musicbrainz" not in json.loads(row["external_ids"])
+
+
+def test_a_musicbrainz_group_still_matches_its_row_on_the_next_sync(
+        legacy_db, imported_conn, fake_mb_discography):
+    """The regression this could have introduced: with the group id out of
+    external_ids, the id match has to find the row by its group column or the
+    second sync inserts the release all over again."""
+    D.expand_artist_discography(legacy_db, _artist_id(imported_conn))
+    second = D.expand_artist_discography(legacy_db, _artist_id(imported_conn))
+
+    assert second["added"] == 0
+    assert second["enriched"] == 1
+    assert imported_conn.execute(
+        "SELECT COUNT(*) c FROM lib2_albums WHERE title='Certified Lover Boy'"
+    ).fetchone()["c"] == 1
+
+
+def test_a_concrete_release_keeps_both_ids(legacy_db, imported_conn, monkeypatch):
+    """The other MB shape — a release expanded out of its group — carries two
+    different ids, and each belongs in its own place."""
+    payload = {
+        "albums": [{
+            "id": MB_RELEASE, "title": "Certified Lover Boy", "album_type": "album",
+            "release_date": "2021-09-03", "year": "2021", "track_count": 21,
+            "image_url": None, "release_group_id": MB_GROUP,
+        }],
+        "eps": [], "singles": [], "success": True, "source": "musicbrainz",
+    }
+    monkeypatch.setattr(
+        "core.metadata.discography.get_artist_detail_discography",
+        lambda artist_id, artist_name="", options=None: payload)
+    monkeypatch.setattr(
+        "core.library2.provider_adapters.fetch_album_tracklist",
+        lambda *_args, **_kwargs: None)
+
+    D.expand_artist_discography(legacy_db, _artist_id(imported_conn))
+
+    row = imported_conn.execute(
+        "SELECT musicbrainz_release_group_id AS rg, external_ids "
+        "FROM lib2_albums WHERE title='Certified Lover Boy'").fetchone()
+    assert row["rg"] == MB_GROUP
+    assert json.loads(row["external_ids"])["musicbrainz"] == MB_RELEASE
+
+
+def test_another_provider_never_writes_the_musicbrainz_column(
+        legacy_db, imported_conn, monkeypatch):
+    """`release_group_id` exists on more than one provider's Album dataclass;
+    only a MusicBrainz value may land in a MusicBrainz column."""
+    payload = {
+        "albums": [{
+            "id": "js-clb", "title": "Certified Lover Boy", "album_type": "album",
+            "release_date": "2021-09-03", "year": "2021", "track_count": 21,
+            "image_url": None, "release_group_id": "js-group-42",
+        }],
+        "eps": [], "singles": [], "success": True, "source": "jiosaavn",
+    }
+    monkeypatch.setattr(
+        "core.metadata.discography.get_artist_detail_discography",
+        lambda artist_id, artist_name="", options=None: payload)
+    monkeypatch.setattr(
+        "core.library2.provider_adapters.fetch_album_tracklist",
+        lambda *_args, **_kwargs: None)
+
+    D.expand_artist_discography(legacy_db, _artist_id(imported_conn))
+
+    row = imported_conn.execute(
+        "SELECT musicbrainz_release_group_id AS rg, external_ids "
+        "FROM lib2_albums WHERE title='Certified Lover Boy'").fetchone()
+    assert row["rg"] is None
+    assert json.loads(row["external_ids"])["jiosaavn"] == "js-clb"

@@ -17,7 +17,9 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 from utils.logging_config import get_logger
 
 
-DISCOGRAPHY_PARSER_VERSION = "library2-discography/3"
+# /4: release_group_id rides along, so a MusicBrainz group id stops being
+# stored as though it were a release id (see DiscographyRelease).
+DISCOGRAPHY_PARSER_VERSION = "library2-discography/4"
 TRACKLIST_PARSER_VERSION = "library2-tracklist/4"
 ARTWORK_PARSER_VERSION = "library2-artwork/1"
 logger = get_logger("library2.provider_adapters")
@@ -109,6 +111,23 @@ class DiscographyRelease:
     image_url: Optional[str]
     secondary_types: Tuple[str, ...]
     explicit: Optional[bool]
+    # MusicBrainz has a level above the concrete release — the release GROUP,
+    # which several pressings of one record share — and its discography browse
+    # returns exactly that level, so ``provider_id`` is then a group mbid. The
+    # two are different entities with different ids and neither resolves under
+    # the other's URL, so the group travels in its own field instead of being
+    # mistaken for the release. Providers without the concept leave it None.
+    release_group_id: Optional[str] = None
+
+    @property
+    def provider_id_is_release_group(self) -> bool:
+        """Is ``provider_id`` itself the group id rather than a release id?
+
+        True for MusicBrainz's discography browse, which projects release
+        groups; False when a concrete release was expanded and carries its
+        group alongside. Nothing else can tell them apart: both are uuids.
+        """
+        return bool(self.release_group_id) and self.release_group_id == self.provider_id
 
     @classmethod
     def from_card(cls, card: Mapping[str, Any]) -> Optional["DiscographyRelease"]:
@@ -143,10 +162,12 @@ class DiscographyRelease:
             image_url=_optional_text(card.get("image_url")),
             secondary_types=secondary_types,
             explicit=explicit,
+            release_group_id=_optional_text(
+                card.get("release_group_id") or card.get("release-group-id")),
         )
 
     def to_payload(self) -> Dict[str, Any]:
-        return {
+        payload: Dict[str, Any] = {
             "id": self.provider_id,
             "title": self.title,
             "artists": list(self.artists),
@@ -159,6 +180,11 @@ class DiscographyRelease:
             "secondary_types": list(self.secondary_types),
             "explicit": self.explicit,
         }
+        # Only when there is one: a provider without release groups keeps the
+        # payload it always had, so its snapshot hash does not churn.
+        if self.release_group_id:
+            payload["release_group_id"] = self.release_group_id
+        return payload
 
     @property
     def artists(self) -> Tuple[str, ...]:
@@ -963,8 +989,17 @@ def fetch_artwork_url(
     source_ids: Optional[Mapping[str, str]] = None,
     source_order: Optional[Tuple[str, ...]] = None,
     deadline: Optional[float] = None,
+    release_group_id: Optional[str] = None,
 ) -> Optional[ArtworkProviderResult]:
     """Resolve artwork through existing engines and return one typed result.
+
+    ``release_group_id`` is the MusicBrainz release GROUP, which is a separate
+    entity from the release in ``source_ids['musicbrainz']`` and has its own
+    Cover Art Archive endpoint. It is passed separately rather than as another
+    entry in ``source_ids`` because that mapping is provider-keyed: two
+    different MusicBrainz entities cannot share the ``musicbrainz`` key without
+    one of them ending up addressed under the other's URL. Group art covers
+    every edition, so it is the right fallback when no release id is known.
 
     Library v2 supplies normalized catalog facts; provider-specific response
     dictionaries stay inside ``core.metadata``. No image bytes or signed
@@ -1084,6 +1119,23 @@ def fetch_artwork_url(
                 )
         except Exception as exc:  # noqa: BLE001
             logger.debug("%s direct artwork lookup failed: %s", source, exc)
+    # No exact release id answered. A MusicBrainz release GROUP is still an
+    # exact statement about THIS record — and its Cover Art Archive entry
+    # covers every edition, so it hits more often than a per-release one —
+    # whereas everything below here is a title search, i.e. a guess about
+    # which record is meant. Its endpoint is /release-group/, not /release/:
+    # a group id requested under the release path is a 404, which is what the
+    # discography rows that stored a group id as their release id all got.
+    group_id = _optional_text(release_group_id)
+    if group_id:
+        if _out_of_budget():
+            return None
+        return ArtworkProviderResult(
+            kind="album",
+            source="caa",
+            provider_entity_id=group_id,
+            url=f"https://coverartarchive.org/release-group/{group_id}/front-1200",
+        )
     from core.metadata.art_lookup import (
         available_art_sources,
         select_preferred_art,

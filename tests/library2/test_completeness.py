@@ -1014,3 +1014,52 @@ def test_browse_only_credits_still_link_artists_that_already_exist(imported_conn
         "SELECT 1 FROM lib2_album_artists WHERE album_id=? AND artist_id=?",
         (album_id, known_id),
     ).fetchone() is not None
+
+
+def _capture_tracklist_call(monkeypatch):
+    captured = {}
+
+    def fake_fetch(album_title, artist_name, **kwargs):
+        captured.update(album_title=album_title, artist_name=artist_name, **kwargs)
+        return None
+
+    monkeypatch.setattr(
+        "core.library2.provider_adapters.fetch_album_tracklist", fake_fetch)
+    return captured
+
+
+def test_a_release_group_is_a_usable_tracklist_key(imported_conn, monkeypatch):
+    """A discography row has no concrete release — the group id is all it has.
+
+    MusicBrainz's ``get_album_tracks`` resolves a release group too, so the
+    group is a legitimate lookup key here. It is deliberately not STORED under
+    the `musicbrainz` key, where the tag writer and the /release/ link would
+    both read it as a release."""
+    views_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'").fetchone()[0]
+    imported_conn.execute(
+        """UPDATE lib2_albums
+              SET musicbrainz_id=NULL, external_ids='{}', tracklist_json=NULL,
+                  musicbrainz_release_group_id='rg-views'
+            WHERE id=?""", (views_id,))
+    imported_conn.execute(
+        "UPDATE lib2_release_editions SET musicbrainz_id=NULL, external_ids='{}' "
+        "WHERE release_group_id=?", (views_id,))
+    captured = _capture_tracklist_call(monkeypatch)
+
+    assert resolve_tracklist(None, imported_conn, views_id) is None
+    assert captured["source_album_ids"]["musicbrainz"] == "rg-views"
+
+
+def test_a_known_release_id_wins_over_the_group(imported_conn, monkeypatch):
+    views_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'").fetchone()[0]
+    imported_conn.execute(
+        """UPDATE lib2_albums
+              SET musicbrainz_id='mb-release', tracklist_json=NULL,
+                  musicbrainz_release_group_id='rg-views'
+            WHERE id=?""", (views_id,))
+    captured = _capture_tracklist_call(monkeypatch)
+
+    assert resolve_tracklist(None, imported_conn, views_id) is None
+    assert captured["source_album_ids"]["musicbrainz"] == "mb-release"

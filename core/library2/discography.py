@@ -72,7 +72,8 @@ def _existing_release_index(conn, artist_id: int) -> Dict[str, List[Dict[str, An
     """Index the artist's current lib2 releases by normalized title."""
     rows = conn.execute(
         """SELECT al.id, al.title, al.album_type, al.origin, al.spotify_id,
-                  al.external_ids, al.monitored, al.release_date, al.year,
+                  al.external_ids, al.musicbrainz_release_group_id,
+                  al.monitored, al.release_date, al.year,
                   al.expected_track_count, al.track_count,
                   (SELECT COUNT(*) FROM lib2_tracks t WHERE t.album_id = al.id) AS track_rows
              FROM lib2_album_artists aa JOIN lib2_albums al ON al.id = aa.album_id
@@ -328,9 +329,20 @@ def _expected_count(row: Dict[str, Any]) -> Optional[int]:
 def _match_existing(index: Dict[str, List[Dict[str, Any]]], *, title: str,
                     album_type: str, provider_id: str, source: Optional[str],
                     release_date: Any = None,
-                    track_count: Any = None) -> Optional[Dict[str, Any]]:
+                    track_count: Any = None,
+                    release_group_id: Optional[str] = None
+                    ) -> Optional[Dict[str, Any]]:
     """Find the library row a provider release corresponds to, if any."""
     # 1) Provider-id match beats everything (exact release identity).
+    #    A MusicBrainz release GROUP is matched against the column that holds
+    #    group ids — not against external_ids, which is the release namespace.
+    #    Without this the group id would find no row on the second sync and
+    #    every MB release would be inserted a second time.
+    if release_group_id:
+        for candidates in index.values():
+            for row in candidates:
+                if row["musicbrainz_release_group_id"] == release_group_id:
+                    return row
     if provider_id:
         for candidates in index.values():
             for row in candidates:
@@ -577,7 +589,19 @@ def _expand_artist_discography(
             track_count = release.track_count or None
             image_url = release.image_url
             spotify_id = provider_id if source == "spotify" else None
-            external_ids = json.dumps({source: provider_id}) if (source and provider_id) else "{}"
+            # Only MusicBrainz has release groups, and only MusicBrainz ids may
+            # land in the MusicBrainz column; another provider's `release_group_id`
+            # (the field exists on more than one Album dataclass) is not an mbid.
+            release_group_id = (
+                release.release_group_id if source == "musicbrainz" else None)
+            # When the provider id IS the group id, external_ids must NOT
+            # receive it: that key is the concrete release, which is what a
+            # file's MUSICBRAINZ_ALBUMID tag and the /release/ link both mean.
+            id_is_group = source == "musicbrainz" and release.provider_id_is_release_group
+            external_ids = (
+                json.dumps({source: provider_id})
+                if (source and provider_id and not id_is_group) else "{}"
+            )
             auto_monitor_release = _should_auto_monitor(
                 monitor_new_policy,
                 eligible_reexpansion=eligible_reexpansion,
@@ -598,12 +622,14 @@ def _expand_artist_discography(
 
             existing = _match_existing(index, title=title, album_type=album_type,
                                        provider_id=provider_id, source=source,
+                                       release_group_id=release_group_id,
                                        release_date=release_date,
                                        track_count=track_count)
             if existing:
                 seen_ids.add(existing["id"])
                 merged_external_ids, id_conflict = _merge_external_id_details(
-                    existing["external_ids"], source, provider_id)
+                    existing["external_ids"], source,
+                    "" if id_is_group else provider_id)
                 cursor.execute(
                     """UPDATE lib2_albums SET
                            spotify_id = COALESCE(spotify_id, ?),
@@ -615,12 +641,16 @@ def _expand_artist_discography(
                                COALESCE(?, 0)
                            ),
                            external_ids = ?,
+                           musicbrainz_release_group_id = COALESCE(
+                               NULLIF(musicbrainz_release_group_id, ''), ?),
                            updated_at = CURRENT_TIMESTAMP
                        WHERE id = ?""",
                     (spotify_id, image_url, release_date, year, track_count,
-                     merged_external_ids, existing["id"]),
+                     merged_external_ids, release_group_id, existing["id"]),
                 )
                 existing["external_ids"] = merged_external_ids
+                if release_group_id and not existing["musicbrainz_release_group_id"]:
+                    existing["musicbrainz_release_group_id"] = release_group_id
                 if id_conflict:
                     from core.library2.editions import record_alternative_edition
                     record_alternative_edition(
@@ -642,12 +672,13 @@ def _expand_artist_discography(
                 """INSERT INTO lib2_albums(primary_artist_id, title, album_type,
                        release_date, year, spotify_id, external_ids, image_url,
                        track_count, expected_track_count, origin, monitored,
-                       quality_profile_id)
-                   VALUES(?,?,?,?,?,?,?,?,?,?, 'discography', ?, ?)""",
+                       quality_profile_id, musicbrainz_release_group_id)
+                   VALUES(?,?,?,?,?,?,?,?,?,?, 'discography', ?, ?, ?)""",
                 (artist_id, title, album_type, release_date, year, spotify_id,
                  external_ids, image_url, track_count, track_count,
                  1 if auto_monitor_release and not defer_auto_monitor else 0,
-                 artist["quality_profile_id"] or fallback_profile),
+                 artist["quality_profile_id"] or fallback_profile,
+                 release_group_id),
             )
             new_id = cursor.lastrowid
             seen_ids.add(new_id)

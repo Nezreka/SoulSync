@@ -525,6 +525,7 @@ def _provider_art_url(
         elif kind == "album":
             row = conn.execute(
                 """SELECT al.id, al.title, al.spotify_id, al.musicbrainz_id,
+                          al.musicbrainz_release_group_id,
                           al.external_ids, ar.id AS artist_id,
                           ar.name AS artist_name,
                           ed.spotify_id AS edition_spotify_id,
@@ -566,6 +567,10 @@ def _provider_art_url(
                 album_title=album_effective["title"],
                 source_ids=source_ids,
                 deadline=deadline,
+                # A different MusicBrainz entity than source_ids['musicbrainz']
+                # and a different Cover Art Archive endpoint, so it cannot ride
+                # in that provider-keyed mapping.
+                release_group_id=row["musicbrainz_release_group_id"],
             )
             return result.url if result else None
     except Exception as e:  # noqa: BLE001

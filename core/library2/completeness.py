@@ -182,6 +182,7 @@ def _album_tracklist_context(
                   al.expected_track_count AS album_expected_track_count,
                   al.spotify_id AS album_spotify_id,
                   al.musicbrainz_id AS album_musicbrainz_id,
+                  al.musicbrainz_release_group_id AS album_release_group_mbid,
                   al.external_ids AS album_external_ids,
                   ed.id AS release_edition_id,
                   ed.release_date AS edition_release_date,
@@ -206,6 +207,14 @@ def _album_tracklist_context(
         source_ids["spotify"] = str(spotify_id)
     if musicbrainz_id:
         source_ids["musicbrainz"] = str(musicbrainz_id)
+    elif row["album_release_group_mbid"]:
+        # No concrete release is known for this row — a discography row never
+        # has one. MusicBrainz's ``get_album_tracks`` resolves a release GROUP
+        # too (it picks a release from the group), so the group id is a usable
+        # tracklist key and the only one these rows have. It is deliberately
+        # NOT stored under this key in the database: there it would be read as
+        # a release id by the tag writer and the /release/ link.
+        source_ids["musicbrainz"] = str(row["album_release_group_mbid"])
     release_date = (
         row["edition_release_date"]
         or row["album_release_date"]

@@ -8,6 +8,7 @@ from core.library2.artwork import _provider_art_url
 from core.library2.metadata_overrides import set_field_override
 from core.library2.provider_adapters import (
     ArtworkProviderResult,
+    DiscographyRelease,
     fetch_album_tracklist,
     fetch_artwork_url,
     fetch_descriptive_metadata,
@@ -513,3 +514,103 @@ def test_tracklist_keeps_the_provider_id_of_every_artist_credit(monkeypatch):
         {"name": "Artist B", "id": "artist-b"},
     ]
     assert payload["provider"] == "spotify"
+
+
+# ---------------------------------------------------------------------------
+# DiscographyRelease and the release-group namespace
+# ---------------------------------------------------------------------------
+
+MB_GROUP = "9c5c1a2e-1f77-4c1e-9f43-1b2d3e4f5a60"
+MB_RELEASE = "1d0e2f3a-4b5c-4d6e-8f90-a1b2c3d4e5f6"
+
+
+def test_a_release_group_projection_says_so():
+    """MusicBrainz's discography browse returns groups, so `id` IS the group."""
+    release = DiscographyRelease.from_card(
+        {"id": MB_GROUP, "title": "Ultra", "release_group_id": MB_GROUP})
+    assert release.release_group_id == MB_GROUP
+    assert release.provider_id_is_release_group is True
+
+
+def test_a_concrete_release_carrying_its_group_does_not():
+    release = DiscographyRelease.from_card(
+        {"id": MB_RELEASE, "title": "Ultra", "release_group_id": MB_GROUP})
+    assert release.provider_id_is_release_group is False
+
+
+def test_a_provider_without_release_groups_claims_nothing():
+    release = DiscographyRelease.from_card({"id": "sp123", "title": "GNX"})
+    assert release.release_group_id is None
+    assert release.provider_id_is_release_group is False
+
+
+def test_the_group_id_survives_a_snapshot_round_trip():
+    """The stored snapshot payload is re-read through `from_card`, so a field
+    it cannot round-trip is a field the replay silently loses."""
+    original = DiscographyRelease.from_card(
+        {"id": MB_GROUP, "title": "Ultra", "release_group_id": MB_GROUP})
+    replayed = DiscographyRelease.from_card(original.to_payload())
+    assert replayed.release_group_id == MB_GROUP
+
+
+def test_a_payload_without_a_group_keeps_its_old_shape():
+    """Adding an always-present key would re-hash every provider's snapshot
+    once and report a change that did not happen."""
+    payload = DiscographyRelease.from_card({"id": "sp123", "title": "GNX"}).to_payload()
+    assert "release_group_id" not in payload
+
+
+def test_album_artwork_asks_the_release_group_endpoint_for_a_group_id(monkeypatch):
+    """CAA has a /release-group/ path of its own. A group id requested under
+    /release/ is a 404 — which is what every discography row that stored its
+    group id as a release id was getting."""
+    monkeypatch.setattr(
+        "core.metadata.registry.get_client_for_source", lambda source: None)
+    result = fetch_artwork_url(
+        "album",
+        artist_name="Artist",
+        album_title="Album",
+        source_ids={},
+        source_order=("caa",),
+        release_group_id=MB_GROUP,
+    )
+
+    assert result is not None
+    assert result.source == "caa"
+    assert result.provider_entity_id == MB_GROUP
+    assert result.url == f"https://coverartarchive.org/release-group/{MB_GROUP}/front-1200"
+
+
+def test_an_exact_release_still_beats_the_release_group(monkeypatch):
+    monkeypatch.setattr(
+        "core.metadata.registry.get_client_for_source", lambda source: None)
+    result = fetch_artwork_url(
+        "album",
+        artist_name="Artist",
+        album_title="Album",
+        source_ids={"musicbrainz": MB_RELEASE},
+        source_order=("caa",),
+        release_group_id=MB_GROUP,
+    )
+
+    assert result.url == f"https://coverartarchive.org/release/{MB_RELEASE}/front-1200"
+
+
+def test_the_release_group_beats_a_title_search(monkeypatch):
+    """A group id is an exact statement about THIS record; a title search is a
+    guess about which record is meant."""
+    monkeypatch.setattr(
+        "core.metadata.registry.get_client_for_source", lambda source: None)
+    monkeypatch.setattr(
+        "core.metadata.art_lookup.select_preferred_art",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("a title search must not run while a group id is known")),
+    )
+    result = fetch_artwork_url(
+        "album",
+        artist_name="Artist",
+        album_title="Album",
+        source_ids={},
+        release_group_id=MB_GROUP,
+    )
+    assert result.provider_entity_id == MB_GROUP
