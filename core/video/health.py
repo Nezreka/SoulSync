@@ -236,6 +236,49 @@ def _indexer_health_checks(db) -> list:
     return out
 
 
+def _import_list_checks(db) -> list:
+    """Whether configured import lists can ever actually run.
+
+    The failure this exists for is silent and total: you add a Trakt or IMDb
+    list, the UI saves it, the list page shows it — and if the
+    ``video_import_lists`` automation is disabled, nothing ever syncs. There is
+    no error, no empty state, no clue. A configured list and a working list look
+    identical from every screen.
+
+    Says nothing when no lists exist: not using the feature is not a fault.
+    """
+    out = []
+    try:
+        from core.video.import_lists import load_lists
+        lists = [x for x in (load_lists(db) or []) if x.get("enabled")]
+    except Exception:   # noqa: BLE001 - health must never 500 over one probe
+        logger.debug("import-list health probe failed", exc_info=True)
+        return out
+    if not lists:
+        return out
+
+    try:
+        from database.music_database import MusicDatabase
+        auto = MusicDatabase().get_system_automation_by_action("video_import_lists")
+    except Exception:   # noqa: BLE001 - the automation store is the music side's
+        logger.debug("import-list automation lookup failed", exc_info=True)
+        return out
+
+    names = ", ".join(sorted(x.get("name") or x.get("source") or "?" for x in lists)[:4])
+    if not auto:
+        out.append(_check("import_lists", "Import lists", "warning",
+                          "%d list(s) configured (%s) but the sync automation does not exist — "
+                          "they will never run" % (len(lists), names)))
+    elif not auto.get("enabled"):
+        out.append(_check("import_lists", "Import lists", "warning",
+                          "%d list(s) configured (%s) but 'Import Lists' is disabled in "
+                          "Automations — they will never run" % (len(lists), names)))
+    else:
+        out.append(_check("import_lists", "Import lists", "ok",
+                          "%d list(s) syncing: %s" % (len(lists), names)))
+    return out
+
+
 def collect(db) -> dict:
     """{status, checks: [...]} — every check always present, worst-first sort."""
     checks = []
@@ -307,6 +350,10 @@ def collect(db) -> dict:
     # 7) individual indexers that are contributing nothing. Only worth a line
     # when there IS one — a healthy indexer set needs no commentary.
     checks.extend(_indexer_health_checks(db))
+
+    # 8) import lists configured but never actually running — a silent no-op
+    # that looks exactly like a working setup.
+    checks.extend(_import_list_checks(db))
 
     order = {"error": 0, "warning": 1, "ok": 2}
     checks.sort(key=lambda c: order.get(c["status"], 3))

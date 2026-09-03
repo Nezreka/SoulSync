@@ -435,3 +435,66 @@ def test_a_single_indexer_is_left_to_the_transport_check(db):
     source having a bad fortnight is already the source check's business."""
     _isnap(db, 8, [_rel("Only")] * 30)
     assert not any(x["id"] == "indexers_barren" for x in collect(db)["checks"])
+
+
+# ── import lists that can never run ──────────────────────────────────────────
+def _lists(db, n=2):
+    import json as _json
+    db.set_setting("import_lists", _json.dumps([
+        {"id": i + 1, "name": "List %d" % (i + 1), "source": "tmdb_list",
+         "ref": "123", "enabled": True} for i in range(n)]))
+
+
+def _automation(monkeypatch, row):
+    """Stub the music-side automation store the check consults."""
+    class _DB:
+        def get_system_automation_by_action(self, action):
+            assert action == "video_import_lists"
+            return row
+    import database.music_database as md
+    monkeypatch.setattr(md, "MusicDatabase", lambda *a, **kw: _DB())
+
+
+def _il(h):
+    return next((c for c in h["checks"] if c["id"] == "import_lists"), None)
+
+
+def test_lists_configured_but_the_automation_disabled_is_the_silent_failure(db, monkeypatch):
+    """You add a list, the UI saves it, the list page shows it - and nothing
+    ever syncs. No error, no empty state. A configured list and a working list
+    look identical from every screen."""
+    _lists(db)
+    _automation(monkeypatch, {"enabled": 0})
+    c = _il(collect(db))
+    assert c and c["status"] == "warning"
+    assert "disabled" in c["detail"] and "never run" in c["detail"]
+    assert "List 1" in c["detail"], "naming them saves a hunt through settings"
+
+
+def test_lists_configured_with_no_automation_at_all(db, monkeypatch):
+    _lists(db, 1)
+    _automation(monkeypatch, None)
+    c = _il(collect(db))
+    assert c and c["status"] == "warning" and "does not exist" in c["detail"]
+
+
+def test_a_working_setup_says_so(db, monkeypatch):
+    _lists(db, 3)
+    _automation(monkeypatch, {"enabled": 1})
+    c = _il(collect(db))
+    assert c and c["status"] == "ok" and "3 list(s) syncing" in c["detail"]
+
+
+def test_no_lists_means_no_opinion(db, monkeypatch):
+    """Not using the feature is not a fault, and a tile about it would be noise
+    on every install that does not want import lists."""
+    _automation(monkeypatch, {"enabled": 0})
+    assert _il(collect(db)) is None
+
+
+def test_a_disabled_list_does_not_count(db, monkeypatch):
+    import json as _json
+    db.set_setting("import_lists", _json.dumps(
+        [{"id": 1, "name": "Off", "source": "tmdb_list", "ref": "1", "enabled": False}]))
+    _automation(monkeypatch, {"enabled": 0})
+    assert _il(collect(db)) is None
