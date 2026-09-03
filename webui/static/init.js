@@ -2738,6 +2738,33 @@ function showSelfEditForm() {
     nameInput.placeholder = 'Profile name';
     form.appendChild(nameInput);
 
+    // PIN
+    const pinLabel = document.createElement('label');
+    pinLabel.className = 'profile-settings-label';
+    pinLabel.textContent = currentProfile.has_pin ? 'Change PIN' : 'Add PIN';
+    form.appendChild(pinLabel);
+
+    const pinInput = document.createElement('input');
+    pinInput.type = 'password';
+    pinInput.className = 'profile-input';
+    pinInput.maxLength = 6;
+    pinInput.placeholder = currentProfile.has_pin ? 'New PIN (leave blank to keep)' : 'New PIN (optional)';
+    form.appendChild(pinInput);
+
+    // Login password
+    const passwordLabel = document.createElement('label');
+    passwordLabel.className = 'profile-settings-label';
+    passwordLabel.textContent = currentProfile.has_password ? 'Change Login Password' : 'Add Login Password';
+    form.appendChild(passwordLabel);
+
+    const passwordInput = document.createElement('input');
+    passwordInput.type = 'password';
+    passwordInput.className = 'profile-input';
+    passwordInput.maxLength = 200;
+    passwordInput.autocomplete = 'new-password';
+    passwordInput.placeholder = currentProfile.has_password ? 'New password (leave blank to keep)' : 'New password (optional)';
+    form.appendChild(passwordInput);
+
     // Home page
     const homeLabel = document.createElement('label');
     homeLabel.className = 'profile-settings-label';
@@ -2779,6 +2806,30 @@ function showSelfEditForm() {
             });
             const data = await res.json();
             if (data.success) {
+                const pin = pinInput.value.trim();
+                if (pin) {
+                    const pinRes = await fetch(`/api/profiles/${currentProfile.id}/set-pin`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ pin })
+                    });
+                    const pinData = await pinRes.json();
+                    if (!pinData.success) { alert(pinData.error || 'Failed to update PIN'); return; }
+                    currentProfile.has_pin = true;
+                }
+
+                const password = passwordInput.value;
+                if (password) {
+                    const passwordRes = await fetch(`/api/profiles/${currentProfile.id}/set-password`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ password })
+                    });
+                    const passwordData = await passwordRes.json();
+                    if (!passwordData.success) { alert(passwordData.error || 'Failed to update password'); return; }
+                    currentProfile.has_password = !!passwordData.has_password;
+                }
+
                 currentProfile.name = newName;
                 currentProfile.home_page = homeSelect.value || null;
                 updateProfileIndicator();
