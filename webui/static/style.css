@@ -58763,6 +58763,58 @@ tr.tag-diff-same {
 .cache-health-status-text { font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.8); }
 
 /* Stat cards */
+/* ── Cache health: what it means and what to do ──
+   The modal used to state a verdict ("Cleanup recommended") and stop, leaving
+   the reader to guess what was wrong and what would fix it. */
+.cache-health-explain {
+    margin: 14px 0 4px;
+    padding: 14px 16px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-left: 3px solid rgb(var(--accent-rgb, 99, 102, 241));
+    border-radius: 10px;
+}
+/* A disabled cleanup job is the one case that really does need the user. */
+.cache-health-explain.warn {
+    border-left-color: #f1c40f;
+    background: rgba(241, 196, 15, 0.06);
+}
+.cache-health-explain-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.55);
+    margin-bottom: 8px;
+}
+.cache-health-explain-list {
+    margin: 0 0 10px;
+    padding-left: 18px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.75);
+}
+.cache-health-explain-list li + li {
+    margin-top: 6px;
+}
+.cache-health-explain-list strong {
+    color: #fff;
+}
+.cache-health-explain-fix {
+    font-size: 13px;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.75);
+    margin-bottom: 12px;
+}
+.cache-health-explain-fix strong {
+    color: #fff;
+}
+.cache-health-explain-note {
+    margin-top: 8px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
 .cache-health-cards {
     display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px;
 }
