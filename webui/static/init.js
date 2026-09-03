@@ -497,6 +497,7 @@ bootstrapServerAppearanceSettings();
 
 // ── Profile System ─────────────────────────────────────────────
 let currentProfile = null;
+let profileLoginMode = false;
 const PROFILE_CONTEXT_CHANGED_EVENT = 'ss:webui-profile-context-changed';
 
 function notifyProfileContextChanged() {
@@ -611,6 +612,7 @@ async function initProfileSystem() {
         // Check if a session already has a profile selected
         const currentRes = await fetch('/api/profiles/current');
         const currentData = await currentRes.json();
+        profileLoginMode = !!currentData.login_mode;
         // Login mode: show the sign-in screen and defer everything else until
         // the user authenticates.
         if (currentData.login_required) {
@@ -1242,8 +1244,10 @@ async function handleProfileClick(profile) {
         profileCount = (d.profiles || []).length;
     } catch (e) { }
 
-    if (profile.has_pin && profileCount > 1) {
-        showPinDialog(profile);
+    if (profileLoginMode && currentProfile && profile.id !== currentProfile.id) {
+        showPinDialog(profile, 'password');
+    } else if (profile.has_pin && profileCount > 1) {
+        showPinDialog(profile, 'pin');
     } else {
         const wasSwitching = !!currentProfile;
         await selectProfile(profile.id);
@@ -1256,7 +1260,7 @@ async function handleProfileClick(profile) {
     }
 }
 
-function showPinDialog(profile) {
+function showPinDialog(profile, mode = 'pin') {
     const dialog = document.getElementById('profile-pin-dialog');
     const avatar = document.getElementById('profile-pin-avatar');
     const nameEl = document.getElementById('profile-pin-name');
@@ -1282,17 +1286,25 @@ function showPinDialog(profile) {
     dialog.style.display = 'flex';
     setTimeout(() => input.focus(), 100);
 
+    const isPasswordMode = mode === 'password';
+    input.placeholder = isPasswordMode ? 'Password' : 'Enter PIN';
+    input.maxLength = isPasswordMode ? 200 : 6;
+    const forgot = document.getElementById('profile-pin-forgot');
+    if (forgot) forgot.style.display = isPasswordMode ? 'none' : '';
+
     const wasSwitching = !!currentProfile;
     const handleSubmit = async () => {
-        const pin = input.value;
-        if (!pin) return;
+        const secret = input.value;
+        if (!secret) return;
         submit.disabled = true;
         submit.textContent = 'Verifying...';
         try {
             const res = await fetch('/api/profiles/select', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ profile_id: profile.id, pin })
+                body: JSON.stringify(isPasswordMode
+                    ? { profile_id: profile.id, password: secret }
+                    : { profile_id: profile.id, pin: secret })
             });
             const data = await res.json();
             if (data.success) {
@@ -1307,7 +1319,7 @@ function showPinDialog(profile) {
                 initApp();
                 return;
             } else {
-                errorEl.textContent = data.error || 'Invalid PIN';
+                errorEl.textContent = data.error || (isPasswordMode ? 'Invalid password' : 'Invalid PIN');
                 errorEl.style.display = '';
                 input.value = '';
                 input.focus();
