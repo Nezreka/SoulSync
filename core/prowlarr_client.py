@@ -26,6 +26,7 @@ Security → API Key.
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -68,6 +69,14 @@ MAX_CONCURRENT_INDEXER_SEARCHES = 6
 # to Prowlarr on every query.
 DEFAULT_INDEXER_PRIORITY = 25
 INDEXER_PRIORITY_CACHE_SECONDS = 300
+
+# Module level, not per instance: the video side builds a fresh ProwlarrClient
+# for every request, so an instance cache never hit there and each search paid
+# for its own listing. The lock makes a cold cache single flight — six searches
+# starting together used to issue six `/indexer` calls.
+_INDEXER_PRIORITY_CACHE: Optional[Dict[int, int]] = None
+_INDEXER_PRIORITY_CACHED_AT: float = 0.0
+_INDEXER_PRIORITY_LOCK = threading.Lock()
 
 DEFAULT_MUSIC_CATEGORIES: tuple = (
     MUSIC_CATEGORY_ALL,
@@ -209,23 +218,48 @@ class ProwlarrClient:
         Best-effort by contract: the priority is only a tiebreaker, so a
         Prowlarr that cannot list its indexers must cost a search nothing. An
         empty map leaves every result on the neutral default.
+
+        Never call this from inside a search deadline — see ``_search_sync``.
         """
-        now = time.monotonic()
-        cached = getattr(self, '_indexer_priority_cache', None)
-        cached_at = getattr(self, '_indexer_priority_cached_at', 0.0)
-        if cached is not None and (now - cached_at) < INDEXER_PRIORITY_CACHE_SECONDS:
+        global _INDEXER_PRIORITY_CACHE, _INDEXER_PRIORITY_CACHED_AT
+
+        def _fresh() -> Optional[Dict[int, int]]:
+            if _INDEXER_PRIORITY_CACHE is None:
+                return None
+            age = time.monotonic() - _INDEXER_PRIORITY_CACHED_AT
+            return _INDEXER_PRIORITY_CACHE if age < INDEXER_PRIORITY_CACHE_SECONDS else None
+
+        cached = _fresh()
+        if cached is not None:
             return cached
-        try:
-            known = self._get_indexers_sync()
-        except Exception as exc:  # noqa: BLE001 - never fail a search on this
-            logger.debug("Prowlarr indexer priority lookup failed: %s", exc)
-            self._indexer_priority_cache = {}
-            self._indexer_priority_cached_at = now
-            return {}
-        priorities = {indexer.id: indexer.priority for indexer in known}
-        self._indexer_priority_cache = priorities
-        self._indexer_priority_cached_at = now
-        return priorities
+        with _INDEXER_PRIORITY_LOCK:
+            # Another thread may have filled it while this one waited.
+            cached = _fresh()
+            if cached is not None:
+                return cached
+            try:
+                known = self._get_indexers_sync()
+                priorities = {indexer.id: indexer.priority for indexer in known}
+            except Exception as exc:  # noqa: BLE001 - never fail a search on this
+                logger.debug("Prowlarr indexer priority lookup failed: %s", exc)
+                priorities = {}
+            _INDEXER_PRIORITY_CACHE = priorities
+            _INDEXER_PRIORITY_CACHED_AT = time.monotonic()
+            return priorities
+
+    def stamp_indexer_priorities(
+        self, results: List[ProwlarrSearchResult],
+    ) -> List[ProwlarrSearchResult]:
+        """Attach each result's indexer priority, in place, best effort."""
+        if not results:
+            return results
+        priorities = self.indexer_priorities()
+        if priorities:
+            for result in results:
+                result.indexer_priority = priorities.get(
+                    result.indexer_id, DEFAULT_INDEXER_PRIORITY,
+                )
+        return results
 
     def indexer_ids_for_protocol(
         self, configured_ids: Sequence[int], protocol: str,
@@ -319,11 +353,12 @@ class ProwlarrClient:
         """
         if not self.is_configured() or not query.strip():
             return []
-        return await run_blocking(
+        results = await run_blocking(
             self._search_sync, query, list(categories), list(indexer_ids or []),
             limit, search_type, list(extra_params or []),
             self.resolve_search_timeout(timeout), None, throttle,
         )
+        return await run_blocking(self.stamp_indexer_priorities, results)
 
     async def resolve_search_indexers(
         self, indexer_ids: Sequence[int], protocol: str,
@@ -452,6 +487,8 @@ class ProwlarrClient:
                 failures.append(f"indexer {indexer_id}: {error}")
                 continue
             results.extend(task.result())
+        # Outside the per-task deadline on purpose, see _search_sync.
+        await run_blocking(self.stamp_indexer_priorities, results)
         return results, failures
 
     def _search_sync(
@@ -506,16 +543,13 @@ class ProwlarrClient:
         )
         if not isinstance(data, list):
             return []
-        results = [self._parse_result(entry) for entry in data if isinstance(entry, dict)]
-        # Nothing to stamp means nothing to look up: a search that found no
-        # release must not pay for an indexer listing.
-        priorities = self.indexer_priorities() if results else {}
-        if priorities:
-            for result in results:
-                result.indexer_priority = priorities.get(
-                    result.indexer_id, DEFAULT_INDEXER_PRIORITY,
-                )
-        return results
+        # Deliberately no priority lookup here. This runs inside the
+        # per-indexer fan-out's deadline, where an extra synchronous request
+        # does not merely cost time: it can push an already-finished search
+        # past the budget, and those results are then discarded. The async
+        # wrappers stamp priorities afterwards, outside the deadline; the
+        # video side calls this directly and never reads the field.
+        return [self._parse_result(entry) for entry in data if isinstance(entry, dict)]
 
     def _parse_indexer(self, entry: Dict[str, Any]) -> ProwlarrIndexer:
         return ProwlarrIndexer(

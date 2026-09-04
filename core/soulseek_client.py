@@ -1492,6 +1492,7 @@ class SoulseekClient(DownloadSourcePlugin):
         preferred_source: Optional[Dict[str, Any]] = None,
         preferred_tracks: Optional[List[TrackResult]] = None,
         quality_profile_id=None,
+        expected_duration_seconds=None,
     ) -> Dict[str, Any]:
         """One-shot Soulseek album download.
 
@@ -1502,6 +1503,12 @@ class SoulseekClient(DownloadSourcePlugin):
         callers may fall back to the existing per-track Soulseek flow.
         Once files are staged, the per-track staging matcher owns final
         import, same as torrent / usenet album bundles.
+                ``expected_duration_seconds`` is part of the album-bundle plugin
+        contract the master worker calls every source with. Soulseek picks a
+        folder rather than a single release, so it has nothing to compare a
+        duration against and ignores it; the parameter exists because a
+        missing one is a TypeError, and try_dispatch turns that into a failed
+        batch instead of a fallback.
         """
         result: Dict[str, Any] = {
             'success': False,

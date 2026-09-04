@@ -62,8 +62,11 @@ def test_amazon_opus_is_not_misreported_as_aac(monkeypatch):
     _patch_targets(monkeypatch, [QualityTarget(label='', format='opus')])
     assert sm.quality_tier_for_source('amazon') == 'opus'
 
+    # An AAC profile matches nothing in this ladder. It used to be answered
+    # with flac, which the import guard then rejected — see
+    # test_a_lossy_only_profile_never_requests_lossless_from_a_source.
     _patch_targets(monkeypatch, [QualityTarget(label='', format='aac')])
-    assert sm.quality_tier_for_source('amazon') == 'flac'
+    assert sm.quality_tier_for_source('amazon') == 'opus'
 
 
 T_OPUS = [QualityTarget(label='', format='opus')]
@@ -213,3 +216,23 @@ def test_amazon_fallback_never_wraps_above_item_quality_ceiling(monkeypatch):
 
     assert client._download_sync('id', 'asin', 'Artist - Track') is None
     assert attempted == ['opus', 'eac3']
+
+
+def test_a_lossy_only_profile_never_requests_lossless_from_a_source(monkeypatch):
+    """Falling back to the top tier spends the most bandwidth on a reject.
+
+    Amazon's lossy tier is Opus, so an AAC-only profile matches nothing in that
+    ladder. The fallback handed it `ladder[0]`, which is FLAC, and the import
+    guard then threw the download away. When the profile asked for a lossy
+    format, the honest miss is the lowest tier, not the highest.
+    """
+    _patch_targets(monkeypatch, [QualityTarget(label='', format='aac')], fallback=False)
+
+    assert sm.quality_tier_for_source('amazon') == 'opus'
+
+
+def test_a_lossless_profile_that_matches_nothing_still_gets_the_top_tier(monkeypatch):
+    """Best effort still means the best the source has, in that direction."""
+    _patch_targets(monkeypatch, [QualityTarget(label='', format='ape')], fallback=False)
+
+    assert sm.quality_tier_for_source('amazon') == 'flac'

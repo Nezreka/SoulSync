@@ -1504,3 +1504,23 @@ def test_release_duration_reads_a_nested_track_payload():
         {'track': {'duration_ms': 200_000}},
         {'duration_ms': 100_000},
     ]) == 300
+
+
+def test_a_partial_track_list_gives_no_duration_at_all():
+    """A subtotal is not a duration, and it rejects real releases.
+
+    Ten tracks with one known 180 second duration summed to 180, and the size
+    gate then read a legitimate 90 MB MP3 album as 4000 kbit/s and refused it.
+    Anything short of every track being known has to stay silent.
+    """
+    assert mw.expected_release_duration_seconds([
+        {'name': 'T1', 'duration_ms': 180_000},
+        {'name': 'T2'},
+        {'name': 'T3', 'duration_ms': 0},
+    ]) is None
+
+
+def test_a_complete_track_list_still_answers():
+    assert mw.expected_release_duration_seconds([
+        {'duration_ms': 180_000}, {'duration_ms': 120_000},
+    ]) == 300

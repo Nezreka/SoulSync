@@ -280,6 +280,44 @@ def get_valid_candidates(results, spotify_track, query, profile_id=None):
     return accepted
 
 
+def _satisfies_a_target_on_stated_facts(quality, targets) -> bool:
+    """Whether a release could satisfy any target, judged on what it CLAIMED.
+
+    Ranking probed files uses the opposite rule: a FLAC with no stated
+    resolution fails a hi-res target, because an unproven file must not
+    over-claim. A Prowlarr release is not a probed file. Its title almost never
+    carries sample rate, bit depth or bitrate, so applying that rule here does
+    not filter the lane, it empties it — the stock MP3 target's min_bitrate of
+    320 was enough on its own.
+
+    So a value the release never stated cannot disqualify it, and a value it
+    did state is enforced exactly. Format is always required: an unreadable
+    format matches no target and a strict profile drops it, which is the same
+    answer the pre-grab gate gives. The file itself is still probed at import.
+    """
+    fmt = str(getattr(quality, 'format', '') or '').lower()
+    for target in targets or ():
+        wanted = str(getattr(target, 'format', '') or '').lower()
+        if wanted and wanted != fmt:
+            continue
+        if not wanted and fmt in ('', 'unknown'):
+            continue
+        bitrate = getattr(quality, 'bitrate', None)
+        minimum = getattr(target, 'min_bitrate', None)
+        if minimum and bitrate is not None and bitrate < minimum:
+            continue
+        sample_rate = getattr(quality, 'sample_rate', None)
+        min_rate = getattr(target, 'min_sample_rate', None)
+        if min_rate and sample_rate is not None and sample_rate < min_rate:
+            continue
+        depth = getattr(quality, 'bit_depth', None)
+        min_depth = getattr(target, 'bit_depth', None)
+        if min_depth and depth is not None and depth < min_depth:
+            continue
+        return True
+    return False
+
+
 def _filter_prowlarr_by_quality(candidates, profile_id=None):
     """Apply the item's quality ladder to torrent/Usenet search hits.
 
@@ -304,19 +342,25 @@ def _filter_prowlarr_by_quality(candidates, profile_id=None):
         return rows
 
     try:
-        from core.quality.selection import (
-            load_profile_by_id,
-            rank_with_targets,
-            targets_from_profile,
-        )
+        from core.quality.model import AudioQuality
+        from core.quality.selection import load_profile_by_id, targets_from_profile
 
         profile = load_profile_by_id(profile_id)
         targets, fallback_enabled = targets_from_profile(profile)
-        ranked, _ = rank_with_targets(
-            prowlarr,
-            targets,
-            fallback_enabled=fallback_enabled,
-        )
+        if fallback_enabled or not targets:
+            return rows
+        ranked = [
+            row for row in prowlarr
+            if _satisfies_a_target_on_stated_facts(
+                AudioQuality(
+                    format=str(getattr(row, 'quality', '') or 'unknown'),
+                    bitrate=getattr(row, 'bitrate', None),
+                    sample_rate=getattr(row, 'sample_rate', None),
+                    bit_depth=getattr(row, 'bit_depth', None),
+                ),
+                targets,
+            )
+        ]
     except Exception as exc:  # noqa: BLE001 - never turn config I/O into no hits
         logger.debug("Prowlarr quality filtering unavailable: %s", exc)
         return rows

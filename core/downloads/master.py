@@ -161,24 +161,31 @@ def expected_release_duration_seconds(tracks_json) -> Optional[int]:
     The album-bundle picker refuses a release whose size cannot support the
     quality its title claims, and that comparison needs a duration. The batch's
     own track list is the only place it exists before anything is downloaded.
-    A list with no usable durations returns None rather than 0 — "unknown"
-    keeps the gate silent, while a zero would read as a real length and turn
-    every candidate implausible.
+
+    EVERY track has to be known. A subtotal is not a duration: ten tracks with
+    one known 180 seconds summed to 180, and the size gate then read a
+    legitimate 90 MB MP3 album as 4000 kbit/s and refused it. One missing
+    duration makes the whole answer None, and None keeps the gate silent,
+    which is the safe direction.
     """
+    entries = [entry for entry in tracks_json or [] if isinstance(entry, dict)]
+    if not entries:
+        return None
     total_ms = 0
-    for entry in tracks_json or []:
-        if not isinstance(entry, dict):
-            continue
+    for entry in entries:
         raw = entry.get('duration_ms')
         if raw is None:
             nested = entry.get('track')
             if isinstance(nested, dict):
                 raw = nested.get('duration_ms')
         try:
-            total_ms += int(raw or 0)
+            value = int(raw or 0)
         except (TypeError, ValueError):
-            continue
-    return round(total_ms / 1000) if total_ms > 0 else None
+            return None
+        if value <= 0:
+            return None
+        total_ms += value
+    return round(total_ms / 1000)
 
 
 def _album_context_richness(album_ctx: dict) -> int:

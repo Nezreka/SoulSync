@@ -47,6 +47,12 @@ def quality_profile_context(profile_id=None):
         _ACTIVE_QUALITY_PROFILE_ID.reset(token)
 
 
+# Named lossy codecs. Deliberately a positive list rather than "not lossless":
+# core.quality.lossless.LOSSLESS_FORMATS does not carry ape or wavpack, so an
+# APE profile would read as lossy and get handed a source's worst tier.
+_LOSSY_FORMATS = frozenset({'mp3', 'aac', 'ogg', 'opus', 'wma'})
+
+
 # ── Extension → format string (source-agnostic) ────────────────────────────
 #
 # The single source of truth for mapping a file extension to the unified
@@ -316,4 +322,17 @@ def quality_tier_for_source(
     for key, aq in reversed(ladder):           # low → high
         if aq.matches_target(top):
             return key
+
+    # Nothing in this source's ladder can satisfy the profile, so the answer is
+    # best effort. It must not be a LOSSLESS tier for a request that asked for
+    # a lossy format: an AAC-only profile matches nothing in Amazon's
+    # flac/opus ladder, was handed flac, and the import guard then threw the
+    # download away — the most bandwidth spent on the likeliest reject. The
+    # best lossy tier is still best effort (YouTube serves no MP3 either, and
+    # an MP3 profile keeps getting Opus 256 there).
+    wanted = str(getattr(top, 'format', '') or '').lower()
+    if wanted in _LOSSY_FORMATS:
+        for key, aq in ladder:                  # high → low
+            if str(aq.format or '').lower() in _LOSSY_FORMATS:
+                return key
     return ladder[0][0]                         # best effort: max tier

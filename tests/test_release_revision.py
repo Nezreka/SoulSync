@@ -41,3 +41,14 @@ def test_real_is_case_sensitive():
 def test_mp3_is_not_a_version_marker():
     """``MP3`` ends in a digit followed by nothing; it is not "v3"."""
     assert release_revision('Artist - Album [MP3 320]').version == 1
+
+
+def test_an_all_caps_title_does_not_get_a_free_real_bump():
+    """REAL is matched case sensitively so the ordinary word does not count.
+
+    That only works while the title has a case to read. Plenty of indexers
+    post everything upper cased, and there `REAL` says nothing, so a release
+    called THE REAL THING was outranking a genuinely better seeded one.
+    """
+    assert release_revision('ARTIST - THE REAL THING 2020 FLAC').real == 0
+    assert release_revision('Artist - Album REAL PROPER [FLAC]').real == 1

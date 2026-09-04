@@ -68,8 +68,11 @@ _TITLE_MARKERS = (
     ('itunes plus', 'aac'),
     ('aiff', 'wav'),
     ('aifc', 'wav'),
-    ('aif', 'wav'),
-    ('wave', 'wav'),
+    # No 'wave' marker on purpose. 'wav' already has a word boundary on both
+    # sides, so it does not fire inside "Heat Wave"; a 'wave' marker did, and
+    # turned every album with that word into a mixed flac/wav release a
+    # lossless-only profile then refused. Lidarr's codec regex matches WAV and
+    # never WAVE for the same reason. 'aif' is left out on the same grounds.
     ('wav', 'wav'),
     ('wavpack', 'wavpack'),
     ('ape', 'ape'),
@@ -272,11 +275,10 @@ def audio_quality_from_release(
         quality.format = 'unknown'
         return quality
 
-    if has_mp3_category:
-        if not title_formats:
-            quality.format = 'mp3'
-        elif title_formats != {'mp3'}:
-            quality.format = 'unknown'
+    if has_mp3_category and not title_formats:
+        # Fills a silent title only; a title that names a codec outranks a
+        # category mapping (see evaluate_release for the same rule).
+        quality.format = 'mp3'
     elif has_lossless_category and quality.format in _LOSSY_FORMATS:
         quality.format = 'unknown'
     return quality
@@ -312,6 +314,10 @@ _VERSION_RE = re.compile(
     r'(?:\d(?<!\bmp3))[-._ ]?v(\d)[-._ ]|\[v(\d)\]|repack(\d)|rerip(\d)', re.I,
 )
 _REAL_RE = re.compile(r'\bREAL\b')
+# Case sensitivity is the whole signal, so it only means anything in a title
+# that HAS a case. Many indexers post fully upper cased, where REAL is just the
+# ordinary word, and real outranks version in the revision sort.
+_HAS_LOWERCASE_RE = re.compile(r'[a-z]')
 
 
 class ReleaseRevision(NamedTuple):
@@ -345,7 +351,10 @@ def release_revision(title: str) -> ReleaseRevision:
 
     return ReleaseRevision(
         version=version,
-        real=len(_REAL_RE.findall(raw)),
+        real=(
+            len(_REAL_RE.findall(raw))
+            if _HAS_LOWERCASE_RE.search(raw) else 0
+        ),
         is_repack=is_repack,
     )
 
@@ -507,7 +516,12 @@ def evaluate_release(
         if has_mp3_category and has_lossless_category:
             found = set()
         elif has_mp3_category:
-            found = title_formats | {'mp3'}
+            # 3010 is Audio/MP3, but plenty of indexers map their whole music
+            # category to it, FLAC torrents included, so it is not proof of a
+            # codec against a title that names one. The title describes THIS
+            # release; the category describes the bucket the indexer put it in.
+            # It fills a title that said nothing, and yields to one that did.
+            found = title_formats or {'mp3'}
         elif has_lossless_category and title_formats & _LOSSY_FORMATS:
             # Audio/Lossless identifies a family rather than a codec, so it
             # cannot fill a bare title. It can still disprove a lossy title.

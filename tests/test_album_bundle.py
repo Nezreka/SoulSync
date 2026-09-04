@@ -48,6 +48,7 @@ class _Release:
     grabs: Optional[int] = None
     indexer_priority: int = 25
     publish_date: Optional[str] = None
+    protocol: str = 'torrent'
 
 
 def _iso_hours_ago(hours: float) -> str:
@@ -1577,9 +1578,9 @@ def test_a_fresh_usenet_post_beats_an_old_one():
     """
     targets = [QualityTarget(format='flac')]
     fresh = _Release(title='Artist - Album [FLAC]', size=350_000_000, grabs=5,
-                     publish_date=_iso_hours_ago(2))
+                     protocol='usenet', publish_date=_iso_hours_ago(2))
     ancient = _Release(title='Artist - Album [FLAC]', size=350_000_000, grabs=5,
-                       publish_date=_iso_hours_ago(24 * 900))
+                       protocol='usenet', publish_date=_iso_hours_ago(24 * 900))
 
     picked = pick_best_album_release(
         [ancient, fresh], _flac_quality_guess, quality_targets=targets,
@@ -1602,3 +1603,77 @@ def test_age_says_nothing_about_a_torrent():
     )
 
     assert picked is old_but_bigger
+
+
+def test_a_healthy_swarm_outranks_a_preferred_indexer():
+    """Indexer priority is a tiebreaker, not a reason to take a dead swarm.
+
+    Lidarr can put indexer priority above peers because it has no seeder sort
+    key at all, only a minimum-seeders rejection. We have both, so priority
+    belongs below availability or it undoes the bucketing entirely.
+    """
+    targets = [QualityTarget(format='flac')]
+    preferred_but_dead = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                                  seeders=2, indexer_priority=1)
+    healthy = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                       seeders=5000, indexer_priority=25)
+
+    picked = pick_best_album_release(
+        [preferred_but_dead, healthy], _flac_quality_guess,
+        quality_targets=targets,
+    )
+
+    assert picked is healthy
+
+
+def test_priority_still_decides_inside_one_availability_bucket():
+    targets = [QualityTarget(format='flac')]
+    preferred = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                         seeders=40, indexer_priority=1)
+    other = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                     seeders=44, indexer_priority=40)
+
+    picked = pick_best_album_release(
+        [other, preferred], _flac_quality_guess, quality_targets=targets,
+    )
+
+    assert picked is preferred
+
+
+def test_a_torrent_without_a_seeder_count_is_still_a_torrent():
+    """`seeders is None` also means "this indexer omits the field".
+
+    The picker's own availability gate says so. Using it as the "this is
+    usenet" test handed such a torrent the full freshness bonus, which is the
+    exact sorting the age bucket is written to keep away from torrents.
+    """
+    targets = [QualityTarget(format='flac')]
+    fresh_unknown_swarm = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                                   seeders=None, protocol='torrent',
+                                   publish_date=_iso_hours_ago(1))
+    older_bigger = _Release(title='Artist - Album [FLAC]', size=900_000_000,
+                            seeders=None, protocol='torrent',
+                            publish_date=_iso_hours_ago(24 * 400))
+
+    picked = pick_best_album_release(
+        [fresh_unknown_swarm, older_bigger], _flac_quality_guess,
+        quality_targets=targets,
+    )
+
+    assert picked is older_bigger
+
+
+def test_an_nzb_of_unknown_age_does_not_beat_a_known_old_one():
+    """Missing publish date used to score 0.0, above every post over a week."""
+    targets = [QualityTarget(format='flac')]
+    unknown_age = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                           grabs=5, protocol='usenet', publish_date=None)
+    known_old = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                         grabs=5, protocol='usenet',
+                         publish_date=_iso_hours_ago(24 * 10))
+
+    picked = pick_best_album_release(
+        [unknown_age, known_old], _flac_quality_guess, quality_targets=targets,
+    )
+
+    assert picked is known_old

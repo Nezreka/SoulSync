@@ -139,6 +139,41 @@ def quality_meets_profile(aq, targets: List[QualityTarget]) -> bool:
 _VALID_SEARCH_MODES = ("priority", "best_quality")
 
 
+def profile_id_for_library_track(database, track_id, explicit=None):
+    """The Quality Profile a library track belongs to, or None for the default.
+
+    An explicit choice from the caller wins; otherwise the track's own
+    ``tracks.quality_profile_id`` answers. Resolving it server-side matters
+    most for redownload, which replaces a file and then deletes the original:
+    reading a profile only from the request body meant the shipped UI (which
+    sends none) ran that whole path on the app default, so a file the default
+    accepts could replace a track assigned something stricter.
+
+    Never raises. An unknown track, a missing column or an unavailable
+    database all mean "no answer", which is the app default, which is where
+    this lane already was.
+    """
+    if explicit is not None:
+        return explicit
+    if database is None or track_id in (None, ''):
+        return None
+    try:
+        conn = database.get_connection()
+        row = conn.execute(
+            "SELECT quality_profile_id FROM tracks WHERE id = ?", (str(track_id),),
+        ).fetchone()
+    except Exception as exc:  # noqa: BLE001 - a lookup must not fail the request
+        logger.debug("track quality profile lookup failed for %s: %s", track_id, exc)
+        return None
+    if row is None:
+        return None
+    try:
+        value = row["quality_profile_id"]
+    except (IndexError, KeyError, TypeError):
+        value = row[0] if len(row) else None
+    return value
+
+
 def load_search_mode(profile_id=None) -> str:
     """Return the download search strategy from the applicable profile.
 

@@ -273,24 +273,39 @@ def _indexer_priority_rank(candidate) -> int:
     return -priority
 
 
+# An NZB whose indexer omitted the publish date sorts below every dated post.
+# A neutral 0.0 put it ABOVE everything older than a week, which is backwards:
+# on usenet the date is how you judge whether a post is still complete, so a
+# post that will not even say is the one we know least about, and there is
+# always a dated alternative to prefer.
+UNKNOWN_AGE_BUCKET = -99.0
+
+
 def _usenet_age_bucket(candidate) -> float:
     """How fresh a Usenet post is, in Lidarr's buckets. 0 for anything else.
 
     A torrent's health is its swarm, and a seeded release is alive whatever its
-    post date — so age must not sort torrents at all. A Usenet post has no such
-    signal: the older it is, the likelier it is to be incomplete or past a
-    provider's retention. Bucketing keeps a few hours' difference from
-    deciding anything.
+    post date, so age must not sort torrents at all. That test is the
+    candidate's PROTOCOL, not its seeder count: an indexer omitting seeders is
+    common enough that the availability gate exempts it by name, and using the
+    missing count as "this is usenet" handed those torrents the freshness
+    bonus. A Usenet post has no swarm to read, and the older it is the likelier
+    it is to be incomplete or past a provider's retention.
     """
-    if candidate.seeders is not None:
+    protocol = str(getattr(candidate, 'protocol', '') or '').strip().lower()
+    if protocol and protocol != 'usenet':
+        return 0.0
+    if not protocol and candidate.seeders is not None:
+        # No protocol on the object at all: fall back to the old signal rather
+        # than treat every candidate as usenet.
         return 0.0
     published = getattr(candidate, 'publish_date', None)
     if not published:
-        return 0.0
+        return UNKNOWN_AGE_BUCKET
     try:
         stamp = datetime.fromisoformat(str(published).replace('Z', '+00:00'))
     except (TypeError, ValueError):
-        return 0.0
+        return UNKNOWN_AGE_BUCKET
     if stamp.tzinfo is None:
         stamp = stamp.replace(tzinfo=timezone.utc)
     age_hours = (datetime.now(timezone.utc) - stamp).total_seconds() / 3600
@@ -516,17 +531,20 @@ def pick_best_album_release(candidates, quality_guess,
                 True if best_target < len(quality_targets)
                 else aq.format.lower() in preferred_formats
             )
-            # Lidarr's DownloadDecisionComparer order, minus the keys this
-            # pipeline has no equivalent for (custom formats, protocol — one
-            # plugin answers one search — and album count).
+            # Lidarr's DownloadDecisionComparer order with one deliberate
+            # change: indexer priority sits BELOW availability. Lidarr can put
+            # it above peers because it has no seeder sort key at all, only a
+            # minimum-seeders rejection. We have both, and a preferred indexer
+            # is not worth a dead swarm, so priority decides inside one
+            # availability bucket rather than across buckets.
             return (
                 preferred,
                 aq.tier_score(),
                 # Only ever a tiebreaker: a repack is the corrected copy of the
                 # SAME quality, never a reason to take a worse format.
                 release_revision(candidate.title or '').rank,
-                _indexer_priority_rank(candidate),
                 availability,
+                _indexer_priority_rank(candidate),
                 _usenet_age_bucket(candidate),
                 candidate.size or 0,
             )

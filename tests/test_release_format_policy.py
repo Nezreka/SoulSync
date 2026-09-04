@@ -193,14 +193,20 @@ def test_exact_mp3_category_is_preserved_by_the_strict_gate():
     assert 'mp3' in reason
 
 
-def test_category_title_contradiction_is_not_silently_trusted():
-    for allowed in ({'flac'}, {'mp3'}):
-        ok, _reason = evaluate_release(
-            allowed,
-            'Artist - Album [FLAC]',
-            categories=[3010],
-        )
-        assert ok is False
+def test_a_named_codec_outranks_a_generic_mp3_category():
+    """3010 is Audio/MP3, and this used to read as a contradiction.
+
+    It was treated as codec evidence equal to the title, so a FLAC torrent
+    filed under 3010 became a mixed flac/mp3 release and a lossless-only
+    profile refused it. Plenty of indexers map their whole music category to
+    3010, so it says which bucket the indexer used, not what this release is.
+    The title names the release and wins; the category only fills a title that
+    said nothing.
+    """
+    assert evaluate_release({'flac'}, 'Artist - Album [FLAC]', categories=[3010])[0] is True
+    assert evaluate_release({'mp3'}, 'Artist - Album [FLAC]', categories=[3010])[0] is False
+    # A title that names nothing still takes the category's word for it.
+    assert evaluate_release({'mp3'}, 'Artist - Album (2019)', categories=[3010])[0] is True
 
 
 def test_lossless_category_disproves_a_lossy_title_without_inventing_flac():
