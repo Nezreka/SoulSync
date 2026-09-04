@@ -10719,6 +10719,13 @@ def redownload_search_sources(track_id):
         if not metadata.get('name'):
             return jsonify({"success": False, "error": "metadata with name required"}), 400
 
+        # The ladder that judges these candidates is the item's, not the app's.
+        # Every other lane resolves it (task_worker reads it off the track, the
+        # album bundle off the batch); this one had nothing to read it from, so
+        # it is accepted from the caller and falls back to the app default when
+        # the caller does not know one either.
+        quality_profile_id = parse_strict_int(data.get('quality_profile_id'))
+
         # Build a track-like object for query generation
         from core.itunes_client import Track as MetaTrack
         track_obj = MetaTrack(
@@ -10766,7 +10773,8 @@ def redownload_search_sources(track_id):
                     tracks_result, _ = run_async(client.search(q, timeout=20))
                     if not tracks_result:
                         continue
-                    valid = get_valid_candidates(tracks_result, track_obj, q)
+                    valid = get_valid_candidates(tracks_result, track_obj, q,
+                                                 quality_profile_id)
                     for candidate in valid:
                         is_bl = database.is_blacklisted(candidate.username, candidate.filename)
                         display_name = os.path.basename(candidate.filename.replace('\\', '/'))

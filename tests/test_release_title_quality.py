@@ -73,3 +73,65 @@ def test_exact_category_does_not_hide_a_mixed_release_title():
     )
 
     assert quality.format == 'unknown'
+
+
+@pytest.mark.parametrize(
+    ('title', 'fmt', 'bitrate', 'bit_depth'),
+    [
+        # Lidarr's QualityParser recognises these; SoulSync did not, so a
+        # correctly-labelled release read as 'unknown' and lost its bucket.
+        ('Artist - Album [FLAC24]', 'flac', None, 24),
+        ('Artist - Album (TR24)', 'flac', None, 24),
+        ('Artist - Album [AAC iTunes Plus]', 'aac', 256, None),
+        ('Artist - Album [Ogg Vorbis q8]', 'ogg', 256, None),
+        ('Artist - Album [Opus Q10]', 'opus', 500, None),
+    ],
+)
+def test_lidarr_style_markers_are_understood(title, fmt, bitrate, bit_depth):
+    quality = audio_quality_from_release_title(title)
+
+    assert (quality.format, quality.bitrate, quality.bit_depth) == (fmt, bitrate, bit_depth)
+
+
+def test_a_vorbis_quality_marker_needs_a_vorbis_codec():
+    """``q8`` is only a bitrate claim next to Ogg/Opus.
+
+    Lidarr maps a bare ``q8`` to 256 kbps whatever the codec. Here it must not
+    invent a bitrate for a release whose codec is unknown — the same rule that
+    keeps a bare ``192`` from becoming a bitrate.
+    """
+    assert audio_quality_from_release_title('Artist - Album Q8 (2026)').bitrate is None
+
+
+def test_the_file_list_outranks_the_title():
+    """A title is a claim; the file list is evidence.
+
+    Lidarr cascades desc (tags) -> name -> extension and records which one
+    answered. The same precedence belongs in one place here, instead of being
+    re-implemented by each caller that happens to have a file list.
+    """
+    quality = audio_quality_from_release(
+        'Artist - Album [MP3 320]',
+        categories=(3010,),
+        file_names=('01 - One.flac', '02 - Two.flac', 'cover.jpg'),
+    )
+
+    assert quality.format == 'flac'
+
+
+def test_a_mixed_file_list_is_unknown_whatever_the_title_claims():
+    quality = audio_quality_from_release(
+        'Artist - Album [FLAC]',
+        file_names=('01 - One.flac', '02 - Two.mp3'),
+    )
+
+    assert quality.format == 'unknown'
+
+
+def test_a_file_list_without_audio_leaves_the_title_alone():
+    quality = audio_quality_from_release(
+        'Artist - Album [FLAC]',
+        file_names=('cover.jpg', 'release.nfo'),
+    )
+
+    assert quality.format == 'flac'

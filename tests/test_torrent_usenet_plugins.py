@@ -959,3 +959,42 @@ def test_handle_stalled_survives_adapter_error():
 
     # Download still fails cleanly even when the client call blew up.
     assert plugin.active_downloads['d3']['state'] == 'Completed, Errored'
+
+
+@pytest.mark.parametrize('module, plugin_factory, adapter_patch, make_result', [
+    ('core.download_plugins.torrent', lambda: TorrentDownloadPlugin(),
+     'core.download_plugins.torrent.get_active_torrent_adapter',
+     _make_torrent_result),
+    ('core.download_plugins.usenet', lambda: UsenetDownloadPlugin(),
+     'core.download_plugins.usenet.get_active_usenet_adapter',
+     _make_usenet_result),
+])
+def test_album_duration_reaches_the_release_picker(module, plugin_factory,
+                                                   adapter_patch, make_result,
+                                                   tmp_path: Path) -> None:
+    """The size gate is useless if the duration stops at the plugin boundary.
+
+    Both album plugins must hand ``expected_duration_seconds`` to
+    ``pick_best_album_release``; without it the gate silently has no opinion,
+    which looks identical to "every release was plausible".
+    """
+    plugin = plugin_factory()
+    fake_adapter = MagicMock()
+    fake_adapter.is_configured.return_value = True
+    seen = {}
+
+    def _capture(*_args, **kwargs):
+        seen.update(kwargs)
+        return None
+
+    with patch.object(plugin, 'is_configured', return_value=True), \
+         patch.object(plugin._prowlarr, 'search',
+                      new=AsyncMock(return_value=[make_result()])), \
+         patch(f'{module}.pick_best_album_release', side_effect=_capture), \
+         patch(adapter_patch, return_value=fake_adapter):
+        plugin.download_album_to_staging(
+            'GNX', 'Kendrick Lamar', str(tmp_path),
+            expected_duration_seconds=2700,
+        )
+
+    assert seen.get('expected_duration_seconds') == 2700

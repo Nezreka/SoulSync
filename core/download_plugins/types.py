@@ -175,8 +175,8 @@ class AlbumResult:
         ]
         formats = set(format_values)
 
-        def _complete_min(field):
-            values = [getattr(track, field, None) for track in tracks]
+        def _complete_min(attribute):
+            values = [getattr(track, attribute, None) for track in tracks]
             if not values or any(value is None for value in values):
                 return None
             return min(values)

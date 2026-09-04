@@ -61,8 +61,11 @@ _TITLE_MARKERS = (
     ('dsf', 'dsf'),
     ('dff', 'dsf'),
     ('dsd', 'dsf'),
+    ('flac24', 'flac'),
+    ('tr24', 'flac'),
     ('flac', 'flac'),
     ('alac', 'alac'),
+    ('itunes plus', 'aac'),
     ('aiff', 'wav'),
     ('aifc', 'wav'),
     ('aif', 'wav'),
@@ -125,6 +128,23 @@ _LOSSY_BARE_BITRATE = re.compile(
     re.I,
 )
 
+# Codec markers that carry a resolution of their own. ``FLAC24``/``TR24`` are
+# how a 24-bit release is labelled when the title never spells out "24bit",
+# which read as an unlabelled FLAC here and lost its hi-res bucket.
+_HIRES_CODEC_MARKER = re.compile(r'(?<![a-z0-9])(?:flac24|tr24)(?![a-z0-9])', re.I)
+
+# Bitrate claims that are named rather than numeric. iTunes Plus is Apple's
+# 256 kbps AAC; Vorbis/Opus quality presets map onto nominal bitrates the same
+# way Lidarr's QualityParser reads them. A preset only speaks for a release
+# whose codec is known to use it — a bare ``q8`` next to no codec is as mute as
+# a bare ``256``.
+_ITUNES_PLUS = re.compile(r'(?<![a-z0-9])itunes\s*plus(?![a-z0-9])', re.I)
+_VORBIS_QUALITY = re.compile(r'(?<![a-z0-9])q(5|6|7|8|9|10)(?![a-z0-9])', re.I)
+_VORBIS_QUALITY_BITRATE = {
+    '5': 160, '6': 192, '7': 224, '8': 256, '9': 320, '10': 500,
+}
+_VORBIS_FORMATS = frozenset({'ogg', 'opus'})
+
 
 def formats_in_title(title: str) -> Set[str]:
     """Every format a release TITLE claims. Possibly empty (unknown), possibly
@@ -170,6 +190,8 @@ def audio_quality_from_release_title(title: str) -> AudioQuality:
     bit_depth = int(pair.group(1)) if pair else (
         int(depth_match.group(1)) if depth_match else None
     )
+    if bit_depth is None and _HIRES_CODEC_MARKER.search(raw):
+        bit_depth = 24
 
     sample_rate = None
     if pair:
@@ -184,8 +206,13 @@ def audio_quality_from_release_title(title: str) -> AudioQuality:
 
     bitrate = None
     labelled = _LABELLED_BITRATE.search(raw)
+    preset = _VORBIS_QUALITY.search(raw)
     if labelled:
         bitrate = int(labelled.group(1))
+    elif fmt == 'aac' and _ITUNES_PLUS.search(raw):
+        bitrate = 256
+    elif fmt in _VORBIS_FORMATS and preset:
+        bitrate = _VORBIS_QUALITY_BITRATE[preset.group(1)]
     elif fmt in _LOSSY_FORMATS:
         bare = _LOSSY_BARE_BITRATE.search(raw)
         if bare:
@@ -202,6 +229,7 @@ def audio_quality_from_release_title(title: str) -> AudioQuality:
 def audio_quality_from_release(
     title: str,
     categories: Optional[Iterable[int]] = None,
+    file_names: Optional[Iterable[str]] = None,
 ) -> AudioQuality:
     """Combine title hints with Prowlarr/Newznab's audio leaf category.
 
@@ -212,8 +240,21 @@ def audio_quality_from_release(
     ``unknown`` instead of arbitrarily trusting one side. Resolution and
     bitrate still come only from the title because categories do not encode
     them.
+
+    ``file_names`` is the release's file list, and it OUTRANKS both: an
+    extension is what the release contains, a title is what the uploader typed.
+    A list carrying more than one audio format is ``unknown`` — the same rule a
+    mixed title gets — and a list with no audio in it (art, logs, .nfo) says
+    nothing, so the title keeps its answer. Precedence lives here so every
+    caller that happens to have a file list does not re-derive it.
     """
     quality = audio_quality_from_release_title(title)
+    file_formats = formats_in_files(file_names or ())
+    if file_formats:
+        quality.format = (
+            next(iter(file_formats)) if len(file_formats) == 1 else 'unknown'
+        )
+        return quality
     title_formats = formats_in_title(title)
     has_mp3_category = False
     has_lossless_category = False
@@ -239,6 +280,73 @@ def audio_quality_from_release(
     elif has_lossless_category and quality.format in _LOSSY_FORMATS:
         quality.format = 'unknown'
     return quality
+
+
+# A lossless claim has a floor its own bytes have to clear. FLAC of CD audio
+# lands around 700-1000 kbit/s and even the most compressible material stays
+# well above this; anything under it is a lossy file wearing a lossless title.
+# There is deliberately no lossless CEILING: 24/192 multichannel legitimately
+# runs into thousands of kbit/s, so a ceiling could only be wrong.
+_LOSSLESS_MIN_IMPLIED_KBPS = 400.0
+
+# For a STATED lossy bitrate the tolerance is generous — the measurement covers
+# artwork, logs and cue sheets as well as audio, and the duration comes from a
+# provider tracklist that may describe a different edition. Doubling the claim
+# and adding a fixed allowance means only a release that is nothing like what
+# it says (a discography pack answering an album search) trips it. Lidarr can
+# afford a tight per-quality ceiling because it knows the exact release
+# duration; here the same rule has to survive a wrong edition.
+_LOSSY_CEILING_FACTOR = 2.0
+_LOSSY_CEILING_ALLOWANCE_KBPS = 64.0
+
+
+def implied_bitrate_kbps(size_bytes, duration_seconds) -> Optional[float]:
+    """Average kbit/s a release carries, or None when it cannot be measured.
+
+    This is an upper bound on the audio bitrate: the size includes everything
+    shipped alongside the audio, so padding only ever inflates it.
+    """
+    try:
+        size = float(size_bytes or 0)
+        duration = float(duration_seconds or 0)
+    except (TypeError, ValueError):
+        return None
+    if size <= 0 or duration <= 0:
+        return None
+    return size * 8 / 1000 / duration
+
+
+def size_contradicts_quality(quality, size_bytes, duration_seconds) -> Optional[str]:
+    """Why the bytes disagree with the claimed quality, or None if they don't.
+
+    Same mechanism as Lidarr's ``AcceptableSizeSpecification`` — expected
+    kbit/s times known duration, compared against the release size — and the
+    same fail-open contract: no size or no duration means no opinion, never a
+    rejection. What it can prove is asymmetric, so the two directions are not
+    the same rule (see the constants above).
+    """
+    implied = implied_bitrate_kbps(size_bytes, duration_seconds)
+    if implied is None or quality is None:
+        return None
+
+    fmt = str(getattr(quality, 'format', '') or '').lower()
+    if fmt in LOSSLESS_FORMATS:
+        if implied < _LOSSLESS_MIN_IMPLIED_KBPS:
+            return (
+                f"claims lossless {fmt.upper()} but carries only "
+                f"{implied:.0f} kbit/s"
+            )
+        return None
+
+    claimed = getattr(quality, 'bitrate', None)
+    if fmt in _LOSSY_FORMATS and claimed:
+        ceiling = claimed * _LOSSY_CEILING_FACTOR + _LOSSY_CEILING_ALLOWANCE_KBPS
+        if implied > ceiling:
+            return (
+                f"claims {claimed} kbit/s {fmt.upper()} but carries "
+                f"{implied:.0f} kbit/s"
+            )
+    return None
 
 
 def _khz_to_hz(value: str) -> int:

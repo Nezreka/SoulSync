@@ -681,6 +681,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         staging_dir: str,
         progress_callback=None,
         quality_profile_id=None,
+        expected_duration_seconds=None,
     ) -> Dict[str, Any]:
         """One-shot album download: search Prowlarr for the whole
         release, pick the best torrent, fetch it, extract if needed,
@@ -757,6 +758,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             allowed_formats=allowed_formats,
             quality_targets=quality_targets,
             fallback_enabled=fallback_enabled,
+            expected_duration_seconds=expected_duration_seconds,
         )
         if picked is None:
             # No candidate matched the requested album, or none had a live

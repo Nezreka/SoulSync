@@ -33,7 +33,7 @@ import uuid
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from core.downloads import album_bundle_dispatch as _album_bundle_dispatch
 from core.runtime_state import download_batches, download_tasks, tasks_lock
@@ -153,6 +153,32 @@ def owned_hit_is_rerelease_original(db, requested_album: str, expected_year,
         return bool(same_family and db._release_years_conflict(expected_year, matched_year))
     except Exception:   # noqa: BLE001 - the guard must never break the analysis
         return False
+
+
+def expected_release_duration_seconds(tracks_json) -> Optional[int]:
+    """Total playing time of the requested release, or None if unknown.
+
+    The album-bundle picker refuses a release whose size cannot support the
+    quality its title claims, and that comparison needs a duration. The batch's
+    own track list is the only place it exists before anything is downloaded.
+    A list with no usable durations returns None rather than 0 — "unknown"
+    keeps the gate silent, while a zero would read as a real length and turn
+    every candidate implausible.
+    """
+    total_ms = 0
+    for entry in tracks_json or []:
+        if not isinstance(entry, dict):
+            continue
+        raw = entry.get('duration_ms')
+        if raw is None:
+            nested = entry.get('track')
+            if isinstance(nested, dict):
+                raw = nested.get('duration_ms')
+        try:
+            total_ms += int(raw or 0)
+        except (TypeError, ValueError):
+            continue
+    return round(total_ms / 1000) if total_ms > 0 else None
 
 
 def _album_context_richness(album_ctx: dict) -> int:
@@ -963,6 +989,22 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     return None
             return plugin
 
+        def _bundle_plugin_kwargs():
+            """What the album plugins need beyond album/artist/staging.
+
+            Both dispatch sites send the same thing, and a key is omitted
+            rather than sent as None: the plugins treat a missing duration as
+            "no opinion", and an explicit None would have to mean the same,
+            twice.
+            """
+            kwargs = {}
+            if batch_quality_profile_id is not None:
+                kwargs['quality_profile_id'] = batch_quality_profile_id
+            _duration = expected_release_duration_seconds(tracks_json)
+            if _duration:
+                kwargs['expected_duration_seconds'] = _duration
+            return kwargs or None
+
         def _dispatch_bundle_sources(sources):
             """Try an ordered segment. Return True only for a terminal result."""
             nonlocal _album_bundle_staged
@@ -981,10 +1023,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     plugin_resolver=lambda _name, _plugin=plugin: _plugin,
                     state=_bundle_state,
                     source_override=source,
-                    plugin_kwargs=(
-                        {'quality_profile_id': batch_quality_profile_id}
-                        if batch_quality_profile_id is not None else None
-                    ),
+                    plugin_kwargs=_bundle_plugin_kwargs(),
                 ):
                     return True
 
@@ -1177,8 +1216,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                         if preflight_source and preflight_tracks else {}
                     ),
                     **(
-                        {'quality_profile_id': batch_quality_profile_id}
-                        if batch_quality_profile_id is not None else {}
+                        _bundle_plugin_kwargs() or {}
                     ),
                 } or None,
             ):

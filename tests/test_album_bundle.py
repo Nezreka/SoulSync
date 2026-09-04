@@ -1405,3 +1405,63 @@ def test_poll_get_status_exception_treated_as_transient_miss() -> None:
     )
     assert result == '/recovered'
     assert 'failed' not in [c[0] for c in calls]
+
+
+def test_the_no_target_sort_uses_the_shared_quality_ladder():
+    """One definition of "better audio", not a fourth private one.
+
+    Without ranked targets the picker fell back to a four-entry map
+    (flac/ogg/aac/mp3). ALAC, WAV, Opus and DSD were absent from it and scored
+    zero, so a lossless ALAC release lost to an MP3 with the same seeders.
+    """
+    alac = _Release(title='Artist - Album [ALAC]', size=400_000_000, seeders=10)
+    mp3 = _Release(title='Artist - Album [MP3 320]', size=400_000_000, seeders=10)
+
+    assert pick_best_album_release([mp3, alac], _flac_quality_guess) is alac
+
+
+def test_the_no_target_sort_still_asks_the_plugin_when_the_title_is_mute():
+    """The plugin's guess is the fallback, not the primary.
+
+    ``quality_guess`` stays wired so a plugin that knows something the shared
+    parser does not can still place its release, but it only speaks when the
+    release itself said nothing.
+    """
+    def _always_flac(_title: str) -> str:
+        return 'flac'
+
+    mute = _Release(title='Artist - Album (2026)', size=400_000_000, seeders=10)
+    mp3 = _Release(title='Artist - Album [MP3 320]', size=400_000_000, seeders=10)
+
+    assert pick_best_album_release([mp3, mute], _always_flac) is mute
+
+
+def test_a_flac_release_too_small_for_its_own_claim_is_dropped():
+    """Lidarr's size specification, applied where the picker decides.
+
+    A 45-minute album is roughly 340 MB in FLAC. A 60 MB "FLAC" is a transcode
+    with a lossless title, and grabbing it costs a full re-download later.
+    """
+    fake = _Release(title='Artist - Album [FLAC]', size=60_000_000, seeders=99)
+    real = _Release(title='Artist - Album [FLAC]', size=337_500_000, seeders=2)
+
+    picked = pick_best_album_release(
+        [fake, real], _flac_quality_guess,
+        expected_duration_seconds=2700,
+    )
+
+    assert picked is real
+
+
+def test_the_size_gate_refuses_the_bundle_when_nothing_survives():
+    fake = _Release(title='Artist - Album [FLAC]', size=60_000_000, seeders=99)
+
+    assert pick_best_album_release(
+        [fake], _flac_quality_guess, expected_duration_seconds=2700,
+    ) is None
+
+
+def test_without_a_duration_the_size_gate_has_no_opinion():
+    fake = _Release(title='Artist - Album [FLAC]', size=60_000_000, seeders=99)
+
+    assert pick_best_album_release([fake], _flac_quality_guess) is fake

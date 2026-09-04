@@ -49,10 +49,10 @@ ALBUM_PICK_MIN_BYTES = 40 * 1024 * 1024
 ALBUM_PICK_MAX_BYTES = 3 * 1024 * 1024 * 1024
 
 
-# Quality-score weights for the album-pick heuristic. Mirrors the
-# tier order in ``core/imports/file_ops.py``'s ``quality_tiers`` —
-# higher number = preferred.
-_QUALITY_SCORE = {'flac': 4, 'ogg': 3, 'aac': 2, 'mp3': 1}
+# The album-pick heuristic used to carry its own four-entry ladder
+# (flac/ogg/aac/mp3). ALAC, WAV, Opus and DSD were not in it and scored zero,
+# below MP3. Ranking now goes through ``AudioQuality.tier_score()`` like every
+# other stage, so there is one answer to "which of these is better audio".
 
 
 # Default poll cadence + timeout for the album-download poll loop.
@@ -91,14 +91,34 @@ def get_poll_timeout() -> float:
     return DEFAULT_POLL_TIMEOUT_SECONDS
 
 
-def quality_score(title: str, quality_guess) -> int:
-    """Map a release title's inferred quality to a sortable integer.
+def quality_score(title: str, quality_guess) -> float:
+    """Rank one release title on the shared quality ladder.
 
-    ``quality_guess`` is the function from each plugin that maps a
-    title string to a quality string ('flac' / 'mp3' / etc.) — passed
-    in so this module doesn't have to import either plugin and risk
-    a circular import."""
-    return _QUALITY_SCORE.get(quality_guess(title) or '', 0)
+    ``quality_guess`` is the function from each plugin that maps a title string
+    to a quality string ('flac' / 'mp3' / etc.) — passed in so this module
+    doesn't have to import either plugin and risk a circular import. It is the
+    FALLBACK: the shared parser reads the title first, and the plugin only
+    answers for a release whose title said nothing, so a plugin that knows
+    something extra can still place its result.
+    """
+    return release_quality_score(title, quality_guess)
+
+
+def release_quality_score(title: str, quality_guess=None,
+                          categories=None, file_names=None) -> float:
+    """``AudioQuality.tier_score()`` for a release, from whatever it exposes."""
+    from core.quality.release_format import audio_quality_from_release
+
+    quality = audio_quality_from_release(title or '', categories, file_names)
+    if quality.format == 'unknown' and quality_guess is not None:
+        try:
+            guessed = quality_guess(title or '')
+        except Exception as exc:  # noqa: BLE001 - a plugin hook must not decide the pick
+            logger.debug("quality_guess failed for %r: %s", title, exc)
+            guessed = None
+        if guessed:
+            quality.format = str(guessed).lower()
+    return quality.tier_score()
 
 
 def _normalize_release_text(text: str) -> str:
@@ -224,7 +244,8 @@ def pick_best_album_release(candidates, quality_guess,
                             allowed_formats=None,
                             allow_mixed: bool = False,
                             quality_targets=None,
-                            fallback_enabled: bool = True) -> Optional[object]:
+                            fallback_enabled: bool = True,
+                            expected_duration_seconds=None) -> Optional[object]:
     """Pick the single best torrent / NZB for an album-bundle download.
 
     Heuristic, in priority order:
@@ -242,7 +263,15 @@ def pick_best_album_release(candidates, quality_guess,
        seeders no matter what the profile said — sorting cannot express "never
        this", only "prefer that". A release whose format cannot be determined
        is dropped too rather than assumed lossy and ranked.
-    0b. Availability gate (#1139): drop candidates whose indexer-reported
+    0b. SIZE gate: drop candidates whose bytes contradict the quality their
+       title claims — a 60 MB "FLAC" of a 45-minute album is a transcode, and
+       a release averaging far more than its stated lossy bitrate is not the
+       album that was searched for. Same mechanism as Lidarr's
+       AcceptableSizeSpecification (expected kbit/s x known duration), and the
+       same fail-open contract: without ``expected_duration_seconds`` there is
+       no opinion. Runs before availability so the log names the quality lie
+       rather than a dead swarm.
+    0c. Availability gate (#1139): drop candidates whose indexer-reported
        seeder count is BELOW ``min_seeders``. Sorting by seeders was never
        enough — with every candidate on zero, the sort still handed back a
        release nobody is serving, and the download then sat on "downloading
@@ -312,6 +341,42 @@ def pick_best_album_release(candidates, quality_guess,
                         len(candidates) - len(keeping))
         candidates = keeping
 
+    if expected_duration_seconds:
+        from core.quality.release_format import (
+            audio_quality_from_release,
+            size_contradicts_quality,
+        )
+
+        plausible = []
+        for c in candidates:
+            reason = size_contradicts_quality(
+                audio_quality_from_release(
+                    c.title or '',
+                    getattr(c, 'categories', None),
+                    getattr(c, 'file_names', None),
+                ),
+                getattr(c, 'size', None),
+                expected_duration_seconds,
+            )
+            if reason is None:
+                plausible.append(c)
+            else:
+                logger.debug("[Album Bundle] Rejected '%s': %s", c.title, reason)
+        if not plausible:
+            logger.warning(
+                "[Album Bundle] Every candidate for '%s' carries a size its own "
+                "quality claim cannot support (%d rejected) — refusing the "
+                "bundle so the caller falls back rather than queueing a "
+                "mislabelled release.",
+                album_name or '?', len(candidates),
+            )
+            return None
+        if len(plausible) != len(candidates):
+            logger.info("[Album Bundle] Dropped %d candidate(s) whose size "
+                        "contradicts their quality claim",
+                        len(candidates) - len(plausible))
+        candidates = plausible
+
     if min_seeders > 0:
         available = [c for c in candidates
                      if c.seeders is None or (c.seeders or 0) >= min_seeders]
@@ -340,25 +405,17 @@ def pick_best_album_release(candidates, quality_guess,
     # release into the same AudioQuality model used by Soulseek/streaming.
     if quality_targets:
         from core.quality.model import rank_candidate
-        from core.quality.release_format import (
-            audio_quality_from_release,
-            formats_in_files,
-        )
+        from core.quality.release_format import audio_quality_from_release
 
         quality_rows = []
         for candidate in pool:
+            # File list over title is decided inside audio_quality_from_release
+            # so this stage and the legacy sort below cannot disagree.
             aq = audio_quality_from_release(
                 candidate.title or '',
                 getattr(candidate, 'categories', None),
+                getattr(candidate, 'file_names', None),
             )
-            file_formats = formats_in_files(
-                getattr(candidate, 'file_names', None) or ()
-            )
-            if len(file_formats) == 1:
-                # A torrent file list is stronger evidence than its title.
-                aq.format = next(iter(file_formats))
-            elif len(file_formats) > 1:
-                aq.format = 'unknown'
             quality_rows.append((rank_candidate(aq, quality_targets), aq, candidate))
 
         best_target = min(
@@ -403,7 +460,15 @@ def pick_best_album_release(candidates, quality_guess,
 
     def _score(c) -> tuple:
         seeders = c.seeders if c.seeders is not None else (c.grabs or 0)
-        return (seeders, quality_score(c.title or '', quality_guess), c.size or 0)
+        return (
+            seeders,
+            release_quality_score(
+                c.title or '', quality_guess,
+                getattr(c, 'categories', None),
+                getattr(c, 'file_names', None),
+            ),
+            c.size or 0,
+        )
 
     return max(pool, key=_score)
 

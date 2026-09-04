@@ -1459,3 +1459,48 @@ def test_batch_removed_before_phase_two_returns_cleanly(monkeypatch):
     # (batch was deleted, so phase=complete update silently no-ops)
     assert monitor.started == []
     assert next_batch_calls == []
+
+
+def test_album_bundle_passes_the_expected_release_duration(monkeypatch):
+    """The size gate needs the album's length, and only the batch knows it.
+
+    The picker refuses a release whose bytes cannot support its quality claim,
+    but only when it is told how long the album is. That number is summed from
+    the batch's own track list.
+    """
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    plugin = _FakeAlbumBundleSoulseek()
+    deps = _build_deps(
+        config=_FakeConfig({'download_source.mode': 'usenet'}),
+        soulseek=_FakePluginWrapper({'usenet': plugin}),
+    )
+    _seed_batch(
+        'B-duration',
+        is_album_download=True,
+        album_context={'name': 'Test Album', 'total_tracks': 2},
+        artist_context={'name': 'Artist'},
+    )
+    tracks = [
+        {'name': 'T1', 'artists': ['Artist'], 'track_number': 1, 'duration_ms': 210_000},
+        {'name': 'T2', 'artists': ['Artist'], 'track_number': 2, 'duration_ms': 195_000},
+    ]
+
+    mw.run_full_missing_tracks_process('B-duration', 'album:1', tracks, deps)
+
+    assert plugin.calls[0][3] == {'expected_duration_seconds': 405}
+
+
+def test_a_track_list_without_durations_says_nothing_about_length():
+    """No duration is not a duration of zero — the gate must stay silent."""
+    assert mw.expected_release_duration_seconds([
+        {'name': 'T1'}, {'name': 'T2', 'duration_ms': 0},
+    ]) is None
+
+
+def test_release_duration_reads_a_nested_track_payload():
+    assert mw.expected_release_duration_seconds([
+        {'track': {'duration_ms': 200_000}},
+        {'duration_ms': 100_000},
+    ]) == 300
