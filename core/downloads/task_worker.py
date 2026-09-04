@@ -611,10 +611,20 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                         logger.debug("[Modal Worker] search ticker failed: %s", _tick_exc)
 
                 # Perform search with timeout
-                tracks_result, _ = deps.run_async(deps.download_orchestrator.search(
-                    query, timeout=30, exclude_sources=_exclude_sources or None,
-                    progress_callback=_search_progress,
-                ))
+                _search_kwargs = {
+                    'timeout': 30,
+                    'exclude_sources': _exclude_sources or None,
+                    'progress_callback': _search_progress,
+                }
+                # Preserve the old call shape for default-profile tasks (and
+                # light-weight test doubles), while ensuring an assigned item
+                # profile decides whether hybrid search stops at the first
+                # source or pools every source for best-quality selection.
+                if _profile_id is not None:
+                    _search_kwargs['quality_profile_id'] = _profile_id
+                tracks_result, _ = deps.run_async(
+                    deps.download_orchestrator.search(query, **_search_kwargs)
+                )
                 logger.debug(f"Search completed for task {task_id}, got {len(tracks_result) if tracks_result else 0} results")
 
                 # CRITICAL: Check cancellation immediately after search returns

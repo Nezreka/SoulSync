@@ -98,6 +98,20 @@ def test_a_total_failure_still_raises_rather_than_reporting_zero_hits():
         _run(client)
 
 
+def test_one_failure_does_not_poison_responsive_zero_hit_indexers():
+    """A successful empty response is materially different from a transport
+    failure. The failing indexer is isolated and relaxed variants may continue;
+    the overall search should simply return no hits when none are found."""
+    client = _FanOutProwlarr({
+        1: [],
+        2: ProwlarrSearchError('gateway timeout'),
+        3: [],
+    })
+
+    assert _run(client) == []
+    assert {indexer_id for _query, indexer_id in client.searched} == {1, 2, 3}
+
+
 def test_the_failing_indexer_is_named():
     """The aggregated request structurally could not say WHICH indexer was
     the problem. The report asks for exactly that."""
@@ -383,3 +397,13 @@ def test_a_repeated_indexer_id_is_searched_once(monkeypatch):
 
     assert sorted(asked) == [1, 2]
     assert len(results) == 2, 'a duplicated id produced duplicate candidates'
+
+
+def test_duplicate_only_allowlist_still_reports_total_failure():
+    client = _FanOutProwlarr(
+        {1: ProwlarrSearchError('down')},
+        ids=[1, 1],
+    )
+
+    with pytest.raises(ProwlarrSearchError):
+        _run(client)

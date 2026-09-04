@@ -10733,6 +10733,17 @@ def redownload_search_sources(track_id):
         if not metadata.get('name'):
             return jsonify({"success": False, "error": "metadata with name required"}), 400
 
+        # The ladder that judges these candidates is the item's, not the app's.
+        # Every other lane resolves it (task_worker reads it off the track, the
+        # album bundle off the batch); this one reads it off the library row,
+        # because the UI sends only metadata and this path deletes the file it
+        # replaces. An explicit choice from the caller still wins.
+        from core.quality.selection import profile_id_for_library_track
+        quality_profile_id = profile_id_for_library_track(
+            get_database(), track_id,
+            explicit=parse_strict_int(data.get('quality_profile_id')),
+        )
+
         # Build a track-like object for query generation
         from core.itunes_client import Track as MetaTrack
         track_obj = MetaTrack(
@@ -10775,12 +10786,19 @@ def redownload_search_sources(track_id):
         def _search_one_source(source_name, client):
             """Search a single download source and return formatted candidates."""
             source_candidates = []
+            # These clients are searched directly rather than through the
+            # orchestrator, so nothing else would enter the item's profile
+            # context and quality_tier_for_source would ask each source for the
+            # tier the APP default wants.
+            from core.quality.source_map import quality_profile_context
             for _qi, q in enumerate(search_queries):
                 try:
-                    tracks_result, _ = run_async(client.search(q, timeout=20))
+                    with quality_profile_context(quality_profile_id):
+                        tracks_result, _ = run_async(client.search(q, timeout=20))
                     if not tracks_result:
                         continue
-                    valid = get_valid_candidates(tracks_result, track_obj, q)
+                    valid = get_valid_candidates(tracks_result, track_obj, q,
+                                                 quality_profile_id)
                     for candidate in valid:
                         is_bl = database.is_blacklisted(candidate.username, candidate.filename)
                         display_name = os.path.basename(candidate.filename.replace('\\', '/'))

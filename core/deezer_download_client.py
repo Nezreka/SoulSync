@@ -343,7 +343,10 @@ class DeezerDownloadClient(DownloadSourcePlugin):
     def get_quality_label(self) -> str:
         """Get human-readable label for current quality setting."""
         labels = {'flac': 'FLAC (Lossless)', 'mp3_320': 'MP3 320kbps', 'mp3_128': 'MP3 128kbps'}
-        return labels.get(self._quality, 'MP3 320kbps')
+        requested_quality = quality_tier_for_source(
+            'deezer', default=self._quality,
+        )
+        return labels.get(requested_quality, 'MP3 320kbps')
 
     # ─── User Playlists (ARL-authenticated) ─────────────────────
 
@@ -688,6 +691,9 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             return [], []
 
         try:
+            requested_quality = quality_tier_for_source(
+                'deezer', default=self._quality,
+            )
             resp = self._api_get(
                 'https://api.deezer.com/search',
                 params={'q': query, 'limit': 30},
@@ -711,11 +717,11 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                 duration_ms = (item.get('duration', 0)) * 1000  # Deezer returns seconds
                 # Estimate size based on quality
                 duration_s = item.get('duration', 0)
-                if self._quality == 'flac':
+                if requested_quality == 'flac':
                     est_size = duration_s * 176400  # ~1411kbps
                     bitrate = 1411
                     quality = 'flac'
-                elif self._quality == 'mp3_320':
+                elif requested_quality == 'mp3_320':
                     est_size = duration_s * 40000  # ~320kbps
                     bitrate = 320
                     quality = 'mp3'
@@ -740,7 +746,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                     track_number=item.get('track_position'),
                 )
                 # Stamp CD-quality FLAC (16/44.1) so lossless ranks correctly.
-                tr.set_quality(quality_from_deezer(self._quality))
+                tr.set_quality(quality_from_deezer(requested_quality))
                 results.append(tr)
 
             logger.info(f"Deezer search for '{query}' returned {len(results)} results")
@@ -826,15 +832,19 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         actual_quality = None
         allow_fallback = self._config.get('deezer_download.allow_fallback', True)
 
+        requested_quality = quality_tier_for_source(
+            'deezer', default=self._quality,
+        )
+
         if allow_fallback:
             quality_order = _QUALITY_ORDER.copy()
             try:
-                pref_idx = quality_order.index(self._quality)
-                quality_order = quality_order[pref_idx:] + quality_order[:pref_idx]
+                pref_idx = quality_order.index(requested_quality)
+                quality_order = quality_order[pref_idx:]
             except ValueError:
                 pass
         else:
-            quality_order = [self._quality]
+            quality_order = [requested_quality]
 
         for q in quality_order:
             url = self._get_media_url(track_token, q)
@@ -847,8 +857,8 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             self._set_error(download_id, 'No media URL available (may require higher subscription tier)')
             return None
 
-        if actual_quality != self._quality:
-            logger.info(f"Quality fallback: {self._quality} → {actual_quality} for {display_name}")
+        if actual_quality != requested_quality:
+            logger.info(f"Quality fallback: {requested_quality} → {actual_quality} for {display_name}")
 
         ext = '.flac' if actual_quality == 'flac' else '.mp3'
         safe_name = self._sanitize_filename(display_name)

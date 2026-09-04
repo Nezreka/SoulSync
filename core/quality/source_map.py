@@ -16,10 +16,41 @@ lossless.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Optional
 
 from core.quality.model import AudioQuality
-from core.quality.selection import load_profile_targets
+from core.quality.selection import (
+    load_profile_by_id,
+    load_profile_targets,
+    targets_from_profile,
+)
+
+
+# Item-level profiles must not be written onto process-wide client singletons:
+# best-quality fan-out can search several items concurrently. Context-local
+# state gives each async task (and its copied worker context) the right ladder.
+_ACTIVE_QUALITY_PROFILE_ID: ContextVar[object] = ContextVar(
+    'active_quality_profile_id',
+    default=None,
+)
+
+
+@contextmanager
+def quality_profile_context(profile_id=None):
+    """Expose one item's profile to source-tier resolution for this call."""
+    token = _ACTIVE_QUALITY_PROFILE_ID.set(profile_id)
+    try:
+        yield
+    finally:
+        _ACTIVE_QUALITY_PROFILE_ID.reset(token)
+
+
+# Named lossy codecs. Deliberately a positive list rather than "not lossless":
+# core.quality.lossless.LOSSLESS_FORMATS does not carry ape or wavpack, so an
+# APE profile would read as lossy and get handed a source's worst tier.
+_LOSSY_FORMATS = frozenset({'mp3', 'aac', 'ogg', 'opus', 'wma'})
 
 
 # ── Extension → format string (source-agnostic) ────────────────────────────
@@ -241,7 +272,10 @@ _SOURCE_TIER_LADDERS: dict[str, list[tuple[str, AudioQuality]]] = {
     ],
     'amazon': [
         ('flac', AudioQuality('flac', sample_rate=48000, bit_depth=24)),
-        ('opus', AudioQuality('aac', bitrate=320)),
+        # T2Tunes names and serves this codec as Opus. Calling it AAC made an
+        # AAC-only profile appear satisfied and prevented an Opus profile from
+        # requesting the tier that actually matches it.
+        ('opus', AudioQuality('opus')),
     ],
     'youtube': [
         ('opus_256', AudioQuality('opus', bitrate=256)),
@@ -252,8 +286,13 @@ _SOURCE_TIER_LADDERS: dict[str, list[tuple[str, AudioQuality]]] = {
 }
 
 
-def quality_tier_for_source(source_name: str, *, default: Optional[str] = None) -> Optional[str]:
-    """Return the source tier key to request, derived from the global profile.
+def quality_tier_for_source(
+    source_name: str,
+    *,
+    default: Optional[str] = None,
+    profile_id=None,
+) -> Optional[str]:
+    """Return the source tier key to request from the applicable profile.
 
     Picks the lowest tier in the source's ladder that satisfies the user's
     top (most-preferred) target — respecting the quality ceiling and saving
@@ -265,7 +304,17 @@ def quality_tier_for_source(source_name: str, *, default: Optional[str] = None) 
     if not ladder:
         return default
 
-    targets, _ = load_profile_targets()
+    effective_profile_id = (
+        profile_id
+        if profile_id is not None
+        else _ACTIVE_QUALITY_PROFILE_ID.get()
+    )
+    if effective_profile_id is None:
+        targets, _ = load_profile_targets()
+    else:
+        targets, _ = targets_from_profile(
+            load_profile_by_id(effective_profile_id)
+        )
     if not targets:
         return ladder[0][0]
 
@@ -273,4 +322,17 @@ def quality_tier_for_source(source_name: str, *, default: Optional[str] = None) 
     for key, aq in reversed(ladder):           # low → high
         if aq.matches_target(top):
             return key
+
+    # Nothing in this source's ladder can satisfy the profile, so the answer is
+    # best effort. It must not be a LOSSLESS tier for a request that asked for
+    # a lossy format: an AAC-only profile matches nothing in Amazon's
+    # flac/opus ladder, was handed flac, and the import guard then threw the
+    # download away — the most bandwidth spent on the likeliest reject. The
+    # best lossy tier is still best effort (YouTube serves no MP3 either, and
+    # an MP3 profile keeps getting Opus 256 there).
+    wanted = str(getattr(top, 'format', '') or '').lower()
+    if wanted in _LOSSY_FORMATS:
+        for key, aq in ladder:                  # high → low
+            if str(aq.format or '').lower() in _LOSSY_FORMATS:
+                return key
     return ladder[0][0]                         # best effort: max tier

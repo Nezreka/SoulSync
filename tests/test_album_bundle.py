@@ -36,6 +36,7 @@ from core.download_plugins.album_bundle import (
     resolve_reported_save_path,
     unique_staging_path,
 )
+from core.quality.model import QualityTarget
 
 
 # Minimal release-result shim — duck-types the fields the picker reads.
@@ -45,6 +46,14 @@ class _Release:
     size: int
     seeders: Optional[int] = None
     grabs: Optional[int] = None
+    indexer_priority: int = 25
+    publish_date: Optional[str] = None
+    protocol: str = 'torrent'
+
+
+def _iso_hours_ago(hours: float) -> str:
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
 
 
 def _flac_quality_guess(title: str) -> str:
@@ -80,6 +89,66 @@ def test_picker_prefers_flac_when_tied_on_seeders() -> None:
     flac = _Release(title='Album [FLAC]', size=400_000_000, seeders=50)
     mp3 = _Release(title='Album [MP3]', size=130_000_000, seeders=50)
     assert pick_best_album_release([flac, mp3], _flac_quality_guess) is flac
+
+
+def test_profile_ladder_beats_hardcoded_codec_and_seed_order() -> None:
+    """A space-saving MP3-first profile must not be silently rewritten as
+    FLAC-first by the album picker, even when FLAC is more popular."""
+    flac = _Release(title='Album [FLAC 24-96]', size=500_000_000, seeders=900)
+    mp3 = _Release(title='Album [MP3 320]', size=140_000_000, seeders=3)
+
+    picked = pick_best_album_release(
+        [flac, mp3],
+        _flac_quality_guess,
+        quality_targets=[
+            QualityTarget(format='mp3', min_bitrate=320),
+            QualityTarget(format='flac'),
+        ],
+        fallback_enabled=False,
+    )
+
+    assert picked is mp3
+
+
+def test_lossless_resolution_is_ranked_before_usenet_popularity() -> None:
+    cd = _Release(
+        title='Album [FLAC 16bit 44.1kHz]',
+        size=400_000_000,
+        grabs=5_000,
+    )
+    hires = _Release(
+        title='Album [FLAC 24-96]',
+        size=900_000_000,
+        grabs=5,
+    )
+
+    picked = pick_best_album_release(
+        [cd, hires],
+        _flac_quality_guess,
+        quality_targets=[
+            QualityTarget(format='flac', bit_depth=24, min_sample_rate=96_000),
+            QualityTarget(format='flac', bit_depth=16),
+        ],
+        fallback_enabled=False,
+    )
+
+    assert picked is hires
+
+
+def test_strict_hires_profile_rejects_generic_flac_claim() -> None:
+    generic = _Release(title='Album [FLAC]', size=400_000_000, grabs=500)
+
+    picked = pick_best_album_release(
+        [generic],
+        _flac_quality_guess,
+        allowed_formats={'flac'},
+        quality_targets=[
+            QualityTarget(format='flac', bit_depth=24, min_sample_rate=96_000),
+        ],
+        fallback_enabled=False,
+    )
+
+    assert picked is None
 
 
 def test_picker_uses_grabs_when_seeders_is_none() -> None:
@@ -1344,3 +1413,267 @@ def test_poll_get_status_exception_treated_as_transient_miss() -> None:
     )
     assert result == '/recovered'
     assert 'failed' not in [c[0] for c in calls]
+
+
+def test_the_no_target_sort_uses_the_shared_quality_ladder():
+    """One definition of "better audio", not a fourth private one.
+
+    Without ranked targets the picker fell back to a four-entry map
+    (flac/ogg/aac/mp3). ALAC, WAV, Opus and DSD were absent from it and scored
+    zero, so a lossless ALAC release lost to an MP3 with the same seeders.
+    """
+    alac = _Release(title='Artist - Album [ALAC]', size=400_000_000, seeders=10)
+    mp3 = _Release(title='Artist - Album [MP3 320]', size=400_000_000, seeders=10)
+
+    assert pick_best_album_release([mp3, alac], _flac_quality_guess) is alac
+
+
+def test_the_no_target_sort_still_asks_the_plugin_when_the_title_is_mute():
+    """The plugin's guess is the fallback, not the primary.
+
+    ``quality_guess`` stays wired so a plugin that knows something the shared
+    parser does not can still place its release, but it only speaks when the
+    release itself said nothing.
+    """
+    def _always_flac(_title: str) -> str:
+        return 'flac'
+
+    mute = _Release(title='Artist - Album (2026)', size=400_000_000, seeders=10)
+    mp3 = _Release(title='Artist - Album [MP3 320]', size=400_000_000, seeders=10)
+
+    assert pick_best_album_release([mp3, mute], _always_flac) is mute
+
+
+def test_a_flac_release_too_small_for_its_own_claim_is_dropped():
+    """Lidarr's size specification, applied where the picker decides.
+
+    A 45-minute album is roughly 340 MB in FLAC. A 60 MB "FLAC" is a transcode
+    with a lossless title, and grabbing it costs a full re-download later.
+    """
+    fake = _Release(title='Artist - Album [FLAC]', size=60_000_000, seeders=99)
+    real = _Release(title='Artist - Album [FLAC]', size=337_500_000, seeders=2)
+
+    picked = pick_best_album_release(
+        [fake, real], _flac_quality_guess,
+        expected_duration_seconds=2700,
+    )
+
+    assert picked is real
+
+
+def test_the_size_gate_refuses_the_bundle_when_nothing_survives():
+    fake = _Release(title='Artist - Album [FLAC]', size=60_000_000, seeders=99)
+
+    assert pick_best_album_release(
+        [fake], _flac_quality_guess, expected_duration_seconds=2700,
+    ) is None
+
+
+def test_without_a_duration_the_size_gate_has_no_opinion():
+    fake = _Release(title='Artist - Album [FLAC]', size=60_000_000, seeders=99)
+
+    assert pick_best_album_release([fake], _flac_quality_guess) is fake
+
+
+def test_a_repack_beats_the_rip_it_replaces_at_the_same_quality():
+    """Lidarr's Revision as a tiebreaker: only when the quality itself ties."""
+    original = _Release(title='Artist - Album [FLAC]', size=400_000_000, seeders=10)
+    repack = _Release(title='Artist - Album REPACK [FLAC]', size=400_000_000, seeders=10)
+
+    assert pick_best_album_release([original, repack], _flac_quality_guess) is repack
+
+
+def test_a_repack_does_not_beat_a_better_format():
+    """A corrected MP3 is still an MP3."""
+    repacked_mp3 = _Release(title='Artist - Album REPACK [MP3 320]',
+                            size=400_000_000, seeders=10)
+    flac = _Release(title='Artist - Album [FLAC]', size=400_000_000, seeders=10)
+
+    assert pick_best_album_release([repacked_mp3, flac], _flac_quality_guess) is flac
+
+
+def test_a_repack_beats_the_original_under_ranked_targets_too():
+    targets = [QualityTarget(format='flac')]
+    original = _Release(title='Artist - Album [FLAC]', size=400_000_000, seeders=10)
+    repack = _Release(title='Artist - Album PROPER [FLAC]', size=400_000_000, seeders=10)
+
+    picked = pick_best_album_release(
+        [original, repack], _flac_quality_guess, quality_targets=targets,
+    )
+
+    assert picked is repack
+
+
+def test_a_meaningless_seeder_difference_does_not_decide_the_pick():
+    """Lidarr rounds seeders to log10 before comparing them.
+
+    Availability is a tiebreaker inside one quality bucket, and 41 vs 38
+    seeders says nothing about which release is better. Compared raw, it
+    outvoted every key after it — including the size that actually describes
+    the encode.
+    """
+    targets = [QualityTarget(format='flac')]
+    thin = _Release(title='Artist - Album [FLAC]', size=900_000_000, seeders=38)
+    fat = _Release(title='Artist - Album [FLAC]', size=350_000_000, seeders=41)
+
+    picked = pick_best_album_release(
+        [fat, thin], _flac_quality_guess, quality_targets=targets,
+    )
+
+    assert picked is thin
+
+
+def test_an_order_of_magnitude_more_seeders_still_wins():
+    targets = [QualityTarget(format='flac')]
+    dying = _Release(title='Artist - Album [FLAC]', size=900_000_000, seeders=3)
+    healthy = _Release(title='Artist - Album [FLAC]', size=350_000_000, seeders=400)
+
+    picked = pick_best_album_release(
+        [dying, healthy], _flac_quality_guess, quality_targets=targets,
+    )
+
+    assert picked is healthy
+
+
+
+def test_the_users_preferred_indexer_breaks_an_otherwise_equal_tie():
+    """Prowlarr's indexer priority is 1 (highest) to 50 (lowest), default 25.
+
+    Lidarr compares it right after quality and before seeders, and calls it
+    what it is: a tiebreaker for otherwise equal releases.
+    """
+    targets = [QualityTarget(format='flac')]
+    preferred = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                         seeders=10, indexer_priority=5)
+    other = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                     seeders=10, indexer_priority=40)
+
+    picked = pick_best_album_release(
+        [other, preferred], _flac_quality_guess, quality_targets=targets,
+    )
+
+    assert picked is preferred
+
+
+def test_indexer_priority_does_not_outrank_quality():
+    targets = [QualityTarget(format='flac'), QualityTarget(format='mp3')]
+    good_indexer_mp3 = _Release(title='Artist - Album [MP3 320]', size=350_000_000,
+                                seeders=10, indexer_priority=1)
+    bad_indexer_flac = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                                seeders=10, indexer_priority=50)
+
+    picked = pick_best_album_release(
+        [good_indexer_mp3, bad_indexer_flac], _flac_quality_guess,
+        quality_targets=targets,
+    )
+
+    assert picked is bad_indexer_flac
+
+
+def test_a_fresh_usenet_post_beats_an_old_one():
+    """Usenet has no seeders; age is what says whether it is still complete.
+
+    Lidarr buckets it — under an hour, under a day, under a week, then log10 of
+    the age in days — so a few hours' difference is not a decision.
+    """
+    targets = [QualityTarget(format='flac')]
+    fresh = _Release(title='Artist - Album [FLAC]', size=350_000_000, grabs=5,
+                     protocol='usenet', publish_date=_iso_hours_ago(2))
+    ancient = _Release(title='Artist - Album [FLAC]', size=350_000_000, grabs=5,
+                       protocol='usenet', publish_date=_iso_hours_ago(24 * 900))
+
+    picked = pick_best_album_release(
+        [ancient, fresh], _flac_quality_guess, quality_targets=targets,
+    )
+
+    assert picked is fresh
+
+
+def test_age_says_nothing_about_a_torrent():
+    """A seeded swarm is alive whatever its post date, so age must not sort it."""
+    targets = [QualityTarget(format='flac')]
+    old_but_bigger = _Release(title='Artist - Album [FLAC]', size=900_000_000,
+                              seeders=10, publish_date=_iso_hours_ago(24 * 900))
+    fresh_but_smaller = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                                 seeders=10, publish_date=_iso_hours_ago(1))
+
+    picked = pick_best_album_release(
+        [fresh_but_smaller, old_but_bigger], _flac_quality_guess,
+        quality_targets=targets,
+    )
+
+    assert picked is old_but_bigger
+
+
+def test_a_healthy_swarm_outranks_a_preferred_indexer():
+    """Indexer priority is a tiebreaker, not a reason to take a dead swarm.
+
+    Lidarr can put indexer priority above peers because it has no seeder sort
+    key at all, only a minimum-seeders rejection. We have both, so priority
+    belongs below availability or it undoes the bucketing entirely.
+    """
+    targets = [QualityTarget(format='flac')]
+    preferred_but_dead = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                                  seeders=2, indexer_priority=1)
+    healthy = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                       seeders=5000, indexer_priority=25)
+
+    picked = pick_best_album_release(
+        [preferred_but_dead, healthy], _flac_quality_guess,
+        quality_targets=targets,
+    )
+
+    assert picked is healthy
+
+
+def test_priority_still_decides_inside_one_availability_bucket():
+    targets = [QualityTarget(format='flac')]
+    preferred = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                         seeders=40, indexer_priority=1)
+    other = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                     seeders=44, indexer_priority=40)
+
+    picked = pick_best_album_release(
+        [other, preferred], _flac_quality_guess, quality_targets=targets,
+    )
+
+    assert picked is preferred
+
+
+def test_a_torrent_without_a_seeder_count_is_still_a_torrent():
+    """`seeders is None` also means "this indexer omits the field".
+
+    The picker's own availability gate says so. Using it as the "this is
+    usenet" test handed such a torrent the full freshness bonus, which is the
+    exact sorting the age bucket is written to keep away from torrents.
+    """
+    targets = [QualityTarget(format='flac')]
+    fresh_unknown_swarm = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                                   seeders=None, protocol='torrent',
+                                   publish_date=_iso_hours_ago(1))
+    older_bigger = _Release(title='Artist - Album [FLAC]', size=900_000_000,
+                            seeders=None, protocol='torrent',
+                            publish_date=_iso_hours_ago(24 * 400))
+
+    picked = pick_best_album_release(
+        [fresh_unknown_swarm, older_bigger], _flac_quality_guess,
+        quality_targets=targets,
+    )
+
+    assert picked is older_bigger
+
+
+def test_an_nzb_of_unknown_age_does_not_beat_a_known_old_one():
+    """Missing publish date used to score 0.0, above every post over a week."""
+    targets = [QualityTarget(format='flac')]
+    unknown_age = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                           grabs=5, protocol='usenet', publish_date=None)
+    known_old = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                         grabs=5, protocol='usenet',
+                         publish_date=_iso_hours_ago(24 * 10))
+
+    picked = pick_best_album_release(
+        [unknown_age, known_old], _flac_quality_guess, quality_targets=targets,
+    )
+
+    assert picked is known_old

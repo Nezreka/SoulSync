@@ -411,8 +411,8 @@ class SoulseekClient(DownloadSourcePlugin):
                     free_upload_slots=response_data.get('freeUploadSlots', 0),
                     upload_speed=response_data.get('uploadSpeed', 0),
                     queue_length=response_data.get('queueLength', 0),
-                    sample_rate=slskd_attrs.get(4),
-                    bit_depth=slskd_attrs.get(5),
+                    sample_rate=file_data.get('sampleRate') or slskd_attrs.get(4),
+                    bit_depth=file_data.get('bitDepth') or slskd_attrs.get(5),
                 )
 
                 all_tracks.append(track)
@@ -1171,8 +1171,8 @@ class SoulseekClient(DownloadSourcePlugin):
                 bitrate=file_data.get('bitRate') or slskd_attrs.get(0),
                 duration=duration_ms, quality=quality,
                 free_upload_slots=free_slots, upload_speed=upload_speed, queue_length=queue_length,
-                sample_rate=slskd_attrs.get(4),
-                bit_depth=slskd_attrs.get(5),
+                sample_rate=file_data.get('sampleRate') or slskd_attrs.get(4),
+                bit_depth=file_data.get('bitDepth') or slskd_attrs.get(5),
             ))
         return results
 
@@ -1491,6 +1491,8 @@ class SoulseekClient(DownloadSourcePlugin):
         *,
         preferred_source: Optional[Dict[str, Any]] = None,
         preferred_tracks: Optional[List[TrackResult]] = None,
+        quality_profile_id=None,
+        expected_duration_seconds=None,
     ) -> Dict[str, Any]:
         """One-shot Soulseek album download.
 
@@ -1501,6 +1503,12 @@ class SoulseekClient(DownloadSourcePlugin):
         callers may fall back to the existing per-track Soulseek flow.
         Once files are staged, the per-track staging matcher owns final
         import, same as torrent / usenet album bundles.
+                ``expected_duration_seconds`` is part of the album-bundle plugin
+        contract the master worker calls every source with. Soulseek picks a
+        folder rather than a single release, so it has nothing to compare a
+        duration against and ignores it; the parameter exists because a
+        missing one is a TypeError, and try_dispatch turns that into a failed
+        batch instead of a fallback.
         """
         result: Dict[str, Any] = {
             'success': False,
@@ -1544,7 +1552,12 @@ class SoulseekClient(DownloadSourcePlugin):
                 result['error'] = 'No complete Soulseek album folders found'
                 return result
 
-            picked = self._pick_album_bundle_folder(albums, album_name, artist_name)
+            picked = self._pick_album_bundle_folder(
+                albums,
+                album_name,
+                artist_name,
+                quality_profile_id=quality_profile_id,
+            )
             if picked is None:
                 result['error'] = 'No suitable Soulseek album folder after filtering'
                 return result
@@ -1593,7 +1606,13 @@ class SoulseekClient(DownloadSourcePlugin):
                 browse_files,
                 directory=folder_path,
             )
-        folder_tracks = self.filter_results_by_quality_preference(folder_tracks)
+        if quality_profile_id is None:
+            folder_tracks = self.filter_results_by_quality_preference(folder_tracks)
+        else:
+            folder_tracks = self.filter_results_by_quality_preference(
+                folder_tracks,
+                profile_id=quality_profile_id,
+            )
         if not folder_tracks:
             result['error'] = 'Selected Soulseek album folder contained no audio files'
             return result
@@ -1663,10 +1682,18 @@ class SoulseekClient(DownloadSourcePlugin):
         albums: List[AlbumResult],
         album_name: str,
         artist_name: str,
+        quality_profile_id=None,
     ) -> Optional[AlbumResult]:
         scored = []
         for album in albums:
-            tracks = self.filter_results_by_quality_preference(list(getattr(album, 'tracks', []) or []))
+            album_tracks = list(getattr(album, 'tracks', []) or [])
+            if quality_profile_id is None:
+                tracks = self.filter_results_by_quality_preference(album_tracks)
+            else:
+                tracks = self.filter_results_by_quality_preference(
+                    album_tracks,
+                    profile_id=quality_profile_id,
+                )
             if not tracks:
                 continue
             album_text = f"{getattr(album, 'album_title', '')} {getattr(album, 'album_path', '')}"
