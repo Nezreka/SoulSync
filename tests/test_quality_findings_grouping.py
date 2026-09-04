@@ -234,10 +234,12 @@ def test_the_sql_score_is_tier_score_transcribed_not_reinvented(worker):
     The first version of this was a flat "format base + bitrate/1000" that only
     looked like tier_score. tier_score has TWO branches - lossless scores on
     sample rate and bit depth and ignores bitrate entirely, lossy scores on
-    bitrate capped at 320 - and the flat version matched neither. It put ALAC
-    below FLAC (tier_score puts it above, because ALAC never earns the hi-res
-    bonus) and sent DSD to the top of the list. Two definitions of "better
-    audio" in one app is how the ranker and the scanner start disagreeing.
+    bitrate capped at 320 - and the flat version matched neither, and sent DSD
+    to the top of the list. ALAC belongs in the lossless branch: scoring it on
+    bitrate gave a CD-spec ALAC the full +10 and put it ABOVE a CD-spec FLAC,
+    which is the same audio in a worse-supported container. Two definitions of
+    "better audio" in one app is how the ranker and the scanner start
+    disagreeing.
     """
     import json as _json
     import sqlite3
