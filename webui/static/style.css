@@ -81089,6 +81089,95 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-card-challenge-btns { display: flex; gap: 6px; flex-wrap: wrap; }
 
 /* ── chat file sharing (filepost.dev, chat P2) ── */
+/* overlay share picker. rendered previews, not a list of names. an overlay is
+   a visual thing, picking one by name is picking blind. */
+.chat-ovl-modal { max-width: 720px; width: 92vw; }
+.chat-ovl-sub {
+    margin: 0 0 14px;
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.55);
+    line-height: 1.5;
+}
+.chat-ovl-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    gap: 12px;
+    max-height: 54vh;
+    overflow-y: auto;
+    padding: 2px;
+}
+.chat-ovl-card {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 0;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    min-width: 0;
+}
+/* posters are 2:3. anything else crops the design you're trying to look at. */
+.chat-ovl-shot {
+    display: block;
+    position: relative;
+    aspect-ratio: 2 / 3;
+    border-radius: 9px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.chat-ovl-shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chat-ovl-shot.is-noshot::after {
+    content: 'no preview';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.3);
+}
+.chat-ovl-card:hover .chat-ovl-shot {
+    border-color: rgb(var(--accent-rgb, 99, 102, 241));
+    transform: translateY(-2px);
+}
+.chat-ovl-card:focus-visible .chat-ovl-shot {
+    outline: 2px solid rgb(var(--accent-rgb, 99, 102, 241));
+    outline-offset: 2px;
+}
+.chat-ovl-meta { display: block; min-width: 0; }
+.chat-ovl-cardname {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.chat-ovl-cardsub {
+    display: block;
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.42);
+}
+.chat-ovl-empty {
+    grid-column: 1 / -1;
+    padding: 28px 8px;
+    text-align: center;
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.45);
+    line-height: 1.6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .chat-ovl-shot { transition: none; }
+    .chat-ovl-card:hover .chat-ovl-shot { transform: none; }
+}
+
 /* A shared overlay template. Deliberately shaped like the file card beside it
    — same footprint, same rhythm — because it IS the same gesture: someone
    handed you something you can take. The accent stripe is what marks it as a

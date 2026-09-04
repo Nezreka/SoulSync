@@ -523,40 +523,91 @@
         if (typeof showToast === 'function') showToast(msg, kind);
     }
 
-    // Pick one of YOUR templates and send it. The list is names only — a
-    // gallery in a chat popover would be a second Overlay Studio to maintain,
-    // and the name is what you pick by anyway.
+    // Pick one of YOUR templates and send it.
+    //
+    // A grid of RENDERED previews, not a list of names. Each card is the
+    // template composited onto a neutral poster by the same endpoint the
+    // Overlay Studio gallery uses — a template is a visual thing, and choosing
+    // one by name is choosing blind. (The first version of this was a
+    // window.prompt asking for a number, which is exactly as bad as it sounds.)
     function _pickOverlayToShare() {
         toggleAttachPanel(true);
+        var ov = q('[data-chat-ovl-modal]');
+        var grid = q('[data-chat-ovl-grid]');
+        if (!ov || !grid) { _ovToast('The overlay picker is unavailable', 'error'); return; }
+        grid.innerHTML = '<div class="chat-ovl-empty">Loading your templates\u2026</div>';
+        ov.hidden = false;
+        _bindOverlayPickerEsc();
         fetch('/api/video/overlays/templates', { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 var list = (d && d.templates) || [];
                 if (!list.length) {
-                    _ovToast('You have no overlay templates to share yet', 'info');
+                    grid.innerHTML = '<div class="chat-ovl-empty">You have no overlay templates yet. ' +
+                        'Design one in the Overlay Studio and it will show up here.</div>';
                     return;
                 }
-                var names = list.map(function (t, i) { return (i + 1) + '. ' + (t.name || 'Untitled'); });
-                var pick = window.prompt('Share which overlay template?\n\n' +
-                                         names.join('\n') + '\n\nEnter a number:', '1');
-                if (pick === null) return;
-                var t = list[parseInt(pick, 10) - 1];
-                if (!t) { _ovToast('No template with that number', 'error'); return; }
-                // The gallery row is a summary; the DEFINITION has to be fetched
-                // before it can be sent.
-                fetch('/api/video/overlays/templates/' + t.id, { headers: { Accept: 'application/json' } })
-                    .then(function (r) { return r.ok ? r.json() : null; })
-                    .then(function (full) {
-                        var defn = full && (full.definition || (full.template || {}).definition);
-                        if (!defn || !defn.layers || !defn.layers.length) {
-                            _ovToast('That template has no layers to share', 'error');
-                            return;
-                        }
-                        _sendOverlayShare(t.name || 'Overlay template', defn);
-                    })
-                    .catch(function () { _ovToast('Could not read that template', 'error'); });
+                grid.innerHTML = list.map(_overlayPickCard).join('');
             })
-            .catch(function () { _ovToast('Could not list your templates', 'error'); });
+            .catch(function () {
+                grid.innerHTML = '<div class="chat-ovl-empty">Could not load your templates.</div>';
+            });
+    }
+
+    function _overlayPickCard(t) {
+        var layers = Number(t.layer_count || 0);
+        return '<button type="button" class="chat-ovl-card" data-chat-ovl-pick="' + attr(t.id) + '" ' +
+            'data-chat-ovl-name="' + attr(t.name || 'Overlay template') + '" ' +
+            'title="Share ' + attr(t.name || 'this template') + '">' +
+            // same preview the studio gallery shows, so what you pick is what
+            // they get
+            '<span class="chat-ovl-shot">' +
+                // thumb 404s if pillow can't render. a broken image icon here
+                // looks like the template is broken, so fall back instead
+                '<img src="/api/video/overlays/templates/' + attr(t.id) + '/thumb" alt="" loading="lazy" ' +
+                    'onerror="this.parentNode.classList.add(\'is-noshot\');this.remove();">' +
+            '</span>' +
+            '<span class="chat-ovl-meta">' +
+                '<span class="chat-ovl-cardname">' + esc(t.name || 'Untitled') + '</span>' +
+                '<span class="chat-ovl-cardsub">' + layers +
+                    (layers === 1 ? ' layer' : ' layers') +
+                    (t.kind && t.kind !== 'poster' ? ' \u00b7 ' + esc(t.kind) : '') +
+                '</span>' +
+            '</span>' +
+        '</button>';
+    }
+
+    function _closeOverlayPicker() {
+        var ov = q('[data-chat-ovl-modal]');
+        if (ov) ov.hidden = true;
+        if (_ovlEsc) { document.removeEventListener('keydown', _ovlEsc); _ovlEsc = null; }
+    }
+
+    // escape closes it. the other chat modals don't bother but they should.
+    // unbind on close, otherwise you stack a listener per open.
+    var _ovlEsc = null;
+    function _bindOverlayPickerEsc() {
+        if (_ovlEsc) return;
+        _ovlEsc = function (ev) { if (ev.key === 'Escape') _closeOverlayPicker(); };
+        document.addEventListener('keydown', _ovlEsc);
+    }
+
+    // The gallery row is a summary — the DEFINITION has to be fetched before it
+    // can be sent.
+    function _shareOverlayById(id, name) {
+        _closeOverlayPicker();
+        fetch('/api/video/overlays/templates/' + encodeURIComponent(id),
+              { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (full) {
+                var defn = full && full.definition;
+                if (!defn || !defn.layers || !defn.layers.length) {
+                    _ovToast('That template has no layers to share', 'error');
+                    return;
+                }
+                _sendOverlayShare(name || full.name || 'Overlay template', defn);
+            })
+            .catch(function () { _ovToast('Could not read that template', 'error'); });
     }
 
     function _sendOverlayShare(name, definition) {
@@ -5023,6 +5074,18 @@
             if (t) { toggleAttachPanel(); return; }
             t = e.target.closest('[data-chat-attach-overlay]');
             if (t) { _pickOverlayToShare(); return; }
+            t = e.target.closest('[data-chat-ovl-pick]');
+            if (t) {
+                _shareOverlayById(t.getAttribute('data-chat-ovl-pick'),
+                                  t.getAttribute('data-chat-ovl-name'));
+                return;
+            }
+            t = e.target.closest('[data-chat-ovl-close]');
+            if (t) { _closeOverlayPicker(); return; }
+            // Click the backdrop to dismiss, like every other chat modal.
+            if (e.target.matches && e.target.matches('[data-chat-ovl-modal]')) {
+                _closeOverlayPicker(); return;
+            }
             t = e.target.closest('[data-chat-spoiler]');
             if (t) { t.classList.add('chat-spoiler--shown'); return; }
             t = e.target.closest('[data-chat-fmt]');
