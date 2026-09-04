@@ -34,8 +34,6 @@ def _transfer_dir(tmp_path, monkeypatch):
             return None
 
     monkeypatch.setattr('core.imports.paths._get_config_manager', lambda: _Cfg())
-    monkeypatch.setattr('core.library_reorganize._preserve_casing_enabled', lambda: True)
-    monkeypatch.setattr('core.library_reorganize._feat_in_title_enabled', lambda: False)
     return root
 
 
@@ -45,7 +43,7 @@ def _context(artist='Pink Floyd', album='The Wall', title='Another Brick'):
          "total_tracks": 10, "images": [{"url": ""}]},
         {"name": title, "track_number": 1, "disc_number": 1,
          "artists": [{"name": artist}]},
-        artist, album, 1, local_title=title)
+        artist, album, 1)
 
 
 def _build(create_dirs=False):

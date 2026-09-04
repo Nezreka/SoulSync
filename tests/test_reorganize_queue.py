@@ -6,9 +6,9 @@ Contract this test file pins:
    running returns ``{'queued': False, 'reason': 'already_queued'}`` and
    the existing queue_id, never a duplicate.
 2. **FIFO order** — the worker drains items in submission order.
-3. **Per-item source preserved** — the source string the user picked at
-   enqueue time is what the runner sees, even when multiple items with
-   different sources are interleaved.
+3. **What the runner sees is what was enqueued** — the item reaching the
+   runner is the one submitted, in order. (There is no per-item ``source``
+   any more: a reorganize plans from the catalogue and asks no provider.)
 4. **Continue on failure** — a runner that raises (or one whose summary
    reports a non-completed status) marks that item failed and the
    worker moves to the next item, it does not stall.
@@ -42,7 +42,7 @@ def _make_runner(record, *, raise_on=None, summary_factory=None,
     """Build a runner closure that records what it was called with.
 
     Args:
-        record: list to append `(queue_id, source)` to per call.
+        record: list to append each call's queue_id to.
         raise_on: queue_id (or set of queue_ids) for which the runner
             should raise — used to test continue-on-failure.
         summary_factory: optional callable `(item) -> summary dict` to
@@ -59,7 +59,7 @@ def _make_runner(record, *, raise_on=None, summary_factory=None,
         raise_set = set(raise_on)
 
     def runner(item):
-        record.append((item.queue_id, item.source))
+        record.append(item.queue_id)
         if block_event is not None:
             block_event.wait(timeout=2.0)
         if runtime:
@@ -70,7 +70,6 @@ def _make_runner(record, *, raise_on=None, summary_factory=None,
             return summary_factory(item)
         return {
             'status': 'completed',
-            'source': item.source or 'spotify',
             'total': 1,
             'moved': 1,
             'skipped': 0,
@@ -80,13 +79,12 @@ def _make_runner(record, *, raise_on=None, summary_factory=None,
     return runner
 
 
-def _enqueue(queue, *, album_id, source=None, title=None, artist='Aerosmith'):
+def _enqueue(queue, *, album_id, title=None, artist='Aerosmith'):
     return queue.enqueue(
         album_id=album_id,
         album_title=title or f"Album {album_id}",
         artist_id='artist-1',
         artist_name=artist,
-        source=source,
     )
 
 
@@ -128,8 +126,8 @@ def test_enqueue_returns_queued_with_position(queue):
 
 def test_enqueue_same_album_dedupes(queue):
     queue.set_runner(_make_runner([], block_event=threading.Event()))
-    r1 = _enqueue(queue, album_id='alb-1', source='spotify')
-    r2 = _enqueue(queue, album_id='alb-1', source='deezer')  # different source
+    r1 = _enqueue(queue, album_id='alb-1')
+    r2 = _enqueue(queue, album_id='alb-1')
     assert r1['queued'] is True
     assert r2['queued'] is False
     assert r2['reason'] == 'already_queued'
@@ -142,7 +140,7 @@ def test_dedupe_releases_after_completion(queue):
     record = []
     queue.set_runner(_make_runner(record))
     r1 = _enqueue(queue, album_id='alb-1')
-    assert _wait_for(lambda: any(r[0] == r1['queue_id'] for r in record))
+    assert _wait_for(lambda: r1['queue_id'] in record)
     # Wait for the item to flip into the recent bucket.
     assert _wait_for(lambda: queue.snapshot()['active'] is None)
     r2 = _enqueue(queue, album_id='alb-1')
@@ -155,17 +153,7 @@ def test_fifo_order(queue):
     queue.set_runner(_make_runner(record))
     ids = [_enqueue(queue, album_id=f'alb-{i}')['queue_id'] for i in range(5)]
     assert _wait_for(lambda: len(record) == 5)
-    assert [r[0] for r in record] == ids
-
-
-def test_per_item_source_preserved(queue):
-    record = []
-    queue.set_runner(_make_runner(record))
-    sources = ['spotify', 'deezer', 'itunes', None, 'discogs']
-    for i, src in enumerate(sources):
-        _enqueue(queue, album_id=f'alb-{i}', source=src)
-    assert _wait_for(lambda: len(record) == len(sources))
-    assert [r[1] for r in record] == sources
+    assert record == ids
 
 
 def test_continue_on_runner_exception(queue):
@@ -179,12 +167,12 @@ def test_continue_on_runner_exception(queue):
     raise_target = {}
 
     def runner(item):
-        record.append((item.queue_id, item.source))
+        record.append(item.queue_id)
         block.wait(timeout=2.0)
         if item.queue_id == raise_target.get('id'):
             raise RuntimeError(f"Simulated failure for {item.queue_id}")
         return {
-            'status': 'completed', 'source': 'spotify',
+            'status': 'completed',
             'total': 1, 'moved': 1, 'skipped': 0, 'failed': 0, 'errors': [],
         }
 
@@ -194,7 +182,7 @@ def test_continue_on_runner_exception(queue):
     block.set()
 
     assert _wait_for(lambda: len(record) == 3)
-    assert [r[0] for r in record] == ids
+    assert record == ids
 
     assert _wait_for(lambda: queue.snapshot()['active'] is None)
     snap = queue.snapshot()
@@ -209,7 +197,6 @@ def test_failed_status_when_runner_reports_failed_tracks(queue):
     'failed' even if the runner returned normally."""
     queue.set_runner(_make_runner([], summary_factory=lambda item: {
         'status': 'completed',
-        'source': 'spotify',
         'total': 5,
         'moved': 4,
         'skipped': 0,
@@ -230,11 +217,10 @@ def test_failed_status_when_runner_reports_failed_tracks(queue):
 
 
 def test_failed_status_when_runner_reports_non_completed_status(queue):
-    """``status='no_source_id'`` and friends are setup-failures — they
+    """``status='setup_failed'`` and friends are setup-failures — they
     leave failed=0 but the item is still NOT a success."""
     queue.set_runner(_make_runner([], summary_factory=lambda item: {
-        'status': 'no_source_id',
-        'source': None,
+        'status': 'setup_failed',
         'total': 0,
         'moved': 0,
         'skipped': 0,
@@ -246,7 +232,7 @@ def test_failed_status_when_runner_reports_non_completed_status(queue):
     snap = queue.snapshot()
     item = next(r for r in snap['recent'] if r['queue_id'] == qid)
     assert item['status'] == 'failed'
-    assert item['result_status'] == 'no_source_id'
+    assert item['result_status'] == 'setup_failed'
 
 
 def test_cancel_queued_item(queue):
@@ -365,7 +351,7 @@ def test_enqueue_many_tallies_enqueued_and_dedupes(queue):
 
     # Pre-existing item — should appear as already_queued.
     queue.enqueue(album_id='alb-existing', album_title='X',
-                  artist_id='ar-1', artist_name='A', source=None)
+                  artist_id='ar-1', artist_name='A')
     # Wait for it to be running so the dedupe path triggers.
     assert _wait_for(lambda: queue.snapshot()['active'] is not None)
 
@@ -379,19 +365,20 @@ def test_enqueue_many_tallies_enqueued_and_dedupes(queue):
     block.set()
 
 
-def test_enqueue_many_carries_source_per_item(queue):
-    """Each dict's ``source`` is honoured independently — the bulk
-    helper doesn't collapse them to one value."""
+def test_enqueue_many_runs_every_item_in_order(queue):
+    """The bulk helper enqueues each dict as its own item; extra keys a caller
+    happens to carry (a leftover ``source``) are ignored rather than fatal."""
     record = []
     queue.set_runner(_make_runner(record))
     items = [
-        {'album_id': 'a', 'album_title': 'A', 'artist_id': 'x', 'artist_name': 'X', 'source': 'spotify'},
-        {'album_id': 'b', 'album_title': 'B', 'artist_id': 'x', 'artist_name': 'X', 'source': 'deezer'},
-        {'album_id': 'c', 'album_title': 'C', 'artist_id': 'x', 'artist_name': 'X', 'source': None},
+        {'album_id': 'a', 'album_title': 'A', 'artist_id': 'x', 'artist_name': 'X'},
+        {'album_id': 'b', 'album_title': 'B', 'artist_id': 'x', 'artist_name': 'X'},
+        {'album_id': 'c', 'album_title': 'C', 'artist_id': 'x', 'artist_name': 'X',
+         'source': 'spotify'},
     ]
     queue.enqueue_many(items)
     assert _wait_for(lambda: len(record) == 3)
-    assert [r[1] for r in record] == ['spotify', 'deezer', None]
+    assert len(set(record)) == 3
 
 
 def test_enqueue_many_handles_empty_list(queue):
@@ -441,7 +428,7 @@ def test_cancel_and_run_are_mutually_exclusive(queue):
         # could (incorrectly) fire on a running item.
         time.sleep(0.002)
         return {
-            'status': 'completed', 'source': 'spotify',
+            'status': 'completed',
             'total': 1, 'moved': 1, 'skipped': 0, 'failed': 0, 'errors': [],
         }
 

@@ -1,13 +1,25 @@
-"""Pure planning logic for the library re-tag job.
+"""Matching + planning for the library re-tag job.
 
 Given a source album's metadata + tracklist and the library's tracks (with their
 *current* file tags), this works out — per track — exactly which tags would
 change (the dry-run diff the finding shows) and the ``db_data`` payload to feed
 ``core.tag_writer.write_tags_to_file`` at apply time.
 
+The diff itself is NOT decided here. ``core.tag_writer.build_tag_diff`` makes
+it, because that is the function ``write_tags_to_file`` agrees with by
+construction: the #800 placeholder guard, the #824 date normalisation and the
+genre-subset guard all live in that pair. This module used to carry its own
+comparison and knew none of them, so it reported changes the writer then
+refused — and since a pending finding is refreshed in place rather than
+re-inserted, those never went away.
+
+What is left here is the part the shared engine has no opinion about: pairing a
+library track to a source track, shaping the source's values into a write
+payload, and honouring ``mode``.
+
 No file IO, no network, no DB: the job feeds in current tags + fetched source
-data, so all the matching/diff logic stays unit-testable. Tags are only ever
-ADDED/overwritten per-field — never a full tag-block wipe.
+data, so all of it stays unit-testable. Tags are only ever ADDED/overwritten
+per-field — never a full tag-block wipe.
 """
 
 from __future__ import annotations
@@ -16,9 +28,7 @@ import re
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
-# Fields this job manages. Keys are the internal/display names; the diff and the
-# write payload are both built from these.
-MANAGED_FIELDS = ('title', 'artist', 'album', 'year', 'genre', 'track_number', 'disc_number')
+from core.tag_writer import build_tag_diff
 
 # Modes: overwrite everything the source provides, or only fill blanks.
 MODE_OVERWRITE = 'overwrite'
@@ -140,79 +150,102 @@ def _target_for_track(source_track: Any, album_meta: Dict[str, Any]) -> Dict[str
     }
 
 
-def _current_value(current_tags: Dict[str, Any], field: str):
-    if field == 'artist':
-        # _read_tags stores album_artist + artist; prefer album_artist for the album-level compare.
-        return current_tags.get('album_artist') or current_tags.get('artist') or ''
-    if field == 'genre':
-        return current_tags.get('genre') or ''
-    return current_tags.get(field)
+def _write_payload(target: Dict[str, Any]) -> Dict[str, Any]:
+    """The complete ``db_data`` the source implies — every field it supplied.
+
+    ``build_tag_diff`` compares a whole payload at once; :func:`plan_track`
+    then keeps only the keys whose field really changed, so an apply still
+    touches nothing the finding didn't show.
+    """
+    data: Dict[str, Any] = {}
+    if target.get('title'):
+        data['title'] = target['title']
+    if target.get('artist'):
+        data['artist_name'] = target['artist']            # album-level artist
+    if target.get('track_artist'):
+        data['track_artist'] = target['track_artist']     # per-track (compilations)
+    if target.get('album'):
+        data['album_title'] = target['album']
+    if target.get('year'):
+        # Deliberately the year and NOT ``release_date``. The source supplies an
+        # album-level date while a file may carry a more specific one; with a
+        # year-only value build_tag_diff preserves the file's (#824) instead of
+        # flattening every dated file in the library on the first scan.
+        data['year'] = target['year']
+    if target.get('genre'):
+        data['genres'] = target['genre']                  # list
+    if target.get('track_number') is not None:
+        data['track_number'] = target['track_number']
+        if target.get('track_count'):
+            data['track_count'] = target['track_count']   # writers want both
+    if target.get('disc_number') is not None:
+        data['disc_number'] = target['disc_number']
+    return data
 
 
-def _display(value) -> str:
-    if isinstance(value, list):
-        return ', '.join(str(v) for v in value)
-    return '' if value is None else str(value)
-
-
-def _is_empty(value) -> bool:
-    if value is None:
-        return True
-    if isinstance(value, str):
-        return value.strip() == ''
-    if isinstance(value, list):
-        return len(value) == 0
-    return False
+#: ``build_tag_diff``'s ``file_key`` -> the ``db_data`` keys that field writes.
+#: Doubles as the list of fields this job manages: a diff row outside it (BPM)
+#: is one nothing here supplies a value for.
+_WRITE_KEYS = {
+    'title': ('title',),
+    'artist': ('track_artist',),
+    'album': ('album_title',),
+    # BOTH keys, not just `artist_name`. `write_tags_to_file` writes the ARTIST
+    # tag from `track_artist or artist_name`, so a payload carrying only the
+    # album artist puts it in the track's ARTIST tag as well — replacing the
+    # per-track artists on a compilation or a DJ mix, from a finding that said
+    # nothing about them.
+    'album_artist': ('artist_name', 'track_artist'),
+    'year': ('year',),
+    'genre': ('genres',),
+    'track_number': ('track_number', 'track_count'),
+    'disc_number': ('disc_number',),
+}
 
 
 def plan_track(current_tags: Dict[str, Any], source_track: Any, album_meta: Dict[str, Any],
                mode: str = MODE_OVERWRITE) -> Dict[str, Any]:
     """Diff one library track's current tags against the source target.
 
-    Returns ``{changes, db_data}`` where ``changes`` is ``{field: {old, new}}``
-    for display, and ``db_data`` is the (minimal) payload for
-    ``write_tags_to_file`` — it contains ONLY the fields that should be written
-    under ``mode``, so applying never touches unrelated/unchanged tags.
+    Returns ``{changes, db_data, protected}``:
+
+    * ``changes`` — ``{field: {old, new}}`` for display
+    * ``db_data`` — the MINIMAL payload for ``write_tags_to_file``: only the
+      fields that should be written under ``mode``
+    * ``protected`` — ``{field: {file, source}}`` for fields the writer's own
+      guards hold back, so the finding can say "kept yours" instead of
+      promising a change that will not happen
+
+    The decision itself belongs to ``core.tag_writer.build_tag_diff``, which
+    is the function ``write_tags_to_file`` agrees with — the placeholder guard
+    (#800), the date normalisation (#824) and the genre-subset guard all live
+    there. A second opinion here is a finding the fix cannot resolve.
     """
     target = _target_for_track(source_track, album_meta)
+    payload = _write_payload(target)
+
     changes: Dict[str, Dict[str, str]] = {}
-    db_data: Dict[str, Any] = {}
+    protected: Dict[str, Dict[str, str]] = {}
+    keep: set = set()
 
-    for field in MANAGED_FIELDS:
-        new_val = target.get(field)
-        if _is_empty(new_val):
-            continue  # source gave us nothing for this field — leave the file alone
-        old_val = _current_value(current_tags, field)
+    for row in build_tag_diff(current_tags or {}, payload):
+        field = row.get('file_key')
+        if field not in _WRITE_KEYS:
+            continue
+        if row.get('protected'):
+            protected[field] = {'file': row.get('file_value') or '',
+                                'source': row.get('db_value') or ''}
+            continue
+        if not row.get('changed'):
+            continue
+        if mode == MODE_FILL_MISSING and str(row.get('file_value') or '').strip():
+            continue                     # fill-missing only writes blanks
+        changes[field] = {'old': row.get('file_value') or '',
+                          'new': row.get('db_value') or ''}
+        keep.update(_WRITE_KEYS[field])
 
-        if mode == MODE_FILL_MISSING and not _is_empty(old_val):
-            continue  # fill-missing only writes blanks
-
-        old_disp, new_disp = _display(old_val), _display(new_val)
-        if old_disp == new_disp:
-            continue  # already correct — nothing to write
-
-        changes[field] = {'old': old_disp, 'new': new_disp}
-        # Map managed field → write_tags_to_file db_data key.
-        if field == 'title':
-            db_data['title'] = new_val
-        elif field == 'artist':
-            db_data['artist_name'] = new_val           # = album artist for the writer
-            ta = target.get('track_artist')
-            if ta and ta != new_val:
-                db_data['track_artist'] = ta
-        elif field == 'album':
-            db_data['album_title'] = new_val
-        elif field == 'year':
-            db_data['year'] = new_val
-        elif field == 'genre':
-            db_data['genres'] = new_val                # list
-        elif field == 'track_number':
-            db_data['track_number'] = new_val
-        elif field == 'disc_number':
-            db_data['disc_number'] = new_val
-
-    # Always carry track_count alongside a track_number write (writers want both).
-    if 'track_number' in db_data and target.get('track_count'):
-        db_data['track_count'] = target['track_count']
-
-    return {'changes': changes, 'db_data': db_data}
+    return {
+        'changes': changes,
+        'db_data': {k: v for k, v in payload.items() if k in keep},
+        'protected': protected,
+    }

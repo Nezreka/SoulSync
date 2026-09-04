@@ -9390,35 +9390,6 @@ def get_tracks_replaygain_batch_status():
 # :mod:`core.library_reorganize`.
 
 
-@app.route('/api/library/reorganize/sources', methods=['GET'])
-def reorganize_sources_global():
-    """List metadata sources the user has authed on this instance.
-    Used by the bulk "Reorganize All" modal where per-album ID coverage
-    varies. No network calls."""
-    try:
-        from core.library_reorganize import authed_sources
-        return jsonify({"success": True, "sources": authed_sources()})
-    except Exception as e:
-        logger.error(f"Reorganize sources (global) error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/library/album/<album_id>/reorganize/sources', methods=['GET'])
-def reorganize_album_sources(album_id):
-    """List metadata sources the user can pick for this album's
-    reorganize — every entry has both a stored album ID on the local
-    row AND an authenticated client. No network calls."""
-    try:
-        from core.library_reorganize import available_sources_for_album, load_album_and_tracks
-        album_data, _tracks = load_album_and_tracks(get_database(), album_id)
-        if album_data is None:
-            return jsonify({"success": False, "error": "Album not found"}), 404
-        return jsonify({"success": True, "sources": available_sources_for_album(album_data)})
-    except Exception as e:
-        logger.error(f"Reorganize sources error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
 @app.route('/api/library/album/<album_id>/reorganize/preview', methods=['POST'])
 def reorganize_album_preview(album_id):
     """Preview file reorganization for an album — returns current vs
@@ -9427,20 +9398,12 @@ def reorganize_album_preview(album_id):
     the apply endpoint, so the preview is guaranteed to match what
     apply would actually produce.
 
-    Optional body params:
-        source: when provided, only that metadata source is queried
-            (no fallback chain).
-        mode: 'api' (default — query metadata source) or 'tags' (read
-            embedded file tags as the source of truth, issue #592)."""
+    No body params. The plan is computed from the library's own rows, so
+    there is no metadata source to pick and no live call to make: an album
+    with no stored source id previews like any other, and the preview is
+    offline."""
     try:
         from core.library_reorganize import preview_album_reorganize
-        data = request.get_json() or {}
-        chosen_source = data.get('source') or None
-        metadata_source = data.get('mode') or config_manager.get(
-            'library.reorganize_metadata_source', 'api'
-        ) or 'api'
-        if metadata_source not in ('api', 'tags'):
-            metadata_source = 'api'
         transfer_dir = config_root_path(
             config_manager.get('soulseek.transfer_path', './Transfer'), './Transfer')
         result = preview_album_reorganize(
@@ -9449,9 +9412,6 @@ def reorganize_album_preview(album_id):
             transfer_dir=transfer_dir,
             resolve_file_path_fn=_resolve_library_file_path,
             build_final_path_fn=_build_final_path_for_track,
-            primary_source=chosen_source,
-            strict_source=bool(chosen_source),
-            metadata_source=metadata_source,
         )
         if result.get('status') == 'no_album':
             return jsonify({"success": False, "error": "Album not found"}), 404
@@ -9470,25 +9430,13 @@ def reorganize_album_files(album_id):
     that's already queued or running are deduped (returns
     ``{queued: false, reason: 'already_queued'}``).
 
-    Body params:
-        source (optional): per-album source pick (Spotify / iTunes /
-            Deezer / Discogs / Hydrabase). When omitted, the
-            orchestrator uses the configured primary with fallback.
-        mode (optional): 'api' (default — query metadata source) or
-            'tags' (read embedded file tags as the source of truth,
-            issue #592). When omitted, falls back to the
-            ``library.reorganize_metadata_source`` config setting,
-            then to 'api'.
+    No body params. A reorganize moves the album's files to the paths the
+    current template dictates, computed from the library's own rows. There is
+    no source to pick (nothing is fetched) and no mode to choose: #875's
+    "rename only" is the whole behaviour now.
     """
     try:
         from core.reorganize_queue import get_queue
-        data = request.get_json() or {}
-        chosen_source = data.get('source') or None
-        metadata_source = data.get('mode') or config_manager.get(
-            'library.reorganize_metadata_source', 'api'
-        ) or 'api'
-        if metadata_source not in ('api', 'tags'):
-            metadata_source = 'api'
 
         # Capture display fields at enqueue time so the status panel
         # can render them without a DB lookup later.
@@ -9501,11 +9449,6 @@ def reorganize_album_files(album_id):
             album_title=meta['album_title'],
             artist_id=meta['artist_id'],
             artist_name=meta['artist_name'],
-            source=chosen_source,
-            metadata_source=metadata_source,
-            # Rename-only (#875): just move files to the current naming scheme — skip
-            # the copy + post-processing (re-tag / quality / AcoustID) of the full flow.
-            rename_only=bool(data.get('rename_only')),
         )
         return jsonify({"success": True, **result})
     except Exception as e:
@@ -9519,33 +9462,15 @@ def reorganize_all_artist_albums(artist_id):
     bulk-loop. Each album becomes its own queue item, processed FIFO.
     Albums already queued or running are deduped silently.
 
-    Body params:
-        source (optional): same pick applied to every album. Per-album
-            overrides aren't supported here — use the per-album modal
-            for that.
-        mode (optional): 'api' or 'tags' applied to every album, same
-            shape as the per-album endpoint.
+    No body params — see the per-album endpoint.
     """
     try:
         from core.reorganize_queue import get_queue
-        data = request.get_json() or {}
-        chosen_source = data.get('source') or None
-        metadata_source = data.get('mode') or config_manager.get(
-            'library.reorganize_metadata_source', 'api'
-        ) or 'api'
-        if metadata_source not in ('api', 'tags'):
-            metadata_source = 'api'
 
         albums = get_database().get_artist_albums_for_reorganize(artist_id)
         if not albums:
             return jsonify({"success": False, "error": "No albums found for this artist"}), 404
 
-        # Apply the user's chosen source + mode to every album, then
-        # hand off to the queue's bulk-enqueue helper which owns the
-        # loop+tally.
-        for album in albums:
-            album['source'] = chosen_source
-            album['metadata_source'] = metadata_source
         result = get_queue().enqueue_many(albums)
 
         return jsonify({

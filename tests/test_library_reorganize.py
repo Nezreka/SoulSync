@@ -323,31 +323,11 @@ def test_scan_skips_tracks_with_missing_files(make_context, monkeypatch):
     assert result.findings_created == 0
 
 
-def test_scan_emits_album_needs_enrichment_when_planner_returns_no_source_id(make_context, monkeypatch):
-    """Pin: planner returns status='no_source_id' → emit ONE
-    album-level finding ('needs enrichment') instead of N per-track
-    'no source' findings (which would clutter the UI)."""
-    db = _FakeDB([_make_album_row(id_='A1', title='Unenriched Album')])
-    _stub_preview(monkeypatch, {
-        'A1': {
-            'success': False, 'status': 'no_source_id',
-            'source': None,
-            'album': 'Unenriched Album', 'artist': 'Some Artist',
-            'tracks': [
-                {'track_id': 't1', 'title': 'Track 1', 'matched': False, 'reason': '...'},
-                {'track_id': 't2', 'title': 'Track 2', 'matched': False, 'reason': '...'},
-            ],
-        },
-    })
-    ctx = make_context(db=db, dry_run=True)
-
-    job = LibraryReorganizeJob()
-    result = job.scan(ctx)
-
-    findings = ctx._captured_findings  # type: ignore[attr-defined]
-    assert result.findings_created == 1
-    assert findings[0]['finding_type'] == 'album_needs_enrichment'
-    assert 'Unenriched Album' in findings[0]['title']
+# The `album_needs_enrichment` dead-end finding this job used to emit for a
+# `no_source_id` plan is gone with the branch that raised it: the planner reads
+# the catalogue, which needs no enrichment to name a file.
+# `test_an_album_with_no_source_id_still_produces_findings` below pins the
+# replacement — such an album now gets real path_mismatch findings.
 
 
 def test_scan_skips_albums_planner_reports_as_no_album(make_context, monkeypatch):
@@ -457,38 +437,36 @@ def test_scan_apply_mode_enqueues_albums_via_reorganize_queue(make_context, monk
     assert len(enqueue_calls) == 1
     queued = enqueue_calls[0]
     assert {q['album_id'] for q in queued} == {'A1', 'A2'}
-    assert {q['source'] for q in queued} == {'spotify', 'deezer'}
+    # No per-item source: a reorganize consults no provider, so there is
+    # nothing about "which source" for the queue to carry.
+    assert all('source' not in q for q in queued)
     assert result.auto_fixed == 2
     # Apply mode does NOT emit findings — it enqueues for actual move.
     assert result.findings_created == 0
 
 
-def _stub_preview_by_mode(monkeypatch, api_resp, tags_resp):
-    """Patch preview to return different responses for api vs tag mode, so the
-    #862 api→tags fallback can be exercised."""
+def _stub_one_preview(monkeypatch, resp):
+    """One response for every album — the planner has no modes to switch on."""
     from core import library_reorganize as core_lr
-
-    def _fake_preview(*, album_id, metadata_source='api', **kwargs):
-        return tags_resp if metadata_source == 'tags' else api_resp
-    monkeypatch.setattr(core_lr, 'preview_album_reorganize', _fake_preview)
+    monkeypatch.setattr(core_lr, 'preview_album_reorganize',
+                        lambda **kwargs: resp)
 
 
-def test_scan_falls_back_to_tag_mode_when_api_has_no_source_id(make_context, monkeypatch):
-    """#862: media-server albums have no source ID, so the API planner returns
-    no_source_id. The job must fall back to TAG mode and, when that plans, emit
-    real path_mismatch findings — NOT a dead-end 'needs enrichment' finding."""
+def test_an_album_with_no_source_id_still_produces_findings(make_context, monkeypatch):
+    """#862: media-server albums have no source ID, so the API planner returned
+    `no_source_id` and this job only ever reported a dead-end "needs enrichment"
+    finding without moving anything. The answer then was a fallback to reading
+    each file's embedded tags; the answer now is that the plan never needed a
+    source at all — it comes from the library's own rows."""
     db = _FakeDB([_make_album_row(id_='A1', title='Tagged Album')])
-    _stub_preview_by_mode(
-        monkeypatch,
-        api_resp={'success': False, 'status': 'no_source_id', 'source': None,
-                  'album': 'Tagged Album', 'artist': 'A',
-                  'tracks': [{'track_id': 't1', 'title': 'X', 'matched': False}]},
-        tags_resp={'success': True, 'status': 'planned', 'source': 'tags',
-                   'album': 'Tagged Album', 'artist': 'A',
-                   'tracks': [{'track_id': 't1', 'title': 'X',
-                               'current_path': 'old/X.flac', 'new_path': 'A/(2008) Tagged Album/01 - X.flac',
-                               'matched': True, 'unchanged': False, 'file_exists': True}]},
-    )
+    _stub_one_preview(monkeypatch, {
+        'success': True, 'status': 'planned', 'source': 'catalogue',
+        'album': 'Tagged Album', 'artist': 'A',
+        'tracks': [{'track_id': 't1', 'title': 'X',
+                    'current_path': 'old/X.flac',
+                    'new_path': 'A/(2008) Tagged Album/01 - X.flac',
+                    'matched': True, 'unchanged': False, 'file_exists': True}],
+    })
     ctx = make_context(db=db, dry_run=True)
     result = LibraryReorganizeJob().scan(ctx)
 
@@ -499,22 +477,19 @@ def test_scan_falls_back_to_tag_mode_when_api_has_no_source_id(make_context, mon
     assert all(f['finding_type'] != 'album_needs_enrichment' for f in findings)
 
 
-def test_apply_mode_enqueues_tag_metadata_source_on_fallback(make_context, monkeypatch):
-    """#862: when the album reorganizes via the tag-mode fallback, the enqueued
-    item must carry metadata_source='tags' so the live move uses tags too (the
-    queue runner otherwise defaults to 'api' and would fail again)."""
+def test_apply_mode_enqueues_without_a_mode_to_carry(make_context, monkeypatch):
+    """The enqueued item used to carry `metadata_source` so the live move would
+    use the same planner the preview did. There is one planner now, so there is
+    nothing to carry — and nothing that can disagree."""
     db = _FakeDB([_make_album_row(id_='A1', title='Tagged Album', artist_id=10, artist_name='A')])
-    _stub_preview_by_mode(
-        monkeypatch,
-        api_resp={'success': False, 'status': 'no_source_id', 'source': None,
-                  'album': 'Tagged Album', 'artist': 'A',
-                  'tracks': [{'track_id': 't1', 'title': 'X', 'matched': False}]},
-        tags_resp={'success': True, 'status': 'planned', 'source': 'tags',
-                   'album': 'Tagged Album', 'artist': 'A',
-                   'tracks': [{'track_id': 't1', 'title': 'X',
-                               'current_path': 'old/X.flac', 'new_path': 'A/(2008) Tagged Album/01 - X.flac',
-                               'matched': True, 'unchanged': False, 'file_exists': True}]},
-    )
+    _stub_one_preview(monkeypatch, {
+        'success': True, 'status': 'planned', 'source': 'catalogue',
+        'album': 'Tagged Album', 'artist': 'A',
+        'tracks': [{'track_id': 't1', 'title': 'X',
+                    'current_path': 'old/X.flac',
+                    'new_path': 'A/(2008) Tagged Album/01 - X.flac',
+                    'matched': True, 'unchanged': False, 'file_exists': True}],
+    })
 
     enqueue_calls = []
 
@@ -530,8 +505,8 @@ def test_apply_mode_enqueues_tag_metadata_source_on_fallback(make_context, monke
     LibraryReorganizeJob().scan(ctx)
 
     assert len(enqueue_calls) == 1
-    assert enqueue_calls[0][0]['metadata_source'] == 'tags'
-    assert enqueue_calls[0][0]['source'] == 'tags'
+    assert 'metadata_source' not in enqueue_calls[0][0]
+    assert 'source' not in enqueue_calls[0][0]
 
 
 def test_scan_only_iterates_albums_for_active_server(make_context, monkeypatch):

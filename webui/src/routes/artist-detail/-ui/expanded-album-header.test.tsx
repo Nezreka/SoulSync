@@ -232,17 +232,17 @@ describe('admin actions', () => {
     delete window.showToast;
 
     // Reorganize is local now (showReorganizeModal's port): the button
-    // mounts the modal, which loads this album's metadata sources.
+    // mounts the modal, which fetches nothing — the plan comes from the
+    // library's own rows.
     const fetchSpy = vi.fn(
-      async (_i: RequestInfo | URL, _init?: RequestInit) =>
-        new Response(JSON.stringify({ sources: [] })),
+      async (_i: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({})),
     );
     vi.stubGlobal('fetch', fetchSpy);
     fireEvent.click(document.querySelector('.enhanced-reorganize-album-btn') as HTMLElement);
     expect(document.getElementById('reorganize-modal-title')?.textContent).toBe(
       'Reorganize: SAW 85-92',
     );
-    expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('/api/library/album/7/reorganize/sources');
+    expect(fetchSpy).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
 
     // Delete now opens the LOCAL two-option dialog (deleteLibraryAlbum's port).

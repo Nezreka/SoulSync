@@ -19,6 +19,34 @@ logger = get_logger("metadata.registry")
 MetadataClientFactory = Callable[[], Any]
 
 METADATA_SOURCE_PRIORITY = ("deezer", "itunes", "spotify", "discogs", "hydrabase", "musicbrainz", "jiosaavn", "bandcamp")
+#: The ``albums`` column carrying each source's album id. One definition,
+#: because three of them drifted: reorganize accepted all six, the re-tag job
+#: four, and a Discogs- or Hydrabase-matched album was therefore reorganizable
+#: but not re-taggable — silently, by falling out of a ``continue``.
+ALBUM_SOURCE_ID_COLUMNS = {
+    "spotify": "spotify_album_id",
+    "itunes": "itunes_album_id",
+    "deezer": "deezer_id",
+    "discogs": "discogs_id",
+    "hydrabase": "soul_id",
+    "musicbrainz": "musicbrainz_release_id",
+}
+
+def extract_album_source_ids(album_row) -> Dict[str, str]:
+    """Pull the per-source album-ID strings off an album row.
+
+    Lived in ``core.library_reorganize`` while the reorganizer was the only
+    caller that needed to know which provider an album is matched to. It plans
+    from the catalogue now and asks no provider anything, so the helper belongs
+    with the column map — where the canonical resolver, which DOES need it, can
+    reach it without importing the reorganizer.
+    """
+    return {
+        source: (album_row.get(column) or '')
+        for source, column in ALBUM_SOURCE_ID_COLUMNS.items()
+    }
+
+
 METADATA_SOURCE_LABELS = {
     "spotify": "Spotify",
     "itunes": "iTunes",
