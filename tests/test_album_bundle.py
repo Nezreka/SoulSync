@@ -1465,3 +1465,32 @@ def test_without_a_duration_the_size_gate_has_no_opinion():
     fake = _Release(title='Artist - Album [FLAC]', size=60_000_000, seeders=99)
 
     assert pick_best_album_release([fake], _flac_quality_guess) is fake
+
+
+def test_a_repack_beats_the_rip_it_replaces_at_the_same_quality():
+    """Lidarr's Revision as a tiebreaker: only when the quality itself ties."""
+    original = _Release(title='Artist - Album [FLAC]', size=400_000_000, seeders=10)
+    repack = _Release(title='Artist - Album REPACK [FLAC]', size=400_000_000, seeders=10)
+
+    assert pick_best_album_release([original, repack], _flac_quality_guess) is repack
+
+
+def test_a_repack_does_not_beat_a_better_format():
+    """A corrected MP3 is still an MP3."""
+    repacked_mp3 = _Release(title='Artist - Album REPACK [MP3 320]',
+                            size=400_000_000, seeders=10)
+    flac = _Release(title='Artist - Album [FLAC]', size=400_000_000, seeders=10)
+
+    assert pick_best_album_release([repacked_mp3, flac], _flac_quality_guess) is flac
+
+
+def test_a_repack_beats_the_original_under_ranked_targets_too():
+    targets = [QualityTarget(format='flac')]
+    original = _Release(title='Artist - Album [FLAC]', size=400_000_000, seeders=10)
+    repack = _Release(title='Artist - Album PROPER [FLAC]', size=400_000_000, seeders=10)
+
+    picked = pick_best_album_release(
+        [original, repack], _flac_quality_guess, quality_targets=targets,
+    )
+
+    assert picked is repack

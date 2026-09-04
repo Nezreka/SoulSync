@@ -29,6 +29,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
+from core.quality.release_format import release_revision
 from core.settings import config_manager
 from utils.logging_config import get_logger
 
@@ -454,7 +455,15 @@ def pick_best_album_release(candidates, quality_guess,
                 True if best_target < len(quality_targets)
                 else aq.format.lower() in preferred_formats
             )
-            return (preferred, aq.tier_score(), availability, candidate.size or 0)
+            return (
+                preferred,
+                aq.tier_score(),
+                # Only ever a tiebreaker: a repack is the corrected copy of the
+                # SAME quality, never a reason to take a worse format.
+                release_revision(candidate.title or '').rank,
+                availability,
+                candidate.size or 0,
+            )
 
         return max(quality_rows, key=_profile_score)[2]
 
@@ -467,6 +476,7 @@ def pick_best_album_release(candidates, quality_guess,
                 getattr(c, 'categories', None),
                 getattr(c, 'file_names', None),
             ),
+            release_revision(c.title or '').rank,
             c.size or 0,
         )
 

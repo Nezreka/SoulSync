@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Iterable, Optional, Set, Tuple
+from typing import Iterable, NamedTuple, Optional, Set, Tuple
 
 from core.quality.lossless import LOSSLESS_FORMATS
 from core.quality.model import AudioQuality
@@ -298,6 +298,56 @@ _LOSSLESS_MIN_IMPLIED_KBPS = 400.0
 # duration; here the same rule has to survive a wrong edition.
 _LOSSY_CEILING_FACTOR = 2.0
 _LOSSY_CEILING_ALLOWANCE_KBPS = 64.0
+
+
+# Release revision — Lidarr's Revision, parsed from the same words. A repack is
+# the corrected copy of a rip that was wrong, so it beats the original of the
+# SAME quality; it never beats a better format, which is why this is only ever
+# a tiebreaker. REAL is matched case-sensitively because "real" is an ordinary
+# word in album titles, and the version pattern refuses the trailing digit of
+# MP3 for the same reason.
+_PROPER_RE = re.compile(r'\bproper\b', re.I)
+_REPACK_RE = re.compile(r'\b(?:repack\d?|rerip\d?)\b', re.I)
+_VERSION_RE = re.compile(
+    r'(?:\d(?<!\bmp3))[-._ ]?v(\d)[-._ ]|\[v(\d)\]|repack(\d)|rerip(\d)', re.I,
+)
+_REAL_RE = re.compile(r'\bREAL\b')
+
+
+class ReleaseRevision(NamedTuple):
+    """How many times this release has been corrected."""
+
+    version: int = 1
+    real: int = 0
+    is_repack: bool = False
+
+    @property
+    def rank(self) -> Tuple[int, int]:
+        """Sort key. REAL outranks version, exactly as Lidarr compares them."""
+        return (self.real, self.version)
+
+
+def release_revision(title: str) -> ReleaseRevision:
+    """PROPER / REPACK / vN / REAL for one release title."""
+    raw = str(title or '')
+    lowered = raw.lower()
+
+    version = 1
+    matched = _VERSION_RE.search(lowered)
+    if matched:
+        version = int(next(group for group in matched.groups() if group))
+
+    is_repack = bool(_REPACK_RE.search(lowered))
+    if _PROPER_RE.search(lowered) or is_repack:
+        # A bare PROPER is version 2; one that also states a version increments
+        # it, so "REPACK2" is the third copy rather than the second.
+        version = version + 1 if matched else 2
+
+    return ReleaseRevision(
+        version=version,
+        real=len(_REAL_RE.findall(raw)),
+        is_repack=is_repack,
+    )
 
 
 def implied_bitrate_kbps(size_bytes, duration_seconds) -> Optional[float]:
