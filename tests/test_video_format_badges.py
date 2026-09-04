@@ -93,7 +93,10 @@ def test_detail_js_renders_the_badges():
     assert 'function formatBadges(f)' in js
     assert 'formatBadges(d.file)' in js               # hero meta (owned movies)
     assert 'function channelsLabel(n)' in js
-    assert "rows.push(['Dynamic range', f.dynamic_range])" in js
+    # The label + field pairing, not the wrapper around it. The row moved from a
+    # bare array to detailCell(...) in a refactor and this started failing on a
+    # feature that never went anywhere.
+    assert "'Dynamic range', f.dynamic_range" in js
     css = (_ROOT / "webui" / "static" / "video" / "video-side.css").read_text(
         encoding="utf-8", errors="replace")
     assert '.vd-fmt' in css
