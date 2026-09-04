@@ -58799,6 +58799,187 @@ tr.tag-diff-same {
 .cache-health-status-text { font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.8); }
 
 /* Stat cards */
+/* ── Cache health: what it means and what to do ──
+   The modal used to state a verdict ("Cleanup recommended") and stop, leaving
+   the reader to guess what was wrong and what would fix it. */
+/* ── Live: upcoming dates and past setlists on an artist page ── */
+.artist-concerts-section {
+    margin: 28px 0 8px;
+}
+.artist-concerts-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    margin: 0 0 14px;
+}
+.artist-concerts-block + .artist-concerts-block {
+    margin-top: 18px;
+}
+.artist-concerts-block-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.45);
+    margin-bottom: 8px;
+}
+.artist-concerts-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.artist-concert-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    font-size: 13px;
+}
+.artist-concert-row + .artist-concert-row {
+    margin-top: 6px;
+}
+/* Fixed width so the dates form a column instead of ragging with the venue. */
+.artist-concert-date {
+    flex: 0 0 118px;
+    color: rgb(var(--accent-rgb, 99, 102, 241));
+    font-weight: 600;
+}
+.artist-concert-where {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: rgba(255, 255, 255, 0.8);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.artist-concert-link {
+    flex: 0 0 auto;
+    color: rgba(255, 255, 255, 0.6);
+    text-decoration: none;
+    font-size: 12px;
+    font-weight: 600;
+}
+.artist-concert-link:hover {
+    color: #fff;
+}
+
+/* A setlist row opens, so it is a column with a header line. */
+.artist-setlist-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+}
+.artist-setlist-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.artist-setlist-toggle {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: none;
+    border: 0;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.artist-setlist-count {
+    flex: 0 0 auto;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 12px;
+}
+.artist-setlist-play {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgb(var(--accent-rgb, 99, 102, 241));
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+    transition: filter 0.15s ease;
+}
+.artist-setlist-play:hover:not(:disabled) {
+    filter: brightness(1.12);
+}
+.artist-setlist-play:disabled {
+    cursor: wait;
+    opacity: 0.6;
+}
+.artist-setlist-songs {
+    margin: 10px 0 2px;
+    padding-left: 26px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 12.5px;
+    line-height: 1.7;
+}
+
+@media (max-width: 640px) {
+    .artist-concert-date { flex-basis: 92px; }
+    .artist-concert-row { font-size: 12.5px; gap: 8px; }
+}
+
+.cache-health-explain {
+    margin: 14px 0 4px;
+    padding: 14px 16px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-left: 3px solid rgb(var(--accent-rgb, 99, 102, 241));
+    border-radius: 10px;
+}
+/* A disabled cleanup job is the one case that really does need the user. */
+.cache-health-explain.warn {
+    border-left-color: #f1c40f;
+    background: rgba(241, 196, 15, 0.06);
+}
+.cache-health-explain-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.55);
+    margin-bottom: 8px;
+}
+.cache-health-explain-list {
+    margin: 0 0 10px;
+    padding-left: 18px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.75);
+}
+.cache-health-explain-list li + li {
+    margin-top: 6px;
+}
+.cache-health-explain-list strong {
+    color: #fff;
+}
+.cache-health-explain-fix {
+    font-size: 13px;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.75);
+    margin-bottom: 12px;
+}
+.cache-health-explain-fix strong {
+    color: #fff;
+}
+.cache-health-explain-note {
+    margin-top: 8px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
 .cache-health-cards {
     display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px;
 }
@@ -58964,6 +59145,161 @@ tr.tag-diff-same {
 .mb-search-result-mbid { font-size: 9px; color: rgba(255,255,255,0.12); font-family: monospace; flex-shrink: 0; letter-spacing: 0.5px; }
 
 /* ── Findings Tab ── */
+/* ── Findings grouped by album / artist ──────────────────────────────────────
+   The upgrade backlog as things you can decide about, instead of one row per
+   track. Art comes off the finding, so the grid renders in one request. */
+.repair-album-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+    gap: 14px;
+    margin-bottom: 14px;
+}
+
+.repair-album-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    overflow: hidden;
+    cursor: pointer;
+    text-align: left;
+    color: inherit;
+    font: inherit;
+    transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+.repair-album-card:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(var(--accent-rgb, 99, 102, 241), 0.55);
+    transform: translateY(-2px);
+}
+.repair-album-card:focus-visible {
+    outline: 2px solid rgb(var(--accent-rgb, 99, 102, 241));
+    outline-offset: 2px;
+}
+
+.repair-album-art {
+    position: relative;
+    aspect-ratio: 1;
+    background: rgba(255, 255, 255, 0.05);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.repair-album-art img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+/* A letter tile rather than a broken-image icon: a grid full of those reads
+   as a broken page, not as "this album has no art". */
+.repair-album-art-fallback {
+    font-size: 34px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.25);
+}
+
+/* The count is the point of the card, so it sits ON the art where the eye
+   lands first rather than in the text block below. */
+.repair-album-count {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: 11px;
+    background: rgba(0, 0, 0, 0.72);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+}
+
+.repair-album-meta {
+    padding: 0 10px 12px;
+    min-width: 0;
+}
+.repair-album-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.repair-album-artist {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
+}
+/* The worst quality is why the card is here, so it gets the accent. */
+.repair-album-quality {
+    font-size: 11px;
+    color: rgb(var(--accent-rgb, 99, 102, 241));
+    font-weight: 600;
+    margin-top: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.repair-album-tracks {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+    margin-top: 2px;
+}
+
+.repair-album-grid-empty {
+    padding: 28px 14px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 13px;
+}
+
+/* The list/album/artist switch, sitting with the other findings controls. */
+.repair-view-switch {
+    display: inline-flex;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    overflow: hidden;
+}
+.repair-view-switch button {
+    background: rgba(255, 255, 255, 0.06);
+    border: 0;
+    color: rgba(255, 255, 255, 0.6);
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.repair-view-switch button + button {
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+.repair-view-switch button:hover {
+    color: #fff;
+}
+.repair-view-switch button[aria-pressed="true"] {
+    background: rgb(var(--accent-rgb, 99, 102, 241));
+    color: #fff;
+    font-weight: 600;
+}
+
+@media (max-width: 640px) {
+    .repair-album-grid {
+        grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+        gap: 10px;
+    }
+}
+
 .repair-findings-toolbar {
     display: flex;
     align-items: center;
@@ -67355,13 +67691,57 @@ body.max-performance #page-particles-canvas {
 }
 
 /* ── The maintenance surface: one scroll, four sections ──
-   The three tabs are gone. The hero itself is the scroll container so the
-   section nav can stick to the top of it — and so the page below (the tool
-   cards) stays reachable however much maintenance work is outstanding. */
+   It used to be its own capped scroll box (max-height + overflow:auto) so the
+   tool cards sitting below it on the page stayed reachable. That gave the page
+   two scrollbars doing different jobs. The tool cards are their own tab now, so
+   nothing needs capping: this scrolls with the page, and the section nav sticks
+   to the viewport instead of to a box. */
 .tools-maintenance-hero {
-    max-height: min(84vh, 1040px);
-    overflow: hidden auto;
+    overflow: visible;
     scroll-behavior: smooth;
+}
+
+/* The 3px accent line was clipped by the hero's own overflow:hidden; with that
+   gone it has to round its own top corners or it juts past them. */
+.tools-maintenance-hero::before {
+    border-radius: 16px 16px 0 0;
+}
+
+/* ── Tools / Operations tabs ── */
+.tools-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tools-tab {
+    appearance: none;
+    background: none;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    color: rgba(255, 255, 255, 0.5);
+    padding: 9px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.tools-tab:hover {
+    color: #fff;
+}
+
+.tools-tab[aria-selected="true"] {
+    color: #fff;
+    border-bottom-color: rgb(var(--accent-rgb, 99, 102, 241));
+}
+
+.tools-tab:focus-visible {
+    outline: 2px solid rgb(var(--accent-rgb, 99, 102, 241));
+    outline-offset: -2px;
+    border-radius: 4px;
 }
 
 .repair-section-nav {

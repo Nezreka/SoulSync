@@ -52,16 +52,50 @@ def scratch_dir() -> str:
     return tempfile.gettempdir()
 
 
-def check_room(target_dir: str, settings: dict | None) -> dict:
+# The least free space a scratch volume can have and still be worth trying,
+# when the release size is unknown. Not the library floor: that number answers
+# "how much headroom do I want left on my 18TB media drive", and applying it to
+# a temp directory refused grabs on a volume with room for the download many
+# times over.
+SCRATCH_MIN_GB = 5.0
+
+# Headroom over the release size itself: a download is assembled, remuxed and
+# sometimes re-encoded in place, so the working set runs bigger than the file.
+SCRATCH_SIZE_MARGIN = 1.5
+
+
+def scratch_floor(needed_gb: float | None) -> float:
+    """What the SCRATCH volume actually has to have free.
+
+    A scratch drive needs room for the download being assembled, not for the
+    user's library headroom preference. Judging it by ``min_free_disk_gb``
+    refused a 2GB movie because a temp directory had 13.6GB free against a
+    100GB library floor - a drive with room for that download six times over.
+    """
+    try:
+        needed = float(needed_gb or 0)
+    except (TypeError, ValueError):
+        needed = 0.0
+    return max(SCRATCH_MIN_GB, needed * SCRATCH_SIZE_MARGIN)
+
+
+def check_room(target_dir: str, settings: dict | None,
+               needed_gb: float | None = None) -> dict:
     """``{ok, free, floor, where}`` across BOTH drives a download touches.
 
     ``where`` names the one that is short ('library' or 'scratch') so the caller
     can say which drive to clear — being told to free space on a drive with
     terabytes spare is how a real disk problem gets dismissed as a bug.
 
-    Same on/off switch as before: a floor of 0 disables the guard entirely, and
-    an unreadable filesystem answers "has room". A probe error must never wedge
-    downloads.
+    The two drives are judged by DIFFERENT numbers, because they are answering
+    different questions. The library is held to ``min_free_disk_gb``, the user's
+    "leave this much on my media drive". The scratch volume only has to fit the
+    download being assembled (see :func:`scratch_floor`), so pass ``needed_gb``
+    when the release size is known.
+
+    Same on/off switch as before: a library floor of 0 disables the guard
+    entirely, and an unreadable filesystem answers "has room". A probe error
+    must never wedge downloads.
     """
     out = {"ok": True, "free": None, "floor": 0.0, "where": None}
     try:
@@ -86,8 +120,9 @@ def check_room(target_dir: str, settings: dict | None) -> dict:
     # reporting it twice would just be confusing.
     if lib is not None and _same_volume(target_dir, scratch_dir()):
         return out
-    if scratch < floor:
-        return {"ok": False, "free": scratch, "floor": floor, "where": "scratch"}
+    s_floor = scratch_floor(needed_gb)
+    if scratch < s_floor:
+        return {"ok": False, "free": scratch, "floor": s_floor, "where": "scratch"}
     return out
 
 

@@ -1484,6 +1484,10 @@ async function loadSettingsData() {
         if (typeof syncAcoustidRequireVerifiedVisibility === 'function') syncAcoustidRequireVerifiedVisibility();
 
         // Populate Last.fm settings
+        const _tmKey = document.getElementById('concerts-ticketmaster-api-key');
+        if (_tmKey) _tmKey.value = settings.concerts?.ticketmaster_api_key || '';
+        const _slfmKey = document.getElementById('concerts-setlistfm-api-key');
+        if (_slfmKey) _slfmKey.value = settings.concerts?.setlistfm_api_key || '';
         document.getElementById('lastfm-api-key').value = settings.lastfm?.api_key || '';
         document.getElementById('lastfm-api-secret').value = settings.lastfm?.api_secret || '';
         document.getElementById('lastfm-scrobble-enabled').checked = settings.lastfm?.scrobble_enabled === true;
@@ -4519,6 +4523,10 @@ async function saveSettings(quiet = false) {
             api_key: document.getElementById('acoustid-api-key').value,
             enabled: document.getElementById('acoustid-enabled').checked,
             require_verified: document.getElementById('acoustid-require-verified')?.checked === true
+        },
+        concerts: {
+            ticketmaster_api_key: document.getElementById('concerts-ticketmaster-api-key')?.value?.trim() || '',
+            setlistfm_api_key: document.getElementById('concerts-setlistfm-api-key')?.value?.trim() || ''
         },
         lastfm: {
             api_key: document.getElementById('lastfm-api-key').value,

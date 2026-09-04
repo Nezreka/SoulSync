@@ -1536,6 +1536,44 @@ def get_album_tracks(album_id):
         logger.exception("Error fetching album tracks for album %s", album_id)
         return jsonify({"error": str(e)}), 500
 
+@bp.route('/api/artist/<artist_id>/concerts', methods=['GET'])
+def artist_concerts(artist_id):
+    """Upcoming dates and recent setlists for one artist.
+
+    Name comes from the query string because this is called from source-only
+    artist pages too, where there is no library row to read it off. The MBID is
+    optional but worth passing: setlist.fm's name matching is loose enough that
+    two bands sharing a name return each other's shows.
+
+    Always 200. Both providers are optional, and a page section that 500s
+    because the user never configured a concert API is worse than one that says
+    "not set up".
+    """
+    from core.concerts_client import artist_concerts as _lookup
+
+    name = (request.args.get('name') or '').strip()
+    mbid = (request.args.get('mbid') or '').strip()
+    if not name:
+        # fall back to the library row when the caller did not say
+        try:
+            from database.music_database import MusicDatabase
+            row = MusicDatabase().get_artist_by_id(artist_id)
+            name = str((row or {}).get('name') or '').strip()
+            mbid = mbid or str((row or {}).get('musicbrainz_id') or '').strip()
+        except Exception:   # noqa: BLE001 - no row is just "no name"
+            logger.debug('no library row for artist %s, concerts need a ?name',
+                         artist_id, exc_info=True)
+    if not name:
+        return jsonify({"artist": "", "upcoming": [], "setlists": [],
+                        "providers": {}}), 200
+    try:
+        return jsonify(_lookup(name, mbid=mbid)), 200
+    except Exception as e:   # noqa: BLE001
+        logger.error("Concert lookup failed for %s: %s", name, e)
+        return jsonify({"artist": name, "upcoming": [], "setlists": [],
+                        "providers": {}, "error": str(e)}), 200
+
+
 @bp.route('/api/artist/<artist_id>/record', methods=['GET'])
 def get_artist_db_record(artist_id):
     """Return the COMPLETE database record for a library artist — every column of

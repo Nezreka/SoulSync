@@ -155,6 +155,12 @@ def _artist_provider_ids(row: Any) -> Dict[str, str]:
     ids = parse_external_ids(row["external_ids"] if "external_ids" in row.keys() else None)
     if row["spotify_id"]:
         ids.setdefault("spotify", str(row["spotify_id"]))
+    # Both promoted columns, not just Spotify: an MBID written by the importer
+    # lives only in the column, and a reader that missed it (the ported
+    # Concerts section asks setlist.fm by MBID) sees an artist with no
+    # MusicBrainz identity at all.
+    if "musicbrainz_id" in row.keys() and row["musicbrainz_id"]:
+        ids.setdefault("musicbrainz", str(row["musicbrainz_id"]))
     return ids
 
 

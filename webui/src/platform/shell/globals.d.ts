@@ -850,6 +850,9 @@ declare global {
     disablePlaylistSelection?: (disabled: boolean) => void;
     updateRefreshButtonState?: () => void;
     getSyncAccountPlaylists?: () => { id: string | number; name?: string }[];
+    /** Ask the tools page to show whichever tab holds `selector`. True when it
+     *  had to switch, so the caller knows to wait a frame before measuring. */
+    revealToolsTabFor?: (selector: string) => boolean;
   }
 }
 

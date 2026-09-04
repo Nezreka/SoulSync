@@ -189,7 +189,10 @@ function JobHelpOverlay({ job, onClose }: { job: RepairJob; onClose: () => void 
 const SECTIONS: Array<{ id: RepairSection; label: string; anchor: string }> = [
   { id: 'health', label: 'Health', anchor: 'repair-section-health' },
   { id: 'findings', label: 'Findings', anchor: 'repair-section-findings' },
-  { id: 'operations', label: 'Operations', anchor: 'repair-section-operations' },
+  // 'Jobs', not 'Operations': the page tab above is called Operations and two
+  // controls with one name is a guessing game. This matches the section's own
+  // heading, 'Maintenance jobs'.
+  { id: 'operations', label: 'Jobs', anchor: 'repair-section-operations' },
   { id: 'history', label: 'History', anchor: 'repair-section-history' },
 ];
 

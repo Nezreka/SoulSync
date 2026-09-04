@@ -22,6 +22,7 @@ import { bitrateKbps, formatBitrate } from '../-bitrate';
 import { albumQueueRows, artistQueueRows } from '../-library-v2.play';
 import { getServiceUrl } from '../-library-v2.service-links';
 import { ArtistVideosSection } from '../../artist-detail/-ui/artist-videos-section';
+import { ConcertsSection } from '../../artist-detail/-ui/concerts-section';
 import {
   analyzeLibraryV2TrackReplayGain,
   blacklistLibraryV2Source,
@@ -6985,6 +6986,15 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               shipped unreachable. It belongs under the releases, the same place
               upstream put it. */}
           <ArtistVideosSection artistName={artist.name} />
+          {/* Same story as the shelf above: upstream 5283de408 shipped live
+              dates and setlists whose only mount was the deleted page, so the
+              whole 1,189-line feature arrived unreachable. Setlist.fm is asked
+              by MBID; an artist without one still gets the upcoming half.
+              Renders nothing at all unless a concert provider is configured. */}
+          <ConcertsSection
+            artistName={artist.name}
+            mbid={String(artist.provider_ids?.musicbrainz ?? '')}
+          />
           {modalAction && INTERACTIVE_RE.test(modalAction.action) ? (
             <InteractiveSearchModal
               initialQuery={buildSearchQuery(artist.name, modalAction.action, modalAction.entity)}

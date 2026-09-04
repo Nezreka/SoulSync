@@ -632,15 +632,25 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 if len(first_word) > 1:
                     legacy_queries.append(f"{track_name} {first_word}".strip())
 
-        # Add track-only query
-        if track_name.strip():
+        # Add track-only query only when it is distinctive enough to broadcast.
+        # generate_download_queries() already enforces this guard; the legacy
+        # fallback must honor the same contract or short wishlist titles like
+        # "Vortex" still fan out to hundreds of noisy Soulseek responses.
+        if (
+            track_name.strip()
+            and deps.matching_engine._title_is_distinctive_enough_to_broadcast(track_name.strip())
+        ):
             legacy_queries.append(track_name.strip())
 
         # Add traditional cleaned queries
         cleaned_name = re.sub(r'\s*\([^)]*\)', '', track_name).strip()
         cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name).strip()
 
-        if cleaned_name and cleaned_name.lower() != track_name.lower():
+        if (
+            cleaned_name
+            and cleaned_name.lower() != track_name.lower()
+            and deps.matching_engine._title_is_distinctive_enough_to_broadcast(cleaned_name)
+        ):
             legacy_queries.append(cleaned_name.strip())
 
         # Combine enhanced queries with legacy fallbacks.
