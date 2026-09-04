@@ -2849,6 +2849,51 @@
                                     </div>
                                 </div>
 
+                                <!-- YouTube Auth -->
+                                <div class="api-service-frame stg-service" data-service="youtube">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #FF0000;"></span>
+                                        <h4 class="service-title">YouTube</h4>
+                                        <span class="stg-service-chevron">›</span>
+                                    </div>
+                                    <div class="stg-service-body">
+                                        <div class="form-group">
+                                            <label>YouTube cookies:</label>
+                                            <select id="youtube-cookies-browser" class="form-select">
+                                                <option value="">None (public unauthenticated)</option>
+                                                <option value="chrome">From local Chrome</option>
+                                                <option value="firefox">From local Firefox</option>
+                                                <option value="edge">From local Edge</option>
+                                                <option value="brave">From local Brave</option>
+                                                <option value="opera">From local Opera</option>
+                                                <option value="safari">From local Safari</option>
+                                                <option value="custom">Paste cookies.txt (server / Docker)</option>
+                                            </select>
+                                            <div class="setting-help-text">
+                                                If YouTube shows "Sign in to confirm you're not a bot", select your browser here.
+                                                SoulSync will use your browser's YouTube cookies to authenticate. Cookies are also
+                                                used for Premium audio qualities and to sync your YouTube Music playlists and
+                                                library. Reading a browser only works when that browser is on the same machine
+                                                as SoulSync &mdash; on a server/Docker box, choose <strong>Paste cookies.txt</strong> instead.
+                                            </div>
+                                        </div>
+                                        <div class="form-group" id="youtube-cookies-paste-group" style="display:none;">
+                                            <label>Paste cookies.txt:</label>
+                                            <textarea id="youtube-cookies-paste" class="form-input" rows="6"
+                                                      style="width: 100%; font-family: monospace; font-size: 12px;"
+                                                      placeholder="# Netscape HTTP Cookie File&#10;#HttpOnly_.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;1809994081&#9;__Secure-YEC&#9;xxx&#10;#HttpOnly_.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;1820933112&#9;__Secure-3PSID&#9;g.yyy&#10;.youtube.com&#9;TRUE&#9;/&#9;FALSE&#9;1819892806&#9;SIDCC&#9;xxxx&#10;..."></textarea>
+                                            <div class="setting-help-text">
+                                                For server/Docker installs with no local browser. Paste a Netscape/Mozilla
+                                                <code>cookies.txt</code>. Export with a
+                                                "Get cookies.txt LOCALLY" extension and paste the whole file &mdash; the
+                                                <code># Netscape HTTP Cookie File</code> header alone is not enough.
+                                                Required for private playlists like your <strong>Liked Music</strong>, and for
+                                                Premium audio itags. Cookies expire periodically &mdash; re-paste if YouTube stops working.
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- Last.fm Settings -->
                                 <!-- Concerts: two providers, two questions -->
                                 <div class="api-service-frame stg-service" data-service="concerts">
@@ -4425,36 +4470,8 @@
                                 <!-- YouTube Settings (shown when youtube or hybrid mode) -->
                                 <div id="youtube-settings-container" style="display: none;">
                                     <div class="form-group">
-                                        <label>YouTube Browser Cookies:</label>
-                                        <select id="youtube-cookies-browser" class="form-select">
-                                            <option value="">None (No cookies)</option>
-                                            <option value="chrome">Chrome</option>
-                                            <option value="firefox">Firefox</option>
-                                            <option value="edge">Edge</option>
-                                            <option value="brave">Brave</option>
-                                            <option value="opera">Opera</option>
-                                            <option value="safari">Safari</option>
-                                            <option value="custom">Paste cookies.txt (server / Docker)</option>
-                                        </select>
-                                        <div class="setting-help-text">
-                                            If YouTube shows "Sign in to confirm you're not a bot", select your browser here.
-                                            SoulSync will use your browser's YouTube cookies to authenticate. Cookies are also
-                                            used for Premium audio qualities. Reading a browser only works when that browser is
-                                            on the same machine as SoulSync &mdash; on a server/Docker box, choose
-                                            <strong>Paste cookies.txt</strong> instead.
-                                        </div>
-                                    </div>
-                                    <div class="form-group" id="youtube-cookies-paste-group" style="display:none;">
-                                        <label>Paste cookies.txt:</label>
-                                        <textarea id="youtube-cookies-paste" class="form-input" rows="6"
-                                                  placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;...&#9;NAME&#9;VALUE"></textarea>
-                                        <div class="setting-help-text">
-                                            For server/Docker installs with no local browser. Paste a Netscape/Mozilla
-                                            <code>cookies.txt</code>. Export with a
-                                            "Get cookies.txt LOCALLY" extension and paste the whole file &mdash; the
-                                            <code># Netscape HTTP Cookie File</code> header alone is not enough.
-                                            Required for private playlists like your <strong>Liked Music</strong>, and for
-                                            Premium audio itags. Cookies expire periodically &mdash; re-paste if YouTube stops working.
+                                        <div class="setting-help-text" style="padding: 12px 14px; background: rgba(var(--accent-rgb), 0.06); border: 1px solid rgba(var(--accent-rgb), 0.2); border-radius: 10px;">
+                                            📡 YouTube sign-in (cookies) now lives in <strong>Settings → Connections → YouTube</strong> &mdash; downloads still use it, connect it there.
                                         </div>
                                     </div>
                                     <div class="form-group">

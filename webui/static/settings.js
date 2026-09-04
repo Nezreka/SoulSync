@@ -1681,7 +1681,7 @@ async function loadSettingsData() {
                 _ytPasteGroup.style.display = _ytCookieSel.value === 'custom' ? '' : 'none';
             };
             if (_ytPasteBox && settings.youtube?.cookies_file) {
-                _ytPasteBox.placeholder = 'A cookies.txt is saved. Paste again to replace it, or leave blank to keep it.';
+                _ytPasteBox.placeholder = '<saved cookies.txt not shown for security reasons>\n\nEdit this field to overwrite.';
             }
             _toggleYtPaste();
             if (!_ytCookieSel.dataset.pasteToggleBound) {

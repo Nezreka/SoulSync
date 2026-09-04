@@ -108,6 +108,24 @@ def run_service_test(service, test_config):
                 return True, f"Tidal connection successful! Connected as: {username}"
             else:
                 return False, "Tidal authentication failed. Please use the 'Authenticate' button and complete the flow in your browser."
+        elif service == "youtube":
+            from core.youtube_cookies import PASTE_MODE, ytmusic_auth_from_cookiefile
+            mode = str(config_manager.get('youtube.cookies_browser', '') or '').strip()
+            if not mode:
+                return False, "No YouTube cookies configured, SoulSync will only have access to public playlists"
+            if mode != PASTE_MODE:
+                return True, f"Browser cookie source '{mode}' configured. Only verifiable on a machine where that browser is installed and signed in — not checkable from the server."
+            auth = ytmusic_auth_from_cookiefile(config_manager.get('youtube.cookies_file', ''))
+            if not auth:
+                return False, "cookies.txt is missing, unreadable, or has no usable auth cookies. Re-paste it."
+            try:
+                from ytmusicapi import YTMusic
+                YTMusic(auth).get_library_playlists(limit=1)
+                return True, "YouTube Music cookies are valid — library is reachable."
+            except ImportError:
+                return False, "ytmusicapi is not installed on the server."
+            except Exception as e:
+                return False, f"YouTube Music cookies rejected: {e}"
         elif service == "plex":
             temp_client = PlexClient()
             if temp_client.is_connected():
