@@ -87,21 +87,80 @@ describe('the progress number', () => {
   });
 });
 
-describe('the row', () => {
-  const ROW = JS.slice(JS.indexOf('function _dlRow'), JS.indexOf('function loadActiveDownloads'));
+describe('the poster', () => {
+  const art = fn('_dlArt') as (d: Record<string, unknown>) => string;
+
+  it('uses poster_url when the grab carried one', () => {
+    expect(art({ poster_url: '/api/video/poster/show/2948' })).toBe('/api/video/poster/show/2948');
+  });
+
+  it('falls back to the library id, which is why half the band was art-less', () => {
+    // poster_url is only whatever the grab caller happened to pass, and
+    // wishlist-driven grabs routinely pass nothing. a library row can always
+    // resolve its own art.
+    expect(art({ media_source: 'library', media_id: '2948', kind: 'show' }))
+      .toBe('/api/video/poster/show/2948?w=120');
+  });
+
+  it('has nothing to offer for a tmdb row that carried no poster', () => {
+    // media_id is deliberately null for tmdb grabs, so there is no library row
+    // to resolve. the letter is the honest answer.
+    expect(art({ media_source: 'tmdb', media_id: null, kind: 'movie' })).toBe('');
+    expect(art({})).toBe('');
+  });
+
+  it('encodes the id rather than pasting it into a url', () => {
+    const src = extractFunction('_dlArt', JS);
+    expect(src).toContain('encodeURIComponent');
+  });
+});
+
+describe('the card', () => {
+  const ROW = JS.slice(JS.indexOf('function _dlCard'), JS.indexOf('function loadActiveDownloads'));
+  // the real function, so these assert on rendered html rather than on source
+  // text. every dependency it closes over has to come with it.
+  const deps = ['formatBytes', 'formatSpeed', '_esc', '_dlActive', '_dlStatus', '_dlPct', '_dlSub', '_dlArt']
+    .map((n) => extractFunction(n, JS))
+    .join('\n');
+  const card = fn('_dlCard', `${deps}\n`) as (d: Record<string, unknown>) => string;
 
   it('draws a bar only for the states that have real progress', () => {
-    expect(ROW).toContain("d.status === 'downloading' || d.status === 'importing'");
+    expect(card({ title: 'A', status: 'downloading', progress: 40 })).toContain('vdn-bar');
+    expect(card({ title: 'A', status: 'importing', progress: 40 })).toContain('vdn-bar');
+    expect(card({ title: 'A', status: 'queued' })).not.toContain('vdn-bar');
+    expect(card({ title: 'A', status: 'searching' })).not.toContain('vdn-bar');
   });
 
   it('escapes the title and the poster url', () => {
-    // both are remote metadata landing in innerHTML
-    expect(ROW).toContain('_esc(title)');
-    expect(ROW).toContain('_esc(d.poster_url)');
+    const html = card({ title: '<img onerror=alert(1)>', status: 'queued',
+                        poster_url: '"><script>x</script>' });
+    expect(html).not.toContain('<img onerror=alert(1)>');
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('&lt;img');
   });
 
-  it('shows a letter when there is no poster rather than an empty hole', () => {
-    expect(ROW).toContain('vdl-art-fallback');
+  it('lets a poster that 404s uncover the letter instead of leaving a hole', () => {
+    // a background-image cannot report a failure; an <img> can
+    expect(ROW).toContain('<img');
+    expect(ROW).toContain('onerror=');
+    expect(ROW).toContain('vdn-letter');
+  });
+
+  it('renders the letter even when there IS a poster', () => {
+    // it sits UNDERNEATH the image, so onerror can uncover it. checking the
+    // string is in the source proves nothing: wrapping it in `art ? '' : ...`
+    // keeps the string and breaks the behaviour, which is exactly what a
+    // negative-check caught here.
+    const html = card({ title: 'Severance', status: 'downloading', progress: 40,
+                        poster_url: '/api/video/poster/show/9' });
+    expect(html).toContain('vdn-letter');
+    expect(html).toContain('<img');
+  });
+
+  it('still renders the letter when there is no poster at all', () => {
+    const html = card({ title: 'Andor', status: 'queued' });
+    expect(html).toContain('vdn-letter');
+    expect(html).not.toContain('<img');
   });
 });
 
@@ -129,7 +188,7 @@ describe('the loader', () => {
 
   it('caps the rows and says how many it left out', () => {
     expect(LOAD).toContain('DL_MAX_ROWS');
-    expect(LOAD).toContain('vdl-more');
+    expect(LOAD).toContain('vdn-more');
   });
 });
 
@@ -176,11 +235,11 @@ describe('the markup and styles exist', () => {
   it('links out with data-video-goto, the hook that actually routes in-app', () => {
     // data-video-page is only wired for .video-nav buttons; a plain link
     // carrying it full-reloads the app
-    const at = HTML.indexOf('class="vdl-all"');
+    const at = HTML.indexOf('class="vdn-all"');
     expect(HTML.slice(at, at + 200)).toContain('data-video-goto="video-downloads"');
   });
 
-  it.each(['.vdl-row', '.vdl-art', '.vdl-name', '.vdl-bar-fill', '.vdl-pill'])(
+  it.each(['.vdn-card', '.vdn-art', '.vdn-name', '.vdn-bar-fill', '.vdn-pill', '.vdn-grid'])(
     '%s is styled',
     (cls) => {
       expect(CSS.includes(`${cls} `) || CSS.includes(`${cls},`) || CSS.includes(`${cls}--`)).toBe(true);
@@ -190,7 +249,25 @@ describe('the markup and styles exist', () => {
   it('lets the title shrink instead of pushing the row off the page', () => {
     // a flex item defaults to min-width:auto and refuses to shrink; the resume
     // cards hit this exact trap and rendered 319px wide instead of 264px
-    const meta = CSS.slice(CSS.indexOf('.vdl-meta {'), CSS.indexOf('.vdl-name {'));
+    const meta = CSS.slice(CSS.indexOf('.vdn-body {'), CSS.indexOf('.vdn-name {'));
     expect(meta).toContain('min-width: 0');
+  });
+});
+
+describe('it does not squat in another component\'s namespace', () => {
+  it('uses vdn-, because vdl- belongs to the download modal', () => {
+    // video-download-view.js owns ~170 vdl- classes. sharing the prefix is how
+    // two unrelated components end up sharing a rule by accident.
+    const mine = JS.slice(JS.indexOf('function _dlArt'), JS.indexOf('function scheduleDownloadPoll'));
+    expect(mine).not.toMatch(/vdl-/);
+    const at = HTML.indexOf('data-video-dl-section');
+    expect(HTML.slice(at - 900, at + 500)).not.toMatch(/class="vdl-/);
+  });
+
+  it('lays the cards out in a grid, not one full-width row each', () => {
+    // two downloads across a full-width band is mostly empty page
+    const grid = CSS.slice(CSS.indexOf('.vdn-grid {'), CSS.indexOf('.vdn-card {'));
+    expect(grid).toContain('grid-template-columns');
+    expect(grid).toContain('auto-fill');
   });
 });

@@ -6836,14 +6836,18 @@ body[data-side="video"] #gsearch-aura {
 }
 
 /* ── Downloading now ─────────────────────────────────────────────────────────
-   Live transfer rows. A list, not a rail: these are all equally urgent and you
-   read them top to bottom, whereas the resume rail below is ordered by recency
-   and scrolls. Hidden entirely when nothing is in flight. */
-.vdl {
+   Live transfer cards. A GRID, not full width rows: two downloads in a row that
+   spans the whole page is a band of mostly empty space, which is what the first
+   cut looked like.
+
+   Namespaced vdn-, not vdl-. vdl- is the download modal's namespace
+   (video-download-view.js owns ~170 of them) and squatting in it is how two
+   unrelated components end up sharing a rule by accident. */
+.vdn {
     margin: 0 0 26px;
 }
 
-.vdl-head {
+.vdn-head {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
@@ -6851,7 +6855,7 @@ body[data-side="video"] #gsearch-aura {
     margin-bottom: 12px;
 }
 
-.vdl-title {
+.vdn-title {
     margin: 0;
     font-size: 15px;
     font-weight: 700;
@@ -6859,7 +6863,7 @@ body[data-side="video"] #gsearch-aura {
     color: #fff;
 }
 
-.vdl-all {
+.vdn-all {
     font-size: 12px;
     font-weight: 600;
     color: rgba(255, 255, 255, 0.5);
@@ -6867,54 +6871,68 @@ body[data-side="video"] #gsearch-aura {
     white-space: nowrap;
     transition: color 0.15s ease;
 }
-.vdl-all:hover { color: #fff; }
+.vdn-all:hover { color: #fff; }
 
-.vdl-list {
+.vdn-grid {
     display: grid;
-    gap: 8px;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 10px;
 }
 
-.vdl-row {
+.vdn-card {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 10px 12px;
+    gap: 11px;
+    min-width: 0;
+    padding: 9px 11px;
     border-radius: 12px;
     background: rgba(255, 255, 255, 0.035);
     border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-/* 2:3, the poster shape everywhere else on this page uses */
-.vdl-art {
+/* 2:3, the poster shape the rest of the page uses. The letter sits underneath
+   the image rather than instead of it, so a poster that 404s uncovers the
+   letter instead of leaving a hole. */
+.vdn-art {
     position: relative;
-    flex: 0 0 34px;
-    width: 34px;
+    flex: 0 0 32px;
+    width: 32px;
     aspect-ratio: 2 / 3;
     border-radius: 5px;
     overflow: hidden;
-    background: rgba(255, 255, 255, 0.06) center/cover no-repeat;
+    background: rgba(255, 255, 255, 0.07);
+}
+.vdn-art img {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.vdn-letter {
+    position: absolute;
+    inset: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-}
-.vdl-art-fallback {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
-    color: rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 0.32);
 }
 
-/* min-width:0 or the flex item refuses to shrink and the long titles push the
-   row wider than the page. same trap the resume cards hit. */
-.vdl-meta {
+/* min-width:0 or the flex item refuses to shrink and a long title pushes the
+   card past its grid track. The resume cards hit this exact trap. */
+.vdn-body {
     flex: 1 1 auto;
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 4px;
 }
 
-.vdl-name {
-    font-size: 13px;
+.vdn-name {
+    font-size: 12.5px;
     font-weight: 600;
     color: #fff;
     white-space: nowrap;
@@ -6922,53 +6940,53 @@ body[data-side="video"] #gsearch-aura {
     text-overflow: ellipsis;
 }
 
-.vdl-line {
+.vdn-line {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 7px;
     min-width: 0;
 }
 
-.vdl-pill {
+.vdn-pill {
     flex: 0 0 auto;
-    padding: 2px 7px;
+    padding: 2px 6px;
     border-radius: 999px;
-    font-size: 10px;
+    font-size: 9.5px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.4px;
     background: rgba(255, 255, 255, 0.08);
     color: rgba(255, 255, 255, 0.6);
 }
-.vdl-pill--downloading { background: rgba(56, 189, 248, 0.16); color: rgb(125, 211, 252); }
-.vdl-pill--importing   { background: rgba(168, 85, 247, 0.16); color: rgb(216, 180, 254); }
-.vdl-pill--searching   { background: rgba(250, 204, 21, 0.14); color: rgb(253, 224, 71); }
-.vdl-pill--queued      { background: rgba(255, 255, 255, 0.07); color: rgba(255, 255, 255, 0.5); }
+.vdn-pill--downloading { background: rgba(56, 189, 248, 0.16); color: rgb(125, 211, 252); }
+.vdn-pill--importing   { background: rgba(168, 85, 247, 0.16); color: rgb(216, 180, 254); }
+.vdn-pill--searching   { background: rgba(250, 204, 21, 0.14); color: rgb(253, 224, 71); }
+.vdn-pill--queued      { background: rgba(255, 255, 255, 0.07); color: rgba(255, 255, 255, 0.5); }
 
-.vdl-sub {
-    font-size: 11.5px;
+.vdn-pct {
+    margin-left: auto;
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.vdn-sub {
+    font-size: 11px;
     color: rgba(255, 255, 255, 0.45);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-.vdl-pct {
-    margin-left: auto;
-    flex: 0 0 auto;
-    font-size: 11.5px;
-    font-variant-numeric: tabular-nums;
-    color: rgba(255, 255, 255, 0.55);
-}
-
-.vdl-bar {
+.vdn-bar {
     display: block;
     height: 3px;
     border-radius: 2px;
     background: rgba(255, 255, 255, 0.08);
     overflow: hidden;
 }
-.vdl-bar-fill {
+.vdn-bar-fill {
     display: block;
     height: 100%;
     border-radius: 2px;
@@ -6976,14 +6994,15 @@ body[data-side="video"] #gsearch-aura {
     transition: width 0.4s ease;
 }
 
-.vdl-more {
-    padding: 4px 2px 0;
+.vdn-more {
+    align-self: center;
+    padding: 0 4px;
     font-size: 11.5px;
     color: rgba(255, 255, 255, 0.4);
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .vdl-bar-fill { transition: none; }
+    .vdn-bar-fill { transition: none; }
 }
 
 /* ── Continue watching ───────────────────────────────────────────────────────

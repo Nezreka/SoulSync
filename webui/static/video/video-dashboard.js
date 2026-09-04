@@ -245,39 +245,49 @@
         return bits.join(' \u00b7 ');
     }
 
-    function _dlRow(d) {
+    // the poster. poster_url is whatever the grab caller happened to pass, and
+    // wishlist-driven grabs routinely pass nothing, which is why half the band
+    // came up art-less. a library row can always be resolved from its own id
+    // instead. an <img> rather than a background so a 404 can fall back to the
+    // letter, which a background-image cannot do.
+    function _dlArt(d) {
+        if (d.poster_url) return String(d.poster_url);
+        if (d.media_source === 'library' && d.media_id && d.kind) {
+            return '/api/video/poster/' + encodeURIComponent(d.kind) +
+                   '/' + encodeURIComponent(d.media_id) + '?w=120';
+        }
+        return '';
+    }
+
+    function _dlCard(d) {
         var pct = _dlPct(d);
         var title = d.title || d.release_title || 'Unknown';
-        var year = d.year ? ' (' + d.year + ')' : '';
-        var art = d.poster_url ? ' style="background-image:url(\'' + _esc(d.poster_url) + '\')"' : '';
+        var art = _dlArt(d);
         var sub = _dlSub(d);
-        // queued and searching have nothing to show on a bar. a 0% bar reads as
+        // queued and searching have nothing to put on a bar. a 0% bar reads as
         // stalled, which is a different and worse thing to say.
         var bar = (d.status === 'downloading' || d.status === 'importing')
-            ? '<span class="vdl-bar"><span class="vdl-bar-fill" style="width:' + pct + '%"></span></span>'
+            ? '<span class="vdn-bar"><span class="vdn-bar-fill" style="width:' + pct + '%"></span></span>'
             : '';
-        return '<div class="vdl-row" title="' + _esc(title + year) + '">' +
-            '<span class="vdl-art"' + art + '>' +
-                (d.poster_url ? '' : '<span class="vdl-art-fallback">' +
-                    _esc(String(title).charAt(0).toUpperCase()) + '</span>') +
+        return '<div class="vdn-card" title="' + _esc(title + (d.year ? ' (' + d.year + ')' : '')) + '">' +
+            '<span class="vdn-art">' +
+                (art ? '<img src="' + _esc(art) + '" alt="" loading="lazy" ' +
+                       'onerror="this.parentNode.classList.add(\'is-noart\');this.remove();">' : '') +
+                '<span class="vdn-letter">' + _esc(String(title).charAt(0).toUpperCase()) + '</span>' +
             '</span>' +
-            '<span class="vdl-meta">' +
-                '<span class="vdl-name">' + _esc(title) + _esc(year) + '</span>' +
-                '<span class="vdl-line">' +
-                    '<span class="vdl-pill vdl-pill--' + _esc(d.status || '') + '">' +
+            '<span class="vdn-body">' +
+                '<span class="vdn-name">' + _esc(title) + '</span>' +
+                '<span class="vdn-line">' +
+                    '<span class="vdn-pill vdn-pill--' + _esc(d.status || '') + '">' +
                         _esc(_dlStatus(d)) + '</span>' +
-                    (sub ? '<span class="vdl-sub">' + _esc(sub) + '</span>' : '') +
-                    (pct && bar ? '<span class="vdl-pct">' + pct + '%</span>' : '') +
+                    (pct && bar ? '<span class="vdn-pct">' + pct + '%</span>' : '') +
                 '</span>' +
+                (sub ? '<span class="vdn-sub">' + _esc(sub) + '</span>' : '') +
                 bar +
             '</span>' +
         '</div>';
     }
 
-    // `again` makes this re-arm the poll when it resolves. the cadence has to be
-    // decided AFTER the fetch, not before it: scheduling off section.hidden up
-    // front always reads the pre-fetch state, so starting a download would sit
-    // on the idle interval for 15s before the bar first moved.
     function loadActiveDownloads(again) {
         var section = document.querySelector('[data-video-dl-section]');
         var list = document.querySelector('[data-video-dl-list]');
@@ -293,8 +303,8 @@
                 if (rows.length) {
                     var shown = rows.slice(0, DL_MAX_ROWS);
                     var extra = rows.length - shown.length;
-                    list.innerHTML = shown.map(_dlRow).join('') +
-                        (extra > 0 ? '<div class="vdl-more">and ' + extra + ' more</div>' : '');
+                    list.innerHTML = shown.map(_dlCard).join('') +
+                        (extra > 0 ? '<div class="vdn-more">and ' + extra + ' more</div>' : '');
                 } else {
                     list.innerHTML = '';
                 }
