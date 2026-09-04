@@ -192,6 +192,101 @@ class IntegrityResult:
     checks: Dict[str, Any] = field(default_factory=dict)
 
 
+#: Below this fraction of raw PCM, a lossless file is worth LOOKING at. It is a
+#: trigger, NOT a verdict, and the difference matters: dense material (pop, rock,
+#: rap) sits at 40-75% and preview clips sat at 10-28%, so it is tempting to
+#: treat the gap as proof. It is not. Quiet or sparse music compresses just as
+#: hard as a fake - measured on real encodes, ambient came out at 6.5% and very
+#: soft material at 24.7%, both complete files. Rejecting on this number alone
+#: quarantines them. Everything below confirms with a decode before acting.
+LOSSLESS_MIN_DENSITY = 0.30
+
+#: Codecs that carry whole samples. An MP4 container holds either, so the
+#: CONTAINER cannot answer this - only the codec can.
+_LOSSLESS_MP4_CODECS = ("alac",)
+
+#: Concrete mutagen types for lossless formats. Names, because that is what
+#: MutagenFile hands back. WAVE/AIFF are uncompressed so they can never trip a
+#: density trigger; they are listed for correctness, not effect.
+_LOSSLESS_TYPES = ("FLAC", "WAVE", "AIFF", "WavPack", "TrueAudio", "MonkeysAudio")
+
+
+def is_lossless_audio(audio) -> bool:
+    """True when this file is a lossless format.
+
+    The density check below is meaningless for lossy audio - a 128kbps MP3 is
+    SUPPOSED to be 9% of raw PCM - so getting this wrong quarantines healthy
+    files. Two traps, both found by testing real files rather than reasoning:
+
+    * bits_per_sample is NOT the discriminator. A lossy AAC in an .m4a reports
+      bits_per_sample=16, exactly like lossless ALAC in the same container.
+      Only the codec string separates them.
+    * The extension is not either: .m4a is both.
+    """
+    info = getattr(audio, "info", None)
+    if info is None:
+        return False
+    cls = type(audio).__name__
+    if cls in _LOSSLESS_TYPES:
+        return True
+    if cls == "MP4":
+        codec = str(getattr(info, "codec", "") or "").lower()
+        return any(codec.startswith(c) for c in _LOSSLESS_MP4_CODECS)
+    return False
+
+
+def raw_pcm_bitrate(sample_rate, bits_per_sample, channels) -> int:
+    """Uncompressed bits per second, or 0 when any dimension is unknown."""
+    try:
+        sr, bits, ch = int(sample_rate or 0), int(bits_per_sample or 0), int(channels or 0)
+    except (TypeError, ValueError):
+        return 0
+    return sr * bits * ch if sr > 0 and bits > 0 and ch > 0 else 0
+
+
+def is_fake_lossless_bitrate(size_bytes, claimed_seconds, sample_rate, bits_per_sample,
+                             channels, min_ratio: float = LOSSLESS_MIN_DENSITY) -> bool:
+    """True when a 'lossless' file's data is FAR too small for its claimed length - the
+    fingerprint of a preview clip padded (or truncated) to the full duration, so every
+    length header reads 'full' and only the size gives it away.
+
+    Size is the one thing a header cannot lie about, which makes this a very cheap
+    SUSPICION - but not a verdict on its own: quiet or sparse music is thin for the
+    same reason a preview is. Callers must confirm before quarantining.
+    Conservative: 0 / bad inputs return False (never flag on unknowns)."""
+    try:
+        sz, secs = float(size_bytes or 0), float(claimed_seconds or 0)
+    except (TypeError, ValueError):
+        return False
+    raw = raw_pcm_bitrate(sample_rate, bits_per_sample, channels)
+    if sz <= 0 or secs <= 0 or raw <= 0:
+        return False
+    return (sz * 8 / secs) < raw * min_ratio
+
+
+def _confirm_broken_audio(file_path: str) -> Optional[str]:
+    """Decode once and say what is actually wrong, or None when the audio is fine.
+
+    Imported lazily: core.imports.silence shells out to ffmpeg, and this module is
+    imported in places that never decode anything.
+
+    Fails OPEN. Without ffmpeg there is no way to tell a preview from a quiet
+    recording, and quarantining someone's ambient album because a tool is missing
+    is worse than missing a fake. The caller only reaches here for files already
+    flagged as thin, so this is the difference between "suspicious" and "proven".
+    """
+    try:
+        from core.imports.silence import detect_broken_audio
+    except Exception:   # noqa: BLE001 - a missing guard must not break the check
+        logger.debug("audio confirmation unavailable", exc_info=True)
+        return None
+    try:
+        return detect_broken_audio(file_path)
+    except Exception:   # noqa: BLE001
+        logger.debug("audio confirmation raised for %s", file_path, exc_info=True)
+        return None
+
+
 def check_audio_integrity(
     file_path: str,
     expected_duration_ms: Optional[int] = None,
@@ -275,6 +370,47 @@ def check_audio_integrity(
     actual_length_s = float(getattr(audio.info, "length", 0) or 0)
     checks["actual_length_s"] = actual_length_s
 
+    # --- Check 3: thin lossless file, confirmed by decode ---
+    #
+    # A preview padded to full length declares the right duration at every layer,
+    # so the size/parse/duration legs all pass it. Its BYTES give it away: 30s of
+    # audio spread over a 7 minute claim implies a bitrate no lossless codec
+    # produces.
+    #
+    # But thin is ALSO what quiet music looks like - real ambient encodes measured
+    # 6.5% - so this only decides which files are worth a decode. The decode is
+    # what decides. detect_broken_audio makes one pass that catches both shapes a
+    # fake takes: audio that stops early, and audio padded out with silence. A
+    # padded preview shows 90s of silence; quiet-but-complete music shows none.
+    #
+    # Cost stays where it belongs: a healthy library triggers almost nothing.
+    if actual_length_s > 0 and is_lossless_audio(audio):
+        _raw = raw_pcm_bitrate(getattr(audio.info, "sample_rate", 0),
+                               getattr(audio.info, "bits_per_sample", 0),
+                               getattr(audio.info, "channels", 0))
+        if _raw > 0:
+            _density = (size * 8 / actual_length_s) / _raw
+            checks["lossless_density"] = round(_density, 4)
+            if _density < LOSSLESS_MIN_DENSITY:
+                checks["lossless_density_suspicious"] = True
+                _broken = _confirm_broken_audio(file_path)
+                if _broken:
+                    return IntegrityResult(
+                        ok=False,
+                        reason=f"Lossless file holds only {_density * 100:.0f}% of the data its "
+                               f"{actual_length_s:.0f}s runtime needs "
+                               f"({size * 8 / actual_length_s / 1000:.0f}kbps) and {_broken} — "
+                               "a preview clip or truncated download",
+                        checks={**checks, "length_check": "lossless_density_confirmed"},
+                    )
+                # Thin but the audio is all there: quiet or sparse music. Accepting
+                # is the whole reason this confirms instead of trusting the number.
+                logger.info(
+                    "[Integrity] %s is thin for its runtime (%.0f%% of raw) but the audio "
+                    "is complete — accepting (quiet/sparse material)",
+                    os.path.basename(file_path), _density * 100,
+                )
+
     if actual_length_s <= 0:
         # Length 0 is NOT proof of corruption here: the file already passed the
         # size gate, was identified as a real audio format, and has a valid
@@ -317,6 +453,31 @@ def check_audio_integrity(
                     checks={**checks, "mutagen_parse": "zero_length_decoded_ok",
                             "length_check": "passed_decoded"},
                 )
+        # The decode is authoritative and ran first. Reaching here means it could
+        # NOT run (no ffmpeg), which used to accept anything - the hole that let a
+        # 30s clip claiming 215s through on an install without ffmpeg. A zero-length
+        # header hides the file's own runtime, so measure the bytes against the
+        # EXPECTED one. Unlike the positive-duration density check above, this branch
+        # can reject on density alone because there is no runtime measurement left to
+        # confirm against.
+        if is_lossless_audio(audio):
+            _raw = raw_pcm_bitrate(getattr(audio.info, "sample_rate", 0),
+                                   getattr(audio.info, "bits_per_sample", 0),
+                                   getattr(audio.info, "channels", 0))
+            _expected_s = expected_duration_ms / 1000.0 if expected_duration_ms else 0
+            if _raw > 0 and _expected_s > 0:
+                _d = (size * 8 / _expected_s) / _raw
+                checks["lossless_density_vs_expected"] = round(_d, 4)
+                if _d < LOSSLESS_MIN_DENSITY:
+                    return IntegrityResult(
+                        ok=False,
+                        reason=f"Lossless file holds only {_d * 100:.0f}% of the data an expected "
+                               f"{_expected_s:.0f}s runtime needs "
+                               f"({size * 8 / _expected_s / 1000:.0f}kbps) and its header reports "
+                               "no length — a preview clip or truncated download",
+                        checks={**checks, "mutagen_parse": "zero_length_density_failed"},
+                    )
+
         logger.warning(
             "[Integrity] %s parsed cleanly (%d bytes, format=%s) but reports "
             "length 0 and no decode was possible — treating as unknown length "
@@ -329,7 +490,7 @@ def check_audio_integrity(
                     "length_check": "skipped_unknown_length"},
         )
 
-    # --- Check 3: duration agreement (optional) ---
+    # --- Check 4: duration agreement (optional) ---
     if expected_duration_ms is None or expected_duration_ms <= 0:
         checks["length_check"] = "skipped"
         return IntegrityResult(ok=True, checks=checks)
