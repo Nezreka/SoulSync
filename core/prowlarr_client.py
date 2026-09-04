@@ -26,6 +26,7 @@ Security → API Key.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -61,6 +62,13 @@ MUSIC_CATEGORY_FOREIGN = 3060
 # starves every other provider call in the app.
 MAX_CONCURRENT_INDEXER_SEARCHES = 6
 
+# Prowlarr's indexer priority scale, and how long a listing of it is reused.
+# The value only breaks ties between otherwise equal releases, so a few minutes
+# of staleness costs nothing and a per-search listing call would cost a request
+# to Prowlarr on every query.
+DEFAULT_INDEXER_PRIORITY = 25
+INDEXER_PRIORITY_CACHE_SECONDS = 300
+
 DEFAULT_MUSIC_CATEGORIES: tuple = (
     MUSIC_CATEGORY_ALL,
     MUSIC_CATEGORY_MP3,
@@ -83,6 +91,15 @@ def canonical_protocol(raw: Any) -> str:
     return str(raw or '').strip().lower()
 
 
+def _coerce_priority(raw: Any) -> int:
+    """Prowlarr's 1-50 priority, or the neutral default for anything else."""
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_INDEXER_PRIORITY
+    return value if value > 0 else DEFAULT_INDEXER_PRIORITY
+
+
 @dataclass
 class ProwlarrIndexer:
     """One configured indexer exposed by Prowlarr."""
@@ -93,6 +110,9 @@ class ProwlarrIndexer:
     protocol: str          # "torrent" | "usenet"
     enable: bool
     privacy: str           # "public" | "private" | "semiPrivate"
+    # 1 (highest) to 50 (lowest), 25 by default — Prowlarr's own scale, and the
+    # user's answer to "which of my indexers do I trust more".
+    priority: int = DEFAULT_INDEXER_PRIORITY
     categories: List[int] = field(default_factory=list)
     capabilities: Dict[str, Any] = field(default_factory=dict)
 
@@ -122,6 +142,10 @@ class ProwlarrSearchResult:
     grabs: Optional[int] = None
     publish_date: Optional[str] = None
     categories: List[int] = field(default_factory=list)
+    # Stamped from the indexer's own definition after the search, because the
+    # search resource does not carry it. Neutral default for an indexer
+    # Prowlarr did not list — an unknown indexer must not sort to the bottom.
+    indexer_priority: int = DEFAULT_INDEXER_PRIORITY
     raw: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -178,6 +202,30 @@ class ProwlarrClient:
         if not isinstance(data, list):
             return []
         return [self._parse_indexer(entry) for entry in data if isinstance(entry, dict)]
+
+    def indexer_priorities(self) -> Dict[int, int]:
+        """``{indexer id: priority}``, cached, and empty when unavailable.
+
+        Best-effort by contract: the priority is only a tiebreaker, so a
+        Prowlarr that cannot list its indexers must cost a search nothing. An
+        empty map leaves every result on the neutral default.
+        """
+        now = time.monotonic()
+        cached = getattr(self, '_indexer_priority_cache', None)
+        cached_at = getattr(self, '_indexer_priority_cached_at', 0.0)
+        if cached is not None and (now - cached_at) < INDEXER_PRIORITY_CACHE_SECONDS:
+            return cached
+        try:
+            known = self._get_indexers_sync()
+        except Exception as exc:  # noqa: BLE001 - never fail a search on this
+            logger.debug("Prowlarr indexer priority lookup failed: %s", exc)
+            self._indexer_priority_cache = {}
+            self._indexer_priority_cached_at = now
+            return {}
+        priorities = {indexer.id: indexer.priority for indexer in known}
+        self._indexer_priority_cache = priorities
+        self._indexer_priority_cached_at = now
+        return priorities
 
     def indexer_ids_for_protocol(
         self, configured_ids: Sequence[int], protocol: str,
@@ -458,7 +506,16 @@ class ProwlarrClient:
         )
         if not isinstance(data, list):
             return []
-        return [self._parse_result(entry) for entry in data if isinstance(entry, dict)]
+        results = [self._parse_result(entry) for entry in data if isinstance(entry, dict)]
+        # Nothing to stamp means nothing to look up: a search that found no
+        # release must not pay for an indexer listing.
+        priorities = self.indexer_priorities() if results else {}
+        if priorities:
+            for result in results:
+                result.indexer_priority = priorities.get(
+                    result.indexer_id, DEFAULT_INDEXER_PRIORITY,
+                )
+        return results
 
     def _parse_indexer(self, entry: Dict[str, Any]) -> ProwlarrIndexer:
         return ProwlarrIndexer(
@@ -467,6 +524,7 @@ class ProwlarrClient:
             protocol=canonical_protocol(entry.get('protocol')),
             enable=bool(entry.get('enable', True)),
             privacy=entry.get('privacy') or '',
+            priority=_coerce_priority(entry.get('priority')),
             categories=[int(c.get('id') or 0) for c in entry.get('capabilities', {}).get('categories', []) if isinstance(c, dict)],
             capabilities=entry.get('capabilities', {}) or {},
         )

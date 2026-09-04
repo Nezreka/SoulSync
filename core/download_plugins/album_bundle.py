@@ -27,6 +27,7 @@ import shutil
 import time
 import unicodedata
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
@@ -257,6 +258,52 @@ def _availability_bucket(candidate) -> float:
     return round(math.log10(value)) if value > 0 else 0.0
 
 
+# Prowlarr's indexer priority is 1 (highest) to 50 (lowest), default 25 — the
+# same scale Lidarr uses, and the same job: a tiebreaker between releases that
+# are otherwise equal. Negated because the picker takes a maximum.
+DEFAULT_INDEXER_PRIORITY = 25
+
+
+def _indexer_priority_rank(candidate) -> int:
+    raw = getattr(candidate, 'indexer_priority', None)
+    try:
+        priority = int(raw if raw is not None else DEFAULT_INDEXER_PRIORITY)
+    except (TypeError, ValueError):
+        priority = DEFAULT_INDEXER_PRIORITY
+    return -priority
+
+
+def _usenet_age_bucket(candidate) -> float:
+    """How fresh a Usenet post is, in Lidarr's buckets. 0 for anything else.
+
+    A torrent's health is its swarm, and a seeded release is alive whatever its
+    post date — so age must not sort torrents at all. A Usenet post has no such
+    signal: the older it is, the likelier it is to be incomplete or past a
+    provider's retention. Bucketing keeps a few hours' difference from
+    deciding anything.
+    """
+    if candidate.seeders is not None:
+        return 0.0
+    published = getattr(candidate, 'publish_date', None)
+    if not published:
+        return 0.0
+    try:
+        stamp = datetime.fromisoformat(str(published).replace('Z', '+00:00'))
+    except (TypeError, ValueError):
+        return 0.0
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    age_hours = (datetime.now(timezone.utc) - stamp).total_seconds() / 3600
+    if age_hours < 1:
+        return 1000.0
+    if age_hours <= 24:
+        return 100.0
+    age_days = age_hours / 24
+    if age_days <= 7:
+        return 10.0
+    return -round(math.log10(age_days))
+
+
 def pick_best_album_release(candidates, quality_guess,
                             album_name: str = "",
                             min_seeders: int = 0,
@@ -469,13 +516,18 @@ def pick_best_album_release(candidates, quality_guess,
                 True if best_target < len(quality_targets)
                 else aq.format.lower() in preferred_formats
             )
+            # Lidarr's DownloadDecisionComparer order, minus the keys this
+            # pipeline has no equivalent for (custom formats, protocol — one
+            # plugin answers one search — and album count).
             return (
                 preferred,
                 aq.tier_score(),
                 # Only ever a tiebreaker: a repack is the corrected copy of the
                 # SAME quality, never a reason to take a worse format.
                 release_revision(candidate.title or '').rank,
+                _indexer_priority_rank(candidate),
                 availability,
+                _usenet_age_bucket(candidate),
                 candidate.size or 0,
             )
 

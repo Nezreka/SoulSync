@@ -46,6 +46,13 @@ class _Release:
     size: int
     seeders: Optional[int] = None
     grabs: Optional[int] = None
+    indexer_priority: int = 25
+    publish_date: Optional[str] = None
+
+
+def _iso_hours_ago(hours: float) -> str:
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
 
 
 def _flac_quality_guess(title: str) -> str:
@@ -1526,3 +1533,72 @@ def test_an_order_of_magnitude_more_seeders_still_wins():
 
     assert picked is healthy
 
+
+
+def test_the_users_preferred_indexer_breaks_an_otherwise_equal_tie():
+    """Prowlarr's indexer priority is 1 (highest) to 50 (lowest), default 25.
+
+    Lidarr compares it right after quality and before seeders, and calls it
+    what it is: a tiebreaker for otherwise equal releases.
+    """
+    targets = [QualityTarget(format='flac')]
+    preferred = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                         seeders=10, indexer_priority=5)
+    other = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                     seeders=10, indexer_priority=40)
+
+    picked = pick_best_album_release(
+        [other, preferred], _flac_quality_guess, quality_targets=targets,
+    )
+
+    assert picked is preferred
+
+
+def test_indexer_priority_does_not_outrank_quality():
+    targets = [QualityTarget(format='flac'), QualityTarget(format='mp3')]
+    good_indexer_mp3 = _Release(title='Artist - Album [MP3 320]', size=350_000_000,
+                                seeders=10, indexer_priority=1)
+    bad_indexer_flac = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                                seeders=10, indexer_priority=50)
+
+    picked = pick_best_album_release(
+        [good_indexer_mp3, bad_indexer_flac], _flac_quality_guess,
+        quality_targets=targets,
+    )
+
+    assert picked is bad_indexer_flac
+
+
+def test_a_fresh_usenet_post_beats_an_old_one():
+    """Usenet has no seeders; age is what says whether it is still complete.
+
+    Lidarr buckets it — under an hour, under a day, under a week, then log10 of
+    the age in days — so a few hours' difference is not a decision.
+    """
+    targets = [QualityTarget(format='flac')]
+    fresh = _Release(title='Artist - Album [FLAC]', size=350_000_000, grabs=5,
+                     publish_date=_iso_hours_ago(2))
+    ancient = _Release(title='Artist - Album [FLAC]', size=350_000_000, grabs=5,
+                       publish_date=_iso_hours_ago(24 * 900))
+
+    picked = pick_best_album_release(
+        [ancient, fresh], _flac_quality_guess, quality_targets=targets,
+    )
+
+    assert picked is fresh
+
+
+def test_age_says_nothing_about_a_torrent():
+    """A seeded swarm is alive whatever its post date, so age must not sort it."""
+    targets = [QualityTarget(format='flac')]
+    old_but_bigger = _Release(title='Artist - Album [FLAC]', size=900_000_000,
+                              seeders=10, publish_date=_iso_hours_ago(24 * 900))
+    fresh_but_smaller = _Release(title='Artist - Album [FLAC]', size=350_000_000,
+                                 seeders=10, publish_date=_iso_hours_ago(1))
+
+    picked = pick_best_album_release(
+        [fresh_but_smaller, old_but_bigger], _flac_quality_guess,
+        quality_targets=targets,
+    )
+
+    assert picked is old_but_bigger

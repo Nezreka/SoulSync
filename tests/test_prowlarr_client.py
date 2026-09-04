@@ -221,3 +221,70 @@ def test_default_music_categories_match_newznab_tree() -> None:
     assert 3000 in DEFAULT_MUSIC_CATEGORIES   # Audio (parent)
     assert 3010 in DEFAULT_MUSIC_CATEGORIES   # MP3
     assert 3040 in DEFAULT_MUSIC_CATEGORIES   # Lossless
+
+
+# ---------------------------------------------------------------------------
+# Indexer priority
+# ---------------------------------------------------------------------------
+
+
+def test_parse_indexer_reads_priority() -> None:
+    client = _client_with_config()
+    indexer = client._parse_indexer({'id': 3, 'name': 'X', 'protocol': 'torrent',
+                                     'priority': 5})
+
+    assert indexer.priority == 5
+
+
+def test_parse_indexer_defaults_priority_to_prowlarrs_own_default() -> None:
+    """1 (highest) to 50 (lowest), 25 in the middle — an absent value is 25."""
+    client = _client_with_config()
+
+    assert client._parse_indexer({'id': 3, 'name': 'X'}).priority == 25
+
+
+def test_search_stamps_each_result_with_its_indexers_priority() -> None:
+    client = _client_with_config()
+    with patch.object(client, '_get_indexers_sync', return_value=[
+        ProwlarrIndexer(id=1, name='Fast', protocol='torrent', enable=True,
+                        privacy='public', priority=2),
+        ProwlarrIndexer(id=2, name='Slow', protocol='torrent', enable=True,
+                        privacy='public', priority=45),
+    ]), patch.object(client, '_api_get', return_value=[
+        {'guid': 'a', 'title': 'A', 'indexerId': 1, 'protocol': 'torrent'},
+        {'guid': 'b', 'title': 'B', 'indexerId': 2, 'protocol': 'torrent'},
+        {'guid': 'c', 'title': 'C', 'indexerId': 99, 'protocol': 'torrent'},
+    ]):
+        results = client._search_sync('q', [3000], [], 100, throttle=False)
+
+    # An indexer Prowlarr did not list keeps the neutral default rather than
+    # being sorted to the bottom.
+    assert [r.indexer_priority for r in results] == [2, 45, 25]
+
+
+def test_a_broken_indexer_listing_never_fails_a_search() -> None:
+    client = _client_with_config()
+    with patch.object(client, '_get_indexers_sync', side_effect=RuntimeError('down')), \
+         patch.object(client, '_api_get', return_value=[
+             {'guid': 'a', 'title': 'A', 'indexerId': 1, 'protocol': 'torrent'},
+         ]):
+        results = client._search_sync('q', [3000], [], 100, throttle=False)
+
+    assert [r.indexer_priority for r in results] == [25]
+
+
+def test_the_priority_map_is_cached_between_searches() -> None:
+    """One extra API call per TTL, not one per search."""
+    client = _client_with_config()
+    listing = MagicMock(return_value=[
+        ProwlarrIndexer(id=1, name='Fast', protocol='torrent', enable=True,
+                        privacy='public', priority=2),
+    ])
+    with patch.object(client, '_get_indexers_sync', listing), \
+         patch.object(client, '_api_get', return_value=[
+             {'guid': 'a', 'title': 'A', 'indexerId': 1, 'protocol': 'torrent'},
+         ]):
+        client._search_sync('q', [3000], [], 100, throttle=False)
+        client._search_sync('q2', [3000], [], 100, throttle=False)
+
+    assert listing.call_count == 1
