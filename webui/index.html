@@ -2595,7 +2595,7 @@
                                             • <strong>Spotify</strong> — official Spotify; connect your account in the Spotify section below.<br>
                                             • <strong>Spotify (no auth)</strong> — the same Spotify catalog with no account needed. It's unofficial and best-effort (may break if Spotify changes its site) and can't read your personal library or playlists.<br>
                                             • <strong>Deezer</strong> / <strong>iTunes</strong> — free, no account.<br>
-                                            • <strong>MusicBrainz</strong> — free, but limited to 1 request/sec.<br>
+                                            • <strong>MusicBrainz</strong> — free; the public server is limited to 1 request/sec. Configure a self-hosted server in the MusicBrainz section below.<br>
                                             • <strong>Discogs</strong> — needs a personal access token.<br>
                                             • <strong>JioSaavn</strong> — opt in under Advanced → Experimental. Strong for Indian and Bollywood catalogs.<br><br>
                                             Tip: if you pick <strong>Spotify (no auth)</strong> and later connect a real Spotify account, it uses the official account normally and only falls back to no-auth while Spotify is rate-limited — then switches back automatically.</div>
@@ -2937,6 +2937,28 @@
                                                     style="color: #ffff64;">Genius API Clients</a></div>
                                             <div class="callback-help">Generate a "Client Access Token" — no OAuth flow needed.</div>
                                         </div>
+                                    </div>
+                                </div>
+
+                                <!-- MusicBrainz server (optional; public API requires no credentials) -->
+                                <div class="api-service-frame stg-service" id="musicbrainz-server-settings">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #ba478f;"></span>
+                                        <h4 class="service-title">MusicBrainz</h4>
+                                        <span class="stg-service-chevron">›</span>
+                                    </div>
+                                    <div class="stg-service-body">
+                                        <div class="form-group">
+                                            <label for="musicbrainz-base-url">MusicBrainz server URL</label>
+                                            <input type="url" id="musicbrainz-base-url" placeholder="https://musicbrainz.org" aria-describedby="musicbrainz-server-help">
+                                            <small class="settings-hint" id="musicbrainz-server-help">Optional: enter your self-hosted server address. Leave blank to use public MusicBrainz. Applies to search, matching and enrichment as soon as settings are saved.</small>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="musicbrainz-request-interval">MusicBrainz request interval (seconds)</label>
+                                            <input type="number" id="musicbrainz-request-interval" min="0" step="any" value="1.05" aria-describedby="musicbrainz-interval-help">
+                                            <small class="settings-hint" id="musicbrainz-interval-help">Use 0.1 for up to 10 requests/second on your server, or 0 for no delay. Public MusicBrainz always keeps its rate limit. Environment overrides take precedence over these fields. Your server needs search indexes; use its final URL without redirects.</small>
+                                        </div>
+
                                     </div>
                                 </div>
 
@@ -5640,21 +5662,6 @@
                                             <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                             <small class="settings-hint setting-help-body" hidden>Maximum drift between the file's actual length and the metadata source's expected length before the file is quarantined. <strong>0 = auto</strong> (3s normal, 5s for tracks &gt;10min). Raise this if tracks routinely quarantine for being a few seconds off (live recordings, alternate masterings, etc). Capped at 60s.</small>
                                         </div>
-                                    </div>
-
-                                    <div class="post-processing-section">
-                                        <div class="post-processing-section-title">MusicBrainz Server</div>
-                                        <div class="form-group">
-                                            <label for="musicbrainz-base-url">MusicBrainz server URL</label>
-                                            <input type="url" id="musicbrainz-base-url" placeholder="https://musicbrainz.org" aria-describedby="musicbrainz-server-help">
-                                            <small class="settings-hint" id="musicbrainz-server-help">Optional: enter your self-hosted server address. Leave blank to use public MusicBrainz. Applies to search, matching and enrichment as soon as settings are saved.</small>
-                                        </div>
-                                        <div class="form-group">
-                                            <label for="musicbrainz-request-interval">MusicBrainz request interval (seconds)</label>
-                                            <input type="number" id="musicbrainz-request-interval" min="0" step="any" value="1.05" aria-describedby="musicbrainz-interval-help">
-                                            <small class="settings-hint" id="musicbrainz-interval-help">Use 0.1 for up to 10 requests/second on your server, or 0 for no delay. Public MusicBrainz always keeps its rate limit. Environment overrides take precedence over these fields. Your server needs search indexes; use its final URL without redirects.</small>
-                                        </div>
-
                                     </div>
 
                                     <!-- Tag Embedding — per-tag toggles grouped by source -->

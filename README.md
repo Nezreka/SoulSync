@@ -150,7 +150,7 @@ restores the retag.
 #### Self-hosted MusicBrainz
 
 SoulSync can use a MusicBrainz-compatible mirror for enrichment, metadata lookups,
-search, and repair. In Settings, under MusicBrainz Server above the tagging options, enter
+search, and repair. In Settings → Connections → MusicBrainz, enter
 your server URL and request interval, then save. All clients use the saved values
 on their next request; no restart is needed. Leave the URL blank to return to
 public MusicBrainz.
