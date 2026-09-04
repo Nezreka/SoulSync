@@ -3472,6 +3472,20 @@ def handle_settings():
             if not new_settings:
                 return jsonify({"success": False, "error": "No data received."}), 400
 
+            # Validate connection settings before persisting any part of the form.
+            if 'musicbrainz' in new_settings:
+                from core.musicbrainz_client import validate_server_settings
+                mb_settings = new_settings['musicbrainz']
+                if not isinstance(mb_settings, dict):
+                    return jsonify({"success": False, "error": "MusicBrainz settings must be an object."}), 400
+                try:
+                    mb_url, mb_interval = validate_server_settings(
+                        mb_settings.get('base_url', config_manager.get('musicbrainz.base_url')),
+                        mb_settings.get('request_interval', config_manager.get('musicbrainz.request_interval')))
+                except ValueError as exc:
+                    return jsonify({"success": False, "error": str(exc)}), 400
+                mb_settings.update(base_url=mb_url, request_interval=mb_interval)
+
             # Anti-lockout: refuse to turn ON login mode until the admin account
             # has a password — otherwise enabling it would lock everyone out.
             _sec_in = new_settings.get('security') or {}

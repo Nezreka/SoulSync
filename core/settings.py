@@ -758,6 +758,8 @@ class ConfigManager:
                 "single_to_album": False
             },
             "musicbrainz": {
+                "base_url": "https://musicbrainz.org/ws/2",
+                "request_interval": 1.05,
                 "embed_tags": True
             },
             "jiosaavn": {

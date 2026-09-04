@@ -5642,6 +5642,21 @@
                                         </div>
                                     </div>
 
+                                    <div class="post-processing-section">
+                                        <div class="post-processing-section-title">MusicBrainz Server</div>
+                                        <div class="form-group">
+                                            <label for="musicbrainz-base-url">MusicBrainz server URL</label>
+                                            <input type="url" id="musicbrainz-base-url" placeholder="https://musicbrainz.org" aria-describedby="musicbrainz-server-help">
+                                            <small class="settings-hint" id="musicbrainz-server-help">Optional: enter your self-hosted server address. Leave blank to use public MusicBrainz. Applies to search, matching and enrichment as soon as settings are saved.</small>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="musicbrainz-request-interval">MusicBrainz request interval (seconds)</label>
+                                            <input type="number" id="musicbrainz-request-interval" min="0" step="any" value="1.05" aria-describedby="musicbrainz-interval-help">
+                                            <small class="settings-hint" id="musicbrainz-interval-help">Use 0.1 for up to 10 requests/second on your server, or 0 for no delay. Public MusicBrainz always keeps its rate limit. Environment overrides take precedence over these fields. Your server needs search indexes; use its final URL without redirects.</small>
+                                        </div>
+
+                                    </div>
+
                                     <!-- Tag Embedding — per-tag toggles grouped by source -->
                                     <div class="post-processing-section">
                                         <div class="post-processing-section-title">Tag Embedding</div>

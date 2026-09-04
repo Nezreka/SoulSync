@@ -19,7 +19,7 @@ from core.musicbrainz_client import MusicBrainzClient
 def client(monkeypatch):
     import core.musicbrainz_client as mbc
     # no rate-limit sleeping in a unit test
-    monkeypatch.setattr(mbc, '_wait_for_musicbrainz_slot', lambda: None)
+    monkeypatch.setattr(mbc, '_wait_for_musicbrainz_slot', lambda *args: None)
     c = MusicBrainzClient()
 
     def _boom(path, *, params=None):
