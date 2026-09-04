@@ -937,6 +937,21 @@
                             <div class="vcw-rail" data-video-continue-rail></div>
                         </section>
 
+                        <!-- downloading now. the music dashboard shows live transfer
+                             rows, video only had three numbers in a stats card, so
+                             you could see THAT four things were downloading but not
+                             WHAT. hidden when nothing is in flight, same as the
+                             resume rail above. video-dashboard.js fills it. -->
+                        <section class="vdl" data-video-dl-section hidden>
+                            <div class="vdl-head">
+                                <h3 class="vdl-title">Downloading now</h3>
+                                <!-- data-video-goto, not data-video-page. only .video-nav buttons get
+                                     the page attr wired, a plain link with it full reloads. -->
+                                <a class="vdl-all" href="/video-downloads" data-video-goto="video-downloads">All downloads &rsaquo;</a>
+                            </div>
+                            <div class="vdl-list" data-video-dl-list></div>
+                        </section>
+
                         <div class="dash-grid">
 
                             <!-- Recently Added -->

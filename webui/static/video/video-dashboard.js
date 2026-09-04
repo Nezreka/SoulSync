@@ -31,6 +31,15 @@
     var SYSTEM_STATS_URL = '/api/system/stats';
     var systemPollTimer = null;
 
+    // live downloads band. same endpoint the downloads page and the detail
+    // pages poll, adaptive like the downloads page but slower, this is a
+    // secondary surface.
+    var ACTIVE_DL_URL = '/api/video/downloads/active';
+    var DL_POLL_ACTIVE_MS = 3000;
+    var DL_POLL_IDLE_MS = 15000;
+    var DL_MAX_ROWS = 6;
+    var dlPollTimer = null;
+
     // Fallback only — shown if the /api/video/dashboard call fails. (uptime/memory
     // are NOT here — they come from the shared /api/system/stats via loadSystemStats.)
     var FALLBACK_STATS = {
@@ -194,6 +203,117 @@
                 rail.innerHTML = items.map(_continueCard).join('');
             })
             .catch(function () { section.hidden = true; });
+    }
+
+    // ── Downloading now ─────────────────────────────────────────────────────
+    //
+    // /downloads/active is a misleading name: it returns the last 100 rows of
+    // ANY status, including long-finished ones. video-detail.js hit this too.
+    // So filter, don't trust the endpoint name.
+    function _dlActive(s) {
+        return s === 'downloading' || s === 'queued' || s === 'searching' || s === 'importing';
+    }
+
+    // status pill text. 'downloading' is already obvious from the bar moving,
+    // so it says the phase instead when the importer gave us one.
+    function _dlStatus(d) {
+        var st = String(d.status || '');
+        if (st === 'importing') return d.import_phase ? String(d.import_phase) : 'Importing';
+        if (st === 'searching') return 'Searching';
+        if (st === 'queued') return 'Queued';
+        return 'Downloading';
+    }
+
+    function _dlPct(d) {
+        var p = Number(d.progress);
+        if (!isFinite(p) || p <= 0) return 0;
+        if (p <= 1) p = p * 100;          // some writers store a 0-1 fraction
+        return Math.max(0, Math.min(100, Math.round(p)));
+    }
+
+    function _dlSub(d) {
+        var bits = [];
+        if (d.status === 'downloading' && Number(d.speed_bps) > 0) {
+            bits.push(formatSpeed(d.speed_bps));
+        }
+        var eta = parseInt(d.eta_seconds, 10);
+        if (eta > 0) {
+            bits.push(eta < 60 ? '~' + eta + 's left'
+                : eta < 3600 ? '~' + Math.round(eta / 60) + 'm left'
+                : '~' + Math.floor(eta / 3600) + 'h ' + Math.round((eta % 3600) / 60) + 'm left');
+        }
+        return bits.join(' \u00b7 ');
+    }
+
+    function _dlRow(d) {
+        var pct = _dlPct(d);
+        var title = d.title || d.release_title || 'Unknown';
+        var year = d.year ? ' (' + d.year + ')' : '';
+        var art = d.poster_url ? ' style="background-image:url(\'' + _esc(d.poster_url) + '\')"' : '';
+        var sub = _dlSub(d);
+        // queued and searching have nothing to show on a bar. a 0% bar reads as
+        // stalled, which is a different and worse thing to say.
+        var bar = (d.status === 'downloading' || d.status === 'importing')
+            ? '<span class="vdl-bar"><span class="vdl-bar-fill" style="width:' + pct + '%"></span></span>'
+            : '';
+        return '<div class="vdl-row" title="' + _esc(title + year) + '">' +
+            '<span class="vdl-art"' + art + '>' +
+                (d.poster_url ? '' : '<span class="vdl-art-fallback">' +
+                    _esc(String(title).charAt(0).toUpperCase()) + '</span>') +
+            '</span>' +
+            '<span class="vdl-meta">' +
+                '<span class="vdl-name">' + _esc(title) + _esc(year) + '</span>' +
+                '<span class="vdl-line">' +
+                    '<span class="vdl-pill vdl-pill--' + _esc(d.status || '') + '">' +
+                        _esc(_dlStatus(d)) + '</span>' +
+                    (sub ? '<span class="vdl-sub">' + _esc(sub) + '</span>' : '') +
+                    (pct && bar ? '<span class="vdl-pct">' + pct + '%</span>' : '') +
+                '</span>' +
+                bar +
+            '</span>' +
+        '</div>';
+    }
+
+    // `again` makes this re-arm the poll when it resolves. the cadence has to be
+    // decided AFTER the fetch, not before it: scheduling off section.hidden up
+    // front always reads the pre-fetch state, so starting a download would sit
+    // on the idle interval for 15s before the bar first moved.
+    function loadActiveDownloads(again) {
+        var section = document.querySelector('[data-video-dl-section]');
+        var list = document.querySelector('[data-video-dl-list]');
+        if (!section || !list) return;
+        fetch(ACTIVE_DL_URL, { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var rows = ((d && d.downloads) || []).filter(function (x) {
+                    return _dlActive(x.status);
+                });
+                // nothing in flight, the whole band goes away
+                section.hidden = rows.length === 0;
+                if (rows.length) {
+                    var shown = rows.slice(0, DL_MAX_ROWS);
+                    var extra = rows.length - shown.length;
+                    list.innerHTML = shown.map(_dlRow).join('') +
+                        (extra > 0 ? '<div class="vdl-more">and ' + extra + ' more</div>' : '');
+                } else {
+                    list.innerHTML = '';
+                }
+                if (again) scheduleDownloadPoll(rows.length > 0);
+            })
+            .catch(function () {
+                // keep whatever is on screen, a blip is not news
+                if (again) scheduleDownloadPoll(false);
+            });
+    }
+
+    // one timer, adaptive. fast while something is moving, slow when idle, and
+    // it does not fetch at all when the dashboard is not the visible page.
+    function scheduleDownloadPoll(busy) {
+        if (dlPollTimer) clearTimeout(dlPollTimer);
+        dlPollTimer = setTimeout(function () {
+            if (dashboardVisible()) loadActiveDownloads(true);
+            else scheduleDownloadPoll(false);
+        }, busy ? DL_POLL_ACTIVE_MS : DL_POLL_IDLE_MS);
     }
 
     // Attention badges: open issues (everyone) + pending maintenance findings
@@ -486,6 +606,7 @@
         loadStudioCoverage();       // TMDB/TVDB coverage bars on the Studio cards
         loadSystemStats();          // immediate fill (memory/uptime)
         startSystemStatsPolling();  // then keep it live
+        loadActiveDownloads(true);  // what is in flight now, and keep it moving
     }
 
     // ── Library card: live scan progress (parity with the music dashboard) ──

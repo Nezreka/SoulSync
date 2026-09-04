@@ -6835,6 +6835,157 @@ body[data-side="video"] #gsearch-aura {
     .vwsh-nebula .vwsh-ep-grid { width: 100%; grid-template-columns: 1fr; max-height: none; }
 }
 
+/* ── Downloading now ─────────────────────────────────────────────────────────
+   Live transfer rows. A list, not a rail: these are all equally urgent and you
+   read them top to bottom, whereas the resume rail below is ordered by recency
+   and scrolls. Hidden entirely when nothing is in flight. */
+.vdl {
+    margin: 0 0 26px;
+}
+
+.vdl-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.vdl-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+    color: #fff;
+}
+
+.vdl-all {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.5);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 0.15s ease;
+}
+.vdl-all:hover { color: #fff; }
+
+.vdl-list {
+    display: grid;
+    gap: 8px;
+}
+
+.vdl-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* 2:3, the poster shape everywhere else on this page uses */
+.vdl-art {
+    position: relative;
+    flex: 0 0 34px;
+    width: 34px;
+    aspect-ratio: 2 / 3;
+    border-radius: 5px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.06) center/cover no-repeat;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.vdl-art-fallback {
+    font-size: 13px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.3);
+}
+
+/* min-width:0 or the flex item refuses to shrink and the long titles push the
+   row wider than the page. same trap the resume cards hit. */
+.vdl-meta {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.vdl-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vdl-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.vdl-pill {
+    flex: 0 0 auto;
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.6);
+}
+.vdl-pill--downloading { background: rgba(56, 189, 248, 0.16); color: rgb(125, 211, 252); }
+.vdl-pill--importing   { background: rgba(168, 85, 247, 0.16); color: rgb(216, 180, 254); }
+.vdl-pill--searching   { background: rgba(250, 204, 21, 0.14); color: rgb(253, 224, 71); }
+.vdl-pill--queued      { background: rgba(255, 255, 255, 0.07); color: rgba(255, 255, 255, 0.5); }
+
+.vdl-sub {
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.45);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vdl-pct {
+    margin-left: auto;
+    flex: 0 0 auto;
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.vdl-bar {
+    display: block;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+}
+.vdl-bar-fill {
+    display: block;
+    height: 100%;
+    border-radius: 2px;
+    background: linear-gradient(90deg, rgb(56, 189, 248), rgb(129, 140, 248));
+    transition: width 0.4s ease;
+}
+
+.vdl-more {
+    padding: 4px 2px 0;
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vdl-bar-fill { transition: none; }
+}
+
 /* ── Continue watching ───────────────────────────────────────────────────────
    The resume rail. Landscape cards, because a 16:9 still of the scene you
    stopped on is what you recognise — a portrait poster is how you BROWSE, not
