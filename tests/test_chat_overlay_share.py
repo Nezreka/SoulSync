@@ -33,6 +33,9 @@ import pytest
 
 from core import chat_codec
 
+# the room-send fixture lives with the other chat API tests
+from tests.test_chat_api import chat_app  # noqa: F401
+
 
 def _layer(i=0, **kw):
     d = {"id": "l%d" % i, "type": "text", "text": "{resolution}",
@@ -225,3 +228,73 @@ def test_a_share_carries_no_visible_text_but_still_decodes():
     dec = chat_codec.decode(packed)
     assert dec["t"] == ""
     assert chat_codec.overlay_of(dec) is not None
+
+
+# ── end to end: the send endpoint really builds a card ───────────────────────
+#
+# Everything above tests the codec in isolation. This drives the actual
+# /api/chat/room/message endpoint and inspects the bytes that would go on the
+# wire, because the interesting failures live in the wiring, not the validator.
+
+def test_the_send_endpoint_puts_a_decodable_template_on_the_wire(chat_app):
+    http, state = chat_app
+    defn = _defn([_layer(0, text="4K"), _layer(1, type="image",
+                                               src="asset://cafe0123cafe0123.png")])
+
+    r = http.post("/api/chat/room/message",
+                  json={"message": "", "overlay": {"n": "Corner badge", "d": defn}})
+    assert r.status_code == 200, r.get_json()
+
+    # what a vanilla Soulseek client would literally receive
+    room, wire = state["client"].sent_room[-1]
+    assert wire.startswith(chat_codec.MARKER)
+
+    # ...and what a SoulSync client makes of it
+    dec = chat_codec.decode(wire)
+    share = chat_codec.overlay_of(dec)
+    assert share["n"] == "Corner badge"
+    assert share["d"] == defn
+    assert chat_codec.overlay_assets(share["d"]) == ["asset://cafe0123cafe0123.png"]
+
+
+def test_a_share_that_cannot_fit_is_refused_by_the_endpoint(chat_app):
+    """And the error names the TEMPLATE, not the message: with a template
+    attached the text is almost never the problem, and "message too long" sends
+    someone to shorten a sentence that was already empty."""
+    import random
+    import string
+    rnd = random.Random(3)
+
+    def noise(n):
+        return "".join(rnd.choice(string.ascii_letters + string.digits) for _ in range(n))
+
+    huge = _defn([_layer(i, name=noise(60), text=noise(60), src="asset://" + noise(16))
+                  for i in range(40)])
+    http, state = chat_app
+    before = len(state["client"].sent_room)
+
+    r = http.post("/api/chat/room/message",
+                  json={"message": "", "overlay": {"n": "Huge", "d": huge}})
+    assert r.status_code == 400
+    err = r.get_json()["error"]
+    assert "template" in err.lower() and "40 layers" in err
+    assert len(state["client"].sent_room) == before, "a refused share still hit the room"
+
+
+def test_a_malformed_overlay_is_refused_before_anything_is_sent(chat_app):
+    http, state = chat_app
+    before = len(state["client"].sent_room)
+    for bad in ({"n": "", "d": _defn()}, {"n": "X", "d": {"layers": []}}, {"n": "X"}):
+        r = http.post("/api/chat/room/message", json={"message": "", "overlay": bad})
+        assert r.status_code == 400, bad
+    assert len(state["client"].sent_room) == before
+
+
+def test_an_ordinary_message_is_untouched_by_any_of_this(chat_app):
+    """The overlay path must not become a tax on every message."""
+    http, state = chat_app
+    r = http.post("/api/chat/room/message", json={"message": "hello"})
+    assert r.status_code == 200
+    dec = chat_codec.decode(state["client"].sent_room[-1][1])
+    assert dec["t"] == "hello"
+    assert chat_codec.overlay_of(dec) is None

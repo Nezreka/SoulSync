@@ -1379,7 +1379,12 @@ def create_blueprint() -> Blueprint:
         if not _can_send():
             return jsonify({"error": "Chat sending is admin-only on this server"}), 403
         msg = _clean_message(request.get_json(silent=True))
-        if not msg:
+        # An overlay share carries no text on purpose - the CARD is the message,
+        # the way a poll or a game move is - so this guard has to know about it or
+        # the feature can never send anything. A file share slips past because its
+        # url IS the text.
+        _shared_overlay = isinstance((request.get_json(silent=True) or {}).get("overlay"), dict)
+        if not msg and not _shared_overlay:
             return jsonify({"error": "empty message"}), 400
         # Room messages ride the SoulSync envelope (rich format; other clients
         # see line noise). PMs are NEVER encoded — they must stay readable to
