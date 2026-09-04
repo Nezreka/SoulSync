@@ -54,14 +54,24 @@ def test_keyword_chip_is_a_button_with_data_attr():
 def test_keyword_click_navigates_to_search_and_emits_query():
     assert "'video-search'" in _DETAIL
     assert "soulsync:video-search-query" in _DETAIL
+    assert "source: 'keyword'" in _DETAIL
+    assert "kind: (data && data.kind === 'show') ? 'show' : 'movie'" in _DETAIL
 
 
 def test_search_listens_for_query_event():
     assert "soulsync:video-search-query" in _SEARCH
     assert "_pendingQuery" in _SEARCH
+    assert "queryContext" in _SEARCH
+    assert "data-video-search-context-clear" in _SEARCH
 
 
 # ── where-to-watch providers become real links ────────────────────────────────
+
+def test_search_has_visible_keyword_context_slot():
+    html = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
+    assert "data-video-search-context" in html
+    assert ".vsr-context" in _CSS
+
 
 def test_provider_badges_are_anchors_not_dead_divs():
     # the whole point of #1042: no dead badge divs, every provider is an <a href>

@@ -228,6 +228,7 @@ def test_endpoint_and_admin_gate():
     api = (_ROOT / "api" / "video" / "detail.py").read_text(encoding="utf-8", errors="replace")
     gate = (_ROOT / "api" / "video" / "__init__.py").read_text(encoding="utf-8", errors="replace")
     assert '"/detail/show/<int:show_id>/sync"' in api
+    assert '"/detail/movie/<int:movie_id>/sync"' in api
     assert '"/sync"' in gate
 
 

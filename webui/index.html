@@ -1291,6 +1291,7 @@
                                     <input type="text" class="vsr-input" data-video-search-input
                                            placeholder="Search movies, shows, people&hellip;" autocomplete="off" spellcheck="false">
                                 </div>
+                                <div class="vsr-context" data-video-search-context hidden></div>
                             </div>
                             <div class="vsr-panel" data-vsr-panel="basic" id="vsr-basic-panel" role="tabpanel" hidden>
                                 <form class="vsr-basic" data-vsr-basic-form>
@@ -1881,6 +1882,8 @@
                             <div class="vd-bb-bg" data-vd-backdrop aria-hidden="true"></div>
                             <div class="vd-bb-fade" aria-hidden="true"></div>
                             <div class="vd-bb-content">
+                                <img class="vd-cover" data-vd-cover alt="" hidden />
+                                <div class="vd-copy">
                                 <img class="vd-logo" data-vd-logo alt="" hidden />
                                 <h1 class="vd-title" data-vd-title>—</h1>
                                 <div class="vd-tagline" data-vd-tagline hidden></div>
@@ -1892,11 +1895,13 @@
                                 <div class="vd-ratings" data-vd-ratings hidden></div>
                                 <div class="vd-awards" data-vd-awards hidden></div>
                                 <p class="vd-overview" data-vd-overview></p>
+                                <div class="vd-essentials" data-vd-essentials hidden></div>
                                 <!-- Action buttons reuse the exact artist-detail button styles. -->
                                 <div class="vd-actions artist-hero-actions" data-vd-actions></div>
                                 <div class="vd-health" data-vd-health hidden></div>
                                 <div class="vd-genres" data-vd-genres></div>
                                 <div class="vd-subs" data-vd-subs hidden></div>
+                                </div>
                             </div>
                             <!-- offscreen poster, only used to sample the accent color -->
                             <img data-vd-poster crossorigin="anonymous" alt="" style="display:none" />
@@ -1915,7 +1920,7 @@
                                  body on purpose: it was below the whole episode list and
                                  the cast, next to the history block, where nobody found it. -->
                             <div class="vd-acq-section" data-vd-acq-section hidden>
-                                <h2 class="vd-section-h">Acquisition</h2>
+                                <h2 class="vd-section-h">Needs attention</h2>
                                 <div class="vd-acq" data-vd-acq></div>
                             </div>
                             <div class="vd-ep-toolbar">
@@ -1996,6 +2001,8 @@
                             <div class="vd-bb-bg" data-vd-backdrop aria-hidden="true"></div>
                             <div class="vd-bb-fade" aria-hidden="true"></div>
                             <div class="vd-bb-content">
+                                <img class="vd-cover" data-vd-cover alt="" hidden />
+                                <div class="vd-copy">
                                 <img class="vd-logo" data-vd-logo alt="" hidden />
                                 <h1 class="vd-title" data-vd-title>—</h1>
                                 <div class="vd-tagline" data-vd-tagline hidden></div>
@@ -2005,10 +2012,12 @@
                                 <div class="vd-ratings" data-vd-ratings hidden></div>
                                 <div class="vd-awards" data-vd-awards hidden></div>
                                 <p class="vd-overview" data-vd-overview></p>
+                                <div class="vd-essentials" data-vd-essentials hidden></div>
                                 <div class="vd-actions artist-hero-actions" data-vd-actions></div>
                                 <div class="vd-health" data-vd-health hidden></div>
                                 <div class="vd-genres" data-vd-genres></div>
                                 <div class="vd-subs" data-vd-subs hidden></div>
+                                </div>
                             </div>
                             <img data-vd-poster crossorigin="anonymous" alt="" style="display:none" />
                         </div>
@@ -2025,11 +2034,11 @@
                             <!-- Where acquisition stands RIGHT NOW. First thing in the
                                  body on purpose: it was below the whole episode list and
                                  the cast, next to the history block, where nobody found it. -->
+                            <div class="vd-details" data-vd-details></div>
                             <div class="vd-acq-section" data-vd-acq-section hidden>
-                                <h2 class="vd-section-h">Acquisition</h2>
+                                <h2 class="vd-section-h">Needs attention</h2>
                                 <div class="vd-acq" data-vd-acq></div>
                             </div>
-                            <div class="vd-details" data-vd-details></div>
                             <div class="vd-cast-section" data-vd-cast-section hidden>
                                 <div class="vd-section-head">
                                     <h2 class="vd-section-h">Cast &amp; Crew</h2>

@@ -99,7 +99,7 @@ class TestUiPins:
         assert js.count('renderAwards(d)') >= 3         # def + main + youtube-path clear
         assert 'vd-ep-new-chip' in js
         assert 'After-credits scene' in js
-        assert "rows.push(['Digital release', d.digital_release_date])" in js
+        assert "detailCell('Digital release', d.digital_release_date)" in js
         assert "f.quality || mediaRes(f.resolution)" in js
 
     def test_detail_actions_keep_primary_and_tool_hierarchy(self):
