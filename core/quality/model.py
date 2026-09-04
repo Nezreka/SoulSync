@@ -223,6 +223,48 @@ def rank_candidate(aq: AudioQuality, targets: List[QualityTarget]) -> Tuple[int,
     return (len(targets), aq.tier_score())
 
 
+def satisfies_a_target_on_stated_facts(aq, targets) -> bool:
+    """Whether a release COULD satisfy any target, judged on what it claimed.
+
+    ``matches_target`` is the rule for a probed file: a FLAC with no stated
+    resolution fails a hi-res target, because an unproven file must not
+    over-claim. A Prowlarr release is not a probed file. Its title almost never
+    carries sample rate, bit depth or bitrate, so that rule does not filter the
+    lane, it empties it. The stock MP3 target's min_bitrate of 320 is enough on
+    its own.
+
+    So a value the release never stated cannot disqualify it, and a value it did
+    state is enforced exactly. Format is always required: an unreadable format
+    matches no target, which is the same answer the pre-grab gate gives. The
+    file itself is still probed at import.
+
+    Lives here so the per-track lane and the album-bundle picker cannot drift.
+    They did: the picker used ``matches_target`` and refused whole albums the
+    per-track lane accepted from the same indexer.
+    """
+    fmt = str(getattr(aq, 'format', '') or '').lower()
+    for target in targets or ():
+        wanted = str(getattr(target, 'format', '') or '').lower()
+        if wanted and wanted != fmt:
+            continue
+        if not wanted and fmt in ('', 'unknown'):
+            continue
+        bitrate = getattr(aq, 'bitrate', None)
+        minimum = getattr(target, 'min_bitrate', None)
+        if minimum and bitrate is not None and bitrate < minimum:
+            continue
+        sample_rate = getattr(aq, 'sample_rate', None)
+        min_rate = getattr(target, 'min_sample_rate', None)
+        if min_rate and sample_rate is not None and sample_rate < min_rate:
+            continue
+        depth = getattr(aq, 'bit_depth', None)
+        min_depth = getattr(target, 'bit_depth', None)
+        if min_depth and depth is not None and depth < min_depth:
+            continue
+        return True
+    return False
+
+
 def filter_and_rank(
     candidates: list,
     targets: List[QualityTarget],

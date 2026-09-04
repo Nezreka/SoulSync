@@ -58,12 +58,33 @@ import sqlite3
 from core.quality.selection import profile_id_for_library_track
 
 
-class _Db:
+class _KeepOpen:
+    """The real ``_get_connection`` hands out a FRESH connection per call and
+    the caller closes it. This double reuses one in-memory db across calls, so
+    swallow the close instead of tearing the fixture down mid-test."""
+
     def __init__(self, conn):
         self._conn = conn
 
-    def get_connection(self):
-        return self._conn
+    def execute(self, *args, **kwargs):
+        return self._conn.execute(*args, **kwargs)
+
+    def close(self):
+        pass
+
+
+class _Db:
+    """Mirrors MusicDatabase's real accessor name, which is the private one.
+
+    A double that spells the method the way the CALLER wants proves nothing.
+    See test_the_lookup_calls_a_method_the_real_database_has.
+    """
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def _get_connection(self):
+        return _KeepOpen(self._conn)
 
 
 def _library_db(rows):
@@ -104,3 +125,52 @@ def test_an_unknown_track_or_broken_db_is_not_an_error():
 
     assert profile_id_for_library_track(database, 'nope') is None
     assert profile_id_for_library_track(None, 't1') is None
+
+
+def test_the_lookup_calls_a_method_the_real_database_has():
+    """The first cut called ``database.get_connection()``.
+
+    MusicDatabase has no such method, only ``_get_connection``, so every call
+    raised AttributeError into the catch-all and answered None. The redownload
+    lane therefore ran on the app default exactly as before the fix, on the one
+    path that deletes the file it replaces. The stub above hid it by defining
+    whichever name the code asked for, so this one is spec'd to the real class:
+    a method MusicDatabase does not expose raises here instead of passing.
+    """
+    from unittest.mock import MagicMock
+
+    from database.music_database import MusicDatabase
+
+    conn = sqlite3.connect(':memory:')
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE tracks (id TEXT PRIMARY KEY, quality_profile_id INTEGER)")
+    conn.execute("INSERT INTO tracks VALUES ('t1', 7)")
+
+    database = MagicMock(spec=MusicDatabase)
+    database._get_connection.return_value = conn
+
+    assert profile_id_for_library_track(database, 't1') == 7
+
+
+def test_the_lookup_closes_the_connection_it_opened():
+    """``_get_connection`` hands back a NEW sqlite connection every call.
+
+    Redownload search runs this per request; leaking one connection each time
+    is a file handle that never comes back.
+    """
+    conn = sqlite3.connect(':memory:')
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE tracks (id TEXT PRIMARY KEY, quality_profile_id INTEGER)")
+    conn.execute("INSERT INTO tracks VALUES ('t1', 7)")
+    closed = []
+
+    class _CountsCloses(_KeepOpen):
+        def close(self):
+            closed.append(True)
+
+    class _Database:
+        def _get_connection(self):
+            return _CountsCloses(conn)
+
+    assert profile_id_for_library_track(_Database(), 't1') == 7
+    assert closed, "the connection was opened and never closed"

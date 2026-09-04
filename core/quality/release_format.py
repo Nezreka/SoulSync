@@ -319,6 +319,11 @@ _REAL_RE = re.compile(r'\bREAL\b')
 # ordinary word, and real outranks version in the revision sort.
 _HAS_LOWERCASE_RE = re.compile(r'[a-z]')
 
+# Codecs that write their VBR setting as vN. On one of these, "V0" is a bitrate
+# and audio_quality_from_release_title already read it as one, so it says
+# nothing about how many times the release was fixed.
+_PRESET_CODECS = frozenset({'mp3', 'ogg', 'opus'})
+
 
 class ReleaseRevision(NamedTuple):
     """How many times this release has been corrected."""
@@ -333,15 +338,34 @@ class ReleaseRevision(NamedTuple):
         return (self.real, self.version)
 
 
+def _vn_is_a_bitrate_preset(matched, lowered: str) -> bool:
+    """True when a vN match is a LAME/Vorbis quality preset, not a revision.
+
+    repack2 / rerip2 are always a revision, they name the word. A bare v0 or v2
+    is only a revision on a release whose codec does not use presets.
+    """
+    if matched.group(3) or matched.group(4):
+        return False
+    return bool(formats_in_title(lowered) & _PRESET_CODECS)
+
+
 def release_revision(title: str) -> ReleaseRevision:
     """PROPER / REPACK / vN / REAL for one release title."""
     raw = str(title or '')
     lowered = raw.lower()
 
-    version = 1
     matched = _VERSION_RE.search(lowered)
-    if matched:
-        version = int(next(group for group in matched.groups() if group))
+    if matched and _vn_is_a_bitrate_preset(matched, lowered):
+        # V0 and V2 are mp3 VBR presets, not release versions. reading them as
+        # versions put a V0 rip on 0, under the neutral 1 everything else gets,
+        # and a V2 rip on 2, so the worse preset beat the better one. we can't
+        # tell a real re-upload from a preset here, so say nothing. PROPER and
+        # REPACK still speak for an mp3 release.
+        matched = None
+
+    # never below the neutral 1. a release is not worse than an unmarked one
+    # for carrying a marker we could not read.
+    version = max(1, int(next(g for g in matched.groups() if g))) if matched else 1
 
     is_repack = bool(_REPACK_RE.search(lowered))
     if _PROPER_RE.search(lowered) or is_repack:

@@ -10,6 +10,12 @@ import re
 
 from core.settings import config_manager
 from core.imports.file_integrity import resolve_duration_tolerance
+# One definition of "could this release satisfy the profile", shared with the
+# album-bundle picker. It lived here and the picker used the probed-file rule
+# instead, so the same release passed per-track and was refused as an album.
+from core.quality.model import (
+    satisfies_a_target_on_stated_facts as _satisfies_a_target_on_stated_facts,
+)
 
 logger = get_logger("downloads.validation")
 
@@ -278,44 +284,6 @@ def get_valid_candidates(results, spotify_track, query, profile_id=None):
     if p2p:
         accepted.extend(_match_filename_candidates(p2p, spotify_track, profile_id))
     return accepted
-
-
-def _satisfies_a_target_on_stated_facts(quality, targets) -> bool:
-    """Whether a release could satisfy any target, judged on what it CLAIMED.
-
-    Ranking probed files uses the opposite rule: a FLAC with no stated
-    resolution fails a hi-res target, because an unproven file must not
-    over-claim. A Prowlarr release is not a probed file. Its title almost never
-    carries sample rate, bit depth or bitrate, so applying that rule here does
-    not filter the lane, it empties it — the stock MP3 target's min_bitrate of
-    320 was enough on its own.
-
-    So a value the release never stated cannot disqualify it, and a value it
-    did state is enforced exactly. Format is always required: an unreadable
-    format matches no target and a strict profile drops it, which is the same
-    answer the pre-grab gate gives. The file itself is still probed at import.
-    """
-    fmt = str(getattr(quality, 'format', '') or '').lower()
-    for target in targets or ():
-        wanted = str(getattr(target, 'format', '') or '').lower()
-        if wanted and wanted != fmt:
-            continue
-        if not wanted and fmt in ('', 'unknown'):
-            continue
-        bitrate = getattr(quality, 'bitrate', None)
-        minimum = getattr(target, 'min_bitrate', None)
-        if minimum and bitrate is not None and bitrate < minimum:
-            continue
-        sample_rate = getattr(quality, 'sample_rate', None)
-        min_rate = getattr(target, 'min_sample_rate', None)
-        if min_rate and sample_rate is not None and sample_rate < min_rate:
-            continue
-        depth = getattr(quality, 'bit_depth', None)
-        min_depth = getattr(target, 'bit_depth', None)
-        if min_depth and depth is not None and depth < min_depth:
-            continue
-        return True
-    return False
 
 
 def _filter_prowlarr_by_quality(candidates, profile_id=None):

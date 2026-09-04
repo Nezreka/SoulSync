@@ -52,3 +52,40 @@ def test_an_all_caps_title_does_not_get_a_free_real_bump():
     """
     assert release_revision('ARTIST - THE REAL THING 2020 FLAC').real == 0
     assert release_revision('Artist - Album REAL PROPER [FLAC]').real == 1
+
+
+@pytest.mark.parametrize('title', [
+    'Artist - Album [V0]',
+    'Artist - Album [V2]',
+    'Artist - Album [MP3] [v2]',
+])
+def test_a_vbr_preset_is_not_a_release_version(title):
+    """V0 and V2 are LAME presets, and this module reads them as a bitrate.
+
+    Counting them again as Lidarr's Revision put a V0 rip on version 0 — below
+    the neutral 1 an unmarked release gets — and a V2 rip on version 2. So the
+    picker's revision tiebreaker ranked the WORSE preset above the better one,
+    and both against releases that never said anything. V0 is one of the most
+    common things written in an mp3 torrent title.
+    """
+    assert release_revision(title).version == 1
+
+
+def test_a_version_still_counts_on_a_codec_without_presets():
+    """The suppression is scoped to codecs that write vN as a quality setting.
+
+    FLAC has no VBR preset, so [v2] there is a genuine second upload.
+    """
+    assert release_revision('Artist - Album [FLAC] [v2]').version == 2
+    assert release_revision('Artist - Album [v5] [FLAC]').version == 5
+
+
+def test_repack_still_speaks_for_an_mp3_release():
+    """Only the bare vN token is ambiguous. REPACK/PROPER name themselves."""
+    assert release_revision('Artist - Album [MP3 320] REPACK').version == 2
+    assert release_revision('Artist - Album RERIP [MP3]').version == 2
+
+
+def test_a_version_never_sorts_below_an_unmarked_release():
+    """A marker we could not read must not make a release worse than silence."""
+    assert release_revision('Artist - Album [FLAC] [v0]').version >= 1

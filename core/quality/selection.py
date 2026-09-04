@@ -158,10 +158,18 @@ def profile_id_for_library_track(database, track_id, explicit=None):
     if database is None or track_id in (None, ''):
         return None
     try:
-        conn = database.get_connection()
-        row = conn.execute(
-            "SELECT quality_profile_id FROM tracks WHERE id = ?", (str(track_id),),
-        ).fetchone()
+        # _get_connection, not get_connection. MusicDatabase has no public
+        # accessor, so the wrong name raised straight into the catch below and
+        # this answered None for every track, on the one lane that deletes the
+        # file it replaces. closing it is ours to do too, same as
+        # load_profile_by_id above.
+        conn = database._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT quality_profile_id FROM tracks WHERE id = ?", (str(track_id),),
+            ).fetchone()
+        finally:
+            conn.close()
     except Exception as exc:  # noqa: BLE001 - a lookup must not fail the request
         logger.debug("track quality profile lookup failed for %s: %s", track_id, exc)
         return None

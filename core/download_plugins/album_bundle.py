@@ -485,7 +485,10 @@ def pick_best_album_release(candidates, quality_guess,
     # could not distinguish any lossless resolution. Parse every remaining
     # release into the same AudioQuality model used by Soulseek/streaming.
     if quality_targets:
-        from core.quality.model import rank_candidate
+        from core.quality.model import (
+            rank_candidate,
+            satisfies_a_target_on_stated_facts,
+        )
         from core.quality.release_format import audio_quality_from_release
 
         quality_rows = []
@@ -508,12 +511,31 @@ def pick_best_album_release(candidates, quality_guess,
                 row for row in quality_rows if row[0][0] == best_target
             ]
         elif not fallback_enabled:
-            logger.warning(
-                "[Album Bundle] No candidate for '%s' satisfies the profile's "
-                "full quality targets; refusing an unproven release",
-                album_name or '?',
-            )
-            return None
+            # Nothing matched outright, which is NOT the same as the profile
+            # refusing these releases. A prowlarr title almost never states a
+            # bitrate or a sample rate, and the stock MP3 target asks for 320,
+            # so judging a title by the probed-file rule refuses whole albums
+            # the per-track lane accepts from the same indexer. Keep the ones
+            # that only failed on something they never claimed, refuse the rest.
+            # The post-download probe is still the last word.
+            provable = [
+                row for row in quality_rows
+                if satisfies_a_target_on_stated_facts(row[1], quality_targets)
+            ]
+            if not provable:
+                logger.warning(
+                    "[Album Bundle] No candidate for '%s' can satisfy the "
+                    "profile's quality targets; refusing an unproven release",
+                    album_name or '?',
+                )
+                return None
+            if len(provable) != len(quality_rows):
+                logger.info(
+                    "[Album Bundle] Kept %d/%d candidate(s) whose stated "
+                    "quality the profile can still accept",
+                    len(provable), len(quality_rows),
+                )
+            quality_rows = provable
 
         preferred_formats = {
             str(target.format).lower()
