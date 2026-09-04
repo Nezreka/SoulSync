@@ -21,6 +21,7 @@ folder scan.
 
 from __future__ import annotations
 
+import math
 import re
 import shutil
 import time
@@ -239,6 +240,23 @@ def profile_quality_targets(quality_profile_id=None):
         return [], True
 
 
+def _availability_bucket(candidate) -> float:
+    """Seeders (or usenet grabs) rounded to an order of magnitude.
+
+    Availability is a tiebreaker inside one quality bucket, and 41 against 38
+    seeders is not a statement about which release is better — compared raw it
+    outvoted every key after it, including the size that describes the encode.
+    Lidarr rounds to log10 for exactly this reason; ten times the swarm still
+    wins, a rounding difference no longer does.
+    """
+    raw = candidate.seeders if candidate.seeders is not None else (candidate.grabs or 0)
+    try:
+        value = int(raw or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return round(math.log10(value)) if value > 0 else 0.0
+
+
 def pick_best_album_release(candidates, quality_guess,
                             album_name: str = "",
                             min_seeders: int = 0,
@@ -443,11 +461,7 @@ def pick_best_album_release(candidates, quality_guess,
 
         def _profile_score(row) -> tuple:
             _rank, aq, candidate = row
-            availability = (
-                candidate.seeders
-                if candidate.seeders is not None
-                else (candidate.grabs or 0)
-            )
+            availability = _availability_bucket(candidate)
             # If no real target matched and fallback is enabled, formats the
             # user named still outrank unrelated formats — same rule as
             # filter_and_rank's fallback path.

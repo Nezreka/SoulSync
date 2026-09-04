@@ -94,6 +94,7 @@ from core.quality.release_format import (
     audio_quality_from_release,
     audio_quality_from_release_title,
     evaluate_release,
+    is_sample_release,
 )
 
 logger = get_logger("download_plugins.torrent")
@@ -225,6 +226,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             # along as the fallback for when that fetch fails.
             download_url = result.download_url or result.magnet_uri
             if not download_url:
+                continue
+            if is_sample_release(result.title, result.size):
                 continue
             # The filename crosses to the browser in search responses and
             # comes back on grab. Indexer URLs can carry API keys / signed

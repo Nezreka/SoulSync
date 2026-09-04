@@ -57,6 +57,7 @@ from core.prowlarr_client import (
 from core.quality.release_format import (
     audio_quality_from_release,
     evaluate_release,
+    is_sample_release,
 )
 from core.usenet_clients import get_active_adapter as get_active_usenet_adapter
 from utils.async_helpers import run_async
@@ -123,6 +124,8 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             if result.protocol != 'usenet':
                 continue
             if not result.download_url:
+                continue
+            if is_sample_release(result.title, result.size):
                 continue
             # The filename crosses to the browser in search responses and
             # comes back on grab. Prowlarr NZB URLs can carry API keys /

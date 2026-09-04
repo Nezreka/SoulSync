@@ -350,6 +350,24 @@ def release_revision(title: str) -> ReleaseRevision:
     )
 
 
+# Lidarr's NotSampleSpecification. "Sample" alone is not evidence — plenty of
+# tracks are called Sample Text — and a small release alone is not either, it
+# may be a single. Both together are, and 20 MB is Lidarr's line.
+_SAMPLE_MAX_BYTES = 20 * 1024 * 1024
+_SAMPLE_RE = re.compile(r'(?<![a-z0-9])sample(?![a-z0-9])', re.I)
+
+
+def is_sample_release(title: str, size_bytes) -> bool:
+    """True when a release says it is a sample and is small enough to be one."""
+    if not _SAMPLE_RE.search(str(title or '')):
+        return False
+    try:
+        size = int(size_bytes or 0)
+    except (TypeError, ValueError):
+        return False
+    return 0 < size < _SAMPLE_MAX_BYTES
+
+
 def implied_bitrate_kbps(size_bytes, duration_seconds) -> Optional[float]:
     """Average kbit/s a release carries, or None when it cannot be measured.
 

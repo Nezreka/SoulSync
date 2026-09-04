@@ -1494,3 +1494,35 @@ def test_a_repack_beats_the_original_under_ranked_targets_too():
     )
 
     assert picked is repack
+
+
+def test_a_meaningless_seeder_difference_does_not_decide_the_pick():
+    """Lidarr rounds seeders to log10 before comparing them.
+
+    Availability is a tiebreaker inside one quality bucket, and 41 vs 38
+    seeders says nothing about which release is better. Compared raw, it
+    outvoted every key after it — including the size that actually describes
+    the encode.
+    """
+    targets = [QualityTarget(format='flac')]
+    thin = _Release(title='Artist - Album [FLAC]', size=900_000_000, seeders=38)
+    fat = _Release(title='Artist - Album [FLAC]', size=350_000_000, seeders=41)
+
+    picked = pick_best_album_release(
+        [fat, thin], _flac_quality_guess, quality_targets=targets,
+    )
+
+    assert picked is thin
+
+
+def test_an_order_of_magnitude_more_seeders_still_wins():
+    targets = [QualityTarget(format='flac')]
+    dying = _Release(title='Artist - Album [FLAC]', size=900_000_000, seeders=3)
+    healthy = _Release(title='Artist - Album [FLAC]', size=350_000_000, seeders=400)
+
+    picked = pick_best_album_release(
+        [dying, healthy], _flac_quality_guess, quality_targets=targets,
+    )
+
+    assert picked is healthy
+

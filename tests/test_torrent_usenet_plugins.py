@@ -998,3 +998,26 @@ def test_album_duration_reaches_the_release_picker(module, plugin_factory,
         )
 
     assert seen.get('expected_duration_seconds') == 2700
+
+
+@pytest.mark.parametrize('title, size, projected', [
+    ('Danny Brown - Atrocity Exhibition [FLAC] (sample)', 15_000_000, False),
+    # "Sample" is only evidence together with a size no album can have.
+    ('Danny Brown - Atrocity Exhibition [FLAC] sample', 500_000_000, True),
+    ('Danny Brown - Sample Text [FLAC]', 500_000_000, True),
+    # A small release that never claims to be a sample is somebody's single.
+    ('Danny Brown - Atrocity Exhibition [FLAC]', 15_000_000, True),
+])
+def test_sample_releases_never_become_candidates(title, size, projected) -> None:
+    """Lidarr's NotSampleSpecification, at the projection boundary.
+
+    The album picker's 40 MB floor already refuses these, but the per-track
+    lane had no floor at all, so a 15 MB "sample" was a candidate like any
+    other — and it passes a FLAC profile, because it really is FLAC.
+    """
+    plugin = TorrentDownloadPlugin()
+    tracks, _albums = plugin._project_results([
+        _make_torrent_result(title=title, size=size),
+    ])
+
+    assert bool(tracks) is projected
