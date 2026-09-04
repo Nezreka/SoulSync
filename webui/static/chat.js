@@ -28,7 +28,7 @@
                                  // state.msgs: that is the ROOM store and a
                                  // DM would read the room's leftovers.
         started: false,
-        ssOnly: false,           // room filter: show only SoulSync-app messages
+        ssOnly: false,           // room filter AND send format: see + speak SoulSync
         protocolLog: [],         // recent machine-coordination events (bounded)
         beaconed: {},            // rooms we've announced ourselves in this session
         isAdmin: false,          // shows the settings cog (from /status)
@@ -3340,8 +3340,8 @@
               'title="Movie night — nominate something, the room votes, owners watch together">🎬 Movie night</button>' +
               '<button class="chat-filter-btn' + (state.ssOnly ? ' chat-filter-btn--on' : '') +
               '" type="button" data-chat-filter title="' +
-              (state.ssOnly ? 'Showing SoulSync app messages only — click for everything'
-                            : 'Showing everything — click to hide other Soulseek clients') + '">' +
+              (state.ssOnly ? 'SoulSync only: hiding other Soulseek clients, and sending in SoulSync format'
+                            : 'All messages: showing every Soulseek client, and sending in plain text they can read') + '">' +
               (state.ssOnly ? 'SoulSync only' : 'All messages') + '</button>' +
               (state.isAdmin ? '<button class="chat-cog-btn" type="button" data-chat-settings-btn ' +
                   'title="Chat settings">⚙</button>' : '')
@@ -3377,6 +3377,9 @@
         var pollBtn = q('[data-chat-poll-btn]');
         if (pollBtn) pollBtn.hidden = !(state.view === 'room' && state.canSend);
         if (state.view !== 'room') { toggleEmojiPicker(true); toggleGifPicker(true); togglePollPop(true); }
+        // last, because plain mode overrides the placeholder and hides the
+        // rich controls this function just showed
+        _syncModeBtn();
     }
 
     // ── composer toolbar (room only) ─────────────────────────────────────────
@@ -4110,8 +4113,42 @@
     // hand, skipped the tags, and their messages folded into #general no matter
     // which channel they were sent from (kvkarlsson's uploads-in-the-wrong-
     // channel report).
+    // One control, not two. The room filter already says which world you are
+    // in: "SoulSync only" means you are talking to SoulSync clients, so the
+    // envelope earns its keep. "All messages" means you can SEE the vanilla
+    // Soulseek users in the room, and it would be a lie to look at them while
+    // sending something they cannot read.
+    //
+    // A PM is already plaintext, so this is a ROOM idea only.
+    function _plainOn() {
+        return state.view === 'room' && !state.ssOnly;
+    }
+
+    function _syncModeBtn() {
+        var hint = q('[data-chat-mode-hint]');
+        var on = _plainOn() && state.canSend;
+        if (hint) hint.hidden = !on;
+        if (!on) return;    // everything below is the exception, not the default
+
+        // none of these survive without an envelope. leaving them live would
+        // let someone attach a template the send is about to refuse.
+        var bar = q('[data-chat-toolbar]');
+        if (bar) bar.hidden = true;                 // markdown IS the envelope
+        ['[data-chat-gif-btn]', '[data-chat-poll-btn]', '[data-chat-attach-btn]'].forEach(function (sel) {
+            var el = q(sel);
+            if (el) el.hidden = true;
+        });
+        // renderComposer already set a placeholder; only the exception overrides it
+        var input = q('[data-chat-input]');
+        if (input) input.placeholder = 'Plain message — everyone in the room can read this…';
+    }
+
     function _tagRoomPayload(payload) {
         payload.room = state.room || '';
+        // plain text has no envelope, so there is nowhere to put an avatar, a
+        // channel tag or a thread id. attaching them anyway would make the
+        // server refuse a message the user had no way to know was tagged.
+        if (_plainOn()) { payload.plain = true; return payload; }
         if (_myAvatar()) payload.avatar = _myAvatar();
         if (_chanRoom()) {
             payload.chan = state.channel || CHAT_DEFAULT_CHANNEL;
@@ -4985,8 +5022,10 @@
                     username: 'you', message: text,
                     timestamp: new Date().toISOString(), self: true,
                     reply: sentReply || undefined,
-                    // room sends ride the envelope → render the echo rich too
-                    rich: state.view === 'room',
+                    // room sends ride the envelope → render the echo rich too.
+                    // a plain send does not, and claiming rich would paint it
+                    // as a SoulSync message the other clients will not see.
+                    rich: state.view === 'room' && !_plainOn(),
                 }]));
                 host.scrollTop = host.scrollHeight;
                 state.lastStamp = null;
@@ -5325,7 +5364,10 @@
                 try { localStorage.setItem('chat_ss_only', state.ssOnly ? '1' : '0'); } catch (err) { /* ignore */ }
                 state.lastStamp = null;
                 state.renderedCount = 0; hideJumpPill();   // a filter flip isn't 'new messages'
-                renderHead(); refresh();
+                // the filter also picks the SEND format, so a half-built rich
+                // message cannot survive the flip to plain
+                if (_plainOn()) { cancelReply(); cancelEdit(); toggleAttachPanel(true); }
+                renderHead(); renderComposer(); refresh();
                 return;
             }
             t = e.target.closest('[data-chat-browse-retry]');

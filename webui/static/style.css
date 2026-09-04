@@ -81089,6 +81089,21 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-card-challenge-btns { display: flex; gap: 6px; flex-wrap: wrap; }
 
 /* ── chat file sharing (filepost.dev, chat P2) ── */
+/* the plain-text hint. the room filter picks the send format too: "all
+   messages" means you can see the vanilla soulseek users, so you send
+   something they can read. only the exception needs explaining. */
+.chat-modehint {
+    margin: 8px 2px 0;
+    padding: 7px 10px;
+    border-radius: 8px;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.55);
+    background: rgba(250, 204, 21, 0.07);
+    border: 1px solid rgba(250, 204, 21, 0.18);
+}
+.chat-modehint b { color: rgb(253, 224, 71); font-weight: 700; }
+
 /* overlay share picker. rendered previews, not a list of names. an overlay is
    a visual thing, picking one by name is picking blind. */
 .chat-ovl-modal { max-width: 720px; width: 92vw; }

@@ -1054,6 +1054,21 @@ def create_blueprint() -> Blueprint:
                 if now - _INGEST_AT.get(room, 0) > 60:
                     _INGEST_AT[room] = now
                     db.add_chat_messages(room, live)
+                    # The WRITE is throttled with the messages; the read below
+                    # is not. Reactions are carriers, so the message archive
+                    # never held them and a reaction died with slskd's buffer.
+                    db.add_chat_reactions(room, reactions)
+                # Merged on EVERY hydrate, never on the 60s tick alone: this
+                # page polls every 4s, so folding stored reactions in only when
+                # the throttle opens would make old chips appear for one poll
+                # and vanish for the next fourteen.
+                for _k, _by in (db.get_chat_reactions(room) or {}).items():
+                    _live = reactions.setdefault(_k, {})
+                    for _e, _users in _by.items():
+                        _cur = _live.setdefault(_e, [])
+                        for _u in _users:
+                            if _u not in _cur:
+                                _cur.append(_u)
                 # Game carriers ride every hydrate rather than the 60s throttle:
                 # they are rare (usually none at all), the natural-key UNIQUE
                 # makes repeats free, and losing one loses a move.
@@ -1391,6 +1406,44 @@ def create_blueprint() -> Blueprint:
         # non-SoulSync users (and the ProveIt bots need literal plaintext).
         from core import chat_codec
         body = request.get_json(silent=True) or {}
+
+        # PLAIN mode. Everything in this room was enveloped unconditionally, so
+        # anyone talking to a vanilla Soulseek user was talking to themselves —
+        # the room LOOKED shared and was not. `plain` sends the raw text so
+        # every Soulseek client can read it.
+        #
+        # Nothing rich can ride along: there is no envelope to carry a reply
+        # ref, a template, a channel tag or an avatar. Those are REFUSED rather
+        # than quietly dropped — silently sending a bare sentence when someone
+        # attached a template is the same class of lie this mode exists to fix.
+        if body.get("plain") is True:
+            for field, label in (("overlay", "an overlay template"), ("file", "a file"),
+                                 ("reply", "a reply"), ("edit", "an edit")):
+                if body.get(field):
+                    return jsonify({"error": "Plain text can't carry %s — every Soulseek "
+                                             "client has to be able to read it. Switch back "
+                                             "to SoulSync format to send that." % label}), 400
+            chan = str(body.get("chan") or "").strip().lower()
+            if chan and chan != "general":
+                return jsonify({"error": "Plain text always goes to the main room — a "
+                                         "channel tag needs the SoulSync envelope."}), 400
+            if body.get("thread"):
+                return jsonify({"error": "Plain text can't go in a thread — threads need "
+                                         "the SoulSync envelope."}), 400
+            room = _resolve_room(body.get("room"))
+            if room is None:
+                return jsonify({"error": "Not in that room"}), 404
+            try:
+                if not _ensure_joined(client, room):
+                    return jsonify({"error": "Could not join room '%s'" % room}), 502
+                ok = _run_async(client.send_room_message(room, msg))
+            except Exception as e:
+                logger.exception("chat: plain room send failed")
+                return jsonify({"error": str(e)}), 502
+            if not ok:
+                return jsonify({"error": "slskd rejected the message"}), 502
+            return jsonify({"ok": True, "plain": True})
+
         extra = None
         rep = chat_codec.reply_of({"r": body.get("reply")})
         if rep:

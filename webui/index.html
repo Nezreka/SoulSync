@@ -7096,6 +7096,15 @@
                                         <button class="chat-send-fab" type="submit" title="Send">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
                                     </div>
+                                    <!-- says who can actually read what you are about to
+                                         send. shown only in plain mode: the default needs
+                                         no explaining, the exception does. -->
+                                    <div class="chat-modehint" data-chat-mode-hint hidden>
+                                        <b>Plain text.</b> You're showing all messages, so you're sending
+                                        in plain text — every Soulseek client in the room can read it.
+                                        No formatting, replies or attachments. Switch to
+                                        <b>SoulSync only</b> for those.
+                                    </div>
                                 </div>
                             </form>
                         </main>
