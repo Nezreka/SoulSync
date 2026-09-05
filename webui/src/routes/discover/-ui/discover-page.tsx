@@ -40,8 +40,8 @@ import {
   lbSyncTotalId,
 } from '../-discover.listenbrainz';
 import { beginPlayIntent, playMixNow, playTrackNow, type PlayIntent } from '../-discover.playable';
-import { profileKey, useProfileScope } from '../-discover.profile-scope';
 import { syncBubbleImage, toSyncTracks } from '../-discover.playlist-sync';
+import { profileKey, useProfileScope } from '../-discover.profile-scope';
 import { recSource, recommendedVisible } from '../-discover.recommended';
 import {
   fetchStations,
@@ -64,8 +64,8 @@ import { defaultLazySource, useMixModal } from '../-discover.use-mix-modal';
 import { useDiscoverMixes } from '../-discover.use-mixes';
 import { useDiscoverPage } from '../-discover.use-page';
 import { usePlaylistSync } from '../-discover.use-playlist-sync';
-import { useStationPreview } from '../-discover.use-station';
 import { useAdventurousness, useRecommended } from '../-discover.use-recommended';
+import { useStationPreview } from '../-discover.use-station';
 import { useYourAlbums } from '../-discover.use-your-albums';
 import { useYourArtists } from '../-discover.use-your-artists';
 import {
@@ -801,24 +801,11 @@ export function DiscoverPage() {
   // ── Stations: preview, then act on exactly what is checked ───────────────
   const [stationPlayingIndex, setStationPlayingIndex] = useState<number | null>(null);
 
-  const playStationRadio = useCallback(
-    (station: Station) => {
-      // The bridge now RESOLVES false when nothing started; the old wiring
-      // called it and assumed success because the call itself returned.
-      if (!window.startArtistRadioById) {
-        toast(STATION_NO_BRIDGE, 'error');
-        return;
-      }
-      void (async () => {
-        const started = await window.startArtistRadioById?.(
-          String(station.artist_id),
-          station.name,
-        );
-        if (started === false) toast(`Could not start ${station.name} radio`, 'error');
-      })();
-    },
-    [],
-  );
+  const playStationRadio = useCallback(async (station: Station) => {
+    if (!window.startArtistRadioById) throw new Error(STATION_NO_BRIDGE);
+    const started = await window.startArtistRadioById(String(station.artist_id), station.name);
+    if (started === false) throw new Error(`Could not start ${station.name} radio`);
+  }, []);
 
   const stationRows = useCallback(
     () => stationPreview.selection() as unknown as Record<string, unknown>[],
@@ -902,7 +889,8 @@ export function DiscoverPage() {
       tracks: toSyncTracks(rows),
     });
     if (out) toast(out.message, out.level);
-    else bar.add(stationVirtualId(snap), stationTitle(snap), key, syncBubbleImage(toSyncTracks(rows)));
+    else
+      bar.add(stationVirtualId(snap), stationTitle(snap), key, syncBubbleImage(toSyncTracks(rows)));
   }, [bar, stationPreview.snapshot, stationRows, sync]);
 
   const openDive = useCallback((genre: string) => {
@@ -1387,9 +1375,7 @@ export function DiscoverPage() {
             <StationsRow
               stations={stationsQuery.data ?? null}
               loading={stationsQuery.isPending}
-              error={
-                stationsQuery.isError ? 'Could not load your stations.' : null
-              }
+              error={stationsQuery.isError ? 'Could not load your stations.' : null}
               onRetry={() => void stationsQuery.refetch()}
               onView={stationPreview.open}
               onPlayRadio={playStationRadio}
@@ -1502,9 +1488,7 @@ export function DiscoverPage() {
           syncProgress={
             stationPreview.snapshot
               ? toRawProgress(
-                  sync.progressFor(
-                    stationSyncKey(stationPreview.snapshot).replace(/_/g, '-'),
-                  ),
+                  sync.progressFor(stationSyncKey(stationPreview.snapshot).replace(/_/g, '-')),
                 )
               : undefined
           }

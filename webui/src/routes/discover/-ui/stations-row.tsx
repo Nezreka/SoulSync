@@ -16,6 +16,8 @@
  * accident, and nothing is nested inside anything clickable.
  */
 
+import { useRef, useState } from 'react';
+
 import type { Station } from '../-discover.stations';
 
 import { stationSubtitle } from '../-discover.stations';
@@ -31,7 +33,7 @@ export interface StationsRowProps {
   error?: string | null;
   onRetry?: () => void;
   onView: (station: Station) => void;
-  onPlayRadio: (station: Station) => void;
+  onPlayRadio: (station: Station) => void | Promise<void>;
   /** The station whose preview or radio is still resolving. */
   pendingId?: string | null;
   /** Per-card failures, keyed by artist id. */
@@ -107,8 +109,25 @@ function StationCard({
   pending?: boolean;
   error?: string;
   onView: (station: Station) => void;
-  onPlayRadio: (station: Station) => void;
+  onPlayRadio: (station: Station) => void | Promise<void>;
 }) {
+  const startingRef = useRef(false);
+  const [starting, setStarting] = useState(false);
+  const [radioError, setRadioError] = useState<string | null>(null);
+  const startRadio = async () => {
+    if (startingRef.current) return;
+    startingRef.current = true;
+    setStarting(true);
+    setRadioError(null);
+    try {
+      await onPlayRadio(station);
+    } catch (err) {
+      setRadioError(err instanceof Error ? err.message : 'Could not start radio. Try again.');
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
+    }
+  };
   return (
     <div className="discover-station-card">
       <span className="discover-station-badge">RADIO</span>
@@ -137,15 +156,17 @@ function StationCard({
           type="button"
           className="btn btn--sm btn--primary"
           aria-label={`Play ${station.name} radio`}
-          onClick={() => onPlayRadio(station)}
+          disabled={starting}
+          aria-busy={starting || undefined}
+          onClick={() => void startRadio()}
         >
-          ▶ Play radio
+          {starting ? 'Starting...' : '▶ Play radio'}
         </button>
       </div>
       {/* failure reported next to the control that failed, not in a page toast */}
-      {error ? (
+      {radioError || error ? (
         <span className="discover-station-error" role="alert">
-          {error}
+          {radioError || error}
         </span>
       ) : null}
     </div>

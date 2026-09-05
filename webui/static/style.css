@@ -83645,3 +83645,9 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 .station-modal {
     max-width: 900px;
 }
+
+/* Discover previews stay compact; expansion is deliberate. */
+.bylt-section { max-width: 1120px; }
+.bylt-section .discover-section-header { gap: 16px; flex-wrap: wrap; }
+.bylt-section .bylt-track { padding: 6px 8px; }
+.bylt-expand { margin-top: 10px; }

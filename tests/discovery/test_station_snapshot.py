@@ -202,3 +202,17 @@ def test_a_snapshot_from_an_older_schema_is_rebuilt_not_served(db):
     fresh = build_station_snapshot(db, 1)
     assert fresh['schema'] == st.SNAPSHOT_SCHEMA
     assert fresh['revision'] == snap['revision'] + 1
+
+@pytest.mark.parametrize('raises', [False, True])
+def test_failed_selection_is_partial_and_retried(db, monkeypatch, raises):
+    def fail(*args, **kwargs):
+        if raises:
+            raise RuntimeError('temporary failure')
+        return {'success': False, 'error': 'temporary failure'}
+    monkeypatch.setattr(db, 'get_radio_tracks', fail)
+    snap = build_station_snapshot(db, 1)
+    assert snap['status'] == 'partial'
+    assert 'Refresh to retry' in snap['message']
+    assert not db.get_curated_playlist(snapshot_key(1), profile_id=1)
+    monkeypatch.setattr(db, 'get_radio_tracks', lambda *a, **k: {'success': True, 'tracks': []})
+    assert build_station_snapshot(db, 1)['status'] == 'ok'

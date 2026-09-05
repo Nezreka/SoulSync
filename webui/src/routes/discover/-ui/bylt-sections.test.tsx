@@ -263,3 +263,17 @@ describe('Because You Listen To', () => {
     expect(container.querySelectorAll('.bylt-section')[0]).not.toBe(first);
   });
 });
+
+it('keeps long shelves compact until explicitly expanded', () => {
+  const tracks = Array.from({ length: 10 }, (_, i) => ({
+    id: String(i),
+    name: `Track ${i}`,
+    artist: 'Artist',
+  }));
+  render(<ByltSections sections={[section({ tracks })]} />);
+  expect(screen.getAllByRole('listitem')).toHaveLength(4);
+  fireEvent.click(screen.getByRole('button', { name: 'View all 10 tracks' }));
+  expect(screen.getAllByRole('listitem')).toHaveLength(10);
+  fireEvent.click(screen.getByRole('button', { name: 'Show less' }));
+  expect(screen.getAllByRole('listitem')).toHaveLength(4);
+});

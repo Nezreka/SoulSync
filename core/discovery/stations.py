@@ -34,7 +34,8 @@ SNAPSHOT_LIMIT = 40
 # bump to invalidate stored snapshots whose SHAPE or content rules changed.
 # v2 = cover urls pass through normalize_image_url (a raw media-server thumb
 # path is not loadable from a browser, so every row rendered art-less)
-SNAPSHOT_SCHEMA = 2
+# v3 discards older snapshots that may have cached a failed radio selection.
+SNAPSHOT_SCHEMA = 3
 SNAPSHOT_ALGORITHM = "station-v1"
 
 
@@ -275,17 +276,20 @@ def build_station_snapshot(database, artist_id: Any, profile_id: int = 1,
 
     seed = dict(seed)
     rows = [_snapshot_row(seed)]
+    selection_failed = False
     try:
         radio = database.get_radio_tracks(seed["id"], limit=max(0, limit - 1))
         # a refusal is not an exception, and a preview that silently contains
         # only its seed track looks like a small library rather than a broken
         # selection. say which one it was.
         if not radio.get("success"):
+            selection_failed = True
             logger.warning("station radio selection refused for %s: %s",
                            artist["name"], radio.get("error"))
         for row in (radio.get("tracks") or []):
             rows.append(_snapshot_row(dict(row)))
     except Exception as e:  # noqa: BLE001 - a short preview beats no preview
+        selection_failed = True
         logger.debug("station radio selection failed: %s", e)
 
     from core.metadata import normalize_image_url
@@ -315,6 +319,10 @@ def build_station_snapshot(database, artist_id: Any, profile_id: int = 1,
         "reason": None,
         "message": None,
     }
+    if selection_failed:
+        snapshot.update(status="partial", reason="radio-selection-failed",
+                        message="Could not load the full station. Showing the tracks available so far. Refresh to retry.")
+        return snapshot  # Never persist a failed selection as a complete station.
     if len(snapshot["tracks"]) < limit:
         count = len(snapshot["tracks"])
         snapshot["message"] = (

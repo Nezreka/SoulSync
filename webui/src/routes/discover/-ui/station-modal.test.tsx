@@ -155,3 +155,14 @@ describe('StationModal', () => {
     expect(screen.getByText('Sync selected (1)')).toBeDisabled();
   });
 });
+
+it('shows available rows and a retry explanation for partial snapshots', () => {
+  renderModal({
+    snapshot: snapshot({
+      status: 'partial',
+      message: 'Could not load the full station. Refresh to retry.',
+    }),
+  });
+  expect(screen.getByText('Aerodynamic')).toBeInTheDocument();
+  expect(screen.getByText(/Could not load the full station/)).toBeInTheDocument();
+});

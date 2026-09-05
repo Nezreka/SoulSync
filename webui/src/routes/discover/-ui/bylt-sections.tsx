@@ -108,7 +108,9 @@ function ByltShelf({
   idx: number;
 } & Omit<ByltSectionsProps, 'sections' | 'statusNote' | 'historyNote'>) {
   const [headBroken, setHeadBroken] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const tracks = byltTracks(section);
+  const visibleTracks = expanded ? tracks : tracks.slice(0, 4);
   const seed = section.seed_key ?? String(idx);
   const missing = byltUnavailableNote(section);
   const reason = byltReasonLabel(section);
@@ -176,7 +178,7 @@ function ByltShelf({
         <p className="bylt-insufficient">Not enough to recommend from {section.artist_name} yet.</p>
       ) : (
         <ul className="bylt-track-list" id={byltCarouselId(idx)}>
-          {tracks.map((track, i) => (
+          {visibleTracks.map((track, i) => (
             <ByltTrackRow
               key={byltRow(track, i).key}
               track={track}
@@ -192,6 +194,17 @@ function ByltShelf({
           ))}
         </ul>
       )}
+      {tracks.length > 4 && !byltIsInsufficient(section) ? (
+        <button
+          type="button"
+          className="btn btn--sm btn--secondary bylt-expand"
+          aria-expanded={expanded}
+          aria-controls={byltCarouselId(idx)}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? 'Show less' : `View all ${tracks.length} tracks`}
+        </button>
+      ) : null}
     </section>
   );
 }

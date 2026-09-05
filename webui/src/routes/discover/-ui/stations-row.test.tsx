@@ -135,3 +135,23 @@ describe('fetchStations', () => {
     await expect(fetchStations()).rejects.toThrow();
   });
 });
+
+it('guards radio startup and makes a rejected start retryable', async () => {
+  let reject!: (error: Error) => void;
+  const play = vi.fn(
+    () =>
+      new Promise<void>((_resolve, fail) => {
+        reject = fail;
+      }),
+  );
+  renderRow({ onPlayRadio: play });
+  const button = screen.getByRole('button', { name: 'Play bbno$ radio' });
+  fireEvent.click(button);
+  fireEvent.click(button);
+  expect(play).toHaveBeenCalledTimes(1);
+  expect(button).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Play Kick Bong radio' })).not.toBeDisabled();
+  reject(new Error('Temporary playback failure'));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Temporary playback failure');
+  expect(button).not.toBeDisabled();
+});

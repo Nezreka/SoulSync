@@ -204,7 +204,7 @@ export function StationModal({
             <div className="discover-empty">
               <p>Building this station…</p>
             </div>
-          ) : snapshot && snapshot.status !== 'ok' ? (
+          ) : snapshot && snapshot.status !== 'ok' && snapshot.status !== 'partial' ? (
             <div className="discover-empty">
               <p>{snapshot.message || 'This station has nothing to preview.'}</p>
             </div>

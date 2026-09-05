@@ -534,3 +534,10 @@ artist/album counts, per-artist and per-album maxima, pairwise shelf overlap
 (0 recordings, Jaccard 0.0 where the audit measured 9 shared and ~0.82), the
 edge verdict tally including the ambiguous legacy edge that was correctly
 refused, and the station snapshot's counts, stability and action list.
+
+### Follow-up review fixes — 2026-09-05
+
+- BYLT now initially shows four tracks per shelf, with an accessible View all / Show less toggle. A 1120px maximum width keeps controls nearer the track details; bulk actions continue to address the whole shelf. This changes presentation only. Existing legacy selections still need the next watchlist curation to build a new BYLT generation.
+- Station radio-selection failures now return a partial preview with an explicit refresh instruction. Available rows remain visible/actionable; failed selections are not persisted as successful small libraries. Snapshot schema 3 invalidates older cached previews that could contain this failure. Exceptions and explicit backend refusals are covered.
+- Play radio now awaits its bridge through the card, disables repeat activation while starting, displays Starting text and shows retryable errors beside the card. The radio action still starts artist radio; Play selected still plays the finite preview selection.
+- Validation: targeted backend station tests passed (17); targeted frontend tests passed (53), including partial-result rendering, expansion and radio retries. No watchlist scan, acquisition or playback was started for this change. Browser visual verification remains outstanding.
