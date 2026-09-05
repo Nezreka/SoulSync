@@ -1,0 +1,321 @@
+{
+  "because-you-listen-to": {
+    "status": 200,
+    "data": {
+      "sections": [
+        {
+          "artist_image": "http://192.168.86.36:32400/library/metadata/196289/thumb/1787310866?X-Plex-Token=6qoU4-Gko1cWDKfbU1uP",
+          "artist_name": "Katy Perry",
+          "tracks": [
+            {
+              "album": "Baked",
+              "artist": "Halogen",
+              "duration_ms": 180000,
+              "id": "9884087",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/384d4279e0176d74426398a8a3f75d1c/1000x1000-000000-80-0-0.jpg",
+              "name": "German Piano",
+              "popularity": 0
+            },
+            {
+              "album": "Baked",
+              "artist": "Halogen",
+              "duration_ms": 283000,
+              "id": "9884086",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/384d4279e0176d74426398a8a3f75d1c/1000x1000-000000-80-0-0.jpg",
+              "name": "Etik",
+              "popularity": 0
+            },
+            {
+              "album": "If By Chance (slowed + reverb)",
+              "artist": "Ruth B.",
+              "duration_ms": 384000,
+              "id": "1614906382",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/acdef596526fb505a198562a750b0ae8/1000x1000-000000-80-0-0.jpg",
+              "name": "If By Chance (slowed + reverb)",
+              "popularity": 0
+            },
+            {
+              "album": "Nine One One (Poolside Remix)",
+              "artist": "Drama",
+              "duration_ms": 219000,
+              "id": "1069564912",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/94fd7b31711709ae9d9483b6ee768c1a/1000x1000-000000-80-0-0.jpg",
+              "name": "Nine One One (Poolside Remix)",
+              "popularity": 0
+            },
+            {
+              "album": "Baked",
+              "artist": "Halogen",
+              "duration_ms": 323000,
+              "id": "9884089",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/384d4279e0176d74426398a8a3f75d1c/1000x1000-000000-80-0-0.jpg",
+              "name": "String Theory",
+              "popularity": 0
+            },
+            {
+              "album": "Baked",
+              "artist": "Halogen",
+              "duration_ms": 167000,
+              "id": "9884085",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/384d4279e0176d74426398a8a3f75d1c/1000x1000-000000-80-0-0.jpg",
+              "name": "Baked",
+              "popularity": 0
+            },
+            {
+              "album": "Baked",
+              "artist": "Halogen",
+              "duration_ms": 288000,
+              "id": "9884090",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/384d4279e0176d74426398a8a3f75d1c/1000x1000-000000-80-0-0.jpg",
+              "name": "Pervelon",
+              "popularity": 0
+            },
+            {
+              "album": "Baked",
+              "artist": "Halogen",
+              "duration_ms": 235000,
+              "id": "9884084",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/384d4279e0176d74426398a8a3f75d1c/1000x1000-000000-80-0-0.jpg",
+              "name": "Aperture Apparel",
+              "popularity": 0
+            },
+            {
+              "album": "Baked",
+              "artist": "Halogen",
+              "duration_ms": 217000,
+              "id": "9884088",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/384d4279e0176d74426398a8a3f75d1c/1000x1000-000000-80-0-0.jpg",
+              "name": "Redux",
+              "popularity": 0
+            },
+            {
+              "album": "Baked",
+              "artist": "Halogen",
+              "duration_ms": 207000,
+              "id": "9884082",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/384d4279e0176d74426398a8a3f75d1c/1000x1000-000000-80-0-0.jpg",
+              "name": "Millicent",
+              "popularity": 0
+            }
+          ]
+        },
+        {
+          "artist_image": "/api/image-cache/8c3fa12c77a67edf3ec5926fa85f78f08397ddb16699e0d7ac78300d69410659",
+          "artist_name": "Ariana Grande",
+          "tracks": [
+            {
+              "album": "Baked",
+              "artist": "Halogen",
+              "duration_ms": 167000,
+              "id": "9884085",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/384d4279e0176d74426398a8a3f75d1c/1000x1000-000000-80-0-0.jpg",
+              "name": "Baked",
+              "popularity": 0
+            },
+            {
+              "album": "Baked",
+              "artist": "Halogen",
+              "duration_ms": 323000,
+              "id": "9884089",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/384d4279e0176d74426398a8a3f75d1c/1000x1000-000000-80-0-0.jpg",
+              "name": "String Theory",
+              "popularity": 0
+            },
+            {
+              "album": "Nine One One (Poolside Remix)",
+              "artist": "Drama",
+              "duration_ms": 219000,
+              "id": "1069564912",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/94fd7b31711709ae9d9483b6ee768c1a/1000x1000-000000-80-0-0.jpg",
+              "name": "Nine One One (Poolside Remix)",
+              "popularity": 0
+            },
+            {
+              "album": "Baked",
+              "artist": "Halogen",
+              "duration_ms": 288000,
+              "id": "9884090",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/384d4279e0176d74426398a8a3f75d1c/1000x1000-000000-80-0-0.jpg",
+              "name": "Pervelon",
+              "popularity": 0
+            },
+            {
+              "album": "Baked",
+              "artist": "Halogen",
+              "duration_ms": 283000,
+              "id": "9884086",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/384d4279e0176d74426398a8a3f75d1c/1000x1000-000000-80-0-0.jpg",
+              "name": "Etik",
+              "popularity": 0
+            },
+            {
+              "album": "Baked",
+              "artist": "Halogen",
+              "duration_ms": 217000,
+              "id": "9884088",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/384d4279e0176d74426398a8a3f75d1c/1000x1000-000000-80-0-0.jpg",
+              "name": "Redux",
+              "popularity": 0
+            },
+            {
+              "album": "Baked",
+              "artist": "Halogen",
+              "duration_ms": 259000,
+              "id": "9884083",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/384d4279e0176d74426398a8a3f75d1c/1000x1000-000000-80-0-0.jpg",
+              "name": "Ohmu",
+              "popularity": 0
+            },
+            {
+              "album": "Baked",
+              "artist": "Halogen",
+              "duration_ms": 235000,
+              "id": "9884084",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/384d4279e0176d74426398a8a3f75d1c/1000x1000-000000-80-0-0.jpg",
+              "name": "Aperture Apparel",
+              "popularity": 0
+            },
+            {
+              "album": "If By Chance (slowed + reverb)",
+              "artist": "Ruth B.",
+              "duration_ms": 384000,
+              "id": "1614906382",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/acdef596526fb505a198562a750b0ae8/1000x1000-000000-80-0-0.jpg",
+              "name": "If By Chance (slowed + reverb)",
+              "popularity": 0
+            },
+            {
+              "album": "Baked",
+              "artist": "Halogen",
+              "duration_ms": 180000,
+              "id": "9884087",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/384d4279e0176d74426398a8a3f75d1c/1000x1000-000000-80-0-0.jpg",
+              "name": "German Piano",
+              "popularity": 0
+            }
+          ]
+        },
+        {
+          "artist_image": "/api/image-cache/8c3fa12c77a67edf3ec5926fa85f78f08397ddb16699e0d7ac78300d69410659",
+          "artist_name": "Ariana Grande",
+          "tracks": [
+            {
+              "album": "Perfect Girl (EDM Remake)",
+              "artist": "Scorpixter",
+              "duration_ms": 188000,
+              "id": "2372357235",
+              "image_url": "https://cdn-images.dzcdn.net/images/cover/446f6969b447d50617d90c17e2ce7244/1000x1000-000000-80-0-0.jpg",
+              "name": "Perfect Girl (EDM Remake)",
+              "popularity": 0
+            }
+          ]
+        }
+      ],
+      "success": true
+    }
+  },
+  "stations": {
+    "status": 200,
+    "data": {
+      "stations": [
+        {
+          "artist_id": "155519",
+          "image_url": "http://192.168.86.36:32400/library/metadata/155519/thumb/1776179469?X-Plex-Token=6qoU4-Gko1cWDKfbU1uP",
+          "name": "Virtual Mage",
+          "with": [
+            "Blanku",
+            "Jezzy",
+            "NEZZOX"
+          ]
+        },
+        {
+          "artist_id": "196289",
+          "image_url": "http://192.168.86.36:32400/library/metadata/196289/thumb/1787310866?X-Plex-Token=6qoU4-Gko1cWDKfbU1uP",
+          "name": "Katy Perry",
+          "with": [
+            "Lady Gaga",
+            "Ke$ha",
+            "Kesha"
+          ]
+        },
+        {
+          "artist_id": "248327",
+          "image_url": "/api/image-cache/8c3fa12c77a67edf3ec5926fa85f78f08397ddb16699e0d7ac78300d69410659",
+          "name": "Ariana Grande",
+          "with": [
+            "Selena Gomez",
+            "Taylor Swift",
+            "Justin Bieber"
+          ]
+        },
+        {
+          "artist_id": "197354",
+          "image_url": "http://192.168.86.36:32400/library/metadata/197354/thumb/1785935317?X-Plex-Token=6qoU4-Gko1cWDKfbU1uP",
+          "name": "Bad Bunny",
+          "with": [
+            "J Balvin",
+            "Anuel AA",
+            "Ozuna"
+          ]
+        },
+        {
+          "artist_id": "514646",
+          "image_url": "/api/image-cache/9d612f4d7cff2f0dc981aca3211de0c1edd6bc493073ed1e3067f567a3d55d2b",
+          "name": "Uther Moads",
+          "with": []
+        },
+        {
+          "artist_id": "569986",
+          "image_url": "http://192.168.86.36:32400/library/metadata/569986/thumb/1787312004?X-Plex-Token=6qoU4-Gko1cWDKfbU1uP",
+          "name": "Kylie Cantrall",
+          "with": [
+            "Sofia Wylie",
+            "Meg Donnelly",
+            "High School Musical Cast"
+          ]
+        },
+        {
+          "artist_id": "183403",
+          "image_url": "http://192.168.86.36:32400/library/metadata/183403/thumb/1776172269?X-Plex-Token=6qoU4-Gko1cWDKfbU1uP",
+          "name": "Sabrina Carpenter",
+          "with": [
+            "Reneé Rapp",
+            "Dove Cameron",
+            "Sofia Carson"
+          ]
+        },
+        {
+          "artist_id": "157896",
+          "image_url": "http://192.168.86.36:32400/library/metadata/157896/thumb/1776142029?X-Plex-Token=6qoU4-Gko1cWDKfbU1uP",
+          "name": "Cinnamon Chasers",
+          "with": [
+            "Goddamn Electric Bill",
+            "A-Trak",
+            "Treasure Fingers"
+          ]
+        },
+        {
+          "artist_id": "330571",
+          "image_url": "/api/image-cache/ed8a1b0e7873b60c2baed0e21e5560825138252964f985c8c7974d49ca1de2f5",
+          "name": "bbno$",
+          "with": [
+            "Yung Gravy",
+            "Y2K",
+            "lentra"
+          ]
+        },
+        {
+          "artist_id": "181684",
+          "image_url": "/api/image-cache/60810365cfa856e2cbe3dc99d5499413f78249e08236e3e248a3e650d9a87b68",
+          "name": "KVPV",
+          "with": [
+            "LIUFO",
+            "Jvla",
+            "SICKKO BOY"
+          ]
+        }
+      ],
+      "success": true
+    }
+  }
+}

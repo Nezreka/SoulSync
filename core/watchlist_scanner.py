@@ -39,6 +39,48 @@ def _mark_personalized_kinds_stale(database, kinds, profile_id=1):
 
 logger = get_logger("watchlist_scanner")
 
+
+# the provider that owns each watchlist id column, most trusted first. the
+# internal row id is its OWN namespace and is named as such - it is not a
+# provider id and must never be compared against one.
+_WATCHLIST_IDENTITY_ORDER = (
+    ('spotify', 'spotify_artist_id'),
+    ('itunes', 'itunes_artist_id'),
+    ('deezer', 'deezer_artist_id'),
+    ('discogs', 'discogs_artist_id'),
+    ('musicbrainz', 'musicbrainz_artist_id'),
+)
+
+
+def _invalidate_discover_shelf_cache():
+    """Drop the discover shelf cache after curation stores new content.
+
+    the shelf responses are cached for 30 minutes in the web process. the
+    scanner runs in that same process, so a freshly stored generation would
+    otherwise sit behind a stale response for up to half an hour. guarded and
+    best-effort: no import cycle, and a missing web layer is not an error.
+    """
+    try:
+        from api.discover_routes import invalidate_discover_shelf_cache
+        invalidate_discover_shelf_cache()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("discover shelf cache invalidation skipped: %s", e)
+
+
+def watchlist_source_identity(artist):
+    """(id, provider) for a watchlist artist - never the id alone.
+
+    a bare deezer id and a bare itunes id are the same string, so an edge
+    stored without its provider cannot be matched back to one artist with
+    certainty. every similarity row now records which namespace its
+    source_artist_id came from, and the readers match the PAIR.
+    """
+    for provider, attr in _WATCHLIST_IDENTITY_ORDER:
+        value = getattr(artist, attr, None)
+        if value:
+            return str(value), provider
+    return str(getattr(artist, 'id', '')), 'watchlist_row'
+
 # Rate limiting constants for watchlist operations
 DELAY_BETWEEN_ARTISTS = 4.0      # 4 seconds between different artists (was 2s, increased to reduce Spotify rate limit risk)
 DELAY_BETWEEN_ALBUMS = 0.5       # 500ms between albums for same artist
@@ -1291,14 +1333,7 @@ class WatchlistScanner:
                 _emit('cancelled', processed=i, total=len(watchlist_artists))
                 break
 
-            source_artist_id = (
-                artist.spotify_artist_id
-                or artist.itunes_artist_id
-                or artist.deezer_artist_id
-                or artist.discogs_artist_id
-                or getattr(artist, 'musicbrainz_artist_id', None)
-                or str(artist.id)
-            )
+            source_artist_id, source_provider = watchlist_source_identity(artist)
 
             try:
                 discography_result = self.get_artist_discography_for_watchlist(artist, artist.last_scan_timestamp)
@@ -1328,6 +1363,8 @@ class WatchlistScanner:
                     source = discography_result.source
                     albums = discography_result.albums
                     source_artist_id = discography_result.artist_id
+                    # the id changed namespace with it - keep the pair honest
+                    source_provider = str(source or '').strip().lower() or source_provider
                     artist_image_url = discography_result.image_url or self.get_artist_image_url(artist) or ''
                     album_fetcher = lambda album_id, album_name='', source=source: self._get_album_data_for_source(source, album_id, album_name)
 
@@ -1519,7 +1556,9 @@ class WatchlistScanner:
                         self._backfill_similar_artists_fallback_ids(source_artist_id, profile_id=artist_profile_id)
                     else:
                         logger.info("Fetching similar artists for %s (profile %s)...", artist.artist_name, artist_profile_id)
-                        self.update_similar_artists(artist, profile_id=artist_profile_id, source_artist_id=source_artist_id)
+                        self.update_similar_artists(artist, profile_id=artist_profile_id,
+                                                    source_artist_id=source_artist_id,
+                                                    source_provider=source_provider)
                         logger.info("Similar artists updated for %s", artist.artist_name)
                 except Exception as similar_error:
                     logger.warning("Failed to update similar artists for %s: %s", artist.artist_name, similar_error)
@@ -2726,6 +2765,7 @@ class WatchlistScanner:
         limit: int = 10,
         profile_id: int = 1,
         source_artist_id: Optional[str] = None,
+        source_provider: Optional[str] = None,
     ) -> bool:
         """
         Fetch and store similar artists for a watchlist artist.
@@ -2745,14 +2785,11 @@ class WatchlistScanner:
             logger.info(f"Found {len(similar_artists)} similar artists for {watchlist_artist.artist_name}")
 
             # Use the ID that matched the scan source when available; otherwise fall back to any known ID.
-            source_artist_id = (
-                source_artist_id
-                or watchlist_artist.spotify_artist_id
-                or watchlist_artist.itunes_artist_id
-                or watchlist_artist.deezer_artist_id
-                or watchlist_artist.discogs_artist_id
-                or str(watchlist_artist.id)
-            )
+            # The PROVIDER rides along: an id with no namespace is unprovable,
+            # and the recommendation readers refuse to use unprovable edges.
+            if not source_artist_id:
+                source_artist_id, derived_provider = watchlist_source_identity(watchlist_artist)
+                source_provider = source_provider or derived_provider
 
             # Store each similar artist in database
             stored_count = 0
@@ -2771,6 +2808,7 @@ class WatchlistScanner:
                         popularity=similar_artist.get('popularity', 0),
                         similar_artist_deezer_id=similar_artist.get('deezer_id'),
                         similar_artist_musicbrainz_id=similar_artist.get('musicbrainz_id'),
+                        source_provider=source_provider,
                     )
 
                     if success:
@@ -4014,88 +4052,11 @@ class WatchlistScanner:
                 except Exception as e:  # noqa: BLE001
                     logger.debug("Archives stale-flag failed: %s", e)
 
-            # 3. "Because You Listen To" — personalized sections based on top played artists
+            # 3. "Because You Listen To" — one generation per profile, built and
+            # stored whole (core/discovery/bylt.py + bylt_store.py).
             if profile['has_data']:
-                logger.info("Building 'Because You Listen To' playlists...")
-                top_played = self.database.get_top_artists('30d', 3)
-                active_source_for_bylt = None
-                all_pool_tracks = []
-                for candidate_source in sources_to_process:
-                    all_pool_tracks = self.database.get_discovery_pool_tracks(
-                        limit=2000, new_releases_only=False,
-                        source=candidate_source, profile_id=profile_id
-                    )
-                    if all_pool_tracks:
-                        active_source_for_bylt = candidate_source
-                        break
-                if not active_source_for_bylt:
-                    logger.warning("No discovery pool tracks found for Because You Listen To")
-                    all_pool_tracks = []
-
-                # Build source_artist_id → artist_name mapping from watchlist
-                _wa_id_to_name = {}
-                try:
-                    _wa_list = self.database.get_watchlist_artists(profile_id=profile_id)
-                    for _wa in _wa_list:
-                        _wa_id_to_name[str(_wa.id)] = (_wa.artist_name or '').lower()
-                except Exception as e:
-                    logger.debug("watchlist artist id-to-name map failed: %s", e)
-
-                all_similar = self.database.get_top_similar_artists(limit=200, profile_id=profile_id)
-
-                for i, played_artist in enumerate(top_played):
-                    try:
-                        artist_name = played_artist['name']
-                        artist_lower = artist_name.lower()
-
-                        # Find similar artists to this played artist via the similar_artists table
-                        similar_names = set()
-                        for s in all_similar:
-                            # Check if this similar artist's source matches our played artist
-                            src_id = str(getattr(s, 'source_artist_id', ''))
-                            src_name = _wa_id_to_name.get(src_id, '')
-                            sim_name = getattr(s, 'similar_artist_name', '') or ''
-                            if src_name == artist_lower and sim_name:
-                                similar_names.add(sim_name.lower())
-
-                        if not similar_names:
-                            # Fallback: find pool tracks from same genre
-                            played_genres = _artist_genre_cache.get(artist_lower, set())
-                            if played_genres:
-                                for t in all_pool_tracks:
-                                    t_artist_lower = (t.artist_name or '').lower()
-                                    if t_artist_lower != artist_lower and _artist_genre_cache.get(t_artist_lower, set()) & played_genres:
-                                        similar_names.add(t_artist_lower)
-                                    if len(similar_names) >= 20:
-                                        break
-
-                        if not similar_names:
-                            continue
-
-                        # Pick tracks from those similar artists in the pool
-                        matching_tracks = []
-                        for t in all_pool_tracks:
-                            if (t.artist_name or '').lower() in similar_names:
-                                if active_source_for_bylt == 'spotify' and t.spotify_track_id:
-                                    matching_tracks.append(t.spotify_track_id)
-                                elif active_source_for_bylt == 'itunes' and t.itunes_track_id:
-                                    matching_tracks.append(t.itunes_track_id)
-                                elif active_source_for_bylt == 'deezer' and t.deezer_track_id:
-                                    matching_tracks.append(t.deezer_track_id)
-
-                            if len(matching_tracks) >= 15:
-                                break
-
-                        if matching_tracks:
-                            import random as _rnd
-                            _rnd.shuffle(matching_tracks)
-                            playlist_key = f'because_you_listen_to_{i}'
-                            self.database.save_curated_playlist(playlist_key, matching_tracks[:10], profile_id=profile_id)
-                            # Store the source artist name in metadata
-                            self.database.set_metadata(f'bylt_artist_{i}', artist_name)
-                            logger.info(f"'Because You Listen To {artist_name}': {len(matching_tracks[:10])} tracks")
-                    except Exception as e:
-                        logger.debug(f"Error building BYLT for {played_artist.get('name', '?')}: {e}")
+                self._build_because_you_listen_to(
+                    profile_id, sources_to_process, _artist_genre_cache)
 
                 # #913: listening-driven recommendations — consensus-ranked artists you'd love but
                 # don't own + candidate playlist tracks. Self-contained + double-guarded so it can
@@ -4122,6 +4083,149 @@ class WatchlistScanner:
             logger.error(f"Error curating discovery playlists: {e}")
             import traceback
             traceback.print_exc()
+
+    def _build_because_you_listen_to(self, profile_id, sources_to_process,
+                                     artist_genre_cache=None):
+        """Build and store ONE Because You Listen To generation for a profile.
+
+        the decisions all live in core/discovery/bylt.py (pure, tested); this
+        gathers the inputs and owns the transaction. three properties matter
+        and each replaces a specific defect:
+
+          - seeds resolve through the library catalogue as (provider, id)
+            pairs, so an artist you play but do not WATCH still finds its
+            similarity edges, and a deezer id never matches an itunes one;
+          - the whole generation is written in one store call, so a run that
+            fills two shelves cannot leave a third from three weeks ago
+            standing beside them;
+          - a failed run stores a failure marker and leaves the last good
+            generation in place, instead of replacing it with an empty
+            success that reads as "no recommendations".
+        """
+        from datetime import datetime as _dt
+        from uuid import uuid4
+
+        from core.discovery import bylt_store
+        from core.discovery.bylt import (
+            MAX_SHELVES,
+            allocate_shelves,
+            build_generation,
+            collect_candidates,
+            collect_identities,
+            genre_document_counts,
+            norm,
+            related_from_edges,
+            related_from_genres,
+            section_from_shelf,
+            seed_identities,
+            validate_generation,
+        )
+        from core.discovery.curated_full import full_row_from_pool_track
+
+        generation_id = uuid4().hex
+        started_at = _dt.now().isoformat(timespec='seconds')
+        try:
+            logger.info("Building 'Because You Listen To' generation %s...", generation_id[:8])
+
+            # seeds: recent listening first, lifetime when nothing is recent.
+            # profile_id is passed even though today's history is shared - the
+            # payload reports which scope it actually got.
+            top_played = self.database.get_top_artists('30d', MAX_SHELVES, profile_id=profile_id)
+            if not top_played:
+                top_played = self.database.get_top_artists('all', MAX_SHELVES, profile_id=profile_id)
+            seed_names = [t.get('name') for t in (top_played or []) if t.get('name')]
+
+            # the pool, from the first source that has one
+            active_source, pool = None, []
+            for candidate_source in sources_to_process:
+                pool = self.database.get_discovery_pool_tracks(
+                    limit=2000, new_releases_only=False,
+                    source=candidate_source, profile_id=profile_id)
+                if pool:
+                    active_source = candidate_source
+                    break
+            if not active_source:
+                logger.warning("No discovery pool tracks found for Because You Listen To")
+                active_source = (sources_to_process or ['spotify'])[0]
+                pool = []
+
+            # the pool grouped by artist, whole. the old builder walked this
+            # list in insertion order and stopped at the first 15 matches,
+            # which is why one album ingested that morning owned the shelf.
+            pool_by_artist = {}
+            for track in pool:
+                key = norm(getattr(track, 'artist_name', ''))
+                if not key:
+                    continue
+                row = full_row_from_pool_track(track)
+                row['source'] = row.get('source') or active_source
+                if not row.get('track_id'):
+                    continue
+                pool_by_artist.setdefault(key, []).append(row)
+
+            artist_rows = self.database.get_artist_identity_rows()
+            try:
+                watchlist_rows = self.database.get_watchlist_artists(profile_id=profile_id)
+            except Exception as e:  # noqa: BLE001 - the watchlist is additive here
+                logger.debug("watchlist identities unavailable: %s", e)
+                watchlist_rows = []
+            by_name, ownership = collect_identities(artist_rows, watchlist_rows)
+            thumb_by_name = {norm(r.get('name')): r.get('thumb_url')
+                             for r in artist_rows if r.get('name')}
+
+            seeds = seed_identities(seed_names, by_name)
+            edges = self.database.get_similar_artist_edges(
+                sorted({i for seed in seeds for i in seed.bare_ids}), profile_id=profile_id)
+
+            genre_by_artist = dict(artist_genre_cache or {})
+            doc_counts = genre_document_counts(genre_by_artist)
+            pool_artists = list(pool_by_artist.keys())
+
+            per_seed, edge_counts = [], {}
+            for seed in seeds:
+                related, counts = related_from_edges(seed, edges, ownership)
+                edge_counts[seed.key] = counts
+                # genre matches are APPENDED, never substituted: they score
+                # below every direct relationship, so they can only fill a
+                # shelf a real relationship could not.
+                related = related + related_from_genres(
+                    seed, genre_by_artist, pool_artists, doc_counts)
+                per_seed.append((seed, collect_candidates(seed, related, pool_by_artist)))
+
+            shelves = allocate_shelves(per_seed)
+            sections = []
+            for shelf in shelves:
+                shelf.diagnostics['edges'] = edge_counts.get(shelf.seed.key, {})
+                sections.append(section_from_shelf(
+                    shelf, seed_image=thumb_by_name.get(shelf.seed.norm_name)))
+
+            generation = build_generation(
+                sections, profile_id=profile_id, source=active_source,
+                generation_id=generation_id,
+                generated_at=_dt.now().isoformat(timespec='seconds'))
+            if not validate_generation(generation):
+                raise ValueError("built an invalid BYLT generation")
+
+            if not bylt_store.save_generation(self.database, generation,
+                                              profile_id=profile_id):
+                raise RuntimeError("failed to store BYLT generation")
+
+            bylt_store.clear_failure(self.database, profile_id=profile_id)
+            bylt_store.retire_legacy_slots(self.database, profile_id=profile_id)
+            for section in generation['sections']:
+                logger.info("'Because You Listen To %s': %s tracks, %s artists (%s)",
+                            section['seed_name'], len(section['tracks']),
+                            section['diagnostics'].get('distinct_artists'),
+                            section['reason'].get('kind'))
+            if not generation['sections']:
+                logger.info("Because You Listen To: no shelf had enough evidence; "
+                            "stored an explicit empty generation")
+            _invalidate_discover_shelf_cache()
+
+        except Exception as e:  # noqa: BLE001 - a failed run must not curate over a good one
+            logger.error("Because You Listen To generation failed: %s", e)
+            bylt_store.save_failure(self.database, profile_id, str(e),
+                                    started_at, generation_id)
 
     def _build_listening_recommendations(self, profile_id, sources_to_process):
         """#913: consensus-ranked artists you'd love but don't own, plus candidate playlist

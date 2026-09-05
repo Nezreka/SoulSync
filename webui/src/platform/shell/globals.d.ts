@@ -120,8 +120,16 @@ declare global {
      *  Must be given the id explicitly once React owns the page. */
     playArtistRadio?: (artistId?: string | number, artistName?: string) => void;
     /** stats-automations.js — the parameterized radio core the Artist Web's
-     *  "Play radio" hands off to (survives the discover.js deletion). */
-    startArtistRadioById?: (artistId: string | number, artistName: string) => void | Promise<void>;
+     *  "Play radio" and the discover Stations row hand off to (survives the
+     *  discover.js deletion).
+     *
+     *  RESOLVES false when nothing could be played. It used to resolve
+     *  undefined either way, so a caller reported success for a station that
+     *  never started. */
+    startArtistRadioById?: (
+      artistId: string | number,
+      artistName: string,
+    ) => Promise<boolean | void> | boolean | void;
     /** media-player.js — seedless Library Radio: queues a ranked-random batch
      *  from the whole library and arms radio mode for refills. */
     startLibraryRadio?: () => void | Promise<void>;
@@ -300,6 +308,9 @@ declare global {
       spotifyTracks: unknown[],
       artist?: unknown,
       album?: unknown,
+      /** Explicit "who made this playlist". Without it the modal sniffs the id
+       *  prefix and DEFAULTS to YouTube, which mislabels a SoulSync station. */
+      sourceLabel?: string | null,
     ) => void | Promise<void>;
     /** init.js:1465 — the My Accounts / personal settings modal. */
     openPersonalSettings?: () => void | Promise<void>;

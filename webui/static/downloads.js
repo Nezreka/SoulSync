@@ -426,7 +426,11 @@ async function _wingItFromModal(urlHash) {
     wingItDownload(tracks, name, source);
 }
 
-async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks, artist = null, album = null) {
+// `sourceLabel` is the explicit answer to "who made this playlist". the name of
+// this function is a fossil - it serves every virtual playlist on the page - and
+// the prefix sniffing below is a guess that DEFAULTS to YouTube. callers that know
+// (a SoulSync station, a generated mix) pass the label and stop the guessing.
+async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks, artist = null, album = null, sourceLabel = null) {
     showLoadingOverlay('Loading playlist...');
     // Check if a process is already active for this virtual playlist
     if (activeDownloadProcesses[virtualPlaylistId]) {
@@ -478,7 +482,8 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     };
 
     // Generate hero section with dynamic source detection
-    const source = /^(daily_mix_|release_radar|discovery_weekly|popular_picks|hidden_gems|listening_mix|discovery_shuffle)/.test(virtualPlaylistId) ? 'SoulSync' :
+    const source = sourceLabel ? sourceLabel :
+        /^(daily_mix_|release_radar|discovery_weekly|popular_picks|hidden_gems|listening_mix|discovery_shuffle|station_)/.test(virtualPlaylistId) ? 'SoulSync' :
         virtualPlaylistId.startsWith('beatport_') ? 'Beatport' :
         virtualPlaylistId.startsWith('tidal_') ? 'Tidal' :
             virtualPlaylistId.startsWith('listenbrainz_') ? 'ListenBrainz' :

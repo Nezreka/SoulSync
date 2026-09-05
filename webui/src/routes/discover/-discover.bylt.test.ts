@@ -1,87 +1,230 @@
 import { describe, expect, it } from 'vitest';
 
+import type { ByltPayload, ByltSection, ByltTrack } from './-discover.bylt';
+
 import {
+  byltCarouselId,
+  byltDuration,
+  byltGenerationId,
+  byltHasArtistImage,
+  byltIsCompact,
+  byltIsInsufficient,
+  byltIsLegacy,
+  byltReasonLabel,
+  byltRow,
+  byltSections,
+  byltShelfKey,
+  byltShelfRows,
+  byltShelfTitle,
+  byltShelfVirtualId,
+  byltStatusNote,
+  byltTrackToRow,
+  byltTracks,
+  byltUnavailableNote,
   BYLT_ANCHOR_ID,
   BYLT_CONTAINER_ID,
   BYLT_LOADING_MESSAGE,
   BYLT_RENDERS_EMPTY_STATE,
+  BYLT_STALE_MS,
   BYLT_SUBTITLE,
-  byltCarouselId,
-  byltHasArtistImage,
-  byltSections,
-  byltTrackCard,
-  byltTracks,
 } from './-discover.bylt';
 
-describe('the self-created container', () => {
-  it('creates its own container after the release-radar anchor', () => {
-    // index.html ships no placeholder for this section, so the loader inserts
-    // one — and bails entirely if the anchor is missing.
+/**
+ * The BYLT view model.
+ *
+ * The container/anchor constants are still here — index.html ships no
+ * placeholder for this section, and losing that dependency is easy in a
+ * declarative port. Everything else pins the payload the rebuilt endpoint now
+ * serves: identity per section and per track, a truthful reason, honest
+ * counts, and a freshness policy instead of `Infinity`.
+ */
+
+const track = (over: Partial<ByltTrack> = {}): ByltTrack => ({
+  id: '9884087',
+  name: 'Millicent',
+  artist: 'Halogen',
+  album: 'Baked',
+  image_url: '/img/baked.jpg',
+  duration_ms: 187000,
+  relation: 'direct',
+  relation_detail: 'Halogen',
+  ...over,
+});
+
+const section = (over: Partial<ByltSection> = {}): ByltSection => ({
+  seed_key: 'deezer:111',
+  artist_name: 'Katy Perry',
+  artist_image: '/img/katy.jpg',
+  reason: { kind: 'direct', label: 'Artists similar to Katy Perry' },
+  presentation: 'full',
+  requested: 1,
+  resolved: 1,
+  unavailable: 0,
+  tracks: [track()],
+  ...over,
+});
+
+describe('the section contract', () => {
+  it('keeps the anchor the vanilla loader depended on', () => {
     expect(BYLT_CONTAINER_ID).toBe('discover-bylt-sections');
     expect(BYLT_ANCHOR_ID).toBe('discover-release-radar');
-  });
-
-  it('opts OUT of the shared empty state', () => {
-    // With nothing to show the container stays blank rather than rendering a
-    // placeholder — the original no-op behaviour.
+    expect(BYLT_SUBTITLE).toBe('Because you listen to');
+    // one of the few sections that opts OUT of the shared empty state
     expect(BYLT_RENDERS_EMPTY_STATE).toBe(false);
     expect(BYLT_LOADING_MESSAGE).toBe('');
   });
 
-  it('keeps the subtitle verbatim', () => {
-    expect(BYLT_SUBTITLE).toBe('Because you listen to');
-  });
-});
-
-describe('reading the response', () => {
-  it('extracts sections, defaulting to empty', () => {
-    expect(byltSections({ sections: [{ artist_name: 'A' }] })).toHaveLength(1);
-    expect(byltSections({})).toEqual([]);
+  it('unwraps sections and tolerates a missing list', () => {
+    expect(byltSections({ sections: [section()] })).toHaveLength(1);
     expect(byltSections(null)).toEqual([]);
+    expect(byltSections({})).toEqual([]);
   });
 
-  it('omits the header image entirely when absent', () => {
-    expect(byltHasArtistImage({ artist_image: '/a.jpg' })).toBe(true);
-    expect(byltHasArtistImage({})).toBe(false);
+  it('guards a section with no tracks array, costing only that shelf', () => {
+    expect(byltTracks(section({ tracks: undefined }))).toEqual([]);
+    expect(byltTracks(section())).toHaveLength(1);
   });
 
-  it('ids each shelf grid by INDEX', () => {
+  it('omits the header image when absent', () => {
+    expect(byltHasArtistImage(section())).toBe(true);
+    expect(byltHasArtistImage(section({ artist_image: undefined }))).toBe(false);
+  });
+
+  it('keys a shelf by seed identity, not by position', () => {
+    expect(byltShelfKey(section(), 0)).toBe('deezer:111');
+    expect(byltShelfKey(section(), 2)).toBe('deezer:111');
+    // only a payload with no identity at all falls back to the index
+    expect(byltShelfKey({ artist_name: 'X' }, 1)).toBe('X:1');
+  });
+
+  it('still ids each grid by index (10377)', () => {
     expect(byltCarouselId(0)).toBe('bylt-carousel-0');
-    expect(byltCarouselId(3)).toBe('bylt-carousel-3');
   });
 });
 
-describe('the track card', () => {
-  it('reads `name` and `artist`, NOT track_name/artist_name', () => {
-    // Every other card renderer on this page uses name/artist_name. Sharing a
-    // card type across them would quietly blank this one's second line.
-    expect(byltTrackCard({ name: 'Xtal', artist: 'Aphex Twin' })).toMatchObject({
-      title: 'Xtal',
-      subtitle: 'Aphex Twin',
-    });
-    expect(byltTrackCard({ track_name: 'Xtal', artist_name: 'A' } as never)).toMatchObject({
-      title: '',
-      subtitle: '',
-    });
+describe('rows', () => {
+  it('reads name and artist — NOT the artist_name family', () => {
+    const row = byltRow(track(), 0);
+    expect(row.title).toBe('Millicent');
+    expect(row.artist).toBe('Halogen');
+    expect(row.album).toBe('Baked');
   });
 
-  it('shows the placeholder only without art', () => {
-    expect(byltTrackCard({ image_url: '/a.jpg' })).toMatchObject({
-      image: '/a.jpg',
-      showPlaceholder: false,
-    });
-    expect(byltTrackCard({})).toMatchObject({ image: null, showPlaceholder: true });
+  it('formats a duration and leaves an unknown one EMPTY', () => {
+    expect(byltDuration(187000)).toBe('3:07');
+    expect(byltDuration(0)).toBe('');
+    expect(byltDuration(undefined)).toBe('');
+    // the daily-mix bug: milliseconds must not be multiplied again
+    expect(byltDuration(367725)).toBe('6:07');
+  });
+
+  it('shows the placeholder only for artless rows', () => {
+    expect(byltRow(track(), 0).showPlaceholder).toBe(false);
+    expect(byltRow(track({ image_url: undefined }), 0).showPlaceholder).toBe(true);
+  });
+
+  it('states the relationship it actually has, and nothing when it has none', () => {
+    expect(byltRow(track(), 0).why).toBe('Similar artist: Halogen');
+    expect(byltRow(track({ relation: 'genre', relation_detail: 'shoegaze' }), 0).why).toBe(
+      'Shares shoegaze',
+    );
+    expect(byltRow(track({ relation: undefined, relation_detail: '' }), 0).why).toBe('');
+  });
+
+  it('reports whether a row can be acted on by identity', () => {
+    expect(byltRow(track(), 0).hasIdentity).toBe(true);
+    expect(byltRow(track({ id: undefined }), 0).hasIdentity).toBe(false);
+  });
+
+  it('labels an owned row owned rather than hiding it', () => {
+    expect(byltRow(track({ owned: true }), 0).owned).toBe(true);
   });
 });
 
-describe('a malformed section', () => {
-  it('costs ONE shelf, not every shelf after it', () => {
-    // section.tracks.map(...) at 10438 is unguarded, so a section without a
-    // tracks array throws inside onRendered and aborts the loop — every later
-    // shelf renders its wrapper with no cards.
-    expect(byltTracks({ tracks: [{ name: 'x' }] })).toHaveLength(1);
-    expect(byltTracks({})).toEqual([]);
-    expect(byltTracks({ tracks: null as never })).toEqual([]);
-    expect(byltTracks({ tracks: 'nope' as never })).toEqual([]);
+describe('honesty', () => {
+  it('uses the section reason and never invents one', () => {
+    expect(byltReasonLabel(section())).toBe('Artists similar to Katy Perry');
+    expect(byltReasonLabel(section({ reason: undefined }))).toBe('From your Katy Perry listening');
+    expect(byltReasonLabel({})).toBe('');
+  });
+
+  it('says what went missing instead of quietly rendering fewer rows', () => {
+    expect(byltUnavailableNote(section())).toBe('');
+    expect(byltUnavailableNote(section({ requested: 10, resolved: 3, unavailable: 7 }))).toBe(
+      '7 of 10 are no longer available',
+    );
+    expect(
+      byltUnavailableNote(
+        section({
+          requested: 10,
+          unavailable: 10,
+          unavailable_reasons: { 'source-unsupported': 10 },
+        }),
+      ),
+    ).toContain('metadata source');
+  });
+
+  it('separates a stale set from a failed one from an empty one', () => {
+    expect(byltStatusNote({ status: 'stale' })).toContain('last good set');
+    expect(byltStatusNote({ status: 'failed' })).toContain("Couldn't build");
+    expect(byltStatusNote({ status: 'ok' })).toBe('');
+    expect(byltStatusNote({ status: 'empty' })).toBe('');
+    expect(byltStatusNote(null)).toBe('');
+  });
+
+  it('marks pre-generation ordinal rows as legacy', () => {
+    expect(byltIsLegacy({ legacy: true })).toBe(true);
+    expect(byltIsLegacy({ legacy: false })).toBe(false);
+  });
+
+  it('treats anything under the bar as compact, and an empty shelf as insufficient', () => {
+    expect(byltIsCompact(section({ presentation: 'full' }))).toBe(false);
+    expect(byltIsCompact(section({ presentation: 'compact' }))).toBe(true);
+    expect(byltIsInsufficient(section({ tracks: [] }))).toBe(true);
+    expect(byltIsInsufficient(section({ presentation: 'insufficient' }))).toBe(true);
+    expect(byltIsInsufficient(section())).toBe(false);
+  });
+});
+
+describe('cache identity', () => {
+  it('exposes the generation so the client key follows the content', () => {
+    expect(byltGenerationId({ generation_id: 'g7' } as ByltPayload)).toBe('g7');
+    expect(byltGenerationId(null)).toBe('none');
+  });
+
+  it('has a finite freshness policy, not Infinity', () => {
+    expect(Number.isFinite(BYLT_STALE_MS)).toBe(true);
+    expect(BYLT_STALE_MS).toBeGreaterThan(0);
+  });
+});
+
+describe('action shapes', () => {
+  it('renames the fields the download and sync converters read', () => {
+    const row = byltTrackToRow(track());
+    expect(row.track_name).toBe('Millicent');
+    expect(row.artist_name).toBe('Halogen');
+    expect(row.album_name).toBe('Baked');
+    expect(row.album_cover_url).toBe('/img/baked.jpg');
+    expect(row.duration_ms).toBe(187000);
+    expect(row.id).toBe('9884087');
+  });
+
+  it('passes a rich track_data_json through untouched', () => {
+    const payload = { id: 'x', name: 'n', artists: [{ name: 'a' }] };
+    expect(byltTrackToRow(track({ track_data_json: payload })).track_data_json).toBe(payload);
+  });
+
+  it('gives a shelf a seed-scoped operation identity', () => {
+    expect(byltShelfVirtualId(section())).toBe('discover_bylt_deezer_111');
+    // two shelves can never collide, because the seed is in the key
+    expect(byltShelfVirtualId(section({ seed_key: 'deezer:222' }))).toBe(
+      'discover_bylt_deezer_222',
+    );
+    expect(byltShelfTitle(section())).toBe('Because you listen to Katy Perry');
+  });
+
+  it('converts a whole shelf at once', () => {
+    expect(byltShelfRows(section())).toHaveLength(1);
+    expect(byltShelfRows(section({ tracks: undefined }))).toEqual([]);
   });
 });

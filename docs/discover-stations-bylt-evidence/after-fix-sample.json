@@ -1,0 +1,155 @@
+{
+  "kind": "fixture-derived release-gate sample",
+  "note": "rebuilt from the audit\u2019s own captured pattern (a 12-track Halogen album, two seeds that are played but not watchlisted) and run through the new generator. this is NOT a reading of a live install.",
+  "generation": {
+    "generation_id": "7e0103e63cfe4b109d6316f2397593c5",
+    "algorithm": "bylt-v1",
+    "schema": 1,
+    "source": "deezer",
+    "profile_id": 1,
+    "status": "ok",
+    "history_scope": "shared",
+    "section_count": 2
+  },
+  "sections": [
+    {
+      "seed_key": "deezer:111",
+      "seed_name": "Katy Perry",
+      "presentation": "compact",
+      "reason": {
+        "kind": "direct",
+        "label": "Artists similar to Katy Perry",
+        "evidence": [
+          "Drama",
+          "Halogen",
+          "Ruth B."
+        ]
+      },
+      "requested": 3,
+      "resolved": 3,
+      "unavailable": 0,
+      "unavailable_reasons": {},
+      "distinct_artists": 3,
+      "distinct_albums": 3,
+      "max_tracks_per_artist": 1,
+      "max_tracks_per_album": 1,
+      "owned_shown": 0,
+      "edge_verdicts": {
+        "provider": 4,
+        "legacy-provable": 0,
+        "legacy-ambiguous": 1,
+        "no-match": 3
+      },
+      "diagnostics": {
+        "candidates": 12,
+        "owned": 12,
+        "after_caps": 3,
+        "backfilled": 0,
+        "overlap": 0,
+        "selected": 3,
+        "distinct_artists": 3,
+        "distinct_albums": 3
+      },
+      "track_ids": [
+        "d0",
+        "h0",
+        "r0"
+      ],
+      "artists": [
+        "Drama",
+        "Halogen",
+        "Ruth B."
+      ]
+    },
+    {
+      "seed_key": "deezer:222",
+      "seed_name": "Ariana Grande",
+      "presentation": "compact",
+      "reason": {
+        "kind": "direct",
+        "label": "Artists similar to Ariana Grande",
+        "evidence": [
+          "Halogen",
+          "Neon Bloom",
+          "Scorpixter"
+        ]
+      },
+      "requested": 3,
+      "resolved": 3,
+      "unavailable": 0,
+      "unavailable_reasons": {},
+      "distinct_artists": 3,
+      "distinct_albums": 3,
+      "max_tracks_per_artist": 1,
+      "max_tracks_per_album": 1,
+      "owned_shown": 0,
+      "edge_verdicts": {
+        "provider": 3,
+        "legacy-provable": 0,
+        "legacy-ambiguous": 0,
+        "no-match": 5
+      },
+      "diagnostics": {
+        "candidates": 14,
+        "owned": 8,
+        "after_caps": 2,
+        "backfilled": 1,
+        "overlap": 0,
+        "selected": 3,
+        "distinct_artists": 3,
+        "distinct_albums": 3
+      },
+      "track_ids": [
+        "h1",
+        "n0",
+        "s0"
+      ],
+      "artists": [
+        "Halogen",
+        "Neon Bloom",
+        "Scorpixter"
+      ]
+    }
+  ],
+  "pairwise_overlap": [
+    {
+      "a": "deezer:111",
+      "b": "deezer:222",
+      "shared_recordings": 0,
+      "jaccard": 0.0
+    }
+  ],
+  "stations": [
+    {
+      "name": "Halogen",
+      "with": [],
+      "related": [],
+      "playable_tracks": 6
+    }
+  ],
+  "station_snapshot": {
+    "snapshot_id": "3-r1",
+    "revision": 1,
+    "status": "ok",
+    "counts": {
+      "returned": 6,
+      "available": 6,
+      "unavailable": 0
+    },
+    "actions": [
+      "play",
+      "download",
+      "sync"
+    ],
+    "message": "6 tracks - that is everything your library has for this station.",
+    "stable_on_reread": true,
+    "refresh_cuts_a_new_revision": true,
+    "first_track": {
+      "track_name": "Halogen Owned 0",
+      "artist_name": "Halogen",
+      "duration_ms": 187000,
+      "available": true,
+      "owned": true
+    }
+  }
+}

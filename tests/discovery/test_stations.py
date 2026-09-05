@@ -50,7 +50,22 @@ def test_stations_are_owned_playable_artists_with_companions(db):
     # cache-proxied (/api/image-cache/<key>), media-server-relative ones
     # become loadable. either way: browser-safe, never raw and never empty.
     assert dp['image_url'].startswith(('/api/image-cache/', 'http://dp.jpg'))
-    assert dp['with'] == ['Justice', 'SebastiAn']
+
+
+def test_only_playable_companions_earn_a_with_credit(db):
+    """S03: "With X" claimed artists the library could not play.
+
+    Justice has playable tracks, so it can genuinely turn up in the queue.
+    SebastiAn is not in the library at all - naming it under "With" promised
+    something the radio tiers were never going to deliver.
+    """
+    dp = build_stations(db)[0]
+    assert dp['with'] == ['Justice']
+    assert dp['related'] == ['SebastiAn']
+
+
+def test_a_station_reports_how_much_it_can_play(db):
+    assert build_stations(db)[0]['playable_tracks'] == 5
 
 
 def test_empty_history_means_no_stations(tmp_path):

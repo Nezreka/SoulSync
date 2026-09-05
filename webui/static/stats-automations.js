@@ -6040,7 +6040,11 @@ async function playArtistRadio() {
 }
 
 // Parameterized core of the artist-detail Radio button — also driven by the Artist Web graph panel
-// ("Play radio" on an owned node), so both entry points share one implementation.
+// ("Play radio" on an owned node) and the discover Stations row, so every entry point shares one
+// implementation.
+//
+// RETURNS true only when playback actually started. it used to return undefined either way, so a
+// caller could not tell "playing" from "there was nothing to play" and reported success for both.
 async function startArtistRadioById(artistId, artistName) {
     try {
         // Get tracks from this artist's library
@@ -6061,7 +6065,7 @@ async function startArtistRadioById(artistId, artistName) {
 
         if (!allTracks.length) {
             showToast('No playable tracks found for this artist', 'error');
-            return;
+            return false;
         }
 
         // Pick a random track
@@ -6102,8 +6106,10 @@ async function startArtistRadioById(artistId, artistName) {
         }
 
         showToast(`Playing ${artistName} radio — similar tracks will auto-queue`, 'success');
+        return true;
     } catch (e) {
         showToast(`Failed to start artist radio: ${e.message}`, 'error');
+        return false;
     }
 }
 

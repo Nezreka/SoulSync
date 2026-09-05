@@ -57,8 +57,16 @@ function bodyFor(url: string): Record<string, unknown> {
       success: true,
       sections: [
         {
+          seed_key: 'deezer:900',
           artist_name: 'Purrple Cat',
-          tracks: [{ name: 'Moonwinds', artist: 'Purrple Cat', album: 'Moon Album' }],
+          presentation: 'compact',
+          reason: { kind: 'direct', label: 'Artists similar to Purrple Cat' },
+          requested: 1,
+          resolved: 1,
+          unavailable: 0,
+          tracks: [
+            { id: 'm1', name: 'Moonwinds', artist: 'Purrple Cat', album: 'Moon Album' },
+          ],
         },
       ],
     };
@@ -121,11 +129,14 @@ describe('discover route (live)', () => {
     expect(requested.some((u) => u.includes('/api/sync/status/'))).toBe(true);
   });
 
-  it('a BYLT tile resolves by ALBUM name, not track name', async () => {
+  it("a BYLT row's Album button resolves by ALBUM name, not track name", async () => {
+    // The shelf no longer has one ambiguous whole-card click: Album is its own
+    // labelled control, and it still has to carry the ALBUM's name.
     renderRoute();
     await screen.findByText('Hero Artist');
-    const tile = await screen.findByText('Moonwinds');
-    tile.closest('.ya-card')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await screen.findByText('Moonwinds');
+    const album = await screen.findByLabelText('Open the album Moon Album');
+    album.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     // The first wiring resolved an album named after the TRACK and every
     // click died with 'Failed to fetch album tracks'. The resolve request
     // must carry the album's name.

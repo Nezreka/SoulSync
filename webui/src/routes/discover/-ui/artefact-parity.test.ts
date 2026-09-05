@@ -86,6 +86,17 @@ const NEW_IDS = [
   // appear in the stylesheet.
   'adv-wave-label',
   'adv-wave-help',
+  // the station preview dialog (sep 5). the vanilla had no such surface at
+  // all - a station was one click that started endless radio - so every id
+  // here is new by construction. they mirror the mix modal's, which is
+  // deliberate: the poller and the selection bar read by id.
+  'station-modal-overlay',
+  'station-modal-selbar',
+  'station-modal-tracks',
+  'station-select-all',
+  'station-sel-count',
+  'station-dl-selected',
+  'station-sync-selected',
 ];
 
 /**
