@@ -335,3 +335,31 @@ These are the parts of the batch that cannot be closed from here:
 3. **Screen reader pass (§11.4).**
 4. **Does it look right.** The after-shots are in
    `webui/test-results/discover-batch1/`; the judgement is Boulder's.
+
+---
+
+## Follow-up — Daily Mix duration and download metadata (2026-09-05)
+
+- **Status:** complete for the reported data corruption; broader visual recomposition remains in its planned batches.
+- **Problem reproduced:** owned Daily Mix tracks showed durations such as `6128:45`; the selected-download dialog lost native `artists[]` values and attributed generated mixes to YouTube. The database's `tracks.duration` column is milliseconds, but `_owned_tracks_for` multiplied it by 1,000. The download converter rebuilt native rows using only pool-style `artist_name` and `album_name`, discarding the native arrays/objects.
+- **Behavior implemented:** preserve database milliseconds; preserve native artist arrays, album/artwork and track ID through selection conversion; accept bare title/artist fallback rows; label generated Made for You downloads as SoulSync. The same track's displayed duration and artist now agree across the mix and download dialog.
+- **Persisted data:** Daily Mix payload version increased from 2 to 3. `get_or_build_daily_mixes` rebuilds an old stored payload on the next request instead of serving corrupted durations until its TTL expires. No database duration values were rewritten and no duration-size heuristic was introduced.
+- **Files changed:** `core/personalized/daily_mixes.py`; `webui/src/routes/discover/-discover.helpers.ts`; `webui/static/downloads.js`; regression tests in `tests/personalized/test_daily_mixes.py`, `-discover.helpers.differential.test.ts`, and `-discover.selection-metadata.test.tsx`.
+- **Validation:** 317 tests across the five focused frontend suites passed; 19 backend tests across Daily Mix generation and playable resolution passed; changed TypeScript files passed lint/type checking with zero warnings/errors; production UI and shell build succeeded.
+- **Failure/edge cases:** old stored payload version rebuild; native object artists and string artists; conversion repeated without losing metadata; pool-shaped rows retain prior behavior; selected track order and milliseconds preserved. The regression fixture checks `367725 ms → 6:07`, not `6128:45`.
+- **Live UI verification:** opened Daily Mix 1, selected all 40 rows, opened the real download modal. Aether shows `Virtual Mage / 3:26`; Seagulls `A.L.I.S.O.N / 3:21`; Warp Drive `Tonebox / 6:43`; header `by SoulSync`. Inspected the settled screenshot. No download analysis, acquisition, or wishlist submission was started.
+- **Evidence:** [corrected dialog](discover-fixes-evidence/download-selection-desktop.jpg), [rendered metadata and playback measurements](discover-fixes-evidence/metadata-and-playback.json).
+- **Remaining limitations:** this fixes data integrity, not the dialog's broader visual redesign or keyboard/mobile redesign. Already-open dialogs hold their prior payload: refresh Discover and reopen the mix to pick up the regenerated data.
+
+### Playback measurement follow-up
+
+The six original review fixes were incorporated in `afcd91a6f`. A subsequent live measurement used the actual running application and an already-owned track:
+
+| Stage | Observed result |
+|---|---|
+| Resolve a 40-track Daily Mix | 5,529 ms; 32 matched |
+| First already-resolved local playback | `playing` event at 185 ms; bridge returned `played` at 298 ms |
+| Second local playback | `playing` event at 74 ms; bridge returned at 75 ms |
+| Third local playback | `playing` event at 79 ms; bridge returned at 80 ms |
+
+All three attempts had `paused: false` and `readyState: 4`. The audio element was muted for verification and stopped afterward. This verifies browser playback acknowledgment, **not physical audibility**. The 40-track resolution sample is still above the original desired local-action latency; do not describe the full click-to-listening path as under two seconds. The historical approximately 60-second report has not been comprehensively benchmarked across library sizes and missing-track acquisition. These measurements distinguish resolution from audio startup instead of treating a toast as audio onset.

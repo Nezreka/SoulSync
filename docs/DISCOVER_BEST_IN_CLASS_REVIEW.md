@@ -1065,3 +1065,9 @@ is not. `[ ]` not started.
 A person should feel that SoulSync knows enough to help, explains enough to be trusted, and asks for very little effort. The interface should make beautiful media the subject; its control system should recede until needed. The next action should be obvious, its consequence accurate, and its result persistent.
 
 The existing application has enough capability to justify that ambition. The work is to make that capability coherent. Finish the correctness and interaction foundations, then measure whether the redesigned pages help people find, enjoy, and collect media faster and with fewer mistakes. That is the standard this specification is intended to enforce.
+
+### Implementation follow-up: Daily Mix metadata, 2026-09-05
+
+The user reported corrupted durations and missing artists after opening a Made for You mix and using Download selected. This data-integrity defect is now fixed: library milliseconds are preserved, native artist/album metadata survives the download handoff, generated mixes identify SoulSync as their source, and version-2 stored Daily Mix payloads rebuild automatically. See the [implementation record](DISCOVER_BIC_PROGRESS.md#follow-up--daily-mix-duration-and-download-metadata-2026-09-05) for tests and live evidence.
+
+This closes that specific metadata defect; it does not mark the later music/video recomposition batches complete. A live 40-track resolution took 5.529 seconds, while three already-resolved local playback attempts reached the browser playing event in 74–185 ms. Keep preparation latency separate from playback acknowledgment in the remaining performance work.

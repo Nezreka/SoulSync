@@ -440,3 +440,28 @@ describe('_buildDiscoverArtistContext', () => {
     });
   }
 });
+
+describe('native Daily Mix metadata survives the download handoff', () => {
+  it.each([{ artists: [{ name: 'Bad Bunny' }] }, { artists: ['Bad Bunny'] }])(
+    'preserves artists, album artwork, identity and milliseconds',
+    ({ artists }) => {
+      const track = {
+        id: 'native-track',
+        name: 'BAILE INoLVIDABLE',
+        artists,
+        album: { name: 'DeBÍ TiRAR MáS FOToS', images: [{ url: '/cover.jpg' }] },
+        duration_ms: 367725,
+      };
+      const result = discoverTrackToSpotifyShape(track);
+      expect(result).toEqual({
+        id: 'native-track',
+        name: 'BAILE INoLVIDABLE',
+        artists: ['Bad Bunny'],
+        album: track.album,
+        duration_ms: 367725,
+      });
+      expect(discoverTrackToSpotifyShape(result)).toEqual(result);
+      expect(normalizeTrack(result)).toMatchObject({ artist: 'Bad Bunny', durationMs: 367725 });
+    },
+  );
+});

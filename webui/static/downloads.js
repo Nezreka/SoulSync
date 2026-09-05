@@ -427,7 +427,7 @@ async function _wingItFromModal(urlHash) {
 }
 
 async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks, artist = null, album = null) {
-    showLoadingOverlay('Loading YouTube playlist...');
+    showLoadingOverlay('Loading playlist...');
     // Check if a process is already active for this virtual playlist
     if (activeDownloadProcesses[virtualPlaylistId]) {
         console.log(`Modal for ${virtualPlaylistId} already exists. Showing it.`);
@@ -478,7 +478,8 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     };
 
     // Generate hero section with dynamic source detection
-    const source = virtualPlaylistId.startsWith('beatport_') ? 'Beatport' :
+    const source = /^(daily_mix_|release_radar|discovery_weekly|popular_picks|hidden_gems|listening_mix|discovery_shuffle)/.test(virtualPlaylistId) ? 'SoulSync' :
+        virtualPlaylistId.startsWith('beatport_') ? 'Beatport' :
         virtualPlaylistId.startsWith('tidal_') ? 'Tidal' :
             virtualPlaylistId.startsWith('listenbrainz_') ? 'ListenBrainz' :
                 virtualPlaylistId.startsWith('spotify_public_') ? 'Spotify' :
