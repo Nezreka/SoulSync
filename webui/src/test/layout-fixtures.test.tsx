@@ -42,7 +42,7 @@ describe('layout fixtures', () => {
             genres: ['modern classical', 'chamber'],
           } as never
         }
-        count={6}
+        count={10}
         index={0}
         watchlist={{ watching: false, label: 'Add to Watchlist' } as never}
         watchAllPhase={'idle' as never}

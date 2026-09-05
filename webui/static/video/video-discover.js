@@ -221,7 +221,7 @@
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
         }).then(function (r) { return r.ok ? r.json() : null; })
-          .then(function (d) { return (d && d.success !== false) ? d : null; })
+          .then(function (d) { return (d && d.success === true) ? d : null; })
           .catch(function () { return null; });
     }
     // Every tile for the same title, wherever it sits. Hiding only the one you
@@ -251,7 +251,18 @@
             '<button class="vdsc-undo-btn" type="button">Undo</button>';
         document.body.appendChild(bar);
         var done = function () { clearTimeout(_undoTimer); if (bar.parentNode) bar.remove(); };
-        bar.querySelector('.vdsc-undo-btn').addEventListener('click', function () { done(); onUndo(); });
+        bar.querySelector('.vdsc-undo-btn').addEventListener('click', function () {
+            var button = this;
+            if (button.disabled) return;
+            clearTimeout(_undoTimer);
+            button.disabled = true; button.textContent = 'Restoring…';
+            Promise.resolve(onUndo()).then(function (saved) {
+                if (saved) { done(); return; }
+                button.disabled = false; button.textContent = 'Retry Undo';
+                // Keep failed Undo available instead of expiring its recovery path.
+                button.focus();
+            });
+        });
         _undoTimer = setTimeout(function () { done(); onUndo.expire(); }, 9000);
         return done;
     }
@@ -285,11 +296,17 @@
                         return;
                     }
                     var undo = function () {
-                        cards.forEach(function (c) { c.classList.remove('vdsc-card-hiding'); });
-                        b.disabled = false;
-                        postIgnore({ action: 'remove', kind: kind, tmdb_id: id })
-                            .then(function (r) { if (!r) toast('Couldn\'t un-hide ' + title, 'error'); })
-                            .catch(function () { toast('Couldn\'t un-hide ' + title, 'error'); });
+                        return postIgnore({ action: 'remove', kind: kind, tmdb_id: id })
+                            .then(function (r) {
+                                if (!r) throw new Error('Undo not saved');
+                                cards.forEach(function (c) { c.classList.remove('vdsc-card-hiding'); });
+                                b.disabled = false;
+                                return true;
+                            })
+                            .catch(function () {
+                                toast('Couldn\'t un-hide ' + title + '. Try Undo again.', 'error');
+                                return false;
+                            });
                     };
                     // Nothing left to undo: drop the tiles for real.
                     undo.expire = function () { cards.forEach(function (c) { c.remove(); }); };
@@ -840,7 +857,8 @@
         var c = state.cat;
         if (c.busy) return;
         c.busy = true;
-        var pageToLoad = reset ? 1 : c.nextPage;
+        var pageToLoad = reset ? 1 : (c.failedPage || c.nextPage);
+        c.failedPage = pageToLoad; // Retry this exact page until an accepted response succeeds.
         var more = $('[data-vdsc-more]'); if (more && !reset) { more.disabled = true; more.textContent = 'Loading…'; }
         var ld = reset ? $('[data-vdsc-grid-loading]') : $('[data-vdsc-more-loading]');
         if (ld) ld.classList.remove('hidden');
@@ -863,7 +881,7 @@
                     if (grid) { grid.insertAdjacentHTML('beforeend', items.map(card).join('')); hydrateGet(grid); }
                 }
                 var empty = $('[data-vdsc-grid-empty]');
-                if (empty) empty.classList.toggle('hidden', failed || !(reset && !items.length));
+                if (empty) empty.classList.toggle('hidden', failed || !(pageToLoad === 1 && !items.length));
                 var err = $('[data-vdsc-grid-error]');
                 if (err) err.classList.toggle('hidden', !failed);
                 if (failed) {
@@ -876,6 +894,7 @@
                 // page it consumed up to (filtered fetches burn several TMDB pages
                 // per response). No more ≥18-items guessing — that stopped paging
                 // the moment filtering shrank a page.
+                c.failedPage = null;
                 c.hasMore = c.paginates && !!d.has_more;
                 c.nextPage = d.next_page || (pageToLoad + 1);
                 // Button is always the reliable control; the sentinel auto-loads on top.

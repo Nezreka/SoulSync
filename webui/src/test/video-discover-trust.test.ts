@@ -209,6 +209,26 @@ describe('the browse grid', () => {
     expect(h.state.cat.nextPage).toBe(2);
   });
 
+  it('Retry after a failed first page requests page one again', async () => {
+    const h = gridHarness();
+    openCat(h, 'genre=A');
+    h.loadGrid(true);
+    h.answer('/list?genre=A&page=1', null);
+    await Promise.resolve();
+    await Promise.resolve();
+    document.querySelector('[data-vdsc-more]')!.addEventListener('click', () => h.loadGrid(false));
+    (document.querySelector('[data-vdsc-more]') as HTMLButtonElement).click();
+    h.answer('/list?genre=A&page=1', {
+      items: [{ title: 'Recovered first page' }],
+      has_more: true,
+      next_page: 2,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(h.html()).toContain('Recovered first page');
+    expect(h.state.cat.nextPage).toBe(2);
+  });
+
   it('the error banner exists in the markup', () => {
     expect(HTML).toContain('data-vdsc-grid-error');
   });
@@ -216,7 +236,7 @@ describe('the browse grid', () => {
 
 // ── not interested ──────────────────────────────────────────────────────────
 
-function notIntHarness(saveResult: unknown) {
+function notIntHarness(saveResult: unknown, undoResult: unknown = { success: true }) {
   // Its own document. wireNotInterested binds a listener to `document` and
   // never lets go, so sharing jsdom's one document across tests leaves the
   // first test's handler running over the second test's cards.
@@ -238,7 +258,7 @@ function notIntHarness(saveResult: unknown) {
   const posts: Record<string, unknown>[] = [];
   const postIgnore = (payload: Record<string, unknown>) => {
     posts.push(payload);
-    return Promise.resolve(payload.action === 'add' ? saveResult : { success: true });
+    return Promise.resolve(payload.action === 'add' ? saveResult : undoResult);
   };
   const esc = (v: unknown) => String(v ?? '');
   const toasts: string[] = [];
@@ -322,7 +342,21 @@ describe('not interested', () => {
     await Promise.resolve();
     expect(h.visible('card-a')).toBe(true);
     expect(h.posts.map((p) => p.action)).toEqual(['add', 'remove']);
-    expect(h.doc.getElementById('vdsc-undo')).toBeNull();
+    await vi.waitFor(() => expect(h.doc.getElementById('vdsc-undo')).toBeNull());
+  });
+
+  it('failed Undo keeps every occurrence hidden and offers a retry', async () => {
+    const h = notIntHarness({ success: true }, null);
+    h.click('card-a');
+    await Promise.resolve();
+    await Promise.resolve();
+    const undo = h.doc.querySelector('.vdsc-undo-btn') as HTMLButtonElement;
+    undo.click();
+    await vi.waitFor(() => expect(undo.textContent).toBe('Retry Undo'));
+    expect(h.visible('card-a')).toBe(false);
+    expect(h.visible('card-b')).toBe(false);
+    expect(undo.disabled).toBe(false);
+    expect(h.toasts.join(' ')).toContain("Couldn't un-hide");
   });
 
   it('the cards only really go once the undo window has closed', async () => {

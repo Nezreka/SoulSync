@@ -77,3 +77,24 @@ def test_empty_and_nameless_input(db):
     }
     result = resolve_playable_tracks(db, [{'artist': '', 'title': 'X'}, {'title': ''}])
     assert result['matched'] == 0
+
+def test_mix_resolution_scans_candidate_titles_once(db):
+    class TracedDB:
+        def _get_connection(self):
+            conn = db._get_connection()
+            conn.set_trace_callback(statements.append)
+            return conn
+
+    statements = []
+    result = resolve_playable_tracks(TracedDB(), [
+        {'artist': 'Daft Punk', 'title': 'One More Time'},
+        {'artist': 'Justice', 'title': 'One More Time'},
+        {'artist': 'Daft Punk', 'title': 'Aerodynamic'},
+        {'artist': 'Daft Punk', 'title': 'Missing Song'},
+    ])
+    selects = [sql for sql in statements if 'FROM tracks t' in sql]
+    assert len(selects) == 1
+    assert result['matched'] == 3
+    assert [track['file_path'] for track in result['tracks']] == [
+        '/m/omt.flac', '/m/justice-omt.flac', '/m/aero.flac'
+    ]

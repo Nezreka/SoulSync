@@ -48,7 +48,7 @@ export async function resolveMixPlayable(tracks: unknown[]): Promise<PlayableRes
       matched?: number;
       total?: number;
     };
-    if (!data?.success) return null;
+    if (!response.ok || !data?.success) return null;
     return {
       rows: Array.isArray(data.tracks) ? data.tracks : [],
       queueRows: Array.isArray(data.queue_tracks)
@@ -71,7 +71,15 @@ export async function resolveMixPlayable(tracks: unknown[]): Promise<PlayableRes
  * which is a "not here" the user can't retry. the old code awaited nothing and
  * toasted "Playing all N tracks" whether or not a bridge existed.
  */
-export type PlayOutcome = 'played' | 'empty' | 'failed' | 'unsupported';
+export type PlayOutcome = 'played' | 'empty' | 'failed' | 'unsupported' | 'superseded';
+
+let latestIntent = 0;
+export function beginPlayIntent() {
+  const id = ++latestIntent;
+  window.cancelPendingPlayback?.();
+  return { isCurrent: () => id === latestIntent };
+}
+export type PlayIntent = ReturnType<typeof beginPlayIntent>;
 
 /** is the shared media player reachable from here at all? */
 export function playerBridgeAvailable(): boolean {
@@ -89,12 +97,15 @@ async function resolveAndPlay(
   tracks: unknown[],
   contextName: string,
   say: (res: PlayableResolution) => [string, 'success' | 'info'],
+  intent: PlayIntent,
 ): Promise<PlayOutcome> {
+  if (!intent.isCurrent()) return 'superseded';
   if (!playerBridgeAvailable()) {
     window.showToast?.('The player is not available on this page', 'error');
     return 'unsupported';
   }
   const res = await resolveMixPlayable(tracks);
+  if (!intent.isCurrent()) return 'superseded';
   if (res === null) {
     window.showToast?.('Could not check your library right now', 'error');
     return 'failed';
@@ -104,11 +115,20 @@ async function resolveAndPlay(
     return 'empty';
   }
   try {
-    // awaited. playTrackList resolves once the first queue item reaches the
-    // audio element, and a rejection means nothing is playing. the old
-    // fire-and-forget call couldn't tell the two apart.
-    await window.playTrackList?.(res.queueRows as never, contextName);
+    const result = await window.playTrackList?.(res.queueRows, contextName, intent);
+    if (!intent.isCurrent() || result?.status === 'superseded') return 'superseded';
+    if (result?.status === 'skipped') {
+      // The first track could not play and the queue moved on. That is not a
+      // failure, and the player has already said which track it skipped.
+      window.showToast?.('Skipped a track that would not play. Playing the next one.', 'info');
+      return 'played';
+    }
+    if (result?.status !== 'played') {
+      window.showToast?.('Playback could not start. Try again.', 'error');
+      return 'failed';
+    }
   } catch {
+    if (!intent.isCurrent()) return 'superseded';
     window.showToast?.('Playback could not start', 'error');
     return 'failed';
   }
@@ -121,13 +141,22 @@ async function resolveAndPlay(
  * resolve and play a whole mix. the shared behaviour behind every play button
  * on the page; the outcome tells the caller whether to close the modal.
  */
-export async function playMixNow(tracks: unknown[], contextName: string): Promise<PlayOutcome> {
-  return resolveAndPlay(tracks, contextName, (res) => {
-    const missing = Math.max(0, res.total - res.matched);
-    return res.matched === res.total
-      ? [`Playing all ${res.matched} tracks`, 'success']
-      : [`Queued ${res.total} tracks, ${missing} will download first`, 'success'];
-  });
+export async function playMixNow(
+  tracks: unknown[],
+  contextName: string,
+  intent = beginPlayIntent(),
+): Promise<PlayOutcome> {
+  return resolveAndPlay(
+    tracks,
+    contextName,
+    (res) => {
+      const missing = Math.max(0, res.total - res.matched);
+      return res.matched === res.total
+        ? [`Playing all ${res.matched} tracks`, 'success']
+        : [`Queued ${res.total} tracks, ${missing} will download first`, 'success'];
+    },
+    intent,
+  );
 }
 
 /**
@@ -137,10 +166,10 @@ export async function playMixNow(tracks: unknown[], contextName: string): Promis
  * through the same bridge, so it says Play, and a row we don't own says that
  * instead of pretending it started.
  */
-export async function playTrackNow(track: unknown, label: string): Promise<PlayOutcome> {
-  return resolveAndPlay([track], label, (res) =>
-    res.matched > 0
-      ? [`Playing ${label}`, 'success']
-      : [`${label} is not in your library yet, downloading it first`, 'info'],
-  );
+export async function playTrackNow(
+  track: unknown,
+  label: string,
+  intent = beginPlayIntent(),
+): Promise<PlayOutcome> {
+  return resolveAndPlay([track], label, () => [`Playing ${label}`, 'success'], intent);
 }

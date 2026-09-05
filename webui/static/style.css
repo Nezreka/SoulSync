@@ -36948,8 +36948,29 @@ div.artist-hero-badge {
 }
 .discover-hero-controls > * { pointer-events: auto; }
 
+.discover-playback-pending {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    border: 1px solid rgba(var(--accent-rgb), .4);
+    border-radius: 12px;
+    background: rgba(var(--accent-rgb), .1);
+    font-size: 14px;
+}
+.discover-playback-pending button { flex-shrink: 0; }
+@media (max-width: 600px) {
+    .discover-playback-pending { align-items: flex-start; flex-direction: column; }
+}
+
 .discover-hero-indicators {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 100%;
+    box-sizing: border-box;
     gap: 4px;
     padding: 4px 10px;
     background: rgba(0, 0, 0, 0.3);
@@ -36964,6 +36985,7 @@ div.artist-hero-badge {
 /* A small dot inside a finger-sized target, rather than a small button that a
    generic min-height stretches into a lozenge. */
 .hero-indicator {
+    flex: 0 0 36px;
     width: 36px;
     height: 36px;
     min-height: 36px;

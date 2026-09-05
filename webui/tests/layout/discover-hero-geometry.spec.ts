@@ -77,7 +77,11 @@ for (const [w, h] of [
   test(`hero controls never intersect at ${w}x${h}`, async ({ page }) => {
     await layout(page, w, h, markup());
     const found = await boxes(page);
-    expect(found.length).toBeGreaterThan(6);
+    expect(found.length).toBeGreaterThan(10);
+    for (const control of found) {
+      expect(control.x, `${control.sel} left boundary`).toBeGreaterThanOrEqual(0);
+      expect(control.x + control.w, `${control.sel} right boundary`).toBeLessThanOrEqual(w);
+    }
 
     const collisions: string[] = [];
     for (let i = 0; i < found.length; i++) {

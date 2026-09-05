@@ -26,7 +26,7 @@ import {
   lbSyncPercentageId,
   lbSyncTotalId,
 } from '../-discover.listenbrainz';
-import { playMixNow, playTrackNow } from '../-discover.playable';
+import { beginPlayIntent, playMixNow, playTrackNow, type PlayIntent } from '../-discover.playable';
 import { syncBubbleImage, toSyncTracks } from '../-discover.playlist-sync';
 import { recSource, recommendedVisible } from '../-discover.recommended';
 import { useAlbumOpen } from '../-discover.use-album-open';
@@ -363,6 +363,7 @@ export function DiscoverPage() {
 
   // which mix key / track row is resolving. two fast taps used to queue the
   // same thing twice, and nothing on screen said anything was happening.
+  const pendingPlay = useRef<{ owner: string; intent: PlayIntent } | null>(null);
   const [playingMixKey, setPlayingMixKey] = useState<string | null>(null);
   const [playingTrackIndex, setPlayingTrackIndex] = useState<number | null>(null);
 
@@ -372,18 +373,25 @@ export function DiscoverPage() {
       // Only the SAME mix is blocked while it resolves. Blocking every other
       // card too left them looking live and doing nothing, which on a slow
       // resolve is a dead control for a minute.
-      if (playingMixKey === key) return;
+      if (pendingPlay.current?.owner === `mix:${key}`) return;
+      const intent = beginPlayIntent();
+      pendingPlay.current = { owner: `mix:${key}`, intent };
+      setPlayingTrackIndex(null);
       setPlayingMixKey(key);
       void (async () => {
         try {
           const tracks = await modal.loadTracks(key);
+          if (!intent.isCurrent()) return;
           if (tracks === null) {
             toast('Could not load that mix', 'error');
             return;
           }
-          await playMixNow(tracks, registry[key]?.title ?? 'Mix');
+          await playMixNow(tracks, registry[key]?.title ?? 'Mix', intent);
         } finally {
-          setPlayingMixKey(null);
+          if (pendingPlay.current?.intent === intent) {
+            pendingPlay.current = null;
+            setPlayingMixKey(null);
+          }
         }
       })();
     },
@@ -393,19 +401,26 @@ export function DiscoverPage() {
   /** Play one row of the open mix. Resolved against the rendered list. */
   const playTrackFromModal = useCallback(
     (index: number) => {
-      if (playingTrackIndex !== null) return;
+      const owner = `track:${modal.mix?.key}:${index}`;
+      if (pendingPlay.current?.owner === owner) return;
       const rows = modal.tracks ?? [];
       const track = rows[index];
       if (!track) {
         toast('That track is no longer in this mix', 'error');
         return;
       }
+      const intent = beginPlayIntent();
+      pendingPlay.current = { owner, intent };
+      setPlayingMixKey(null);
       setPlayingTrackIndex(index);
       void (async () => {
         try {
-          await playTrackNow(track, normalizeTrack(track as never).name);
+          await playTrackNow(track, normalizeTrack(track as never).name, intent);
         } finally {
-          setPlayingTrackIndex(null);
+          if (pendingPlay.current?.intent === intent) {
+            pendingPlay.current = null;
+            setPlayingTrackIndex(null);
+          }
         }
       })();
     },
@@ -524,16 +539,9 @@ export function DiscoverPage() {
         // The busy state is not decoration: resolving 50 tracks against the
         // library takes a couple of seconds, and this button said nothing at
         // all for the whole wait.
-        if (playingMixKey === mix.key) return;
-        setPlayingMixKey(mix.key);
-        void (async () => {
-          try {
-            const outcome = await playMixNow(modal.tracks ?? [], mix.title);
-            if (outcome === 'played') modal.close();
-          } finally {
-            setPlayingMixKey(null);
-          }
-        })();
+        // Keep the tracklist open while listening. Completion must never close
+        // another dialog opened while the request was pending.
+        playMixFromCard(mix.key);
         return;
       }
       if (verb === 'lb-download') {
@@ -615,7 +623,7 @@ export function DiscoverPage() {
         // starts (1806) — a bubble at modal-open outlived a cancelled modal.
       }
     },
-    [modal, sync, bar, openTracksModal, playingMixKey],
+    [modal, sync, bar, openTracksModal, playMixFromCard],
   );
 
   const downloadSelection = useCallback(() => {
@@ -1064,6 +1072,25 @@ export function DiscoverPage() {
 
       {!vizOpen && (
         <div className="discover-container">
+          {(playingMixKey !== null || playingTrackIndex !== null) && (
+            <div className="discover-playback-pending" role="status">
+              <span>
+                Preparing {playingMixKey ? (registry[playingMixKey]?.title ?? 'mix') : 'track'}…
+                Checking your library and preparing audio.
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  beginPlayIntent();
+                  pendingPlay.current = null;
+                  setPlayingMixKey(null);
+                  setPlayingTrackIndex(null);
+                }}
+              >
+                Cancel playback
+              </button>
+            </div>
+          )}
           <div className="discover-command-grid">
             <div className="discover-command-hero">
               <DiscoverHero
