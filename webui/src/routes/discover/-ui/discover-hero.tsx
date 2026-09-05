@@ -233,41 +233,51 @@ export function DiscoverHero({
         </div>
       </div>
 
-      <div className="discover-hero-indicators" id="discover-hero-indicators">
-        {rotates &&
-          indicators.map((ind) => (
-            <button
-              type="button"
-              key={ind.index}
-              className={ind.active ? 'hero-indicator active' : 'hero-indicator'}
-              aria-label={ind.ariaLabel}
-              aria-current={ind.active ? 'true' : undefined}
-              onClick={() => onJump(ind.index)}
-            />
-          ))}
-      </div>
+      {/* One reserved row for both. They used to be two absolutely positioned
+          boxes sharing bottom: 24px, one centred and one right-aligned, so the
+          dots painted straight through the Watch All pill on anything narrow.
+          Now they are cells of the same flex row and cannot overlap. */}
+      <div className="discover-hero-controls">
+        <div className="discover-hero-indicators" id="discover-hero-indicators">
+          {rotates &&
+            indicators.map((ind) => (
+              <button
+                type="button"
+                key={ind.index}
+                className={ind.active ? 'hero-indicator active' : 'hero-indicator'}
+                aria-label={ind.ariaLabel}
+                aria-current={ind.active ? 'true' : undefined}
+                onClick={() => onJump(ind.index)}
+              >
+                <span className="hero-indicator-dot" aria-hidden="true" />
+              </button>
+            ))}
+        </div>
 
-      <div className="discover-hero-bottom-actions">
-        <button
-          type="button"
-          id="discover-hero-watch-all"
-          className={
-            watchAll.allWatched ? 'discover-hero-watch-all all-watched' : 'discover-hero-watch-all'
-          }
-          disabled={watchAll.disabled}
-          onClick={onWatchAll}
-        >
-          <span className="watch-all-icon">{HERO_WATCHLIST_ICON}</span>
-          <span className="watch-all-text">{watchAll.label}</span>
-        </button>
-        <button
-          type="button"
-          className="discover-hero-view-all"
-          id="discover-hero-view-all"
-          onClick={onViewRecommended}
-        >
-          View Recommended
-        </button>
+        <div className="discover-hero-bottom-actions">
+          <button
+            type="button"
+            id="discover-hero-watch-all"
+            className={
+              watchAll.allWatched
+                ? 'discover-hero-watch-all all-watched'
+                : 'discover-hero-watch-all'
+            }
+            disabled={watchAll.disabled}
+            onClick={onWatchAll}
+          >
+            <span className="watch-all-icon">{HERO_WATCHLIST_ICON}</span>
+            <span className="watch-all-text">{watchAll.label}</span>
+          </button>
+          <button
+            type="button"
+            className="discover-hero-view-all"
+            id="discover-hero-view-all"
+            onClick={onViewRecommended}
+          >
+            View Recommended
+          </button>
+        </div>
       </div>
     </div>
   );

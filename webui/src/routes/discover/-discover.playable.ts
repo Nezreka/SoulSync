@@ -65,13 +65,35 @@ export async function resolveMixPlayable(tracks: unknown[]): Promise<PlayableRes
 }
 
 /**
- * Resolve and play; the shared behavior behind every ▶ on the page.
- * Returns what happened so callers can toast/close appropriately.
+ * what actually happened when something asked for playback.
+ *
+ * 'unsupported' is not 'failed'. there is just no player bridge on this page,
+ * which is a "not here" the user can't retry. the old code awaited nothing and
+ * toasted "Playing all N tracks" whether or not a bridge existed.
  */
-export async function playMixNow(
+export type PlayOutcome = 'played' | 'empty' | 'failed' | 'unsupported';
+
+/** is the shared media player reachable from here at all? */
+export function playerBridgeAvailable(): boolean {
+  return typeof window.playTrackList === 'function';
+}
+
+/**
+ * resolve a tracklist against the library and hand it to the player, awaiting
+ * the handoff before claiming anything.
+ *
+ * the caller writes the toast from what the resolution actually said. nothing
+ * here reports a success it didn't see.
+ */
+async function resolveAndPlay(
   tracks: unknown[],
   contextName: string,
-): Promise<'played' | 'empty' | 'failed'> {
+  say: (res: PlayableResolution) => [string, 'success' | 'info'],
+): Promise<PlayOutcome> {
+  if (!playerBridgeAvailable()) {
+    window.showToast?.('The player is not available on this page', 'error');
+    return 'unsupported';
+  }
   const res = await resolveMixPlayable(tracks);
   if (res === null) {
     window.showToast?.('Could not check your library right now', 'error');
@@ -81,13 +103,44 @@ export async function playMixNow(
     window.showToast?.('This mix has no playable track metadata', 'info');
     return 'empty';
   }
-  void window.playTrackList?.(res.queueRows as never, contextName);
-  const missing = Math.max(0, res.total - res.matched);
-  window.showToast?.(
-    res.matched === res.total
-      ? `Playing all ${res.matched} tracks`
-      : `Queued ${res.total} tracks — preloading ${missing} missing`,
-    'success',
-  );
+  try {
+    // awaited. playTrackList resolves once the first queue item reaches the
+    // audio element, and a rejection means nothing is playing. the old
+    // fire-and-forget call couldn't tell the two apart.
+    await window.playTrackList?.(res.queueRows as never, contextName);
+  } catch {
+    window.showToast?.('Playback could not start', 'error');
+    return 'failed';
+  }
+  const [message, level] = say(res);
+  window.showToast?.(message, level);
   return 'played';
+}
+
+/**
+ * resolve and play a whole mix. the shared behaviour behind every play button
+ * on the page; the outcome tells the caller whether to close the modal.
+ */
+export async function playMixNow(tracks: unknown[], contextName: string): Promise<PlayOutcome> {
+  return resolveAndPlay(tracks, contextName, (res) => {
+    const missing = Math.max(0, res.total - res.matched);
+    return res.matched === res.total
+      ? [`Playing all ${res.matched} tracks`, 'success']
+      : [`Queued ${res.total} tracks, ${missing} will download first`, 'success'];
+  });
+}
+
+/**
+ * play ONE row out of an open mix.
+ *
+ * this row button used to say Preview and do nothing. it is full playback
+ * through the same bridge, so it says Play, and a row we don't own says that
+ * instead of pretending it started.
+ */
+export async function playTrackNow(track: unknown, label: string): Promise<PlayOutcome> {
+  return resolveAndPlay([track], label, (res) =>
+    res.matched > 0
+      ? [`Playing ${label}`, 'success']
+      : [`${label} is not in your library yet, downloading it first`, 'info'],
+  );
 }

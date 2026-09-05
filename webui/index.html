@@ -328,7 +328,8 @@
 
     <div class="main-container">
         <!-- Mobile Navigation -->
-        <button class="hamburger-btn" id="hamburger-btn" aria-label="Toggle navigation">
+        <button class="hamburger-btn" id="hamburger-btn" aria-label="Open navigation"
+                aria-expanded="false" aria-controls="app-sidebar">
             <span class="hamburger-line"></span>
             <span class="hamburger-line"></span>
             <span class="hamburger-line"></span>
@@ -336,7 +337,7 @@
         <div class="mobile-overlay" id="mobile-overlay"></div>
 
         <!-- Sidebar - Always Visible -->
-        <div class="sidebar">
+        <div class="sidebar" id="app-sidebar">
             <!-- Header Section -->
             <div class="sidebar-header">
                 <div class="sidebar-brand">
@@ -1500,6 +1501,13 @@
                                 <div class="vsr-state-ic">&#129300;</div>
                                 <div class="vsr-state-title">Nothing here</div>
                                 <div class="vsr-state-sub">Try a different genre, decade or sort.</div>
+                            </div>
+                            <!-- A failed request is not an empty result. This
+                                 used to show "Nothing here" for a 500. -->
+                            <div class="vsr-state hidden" data-vdsc-grid-error>
+                                <div class="vsr-state-ic">&#9888;&#65039;</div>
+                                <div class="vsr-state-title">Couldn't load these titles</div>
+                                <div class="vsr-state-sub">The metadata service didn't answer. Use Try again below.</div>
                             </div>
                             <div class="vdsc-sentinel" data-vdsc-sentinel aria-hidden="true"></div>
                             <div class="vsr-loading hidden" data-vdsc-more-loading><div class="loading-spinner"></div></div>

@@ -29,14 +29,13 @@ import { describe, expect, it } from 'vitest';
 const UI = resolve(process.cwd(), 'src/routes/discover/-ui');
 
 const HTML = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
-const JS =
-  readFileSync(
-    resolve(process.cwd(), 'src/routes/discover/__fixtures__/-vanilla-discover.js'),
-    'utf8',
-  );
-  // discover-section-controller.js was deleted outright in the aug 26 TS
-  // migration (dead code: its consumer, the vanilla discover page, is long
-  // gone) - the fixture below already carries the vanilla class vocabulary.
+const JS = readFileSync(
+  resolve(process.cwd(), 'src/routes/discover/__fixtures__/-vanilla-discover.js'),
+  'utf8',
+);
+// discover-section-controller.js was deleted outright in the aug 26 TS
+// migration (dead code: its consumer, the vanilla discover page, is long
+// gone) - the fixture below already carries the vanilla class vocabulary.
 const CSS = readdirSync(resolve(process.cwd(), 'static'))
   .filter((f) => f.endsWith('.css'))
   .map((f) => readFileSync(resolve(process.cwd(), 'static', f), 'utf8'))
@@ -82,6 +81,11 @@ const NEW_IDS = [
   'library-radio-section',
   // recommended stations row (aug 25)
   'recommended-stations-section',
+  // M05: the dial is a native range input now, and aria-labelledby /
+  // aria-describedby need ids to point at. Styled by class, so they never
+  // appear in the stylesheet.
+  'adv-wave-label',
+  'adv-wave-help',
 ];
 
 /**

@@ -78,17 +78,25 @@ describe('the mix card', () => {
     );
     const cover = container.querySelector('.mix-card-cover--solid')!;
     expect(container.querySelectorAll('.mix-card-tile')).toHaveLength(0);
-    // The section's own nodes are DIRECT children of the cover (4842) — a
-    // wrapper div would break child selectors and height:100% sizing.
-    expect(cover.children[0].tagName).toBe('SPAN');
-    expect(cover.children[0].textContent).toBe('1990s');
-    expect(cover.children[1]).toHaveClass('mix-card-play');
+    // The section's own nodes stay DIRECT children of the cover (4842). The
+    // wrapper is display:contents, so it doesn't lay out.
+    const inner = cover.querySelector('.mix-card-cover-inner')!;
+    expect(inner.children[0].tagName).toBe('SPAN');
+    expect(inner.children[0].textContent).toBe('1990s');
   });
 
   it('keeps a play affordance on both cover kinds', () => {
-    const { container, rerender } = render(<DiscoverMixCard mix={mix()} onOpen={vi.fn()} />);
+    const { container, rerender } = render(
+      <DiscoverMixCard mix={mix()} onOpen={vi.fn()} onPlay={vi.fn()} />,
+    );
     expect(container.querySelector('.mix-card-play')).not.toBeNull();
-    rerender(<DiscoverMixCard mix={mix({ coverHtml: '<span>x</span>' })} onOpen={vi.fn()} />);
+    rerender(
+      <DiscoverMixCard
+        mix={mix({ coverHtml: '<span>x</span>' })}
+        onOpen={vi.fn()}
+        onPlay={vi.fn()}
+      />,
+    );
     expect(container.querySelector('.mix-card-play')).not.toBeNull();
   });
 
@@ -97,9 +105,43 @@ describe('the mix card', () => {
     const { container } = render(<DiscoverMixCard mix={mix()} onOpen={onOpen} />);
     const card = container.querySelector('.discover-mix-card')!;
     expect(card).toHaveAttribute('data-mix-key', 'mix_a');
-    fireEvent.click(card);
+    fireEvent.click(container.querySelector('.mix-card-open')!);
     // The modal resolves the mix out of the shared registry, which is keyed.
     expect(onOpen).toHaveBeenCalledWith('mix_a');
+  });
+
+  // M04: the card was a div with an onClick, so a keyboard could not reach it
+  // at all, and the ▶ glyph was decoration that opened the same modal.
+  it('open and play are real buttons, and play does not open', () => {
+    const onOpen = vi.fn();
+    const onPlay = vi.fn();
+    const { container } = render(<DiscoverMixCard mix={mix()} onOpen={onOpen} onPlay={onPlay} />);
+    const open = container.querySelector('.mix-card-open')!;
+    const play = container.querySelector('.mix-card-play')!;
+    expect(open.tagName).toBe('BUTTON');
+    expect(play.tagName).toBe('BUTTON');
+    expect(play).toHaveAttribute('aria-label', 'Play Your Mix');
+    // Not nested: activating play must not also open the details.
+    expect(open.contains(play)).toBe(false);
+    fireEvent.click(play);
+    expect(onPlay).toHaveBeenCalledWith('mix_a');
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it('a resolving card disables its own play button', () => {
+    const onPlay = vi.fn();
+    const { container } = render(
+      <DiscoverMixCard mix={mix()} onOpen={vi.fn()} onPlay={onPlay} playing />,
+    );
+    const play = container.querySelector('.mix-card-play') as HTMLButtonElement;
+    expect(play.disabled).toBe(true);
+    fireEvent.click(play);
+    expect(onPlay).not.toHaveBeenCalled();
+  });
+
+  it('no play handler means no play button, not a dead one', () => {
+    const { container } = render(<DiscoverMixCard mix={mix()} onOpen={vi.fn()} />);
+    expect(container.querySelector('.mix-card-play')).toBeNull();
   });
 });
 

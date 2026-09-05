@@ -5,8 +5,6 @@ import type { WebLens } from '../-discover.artist-web';
 import type { CacheItem } from '../-discover.cache-sections';
 import type { DiscoverSectionId } from '../-discover.layout';
 import type { DiscoverMix, MixAction } from '../-discover.mixes';
-import { playMixNow } from '../-discover.playable';
-import { StationsRow } from './stations-row';
 import type { RecentAlbum } from '../-discover.recent-releases';
 import type { RecommendedArtist } from '../-discover.recommended';
 import type { SeasonData, SeasonalAlbum } from '../-discover.seasonal';
@@ -19,6 +17,7 @@ import { bpMetaStats } from '../-discover.build-playlist';
 import { byltSections, type ByltSection } from '../-discover.bylt';
 import { CACHE_SECTIONS } from '../-discover.cache-sections';
 import { decadeClassicsName, decadeTrackToSpotify } from '../-discover.decade-shelf';
+import { normalizeTrack } from '../-discover.helpers';
 import { discoverLimiter } from '../-discover.limiter';
 import {
   lbStatusBase,
@@ -27,6 +26,7 @@ import {
   lbSyncPercentageId,
   lbSyncTotalId,
 } from '../-discover.listenbrainz';
+import { playMixNow, playTrackNow } from '../-discover.playable';
 import { syncBubbleImage, toSyncTracks } from '../-discover.playlist-sync';
 import { recSource, recommendedVisible } from '../-discover.recommended';
 import { useAlbumOpen } from '../-discover.use-album-open';
@@ -68,6 +68,7 @@ import { LastfmRadioSection, ListenBrainzSection } from './radio-sections';
 import { RecommendedModal } from './recommended-modal';
 import { RecommendedShelf } from './recommended-shelf';
 import { YourAlbumsSourcesModal, YourArtistsSourcesModal } from './sources-modals';
+import { StationsRow } from './stations-row';
 import { YourAlbumsBatchModal } from './your-albums-batch-modal';
 import { YourAlbumsShelf } from './your-albums-shelf';
 import { YourArtistsModal } from './your-artists-modal';
@@ -360,6 +361,57 @@ export function DiscoverPage() {
   }, []);
   const modal = useMixModal(registry, lbLazy);
 
+  // which mix key / track row is resolving. two fast taps used to queue the
+  // same thing twice, and nothing on screen said anything was happening.
+  const [playingMixKey, setPlayingMixKey] = useState<string | null>(null);
+  const [playingTrackIndex, setPlayingTrackIndex] = useState<number | null>(null);
+
+  /** Play a mix straight from its card, fetching a lazy tracklist first. */
+  const playMixFromCard = useCallback(
+    (key: string) => {
+      // Only the SAME mix is blocked while it resolves. Blocking every other
+      // card too left them looking live and doing nothing, which on a slow
+      // resolve is a dead control for a minute.
+      if (playingMixKey === key) return;
+      setPlayingMixKey(key);
+      void (async () => {
+        try {
+          const tracks = await modal.loadTracks(key);
+          if (tracks === null) {
+            toast('Could not load that mix', 'error');
+            return;
+          }
+          await playMixNow(tracks, registry[key]?.title ?? 'Mix');
+        } finally {
+          setPlayingMixKey(null);
+        }
+      })();
+    },
+    [playingMixKey, modal, registry],
+  );
+
+  /** Play one row of the open mix. Resolved against the rendered list. */
+  const playTrackFromModal = useCallback(
+    (index: number) => {
+      if (playingTrackIndex !== null) return;
+      const rows = modal.tracks ?? [];
+      const track = rows[index];
+      if (!track) {
+        toast('That track is no longer in this mix', 'error');
+        return;
+      }
+      setPlayingTrackIndex(index);
+      void (async () => {
+        try {
+          await playTrackNow(track, normalizeTrack(track as never).name);
+        } finally {
+          setPlayingTrackIndex(null);
+        }
+      })();
+    },
+    [playingTrackIndex, modal.tracks],
+  );
+
   // The cover-mosaic hydration (_hydrateMixCovers, 4870): LB cards arrive
   // track-less, so each one background-fetches its playlist once and the card
   // re-renders with a real 4-tile mosaic and an honest track count.
@@ -468,9 +520,19 @@ export function DiscoverPage() {
         // rest stays a download away. LB/lastfm cards load tracks lazily -
         // with nothing loaded yet there is nothing resolvable, and
         // playMixNow's empty answer says so honestly.
+        //
+        // The busy state is not decoration: resolving 50 tracks against the
+        // library takes a couple of seconds, and this button said nothing at
+        // all for the whole wait.
+        if (playingMixKey === mix.key) return;
+        setPlayingMixKey(mix.key);
         void (async () => {
-          const outcome = await playMixNow(modal.tracks ?? [], mix.title);
-          if (outcome === 'played') modal.close();
+          try {
+            const outcome = await playMixNow(modal.tracks ?? [], mix.title);
+            if (outcome === 'played') modal.close();
+          } finally {
+            setPlayingMixKey(null);
+          }
         })();
         return;
       }
@@ -553,7 +615,7 @@ export function DiscoverPage() {
         // starts (1806) — a bubble at modal-open outlived a cancelled modal.
       }
     },
-    [modal, sync, bar, openTracksModal],
+    [modal, sync, bar, openTracksModal, playingMixKey],
   );
 
   const downloadSelection = useCallback(() => {
@@ -662,6 +724,8 @@ export function DiscoverPage() {
             loaded={true}
             gridId="your-mixes-grid"
             onOpenMix={modal.open}
+            onPlayMix={playMixFromCard}
+            playingKey={playingMixKey}
           />
         );
       case 'year-mixes-section':
@@ -674,6 +738,8 @@ export function DiscoverPage() {
             loaded={true}
             gridId="year-mixes-grid"
             onOpenMix={modal.open}
+            onPlayMix={playMixFromCard}
+            playingKey={playingMixKey}
           />
         );
       case 'adv-wave':
@@ -812,6 +878,8 @@ export function DiscoverPage() {
             onClear={lastfm.clear}
             onDismiss={lastfm.dismiss}
             onOpenMix={modal.open}
+            onPlayMix={playMixFromCard}
+            playingKey={playingMixKey}
           />
         );
       case 'listenbrainz':
@@ -831,6 +899,8 @@ export function DiscoverPage() {
             onRefresh={() => void lb.refresh()}
             onConnect={() => void window.openPersonalSettings?.()}
             onOpenMix={modal.open}
+            onPlayMix={playMixFromCard}
+            playingKey={playingMixKey}
           />
         );
       case 'build-a-playlist':
@@ -1092,8 +1162,8 @@ export function DiscoverPage() {
                 <div className="discover-library-radio-copy">
                   <div className="discover-library-radio-title">📻 Library Radio</div>
                   <div className="discover-library-radio-sub">
-                    Endless smart shuffle of your whole collection — play-count
-                    weighted, refills itself by similarity.
+                    Endless smart shuffle of your whole collection — play-count weighted, refills
+                    itself by similarity.
                   </div>
                 </div>
                 <button
@@ -1138,7 +1208,9 @@ export function DiscoverPage() {
           onSelectAll={modal.selectAll}
           onClearSelection={modal.clearSelection}
           onToggleTrack={modal.toggleTrack}
-          onPreviewTrack={() => {}}
+          onPlayTrack={playTrackFromModal}
+          playingIndex={playingTrackIndex}
+          playing={playingMixKey === modal.mix.key}
           onDownloadSelected={downloadSelection}
         />
       )}

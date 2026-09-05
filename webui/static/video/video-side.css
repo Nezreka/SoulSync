@@ -3443,7 +3443,7 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     background: linear-gradient(90deg, #0b0b10 6%, rgba(11, 11, 16, 0.72) 38%, rgba(11, 11, 16, 0.15) 70%, transparent),
         linear-gradient(0deg, #0b0b10 2%, transparent 42%),
         radial-gradient(120% 130% at 0% 100%, hsla(var(--vgm-h, 230), 80%, 50%, 0.34), transparent 58%); }
-.vdsc-hero-body { position: absolute; left: 40px; bottom: 34px; z-index: 2; max-width: 560px;
+.vdsc-hero-body { position: absolute; left: 40px; bottom: 52px; z-index: 2; max-width: 560px;
     animation: vdscRise 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
 @keyframes vdscRise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
 .vdsc-hero-eyebrow { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em;
@@ -3459,16 +3459,31 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     background: linear-gradient(135deg, hsl(var(--vgm-h, 230), 70%, 58%), hsl(var(--vgm-h, 230), 72%, 47%)) !important;
     box-shadow: 0 12px 32px hsla(var(--vgm-h, 230), 70%, 45%, 0.5) !important; }
 .vdsc-hero-cta:hover { transform: translateY(-2px); filter: brightness(1.07); }
-.vdsc-dots { position: absolute; right: 26px; bottom: 26px; z-index: 3; display: flex; gap: 8px; }
-.vdsc-dot { width: 9px; height: 9px; border-radius: 50%; border: none; cursor: pointer; padding: 0;
-    background: rgba(255, 255, 255, 0.32); transition: all 0.2s ease; }
-.vdsc-dot--on { background: hsl(var(--vgm-h, 230), 85%, 65%); width: 26px; border-radius: 5px;
-    position: relative; overflow: hidden; }
+/* Indicators live in their own reserved strip across the foot of the hero, not
+   in the same corner the CTAs occupy. On a phone the hero body is full width,
+   so a bottom-right dot cluster sat straight on top of the Trailer button. */
+.vdsc-dots { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+    display: flex; justify-content: flex-end; gap: 2px; padding: 0 18px 6px;
+    pointer-events: none; }
+/* A 9px dot inside a finger-sized button. The button itself carries no size of
+   its own beyond the target, so mobile.css's blanket button min-height can't
+   stretch it into a lozenge. */
+.vdsc-dot { position: relative; width: 40px; height: 40px; min-height: 40px; border: none; padding: 0;
+    background: none; cursor: pointer; pointer-events: auto;
+    display: flex; align-items: center; justify-content: center; }
+.vdsc-dot::before { content: ''; display: block; width: 9px; height: 9px; border-radius: 50%;
+    background: rgba(255, 255, 255, 0.32); transition: width 0.2s ease, background 0.2s ease, border-radius 0.2s ease; }
+.vdsc-dot:hover::before { background: rgba(255, 255, 255, 0.6); }
+.vdsc-dot--on::before { background: hsl(var(--vgm-h, 230), 85%, 65%); width: 26px; border-radius: 5px; }
 /* Rotation progress: the active dot fills over the slide interval (6.5s). */
-.vdsc-dot--on::after { content: ''; position: absolute; inset: 0; border-radius: 5px; transform-origin: left;
+.vdsc-dot--on::after { content: ''; position: absolute; left: calc(50% - 13px); top: calc(50% - 4.5px);
+    width: 26px; height: 9px; border-radius: 5px; transform-origin: left;
     background: rgba(255, 255, 255, 0.55); animation: vdscDotFill 6.5s linear forwards; }
 @keyframes vdscDotFill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .vdsc-hero:hover .vdsc-dot--on::after { animation-play-state: paused; }   /* hover pauses rotation */
+/* Keyboard focus in the hero pauses it too, so a focused control can't be
+   yanked out from under the user. */
+.vdsc-hero:focus-within .vdsc-dot--on::after { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) { .vdsc-dot--on::after { animation: none; } }
 /* The billboard wordmark (TMDB title logo) — sized like Netflix's, text-shadowed
    container so it pops off any backdrop. Falls back to .vdsc-hero-title text. */
@@ -3622,7 +3637,7 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 
 @media (max-width: 720px) {
     .vdsc-hero { height: 420px; }
-    .vdsc-hero-body { left: 22px; bottom: 22px; right: 22px; }
+    .vdsc-hero-body { left: 22px; bottom: 56px; right: 22px; }
     .vdsc-hero-title { font-size: 27px; }
     .vdsc-rail .vsr-card, .vdsc-skel-card { flex-basis: 132px; width: 132px; }
     .vsr-ranked .vsr-card { flex-basis: 120px; width: 120px; }
@@ -3883,6 +3898,31 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vdsc-tr-title { margin-top: 14px; text-align: center; font-size: 15px; font-weight: 700; color: rgba(255, 255, 255, 0.85); }
 @media (prefers-reduced-motion: reduce) { .vdsc-tr-frame { transition: none; } }
 
+/* A hidden-pending card. It stays in the DOM until the save is acknowledged
+   and the Undo window closes, so putting it back is exact. */
+.vdsc-card-hiding { display: none !important; }
+
+/* Undo bar for "Not interested". A toast can't hold a button, and hiding a
+   title has to be reversible. */
+.vdsc-undo {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    z-index: 9400; display: flex; align-items: center; gap: 14px;
+    max-width: min(460px, calc(100vw - 32px));
+    padding: 11px 12px 11px 18px; border-radius: 14px;
+    background: rgba(16, 17, 24, 0.96); border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 18px 46px rgba(0, 0, 0, 0.5); backdrop-filter: blur(12px);
+    color: rgba(255, 255, 255, 0.9); font-size: 13.5px; font-weight: 650;
+}
+.vdsc-undo-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vdsc-undo-btn {
+    flex: 0 0 auto; min-height: 34px; padding: 7px 15px; border-radius: 10px;
+    border: 1px solid rgba(var(--accent-rgb, 88 101 242), 0.5);
+    background: rgba(var(--accent-rgb, 88 101 242), 0.2);
+    color: #fff; font-size: 13px; font-weight: 800; cursor: pointer;
+}
+.vdsc-undo-btn:hover { background: rgba(var(--accent-rgb, 88 101 242), 0.34); }
+.vdsc-undo-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
 /* infinite-scroll sentinel (invisible trigger near the grid bottom) */
 .vdsc-sentinel { height: 1px; width: 100%; }
 
@@ -3906,12 +3946,12 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     .vdsc-grid-head { flex-wrap: wrap; gap: 10px; }
     .vdsc-grid-title { font-size: 18px; }
     .vdsc-hero { height: 300px; margin-bottom: 20px; }
-    .vdsc-hero-body { left: 18px; right: 18px; bottom: 18px; }
+    .vdsc-hero-body { left: 18px; right: 18px; bottom: 54px; }
     .vdsc-hero-title { font-size: 23px; }
     .vdsc-hero-ov { -webkit-line-clamp: 3; }
     .vdsc-hero-actions { gap: 9px; }
     .vdsc-hero-actions .discog-submit-btn, .vdsc-hero-trailer { flex: 1 1 auto; justify-content: center; }
-    .vdsc-dots { right: 16px; bottom: 16px; }
+    .vdsc-dots { padding: 0 10px 4px; justify-content: center; }
     /* keep the trailer close button on-screen (it sits above the frame on desktop) */
     .vdsc-tr-close { top: 6px; right: 6px; background: rgba(0, 0, 0, 0.65); }
 }

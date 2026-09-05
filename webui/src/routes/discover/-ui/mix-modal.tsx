@@ -1,3 +1,7 @@
+import { useId } from 'react';
+
+import { useAccessibleModal } from '@/components/dialog';
+
 import type { CompactRow, DiscoverMix, MixAction } from '../-discover.mixes';
 
 import {
@@ -34,7 +38,9 @@ export interface CompactPlaylistProps {
   selectable?: boolean;
   selected?: number[];
   onToggle?: (index: number) => void;
-  onPreview?: (index: number) => void;
+  onPlay?: (index: number) => void;
+  /** the row whose play is still resolving, so a second tap can't double it. */
+  playingIndex?: number | null;
 }
 
 export function CompactPlaylist({
@@ -42,7 +48,8 @@ export function CompactPlaylist({
   selectable = false,
   selected = [],
   onToggle,
-  onPreview,
+  onPlay,
+  playingIndex = null,
 }: CompactPlaylistProps) {
   const rows = compactRows(tracks, selectable);
   const chosen = new Set(selected);
@@ -54,7 +61,8 @@ export function CompactPlaylist({
           row={row}
           checked={chosen.has(row.index)}
           onToggle={onToggle}
-          onPreview={onPreview}
+          onPlay={onPlay}
+          busy={playingIndex === row.index}
         />
       ))}
     </div>
@@ -65,12 +73,14 @@ function CompactTrackRow({
   row,
   checked,
   onToggle,
-  onPreview,
+  onPlay,
+  busy,
 }: {
   row: CompactRow;
   checked: boolean;
   onToggle?: (index: number) => void;
-  onPreview?: (index: number) => void;
+  onPlay?: (index: number) => void;
+  busy?: boolean;
 }) {
   return (
     <div
@@ -103,13 +113,19 @@ function CompactTrackRow({
           <button
             type="button"
             className="track-compact-play"
-            title="Preview"
+            // it plays the whole track through the shared player, so it says
+            // Play. calling it Preview promised something we never built, and
+            // for months the handler was empty anyway.
+            title={`Play ${row.name}`}
+            aria-label={`Play ${row.name}`}
+            disabled={busy}
+            aria-busy={busy || undefined}
             onClick={(e) => {
               e.stopPropagation();
-              onPreview?.(row.index);
+              onPlay?.(row.index);
             }}
           >
-            ▶
+            {busy ? '…' : '▶'}
           </button>
         )}
       </div>
@@ -205,7 +221,11 @@ export interface MixModalProps {
   onSelectAll: (indices: number[]) => void;
   onClearSelection: () => void;
   onToggleTrack: (index: number) => void;
-  onPreviewTrack: (index: number) => void;
+  onPlayTrack: (index: number) => void;
+  /** the row whose play is still resolving. */
+  playingIndex?: number | null;
+  /** the mix's own Play action is resolving against the library. */
+  playing?: boolean;
   onDownloadSelected: () => void;
 }
 
@@ -223,43 +243,60 @@ export function MixModal({
   onSelectAll,
   onClearSelection,
   onToggleTrack,
-  onPreviewTrack,
+  onPlayTrack,
+  playingIndex = null,
+  playing = false,
   onDownloadSelected,
 }: MixModalProps) {
   const actions = mixActions(mix);
   const base = mixStatusBase(mix);
   const hasTracks = Boolean(tracks && tracks.length > 0);
+  const titleId = useId();
+  // escape, focus trap, initial focus, focus restore, scroll lock. none of it
+  // was here: escape did nothing and the thing was a plain div.
+  const { ref, onBackdropClick } = useAccessibleModal<HTMLDivElement>(onClose);
 
   return (
-    <div
-      className="modal-overlay"
-      id="mix-modal-overlay"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div className="mix-modal">
+    <div className="modal-overlay" id="mix-modal-overlay" onClick={onBackdropClick}>
+      <div
+        className="mix-modal"
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+      >
         <div className="mix-modal-header">
           <div>
             {/* The EYEBROW sits above the title, falling back to 'Mix' (4979). */}
             <div className="mix-modal-subtitle">{mix.subtitle || 'Mix'}</div>
-            <h2 className="mix-modal-title">{mix.title}</h2>
+            <h2 className="mix-modal-title" id={titleId}>
+              {mix.title}
+            </h2>
             {/* Empty, not '0 tracks', until a lazy mix has fetched (4981). */}
             <div className="mix-modal-meta">{tracks ? `${tracks.length} tracks` : ''}</div>
           </div>
           <div className="mix-modal-actions">
-            {actions.map((action) => (
-              <button
-                type="button"
-                key={action.label}
-                className={
-                  action.primary ? 'btn btn--sm btn--primary' : 'btn btn--sm btn--secondary'
-                }
-                // The live sync poller re-enables the button BY THIS ID (5035).
-                id={action.isSync && base ? `${base}-sync-btn` : undefined}
-                onClick={() => onAction(action)}
-              >
-                {action.label}
-              </button>
-            ))}
+            {actions.map((action) => {
+              // Resolving a 50-track mix against the library takes a couple of
+              // seconds and this button used to say nothing for all of it.
+              const busy = playing && action.onclick.startsWith('play');
+              return (
+                <button
+                  type="button"
+                  key={action.label}
+                  className={
+                    action.primary ? 'btn btn--sm btn--primary' : 'btn btn--sm btn--secondary'
+                  }
+                  // The live sync poller re-enables the button BY THIS ID (5035).
+                  id={action.isSync && base ? `${base}-sync-btn` : undefined}
+                  disabled={busy}
+                  aria-busy={busy || undefined}
+                  onClick={() => onAction(action)}
+                >
+                  {busy ? 'Starting…' : action.label}
+                </button>
+              );
+            })}
             <button type="button" className="mix-modal-close" aria-label="Close" onClick={onClose}>
               ✕
             </button>
@@ -298,7 +335,8 @@ export function MixModal({
                 selectable
                 selected={selected}
                 onToggle={onToggleTrack}
-                onPreview={onPreviewTrack}
+                onPlay={onPlayTrack}
+                playingIndex={playingIndex}
               />
             )
           )}

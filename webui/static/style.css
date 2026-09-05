@@ -36556,6 +36556,10 @@ div.artist-hero-badge {
     overflow: hidden;
     margin-bottom: 40px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    /* Column, so the control strip at the foot is a real row the content sits
+       above rather than an absolute box parked on top of the CTAs. */
+    display: flex;
+    flex-direction: column;
 }
 
 .discover-hero-background {
@@ -36596,11 +36600,12 @@ div.artist-hero-badge {
 
 .discover-hero-content {
     position: relative;
-    height: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
     display: flex;
     align-items: flex-end;
     justify-content: space-between;
-    padding: 48px 56px;
+    padding: 48px 56px 20px;
     gap: 40px;
 }
 
@@ -36924,53 +36929,90 @@ div.artist-hero-badge {
     right: 20px;
 }
 
-/* Hero Slideshow Indicators */
-.discover-hero-indicators {
-    position: absolute;
-    bottom: 24px;
-    left: 50%;
-    transform: translateX(-50%);
+/* Hero control row: the dots and the bulk actions share ONE reserved strip
+   across the foot of the billboard. They were two absolutely positioned boxes
+   both anchored at bottom: 24px, one centred and one right-aligned, which is
+   why the dots painted over the Watch All pill on narrow desktop and on every
+   phone. Nothing here overlaps because nothing here is absolute except the
+   row itself. */
+.discover-hero-controls {
+    position: relative;
     z-index: 10;
+    padding: 0 24px 18px;
     display: flex;
-    gap: 10px;
-    padding: 12px 20px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    pointer-events: none;   /* the strip is layout; only its controls take clicks */
+}
+.discover-hero-controls > * { pointer-events: auto; }
+
+.discover-hero-indicators {
+    display: flex;
+    gap: 4px;
+    padding: 4px 10px;
     background: rgba(0, 0, 0, 0.3);
     backdrop-filter: blur(10px);
-    border-radius: 20px;
+    border-radius: 24px;
     border: 1px solid rgba(255, 255, 255, 0.1);
 }
+.discover-hero-indicators:empty {
+    display: none;
+}
 
+/* A small dot inside a finger-sized target, rather than a small button that a
+   generic min-height stretches into a lozenge. */
 .hero-indicator {
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
+    border-radius: 50%;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.hero-indicator-dot {
+    display: block;
     width: 8px;
     height: 8px;
     border-radius: 50%;
     background: rgba(255, 255, 255, 0.4);
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    transition: all 0.3s ease;
+    transition: background 0.3s ease, width 0.3s ease, border-radius 0.3s ease;
 }
 
-.hero-indicator:hover {
+.hero-indicator:hover .hero-indicator-dot {
     background: rgba(255, 255, 255, 0.7);
-    transform: scale(1.2);
 }
 
-.hero-indicator.active {
+.hero-indicator:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.9);
+    outline-offset: -2px;
+}
+
+.hero-indicator.active .hero-indicator-dot {
     background: rgb(var(--accent-rgb));
-    width: 24px;
+    width: 22px;
     border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hero-indicator-dot { transition: none; }
 }
 
 /* Hero Bottom Action Buttons */
 .discover-hero-bottom-actions {
-    position: absolute;
-    bottom: 24px;
-    right: 24px;
-    z-index: 10;
     display: flex;
     gap: 8px;
     align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    margin-left: auto;
 }
 
 .discover-hero-watch-all,
@@ -37475,8 +37517,20 @@ div.artist-hero-badge {
 
     .discover-hero-content {
         flex-direction: column;
-        padding: 40px 20px;
+        padding: 40px 20px 14px;
         text-align: center;
+    }
+
+    /* On a phone the strip wraps; centre it rather than pushing the actions
+       hard right under a row of dots. */
+    .discover-hero-controls {
+        padding: 0 14px 14px;
+        justify-content: center;
+    }
+
+    .discover-hero-bottom-actions {
+        margin-left: 0;
+        justify-content: center;
     }
 
     .discover-hero-title {
@@ -37569,6 +37623,21 @@ div.artist-hero-badge {
     border-color: rgba(var(--accent-rgb), 0.25);
     box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 24px rgba(var(--accent-rgb), 0.12);
 }
+/* The discover album card is a <button> (it has one action), so undo the
+   button chrome the browser adds and keep the tile shape. */
+.ya-card.discover-album-card {
+    display: block;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    -webkit-appearance: none;
+    appearance: none;
+}
+.ya-card.discover-album-card:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.9);
+    outline-offset: 2px;
+}
 .ya-card-img { position: absolute; inset: 0; }
 .ya-card-img img { width: 100%; height: 100%; object-fit: cover; }
 .ya-card-placeholder {
@@ -37638,6 +37707,7 @@ div.artist-hero-badge {
 .discover-mixes-grid::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 3px; }
 .discover-mixes-grid::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-rgb), 0.45); }
 .discover-mix-card {
+    position: relative;
     background: rgba(255,255,255,0.03);
     border: 1px solid rgba(255,255,255,0.06);
     border-radius: 14px;
@@ -37645,6 +37715,36 @@ div.artist-hero-badge {
     cursor: pointer;
     transition: transform 0.3s cubic-bezier(0.4,0,0.2,1), border-color 0.3s, box-shadow 0.3s, background 0.3s;
 }
+/* The card's open target. It is a real button now, and its ::after stretches
+   over the whole card so the cover is still clickable, while the Play button
+   sits above it on z-index. Nothing is nested inside anything. */
+.mix-card-open {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.mix-card-open::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    z-index: 1;
+}
+.mix-card-open:focus-visible {
+    outline: none;
+}
+.mix-card-open:focus-visible::after {
+    outline: 2px solid rgba(var(--accent-rgb), 0.9);
+    outline-offset: 2px;
+}
+/* display:contents so the injected cover markup stays a direct flex child. */
+.mix-card-cover-inner { display: contents; }
 .discover-mix-card:hover {
     transform: translateY(-5px);
     background: rgba(255,255,255,0.06);
@@ -37671,25 +37771,44 @@ div.artist-hero-badge {
     position: absolute;
     bottom: 10px; right: 10px;
     width: 44px; height: 44px;
+    border: 0;
     border-radius: 50%;
     background: var(--accent);
     color: #000;
     display: flex; align-items: center; justify-content: center;
     font-size: 15px; padding-left: 2px;
     box-shadow: 0 6px 16px rgba(0,0,0,0.45);
-    opacity: 0; transform: translateY(8px);
+    cursor: pointer;
+    /* Visible at rest, not hover-only. A touch device has no hover, so the
+       only way to play a mix used to be opening the modal first. */
+    opacity: 0.82;
     transition: opacity 0.25s, transform 0.25s;
-    z-index: 2;
+    z-index: 3;
 }
-.discover-mix-card:hover .mix-card-play {
-    opacity: 1; transform: translateY(0);
+.discover-mix-card:hover .mix-card-play,
+.mix-card-play:hover,
+.mix-card-play:focus-visible {
+    opacity: 1;
+}
+.mix-card-play:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+.mix-card-play[disabled] {
+    cursor: progress;
+    opacity: 0.6;
+}
+@media (prefers-reduced-motion: reduce) {
+    .mix-card-play { transition: none; }
 }
 .mix-card-name {
+    display: block;
     font-size: 14px; font-weight: 700; color: #fff;
     margin-top: 12px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .mix-card-meta {
+    display: block;
     font-size: 12px; color: rgba(255,255,255,0.5);
     margin-top: 3px;
 }
@@ -37890,6 +38009,33 @@ div.artist-hero-badge {
     font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.35);
     position: relative; z-index: 2;
 }
+/* The real control: a native range input stretched over the wave. Invisible,
+   because the orb is the handle you see, but it owns keyboard, touch and the
+   screen-reader value. The old dial had none of that. */
+.adv-wave-input {
+    position: absolute; inset: 0; z-index: 4;
+    width: 100%; height: 100%; margin: 0; padding: 0;
+    opacity: 0; cursor: grab;
+    -webkit-appearance: none; appearance: none; background: transparent;
+    touch-action: none;
+}
+.adv-wave-input:active { cursor: grabbing; }
+.adv-wave-input::-webkit-slider-thumb { -webkit-appearance: none; width: 30px; height: 100%; }
+.adv-wave-input::-moz-range-thumb { width: 30px; height: 100px; border: 0; }
+/* Focus lands on an invisible input, so the visible ring goes on the card. */
+.adv-wave:focus-within {
+    border-color: rgba(var(--accent-rgb), 0.55);
+    box-shadow: 0 10px 34px rgba(0,0,0,0.30), 0 0 0 2px rgba(var(--accent-rgb), 0.6);
+}
+.adv-wave-help {
+    position: relative; z-index: 2;
+    margin: 8px 0 0; font-size: 11.5px; line-height: 1.45;
+    color: rgba(255,255,255,0.42);
+}
+@media (prefers-reduced-motion: reduce) {
+    .adv-wave-orb::after { animation: none; }
+    .adv-wave-state { transition: none; }
+}
 
 /* Watchlist toggle on recommended-artist .ya-cards — corner pill, appears on hover,
    stays lit when already watching. Keeps the .recommended-card-watchlist-btn hook. */
@@ -38078,7 +38224,7 @@ div.artist-hero-badge {
         linear-gradient(90deg, rgba(0, 0, 0, 0.58) 0%, rgba(0, 0, 0, 0.18) 52%, transparent 100%);
 }
 .discover-command-hero .discover-hero-content {
-    padding: 28px 34px;
+    padding: 28px 34px 14px;
     gap: 22px;
 }
 .discover-command-hero .discover-hero-label {
@@ -38695,7 +38841,7 @@ div.artist-hero-badge {
         grid-template-columns: 1fr;
     }
     .discover-command-hero .discover-hero-content {
-        padding: 26px;
+        padding: 26px 26px 12px;
     }
     .discover-command-hero .discover-hero-image {
         display: none;
@@ -38723,11 +38869,15 @@ div.artist-hero-badge {
         margin-bottom: 24px;
     }
     .discover-command-hero .discover-hero {
-        height: 318px;
+        /* min-height, not height. A fixed 318px clipped the hero's own
+           actions off the bottom the moment a title wrapped, and the hero has
+           overflow: hidden so they vanished rather than spilling. */
+        height: auto;
+        min-height: 318px;
         border-radius: 12px;
     }
     .discover-command-hero .discover-hero-content {
-        padding: 24px;
+        padding: 24px 24px 10px;
     }
     .discover-command-hero .discover-hero-title,
     .discover-command-hero .discover-hero--empty .discover-hero-title {

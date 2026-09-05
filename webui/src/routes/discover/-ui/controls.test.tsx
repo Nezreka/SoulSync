@@ -31,9 +31,11 @@ describe('the dial', () => {
       return frames.length;
     });
     vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
-    // jsdom leaves offsetParent null; the loop's visibility guard reads it.
-    vi.spyOn(HTMLElement.prototype, 'offsetParent', 'get').mockReturnValue(document.body);
   });
+
+  // stubGlobal is not undone by restoreMocks, and a leaked reduced-motion
+  // matchMedia silently kills the frame loop in every test after it.
+  afterEach(() => vi.unstubAllGlobals());
 
   const dial = (over: Partial<Parameters<typeof AdventurousnessDial>[0]> = {}) => ({
     value: 0.3,
@@ -102,14 +104,37 @@ describe('the dial', () => {
     expect(container.querySelector('#adv-wave-path')!.getAttribute('d')).not.toBe(before);
   });
 
-  it('computes NOTHING while the page is off screen', () => {
-    // The rAF keeps ticking; a background tab must not rebuild a 91-point path
-    // sixty times a second.
-    vi.spyOn(HTMLElement.prototype, 'offsetParent', 'get').mockReturnValue(null);
+  it('computes NOTHING while the wave is off screen', () => {
+    // offsetParent said "the page is displayed", which is not the same as
+    // "you can see it". An IntersectionObserver actually knows.
+    let notify: ((entries: { isIntersecting: boolean }[]) => void) | undefined;
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        constructor(cb: (entries: { isIntersecting: boolean }[]) => void) {
+          notify = cb;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
     const { container } = render(<AdventurousnessDial {...dial()} />);
     const before = container.querySelector('#adv-wave-path')!.getAttribute('d');
     act(() => frames.shift()!(0));
     expect(container.querySelector('#adv-wave-path')!.getAttribute('d')).toBe(before);
+    // Scrolled into view: it starts drawing again.
+    act(() => notify!([{ isIntersecting: true }]));
+    act(() => frames.shift()!(0));
+    expect(container.querySelector('#adv-wave-path')!.getAttribute('d')).not.toBe(before);
+  });
+
+  it('reduced motion means no frame loop at all', () => {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => ({ matches: true, addEventListener() {}, removeEventListener() {} })),
+    );
+    render(<AdventurousnessDial {...dial()} />);
+    expect(frames).toHaveLength(0);
   });
 
   it('cancels the loop on unmount', () => {
@@ -119,39 +144,63 @@ describe('the dial', () => {
     expect(cancel).toHaveBeenCalled();
   });
 
-  it('reports a value live while dragging and once on release', () => {
+  // M05. The dial used to be mousedown + window mousemove: no keyboard, no
+  // touch, no announced value, nothing a screen reader could operate.
+  it('is a native range control with an announced value', () => {
+    const { container } = render(<AdventurousnessDial {...dial({ value: 0.5 })} />);
+    const input = container.querySelector('.adv-wave-input') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    expect(input.type).toBe('range');
+    expect(input.min).toBe('0');
+    expect(input.max).toBe('1');
+    expect(input.value).toBe('0.5');
+    expect(input.getAttribute('aria-labelledby')).toBe('adv-wave-label');
+    // Not just a number: the band name is what the label on screen says.
+    expect(input.getAttribute('aria-valuetext')).toContain('Adventurous');
+  });
+
+  it('reports live on input and once the gesture settles', () => {
+    vi.useFakeTimers();
     const p = dial();
     const { container } = render(<AdventurousnessDial {...p} />);
-    const track = container.querySelector('#adv-wave-track')!;
-    vi.spyOn(track, 'getBoundingClientRect').mockReturnValue({
-      left: 0,
-      width: 200,
-    } as DOMRect);
+    const input = container.querySelector('.adv-wave-input') as HTMLInputElement;
 
-    fireEvent.mouseDown(track, { clientX: 100 });
-    expect(p.onChange).toHaveBeenLastCalledWith(0.5);
-
-    fireEvent.mouseMove(window, { clientX: 150 });
+    fireEvent.change(input, { target: { value: '0.75' } });
     expect(p.onChange).toHaveBeenLastCalledWith(0.75);
     expect(p.onCommit).not.toHaveBeenCalled();
 
-    fireEvent.mouseUp(window, { clientX: 150 });
+    act(() => void vi.advanceTimersByTime(400));
     expect(p.onCommit).toHaveBeenCalledWith(0.75);
+    vi.useRealTimers();
   });
 
-  it('ignores the pointer once the drag has ended', () => {
+  it('a held arrow key saves once, with the last value', () => {
+    // Otherwise every repeat fires its own save and an older response can land
+    // last, writing back a value the user already moved past.
+    vi.useFakeTimers();
     const p = dial();
     const { container } = render(<AdventurousnessDial {...p} />);
-    const track = container.querySelector('#adv-wave-track')!;
-    vi.spyOn(track, 'getBoundingClientRect').mockReturnValue({
-      left: 0,
-      width: 200,
-    } as DOMRect);
-    fireEvent.mouseDown(track, { clientX: 20 });
-    fireEvent.mouseUp(window, { clientX: 20 });
-    (p.onChange as ReturnType<typeof vi.fn>).mockClear();
-    fireEvent.mouseMove(window, { clientX: 180 });
-    expect(p.onChange).not.toHaveBeenCalled();
+    const input = container.querySelector('.adv-wave-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '0.4' } });
+    act(() => void vi.advanceTimersByTime(100));
+    fireEvent.change(input, { target: { value: '0.5' } });
+    act(() => void vi.advanceTimersByTime(100));
+    fireEvent.change(input, { target: { value: '0.6' } });
+    act(() => void vi.advanceTimersByTime(400));
+    expect(p.onCommit).toHaveBeenCalledTimes(1);
+    expect(p.onCommit).toHaveBeenCalledWith(0.6);
+    vi.useRealTimers();
+  });
+
+  it('says what it actually changes', () => {
+    const { container } = render(<AdventurousnessDial {...dial()} />);
+    const help = container.querySelector('#adv-wave-help')!;
+    expect(help.textContent).toContain('popular');
+    // And the control points at it, so the explanation is announced too.
+    expect(container.querySelector('.adv-wave-input')).toHaveAttribute(
+      'aria-describedby',
+      'adv-wave-help',
+    );
   });
 
   it('rides the orb ON the wave, not at a fixed height', () => {
