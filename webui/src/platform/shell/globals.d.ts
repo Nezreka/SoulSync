@@ -127,7 +127,15 @@ declare global {
     startLibraryRadio?: () => void | Promise<void>;
     /** media-player.js — play a resolved library track list (radio-row shape)
      *  as the queue, labeled with a "Playing from" context. */
-    playTrackList?: (tracks: unknown[], contextName?: string) => void | Promise<void>;
+    cancelPendingPlayback?: () => void;
+    playTrackList?: (
+      tracks: unknown[],
+      contextName?: string,
+      options?: { isCurrent: () => boolean },
+    ) =>
+      | void
+      | { status: string; error?: string }
+      | Promise<void | { status: string; error?: string }>;
     /** sync-services.js — the WHOLE ListenBrainz playlist sync: fetch, virtual
      *  playlist, status polling into the discover-lb-playlist-<id>-sync-*
      *  spans. Shared (survives discover.js's deletion), so the React page

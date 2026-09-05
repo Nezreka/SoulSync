@@ -28,7 +28,7 @@
                                  // state.msgs: that is the ROOM store and a
                                  // DM would read the room's leftovers.
         started: false,
-        ssOnly: false,           // room filter: show only SoulSync-app messages
+        ssOnly: false,           // room filter AND send format: see + speak SoulSync
         protocolLog: [],         // recent machine-coordination events (bounded)
         beaconed: {},            // rooms we've announced ourselves in this session
         isAdmin: false,          // shows the settings cog (from /status)
@@ -491,9 +491,11 @@
                     (r.n > 1 ? ' <b>' + r.n + '</b>' : '') + '</span>';
             }).join('') + '</div>';
         }
-        var bodyHtml = (m.file && m.file.n)
-            ? _fileCardHtml(m)
-            : (m.rich ? renderRich(showText) : renderPlain(showText));
+        var bodyHtml = (m.overlay && m.overlay.n)
+            ? _overlayCardHtml(m)
+            : (m.file && m.file.n)
+                ? _fileCardHtml(m)
+                : (m.rich ? renderRich(showText) : renderPlain(showText));
         // An edited message wears the marker; hovering it shows every prior
         // version, oldest first (the history is retained, not replaced).
         if (versions) {
@@ -512,6 +514,220 @@
         return '<div class="chat-line' + (me ? ' chat-line--me' : '') + '" title="' +
             attr(_fullTs(m.timestamp)) + '">' + replyRef +
             bodyHtml + actions + chips + '</div>';
+    }
+
+    // chat.js guards every showToast call (it can load without downloads.js,
+    // which defines it) — 45 places do this. One helper rather than a 46th
+    // hand-rolled guard.
+    function _ovToast(msg, kind) {
+        if (typeof showToast === 'function') showToast(msg, kind);
+    }
+
+    // Pick one of YOUR templates and send it.
+    //
+    // A grid of RENDERED previews, not a list of names. Each card is the
+    // template composited onto a neutral poster by the same endpoint the
+    // Overlay Studio gallery uses — a template is a visual thing, and choosing
+    // one by name is choosing blind. (The first version of this was a
+    // window.prompt asking for a number, which is exactly as bad as it sounds.)
+    function _pickOverlayToShare() {
+        toggleAttachPanel(true);
+        var ov = q('[data-chat-ovl-modal]');
+        var grid = q('[data-chat-ovl-grid]');
+        if (!ov || !grid) { _ovToast('The overlay picker is unavailable', 'error'); return; }
+        grid.innerHTML = '<div class="chat-ovl-empty">Loading your templates\u2026</div>';
+        ov.hidden = false;
+        _bindOverlayPickerEsc();
+        fetch('/api/video/overlays/templates', { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var list = (d && d.templates) || [];
+                if (!list.length) {
+                    grid.innerHTML = '<div class="chat-ovl-empty">You have no overlay templates yet. ' +
+                        'Design one in the Overlay Studio and it will show up here.</div>';
+                    return;
+                }
+                grid.innerHTML = list.map(_overlayPickCard).join('');
+            })
+            .catch(function () {
+                grid.innerHTML = '<div class="chat-ovl-empty">Could not load your templates.</div>';
+            });
+    }
+
+    function _overlayPickCard(t) {
+        var layers = Number(t.layer_count || 0);
+        return '<button type="button" class="chat-ovl-card" data-chat-ovl-pick="' + attr(t.id) + '" ' +
+            'data-chat-ovl-name="' + attr(t.name || 'Overlay template') + '" ' +
+            'title="Share ' + attr(t.name || 'this template') + '">' +
+            // same preview the studio gallery shows, so what you pick is what
+            // they get
+            '<span class="chat-ovl-shot">' +
+                // thumb 404s if pillow can't render. a broken image icon here
+                // looks like the template is broken, so fall back instead
+                '<img src="/api/video/overlays/templates/' + attr(t.id) + '/thumb" alt="" loading="lazy" ' +
+                    'onerror="this.parentNode.classList.add(\'is-noshot\');this.remove();">' +
+            '</span>' +
+            '<span class="chat-ovl-meta">' +
+                '<span class="chat-ovl-cardname">' + esc(t.name || 'Untitled') + '</span>' +
+                '<span class="chat-ovl-cardsub">' + layers +
+                    (layers === 1 ? ' layer' : ' layers') +
+                    (t.kind && t.kind !== 'poster' ? ' \u00b7 ' + esc(t.kind) : '') +
+                '</span>' +
+            '</span>' +
+        '</button>';
+    }
+
+    function _closeOverlayPicker() {
+        var ov = q('[data-chat-ovl-modal]');
+        if (ov) ov.hidden = true;
+        if (_ovlEsc) { document.removeEventListener('keydown', _ovlEsc); _ovlEsc = null; }
+    }
+
+    // escape closes it. the other chat modals don't bother but they should.
+    // unbind on close, otherwise you stack a listener per open.
+    var _ovlEsc = null;
+    function _bindOverlayPickerEsc() {
+        if (_ovlEsc) return;
+        _ovlEsc = function (ev) { if (ev.key === 'Escape') _closeOverlayPicker(); };
+        document.addEventListener('keydown', _ovlEsc);
+    }
+
+    // The gallery row is a summary — the DEFINITION has to be fetched before it
+    // can be sent.
+    function _shareOverlayById(id, name) {
+        _closeOverlayPicker();
+        fetch('/api/video/overlays/templates/' + encodeURIComponent(id),
+              { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (full) {
+                var defn = full && full.definition;
+                if (!defn || !defn.layers || !defn.layers.length) {
+                    _ovToast('That template has no layers to share', 'error');
+                    return;
+                }
+                _sendOverlayShare(name || full.name || 'Overlay template', defn);
+            })
+            .catch(function () { _ovToast('Could not read that template', 'error'); });
+    }
+
+    function _sendOverlayShare(name, definition) {
+        // Rooms only. A PM is sent as plaintext by design, so an envelope-only
+        // share would arrive as nothing at all rather than as a card.
+        if (state.view !== 'room') {
+            _ovToast('Overlay templates can only be shared in a room', 'info');
+            return;
+        }
+        postJSON('/api/chat/room/message', _tagRoomPayload({
+            message: '',
+            overlay: { n: name, d: definition },
+        })).then(function (res) {
+            if (res && res.ok) {
+                _ovToast('Shared "' + name + '"', 'success');
+                // The composer's own trick: clearing lastStamp forces the next
+                // poll to render authoritatively instead of diffing. There is
+                // no loadRoom() to call — only loadRooms(), which reloads the
+                // room LIST and would not bring the message back any sooner.
+                state.lastStamp = null;
+                state.stickBottom = true;
+            } else {
+                // The server names the half that did not fit - with a template
+                // attached, "message too long" would send someone to shorten a
+                // sentence that was already empty.
+                _ovToast((res && res.body && res.body.error) ||
+                          'Could not share that template', 'error');
+            }
+        });
+    }
+
+    // Definitions of the templates currently on screen, so the Add button can
+    // carry a short key instead of a few KB of JSON in an attribute.
+    var _overlayShares = { n: 0, map: {}, order: [] };
+    var OVERLAY_SHARE_KEEP = 40;
+
+    function _rememberOverlayShare(share) {
+        var key = 'ov' + (_overlayShares.n++);
+        _overlayShares.map[key] = share;
+        _overlayShares.order.push(key);
+        // Bounded on purpose. Each definition is a few KB and a busy room would
+        // otherwise hold every template ever scrolled past for the life of the
+        // tab. Forty covers everything on screen and then some.
+        while (_overlayShares.order.length > OVERLAY_SHARE_KEEP) {
+            delete _overlayShares.map[_overlayShares.order.shift()];
+        }
+        return key;
+    }
+
+    // Adopt a template someone shared. The definition is already on the
+    // message (it rode the envelope), so this is one POST and no fetching.
+    function _adoptSharedOverlay(btn) {
+        var o = _overlayShares.map[btn.getAttribute('data-chat-overlay-add')];
+        if (!o || !o.d) { _ovToast('That template is no longer on screen', 'error'); return; }
+        btn.disabled = true;
+        var was = btn.textContent;
+        btn.textContent = 'Adding\u2026';
+        fetch('/api/video/overlays/templates/from-share', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ name: o.n, definition: o.d })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d || !d.ok) {
+                    btn.disabled = false; btn.textContent = was;
+                    _ovToast((d && d.error) || 'Could not add that template', 'error');
+                    return;
+                }
+                btn.textContent = '\u2713 added';
+                var miss = (d.missing_assets || []).length;
+                // The missing half is said AFTER the success, not instead of
+                // it: the template really was added, it just has holes the
+                // sender has to send you separately.
+                _ovToast(miss
+                    ? 'Added "' + d.name + '" \u2014 ' + miss +
+                      (miss === 1 ? ' image is' : ' images are') +
+                      ' missing, ask the sender for them'
+                    : 'Added "' + d.name + '" to your overlays',
+                    miss ? 'info' : 'success');
+            })
+            .catch(function () {
+                btn.disabled = false; btn.textContent = was;
+                _ovToast('Could not add that template', 'error');
+            });
+    }
+
+    // ── shared overlay template (envelope 'o') ──────────────────────────
+    //
+    // A design, not a link: the whole template rides the message, so the card
+    // can say what it IS before anyone commits to adopting it — how many layers,
+    // and crucially how many images it depends on that this install does not
+    // have. Those refs are content-addressed (asset://<sha1>), so an image you
+    // already uploaded resolves for free and anything else is named exactly.
+    function _overlayCardHtml(m) {
+        var o = m.overlay || {};
+        var layers = Number(o.layers || 0);
+        var assets = (o.assets || []).length;
+        // The definition is far too large for a data- attribute, so it goes in
+        // a render-scoped registry and only the KEY rides the button. The file
+        // card can put its whole payload (a url) on the element; a template
+        // cannot, and inventing a lookup that does not exist is how the last
+        // card like this ended up doing nothing when clicked.
+        var key = _rememberOverlayShare({ n: o.n, d: o.d });
+        return '<div class="chat-overlay-card">' +
+            '<span class="chat-overlay-icon">\u25F0</span>' +
+            '<span class="chat-overlay-meta">' +
+                '<b class="chat-overlay-name">' + esc(o.n || 'Overlay template') + '</b>' +
+                '<span class="chat-overlay-sub">Overlay template \u00b7 ' +
+                    layers + (layers === 1 ? ' layer' : ' layers') + '</span>' +
+                // Said up front, not after the click: adopting a template whose
+                // art you lack leaves layers that paint nothing, and finding
+                // that out afterwards feels like a broken import.
+                (assets ? '<span class="chat-overlay-warn">Needs ' + assets +
+                          (assets === 1 ? ' image' : ' images') +
+                          ' you may not have</span>' : '') +
+            '</span>' +
+            '<button type="button" class="chat-embed-chip chat-overlay-add" ' +
+                'data-chat-overlay-add="' + key + '">\u2795 add to my overlays</button>' +
+        '</div>';
     }
 
     // ── shared file card (filepost.dev links dressed by envelope 'f') ────
@@ -3124,8 +3340,8 @@
               'title="Movie night — nominate something, the room votes, owners watch together">🎬 Movie night</button>' +
               '<button class="chat-filter-btn' + (state.ssOnly ? ' chat-filter-btn--on' : '') +
               '" type="button" data-chat-filter title="' +
-              (state.ssOnly ? 'Showing SoulSync app messages only — click for everything'
-                            : 'Showing everything — click to hide other Soulseek clients') + '">' +
+              (state.ssOnly ? 'SoulSync only: hiding other Soulseek clients, and sending in SoulSync format'
+                            : 'All messages: showing every Soulseek client, and sending in plain text they can read') + '">' +
               (state.ssOnly ? 'SoulSync only' : 'All messages') + '</button>' +
               (state.isAdmin ? '<button class="chat-cog-btn" type="button" data-chat-settings-btn ' +
                   'title="Chat settings">⚙</button>' : '')
@@ -3161,6 +3377,9 @@
         var pollBtn = q('[data-chat-poll-btn]');
         if (pollBtn) pollBtn.hidden = !(state.view === 'room' && state.canSend);
         if (state.view !== 'room') { toggleEmojiPicker(true); toggleGifPicker(true); togglePollPop(true); }
+        // last, because plain mode overrides the placeholder and hides the
+        // rich controls this function just showed
+        _syncModeBtn();
     }
 
     // ── composer toolbar (room only) ─────────────────────────────────────────
@@ -3894,8 +4113,42 @@
     // hand, skipped the tags, and their messages folded into #general no matter
     // which channel they were sent from (kvkarlsson's uploads-in-the-wrong-
     // channel report).
+    // One control, not two. The room filter already says which world you are
+    // in: "SoulSync only" means you are talking to SoulSync clients, so the
+    // envelope earns its keep. "All messages" means you can SEE the vanilla
+    // Soulseek users in the room, and it would be a lie to look at them while
+    // sending something they cannot read.
+    //
+    // A PM is already plaintext, so this is a ROOM idea only.
+    function _plainOn() {
+        return state.view === 'room' && !state.ssOnly;
+    }
+
+    function _syncModeBtn() {
+        var hint = q('[data-chat-mode-hint]');
+        var on = _plainOn() && state.canSend;
+        if (hint) hint.hidden = !on;
+        if (!on) return;    // everything below is the exception, not the default
+
+        // none of these survive without an envelope. leaving them live would
+        // let someone attach a template the send is about to refuse.
+        var bar = q('[data-chat-toolbar]');
+        if (bar) bar.hidden = true;                 // markdown IS the envelope
+        ['[data-chat-gif-btn]', '[data-chat-poll-btn]', '[data-chat-attach-btn]'].forEach(function (sel) {
+            var el = q(sel);
+            if (el) el.hidden = true;
+        });
+        // renderComposer already set a placeholder; only the exception overrides it
+        var input = q('[data-chat-input]');
+        if (input) input.placeholder = 'Plain message — everyone in the room can read this…';
+    }
+
     function _tagRoomPayload(payload) {
         payload.room = state.room || '';
+        // plain text has no envelope, so there is nowhere to put an avatar, a
+        // channel tag or a thread id. attaching them anyway would make the
+        // server refuse a message the user had no way to know was tagged.
+        if (_plainOn()) { payload.plain = true; return payload; }
         if (_myAvatar()) payload.avatar = _myAvatar();
         if (_chanRoom()) {
             payload.chan = state.channel || CHAT_DEFAULT_CHANNEL;
@@ -4769,8 +5022,10 @@
                     username: 'you', message: text,
                     timestamp: new Date().toISOString(), self: true,
                     reply: sentReply || undefined,
-                    // room sends ride the envelope → render the echo rich too
-                    rich: state.view === 'room',
+                    // room sends ride the envelope → render the echo rich too.
+                    // a plain send does not, and claiming rich would paint it
+                    // as a SoulSync message the other clients will not see.
+                    rich: state.view === 'room' && !_plainOn(),
                 }]));
                 host.scrollTop = host.scrollHeight;
                 state.lastStamp = null;
@@ -4852,8 +5107,24 @@
             }
             t = e.target.closest('[data-chat-file-save]');
             if (t) { _saveFileToLibrary(t); return; }
+            t = e.target.closest('[data-chat-overlay-add]');
+            if (t) { _adoptSharedOverlay(t); return; }
             t = e.target.closest('[data-chat-attach-btn]');
             if (t) { toggleAttachPanel(); return; }
+            t = e.target.closest('[data-chat-attach-overlay]');
+            if (t) { _pickOverlayToShare(); return; }
+            t = e.target.closest('[data-chat-ovl-pick]');
+            if (t) {
+                _shareOverlayById(t.getAttribute('data-chat-ovl-pick'),
+                                  t.getAttribute('data-chat-ovl-name'));
+                return;
+            }
+            t = e.target.closest('[data-chat-ovl-close]');
+            if (t) { _closeOverlayPicker(); return; }
+            // Click the backdrop to dismiss, like every other chat modal.
+            if (e.target.matches && e.target.matches('[data-chat-ovl-modal]')) {
+                _closeOverlayPicker(); return;
+            }
             t = e.target.closest('[data-chat-spoiler]');
             if (t) { t.classList.add('chat-spoiler--shown'); return; }
             t = e.target.closest('[data-chat-fmt]');
@@ -5093,7 +5364,10 @@
                 try { localStorage.setItem('chat_ss_only', state.ssOnly ? '1' : '0'); } catch (err) { /* ignore */ }
                 state.lastStamp = null;
                 state.renderedCount = 0; hideJumpPill();   // a filter flip isn't 'new messages'
-                renderHead(); refresh();
+                // the filter also picks the SEND format, so a half-built rich
+                // message cannot survive the flip to plain
+                if (_plainOn()) { cancelReply(); cancelEdit(); toggleAttachPanel(true); }
+                renderHead(); renderComposer(); refresh();
                 return;
             }
             t = e.target.closest('[data-chat-browse-retry]');

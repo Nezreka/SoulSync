@@ -3132,18 +3132,31 @@ function initializeMobileNavigation() {
 
     if (!hamburgerBtn || !sidebar || !overlay) return;
 
+    // One explicit state: the drawer is open only because someone opened it at
+    // a mobile width. It is not a width, and it is not carried over from the
+    // desktop layout.
     function openMobileNav() {
         sidebar.classList.add('mobile-open');
         hamburgerBtn.classList.add('active');
+        hamburgerBtn.setAttribute('aria-expanded', 'true');
+        hamburgerBtn.setAttribute('aria-label', 'Close navigation');
         overlay.classList.add('active');
         document.body.classList.add('mobile-nav-open');
+        // Focus moves into the drawer so a keyboard isn't left behind the
+        // backdrop, and Escape below puts it back on the opener.
+        const first = sidebar.querySelector('.nav-button, a[href], button:not([disabled])');
+        if (first) first.focus();
     }
 
-    function closeMobileNav() {
+    function closeMobileNav(restoreFocus) {
+        const wasOpen = sidebar.classList.contains('mobile-open');
         sidebar.classList.remove('mobile-open');
         hamburgerBtn.classList.remove('active');
+        hamburgerBtn.setAttribute('aria-expanded', 'false');
+        hamburgerBtn.setAttribute('aria-label', 'Open navigation');
         overlay.classList.remove('active');
         document.body.classList.remove('mobile-nav-open');
+        if (wasOpen && restoreFocus === true) hamburgerBtn.focus();
     }
 
     hamburgerBtn.addEventListener('click', () => {
@@ -3154,7 +3167,33 @@ function initializeMobileNavigation() {
         }
     });
 
-    overlay.addEventListener('click', closeMobileNav);
+    overlay.addEventListener('click', () => closeMobileNav());
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        if (!sidebar.classList.contains('mobile-open')) return;
+        closeMobileNav(true);
+    });
+
+    // Crossing the breakpoint. Going desktop -> mobile the drawer defaults
+    // CLOSED: nobody asked for it, and the drawer's slide transition made the
+    // flip paint a half-open panel over the page. Going mobile -> desktop we
+    // just drop the mobile-only classes; the collapse preference lives in
+    // html[data-sidebar] and is untouched by any of this.
+    const mobileQuery = window.matchMedia ? window.matchMedia('(max-width: 768px)') : null;
+    if (mobileQuery) {
+        const onBreakpoint = () => {
+            // Kill the slide for one frame, so the layout change itself never
+            // animates across the viewport.
+            sidebar.classList.add('sidebar-no-transition');
+            closeMobileNav();
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => sidebar.classList.remove('sidebar-no-transition'));
+            });
+        };
+        if (mobileQuery.addEventListener) mobileQuery.addEventListener('change', onBreakpoint);
+        else if (mobileQuery.addListener) mobileQuery.addListener(onBreakpoint);
+    }
 
     // Backstop for the overlay click above: the overlay is one element at a
     // fixed z-index, so anything that paints over it swallows the tap and the

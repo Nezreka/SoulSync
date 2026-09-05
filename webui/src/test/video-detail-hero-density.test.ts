@@ -72,7 +72,7 @@ describe('the management actions collapse into one button', () => {
 
   it('routes every management action into the menu, not the main row', () => {
     const body = extractFunction('renderActions', SRC);
-    for (const act of ['poster', 'manage', 'sync-show', 'watched-toggle']) {
+    for (const act of ['poster', 'manage', 'sync-show', 'sync-movie', 'watched-toggle']) {
       const line = body.split('\n').find((l) => l.includes(`data-vd-act="${act}"`)) ?? '';
       expect(line, `${act} should build into the overflow, not the main row`).not.toMatch(
         /^\s*html \+=/,
@@ -160,5 +160,13 @@ describe('the overflow menu opens and closes', () => {
     api.closeMoreMenu();
     expect(menu.hidden).toBe(true);
     expect(btn.getAttribute('aria-expanded')).toBe('false');
+  });
+});
+
+describe('hero cover art earns its space', () => {
+  it('only shows a cover when it adds identity rather than duplicating strong title art', () => {
+    const body = extractFunction('renderBillboard', SRC);
+    expect(body).toContain("d.source === 'youtube' || (!d.logo && !d.has_backdrop)");
+    expect(body).toContain('vd-bb-content--no-cover');
   });
 });

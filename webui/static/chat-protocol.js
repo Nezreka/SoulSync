@@ -28,14 +28,24 @@
 
     // ── Protocol payload parsing (REMOTE data — trust nothing) ──────────
     // {k: kind, ...} where kind is a short dotted identifier ('jbx.vote').
-    // Caps: kind ≤ 24 chars, ≤ 16 fields, strings ≤ 512 chars, numbers
-    // finite, one level of nesting for plain-object/array values with the
-    // same caps. Anything else → null (callers drop it silently).
+    // Caps: kind ≤ 24 chars, ≤ 16 fields, strings ≤ 512 chars, numbers finite
+    // and under 1e15, one level of nesting for plain-object/array values with
+    // the same caps. Anything else → null (callers drop it silently).
+    // These MUST match core/chat_codec.protocol_of — see _saneScalar.
     var KIND_RE = /^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)?$/;
+
+    // 1e15 is not decoration: core/chat_codec.protocol_of caps magnitude there,
+    // and it is the gatekeeper at BOTH ends — it validates what the server hands
+    // us AND what we are allowed to send. isFinite() alone let this side accept
+    // numbers python would refuse, so a client could build a payload its own
+    // validator blessed and get a 400 back, while an inbound carrier that python
+    // dropped simply never reached the bus. Same number, both files, or clients
+    // desync exactly as the codec docstring warns.
+    var MAX_ABS = 1e15;
 
     function _saneScalar(v) {
         if (typeof v === 'string') return v.length <= 512;
-        if (typeof v === 'number') return isFinite(v);
+        if (typeof v === 'number') return isFinite(v) && Math.abs(v) < MAX_ABS;
         return typeof v === 'boolean' || v === null;
     }
 

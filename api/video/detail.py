@@ -220,6 +220,22 @@ def register_routes(bp):
             logger.exception("show sync failed for %s", show_id)
             return jsonify({"success": False, "error": "Sync failed — see app.log"}), 500
 
+    @bp.route("/detail/movie/<int:movie_id>/sync", methods=["POST"])
+    def video_movie_sync(movie_id):
+        """Per-movie Synchronize: re-read THIS movie from the server, update
+        file/watch metadata, heal server re-keys, and remove the local row only
+        when the server positively says the movie is gone."""
+        from . import get_video_db
+        try:
+            from core.video.movie_sync import MovieSyncError, sync_movie
+            res = sync_movie(get_video_db(), movie_id)
+            return jsonify({"success": True, **res})
+        except MovieSyncError as e:
+            return jsonify({"success": False, "error": str(e)}), 409
+        except Exception:
+            logger.exception("movie sync failed for %s", movie_id)
+            return jsonify({"success": False, "error": "Sync failed - see app.log"}), 500
+
     @bp.route("/detail/show/<int:show_id>/refresh-art", methods=["POST"])
     def video_show_refresh_art(show_id):
         """Lazy on-view backfill: pull missing season posters / episode art from

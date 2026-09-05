@@ -1,0 +1,22 @@
+{
+  "hero": {
+    "dots": 0,
+    "title": "No Recommendations Yet"
+  },
+  "sliderWrites": [
+    {
+      "t": 1788592183390,
+      "body": {
+        "value": 0.4
+      }
+    }
+  ],
+  "modal": {
+    "inside": true,
+    "escapeClosed": true
+  },
+  "sidebarRight": 0,
+  "retryRequests": [
+    "?kind=movie&sort=popularity.desc&lang=any&page=1"
+  ]
+}

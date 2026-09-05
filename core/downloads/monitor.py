@@ -916,7 +916,16 @@ class WebUIDownloadMonitor:
                 is_tidal = any(s.startswith('tidal_') for s in tried_sources)
                 if is_tidal:
                     from core.quality.source_map import quality_tier_for_source
-                    tidal_quality = quality_tier_for_source('tidal', default='lossless')
+                    _task_track_info = task.get('track_info') or {}
+                    _task_quality_profile_id = (
+                        _task_track_info.get('quality_profile_id')
+                        if isinstance(_task_track_info, dict) else None
+                    )
+                    tidal_quality = quality_tier_for_source(
+                        'tidal',
+                        default='lossless',
+                        profile_id=_task_quality_profile_id,
+                    )
                     allow_fb = config_manager.get('tidal_download.allow_fallback', True)
                     if tidal_quality == 'hires' and not allow_fb:
                         task['error_message'] = (

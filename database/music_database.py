@@ -777,6 +777,25 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_room_messages_room "
                            "ON chat_room_messages (room, timestamp)")
+            # Reactions. They travel as empty-text carriers, which the unwrap
+            # pulls OUT of the message list, so the message archive never saw
+            # them: a reaction lived exactly as long as slskd's room buffer and
+            # was gone after a restart. Reactions cannot be un-sent (there is no
+            # remove carrier), so storing them additively is the whole model —
+            # nothing here can resurrect something a user took back.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS chat_room_reactions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room TEXT NOT NULL,
+                    target_key TEXT NOT NULL,
+                    emoji TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(room, target_key, emoji, username) ON CONFLICT IGNORE
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_room_reactions_room "
+                           "ON chat_room_reactions (room, target_key)")
             # Arcade game carriers. Protocol carriers are normally ephemeral --
             # they are machine coordination and replaying a stale jukebox vote
             # would resurrect a dead queue -- but a GAME is durable state that
@@ -841,8 +860,12 @@ class MusicDatabase:
             # push loop archived DECODED dicts, and decoding is exactly the
             # step that strips the envelope, so the tags existed nowhere
             # the frontend could reach. Same tolerant-ALTER pattern.
+            # 'overlay' carries a shared template. It rides its own envelope key
+            # and a share has NO text, so before this the archive dropped the
+            # whole row (add_chat_messages requires a message) and a template
+            # shared into the room simply vanished on reload.
             for _chat_col in ('chan TEXT', 'thread TEXT', 'thread_name TEXT', 'av INTEGER',
-                              'edit_target TEXT'):
+                              'edit_target TEXT', 'overlay TEXT'):
                 try:
                     cursor.execute("ALTER TABLE chat_room_messages ADD COLUMN " + _chat_col)
                 except sqlite3.OperationalError:
@@ -11442,7 +11465,18 @@ class MusicDatabase:
             user = str(m.get('username') or '').strip()[:64]
             msg = str(m.get('message') or '')[:4000]
             ts = str(m.get('timestamp') or '').strip()[:40]
-            if not user or not msg or not ts:
+            ovl = m.get('overlay')
+            ovl_json = None
+            if isinstance(ovl, dict) and ovl.get('n') and isinstance(ovl.get('d'), dict):
+                try:
+                    ovl_json = json.dumps({'n': str(ovl.get('n'))[:120], 'd': ovl.get('d')})
+                    if len(ovl_json) > 20000:      # matches the codec's own ceiling
+                        ovl_json = None
+                except (ValueError, TypeError):
+                    ovl_json = None
+            # An overlay share carries no text ON PURPOSE - the card is the
+            # message. Requiring one dropped every share from the archive.
+            if not user or not ts or (not msg and not ovl_json):
                 continue
             rep = m.get('reply')
             rep_json = None
@@ -11468,7 +11502,8 @@ class MusicDatabase:
                          str(_th)[:160] if _th else None,
                          str(_tn)[:80] if _tn else None,
                          _av,
-                         str(_ed)[:160] if _ed else None))
+                         str(_ed)[:160] if _ed else None,
+                         ovl_json))
         if not rows:
             return 0
         try:
@@ -11476,8 +11511,8 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 before = conn.total_changes
                 cursor.executemany(
-                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
                 inserted = conn.total_changes - before
                 if inserted:
                     cursor.execute(
@@ -11490,6 +11525,70 @@ class MusicDatabase:
         except Exception as e:
             logger.error("Error archiving chat messages: %s", e)
             return 0
+
+    _CHAT_REACTIONS_KEEP = 20000   # per room — rows are tiny, but still bounded
+
+    def add_chat_reactions(self, room: str, reactions) -> int:
+        """Archive the aggregated reaction map ({target_key: {emoji: [users]}}).
+
+        Idempotent on (room, target, emoji, user): the hydrate re-sends the same
+        map every time it runs, and a reaction has no id of its own. Reactions
+        cannot be un-sent, so there is nothing an additive store can wrongly
+        bring back."""
+        rows = []
+        for key, by_emoji in (reactions or {}).items():
+            k = str(key or '').strip()[:80]
+            if not k or not isinstance(by_emoji, dict):
+                continue
+            for emoji, users in by_emoji.items():
+                e = str(emoji or '').strip()[:8]
+                if not e or not isinstance(users, (list, tuple)):
+                    continue
+                for u in users:
+                    u = str(u or '').strip()[:64]
+                    if u:
+                        rows.append((str(room), k, e, u))
+        if not rows:
+            return 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                before = conn.total_changes
+                cursor.executemany(
+                    "INSERT INTO chat_room_reactions (room, target_key, emoji, username) "
+                    "VALUES (?, ?, ?, ?)", rows)
+                inserted = conn.total_changes - before
+                if inserted:
+                    cursor.execute(
+                        "DELETE FROM chat_room_reactions WHERE room = ? AND id NOT IN "
+                        "(SELECT id FROM chat_room_reactions WHERE room = ? "
+                        " ORDER BY id DESC LIMIT ?)",
+                        (str(room), str(room), self._CHAT_REACTIONS_KEEP))
+                conn.commit()
+                return inserted
+        except Exception as e:
+            logger.error("Error archiving chat reactions: %s", e)
+            return 0
+
+    def get_chat_reactions(self, room: str) -> Dict[str, Any]:
+        """The archived reactions for a room, in the same
+        {target_key: {emoji: [users]}} shape the live unwrap produces, so the
+        two can be merged without either side knowing about the other."""
+        out: Dict[str, Any] = {}
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(
+                    "SELECT target_key, emoji, username FROM chat_room_reactions "
+                    "WHERE room = ? ORDER BY id", (str(room),)).fetchall()
+            for r in rows:
+                by_emoji = out.setdefault(r['target_key'], {})
+                users = by_emoji.setdefault(r['emoji'], [])
+                if r['username'] not in users:
+                    users.append(r['username'])
+        except Exception as e:
+            logger.error("Error reading chat reactions: %s", e)
+            return {}
+        return out
 
     def add_chat_game_carriers(self, room: str, events) -> int:
         """Archive Arcade game carriers ({username, timestamp, p}). Only
@@ -11644,7 +11743,7 @@ class MusicDatabase:
         (ready to render). ``before`` pages backwards: only messages strictly
         older than that timestamp."""
         try:
-            q = ("SELECT username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target FROM chat_room_messages "
+            q = ("SELECT username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay FROM chat_room_messages "
                  "WHERE room = ?")
             args: list = [str(room)]
             if before:
@@ -11685,6 +11784,21 @@ class MusicDatabase:
                     r['ed'] = r.pop('edit_target')
                 else:
                     r.pop('edit_target', None)
+                # Rebuild the share card the live path hands the frontend:
+                # name, layer count and the asset refs it needs, so a reader
+                # can still adopt a template shared days ago.
+                if r.get('overlay'):
+                    try:
+                        _o = json.loads(r['overlay'])
+                        _d = _o.get('d') or {}
+                        from core import chat_codec as _cc
+                        r['overlay'] = {'n': _o.get('n'), 'd': _d,
+                                        'layers': len(_d.get('layers') or []),
+                                        'assets': _cc.overlay_assets(_d)}
+                    except (ValueError, TypeError, ImportError):
+                        r.pop('overlay', None)
+                else:
+                    r.pop('overlay', None)
             return rows
         except Exception as e:
             logger.error("Error reading chat archive: %s", e)

@@ -3463,23 +3463,22 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.3.2': [
-        { date: 'September 2026 \u00b7 3.3.2' },
-        { title: 'The wishlist tells you why', desc: 'every search run records what each source did: whether it ran, what came back, what was accepted, and the reason each rejection lost. open a stuck row and the evidence unfolds underneath it, per source and per indexer.' },
-        { title: 'Waiting is not stuck', desc: 'a row waiting on an episode nobody has posted yet now reads differently from a row that keeps getting refused. before, both said "searching" forever and you could not tell which was which.' },
-        { title: 'A source that finds everything and grabs nothing gets flagged', desc: '20+ results and 0 accepted is a broken filter, not a quiet night. it used to look perfectly healthy.' },
-        { title: 'Per-title acquisition control', desc: 'quality profiles, preferred sources and release group allow/block lists per title, so you can narrow one show without touching the global config.' },
-        { title: 'Manual alternative titles', desc: 'tmdb carries "Big Brother US" but nothing at all for "Password (2022)", so that show could never match a release. type the name in and it matches, the same fix radarr and sonarr use. the automatic version was built, measured against a real library, and reverted: it helped one show and put 85 titles at risk of matching the wrong thing.' },
-        { title: 'The TV calendar knows what it is looking at', desc: 'every episode reads as one of eight states from owned to missing. reality beats intent, so a file on disk is owned whatever the wishlist believes, and a season pack covers the episodes inside it. filter to the ones that need a human and act in place.' },
-        { title: 'The drive a download is BUILT on is checked', desc: 'not just where it lands. eighteen real failures had 13TB free at the destination and a full scratch volume.' },
-        { title: 'YouTube recovers instead of giving up', desc: 'the failure classifier went from four kinds to nine. a full disk, an unavailable video and a throttle no longer blacklist a video permanently, which they previously did even after you cleared space. adds an alternate transport fallback and parses #HttpOnly_ cookie rows most extensions export.' },
-        { title: 'The downloads page, rebuilt', desc: 'batch groups instead of a wall of rows, the side panel is gone, and the layout uses the width it has. plus Download Next buttons for queued items (#1198) and auto-download for missing queue tracks.', page: 'active-downloads' },
-        { title: 'Three ways to lose files, closed', desc: 'the duplicate cleaner could delete the only copy of a track, a scan could delete the album it had just written, and sparing an album did not spare the artist it hung off. all three fixed.', page: 'tools' },
-        { title: 'Compare duplicates before you choose', desc: 'play each copy of a duplicate side by side, delete a whole quarantine group at once, and a track that imports without a match now says so instead of landing quietly.', page: 'tools' },
-        { title: 'System health moved to the notification area', desc: 'symbols between history and notifications; click for the detail in a modal. the healthy half stays collapsed instead of eating the page.' },
-        { title: 'Reported fixes', desc: 'wishlist tracks stranded after a source recovered (#1196), automations reporting 100% while still running (#1197), artist bios with no way to read on (#1200), missing similar-artist images (#1201), the import quality check claiming the library worker was down (#1192), chat unavailable more than available (#1194), the Quality Upgrade Finder still running after being switched off (#1207), source options present but never drawn with animations off (#1209), four maintenance cards all reading "Library maintenance" (#1211), the same tidal playlist listed four times (#1219), Enhance Quality dying on a windows path (#1215), jellyfin/plex credentials vanishing before save (#1213), and two discogs fixes from @RiceTeaPrince (#1203, #1205).' },
-        { title: 'Quality upgrades stop chasing your own conversions', desc: 'a lossy copy you made on purpose read as a regression, so the upgrade finder tried to fix it forever. acquisition quality and retained output are judged separately now, ALAC companions in M4A are detected, and the two copies of the upgrade verdict became one. built on #1191 from nick2000713.', page: 'tools' },
-        { title: 'Earlier versions', desc: '3.3.1 made daily mixes and stations real, repaired last.fm radio, and gave downloads a clients hub and a recycle bin. 3.3.0 rebuilt discover and imported your listening history. 3.2.x moved sixteen music pages to react and paced prowlarr.' },
+    '3.3.3': [
+        { date: 'September 2026 \u00b7 3.3.3' },
+        { title: 'Chat reaches people outside your install', desc: 'messages go both ways with people who are not running soulsync, and the history sticks around. overlay templates can be shared straight into a room, picked from a modal.', page: 'chat' },
+        { title: 'Release parsing reads the evidence first', desc: 'actual bitrate, sample rate and codec, falling back to the uploader title the way lidarr does. a repack wins the tie as the corrected copy. built on #1224 from nick2000713.' },
+        { title: 'Quality survives the source pipeline', desc: 'a complete album can no longer fall back to a worse copy than one already found, and lossless preview clips are caught on import.' },
+        { title: 'Self-hosted MusicBrainz', desc: 'point soulsync at your own musicbrainz server, in settings under Connections.', page: 'settings' },
+        { title: 'Concerts on the artist page', desc: 'upcoming dates and real setlists, via ticketmaster.' },
+        { title: 'Discover play buttons play', desc: 'mix cards and track rows both play, and playback is confirmed by the player before it is reported, so you know when audio actually started.', page: 'discover' },
+        { title: 'A mix starts in about a second', desc: 'it resolves against your library in one query instead of one per track.', page: 'discover' },
+        { title: 'Discover works by keyboard and touch', desc: 'hero controls sit in their own row on both pages, cards and dialogs are real controls, and the taste dial is a real slider.', page: 'discover' },
+        { title: 'Steadier video browsing', desc: 'browsing keeps the newest results, a failed request says so instead of showing an empty shelf, and Not Interested removes every copy of a title with an Undo.', page: 'video-discover' },
+        { title: 'The video dashboard shows what is downloading', desc: 'with posters. continue watching reads your real resume position, and torrent grabs track properly with a reason when one is refused.', page: 'video-dashboard' },
+        { title: 'Tools split into Tools and Operations', desc: 'artist views are named Discography and Your library, and "cleanup recommended" says what it means.', page: 'tools' },
+        { title: 'ntfy and Gotify', desc: 'real notification actions now.' },
+        { title: 'An error page you can report', desc: 'shows the actual error with a copy button, so a bug report has something in it.' },
+        { title: 'Earlier versions', desc: '3.3.2 gave the video side search receipts, rebuilt the downloads page and closed three ways to lose files. 3.3.1 made daily mixes and stations real. 3.3.0 rebuilt discover and imported your listening history.' },
     ],
 };
 
@@ -3510,7 +3509,25 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.3.2: the video side stops failing silently",
+        title: "3.3.3: chat beyond your install, smarter release parsing",
+        description: "chat reaches people who are not running soulsync, release parsing reads the actual audio instead of the filename, musicbrainz can be your own server, and discover got a correctness pass.",
+        features: [
+            "chat works both ways with people outside your install and keeps the history, and overlay templates can be shared straight into a room",
+            "release parsing reads bitrate, sample rate and codec first and only falls back to the uploader title, the way lidarr does. a repack wins the tie as the corrected copy. from #1224 by nick2000713",
+            "quality survives the whole source pipeline, so a complete album cannot fall back to a worse copy than one already found, and lossless preview clips are caught on import",
+            "self-hosted musicbrainz, in settings under Connections",
+            "concerts on the artist page: upcoming dates and real setlists",
+            "discover play buttons play, on mix cards and track rows, and playback is confirmed by the player before it is reported",
+            "a mix resolves against your library in one query instead of one per track, so it starts in about a second",
+            "discover works by keyboard and touch: hero controls in their own row on both pages, real cards and dialogs, and a real slider for the taste dial",
+            "video browsing keeps the newest results, a failed request says so instead of showing an empty shelf, and Not Interested removes every copy of a title with an Undo",
+            "the video dashboard shows what is downloading with posters, continue watching reads your real resume position, and a refused torrent grab says why",
+            "tools split into Tools and Operations, ntfy and gotify as real notification actions, and an error page that shows the actual error with a copy button",
+        ],
+        usage_note: "self-hosted musicbrainz and the ntfy/gotify actions live in settings. concerts appear on an artist page when ticketmaster has dates. everything else needs nothing configured.",
+    },
+    {
+        title: "Earlier in 3.3.2: the video side stops failing silently",
         description: "the wishlist used to search hundreds of times and say nothing but 'searching'. now every run leaves a receipt you can read. plus per-title acquisition control, a calendar that knows what it is looking at, youtube downloads that recover, a rebuilt downloads page, and three ways to lose files closed for good.",
         features: [
             "every wishlist search leaves a receipt: which sources ran, what each returned, what was accepted, and why each rejection lost \u2014 opened in place under the stuck row, credited to the indexer that earned it rather than just the transport",

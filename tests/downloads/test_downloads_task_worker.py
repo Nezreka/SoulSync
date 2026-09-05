@@ -47,6 +47,7 @@ class _FakeClient:
         self.search_calls = []
         self.exclude_calls = []  # exclude_sources arg per search() call
         self.search_modes = []
+        self.search_profile_ids = []
         self._client_map = {}
         for k, v in (subclients or {}).items():
             if k in self._CLIENT_NAMES:
@@ -59,10 +60,12 @@ class _FakeClient:
         return self._client_map.get(name)
 
     async def search(self, query, timeout=30, exclude_sources=None,
-                     progress_callback=None, search_mode=None):
+                     progress_callback=None, search_mode=None,
+                     quality_profile_id=None):
         self.search_calls.append((query, timeout))
         self.exclude_calls.append(exclude_sources)
         self.search_modes.append(search_mode)
+        self.search_profile_ids.append(quality_profile_id)
         return (self._results, None)
 
 
@@ -85,6 +88,10 @@ def test_worker_passes_the_item_profile_search_mode(monkeypatch):
     tw.download_track_worker("t1", "b1", deps)
 
     assert client.search_modes and set(client.search_modes) == {"best_quality"}
+    # Upstream's delta: the item's profile reaches the search too, so hybrid
+    # search can decide for THIS item whether to stop at the first source or
+    # pool every source for best-quality selection.
+    assert set(client.search_profile_ids) == {7}
 
 
 class _FakeMatchEngine:

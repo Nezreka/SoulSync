@@ -30,6 +30,7 @@ from core.download_plugins.registry import DownloadPluginRegistry, build_default
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
 from core.quality.selection import load_search_mode
 from core.downloads.source_policy import resolve_source_policy
+from core.quality.source_map import quality_profile_context
 
 logger = get_logger("download_orchestrator")
 
@@ -298,7 +299,8 @@ class DownloadOrchestrator:
         return list(policy.source_chain)
 
     async def search(self, query: str, timeout: int = None, progress_callback=None,
-                     exclude_sources=None, search_mode=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
+                     exclude_sources=None, search_mode=None, quality_profile_id=None
+                     ) -> Tuple[List[TrackResult], List[AlbumResult]]:
         """Search for tracks using configured source(s). Single-source
         modes route directly; hybrid mode delegates to
         ``engine.search_with_fallback`` which tries the chain in order.
@@ -321,7 +323,8 @@ class DownloadOrchestrator:
                 logger.error(f"{self.registry.display_name(self.mode)} client not available (failed to initialize)")
                 return [], []
             logger.info(f"Searching {self.registry.display_name(self.mode)}: {query}")
-            return await client.search(query, timeout, progress_callback)
+            with quality_profile_context(quality_profile_id):
+                return await client.search(query, timeout, progress_callback)
 
         chain = self._resolve_source_chain()
         if exclude_sources:
@@ -337,18 +340,29 @@ class DownloadOrchestrator:
         if not chain:
             logger.warning("Hybrid search exhausted: no eligible sources after exclusion filter")
             return [], []
+        # Upstream's fix, kept inside our policy layer: the search mode is the
+        # ITEM's, not the app's. An explicit `search_mode` from the caller still
+        # wins; otherwise the profile this download belongs to answers, instead
+        # of the app default that `load_search_mode()` used to return here.
         policy = resolve_source_policy(
             mode="hybrid",
             hybrid_order=chain,
-            search_mode=search_mode or load_search_mode(),
+            search_mode=search_mode or load_search_mode(quality_profile_id),
         )
         if policy.search_all_sources:
             logger.info(f"Best-quality search ({' → '.join(chain)}): {query}")
-            return await self.engine.search_all_sources(
-                query, chain, timeout, progress_callback,
-            )
+            with quality_profile_context(quality_profile_id):
+                return await self.engine.search_all_sources(
+                    query, chain, timeout, progress_callback,
+                )
         logger.info(f"Hybrid search ({' → '.join(chain)}): {query}")
-        return await self.engine.search_with_fallback(query, chain, timeout, progress_callback)
+        with quality_profile_context(quality_profile_id):
+            return await self.engine.search_with_fallback(
+                query,
+                chain,
+                timeout,
+                progress_callback,
+            )
 
     async def search_and_download_best(self, query: str, expected_track=None) -> Optional[str]:
         """
@@ -489,7 +503,8 @@ class DownloadOrchestrator:
         # Use orchestrator's download method to route correctly
         return await self.download(best_result.username, best_result.filename, best_result.size)
 
-    async def download(self, username: str, filename: str, file_size: int = 0) -> Optional[str]:
+    async def download(self, username: str, filename: str, file_size: int = 0,
+                       *, quality_profile_id=None) -> Optional[str]:
         """
         Download a track using the appropriate client.
 
@@ -515,7 +530,14 @@ class DownloadOrchestrator:
                 f"(minimum {floor:.0f} GB). Free up space, or change the floor in "
                 f"Settings → Soulseek (min_free_disk_gb).")
 
-        return await self.engine.dispatch_download(username, filename, file_size)
+        # Ours: one source-resolution contract at the engine boundary (P2-23),
+        # rather than the per-source if/else upstream still carries here.
+        # Upstream's delta ported into it: the item's profile is exposed for the
+        # duration of the transfer, and torrent/usenet take it as an argument —
+        # see `DownloadEngine.dispatch_download`.
+        return await self.engine.dispatch_download(
+            username, filename, file_size, quality_profile_id=quality_profile_id,
+        )
 
     async def get_all_downloads(self) -> List[DownloadStatus]:
         """Aggregated view across every source. Delegates to the

@@ -191,3 +191,151 @@ class TestArchiveSearch:
         assert mdb.search_chat_messages("SoulSync", "%") != []      # literal % exists
         assert mdb.search_chat_messages("SoulSync", "zzz") == []
         assert mdb.search_chat_messages("SoulSync", "") == []
+
+
+class TestSharedOverlaysSurvive:
+    """A template shared into the room used to vanish on reload.
+
+    An overlay share carries NO text on purpose - the card IS the message, the
+    way a poll or a game move is. add_chat_messages required a message, so the
+    whole row was skipped and the archive never held a single share. You could
+    post a template, someone could reload, and it was simply gone.
+    """
+
+    def _share(self, n=1, name="Corner badge", user="alice"):
+        return {"username": user, "message": "", "rich": True,
+                "timestamp": "2026-07-19 10:%02d:00" % n,
+                "overlay": {"n": name, "layers": 2, "assets": ["asset://aaaa.png"],
+                            "d": {"version": 1, "layers": [
+                                {"type": "text", "text": "4K"},
+                                {"type": "image", "src": "asset://aaaa.png"}]}}}
+
+    def test_a_textless_share_is_archived(self, mdb):
+        assert mdb.add_chat_messages("SoulSync", [self._share()]) == 1
+
+    def test_it_comes_back_as_a_card_the_reader_can_still_adopt(self, mdb):
+        mdb.add_chat_messages("SoulSync", [self._share()])
+        row = mdb.get_chat_messages("SoulSync")[0]
+        assert row["overlay"]["n"] == "Corner badge"
+        assert row["overlay"]["d"]["layers"][0]["text"] == "4K"
+
+    def test_the_card_counts_and_asset_refs_are_rebuilt_not_trusted(self, mdb):
+        """layers/assets are DERIVED from the definition on the way out, the
+        same way the live path derives them, so a doctored archive row cannot
+        make a card claim something its definition does not say."""
+        mdb.add_chat_messages("SoulSync", [self._share()])
+        row = mdb.get_chat_messages("SoulSync")[0]
+        assert row["overlay"]["layers"] == 2
+        assert row["overlay"]["assets"] == ["asset://aaaa.png"]
+
+    def test_an_ordinary_message_carries_no_overlay_key(self, mdb):
+        mdb.add_chat_messages("SoulSync", [_m(1)])
+        assert "overlay" not in mdb.get_chat_messages("SoulSync")[0]
+
+    def test_a_textless_row_with_NO_overlay_is_still_skipped(self, mdb):
+        """The empty-message guard still does its job; it just learned about
+        the one kind of message that is legitimately textless."""
+        assert mdb.add_chat_messages("SoulSync", [
+            {"username": "alice", "message": "", "timestamp": "2026-07-19 10:01:00"}]) == 0
+
+    def test_junk_in_the_overlay_field_does_not_take_the_row_down(self, mdb):
+        for bad in ("not a dict", {"n": "no definition"}, {"d": {"layers": []}}, {}):
+            n = mdb.add_chat_messages("SoulSync", [
+                {"username": "alice", "message": "hi", "rich": True,
+                 "timestamp": "2026-07-19 11:%02d:00" % len(str(bad)), "overlay": bad}])
+            assert n == 1                      # the MESSAGE still archives
+        rows = mdb.get_chat_messages("SoulSync")
+        assert all("overlay" not in r for r in rows)
+
+    def test_a_share_and_a_message_archive_together(self, mdb):
+        """The share used to be dropped silently while its neighbours went in,
+        so the batch count looked healthy."""
+        assert mdb.add_chat_messages("SoulSync", [self._share(1), _m(2)]) == 2
+
+    def test_a_definition_json_cannot_serialize_does_not_take_the_row_down(self, mdb):
+        """add_chat_messages is handed DECODED dicts in-process, not raw JSON,
+        so a value json refuses is reachable. The message must still archive.
+        (The earlier junk cases never got this far - they are rejected by the
+        shape check before json.dumps is ever called, which is exactly what a
+        negative-check caught.)"""
+        n = mdb.add_chat_messages("SoulSync", [
+            {"username": "alice", "message": "hi", "rich": True,
+             "timestamp": "2026-07-19 12:00:00",
+             "overlay": {"n": "Bad", "d": {"version": 1, "layers": [{"x": object()}]}}}])
+        assert n == 1
+        row = mdb.get_chat_messages("SoulSync")[0]
+        assert row["message"] == "hi"
+        assert "overlay" not in row
+
+    def test_an_enormous_definition_is_dropped_but_the_message_survives(self, mdb):
+        """Bounded on the way IN as well as on the wire - the archive is not a
+        way around the codec's ceiling."""
+        big = {"version": 1, "layers": [{"type": "text", "text": "x" * 400} for _ in range(200)]}
+        n = mdb.add_chat_messages("SoulSync", [
+            {"username": "alice", "message": "hi", "rich": True,
+             "timestamp": "2026-07-19 13:00:00", "overlay": {"n": "Huge", "d": big}}])
+        assert n == 1
+        assert "overlay" not in mdb.get_chat_messages("SoulSync")[0]
+
+    def test_a_textless_share_with_an_unusable_definition_is_skipped_entirely(self, mdb):
+        """No text and no storable card means there is nothing to show."""
+        assert mdb.add_chat_messages("SoulSync", [
+            {"username": "alice", "message": "", "timestamp": "2026-07-19 14:00:00",
+             "overlay": {"n": "Bad", "d": {"layers": [{"x": object()}]}}}]) == 0
+
+
+class TestReactionsSurvive:
+    """Reactions used to die with slskd's buffer.
+
+    They travel as empty-text carriers, which the unwrap pulls OUT of the
+    message list — so the message archive never saw one. The react endpoint's
+    own docstring said it: "live as long as slskd's room buffer". Restart
+    slskd and every chip in the room was gone.
+
+    Reactions cannot be un-sent (there is no remove carrier), so an additive
+    store is the whole model: nothing here can bring back something a user
+    took away, because taking one away was never possible.
+    """
+
+    KEY = "alice|1a2b3c4d"
+
+    def test_a_reaction_round_trips(self, mdb):
+        assert mdb.add_chat_reactions("SoulSync", {self.KEY: {"🔥": ["bob"]}}) == 1
+        assert mdb.get_chat_reactions("SoulSync") == {self.KEY: {"🔥": ["bob"]}}
+
+    def test_re_archiving_the_same_map_is_free(self, mdb):
+        """The hydrate re-sends the whole map every time it runs."""
+        m = {self.KEY: {"🔥": ["bob", "carol"]}}
+        assert mdb.add_chat_reactions("SoulSync", m) == 2
+        assert mdb.add_chat_reactions("SoulSync", m) == 0
+        assert mdb.get_chat_reactions("SoulSync")[self.KEY]["🔥"] == ["bob", "carol"]
+
+    def test_several_emoji_on_one_message(self, mdb):
+        mdb.add_chat_reactions("SoulSync", {self.KEY: {"🔥": ["bob"], "👍": ["carol", "dave"]}})
+        got = mdb.get_chat_reactions("SoulSync")[self.KEY]
+        assert got["🔥"] == ["bob"] and got["👍"] == ["carol", "dave"]
+
+    def test_rooms_do_not_share_reactions(self, mdb):
+        mdb.add_chat_reactions("SoulSync", {self.KEY: {"🔥": ["bob"]}})
+        mdb.add_chat_reactions("other", {self.KEY: {"👍": ["carol"]}})
+        assert mdb.get_chat_reactions("SoulSync") == {self.KEY: {"🔥": ["bob"]}}
+        assert mdb.get_chat_reactions("other") == {self.KEY: {"👍": ["carol"]}}
+
+    def test_junk_is_stepped_over_not_fatal(self, mdb):
+        n = mdb.add_chat_reactions("SoulSync", {
+            "": {"🔥": ["bob"]},                 # no target
+            self.KEY: {"": ["bob"],              # no emoji
+                       "👍": "not a list",       # not a user list
+                       "🔥": ["", "bob"]},       # one empty username
+            "other|key": "not a dict",
+        })
+        assert n == 1
+        assert mdb.get_chat_reactions("SoulSync") == {self.KEY: {"🔥": ["bob"]}}
+
+    def test_an_empty_map_is_not_an_error(self, mdb):
+        assert mdb.add_chat_reactions("SoulSync", {}) == 0
+        assert mdb.add_chat_reactions("SoulSync", None) == 0
+        assert mdb.get_chat_reactions("SoulSync") == {}
+
+    def test_a_room_with_no_reactions_reads_empty(self, mdb):
+        assert mdb.get_chat_reactions("never-used") == {}

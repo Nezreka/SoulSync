@@ -139,8 +139,56 @@ def quality_meets_profile(aq, targets: List[QualityTarget]) -> bool:
 _VALID_SEARCH_MODES = ("priority", "best_quality")
 
 
+def profile_id_for_library_track(database, track_id, explicit=None):
+    """The Quality Profile a library track belongs to, or None for the default.
+
+    An explicit choice from the caller wins; otherwise the track's own
+    assignment answers. Resolving it server-side matters most for redownload,
+    which replaces a file and then deletes the original: reading a profile only
+    from the request body meant the shipped UI (which sends none) ran that whole
+    path on the app default, so a file the default accepts could replace a track
+    assigned something stricter.
+
+    Ported from upstream onto the v2 catalogue. Upstream reads
+    ``tracks.quality_profile_id``; on this branch the id in that route is a
+    ``lib2_tracks`` id, so the upstream query would have answered None for every
+    track and reintroduced exactly the bug it was written to fix. The catalogue
+    cascade (Track → Album → Artist → Global, guide §2.3) is this branch's own
+    contract for the same question, and it is what the acquisition gate reads.
+
+    Never raises. An unknown track or an unavailable database both mean "no
+    answer", which is the app default, which is where this lane already was.
+    """
+    if explicit is not None:
+        return explicit
+    if database is None or track_id in (None, ''):
+        return None
+    try:
+        numeric_id = int(str(track_id).strip())
+    except (TypeError, ValueError):
+        return None
+    try:
+        # _get_connection, not get_connection. MusicDatabase has no public
+        # accessor, so the wrong name raised straight into the catch below and
+        # this answered None for every track, on the one lane that deletes the
+        # file it replaces. Closing it is ours to do too, same as
+        # load_profile_by_id above.
+        conn = database._get_connection()
+        try:
+            from core.library2.profile_lookup import effective_quality_profile
+
+            return effective_quality_profile(conn, "tracks", numeric_id)["id"]
+        finally:
+            conn.close()
+    except LookupError:
+        return None
+    except Exception as exc:  # noqa: BLE001 - a lookup must not fail the request
+        logger.debug("track quality profile lookup failed for %s: %s", track_id, exc)
+        return None
+
+
 def load_search_mode(profile_id=None) -> str:
-    """Return the download search strategy from the selected quality profile.
+    """Return the download search strategy from the applicable profile.
 
     ``'priority'`` (default) keeps today's behaviour — the first source in the
     hybrid chain that meets a quality target wins. ``'best_quality'`` pools

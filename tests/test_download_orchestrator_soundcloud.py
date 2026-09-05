@@ -121,6 +121,34 @@ def test_download_unknown_username_still_falls_to_soulseek(orchestrator: Downloa
     mock_dl.assert_called_once()
 
 
+def test_download_forwards_profile_context_to_prowlarr_sources(
+    orchestrator: DownloadOrchestrator,
+) -> None:
+    async def _fake_download(
+        username,
+        filename,
+        file_size=0,
+        *,
+        quality_profile_id=None,
+    ):
+        assert quality_profile_id == 91
+        return 'usenet-id'
+
+    with patch.object(
+        orchestrator.client('usenet'),
+        'download',
+        side_effect=_fake_download,
+    ) as mock_dl:
+        result = _run(orchestrator.download(
+            'usenet',
+            'opaque||Artist - Album [FLAC]',
+            quality_profile_id=91,
+        ))
+
+    assert result == 'usenet-id'
+    mock_dl.assert_called_once()
+
+
 # ---------------------------------------------------------------------------
 # Hybrid mode
 # ---------------------------------------------------------------------------

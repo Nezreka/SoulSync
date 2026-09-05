@@ -148,7 +148,8 @@ describe('discover route (live)', () => {
       await screen.findByText('Hero Artist');
       // Fresh Tape's card appears once the release-radar feeder lands.
       const card = await screen.findByText('Fresh Tape');
-      card.closest('.discover-mix-card')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      // The card's open target is a real button now, not the whole div.
+      card.closest('.mix-card-open')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       // Select the one track, then Download selected.
       const checkbox = (await screen.findAllByRole('checkbox'))[0];
       checkbox.dispatchEvent(new MouseEvent('click', { bubbles: true }));

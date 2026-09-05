@@ -160,15 +160,36 @@ class AlbumResult:
 
     @property
     def audio_quality(self) -> AudioQuality:
-        """Unified quality descriptor derived from dominant track quality."""
-        sample_rates = [t.sample_rate for t in self.tracks if t.sample_rate]
-        bit_depths = [t.bit_depth for t in self.tracks if t.bit_depth]
-        bitrates = [t.bitrate for t in self.tracks if t.bitrate]
+        """Conservative whole-album quality descriptor.
+
+        Maxima can synthesize a release that does not exist — one 24-bit track
+        plus a different 96-kHz track used to become a claimed 24/96 album.
+        A bundle is only as strong as its weakest track, and missing metadata
+        stays unknown. Mixed-format folders are ``unknown`` rather than being
+        labelled with the majority codec.
+        """
+        tracks = list(self.tracks or [])
+        format_values = [
+            str(track.quality or 'unknown').lower()
+            for track in tracks
+        ]
+        formats = set(format_values)
+
+        def _complete_min(attribute):
+            values = [getattr(track, attribute, None) for track in tracks]
+            if not values or any(value is None for value in values):
+                return None
+            return min(values)
+
         return AudioQuality(
-            format=self.dominant_quality.lower() if self.dominant_quality else 'unknown',
-            bitrate=max(bitrates) if bitrates else None,
-            sample_rate=max(sample_rates) if sample_rates else None,
-            bit_depth=max(bit_depths) if bit_depths else None,
+            format=(
+                next(iter(formats))
+                if len(formats) == 1 and 'unknown' not in formats
+                else 'unknown'
+            ),
+            bitrate=_complete_min('bitrate'),
+            sample_rate=_complete_min('sample_rate'),
+            bit_depth=_complete_min('bit_depth'),
         )
 
     @property

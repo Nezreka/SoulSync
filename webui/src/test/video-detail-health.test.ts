@@ -73,21 +73,20 @@ const SHOW = {
 
 describe('the detail health band', () => {
   it('flags an identity gap and only an identity gap', () => {
-    const { chips: c } = band({ ...SHOW, tvdb_id: null });
+    const { host, chips: c } = band({ ...SHOW, tvdb_id: null });
     const tvdb = c.find((x) => x.label === 'TVDB');
     expect(tvdb?.mode).toBe('missing');
     // On a library title the gap is actionable, so the chip reads as the action.
     // See video-detail-id-repair.test.ts for where that click lands.
     expect(tvdb?.value).toBe('Find\u2026');
-    expect(c.find((x) => x.label === 'TMDB')?.mode).toBe('ok');
-    expect(c.find((x) => x.label === 'IMDb')?.mode).toBe('ok');
+    expect(labels(host)).toEqual(['TVDB']);
   });
 
-  it('never restates what the hero meta line already says', () => {
+  it('stays hidden when every identity is healthy', () => {
     // owned:false, 0 of 62 episodes, a file with a quality - every hook the old
     // band hung a duplicate chip on.
     const { host } = band({ ...SHOW, owned: false, _vw_watched: true, file: { quality: '1080p' } });
-    expect(labels(host)).toEqual(['Library ID', 'TMDB', 'TVDB', 'IMDb']);
+    expect(labels(host)).toEqual([]);
   });
 
   it('does not report a coverage verdict, green or otherwise', () => {
@@ -98,24 +97,24 @@ describe('the detail health band', () => {
     expect(c.every((x) => x.mode !== 'ok' || x.value !== 'Missing')).toBe(true);
   });
 
-  it('omits the library id on a preview instead of flagging it missing', () => {
+  it('does not flag previews, which have no library row to repair', () => {
     // A tmdb preview has no library row yet. That is the normal state of every
     // browsed title, not a gap worth an amber chip.
     const { host } = band({ kind: 'movie', source: 'tmdb', tmdb_id: 27205, imdb_id: 'tt1375666' });
-    expect(labels(host)).toEqual(['TMDB', 'IMDb']);
+    expect(labels(host)).toEqual([]);
   });
 
-  it('keeps the library id once the title resolves to a row', () => {
+  it('does not show healthy library ids in the hero', () => {
     const { chips: c } = band({ kind: 'movie', source: 'library', id: 9, tmdb_id: 27205, imdb_id: 'tt1375666' });
-    expect(c[0]).toEqual({ label: 'Library ID', value: '9', mode: 'ok' });
+    expect(c).toEqual([]);
   });
 
   it('leaves TVDB out for a movie', () => {
     const { host } = band({ kind: 'movie', source: 'library', id: 9, tmdb_id: 27205, imdb_id: null });
-    expect(labels(host)).toEqual(['Library ID', 'TMDB', 'IMDb']);
+    expect(labels(host)).toEqual(['IMDb']);
   });
 
-  it('states a youtube channel by the id the downloader keys on', () => {
+  it('keeps youtube channel diagnostics out of the hero', () => {
     const { host, chips: c } = band({
       kind: 'channel',
       source: 'youtube',
@@ -124,8 +123,7 @@ describe('the detail health band', () => {
       episode_owned: 1,
       episode_total: 812,
     });
-    expect(labels(host)).toEqual(['Channel ID', 'Handle', 'Downloaded']);
-    expect(c[2]).toEqual({ label: 'Downloaded', value: '1 download', mode: 'neutral' });
+    expect(labels(host)).toEqual([]);
   });
 
   it('claims no video total for a channel, so it claims no missing count', () => {
@@ -140,7 +138,7 @@ describe('the detail health band', () => {
   it('hides the band when there is no title', () => {
     const { host, render } = mount();
     render(SHOW);
-    expect(host.hidden).toBe(false);
+    expect(host.hidden).toBe(true);
     render(null);
     expect(host.hidden).toBe(true);
     expect(host.innerHTML).toBe('');
@@ -157,7 +155,7 @@ describe('youtube owned counts', () => {
     const preamble = `
       var ytVideoMap = {};
       var data = null;
-      var ytFilter = { q: '', sort: 'newest' };
+      var ytFilter = { q: '', sort: 'newest', state: 'all', duration: 'all' };
       function ytProx(u) { return u || ''; }
     `;
     const bodies = ['ytOwnedCount', 'ytEpisodeOf', 'ytPlaylistToShow', 'ytFlatSeason']
@@ -196,6 +194,22 @@ describe('youtube owned counts', () => {
   it('keeps the count when a channel collapses into a flat search season', () => {
     const yt = loadYt();
     expect(yt.ytFlatSeason(VIDEOS).episode_owned).toBe(2);
+  });
+  it('filters a channel by download state and duration', () => {
+    const preamble = `
+      var data = { _channel: { videos: [
+        { youtube_id: 'a', title: 'Short saved', downloaded: true, duration: '0:45', published_at: '2024-01-01' },
+        { youtube_id: 'b', title: 'Deep dive', downloaded: false, wished: true, duration: '25:00', published_at: '2024-01-02' },
+        { youtube_id: 'c', title: 'Regular upload', downloaded: false, duration: '8:00', published_at: '2024-01-03' }
+      ] } };
+      var ytFilter = { q: '', sort: 'newest', state: 'missing', duration: 'long' };
+    `;
+    const bodies = ['ytDurSecs', 'ytVisibleVideos']
+      .map((n) => extractFunction(n, SRC))
+      .join('\n');
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const visible = new Function(`${preamble}\n${bodies}\nreturn ytVisibleVideos;`)() as () => Array<{ youtube_id: string }>;
+    expect(visible().map((v) => v.youtube_id)).toEqual(['b']);
   });
 });
 

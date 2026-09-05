@@ -3443,7 +3443,7 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     background: linear-gradient(90deg, #0b0b10 6%, rgba(11, 11, 16, 0.72) 38%, rgba(11, 11, 16, 0.15) 70%, transparent),
         linear-gradient(0deg, #0b0b10 2%, transparent 42%),
         radial-gradient(120% 130% at 0% 100%, hsla(var(--vgm-h, 230), 80%, 50%, 0.34), transparent 58%); }
-.vdsc-hero-body { position: absolute; left: 40px; bottom: 34px; z-index: 2; max-width: 560px;
+.vdsc-hero-body { position: absolute; left: 40px; bottom: 52px; z-index: 2; max-width: 560px;
     animation: vdscRise 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
 @keyframes vdscRise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
 .vdsc-hero-eyebrow { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em;
@@ -3459,16 +3459,31 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     background: linear-gradient(135deg, hsl(var(--vgm-h, 230), 70%, 58%), hsl(var(--vgm-h, 230), 72%, 47%)) !important;
     box-shadow: 0 12px 32px hsla(var(--vgm-h, 230), 70%, 45%, 0.5) !important; }
 .vdsc-hero-cta:hover { transform: translateY(-2px); filter: brightness(1.07); }
-.vdsc-dots { position: absolute; right: 26px; bottom: 26px; z-index: 3; display: flex; gap: 8px; }
-.vdsc-dot { width: 9px; height: 9px; border-radius: 50%; border: none; cursor: pointer; padding: 0;
-    background: rgba(255, 255, 255, 0.32); transition: all 0.2s ease; }
-.vdsc-dot--on { background: hsl(var(--vgm-h, 230), 85%, 65%); width: 26px; border-radius: 5px;
-    position: relative; overflow: hidden; }
+/* Indicators live in their own reserved strip across the foot of the hero, not
+   in the same corner the CTAs occupy. On a phone the hero body is full width,
+   so a bottom-right dot cluster sat straight on top of the Trailer button. */
+.vdsc-dots { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+    display: flex; justify-content: flex-end; gap: 2px; padding: 0 18px 6px;
+    pointer-events: none; }
+/* A 9px dot inside a finger-sized button. The button itself carries no size of
+   its own beyond the target, so mobile.css's blanket button min-height can't
+   stretch it into a lozenge. */
+.vdsc-dot { position: relative; width: 40px; height: 40px; min-height: 40px; border: none; padding: 0;
+    background: none; cursor: pointer; pointer-events: auto;
+    display: flex; align-items: center; justify-content: center; }
+.vdsc-dot::before { content: ''; display: block; width: 9px; height: 9px; border-radius: 50%;
+    background: rgba(255, 255, 255, 0.32); transition: width 0.2s ease, background 0.2s ease, border-radius 0.2s ease; }
+.vdsc-dot:hover::before { background: rgba(255, 255, 255, 0.6); }
+.vdsc-dot--on::before { background: hsl(var(--vgm-h, 230), 85%, 65%); width: 26px; border-radius: 5px; }
 /* Rotation progress: the active dot fills over the slide interval (6.5s). */
-.vdsc-dot--on::after { content: ''; position: absolute; inset: 0; border-radius: 5px; transform-origin: left;
+.vdsc-dot--on::after { content: ''; position: absolute; left: calc(50% - 13px); top: calc(50% - 4.5px);
+    width: 26px; height: 9px; border-radius: 5px; transform-origin: left;
     background: rgba(255, 255, 255, 0.55); animation: vdscDotFill 6.5s linear forwards; }
 @keyframes vdscDotFill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .vdsc-hero:hover .vdsc-dot--on::after { animation-play-state: paused; }   /* hover pauses rotation */
+/* Keyboard focus in the hero pauses it too, so a focused control can't be
+   yanked out from under the user. */
+.vdsc-hero:focus-within .vdsc-dot--on::after { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) { .vdsc-dot--on::after { animation: none; } }
 /* The billboard wordmark (TMDB title logo) — sized like Netflix's, text-shadowed
    container so it pops off any backdrop. Falls back to .vdsc-hero-title text. */
@@ -3622,7 +3637,7 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 
 @media (max-width: 720px) {
     .vdsc-hero { height: 420px; }
-    .vdsc-hero-body { left: 22px; bottom: 22px; right: 22px; }
+    .vdsc-hero-body { left: 22px; bottom: 56px; right: 22px; }
     .vdsc-hero-title { font-size: 27px; }
     .vdsc-rail .vsr-card, .vdsc-skel-card { flex-basis: 132px; width: 132px; }
     .vsr-ranked .vsr-card { flex-basis: 120px; width: 120px; }
@@ -3883,6 +3898,31 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vdsc-tr-title { margin-top: 14px; text-align: center; font-size: 15px; font-weight: 700; color: rgba(255, 255, 255, 0.85); }
 @media (prefers-reduced-motion: reduce) { .vdsc-tr-frame { transition: none; } }
 
+/* A hidden-pending card. It stays in the DOM until the save is acknowledged
+   and the Undo window closes, so putting it back is exact. */
+.vdsc-card-hiding { display: none !important; }
+
+/* Undo bar for "Not interested". A toast can't hold a button, and hiding a
+   title has to be reversible. */
+.vdsc-undo {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    z-index: 9400; display: flex; align-items: center; gap: 14px;
+    max-width: min(460px, calc(100vw - 32px));
+    padding: 11px 12px 11px 18px; border-radius: 14px;
+    background: rgba(16, 17, 24, 0.96); border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 18px 46px rgba(0, 0, 0, 0.5); backdrop-filter: blur(12px);
+    color: rgba(255, 255, 255, 0.9); font-size: 13.5px; font-weight: 650;
+}
+.vdsc-undo-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vdsc-undo-btn {
+    flex: 0 0 auto; min-height: 34px; padding: 7px 15px; border-radius: 10px;
+    border: 1px solid rgba(var(--accent-rgb, 88 101 242), 0.5);
+    background: rgba(var(--accent-rgb, 88 101 242), 0.2);
+    color: #fff; font-size: 13px; font-weight: 800; cursor: pointer;
+}
+.vdsc-undo-btn:hover { background: rgba(var(--accent-rgb, 88 101 242), 0.34); }
+.vdsc-undo-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
 /* infinite-scroll sentinel (invisible trigger near the grid bottom) */
 .vdsc-sentinel { height: 1px; width: 100%; }
 
@@ -3906,12 +3946,12 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     .vdsc-grid-head { flex-wrap: wrap; gap: 10px; }
     .vdsc-grid-title { font-size: 18px; }
     .vdsc-hero { height: 300px; margin-bottom: 20px; }
-    .vdsc-hero-body { left: 18px; right: 18px; bottom: 18px; }
+    .vdsc-hero-body { left: 18px; right: 18px; bottom: 54px; }
     .vdsc-hero-title { font-size: 23px; }
     .vdsc-hero-ov { -webkit-line-clamp: 3; }
     .vdsc-hero-actions { gap: 9px; }
     .vdsc-hero-actions .discog-submit-btn, .vdsc-hero-trailer { flex: 1 1 auto; justify-content: center; }
-    .vdsc-dots { right: 16px; bottom: 16px; }
+    .vdsc-dots { padding: 0 10px 4px; justify-content: center; }
     /* keep the trailer close button on-screen (it sits above the frame on desktop) */
     .vdsc-tr-close { top: 6px; right: 6px; background: rgba(0, 0, 0, 0.65); }
 }
@@ -6834,3 +6874,609 @@ body[data-side="video"] #gsearch-aura {
     .vwsh-nebula .vwsh-szn-go { opacity: 1; }
     .vwsh-nebula .vwsh-ep-grid { width: 100%; grid-template-columns: 1fr; max-height: none; }
 }
+
+/* ── Downloading now ─────────────────────────────────────────────────────────
+   Live transfer cards. A GRID, not full width rows: two downloads in a row that
+   spans the whole page is a band of mostly empty space, which is what the first
+   cut looked like.
+
+   Namespaced vdn-, not vdl-. vdl- is the download modal's namespace
+   (video-download-view.js owns ~170 of them) and squatting in it is how two
+   unrelated components end up sharing a rule by accident. */
+.vdn {
+    margin: 0 0 26px;
+}
+
+.vdn-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.vdn-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+    color: #fff;
+}
+
+.vdn-all {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.5);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 0.15s ease;
+}
+.vdn-all:hover { color: #fff; }
+
+.vdn-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 10px;
+}
+
+.vdn-card {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    min-width: 0;
+    padding: 9px 11px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* 2:3, the poster shape the rest of the page uses. The letter sits underneath
+   the image rather than instead of it, so a poster that 404s uncovers the
+   letter instead of leaving a hole. */
+.vdn-art {
+    position: relative;
+    flex: 0 0 32px;
+    width: 32px;
+    aspect-ratio: 2 / 3;
+    border-radius: 5px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.07);
+}
+.vdn-art img {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.vdn-letter {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.32);
+}
+
+/* min-width:0 or the flex item refuses to shrink and a long title pushes the
+   card past its grid track. The resume cards hit this exact trap. */
+.vdn-body {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.vdn-name {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vdn-line {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+}
+
+.vdn-pill {
+    flex: 0 0 auto;
+    padding: 2px 6px;
+    border-radius: 999px;
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.6);
+}
+.vdn-pill--downloading { background: rgba(56, 189, 248, 0.16); color: rgb(125, 211, 252); }
+.vdn-pill--importing   { background: rgba(168, 85, 247, 0.16); color: rgb(216, 180, 254); }
+.vdn-pill--searching   { background: rgba(250, 204, 21, 0.14); color: rgb(253, 224, 71); }
+.vdn-pill--queued      { background: rgba(255, 255, 255, 0.07); color: rgba(255, 255, 255, 0.5); }
+
+.vdn-pct {
+    margin-left: auto;
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.vdn-sub {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.45);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vdn-bar {
+    display: block;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+}
+.vdn-bar-fill {
+    display: block;
+    height: 100%;
+    border-radius: 2px;
+    background: linear-gradient(90deg, rgb(56, 189, 248), rgb(129, 140, 248));
+    transition: width 0.4s ease;
+}
+
+.vdn-more {
+    align-self: center;
+    padding: 0 4px;
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vdn-bar-fill { transition: none; }
+}
+
+/* ── Continue watching ───────────────────────────────────────────────────────
+   The resume rail. Landscape cards, because a 16:9 still of the scene you
+   stopped on is what you recognise — a portrait poster is how you BROWSE, not
+   how you resume, which is why every player switches shape for this row.
+   Hidden entirely when there is nothing to resume. */
+.vcw {
+    margin: 0 0 26px;
+}
+
+.vcw-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.vcw-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+    color: #fff;
+}
+
+/* A rail, not a grid: the row is ordered by recency, so the leftmost card is
+   the answer and the rest is overflow you scroll to. */
+.vcw-rail {
+    display: flex;
+    gap: 14px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 6px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+.vcw-rail::-webkit-scrollbar { height: 6px; }
+.vcw-rail::-webkit-scrollbar-track { background: transparent; }
+.vcw-rail::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.14);
+    border-radius: 3px;
+}
+.vcw-rail:hover::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.24); }
+
+.vcw-card {
+    flex: 0 0 264px;
+    text-decoration: none;
+    /* A flex item defaults to min-width:auto, which refuses to shrink below the
+       min-content width of its nowrap title — so a long name widened the card
+       to 319px and no ellipsis ever appeared. Measured in Chrome; jsdom cannot
+       see this at all. */
+    min-width: 0;
+    max-width: 264px;
+    scroll-snap-align: start;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    padding: 0;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.vcw-art {
+    position: relative;
+    display: block;
+    aspect-ratio: 16 / 9;
+    border-radius: 10px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.05) center / cover no-repeat;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.42);
+    transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
+                box-shadow 0.22s ease;
+}
+.vcw-card:hover .vcw-art {
+    transform: translateY(-3px) scale(1.012);
+    box-shadow: 0 14px 30px rgba(0, 0, 0, 0.55);
+}
+.vcw-card:focus-visible .vcw-art {
+    outline: 2px solid rgb(var(--accent-rgb, 99, 102, 241));
+    outline-offset: 2px;
+}
+
+/* A letter tile rather than a broken-image icon: a rail of those reads as a
+   broken page, not as missing art. */
+.vcw-art-fallback {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 40px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.2);
+}
+
+/* An OPEN affordance, not a play button. SoulSync does not play video — the
+   media server does — so a ▶ here would promise something the click cannot
+   deliver. It appears only on hover: at rest the artwork should be the whole
+   card, not a control sitting on a picture. */
+.vcw-open {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 46px;
+    height: 46px;
+    margin: -23px 0 0 -23px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    backdrop-filter: blur(6px);
+    color: #fff;
+    font-size: 22px;
+    padding-bottom: 2px;               /* optical centring of the chevron */
+    opacity: 0;
+    transform: scale(0.88);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.vcw-card:hover .vcw-open,
+.vcw-card:focus-visible .vcw-open { opacity: 1; transform: scale(1); }
+
+.vcw-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(6px);
+    color: #fff;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+}
+
+/* The progress bar sits ON the art, flush to the bottom edge — the one place
+   it reads as "how far through this picture you are" rather than as a
+   separate widget. */
+.vcw-bar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.22);
+}
+.vcw-bar-fill {
+    display: block;
+    height: 100%;
+    background: rgb(var(--accent-rgb, 99, 102, 241));
+}
+
+.vcw-meta {
+    display: block;
+    min-width: 0;
+}
+.vcw-name {
+    display: block;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.vcw-sub {
+    display: block;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
+}
+/* "23 min left" is the number that answers the question, so it gets the accent
+   and the others stay quiet. */
+.vcw-left {
+    display: block;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: rgb(var(--accent-rgb, 99, 102, 241));
+    margin-top: 3px;
+}
+
+@media (max-width: 720px) {
+    .vcw-card { flex-basis: 208px; max-width: 208px; }
+    .vcw-open { width: 38px; height: 38px; margin: -19px 0 0 -19px; font-size: 19px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vcw-art, .vcw-open { transition: none; }
+    .vcw-card:hover .vcw-art { transform: none; }
+}
+
+/* ── Detail polish: compact premium hero and channel facets ─────────────── */
+.vd-bb-content {
+    display: grid;
+    grid-template-columns: clamp(98px, 8vw, 132px) minmax(0, 690px);
+    align-items: start;
+    gap: 22px;
+    max-width: min(900px, calc(100% - 96px));
+}
+.vd-bb-content--no-cover {
+    display: block;
+    max-width: min(760px, calc(100% - 96px));
+}
+.vd-copy { min-width: 0; }
+.vd-cover {
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    object-fit: cover;
+    border-radius: 10px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.64), 0 0 0 1px rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.06);
+}
+.vd-cover--channel {
+    aspect-ratio: 1;
+    border-radius: 50%;
+    box-shadow: 0 18px 42px rgba(0, 0, 0, 0.58), 0 0 0 3px rgba(255, 255, 255, 0.16);
+}
+.vd-essentials {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    max-width: 690px;
+    margin: -6px 0 16px;
+}
+.vd-essential {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    max-width: min(100%, 360px);
+    min-height: 28px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    background: rgba(8, 10, 16, 0.34);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(10px);
+}
+.vd-essential-k {
+    flex: 0 0 auto;
+    font-size: 9.5px;
+    line-height: 1;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(255, 255, 255, 0.48);
+}
+.vd-essential-v {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    line-height: 1.1;
+    font-weight: 800;
+    color: #fff;
+}
+.vd-essential--ok { border-color: rgba(74, 222, 128, 0.28); background: rgba(22, 101, 52, 0.16); }
+.vd-essential--focus { border-color: rgba(var(--vd-accent-rgb), 0.34); background: rgba(var(--vd-accent-rgb), 0.12); }
+.vd-essential--live { border-color: rgba(56, 189, 248, 0.32); background: rgba(8, 47, 73, 0.18); }
+.vd-acq-card {
+    max-width: 820px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+}
+.vd-acq-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 7px 12px;
+    margin-bottom: 10px;
+}
+.vd-acq-summary strong { color: #fff; font-size: 15px; }
+.vd-acq-summary > span:last-child { color: rgba(255, 255, 255, 0.58); font-size: 12px; }
+.vd-acq-eyebrow {
+    font-size: 9.5px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: rgba(255, 255, 255, 0.48);
+}
+.vd-version { display: inline-flex; align-items: center; gap: 8px; }
+.vd-version-rank {
+    display: inline-grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    font-size: 10px;
+    color: #0b0b0f;
+    background: rgba(255, 255, 255, 0.78);
+}
+.vd-yt-facets {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+.vd-yt-facet {
+    min-height: 32px;
+    padding: 7px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.055);
+    color: rgba(255, 255, 255, 0.72);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
+}
+.vd-yt-facet:hover { transform: translateY(-1px); border-color: rgba(var(--vd-accent-rgb), 0.38); color: #fff; }
+.vd-yt-facet--active { background: rgba(var(--vd-accent-rgb), 0.86); border-color: transparent; color: var(--vd-accent-fg, #fff); }
+.vd-yt-facet-sep { width: 1px; height: 22px; background: rgba(255, 255, 255, 0.13); margin: 0 2px; }
+.vd-yt-counts {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    margin-left: auto;
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 12px;
+    font-weight: 700;
+}
+.vd-yt-counts strong { color: #fff; font-size: 16px; }
+@media (max-width: 900px) {
+    .vd-bb-content { grid-template-columns: minmax(0, 1fr); gap: 14px; max-width: none; }
+    .vd-cover { width: clamp(82px, 22vw, 108px); }
+    .vd-yt-counts { flex-basis: 100%; margin-left: 0; }
+}
+@media (max-width: 560px) {
+    .vd-yt-facet-sep { display: none; }
+}
+/* ── Detail body hierarchy pass: quiet admin chrome unless needed ───────── */
+.vd-acq-section {
+    margin: 0 0 20px;
+}
+.vd-acq-section .vd-section-h {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+.vd-acq-chips {
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.vd-acq-chip {
+    padding: 5px 10px;
+    border-radius: 999px;
+}
+.vd-acq-n { font-size: 14px; }
+.vd-acq-k { font-size: 10px; }
+.vd-detail-grid {
+    max-width: 960px;
+    grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+    gap: 12px 24px;
+}
+.vd-details {
+    margin-bottom: 26px;
+}
+.vd-ep-get {
+    transition: opacity 0.16s ease, transform 0.16s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+    .vd-ep:not(:hover):not(:focus-within):not(.vd-ep--open) .vd-ep-get {
+        opacity: 0;
+        transform: translateX(6px);
+        pointer-events: none;
+    }
+    .vd-ep:not(:hover):not(:focus-within):not(.vd-ep--open) .vd-ep-chev {
+        opacity: 0.36;
+    }
+}
+.vd-ep:hover .vd-ep-get,
+.vd-ep:focus-within .vd-ep-get,
+.vd-ep--open .vd-ep-get {
+    opacity: 1;
+    transform: none;
+}
+.vd-ep-vid {
+    font-family: inherit;
+    font-weight: 800;
+    letter-spacing: 0;
+    color: rgba(255,255,255,0.58);
+}
+.vd-section-h {
+    margin-top: 0;
+}
+
+/* Compact context chip for detail-page keyword jumps into Search. */
+.vsr-context {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    min-height: 30px;
+    padding: 4px 5px 4px 10px;
+    width: max-content;
+    max-width: 100%;
+    border: 1px solid rgba(var(--vd-accent-rgb), 0.32);
+    border-radius: 999px;
+    background: rgba(var(--vd-accent-rgb), 0.12);
+    color: rgba(255,255,255,0.82);
+    font-size: 12px;
+    font-weight: 800;
+}
+.vsr-context[hidden] { display: none; }
+.vsr-context span { color: rgba(var(--vd-accent-rgb), 0.95); text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; }
+.vsr-context strong { min-width: 0; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fff; font-weight: 900; }
+.vsr-context em { color: rgba(255,255,255,0.55); font-style: normal; }
+.vsr-context button {
+    width: 22px;
+    height: 22px;
+    border: 0;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.82);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+}
+.vsr-context button:hover { background: rgba(255,255,255,0.18); color: #fff; }

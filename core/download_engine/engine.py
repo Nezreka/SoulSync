@@ -166,6 +166,7 @@ class DownloadEngine:
         file_size: int = 0,
         *,
         default_source: str = "soulseek",
+        quality_profile_id=None,
     ) -> Optional[str]:
         """Route one already-selected result to its owning plugin.
 
@@ -180,6 +181,13 @@ class DownloadEngine:
         contains a source-specific target id.  Search/candidate selection has
         already chosen the source, and trying that opaque id on a different
         plugin would not be meaningful.
+
+        ``quality_profile_id`` is the item's profile, exposed for the duration
+        of the transfer so source-tier resolution answers for THIS download
+        rather than the app default (ported from upstream, which does the same
+        around its per-source if/else in the orchestrator). Torrent and usenet
+        take it as an explicit argument as well: they pick a release from a file
+        list and need the ladder, not just the ambient context.
         """
         canonical = self._resolve_canonical(username) if username else None
         source_name = canonical or default_source
@@ -190,7 +198,15 @@ class DownloadEngine:
             )
 
         logger.info("Dispatching download through %s: %s", source_name, filename)
-        return await plugin.download(username, filename, file_size)
+        from core.quality.source_map import quality_profile_context
+
+        with quality_profile_context(quality_profile_id):
+            if source_name in ("torrent", "usenet"):
+                return await plugin.download(
+                    username, filename, file_size,
+                    quality_profile_id=quality_profile_id,
+                )
+            return await plugin.download(username, filename, file_size)
 
     def _source_lock(self, source_name: str) -> threading.RLock:
         """Return the per-source RLock, lazy-creating it on first use.

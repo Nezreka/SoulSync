@@ -749,7 +749,7 @@ async function updateStreamStatus() {
 // everyone "stopped" forever. Stream status is driven by the per-session HTTP
 // poller (updateStreamStatus) exclusively.)
 
-async function startAudioPlayback() {
+async function startAudioPlayback(isCurrent = () => true, signal) {
     // Start HTML5 audio playback of the streamed file with enhanced state management
     try {
         if (!audioPlayer) {
@@ -778,10 +778,19 @@ async function startAudioPlayback() {
         // Wait for audio to be ready with promise-based approach
         await new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
+                cleanup();
                 reject(new Error('Audio loading timeout'));
             }, 15000); // 15-second timeout
 
+            const cleanup = () => {
+                clearTimeout(timeout);
+                audioPlayer.removeEventListener('canplay', onCanPlay);
+                audioPlayer.removeEventListener('error', onError);
+                signal?.removeEventListener('abort', onAbort);
+            };
+            const onAbort = () => { cleanup(); reject(new Error('Playback superseded')); };
             const onCanPlay = () => {
+                cleanup();
                 clearTimeout(timeout);
                 audioPlayer.removeEventListener('canplay', onCanPlay);
                 audioPlayer.removeEventListener('error', onError);
@@ -789,6 +798,7 @@ async function startAudioPlayback() {
             };
 
             const onError = (event) => {
+                cleanup();
                 clearTimeout(timeout);
                 audioPlayer.removeEventListener('canplay', onCanPlay);
                 audioPlayer.removeEventListener('error', onError);
@@ -796,6 +806,8 @@ async function startAudioPlayback() {
                 reject(error);
             };
 
+            signal?.addEventListener('abort', onAbort, { once: true });
+            if (signal?.aborted || !isCurrent()) { onAbort(); return; }
             audioPlayer.addEventListener('canplay', onCanPlay);
             audioPlayer.addEventListener('error', onError);
 
@@ -813,7 +825,9 @@ async function startAudioPlayback() {
 
         while (retryCount < maxRetries) {
             try {
+                if (!isCurrent()) return { status: 'superseded' };
                 await audioPlayer.play();
+                if (!isCurrent()) return { status: 'superseded' };
                 console.log('✅ Audio playback started successfully');
 
                 // Update UI to playing state
@@ -838,7 +852,7 @@ async function startAudioPlayback() {
                 if (playButton) playButton.disabled = false;
                 if (stopButton) stopButton.disabled = false;
 
-                return; // Success!
+                return { status: 'played' }; // HTMLMediaElement.play acknowledged playback.
 
             } catch (playError) {
                 retryCount++;
@@ -854,6 +868,7 @@ async function startAudioPlayback() {
         }
 
     } catch (error) {
+        if (!isCurrent()) return { status: 'superseded' };
         console.error('❌ Error starting audio playback:', error);
         hideLoadingAnimation();
 
@@ -879,6 +894,7 @@ async function startAudioPlayback() {
         if (npQueue.length === 0) {
             clearTrack();
         }
+        return { status: 'failed', error: userMessage };
     }
 }
 
@@ -1412,6 +1428,16 @@ let npMuted = false;
 let npPreMuteVolume = 70;
 let npMediaSessionThrottle = 0;
 let npLoadingQueueItem = false;
+let npPlaybackGeneration = 0;
+let npPlaybackAbort = new AbortController();
+// Serialize server stream mutations; stale requests never start audio afterward.
+let npPlaybackSetup = Promise.resolve();
+window.cancelPendingPlayback = function () {
+    npPlaybackGeneration += 1;
+    npPlaybackAbort.abort();
+    npPlaybackAbort = new AbortController();
+    npLoadingQueueItem = false;
+};
 let npRadioMode = false;
 let npRecentlyPlayedIds = [];
 let npAudioContext = null;
@@ -1644,16 +1670,18 @@ function npScheduleQueuePrefetch() {
     }, 80);
 }
 
-async function npEnsureQueueTrackReady(track) {
+async function npEnsureQueueTrackReady(track, isCurrent = () => true) {
     if (track?.file_path) return track;
     if (!npAutoDownloadQueue) throw new Error('Auto-download is disabled for missing queue tracks');
     await npPrefetchMissingQueueTracks();
     const deadline = Date.now() + 45 * 60 * 1000;
     while (!track.file_path && Date.now() < deadline) {
+        if (!isCurrent()) throw new Error('Playback superseded');
         if (NP_QUEUE_PREFETCH_TERMINAL.has(track.playback_status)) {
             throw new Error(track.playback_error || npQueueStatusLabel(track));
         }
         await new Promise(resolve => setTimeout(resolve, 1500));
+        if (!isCurrent()) throw new Error('Playback superseded');
         await npPollQueuePrefetch();
     }
     if (!track.file_path) throw new Error('Download timed out after 45 minutes');
@@ -2540,9 +2568,14 @@ function playPreviousInQueue() {
     playQueueItem(prev);
 }
 
-async function playQueueItem(index) {
-    if (index < 0 || index >= npQueue.length) return;
-    if (npLoadingQueueItem) return; // Prevent race condition from double-advance
+async function playQueueItem(index, options = {}) {
+    const generation = npPlaybackGeneration;
+    const signal = npPlaybackAbort.signal;
+    const isCurrent = () => generation === npPlaybackGeneration && !signal.aborted && (!options.isCurrent || options.isCurrent());
+    if (!isCurrent()) return { status: 'superseded' };
+    let releaseSetup;
+    if (index < 0 || index >= npQueue.length) return { status: 'empty' };
+    if (npLoadingQueueItem) return { status: 'busy' }; // Prevent race condition from double-advance
     // Manual skip / row-click during a crossfade: tear down the stray fade so it
     // can't fire npFinishCrossfade on top of this change. No-op for the
     // legitimate handoff (npFinishCrossfade already cleared the flag first).
@@ -2566,13 +2599,19 @@ async function playQueueItem(index) {
             const loadingText = document.querySelector('.loading-text');
             if (loadingText) loadingText.textContent = 'Downloading queued track…';
             renderNpQueue();
-            await npEnsureQueueTrackReady(track);
+            await npEnsureQueueTrackReady(track, isCurrent);
+            if (!isCurrent()) return { status: 'superseded' };
             track.is_library = true;
             if (loadingText) loadingText.textContent = 'Loading track…';
         }
         if (track.is_library) {
+            const previousSetup = npPlaybackSetup;
+            npPlaybackSetup = new Promise(resolve => { releaseSetup = resolve; });
+            await previousSetup;
+            if (!isCurrent()) return { status: 'superseded' };
             // Library track playback flow
             await stopStream();
+            if (!isCurrent()) return { status: 'superseded' };
             setTrackInfo({
                 title: track.title,
                 artist: track.artist,
@@ -2618,10 +2657,15 @@ async function playQueueItem(index) {
                 })
             });
             const result = await response.json();
+            if (!isCurrent()) return { status: 'superseded' };
             if (!result.success) throw new Error(result.error || 'Failed to start playback');
             // Re-apply repeat-one loop property
             if (audioPlayer) audioPlayer.loop = (npRepeatMode === 'one');
-            await startAudioPlayback();
+            const playback = await startAudioPlayback(isCurrent, signal);
+            if (playback?.status !== 'played') {
+                if (playback?.status === 'superseded') return playback;
+                throw new Error(playback?.error || 'Playback did not start');
+            }
         } else {
             // Non-library (stream) tracks cannot be queued for auto-advance
             // Just show track info — the stream flow handles its own playback
@@ -2640,22 +2684,31 @@ async function playQueueItem(index) {
             });
         }
     } catch (error) {
+        if (!isCurrent()) return { status: 'superseded' };
         console.error('Queue playback error:', error);
         showToast(`Skipping track: ${error.message}`, 'error');
         hideLoadingAnimation();
         // Auto-skip to next track on failure instead of stopping the queue
         npLoadingQueueItem = false;
         const nextIdx = npQueueIndex + 1;
-        if (nextIdx < npQueue.length) {
-            setTimeout(() => playQueueItem(nextIdx), 500);
+        const skipping = nextIdx < npQueue.length;
+        if (skipping) {
+            setTimeout(() => { if (isCurrent()) void playQueueItem(nextIdx, options); }, 500);
         }
-        return;
+        // A queue that is moving on to the next track has not failed. Saying
+        // 'failed' here made Discover announce "Playback could not start" and
+        // then start playing the next track a moment later.
+        return skipping
+            ? { status: 'skipped', error: error.message }
+            : { status: 'failed', error: error.message };
     } finally {
-        npLoadingQueueItem = false;
+        releaseSetup?.();
+        if (isCurrent()) npLoadingQueueItem = false;
     }
 
     renderNpQueue();
     updateNpPrevNextButtons();
+    return { status: track.is_library ? 'played' : 'unsupported' };
 }
 
 function renderNpQueue() {
@@ -3480,7 +3533,8 @@ window.startLibraryRadio = startLibraryRadio;
 // Play an acquisition-aware track list. Owned rows start immediately; missing
 // rows enter the same queue and are downloaded, verified and imported ahead of
 // playback. Radio mode stays off because a playlist still has a fixed end.
-async function playTrackList(tracks, contextName) {
+async function playTrackList(tracks, contextName, options = {}) {
+    if (options.isCurrent && !options.isCurrent()) return { status: 'superseded' };
     var list = (tracks || []).filter(function (t) {
         if (!t) return false;
         if (t.file_path) return true;
@@ -3491,8 +3545,9 @@ async function playTrackList(tracks, contextName) {
     });
     if (!list.length) {
         showToast('This list has no usable track metadata', 'info');
-        return;
+        return { status: 'empty' };
     }
+    window.cancelPendingPlayback();
     npCancelCrossfade();
     npRadioMode = false;
     clearQueue();
@@ -3501,7 +3556,7 @@ async function playTrackList(tracks, contextName) {
     renderNpQueue();
     npSetPlayContext(contextName || 'Playlist');
     npScheduleQueuePrefetch();
-    await playQueueItem(0);
+    return await playQueueItem(0, options);
 }
 window.playTrackList = playTrackList;
 

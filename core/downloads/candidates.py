@@ -569,9 +569,17 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                         )
             if used_sources_snapshot is not None:
                 _persist_acquisition_used_sources(task_id, used_sources_snapshot)
+            # Upstream's delta: the ladder that judges this transfer is the
+            # ITEM's. `track_info['quality_profile_id']` is a quality_profiles
+            # row — deliberately NOT `task_profile_id`, which is the USER
+            # profile that owns the task. Two different namespaces.
+            _download_kwargs = {}
+            if track_info.get('quality_profile_id') is not None:
+                _download_kwargs['quality_profile_id'] = track_info['quality_profile_id']
             try:
                 download_id = deps.run_async(
-                    deps.download_orchestrator.download(username, filename, size))
+                    deps.download_orchestrator.download(
+                        username, filename, size, **_download_kwargs))
             except Exception:
                 from core.acquisition.manual_grab import fail_prepared_correlated_grab
                 fail_prepared_correlated_grab(

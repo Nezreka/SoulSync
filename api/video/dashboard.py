@@ -26,6 +26,29 @@ def register_routes(bp):
             logger.exception("video health failed")
             return jsonify({"status": "ok", "checks": []})
 
+    @bp.route("/dashboard/continue-watching", methods=["GET"])
+    def video_continue_watching():
+        """The resume row: what you are part-way through, newest first.
+
+        Its own endpoint rather than a key on /dashboard, because it is the one
+        part of that page that changes while you are not looking at it - you
+        watch something on the TV and want the row right when you come back -
+        and the rest of the dashboard payload is a set of counts that does not
+        need re-fetching to answer that.
+
+        Always 200 with a list. An empty row renders nothing, so a failure here
+        must degrade to "nothing to resume" rather than to a broken band.
+        """
+        from . import get_video_db
+        from core.video.sources import resolve_video_server
+        try:
+            rows = get_video_db().continue_watching(
+                server_source=resolve_video_server(), limit=20)
+            return jsonify({"items": rows})
+        except Exception:
+            logger.exception("continue watching failed")
+            return jsonify({"items": []})
+
     @bp.route("/dashboard", methods=["GET"])
     def video_dashboard():
         from . import get_video_db

@@ -1,4 +1,9 @@
 {
+  "musicbrainz": {
+    "base_url": "https://musicbrainz.org/ws/2",
+    "request_interval": 1.05,
+    "embed_tags": true
+  },
   "active_media_server": "plex",
   "spotify": {
     "client_id": "",

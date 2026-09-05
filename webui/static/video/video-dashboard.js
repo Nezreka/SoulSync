@@ -31,6 +31,15 @@
     var SYSTEM_STATS_URL = '/api/system/stats';
     var systemPollTimer = null;
 
+    // live downloads band. same endpoint the downloads page and the detail
+    // pages poll, adaptive like the downloads page but slower, this is a
+    // secondary surface.
+    var ACTIVE_DL_URL = '/api/video/downloads/active';
+    var DL_POLL_ACTIVE_MS = 3000;
+    var DL_POLL_IDLE_MS = 15000;
+    var DL_MAX_ROWS = 6;
+    var dlPollTimer = null;
+
     // Fallback only — shown if the /api/video/dashboard call fails. (uptime/memory
     // are NOT here — they come from the shared /api/system/stats via loadSystemStats.)
     var FALLBACK_STATS = {
@@ -112,6 +121,209 @@
         var ago = _ago(it.added_at);
         if (ago) bits.push(ago);
         return bits.length ? '<div class="video-recent-year">' + _esc(bits.join(' · ')) + '</div>' : '';
+    }
+
+    // ── Continue watching ────────────────────────────────────────────────
+    //
+    // The resume rail. Landscape cards, because a 16:9 still of the scene you
+    // stopped on is what you recognise - a portrait poster is how you BROWSE,
+    // not how you resume, which is why every player from Plex to Netflix
+    // switches shape for this row.
+    //
+    // The card answers one question: how much is left. Elapsed time is the
+    // number people are shown and the wrong one - "47 minutes in" needs the
+    // runtime to mean anything, "23 min left" is already the answer.
+
+    var CONTINUE_URL = '/api/video/dashboard/continue-watching';
+
+    /** "23 min left" — what remains, not what is spent. */
+    function _remaining(it) {
+        var total = Number(it.runtime_minutes || 0) * 60000;
+        var off = Number(it.view_offset_ms || 0);
+        if (!total) return '';
+        var left = Math.max(0, total - off);
+        var mins = Math.round(left / 60000);
+        if (mins <= 0) return '';
+        if (mins < 60) return mins + ' min left';
+        var h = Math.floor(mins / 60), m = mins % 60;
+        return m ? h + 'h ' + m + 'm left' : h + 'h left';
+    }
+
+    function _pct(it) {
+        var total = Number(it.runtime_minutes || 0) * 60000;
+        var off = Number(it.view_offset_ms || 0);
+        if (!total || off <= 0) return 0;
+        return Math.max(1, Math.min(100, Math.round(off / total * 100)));
+    }
+
+    function _continueCard(it) {
+        var pct = _pct(it);
+        var left = _remaining(it);
+        var img = it.image_url || '';
+        // An up-next card has no progress to show, so it says what it IS
+        // instead. Drawing a 0% bar would read as "stalled".
+        var meta = it.reason === 'up_next' ? 'Up next' : left;
+        // A real <a href>, not a button with a click handler. Every other video
+        // surface links this way, and it is what makes middle-click, ctrl-click
+        // and "open in new tab" work — a button swallows all three.
+        var href = '/video-detail/library/' + (it.kind === 'show' ? 'show/' + it.show_id
+                                                                 : 'movie/' + it.id);
+        return '<a class="vcw-card" href="' + href + '" ' +
+            'data-vcw-kind="' + _esc(it.kind) + '" data-vcw-id="' + _esc(it.id) + '"' +
+            (it.show_id ? ' data-vcw-show="' + _esc(it.show_id) + '"' : '') +
+            ' title="' + _esc(it.title + (it.subtitle ? ' — ' + it.subtitle : '')) + '">' +
+            '<span class="vcw-art"' + (img ? ' style="background-image:url(\'' + _esc(img) + '\')"' : '') + '>' +
+                (img ? '' : '<span class="vcw-art-fallback">' + _esc((it.title || '?').charAt(0).toUpperCase()) + '</span>') +
+                (it.reason === 'up_next' ? '<span class="vcw-badge">Up next</span>' : '') +
+                // An arrow, not a play triangle. SoulSync does not play video —
+                // the media server does — so a ▶ here promises something this
+                // click cannot deliver. It opens the title, and says so.
+                '<span class="vcw-open" aria-hidden="true">&rsaquo;</span>' +
+                (pct > 0 ? '<span class="vcw-bar"><span class="vcw-bar-fill" style="width:' + pct + '%"></span></span>' : '') +
+            '</span>' +
+            '<span class="vcw-meta">' +
+                '<span class="vcw-name">' + _esc(it.title || '') + '</span>' +
+                '<span class="vcw-sub">' + _esc(it.subtitle || '') + '</span>' +
+                (meta ? '<span class="vcw-left">' + _esc(meta) + '</span>' : '') +
+            '</span>' +
+        '</a>';
+    }
+
+    function loadContinueWatching() {
+        var section = document.querySelector('[data-video-continue-section]');
+        var rail = document.querySelector('[data-video-continue-rail]');
+        if (!section || !rail) return;
+        fetch(CONTINUE_URL, { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var items = (d && d.items) || [];
+                // Nothing to resume: the whole band goes away. An empty rail
+                // headed "Continue watching" is worse than no rail.
+                section.hidden = items.length === 0;
+                rail.innerHTML = items.map(_continueCard).join('');
+            })
+            .catch(function () { section.hidden = true; });
+    }
+
+    // ── Downloading now ─────────────────────────────────────────────────────
+    //
+    // /downloads/active is a misleading name: it returns the last 100 rows of
+    // ANY status, including long-finished ones. video-detail.js hit this too.
+    // So filter, don't trust the endpoint name.
+    function _dlActive(s) {
+        return s === 'downloading' || s === 'queued' || s === 'searching' || s === 'importing';
+    }
+
+    // status pill text. 'downloading' is already obvious from the bar moving,
+    // so it says the phase instead when the importer gave us one.
+    function _dlStatus(d) {
+        var st = String(d.status || '');
+        if (st === 'importing') return d.import_phase ? String(d.import_phase) : 'Importing';
+        if (st === 'searching') return 'Searching';
+        if (st === 'queued') return 'Queued';
+        return 'Downloading';
+    }
+
+    function _dlPct(d) {
+        var p = Number(d.progress);
+        if (!isFinite(p) || p <= 0) return 0;
+        if (p <= 1) p = p * 100;          // some writers store a 0-1 fraction
+        return Math.max(0, Math.min(100, Math.round(p)));
+    }
+
+    function _dlSub(d) {
+        var bits = [];
+        if (d.status === 'downloading' && Number(d.speed_bps) > 0) {
+            bits.push(formatSpeed(d.speed_bps));
+        }
+        var eta = parseInt(d.eta_seconds, 10);
+        if (eta > 0) {
+            bits.push(eta < 60 ? '~' + eta + 's left'
+                : eta < 3600 ? '~' + Math.round(eta / 60) + 'm left'
+                : '~' + Math.floor(eta / 3600) + 'h ' + Math.round((eta % 3600) / 60) + 'm left');
+        }
+        return bits.join(' \u00b7 ');
+    }
+
+    // the poster. poster_url is whatever the grab caller happened to pass, and
+    // wishlist-driven grabs routinely pass nothing, which is why half the band
+    // came up art-less. a library row can always be resolved from its own id
+    // instead. an <img> rather than a background so a 404 can fall back to the
+    // letter, which a background-image cannot do.
+    function _dlArt(d) {
+        if (d.poster_url) return String(d.poster_url);
+        if (d.media_source === 'library' && d.media_id && d.kind) {
+            return '/api/video/poster/' + encodeURIComponent(d.kind) +
+                   '/' + encodeURIComponent(d.media_id) + '?w=120';
+        }
+        return '';
+    }
+
+    function _dlCard(d) {
+        var pct = _dlPct(d);
+        var title = d.title || d.release_title || 'Unknown';
+        var art = _dlArt(d);
+        var sub = _dlSub(d);
+        // queued and searching have nothing to put on a bar. a 0% bar reads as
+        // stalled, which is a different and worse thing to say.
+        var bar = (d.status === 'downloading' || d.status === 'importing')
+            ? '<span class="vdn-bar"><span class="vdn-bar-fill" style="width:' + pct + '%"></span></span>'
+            : '';
+        return '<div class="vdn-card" title="' + _esc(title + (d.year ? ' (' + d.year + ')' : '')) + '">' +
+            '<span class="vdn-art">' +
+                (art ? '<img src="' + _esc(art) + '" alt="" loading="lazy" ' +
+                       'onerror="this.parentNode.classList.add(\'is-noart\');this.remove();">' : '') +
+                '<span class="vdn-letter">' + _esc(String(title).charAt(0).toUpperCase()) + '</span>' +
+            '</span>' +
+            '<span class="vdn-body">' +
+                '<span class="vdn-name">' + _esc(title) + '</span>' +
+                '<span class="vdn-line">' +
+                    '<span class="vdn-pill vdn-pill--' + _esc(d.status || '') + '">' +
+                        _esc(_dlStatus(d)) + '</span>' +
+                    (pct && bar ? '<span class="vdn-pct">' + pct + '%</span>' : '') +
+                '</span>' +
+                (sub ? '<span class="vdn-sub">' + _esc(sub) + '</span>' : '') +
+                bar +
+            '</span>' +
+        '</div>';
+    }
+
+    function loadActiveDownloads(again) {
+        var section = document.querySelector('[data-video-dl-section]');
+        var list = document.querySelector('[data-video-dl-list]');
+        if (!section || !list) return;
+        fetch(ACTIVE_DL_URL, { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var rows = ((d && d.downloads) || []).filter(function (x) {
+                    return _dlActive(x.status);
+                });
+                // nothing in flight, the whole band goes away
+                section.hidden = rows.length === 0;
+                if (rows.length) {
+                    var shown = rows.slice(0, DL_MAX_ROWS);
+                    var extra = rows.length - shown.length;
+                    list.innerHTML = shown.map(_dlCard).join('') +
+                        (extra > 0 ? '<div class="vdn-more">and ' + extra + ' more</div>' : '');
+                } else {
+                    list.innerHTML = '';
+                }
+                if (again) scheduleDownloadPoll(rows.length > 0);
+            })
+            .catch(function () {
+                // keep whatever is on screen, a blip is not news
+                if (again) scheduleDownloadPoll(false);
+            });
+    }
+
+    // one timer, adaptive. fast while something is moving, slow when idle, and
+    // it does not fetch at all when the dashboard is not the visible page.
+    function scheduleDownloadPoll(busy) {
+        if (dlPollTimer) clearTimeout(dlPollTimer);
+        dlPollTimer = setTimeout(function () {
+            if (dashboardVisible()) loadActiveDownloads(true);
+            else scheduleDownloadPoll(false);
+        }, busy ? DL_POLL_ACTIVE_MS : DL_POLL_IDLE_MS);
     }
 
     // Attention badges: open issues (everyone) + pending maintenance findings
@@ -394,12 +606,17 @@
     function onPageShown(e) {
         if (!e || e.detail !== DASHBOARD_ID) return;
         loadStats();
+        // First, because "where was I" is the first question anyone brings to a
+        // media library — and because this is the one band that changes while
+        // you are not looking at the page (you watched something on the TV).
+        loadContinueWatching();
         loadUpcoming();
         loadAttention();            // open issues + pending maintenance findings
         gateStudioCards();
         loadStudioCoverage();       // TMDB/TVDB coverage bars on the Studio cards
         loadSystemStats();          // immediate fill (memory/uptime)
         startSystemStatsPolling();  // then keep it live
+        loadActiveDownloads(true);  // what is in flight now, and keep it moving
     }
 
     // ── Library card: live scan progress (parity with the music dashboard) ──

@@ -1,0 +1,40 @@
+{
+  "hero": {
+    "dots": 10,
+    "title": "Jungkook"
+  },
+  "sliderWrites": [
+    {
+      "t": 1788590848953,
+      "body": {
+        "value": 0.31
+      }
+    },
+    {
+      "t": 1788590849430,
+      "body": {
+        "value": 0.34
+      }
+    },
+    {
+      "t": 1788590849970,
+      "body": {
+        "value": 0.38
+      }
+    },
+    {
+      "t": 1788590850591,
+      "body": {
+        "value": 0.4
+      }
+    }
+  ],
+  "modal": {
+    "inside": true,
+    "escapeClosed": true
+  },
+  "sidebarRight": 0,
+  "retryRequests": [
+    "?kind=movie&sort=popularity.desc&lang=any&page=2"
+  ]
+}

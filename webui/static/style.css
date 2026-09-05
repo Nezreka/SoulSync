@@ -36585,6 +36585,10 @@ div.artist-hero-badge {
     overflow: hidden;
     margin-bottom: 40px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    /* Column, so the control strip at the foot is a real row the content sits
+       above rather than an absolute box parked on top of the CTAs. */
+    display: flex;
+    flex-direction: column;
 }
 
 .discover-hero-background {
@@ -36625,11 +36629,12 @@ div.artist-hero-badge {
 
 .discover-hero-content {
     position: relative;
-    height: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
     display: flex;
     align-items: flex-end;
     justify-content: space-between;
-    padding: 48px 56px;
+    padding: 48px 56px 20px;
     gap: 40px;
 }
 
@@ -36953,53 +36958,112 @@ div.artist-hero-badge {
     right: 20px;
 }
 
-/* Hero Slideshow Indicators */
-.discover-hero-indicators {
-    position: absolute;
-    bottom: 24px;
-    left: 50%;
-    transform: translateX(-50%);
+/* Hero control row: the dots and the bulk actions share ONE reserved strip
+   across the foot of the billboard. They were two absolutely positioned boxes
+   both anchored at bottom: 24px, one centred and one right-aligned, which is
+   why the dots painted over the Watch All pill on narrow desktop and on every
+   phone. Nothing here overlaps because nothing here is absolute except the
+   row itself. */
+.discover-hero-controls {
+    position: relative;
     z-index: 10;
+    padding: 0 24px 18px;
     display: flex;
-    gap: 10px;
-    padding: 12px 20px;
-    background: rgba(0, 0, 0, 0.3);
-    backdrop-filter: blur(10px);
-    border-radius: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    pointer-events: none;   /* the strip is layout; only its controls take clicks */
+}
+.discover-hero-controls > * { pointer-events: auto; }
+
+.discover-playback-pending {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    border: 1px solid rgba(var(--accent-rgb), .4);
+    border-radius: 12px;
+    background: rgba(var(--accent-rgb), .1);
+    font-size: 14px;
+}
+.discover-playback-pending button { flex-shrink: 0; }
+@media (max-width: 600px) {
+    .discover-playback-pending { align-items: flex-start; flex-direction: column; }
 }
 
+.discover-hero-indicators {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 100%;
+    box-sizing: border-box;
+    gap: 4px;
+    padding: 4px 10px;
+    background: rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(10px);
+    border-radius: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.discover-hero-indicators:empty {
+    display: none;
+}
+
+/* A small dot inside a finger-sized target, rather than a small button that a
+   generic min-height stretches into a lozenge. */
 .hero-indicator {
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
+    border-radius: 50%;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.hero-indicator-dot {
+    display: block;
     width: 8px;
     height: 8px;
     border-radius: 50%;
     background: rgba(255, 255, 255, 0.4);
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    transition: all 0.3s ease;
+    transition: background 0.3s ease, width 0.3s ease, border-radius 0.3s ease;
 }
 
-.hero-indicator:hover {
+.hero-indicator:hover .hero-indicator-dot {
     background: rgba(255, 255, 255, 0.7);
-    transform: scale(1.2);
 }
 
-.hero-indicator.active {
+.hero-indicator:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.9);
+    outline-offset: -2px;
+}
+
+.hero-indicator.active .hero-indicator-dot {
     background: rgb(var(--accent-rgb));
-    width: 24px;
+    width: 22px;
     border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hero-indicator-dot { transition: none; }
 }
 
 /* Hero Bottom Action Buttons */
 .discover-hero-bottom-actions {
-    position: absolute;
-    bottom: 24px;
-    right: 24px;
-    z-index: 10;
     display: flex;
     gap: 8px;
     align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    margin-left: auto;
 }
 
 .discover-hero-watch-all,
@@ -37504,8 +37568,20 @@ div.artist-hero-badge {
 
     .discover-hero-content {
         flex-direction: column;
-        padding: 40px 20px;
+        padding: 40px 20px 14px;
         text-align: center;
+    }
+
+    /* On a phone the strip wraps; centre it rather than pushing the actions
+       hard right under a row of dots. */
+    .discover-hero-controls {
+        padding: 0 14px 14px;
+        justify-content: center;
+    }
+
+    .discover-hero-bottom-actions {
+        margin-left: 0;
+        justify-content: center;
     }
 
     .discover-hero-title {
@@ -37598,6 +37674,21 @@ div.artist-hero-badge {
     border-color: rgba(var(--accent-rgb), 0.25);
     box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 24px rgba(var(--accent-rgb), 0.12);
 }
+/* The discover album card is a <button> (it has one action), so undo the
+   button chrome the browser adds and keep the tile shape. */
+.ya-card.discover-album-card {
+    display: block;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    -webkit-appearance: none;
+    appearance: none;
+}
+.ya-card.discover-album-card:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.9);
+    outline-offset: 2px;
+}
 .ya-card-img { position: absolute; inset: 0; }
 .ya-card-img img { width: 100%; height: 100%; object-fit: cover; }
 .ya-card-placeholder {
@@ -37667,6 +37758,7 @@ div.artist-hero-badge {
 .discover-mixes-grid::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 3px; }
 .discover-mixes-grid::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-rgb), 0.45); }
 .discover-mix-card {
+    position: relative;
     background: rgba(255,255,255,0.03);
     border: 1px solid rgba(255,255,255,0.06);
     border-radius: 14px;
@@ -37674,6 +37766,36 @@ div.artist-hero-badge {
     cursor: pointer;
     transition: transform 0.3s cubic-bezier(0.4,0,0.2,1), border-color 0.3s, box-shadow 0.3s, background 0.3s;
 }
+/* The card's open target. It is a real button now, and its ::after stretches
+   over the whole card so the cover is still clickable, while the Play button
+   sits above it on z-index. Nothing is nested inside anything. */
+.mix-card-open {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.mix-card-open::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    z-index: 1;
+}
+.mix-card-open:focus-visible {
+    outline: none;
+}
+.mix-card-open:focus-visible::after {
+    outline: 2px solid rgba(var(--accent-rgb), 0.9);
+    outline-offset: 2px;
+}
+/* display:contents so the injected cover markup stays a direct flex child. */
+.mix-card-cover-inner { display: contents; }
 .discover-mix-card:hover {
     transform: translateY(-5px);
     background: rgba(255,255,255,0.06);
@@ -37700,25 +37822,44 @@ div.artist-hero-badge {
     position: absolute;
     bottom: 10px; right: 10px;
     width: 44px; height: 44px;
+    border: 0;
     border-radius: 50%;
     background: var(--accent);
     color: #000;
     display: flex; align-items: center; justify-content: center;
     font-size: 15px; padding-left: 2px;
     box-shadow: 0 6px 16px rgba(0,0,0,0.45);
-    opacity: 0; transform: translateY(8px);
+    cursor: pointer;
+    /* Visible at rest, not hover-only. A touch device has no hover, so the
+       only way to play a mix used to be opening the modal first. */
+    opacity: 0.82;
     transition: opacity 0.25s, transform 0.25s;
-    z-index: 2;
+    z-index: 3;
 }
-.discover-mix-card:hover .mix-card-play {
-    opacity: 1; transform: translateY(0);
+.discover-mix-card:hover .mix-card-play,
+.mix-card-play:hover,
+.mix-card-play:focus-visible {
+    opacity: 1;
+}
+.mix-card-play:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+.mix-card-play[disabled] {
+    cursor: progress;
+    opacity: 0.6;
+}
+@media (prefers-reduced-motion: reduce) {
+    .mix-card-play { transition: none; }
 }
 .mix-card-name {
+    display: block;
     font-size: 14px; font-weight: 700; color: #fff;
     margin-top: 12px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .mix-card-meta {
+    display: block;
     font-size: 12px; color: rgba(255,255,255,0.5);
     margin-top: 3px;
 }
@@ -37919,6 +38060,33 @@ div.artist-hero-badge {
     font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.35);
     position: relative; z-index: 2;
 }
+/* The real control: a native range input stretched over the wave. Invisible,
+   because the orb is the handle you see, but it owns keyboard, touch and the
+   screen-reader value. The old dial had none of that. */
+.adv-wave-input {
+    position: absolute; inset: 0; z-index: 4;
+    width: 100%; height: 100%; margin: 0; padding: 0;
+    opacity: 0; cursor: grab;
+    -webkit-appearance: none; appearance: none; background: transparent;
+    touch-action: none;
+}
+.adv-wave-input:active { cursor: grabbing; }
+.adv-wave-input::-webkit-slider-thumb { -webkit-appearance: none; width: 30px; height: 100%; }
+.adv-wave-input::-moz-range-thumb { width: 30px; height: 100px; border: 0; }
+/* Focus lands on an invisible input, so the visible ring goes on the card. */
+.adv-wave:focus-within {
+    border-color: rgba(var(--accent-rgb), 0.55);
+    box-shadow: 0 10px 34px rgba(0,0,0,0.30), 0 0 0 2px rgba(var(--accent-rgb), 0.6);
+}
+.adv-wave-help {
+    position: relative; z-index: 2;
+    margin: 8px 0 0; font-size: 11.5px; line-height: 1.45;
+    color: rgba(255,255,255,0.42);
+}
+@media (prefers-reduced-motion: reduce) {
+    .adv-wave-orb::after { animation: none; }
+    .adv-wave-state { transition: none; }
+}
 
 /* Watchlist toggle on recommended-artist .ya-cards — corner pill, appears on hover,
    stays lit when already watching. Keeps the .recommended-card-watchlist-btn hook. */
@@ -38107,7 +38275,7 @@ div.artist-hero-badge {
         linear-gradient(90deg, rgba(0, 0, 0, 0.58) 0%, rgba(0, 0, 0, 0.18) 52%, transparent 100%);
 }
 .discover-command-hero .discover-hero-content {
-    padding: 28px 34px;
+    padding: 28px 34px 14px;
     gap: 22px;
 }
 .discover-command-hero .discover-hero-label {
@@ -38724,7 +38892,7 @@ div.artist-hero-badge {
         grid-template-columns: 1fr;
     }
     .discover-command-hero .discover-hero-content {
-        padding: 26px;
+        padding: 26px 26px 12px;
     }
     .discover-command-hero .discover-hero-image {
         display: none;
@@ -38752,11 +38920,15 @@ div.artist-hero-badge {
         margin-bottom: 24px;
     }
     .discover-command-hero .discover-hero {
-        height: 318px;
+        /* min-height, not height. A fixed 318px clipped the hero's own
+           actions off the bottom the moment a title wrapped, and the hero has
+           overflow: hidden so they vanished rather than spilling. */
+        height: auto;
+        min-height: 318px;
         border-radius: 12px;
     }
     .discover-command-hero .discover-hero-content {
-        padding: 24px;
+        padding: 24px 24px 10px;
     }
     .discover-command-hero .discover-hero-title,
     .discover-command-hero .discover-hero--empty .discover-hero-title {
@@ -81131,6 +81303,134 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-card-challenge-btns { display: flex; gap: 6px; flex-wrap: wrap; }
 
 /* ── chat file sharing (filepost.dev, chat P2) ── */
+/* the plain-text hint. the room filter picks the send format too: "all
+   messages" means you can see the vanilla soulseek users, so you send
+   something they can read. only the exception needs explaining. */
+.chat-modehint {
+    margin: 8px 2px 0;
+    padding: 7px 10px;
+    border-radius: 8px;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.55);
+    background: rgba(250, 204, 21, 0.07);
+    border: 1px solid rgba(250, 204, 21, 0.18);
+}
+.chat-modehint b { color: rgb(253, 224, 71); font-weight: 700; }
+
+/* overlay share picker. rendered previews, not a list of names. an overlay is
+   a visual thing, picking one by name is picking blind. */
+.chat-ovl-modal { max-width: 720px; width: 92vw; }
+.chat-ovl-sub {
+    margin: 0 0 14px;
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.55);
+    line-height: 1.5;
+}
+.chat-ovl-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    gap: 12px;
+    max-height: 54vh;
+    overflow-y: auto;
+    padding: 2px;
+}
+.chat-ovl-card {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 0;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    min-width: 0;
+}
+/* posters are 2:3. anything else crops the design you're trying to look at. */
+.chat-ovl-shot {
+    display: block;
+    position: relative;
+    aspect-ratio: 2 / 3;
+    border-radius: 9px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.chat-ovl-shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chat-ovl-shot.is-noshot::after {
+    content: 'no preview';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.3);
+}
+.chat-ovl-card:hover .chat-ovl-shot {
+    border-color: rgb(var(--accent-rgb, 99, 102, 241));
+    transform: translateY(-2px);
+}
+.chat-ovl-card:focus-visible .chat-ovl-shot {
+    outline: 2px solid rgb(var(--accent-rgb, 99, 102, 241));
+    outline-offset: 2px;
+}
+.chat-ovl-meta { display: block; min-width: 0; }
+.chat-ovl-cardname {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.chat-ovl-cardsub {
+    display: block;
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.42);
+}
+.chat-ovl-empty {
+    grid-column: 1 / -1;
+    padding: 28px 8px;
+    text-align: center;
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.45);
+    line-height: 1.6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .chat-ovl-shot { transition: none; }
+    .chat-ovl-card:hover .chat-ovl-shot { transform: none; }
+}
+
+/* A shared overlay template. Deliberately shaped like the file card beside it
+   — same footprint, same rhythm — because it IS the same gesture: someone
+   handed you something you can take. The accent stripe is what marks it as a
+   design rather than a download. */
+.chat-overlay-card {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 9px 12px; margin: 2px 0; max-width: 460px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-left: 3px solid rgb(var(--accent-rgb, 99, 102, 241));
+    border-radius: 11px;
+}
+.chat-overlay-icon { font-size: 18px; opacity: 0.85; }
+.chat-overlay-meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.chat-overlay-name {
+    font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-overlay-sub { font-size: 10.5px; color: rgba(255,255,255,0.4); }
+/* Amber, not red: missing art is a thing to know before you click, not a
+   failure. The template still imports and still renders everything else. */
+.chat-overlay-warn {
+    font-size: 10.5px; color: #f1c40f; margin-top: 2px;
+}
+
 .chat-file-card {
     display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
     padding: 9px 12px; margin: 2px 0; max-width: 460px;
@@ -83107,3 +83407,33 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 .explorer-tier{position:relative;z-index:1;display:flex;justify-content:center;flex-wrap:nowrap;gap:24px;padding:12px 0}.explorer-tier-root{margin-bottom:16px}.explorer-tier-artists{gap:28px;margin-bottom:6px}.explorer-artist-tiers{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center}.explorer-branch{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;animation:explorer-node-enter .42s cubic-bezier(.2,.85,.2,1) both;animation-delay:var(--enter-delay,0s)}.explorer-children{position:relative;z-index:1;display:flex;flex-wrap:wrap;justify-content:center;gap:16px;padding-top:24px}.explorer-children:empty{display:none}.explorer-node{position:relative;overflow:hidden;border:1px solid rgba(255,255,255,.1);background:rgba(9,11,16,.9);cursor:pointer;box-shadow:0 14px 34px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.055);transition:transform .22s ease,border-color .22s ease,box-shadow .22s ease,opacity .22s ease}.explorer-node:hover{transform:translateY(-2px) scale(1.045);border-color:rgba(var(--accent-rgb),.38);box-shadow:0 20px 48px rgba(0,0,0,.44),0 0 0 1px rgba(var(--accent-rgb),.13);z-index:10}.explorer-node.expanded{border-color:rgba(var(--accent-rgb),.68);box-shadow:0 0 0 4px rgba(var(--accent-rgb),.15),0 22px 48px rgba(0,0,0,.42)}.explorer-node-img,.explorer-node-img-placeholder{position:absolute;inset:0;width:100%;height:100%}.explorer-node-img{object-fit:cover}.explorer-node-img-placeholder{display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,rgba(var(--accent-rgb),.14),rgba(255,255,255,.035));color:rgba(255,255,255,.22);font-size:32px}.explorer-node-label{position:absolute;left:0;right:0;bottom:0;z-index:2;padding:10px 9px 8px;background:linear-gradient(to top,rgba(0,0,0,.92),rgba(0,0,0,.62) 58%,transparent);text-align:center}.explorer-node-label-sub{margin-bottom:2px;color:rgba(var(--accent-rgb),.92);font-size:8px;font-weight:900;letter-spacing:1.7px;text-transform:uppercase}.explorer-node-label-main{color:#fff;font-size:12px;font-weight:850;line-height:1.16;text-shadow:0 1px 4px rgba(0,0,0,.65);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.explorer-node-label-meta{margin-top:3px;color:rgba(255,255,255,.6);font-size:9px;font-weight:650}.explorer-node-root{width:172px;height:172px;border-radius:28px;border-color:rgba(var(--accent-rgb),.38)}.explorer-node-root .explorer-node-label{padding:16px 13px 13px;border-radius:0 0 26px 26px}.explorer-node-root .explorer-node-label-main{font-size:15px}.explorer-node-root .explorer-node-label-meta{font-size:10px}.explorer-node-glow{position:absolute;inset:-18px;z-index:0;background:radial-gradient(circle,rgba(var(--accent-rgb),.22),transparent 68%);animation:explorer-glow-pulse 3.5s ease-in-out infinite}@keyframes explorer-glow-pulse{0%,100%{opacity:.55;transform:scale(1)}50%{opacity:1;transform:scale(1.035)}}.explorer-node-artist{width:92px;height:92px;border-radius:50%}.explorer-node-artist:after{content:"";position:absolute;inset:-6px;border-radius:inherit;border:1px solid rgba(var(--accent-rgb),0);pointer-events:none;transition:inset .22s ease,border-color .22s ease}.explorer-node-artist:hover:after{inset:-10px;border-color:rgba(var(--accent-rgb),.25)}.explorer-node-artist .explorer-node-label-main{font-size:11px}.explorer-node-artist.has-selection{border-color:rgba(var(--accent-rgb),.62);box-shadow:0 0 0 4px rgba(var(--accent-rgb),.15),0 16px 34px rgba(var(--accent-rgb),.12)}.explorer-node-artist.has-selection:after{inset:-10px;border-color:rgba(var(--accent-rgb),.28);animation:explorer-selected-breathe 2.5s ease-in-out infinite}.explorer-node-artist.error{border-color:rgba(255,71,87,.35);opacity:.55;cursor:default}.explorer-node-expand-hint{position:absolute;left:50%;bottom:3px;z-index:5;width:18px;height:18px;border-radius:999px;display:flex;align-items:center;justify-content:center;transform:translateX(-50%);background:rgba(0,0,0,.55);color:rgba(255,255,255,.58);font-size:10px;line-height:1;transition:transform .2s ease,color .2s ease,background .2s ease}.explorer-node-artist:hover .explorer-node-expand-hint{background:rgba(var(--accent-rgb),.24);color:#fff}.explorer-node-artist.expanded .explorer-node-expand-hint{transform:translateX(-50%) rotate(180deg);background:rgba(var(--accent-rgb),.28);color:#fff}.explorer-node-error-ring{position:absolute;inset:5px;z-index:3;border:2px dashed rgba(255,71,87,.38);border-radius:50%}
 .explorer-node-album{width:108px;height:108px;border-radius:18px}.explorer-node-album .explorer-node-label{padding:8px 7px 7px;border-radius:0 0 16px 16px}.explorer-node-album .explorer-node-label-main{font-size:10px}.explorer-node-album .explorer-node-label-meta{font-size:8px}.explorer-node-album.selected{border-color:var(--accent);box-shadow:0 0 0 4px rgba(var(--accent-rgb),.22),0 18px 40px rgba(var(--accent-rgb),.16);animation:explorer-selected-breathe 2.5s ease-in-out infinite}@keyframes explorer-selected-breathe{0%,100%{box-shadow:0 0 0 3px rgba(var(--accent-rgb),.18),0 14px 32px rgba(var(--accent-rgb),.12)}50%{box-shadow:0 0 0 5px rgba(var(--accent-rgb),.3),0 18px 42px rgba(var(--accent-rgb),.18)}}.explorer-node-album.owned{opacity:.52}.explorer-node-album.added{border-color:rgba(74,222,128,.72);box-shadow:0 0 0 4px rgba(74,222,128,.16)}.explorer-node-select{position:absolute;top:7px;right:7px;z-index:5;width:24px;height:24px;border-radius:999px;display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,.34);background:rgba(0,0,0,.64);backdrop-filter:blur(6px);opacity:0;transition:opacity .18s ease,background .18s ease,border-color .18s ease}.explorer-node-album:hover .explorer-node-select,.explorer-node-select.active{opacity:1}.explorer-node-select.active{border-color:var(--accent);background:var(--accent);box-shadow:0 4px 12px rgba(var(--accent-rgb),.44)}.explorer-node-select svg{width:13px;height:13px;color:#fff;opacity:0}.explorer-node-select.active svg{opacity:1}.explorer-node-badge-float{position:absolute;z-index:5;left:50%;bottom:50%;transform:translateX(-50%);padding:3px 7px;border-radius:999px;color:#fff;font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}.explorer-node-badge-float.owned{background:rgba(34,197,94,.88)}.explorer-node-badge-float.playlist{top:7px;left:7px;bottom:auto;transform:none;padding:2px 6px;background:rgba(96,165,250,.9);font-size:10px}.explorer-node-track{width:auto;height:auto;min-width:156px;max-width:240px;overflow:visible;padding:8px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.075);background:rgba(255,255,255,.045);cursor:default;box-shadow:0 8px 20px rgba(0,0,0,.2)}.explorer-node-track:hover{transform:none;border-color:rgba(255,255,255,.13);box-shadow:0 8px 20px rgba(0,0,0,.2)}.explorer-node-track .explorer-node-label{position:static;padding:0;background:none;text-align:left}.explorer-node-track .explorer-node-label-main{color:rgba(255,255,255,.84);font-size:11px;font-weight:650;white-space:nowrap}.explorer-node-track .explorer-node-label-meta{color:rgba(255,255,255,.42);font-size:9px}.explorer-line{fill:none}.explorer-line-animated{animation:explorer-line-draw .58s cubic-bezier(.4,0,.2,1) forwards}@keyframes explorer-line-draw{to{stroke-dashoffset:0}}@keyframes explorer-node-enter{from{opacity:0;transform:translateY(18px) scale(.92)}to{opacity:1;transform:none}}
 @media (max-width:1100px){.explorer-picker-command{flex-direction:column;align-items:stretch}.explorer-picker-stats{justify-content:flex-start;max-width:none}.explorer-picker-scroll{grid-auto-columns:minmax(280px,330px)}}@media (max-width:900px){.explorer-container{padding:16px}.explorer-playlist-picker{padding:14px;border-radius:16px}.explorer-picker-top,.explorer-build-row,.explorer-action-bar{align-items:stretch;flex-direction:column}.explorer-picker-tabs,.explorer-controls,.explorer-mode-toggle,.explorer-action-buttons{width:100%}.explorer-picker-tabs,.explorer-mode-toggle{overflow-x:auto}.explorer-mode-btn,.explorer-picker-tab,.explorer-action-buttons .btn{flex:1;justify-content:center}.explorer-build-btn{width:100%}.explorer-viewport{min-height:520px;border-radius:16px}.explorer-tree{padding:34px 44px 76px}.explorer-node-root{width:140px;height:140px}.explorer-node-artist{width:76px;height:76px}.explorer-node-album{width:88px;height:88px}.explorer-tier,.explorer-tier-artists{gap:16px}}@media (max-width:600px){.explorer-container{padding:12px}.explorer-picker-command h3{font-size:19px}.explorer-picker-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.explorer-picker-stats span{justify-content:center}.explorer-picker-scroll{grid-auto-flow:row;grid-auto-columns:unset;grid-template-columns:1fr;overflow:visible;padding-bottom:0}.explorer-picker-card{grid-template-columns:78px minmax(0,1fr);min-height:112px}.explorer-picker-card-art{width:78px;min-height:92px}.explorer-picker-card-name{font-size:13px}.explorer-picker-card-meta{font-size:10px}.explorer-progress{flex-wrap:wrap}.explorer-progress-text{max-width:none;width:100%}.explorer-zoom-controls{flex-direction:row;top:10px}.explorer-tree{padding:30px 30px 70px}.explorer-empty{width:min(420px,calc(100vw - 40px));min-height:300px}.explorer-empty-icon{width:82px;height:82px}.explorer-empty-title{font-size:18px}.explorer-node-root{width:116px;height:116px;border-radius:22px}.explorer-node-artist{width:64px;height:64px}.explorer-node-album{width:72px;height:72px;border-radius:14px}.explorer-node-label{padding:8px 6px 6px}.explorer-node-label-main{font-size:10px}.explorer-node-label-meta{font-size:8px}}
+
+/* The route error boundary. It used to be an unstyled h2 + p that told the
+   user nothing and gave us nothing to debug from. */
+.app-error-boundary {
+    max-width: 780px;
+    margin: 40px auto;
+    padding: 24px 28px;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    border-radius: 14px;
+    background: rgba(239, 68, 68, 0.06);
+    color: rgba(255, 255, 255, 0.88);
+}
+.app-error-boundary h2 { margin: 0 0 8px; font-size: 20px; font-weight: 800; }
+.app-error-boundary p { margin: 0 0 14px; font-size: 14px; color: rgba(255, 255, 255, 0.62); }
+.app-error-boundary__detail {
+    max-height: 260px;
+    overflow: auto;
+    margin: 0 0 14px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.42);
+    color: rgba(255, 255, 255, 0.82);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.app-error-boundary__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+.app-error-boundary__hint { margin: 0; font-size: 12.5px; }

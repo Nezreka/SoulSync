@@ -57,6 +57,146 @@ def register_routes(bp):
             logger.exception("create overlay template failed")
             return jsonify({"ok": False, "error": "Could not create template"}), 500
 
+    # A template's design and nothing else. No id, no thumbnail (a machine-local
+    # data-URL that the import re-renders anyway), no timestamps, no assignment -
+    # which scope a template is bound to is a property of YOUR library, not of
+    # the design, and importing someone else's binding would silently repaint
+    # your posters.
+    _PORTABLE_TEMPLATE = ("name", "definition")
+
+    @bp.route("/overlays/templates/export", methods=["GET"])
+    def overlay_templates_export():
+        """Every template as portable JSON, so a design can leave this install.
+
+        Collection Studio has had this since it shipped and Overlay Studio never
+        did, which is backwards: a template is the artifact people actually
+        share, and an hour of design work could not be backed up or handed to
+        anybody.
+        """
+        from . import get_video_db
+        try:
+            db = get_video_db()
+            out = []
+            for light in db.list_overlay_templates() or []:
+                full = db.get_overlay_template(light["id"])
+                if full:
+                    out.append({k: full.get(k) for k in _PORTABLE_TEMPLATE})
+            return jsonify({"soulsync_overlay_templates": 1, "templates": out})
+        except Exception:
+            logger.exception("overlay template export failed")
+            return jsonify({"error": "Export failed"}), 500
+
+    @bp.route("/overlays/templates/from-share", methods=["POST"])
+    def overlay_template_from_share():
+        """Adopt ONE template shared into a chat room.
+
+        Separate from the bulk file import because the answer a reader needs is
+        different: not "how many landed" but "will this actually render on my
+        install". An image layer points at asset://<sha1>, which lives on the
+        SENDER's machine — the definition travels, the bytes do not — so this
+        reports exactly which images are missing. Content-addressed refs make
+        that answer precise: a recipient who already has those bytes resolves
+        them for free, and anyone else knows the specific files to ask for.
+
+        The template is still created when images are missing. A design you can
+        see and finish is worth more than a refusal, and the missing layers are
+        named rather than silently blank.
+        """
+        from . import get_video_db
+        from core import chat_codec
+        from core.video.overlays.assets import AssetStore
+
+        body = request.get_json(silent=True) or {}
+        # Validated by the SAME codec the chat receive path uses, so a payload
+        # that rendered as a card cannot be refused here, and one that never
+        # was a card cannot sneak in through this door.
+        share = chat_codec.overlay_of({"o": {"n": body.get("name"),
+                                             "d": body.get("definition")}})
+        if not share:
+            return jsonify({"ok": False, "error": "That is not a usable overlay template."}), 400
+        try:
+            db = get_video_db()
+            name = share["n"]
+            existing = {" ".join(str(t.get("name") or "").split()).casefold()
+                        for t in db.list_overlay_templates() or []}
+            # A shared name collides far more often than a file import's does -
+            # two people run the same starter pack - so it is suffixed rather
+            # than skipped. Refusing the import would leave nothing to look at.
+            if name.casefold() in existing:
+                base, n = name, 2
+                while ("%s (%d)" % (base, n)).casefold() in existing and n < 50:
+                    n += 1
+                name = "%s (%d)" % (base, n)
+
+            store = AssetStore.default()
+            missing = [a for a in chat_codec.overlay_assets(share["d"])
+                       if store.read_upload(a[len("asset://"):]) is None]
+
+            tid = db.create_overlay_template(name, definition=share["d"])
+            if tid is None:
+                return jsonify({"ok": False, "error": "Could not save the template"}), 500
+            try:
+                _prerender_thumb(db, tid)
+            except Exception:   # noqa: BLE001 - a missing thumb is cosmetic
+                logger.debug("thumb prerender failed for shared template %s", tid, exc_info=True)
+            return jsonify({"ok": True, "id": tid, "name": name, "missing_assets": missing})
+        except Exception:
+            logger.exception("overlay share import failed")
+            return jsonify({"ok": False, "error": "Could not save the template"}), 500
+
+    @bp.route("/overlays/templates/import", methods=["POST"])
+    def overlay_templates_import():
+        """Import shared templates. An existing NAME is skipped rather than
+        overwritten - the same idempotent bargain the collection import makes,
+        so re-importing a pack is safe and never destroys a design you have
+        since edited."""
+        from . import get_video_db
+        d = request.get_json(silent=True) or {}
+        rows = d.get("templates")
+        if not isinstance(rows, list) or not rows:
+            return jsonify({"ok": False, "error": "templates are required"}), 400
+        try:
+            db = get_video_db()
+            existing = {" ".join(str(t.get("name") or "").split()).casefold()
+                        for t in db.list_overlay_templates() or []}
+            imported, skipped = [], []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                name = " ".join(str(row.get("name") or "").split())
+                if not name:
+                    continue
+                if name.casefold() in existing:
+                    skipped.append(name)
+                    continue
+                definition = row.get("definition")
+                # A template with no layers is not a design; importing it would
+                # add a card that paints nothing.
+                if isinstance(definition, str):
+                    import json as _json
+                    try:
+                        definition = _json.loads(definition)
+                    except (ValueError, TypeError):
+                        continue
+                if not isinstance(definition, dict) or not definition.get("layers"):
+                    continue
+                tid = db.create_overlay_template(name, definition=definition)
+                if tid is None:
+                    continue
+                existing.add(name.casefold())
+                imported.append(name)
+                # The gallery card is a rendered preview, so a freshly imported
+                # design has to earn its own rather than carry a stale one.
+                try:
+                    _prerender_thumb(db, tid)
+                except Exception:   # noqa: BLE001 - a missing thumb is cosmetic
+                    logger.debug("thumb prerender failed for imported template %s", tid,
+                                 exc_info=True)
+            return jsonify({"ok": True, "imported": imported, "skipped": skipped})
+        except Exception:
+            logger.exception("overlay template import failed")
+            return jsonify({"ok": False, "error": "Import failed"}), 500
+
     @bp.route("/overlays/templates/<int:template_id>", methods=["GET"])
     def overlay_template_get(template_id):
         from . import get_video_db

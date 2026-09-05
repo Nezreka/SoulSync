@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import atexit
 import concurrent.futures
+import contextvars
 from typing import Any, Callable, TypeVar
 
 
@@ -27,14 +28,23 @@ async def _run(
     *args: Any,
     **kwargs: Any,
 ) -> _T:
-    # Python 3.14.6 can lose the cross-thread selector wake-up used by
+    # Two things have to hold at once here.
+    #
+    # OURS: Python 3.14.6 can lose the cross-thread selector wake-up used by
     # asyncio.wrap_future(), most visibly when the worker future completes with
     # an exception: the concurrent future is done but the awaiting task sleeps
-    # forever. Keep completion observation on the owner loop instead. A 1 ms
-    # interval is bounded and remains far below the old 50 ms polling floor.
-    # We still use our process-wide pools rather than a loop-owned default
-    # executor, and cancellation attempts to remove work that has not started.
-    future = executor.submit(func, *args, **kwargs)
+    # forever. So completion is observed on the owner loop. A 1 ms interval is
+    # bounded and remains far below the old 50 ms polling floor. We still use
+    # our process-wide pools rather than a loop-owned default executor, and
+    # cancellation attempts to remove work that has not started.
+    #
+    # UPSTREAM (ported, not dropped): executor threads do not inherit
+    # ContextVars, so request-local source-quality intent was lost on every
+    # blocking call. Copy the context explicitly and run the work inside it.
+    # That fix is orthogonal to how completion is observed, so it survives the
+    # workaround above.
+    context = contextvars.copy_context()
+    future = executor.submit(context.run, func, *args, **kwargs)
     try:
         while not future.done():
             await asyncio.sleep(0.001)

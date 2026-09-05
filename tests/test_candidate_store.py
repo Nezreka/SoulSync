@@ -38,6 +38,33 @@ def test_same_url_reuses_token():
     assert store.put("https://x/a.nzb") != store.put("https://x/b.nzb")
 
 
+def test_structured_metadata_roundtrips_server_side():
+    store = CandidateStore()
+    token = store.put(
+        "https://x/a.nzb",
+        metadata={"categories": [3000, 3010]},
+    )
+
+    url, metadata = store.resolve_with_metadata(token)
+
+    assert url == "https://x/a.nzb"
+    assert metadata == {"categories": [3000, 3010]}
+    # Callers cannot mutate either the mapping or its nested category list.
+    metadata["extra"] = True
+    metadata["categories"].append(9999)
+    assert "extra" not in store.resolve_with_metadata(token)[1]
+    assert store.resolve_with_metadata(token)[1]["categories"] == [3000, 3010]
+
+
+def test_repeated_candidate_refreshes_its_metadata():
+    store = CandidateStore()
+    first = store.put("https://x/a.nzb", metadata={"categories": [3040]})
+    second = store.put("https://x/a.nzb", metadata={"categories": [3010]})
+
+    assert second == first
+    assert store.resolve_with_metadata(first)[1] == {"categories": [3010]}
+
+
 def test_unknown_and_tampered_tokens_are_rejected():
     store = CandidateStore()
     store.put("https://x/a.nzb")
@@ -57,6 +84,7 @@ def test_expired_token_is_rejected():
         assert store.resolve(token) == "https://x/a.nzb"
     with patch("core.download_plugins.candidate_store.time.time", return_value=1101.0):
         assert store.resolve(token) is None
+        assert store.resolve_with_metadata(token) == (None, {})
 
 
 def test_size_cap_evicts_oldest():

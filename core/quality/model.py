@@ -51,7 +51,7 @@ class AudioQuality:
         }
         base = format_base.get(self.format.lower(), 10.0)
 
-        if self.format.lower() in ('flac', 'wav'):
+        if self.format.lower() in ('flac', 'alac', 'wav'):
             sr = self.sample_rate or 44100
             bd = self.bit_depth or 16
             # sample-rate contribution: 44.1 kHz = 0, 192 kHz = +20
@@ -107,7 +107,7 @@ class AudioQuality:
     def label(self) -> str:
         """Human-readable label, e.g. 'FLAC 24-bit/192kHz' or 'MP3 320kbps'."""
         fmt = self.format.upper()
-        if self.format.lower() in ('flac', 'wav'):
+        if self.format.lower() in ('flac', 'alac', 'wav'):
             bd = f"{self.bit_depth}-bit/" if self.bit_depth else ""
             sr = f"{self.sample_rate // 1000}kHz" if self.sample_rate else ""
             detail = f" {bd}{sr}".rstrip()
@@ -150,8 +150,12 @@ class AudioQuality:
         return cls(
             format=extension.lower().lstrip('.'),
             bitrate=file_data.get('bitRate') or attrs.get(0),
-            sample_rate=attrs.get(4),
-            bit_depth=attrs.get(5),
+            # Newer slskd responses expose these as direct fields while older
+            # versions only carry Soulseek protocol attributes.  Prefer the
+            # direct representation and retain the attribute fallback so both
+            # response shapes feed the same profile ranking.
+            sample_rate=file_data.get('sampleRate') or attrs.get(4),
+            bit_depth=file_data.get('bitDepth') or attrs.get(5),
         )
 
     @classmethod
@@ -217,6 +221,66 @@ def rank_candidate(aq: AudioQuality, targets: List[QualityTarget]) -> Tuple[int,
         if aq.matches_target(target):
             return (i, aq.tier_score())
     return (len(targets), aq.tier_score())
+
+
+def satisfies_a_target_on_stated_facts(
+    aq, targets, *, unproven_resolution_ok: bool = True,
+) -> bool:
+    """Whether a release COULD satisfy any target, judged on what it claimed.
+
+    ``matches_target`` is the rule for a probed file: a FLAC with no stated
+    resolution fails a hi-res target, because an unproven file must not
+    over-claim. A Prowlarr release is not a probed file. Its title almost never
+    carries sample rate, bit depth or bitrate, so that rule does not filter the
+    lane, it empties it. The stock MP3 target's min_bitrate of 320 is enough on
+    its own.
+
+    So a value the release never stated cannot disqualify it, and a value it did
+    state is enforced exactly. Format is always required: an unreadable format
+    matches no target, which is the same answer the pre-grab gate gives. The
+    file itself is still probed at import.
+
+    Lives here so the per-track lane and the album-bundle picker cannot drift.
+    They did: the picker used ``matches_target`` and refused whole albums the
+    per-track lane accepted from the same indexer.
+
+    ``unproven_resolution_ok=False`` keeps the silence rule for BITRATE only and
+    still requires a hi-res target's sample rate / bit depth to be stated. A
+    lossy title almost never carries its bitrate, so relaxing that is the
+    difference between filtering the lane and emptying it. Asking for 24/96 is
+    the opposite: a deliberate, narrow request, and a whole album is a lot of
+    bandwidth to spend on the hope that a bare ``[FLAC]`` happens to be hi-res.
+    The album picker passes False for that reason.
+    """
+    fmt = str(getattr(aq, 'format', '') or '').lower()
+    for target in targets or ():
+        wanted = str(getattr(target, 'format', '') or '').lower()
+        if wanted and wanted != fmt:
+            continue
+        if not wanted and fmt in ('', 'unknown'):
+            continue
+        bitrate = getattr(aq, 'bitrate', None)
+        minimum = getattr(target, 'min_bitrate', None)
+        if minimum and bitrate is not None and bitrate < minimum:
+            continue
+        sample_rate = getattr(aq, 'sample_rate', None)
+        min_rate = getattr(target, 'min_sample_rate', None)
+        if min_rate:
+            if sample_rate is None:
+                if not unproven_resolution_ok:
+                    continue
+            elif sample_rate < min_rate:
+                continue
+        depth = getattr(aq, 'bit_depth', None)
+        min_depth = getattr(target, 'bit_depth', None)
+        if min_depth:
+            if depth is None:
+                if not unproven_resolution_ok:
+                    continue
+            elif depth < min_depth:
+                continue
+        return True
+    return False
 
 
 def filter_and_rank(

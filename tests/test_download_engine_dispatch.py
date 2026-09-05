@@ -86,6 +86,10 @@ def test_orchestrator_download_delegates_to_engine() -> None:
     result = asyncio.run(orchestrator.download("deezer_dl", "track-3", 123))
 
     assert result == "engine-id"
+    # The item's quality profile travels with the dispatch (upstream's delta,
+    # ported into our single engine-boundary call): source-tier resolution and
+    # the torrent/usenet release check answer for THIS item, not the app
+    # default. None here means "no assigned profile", which is that default.
     orchestrator.engine.dispatch_download.assert_awaited_once_with(
-        "deezer_dl", "track-3", 123
+        "deezer_dl", "track-3", 123, quality_profile_id=None
     )

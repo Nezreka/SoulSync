@@ -61,9 +61,7 @@ describe('repairing a missing id from the health band', () => {
   it('offers no repair on a preview, which has no library row to repair', () => {
     const m = mount();
     m.render({ kind: 'movie', source: 'tmdb', tmdb_id: 27205 });
-    // IMDb is missing and still reported...
-    expect(m.host.textContent).toContain('Missing');
-    // ...but there is nothing to open, so it stays inert.
+    expect(m.host.textContent).toBe('');
     expect(fixTargets(m.host)).toEqual([]);
   });
 
@@ -129,7 +127,7 @@ describe('the manage panel honours a focused service', () => {
   });
 });
 
-describe('a youtube episode row states its video id', () => {
+describe('a youtube episode row links out cleanly', () => {
   function row(ep: Record<string, unknown>): HTMLElement {
     const preamble = `
       var selectedSeason = 1;
@@ -148,10 +146,10 @@ describe('a youtube episode row states its video id', () => {
     return host;
   }
 
-  it('links the id to the video, marked so the row click passes it through', () => {
+  it('links to the video, marked so the row click passes it through', () => {
     const host = row({ episode_number: 1, title: 'A video', youtube_id: 'dQw4w9WgXcQ' });
     const a = host.querySelector('.vd-ep-vid') as HTMLAnchorElement;
-    expect(a.textContent).toBe('dQw4w9WgXcQ');
+    expect(a.textContent).toBe('YouTube');
     expect(a.getAttribute('href')).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
     // Without data-vd-ext the delegated row handler swallows the click and
     // expands the description panel instead of opening the video.
@@ -159,7 +157,7 @@ describe('a youtube episode row states its video id', () => {
     expect(a.getAttribute('rel')).toContain('noopener');
   });
 
-  it('renders no id chip when there is no id', () => {
+  it('renders no external chip when there is no id', () => {
     const host = row({ episode_number: 1, title: 'A video', youtube_id: '' });
     expect(host.querySelector('.vd-ep-vid')).toBeNull();
   });

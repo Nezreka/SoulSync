@@ -37,6 +37,7 @@ under a passing pinning test.
 
 from __future__ import annotations
 
+import contextvars
 import os
 import threading
 import time
@@ -194,9 +195,17 @@ class BackgroundDownloadWorker:
 
         self._engine.add_record(source_name, download_id, record)
 
+        call_context = contextvars.copy_context()
         thread = threading.Thread(
             target=self._worker_loop,
-            args=(source_name, download_id, target_id, display_name, impl_callable),
+            args=(
+                source_name,
+                download_id,
+                target_id,
+                display_name,
+                impl_callable,
+                call_context,
+            ),
             daemon=True,
             name=thread_name,
         )
@@ -215,6 +224,7 @@ class BackgroundDownloadWorker:
         target_id: Any,
         display_name: str,
         impl_callable: ImplCallable,
+        call_context: Optional[contextvars.Context] = None,
     ) -> None:
         """Runs on the spawned daemon thread. Handles semaphore
         acquisition, rate-limit sleep, state lifecycle, exception
@@ -254,7 +264,13 @@ class BackgroundDownloadWorker:
                 })
 
                 try:
-                    file_path = impl_callable(download_id, target_id, display_name)
+                    active_context = call_context or contextvars.copy_context()
+                    file_path = active_context.run(
+                        impl_callable,
+                        download_id,
+                        target_id,
+                        display_name,
+                    )
                 except Exception as exc:
                     logger.error(
                         "%s download %s failed (impl raised): %s",

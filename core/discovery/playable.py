@@ -44,12 +44,15 @@ def resolve_playable_tracks(db, wanted: List[Dict[str, Any]]) -> Dict[str, Any]:
         extra = "".join(
             f"f.{c}, " for c in ("bitrate", "sample_rate") if c in file_cols
         )
-        seen_paths = set()
-        for item in wanted:
-            title = _norm(str(item.get("title") or item.get("name") or ""))
-            artist = _norm(str(item.get("artist") or ""))
-            if not title or not artist:
-                continue
+        # A mix used to run one full LOWER(title) scan for every entry. Read
+        # candidate titles once, then disambiguate by artist without losing
+        # order. (Upstream's optimisation, ported onto the v2 catalogue: the
+        # win is in the number of scans, and it is the same win here.)
+        titles = sorted({_norm(str(item.get("title") or item.get("name") or ""))
+                         for item in wanted} - {""})
+        candidates = {}
+        if titles:
+            placeholders = ",".join("?" for _ in titles)
             # One preferred file per recording, same selection the album-play
             # query uses — a track with several copies must not enter the queue
             # twice, and the row the player gets has to name a live file.
@@ -75,13 +78,21 @@ def resolve_playable_tracks(db, wanted: List[Dict[str, Any]]) -> Dict[str, Any]:
                     ORDER BY preferred.is_primary DESC, preferred.id
                     LIMIT 1
                 )
-                WHERE LOWER(t.title) = ?
-                  AND LOWER(COALESCE(NULLIF(t.track_artist, ''), ar.name, '')) = ?
-                LIMIT 1
-                """,
-                (title, artist),
+                WHERE LOWER(t.title) IN ({placeholders})
+                ORDER BY t.id
+                """, titles,
             )
-            row = cursor.fetchone()
+            for candidate in cursor.fetchall():
+                candidate = dict(candidate)
+                candidates.setdefault(
+                    (_norm(candidate["title"]), _norm(candidate["artist"])), candidate)
+        seen_paths = set()
+        for item in wanted:
+            title = _norm(str(item.get("title") or item.get("name") or ""))
+            artist = _norm(str(item.get("artist") or ""))
+            if not title or not artist:
+                continue
+            row = candidates.get((title, artist))
             if not row:
                 missing = dict(item)
                 missing.update(

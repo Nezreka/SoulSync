@@ -4,9 +4,7 @@ import {
   advAreaPath,
   advNextPhase,
   advOrbTopPercent,
-  advShouldDraw,
   advStyles,
-  advValueFromX,
   advWavePath,
   ADV_VIEW_HEIGHT,
   ADV_VIEW_WIDTH,
@@ -15,12 +13,13 @@ import {
 /**
  * The adventurousness dial.
  *
- * Transcribed from index.html 4523-4560 and discover.js 63-147.
+ * Transcribed from index.html 4523-4560 and discover.js 63-147, then made
+ * operable.
  *
- * The wave animates, which means it needs a frame loop, which means it needs to
- * STOP costing anything when nobody can see it. The vanilla's guard is that the
- * track has no offsetParent — the Discover page is not displayed — and without
- * it a background tab rebuilds a 91-point path sixty times a second forever.
+ * the input is a native range slider now. the wave is decoration on top of it.
+ * before this the only way to move the dial was mousedown + window mousemove:
+ * no keyboard, no touch, no screen reader value, and the rAF ran whenever the
+ * element had an offsetParent, which says nothing about being on screen.
  */
 
 export interface AdventurousnessDialProps {
@@ -30,75 +29,68 @@ export interface AdventurousnessDialProps {
   onCommit: (value: number) => void;
 }
 
+/** how long after the last key press a keyboard change counts as settled. */
+const COMMIT_DEBOUNCE_MS = 320;
+
 export function AdventurousnessDial({ value, onChange, onCommit }: AdventurousnessDialProps) {
   const trackRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const [phase, setPhase] = useState(0);
-  const [dragging, setDragging] = useState(false);
   const styles = advStyles(value);
 
-  // The frame loop. `offsetParent === null` means the page is not on screen;
-  // the rAF keeps ticking but computes nothing.
+  // the frame loop, but only while the wave is actually visible and motion is
+  // allowed. an off-screen or background dial rebuilds nothing.
   useEffect(() => {
+    const track = trackRef.current;
+    if (!track) return;
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    if (reduced?.matches) return;
+
     let raf = 0;
+    let onScreen = true;
     const tick = () => {
-      const track = trackRef.current;
-      if (advShouldDraw(!!track && track.offsetParent !== null)) {
-        setPhase((p) => advNextPhase(p, value));
-      }
+      if (onScreen && !document.hidden) setPhase((p) => advNextPhase(p, value));
       raf = requestAnimationFrame(tick);
     };
+    let observer: IntersectionObserver | null = null;
+    if (typeof IntersectionObserver !== 'undefined') {
+      onScreen = false;
+      observer = new IntersectionObserver((entries) => {
+        onScreen = entries[0]?.isIntersecting ?? false;
+      });
+      observer.observe(track);
+    }
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      observer?.disconnect();
+    };
   }, [value]);
 
-  const valueAt = (clientX: number) => {
-    const track = trackRef.current;
-    if (!track) return value;
-    const rect = track.getBoundingClientRect();
-    // Unclamped here on purpose — advStyles clamps, so a drag past either end
-    // pins rather than wrapping.
-    return advValueFromX(clientX, rect.left, rect.width);
+  // live on every input event, saved once the gesture settles. one save per
+  // drag or key run: holding an arrow key used to be impossible, and a save
+  // per pixel would let an older response land last.
+  const commitTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(commitTimer.current), []);
+  const slide = (next: number) => {
+    onChange(next);
+    clearTimeout(commitTimer.current);
+    commitTimer.current = setTimeout(() => onCommit(next), COMMIT_DEBOUNCE_MS);
   };
-
-  useEffect(() => {
-    if (!dragging) return;
-    const move = (e: MouseEvent) => onChange(valueAt(e.clientX));
-    const up = (e: MouseEvent) => {
-      setDragging(false);
-      onCommit(valueAt(e.clientX));
-    };
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
-    return () => {
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', up);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dragging, onChange, onCommit]);
 
   const line = advWavePath(styles.value, phase);
 
   return (
-    <div
-      className="adv-wave"
-      id="adv-wave"
-      title="Pushes globally-popular artists down so more obscure picks surface in your recommendations"
-    >
+    <div className="adv-wave" id="adv-wave">
       <div className="adv-wave-head">
-        <span className="adv-wave-label">Adventurousness</span>
+        <span className="adv-wave-label" id="adv-wave-label">
+          Adventurousness
+        </span>
         <span className="adv-wave-state" id="adv-wave-state" style={{ color: styles.colorBright }}>
           {styles.state}
         </span>
       </div>
-      <div
-        ref={trackRef}
-        className="adv-wave-track"
-        id="adv-wave-track"
-        onMouseDown={(e) => {
-          setDragging(true);
-          onChange(valueAt(e.clientX));
-        }}
-      >
+      <div ref={trackRef} className="adv-wave-track" id="adv-wave-track">
         <div
           className="adv-wave-aura"
           id="adv-wave-aura"
@@ -138,6 +130,7 @@ export function AdventurousnessDial({ value, onChange, onCommit }: Adventurousne
         <div
           className="adv-wave-orb"
           id="adv-wave-orb"
+          aria-hidden="true"
           style={{
             left: styles.orbLeft,
             top: advOrbTopPercent(styles.value, phase, trackRef.current?.clientWidth ?? 0),
@@ -149,6 +142,21 @@ export function AdventurousnessDial({ value, onChange, onCommit }: Adventurousne
             boxShadow: `0 0 9px 0 ${styles.color}, inset 0 0 0 2px rgba(255,255,255,0.5)`,
           }}
         />
+        {/* the real control. transparent and stretched over the wave, so the
+            orb stays the thing you see and the browser owns the interaction. */}
+        <input
+          ref={inputRef}
+          type="range"
+          className="adv-wave-input"
+          min={0}
+          max={1}
+          step={0.01}
+          value={styles.value}
+          aria-labelledby="adv-wave-label"
+          aria-valuetext={`${styles.state}, ${Math.round(styles.value * 100)}%`}
+          aria-describedby="adv-wave-help"
+          onChange={(e) => slide(Number(e.target.value))}
+        />
       </div>
       {/* The two poles (index.html 4543-4546) — the first draft dropped them,
           leaving the dial with no explanation of what its ends mean. */}
@@ -156,6 +164,10 @@ export function AdventurousnessDial({ value, onChange, onCommit }: Adventurousne
         <span>Safe — artists you already like</span>
         <span>Adventurous — deep cuts</span>
       </div>
+      <p className="adv-wave-help" id="adv-wave-help">
+        Pushes globally popular artists down, so more obscure picks surface in Listening
+        Recommendations and Recommended Artists.
+      </p>
     </div>
   );
 }

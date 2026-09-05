@@ -60,10 +60,12 @@ class _FakeSoulseek:
     def __init__(self, download_id="dl-1"):
         self._download_id = download_id
         self.download_calls = []
+        self.download_profile_calls = []
         self.cancel_calls = []
 
-    async def download(self, username, filename, size):
+    async def download(self, username, filename, size, *, quality_profile_id=None):
         self.download_calls.append((username, filename, size))
+        self.download_profile_calls.append(quality_profile_id)
         return self._download_id
 
     async def cancel_download(self, download_id, username, remove=True):
@@ -168,6 +170,22 @@ def test_retry_context_preserves_exact_library_entity_from_track_info():
     context = matched_downloads_context["user1::retry.flac"]
     assert context["track_info"]["lib2_entity"] == entity
     assert context["track_info"]["_acquisition_import_id"] == "aim1-test"
+
+
+def test_item_quality_profile_reaches_download_dispatch():
+    deps = _build_deps()
+    _seed_task("t-profile", track_info={'quality_profile_id': 42})
+
+    result = dc.attempt_download_with_candidates(
+        "t-profile",
+        [_Candidate(username='usenet', filename='release.nzb')],
+        _Track(),
+        batch_id="b1",
+        deps=deps,
+    )
+
+    assert result is True
+    assert deps.download_orchestrator.download_profile_calls == [42]
 
 
 def test_candidates_tried_in_confidence_order():

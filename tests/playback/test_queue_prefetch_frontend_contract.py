@@ -9,7 +9,10 @@ def test_legacy_player_exposes_acquisition_aware_queue_contract():
 
     assert "'/api/playback/queue/prefetch'" in source
     assert "`/api/playback/queue/prefetch/status?${query}`" in source
-    assert "await npEnsureQueueTrackReady(track);" in source
+    # The awaited call, not its exact argument list: upstream added an
+    # `isCurrent` guard to this helper, and pinning the old one-argument text
+    # failed for a change that kept the contract intact.
+    assert "await npEnsureQueueTrackReady(track" in source
     assert "npQueue = npPrepareQueueTracks(list);" in source
     assert "info._queue_request_ids" in source
     assert "npQueuePrefetchReschedule" in source

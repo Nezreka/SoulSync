@@ -150,9 +150,8 @@ class MusicBrainzWorker:
                 # Process the item
                 self._process_item(item)
 
-                # Keep current_item set during sleep so UI can see what was just processed
-                # Rate limit: 1 request per second
-                interruptible_sleep(self._stop_event, 1)
+                # MusicBrainzClient paces HTTP requests centrally; no extra
+                # per-item delay for mirrors or cache hits is needed.
 
             except Exception as e:
                 logger.error(f"Error in worker loop: {e}")

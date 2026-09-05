@@ -83,21 +83,50 @@ describe('the compact playlist', () => {
     expect(boxes[1].checked).toBe(true);
   });
 
-  it('reports a toggle and a preview by index', () => {
+  it('reports a toggle and a play by index', () => {
     const onToggle = vi.fn();
-    const onPreview = vi.fn();
+    const onPlay = vi.fn();
     const { container } = render(
       <CompactPlaylist
         tracks={[track(), track({ name: 'Tha' })]}
         selectable
         onToggle={onToggle}
-        onPreview={onPreview}
+        onPlay={onPlay}
       />,
     );
     fireEvent.click([...container.querySelectorAll('.track-compact-check')][1]);
     fireEvent.click([...container.querySelectorAll('.track-compact-play')][1]);
     expect(onToggle).toHaveBeenCalledWith(1);
-    expect(onPreview).toHaveBeenCalledWith(1);
+    expect(onPlay).toHaveBeenCalledWith(1);
+  });
+
+  // M02. The row button said "Preview" and the page passed it () => {}, so
+  // every one of them was dead. It plays the whole track, so it says Play, and
+  // it says WHICH track.
+  it('the row button is a named Play, not an anonymous Preview', () => {
+    const { container } = render(
+      <CompactPlaylist tracks={[track()]} selectable onPlay={vi.fn()} />,
+    );
+    const btn = container.querySelector('.track-compact-play')!;
+    expect(btn.getAttribute('aria-label')).toBe('Play Xtal');
+    expect(btn.getAttribute('title')).toBe('Play Xtal');
+  });
+
+  it('a resolving row cannot be fired twice', () => {
+    const onPlay = vi.fn();
+    const { container } = render(
+      <CompactPlaylist
+        tracks={[track(), track({ name: 'Tha' })]}
+        selectable
+        onPlay={onPlay}
+        playingIndex={1}
+      />,
+    );
+    const rows = [...container.querySelectorAll('.track-compact-play')] as HTMLButtonElement[];
+    expect(rows[1].disabled).toBe(true);
+    expect(rows[0].disabled).toBe(false);
+    fireEvent.click(rows[1]);
+    expect(onPlay).not.toHaveBeenCalled();
   });
 
   it('keeps the row index as a data hook', () => {
@@ -189,7 +218,7 @@ describe('the mix modal', () => {
     onSelectAll: vi.fn(),
     onClearSelection: vi.fn(),
     onToggleTrack: vi.fn(),
-    onPreviewTrack: vi.fn(),
+    onPlayTrack: vi.fn(),
     onDownloadSelected: vi.fn(),
     ...over,
   });
@@ -322,5 +351,73 @@ describe('the mix modal', () => {
     fireEvent.click(screen.getByLabelText('Close'));
     fireEvent.click(container.querySelector('#mix-modal-overlay')!);
     expect(p.onClose).toHaveBeenCalledTimes(2);
+  });
+
+  // ── M03: the modal contract ────────────────────────────────────────────────
+  // Escape did nothing, the thing had no dialog role, focus stayed on the card
+  // behind it and the page underneath kept scrolling.
+
+  it('is a labelled modal dialog', () => {
+    const { container } = render(<MixModal {...props()} />);
+    const dialog = container.querySelector('.mix-modal')!;
+    expect(dialog).toHaveAttribute('role', 'dialog');
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    const labelledBy = dialog.getAttribute('aria-labelledby')!;
+    expect(document.getElementById(labelledBy)!.textContent).toBe('Your Mix');
+  });
+
+  it('Escape closes it', () => {
+    const p = props();
+    render(<MixModal {...p} />);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(p.onClose).toHaveBeenCalled();
+  });
+
+  it('takes focus on open and gives it back to the opener on close', () => {
+    const opener = document.createElement('button');
+    document.body.appendChild(opener);
+    opener.focus();
+    expect(document.activeElement).toBe(opener);
+
+    const { container, unmount } = render(<MixModal {...props()} />);
+    expect(container.querySelector('.mix-modal')!.contains(document.activeElement)).toBe(true);
+
+    unmount();
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+
+  it('keeps Tab inside the dialog', () => {
+    const { container } = render(<MixModal {...props()} />);
+    const dialog = container.querySelector('.mix-modal') as HTMLElement;
+    const items = [...dialog.querySelectorAll<HTMLElement>('button, input')];
+    const first = items[0];
+    const last = items[items.length - 1];
+
+    last.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+
+  // The one control that said nothing at all while a 50-track mix resolved.
+  it('the Play action says it is starting, and cannot be fired twice', () => {
+    const p = props({ playing: true });
+    render(<MixModal {...p} />);
+    const play = screen.getByText('Starting…') as HTMLButtonElement;
+    expect(play.disabled).toBe(true);
+    fireEvent.click(play);
+    expect(p.onAction).not.toHaveBeenCalled();
+    // Only the play action is busy; Download and Sync stay live.
+    expect((screen.getByText('Download') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('locks the page behind it while open', () => {
+    const { unmount } = render(<MixModal {...props()} />);
+    expect(document.body.style.overflow).toBe('hidden');
+    unmount();
+    expect(document.body.style.overflow).not.toBe('hidden');
   });
 });

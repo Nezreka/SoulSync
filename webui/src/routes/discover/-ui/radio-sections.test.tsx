@@ -179,7 +179,7 @@ describe('Last.fm Radio', () => {
   it('renders generated radios as mix cards', () => {
     const p = lastfm({ mixes: [mix('lastfm_1', 'Radio: Xtal')] });
     const { container } = render(<LastfmRadioSection {...p} />);
-    fireEvent.click(container.querySelector('.discover-mix-card')!);
+    fireEvent.click(container.querySelector('.mix-card-open')!);
     expect(p.onOpenMix).toHaveBeenCalledWith('lastfm_1');
   });
 });
@@ -308,7 +308,7 @@ describe('ListenBrainz', () => {
     const { container } = render(<ListenBrainzSection {...p} />);
     expect(container.querySelector('#listenbrainz-tab-content .discover-grid')).not.toBeNull();
     expect(container.querySelector('#listenbrainz-grid')).toBeNull();
-    fireEvent.click(container.querySelector('.discover-mix-card')!);
+    fireEvent.click(container.querySelector('.mix-card-open')!);
     expect(p.onOpenMix).toHaveBeenCalledWith('lb_1');
   });
 

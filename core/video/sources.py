@@ -473,6 +473,37 @@ class PlexVideoSource:
             m, sh = min(m, 100), min(sh, 50)
         return {"movies": m, "shows": sh}
 
+    def movie_item(self, server_id, title=None, tmdb_id=None):
+        """The normalized payload for ONE movie. Returns None only when the
+        source can positively treat the item as gone; other server failures
+        raise so a hiccup never deletes local state. Plex ids can be re-keyed,
+        so fall back to title/TMDB search before giving up."""
+        from plexapi.exceptions import NotFound
+        try:
+            item = self._server.fetchItem(int(server_id))
+        except NotFound:
+            item = None
+        if item is not None and getattr(item, "type", "") == "movie":
+            return self._movie(item)
+        want_tmdb = str(tmdb_id) if tmdb_id else None
+        for section in self._scan_sections("movie", self._movies_lib):
+            try:
+                hits = section.search(title=title, maxresults=10) if title else []
+            except Exception:
+                logger.exception("Plex: movie rekey-check search failed for %r", title)
+                raise
+            for h in hits:
+                if getattr(h, "type", "") != "movie":
+                    continue
+                ids = _parse_plex_guids(h)
+                if want_tmdb and ids.get("tmdb_id"):
+                    if str(ids.get("tmdb_id")) == want_tmdb:
+                        return self._movie(h)
+                    continue
+                if title and (getattr(h, "title", "") or "").strip().lower() == title.strip().lower():
+                    return self._movie(h)
+        return None
+
     def iter_movies(self, incremental=False, since=None):
         for section in self._scan_sections("movie", self._movies_lib):
             if not incremental:
@@ -1598,6 +1629,20 @@ class JellyfinVideoSource:
                     yield self._movie(it)
                 except Exception:
                     logger.exception("Jellyfin: skipping movie %s", it.get("Name", "?"))
+
+    def movie_item(self, server_id, title=None, tmdb_id=None):
+        """The normalized payload for ONE movie. Jellyfin ids are durable, and
+        failures collapse to None in _req, so verify the server is still alive
+        before treating a missing item as removed."""
+        it = self._req(f"/Users/{self.uid}/Items/{server_id}",
+                       {"Fields": _JF_MOVIE_FIELDS})
+        if it and it.get("Id"):
+            if (it.get("Type") or "") != "Movie":
+                return None
+            return self._movie(it)
+        if self._req(f"/Users/{self.uid}/Views") is None:
+            raise RuntimeError("Jellyfin unreachable - cannot verify the movie's state")
+        return None
 
     @staticmethod
     def _first(seq):

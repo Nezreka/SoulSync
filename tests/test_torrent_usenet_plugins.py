@@ -67,9 +67,9 @@ def test_guess_quality_from_title() -> None:
     assert _guess_quality_from_title('Album [MP3 320]') == 'mp3'
     assert _guess_quality_from_title('Album [AAC 256]') == 'aac'
     assert _guess_quality_from_title('Album [OGG]') == 'ogg'
-    # Default fallback so quality_score doesn't crash on bare titles.
-    assert _guess_quality_from_title('Just A Title') == 'mp3'
-    assert _guess_quality_from_title('') == 'mp3'
+    # Prowlarr did not supply a codec here; do not invent MP3.
+    assert _guess_quality_from_title('Just A Title') == 'unknown'
+    assert _guess_quality_from_title('') == 'unknown'
 
 
 def test_parse_release_title_splits_artist_dash_title() -> None:
@@ -207,6 +207,9 @@ def test_torrent_project_results_encodes_token_and_title_in_filename() -> None:
     assert get_candidate_store().is_token(token)
     from core.download_plugins.torrent import _decode_candidate
     assert _decode_candidate(get_candidate_store().resolve(token))[0] == 'https://x/y.torrent'
+    assert get_candidate_store().resolve_with_metadata(token)[1] == {
+        'categories': [3040],
+    }
     assert display == 'Danny Brown - Atrocity Exhibition [FLAC]'
 
 
@@ -236,6 +239,21 @@ def test_torrent_project_results_neutralizes_soulseek_specific_fields() -> None:
     # usable. free_upload_slots floors at 1 to avoid the 0-slot
     # penalty applied to dead Soulseek peers.
     assert tracks[0].free_upload_slots >= 1
+
+
+def test_torrent_project_results_carries_rich_title_quality() -> None:
+    plugin = TorrentDownloadPlugin()
+    tracks, _ = plugin._project_results([
+        _make_torrent_result(
+            title='Danny Brown - Atrocity Exhibition [FLAC 24-96]',
+        )
+    ])
+
+    assert tracks[0].quality == 'flac'
+    assert tracks[0].sample_rate == 96_000
+    assert tracks[0].bit_depth == 24
+    assert tracks[0]._source_metadata['release_title'].endswith('[FLAC 24-96]')
+    assert tracks[0]._source_metadata['categories'] == [3040]
 
 
 # ---------------------------------------------------------------------------
@@ -439,11 +457,19 @@ def test_usenet_project_encodes_token_in_filename() -> None:
     token, display = _decode_filename(tracks[0].filename)
     assert 'https://x/y.nzb' not in tracks[0].filename
     assert get_candidate_store().resolve(token) == 'https://x/y.nzb'
+    assert get_candidate_store().resolve_with_metadata(token)[1] == {
+        'categories': [3010],
+    }
     assert display == 'Some Artist - Some Album'
     # Artist + title should be parsed out, not auto-extracted from filename.
     assert tracks[0].artist == 'Some Artist'
     assert tracks[0].title == 'Some Album'
     assert tracks[0]._source_metadata['release_title'] == 'Some Artist - Some Album'
+    # The helper's category is Audio/MP3, structured quality evidence even when
+    # the title is bare; bitrate remains unknown until title/file says it.
+    assert tracks[0].quality == 'mp3'
+    assert tracks[0].bitrate is None
+    assert tracks[0]._source_metadata['categories'] == [3010]
 
 
 def test_usenet_project_falls_back_to_placeholder_when_title_lacks_dash() -> None:
@@ -456,6 +482,57 @@ def test_usenet_project_falls_back_to_placeholder_when_title_lacks_dash() -> Non
     )
     assert tracks[0].artist == 'Unknown Artist'
     assert tracks[0].artist != 'NZBGeek'
+
+
+def test_usenet_project_results_carries_lossy_bitrate() -> None:
+    plugin = UsenetDownloadPlugin()
+    tracks, _ = plugin._project_results([
+        _make_usenet_result(title='Some Artist - Some Album [MP3 320]')
+    ])
+
+    assert tracks[0].quality == 'mp3'
+    assert tracks[0].bitrate == 320
+    assert tracks[0]._source_metadata['release_title'].endswith('[MP3 320]')
+
+
+def test_usenet_download_uses_the_assigned_profile_before_grab() -> None:
+    from core.download_plugins.candidate_store import get_candidate_store
+
+    plugin = UsenetDownloadPlugin()
+    plugin.is_configured = lambda: True
+    token = get_candidate_store().put('https://x/release.nzb')
+    filename = f'{token}{_FILENAME_SEP}Artist - Album [MP3 320]'
+
+    with patch(
+        'core.download_plugins.usenet.profile_allowed_formats',
+        return_value={'flac'},
+    ) as policy:
+        result = _run(plugin.download(
+            'usenet',
+            filename,
+            quality_profile_id=88,
+        ))
+
+    assert result is None
+    policy.assert_called_once_with(88)
+
+
+def test_usenet_download_honors_category_quality_for_a_bare_title() -> None:
+    plugin = UsenetDownloadPlugin()
+    plugin.is_configured = lambda: True
+    tracks, _albums = plugin._project_results([_make_usenet_result()])
+
+    with patch(
+        'core.download_plugins.usenet.profile_allowed_formats',
+        return_value={'mp3'},
+    ), patch.object(plugin, '_download_thread', lambda *args, **kwargs: None):
+        result = _run(plugin.download(
+            'usenet',
+            tracks[0].filename,
+            quality_profile_id=89,
+        ))
+
+    assert result is not None
 
 
 def test_usenet_finalize_picks_first_audio_file(tmp_path: Path) -> None:
@@ -898,3 +975,65 @@ def test_handle_stalled_survives_adapter_error():
 
     # Download still fails cleanly even when the client call blew up.
     assert plugin.active_downloads['d3']['state'] == 'Completed, Errored'
+
+
+@pytest.mark.parametrize('module, plugin_factory, adapter_patch, make_result', [
+    ('core.download_plugins.torrent', lambda: TorrentDownloadPlugin(),
+     'core.download_plugins.torrent.get_active_torrent_adapter',
+     _make_torrent_result),
+    ('core.download_plugins.usenet', lambda: UsenetDownloadPlugin(),
+     'core.download_plugins.usenet.get_active_usenet_adapter',
+     _make_usenet_result),
+])
+def test_album_duration_reaches_the_release_picker(module, plugin_factory,
+                                                   adapter_patch, make_result,
+                                                   tmp_path: Path) -> None:
+    """The size gate is useless if the duration stops at the plugin boundary.
+
+    Both album plugins must hand ``expected_duration_seconds`` to
+    ``pick_best_album_release``; without it the gate silently has no opinion,
+    which looks identical to "every release was plausible".
+    """
+    plugin = plugin_factory()
+    fake_adapter = MagicMock()
+    fake_adapter.is_configured.return_value = True
+    seen = {}
+
+    def _capture(*_args, **kwargs):
+        seen.update(kwargs)
+        return None
+
+    with patch.object(plugin, 'is_configured', return_value=True), \
+         patch.object(plugin._prowlarr, 'search',
+                      new=AsyncMock(return_value=[make_result()])), \
+         patch(f'{module}.pick_best_album_release', side_effect=_capture), \
+         patch(adapter_patch, return_value=fake_adapter):
+        plugin.download_album_to_staging(
+            'GNX', 'Kendrick Lamar', str(tmp_path),
+            expected_duration_seconds=2700,
+        )
+
+    assert seen.get('expected_duration_seconds') == 2700
+
+
+@pytest.mark.parametrize('title, size, projected', [
+    ('Danny Brown - Atrocity Exhibition [FLAC] (sample)', 15_000_000, False),
+    # "Sample" is only evidence together with a size no album can have.
+    ('Danny Brown - Atrocity Exhibition [FLAC] sample', 500_000_000, True),
+    ('Danny Brown - Sample Text [FLAC]', 500_000_000, True),
+    # A small release that never claims to be a sample is somebody's single.
+    ('Danny Brown - Atrocity Exhibition [FLAC]', 15_000_000, True),
+])
+def test_sample_releases_never_become_candidates(title, size, projected) -> None:
+    """Lidarr's NotSampleSpecification, at the projection boundary.
+
+    The album picker's 40 MB floor already refuses these, but the per-track
+    lane had no floor at all, so a 15 MB "sample" was a candidate like any
+    other — and it passes a FLAC profile, because it really is FLAC.
+    """
+    plugin = TorrentDownloadPlugin()
+    tracks, _albums = plugin._project_results([
+        _make_torrent_result(title=title, size=size),
+    ])
+
+    assert bool(tracks) is projected

@@ -443,6 +443,22 @@ def youtube_surrogate_id(source_id: str) -> int:
     return int(h[:15], 16)  # 60 bits — comfortably inside SQLite's signed 64-bit INTEGER
 
 
+def _art_url(kind: str, item_id, art: str | None) -> str:
+    """The image-proxy path for a piece of artwork, or '' when there is none.
+
+    Never the stored url. TMDB writes absolute links that load anywhere, but a
+    Plex or Jellyfin scan writes a path relative to a server the browser has no
+    route to - so a rail built from stored urls shows art only for the items
+    that happen to have been enriched, which is exactly how it looked.
+
+    'poster' on an episode is its still: get_art_ref maps the column, so the
+    proxy stays artwork-agnostic.
+    """
+    if not art or not item_id:
+        return ""
+    return "/api/video/%s/%s/%s" % (art, kind, item_id)
+
+
 class VideoDatabase:
     """Connection + schema manager for the isolated video library DB."""
 
@@ -2912,6 +2928,156 @@ class VideoDatabase:
             return []
         finally:
             conn.close()
+
+    # What counts as "still watching". Both ends matter:
+    #   · past the tail credits and it is FINISHED, not in progress. Plex and
+    #     Netflix both retire a title around here; without it the row fills with
+    #     things you completed and never clears.
+    #   · a few seconds in is an accident - a wrong click, a preview - and a row
+    #     that remembers those is a row you stop trusting.
+    CONTINUE_DONE_RATIO = 0.92
+    CONTINUE_START_RATIO = 0.02
+    CONTINUE_MIN_START_MS = 30_000
+
+    @staticmethod
+    def _resumable(offset_ms, runtime_minutes) -> bool:
+        """Is this a real resume point rather than a finished title or a misclick?"""
+        try:
+            off = int(offset_ms or 0)
+        except (TypeError, ValueError):
+            return False
+        if off <= 0:
+            return False
+        try:
+            total = int(runtime_minutes or 0) * 60_000
+        except (TypeError, ValueError):
+            total = 0
+        if total <= 0:
+            # No runtime known (common on a thin scan). Trust the offset, but
+            # still discard the accidental few seconds.
+            return off >= VideoDatabase.CONTINUE_MIN_START_MS
+        if off >= total * VideoDatabase.CONTINUE_DONE_RATIO:
+            return False
+        return off >= min(VideoDatabase.CONTINUE_MIN_START_MS,
+                          total * VideoDatabase.CONTINUE_START_RATIO)
+
+    def continue_watching(self, server_source=None, limit=20) -> list:
+        """What you are part-way through, newest first — the dashboard's resume row.
+
+        Two things belong here and they are not the same:
+
+          IN PROGRESS  a movie or episode with a real resume point.
+          UP NEXT      a show whose last episode you FINISHED, offering the next
+                       one you own. Plex calls this On Deck. Without it the row
+                       empties the moment you finish an episode, which is exactly
+                       the moment you want the next one.
+
+        ONE ROW PER SHOW. A binge would otherwise push everything else off the
+        rail with eight episodes of the same thing, and the answer to "where was
+        I" is a single card.
+
+        Only OWNED rows (``has_file``): you cannot resume what you do not have.
+        """
+        limit = max(1, min(50, int(limit)))
+        conn = self._get_connection()
+        try:
+            conn.row_factory = sqlite3.Row
+            scope_m = " AND m.server_source = ?" if server_source else ""
+            scope_s = " AND s.server_source = ?" if server_source else ""
+            args_m = (server_source,) if server_source else ()
+            args_s = (server_source,) if server_source else ()
+
+            out = []
+
+            # ── movies in progress ───────────────────────────────────────────
+            for r in conn.execute(f"""
+                SELECT m.id, m.title, m.year, m.poster_url, m.backdrop_url,
+                       m.runtime_minutes, m.view_offset_ms, m.last_viewed_at, m.tmdb_id
+                FROM movies m
+                WHERE m.has_file = 1 AND COALESCE(m.view_offset_ms, 0) > 0
+                      AND m.last_viewed_at IS NOT NULL{scope_m}
+                ORDER BY m.last_viewed_at DESC LIMIT 200
+            """, args_m):
+                if not self._resumable(r["view_offset_ms"], r["runtime_minutes"]):
+                    continue
+                out.append({
+                    "kind": "movie", "reason": "in_progress",
+                    "id": r["id"], "tmdb_id": r["tmdb_id"],
+                    "title": r["title"], "subtitle": str(r["year"] or ""),
+                    # The PROXY path, never the stored one. A TMDB url is
+                    # absolute and loads anywhere; a Plex/Jellyfin path is
+                    # relative to a server the browser cannot reach, so half the
+                    # rail came up blank depending on which had been enriched.
+                    "image_url": _art_url("movie", r["id"], "backdrop"
+                                          if r["backdrop_url"] else "poster"
+                                          if r["poster_url"] else None),
+                    "runtime_minutes": r["runtime_minutes"],
+                    "view_offset_ms": r["view_offset_ms"],
+                    "last_viewed_at": r["last_viewed_at"],
+                })
+
+            # ── shows ────────────────────────────────────────────────────────
+            # The episode itself comes from show_next_up, which is ALREADY the
+            # app's definition of "next up" - the detail page's Play CTA reads
+            # it. Writing a second one here is how the two would start
+            # disagreeing about what you are meant to watch, and it would have
+            # missed what that one gets right: specials sort last, so a season 0
+            # extra never jumps the queue.
+            #
+            # A show only appears at all once you have STARTED it: show_next_up
+            # returns None when nothing has been watched, which is what keeps
+            # this a resume rail rather than a list of everything you own.
+            for r in conn.execute(f"""
+                SELECT s.id, s.title, s.poster_url, s.backdrop_url, s.tmdb_id,
+                       MAX(e.last_viewed_at) AS seen_at
+                FROM shows s JOIN episodes e ON e.show_id = s.id
+                WHERE e.last_viewed_at IS NOT NULL{scope_s}
+                GROUP BY s.id
+                ORDER BY seen_at DESC LIMIT 100
+            """, args_s):
+                nxt = self.show_next_up(r["id"])
+                if not nxt:
+                    continue        # caught up, or nothing owned: no card
+                ep = conn.execute(
+                    "SELECT id, still_url FROM episodes WHERE show_id=? AND "
+                    "season_number=? AND episode_number=?",
+                    (r["id"], nxt["season_number"], nxt["episode_number"])).fetchone()
+                resume = bool(nxt.get("resume"))
+                if resume and not self._resumable(nxt.get("view_offset_ms"),
+                                                  nxt.get("runtime_minutes")):
+                    # started, but only by a few seconds - a misclick, not a
+                    # resume point. Fall through to offering it fresh.
+                    resume = False
+                # An episode's own still is the picture you recognise; the
+                # show's backdrop is next best, its poster the last resort.
+                image = (_art_url("episode", ep["id"], "poster")
+                         if ep and ep["still_url"]
+                         else _art_url("show", r["id"], "backdrop") if r["backdrop_url"]
+                         else _art_url("show", r["id"], "poster") if r["poster_url"]
+                         else "")
+                out.append({
+                    "kind": "show", "show_id": r["id"], "tmdb_id": r["tmdb_id"],
+                    "id": (ep["id"] if ep else None),
+                    "reason": "in_progress" if resume else "up_next",
+                    "title": r["title"],
+                    "subtitle": "S%d E%d · %s" % (nxt["season_number"],
+                                                  nxt["episode_number"],
+                                                  nxt["title"] or ""),
+                    "season_number": nxt["season_number"],
+                    "episode_number": nxt["episode_number"],
+                    "runtime_minutes": nxt.get("runtime_minutes"),
+                    "view_offset_ms": nxt.get("view_offset_ms") if resume else 0,
+                    "image_url": image,
+                    "last_viewed_at": r["seen_at"],
+                })
+        except sqlite3.Error:
+            logger.exception("continue_watching failed")
+            return []
+        finally:
+            conn.close()
+
+        out.sort(key=lambda x: str(x.get("last_viewed_at") or ""), reverse=True)
+        return out[:limit]
 
     def dashboard_stats(self, server_source=None) -> dict:
         """Live counts for the video dashboard, straight from video.db. Library

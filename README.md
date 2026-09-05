@@ -147,6 +147,57 @@ restores the retag.
 - Album art embedding, cover.jpg download
 - Spotify rate limit protection across all API calls
 
+#### Self-hosted MusicBrainz
+
+SoulSync can use a MusicBrainz-compatible mirror for enrichment, metadata lookups,
+search, and repair. In Settings → Connections → MusicBrainz, enter
+your server URL and request interval, then save. All clients use the saved values
+on their next request; no restart is needed. Leave the URL blank to return to
+public MusicBrainz.
+
+Alternatively, add these variables to the SoulSync service's Docker Compose
+`environment` block, then recreate the container:
+
+```yaml
+environment:
+  SOULSYNC_MUSICBRAINZ_BASE_URL: "http://musicbrainz:5000/ws/2"
+  SOULSYNC_MUSICBRAINZ_REQUEST_INTERVAL: "0.1"
+```
+
+Use your server's address as reachable **from SoulSync**. `musicbrainz` above is
+an example service name on a shared Docker network; `localhost` inside SoulSync's
+container points to SoulSync itself. For a non-Docker installation, set the same
+environment variables before starting SoulSync and restart it after changes.
+
+The interval is the minimum number of seconds between request starts across
+clients in one SoulSync process. `0.1` permits up to 10 requests/second, subject
+to server latency and sequential processing; `0` disables the pacing delay for
+a private mirror. Choose a rate your server supports. Defaults remain
+`https://musicbrainz.org/ws/2` and `1.05` seconds. Public `musicbrainz.org` hosts
+retain a minimum 1.05-second interval even if a faster rate is configured.
+Retries use the same limiter and retain their error backoff.
+
+The URL accepts HTTP or HTTPS, an optional port and reverse-proxy prefix, and
+an optional `/ws/2` suffix (added automatically). Use the final API URL: redirects
+are rejected to prevent a mirror forwarding high-rate requests to the public
+service. Embedded credentials, query strings and fragments are not supported.
+Invalid URLs or negative/nonfinite intervals produce an explicit configuration
+error; they do not silently fall back to the public server.
+
+Equivalent persisted settings are `musicbrainz.base_url` and
+`musicbrainz.request_interval`; see `config/config.example.json`. Environment
+variables take precedence. Existing installations load configuration from the
+database, so editing `config/config.json` alone is not a reliable way to change
+these settings; use the Settings UI or environment overrides above. Environment changes require a process restart or container recreation.
+
+The mirror needs both MusicBrainz lookup/browse endpoints and local search
+indexes for artist, release and recording searches. See the official
+[MusicBrainz server setup](https://musicbrainz.org/doc/MusicBrainz_Server/Setup)
+and [search architecture](https://musicbrainz.org/doc/Development/Search_Architecture).
+Cover Art Archive remains external. Changing servers preserves existing MBIDs,
+match caches and retry schedules; it does not automatically reprocess previously
+unmatched items. A mirror outage does not trigger fallback to the public API.
+
 ### Advanced Matching Engine
 
 - Version-aware matching: strictly rejects remixes when you want the original (and vice versa)

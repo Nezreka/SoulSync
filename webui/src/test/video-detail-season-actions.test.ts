@@ -27,7 +27,7 @@ function bar(season: Record<string, unknown>, ctx: Ctx = {}): HTMLElement {
   };
   const preamble = `
     var data = ${JSON.stringify(data)};
-    var ytFilter = { q: ${JSON.stringify(ctx.q ?? '')} };
+    var ytFilter = { q: ${JSON.stringify(ctx.q ?? '')}, state: 'all', duration: 'all' };
     window.VideoGrab = ${ctx.grab === false ? 'undefined' : '{}'};
   `;
   // eslint-disable-next-line @typescript-eslint/no-implied-eval

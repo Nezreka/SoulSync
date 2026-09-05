@@ -29,6 +29,7 @@ audit kept open (§16.1):
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import secrets
 import sqlite3
@@ -37,7 +38,8 @@ import time
 import uuid
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Optional
+from copy import deepcopy
+from typing import Any, Dict, Optional, Tuple
 
 from utils.logging_config import get_logger
 
@@ -125,6 +127,7 @@ CREATE TABLE IF NOT EXISTS candidate_tokens (
     lib2_track_id INTEGER,
     lib2_album_id INTEGER,
     result_kind   TEXT,
+    metadata_json TEXT,
     expires_at    REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_candidate_tokens_url
@@ -181,6 +184,14 @@ class CandidateStore:
             if "result_kind" not in columns:
                 conn.execute(
                     "ALTER TABLE candidate_tokens ADD COLUMN result_kind TEXT")
+            # Ported from upstream: the indexer facts a candidate arrived with
+            # (categories above all). `evaluate_release` judges a release on
+            # that evidence FIRST and only falls back to parsing its title, so
+            # dropping the metadata would silently demote every release check
+            # to title-only.
+            if "metadata_json" not in columns:
+                conn.execute(
+                    "ALTER TABLE candidate_tokens ADD COLUMN metadata_json TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._uri, uri=self._is_uri, timeout=10,
@@ -195,7 +206,8 @@ class CandidateStore:
     def is_token(value: Optional[str]) -> bool:
         return bool(value) and value.startswith(TOKEN_PREFIX)
 
-    def put(self, url: str, *, result_kind: Optional[str] = None) -> str:
+    def put(self, url: str, *, result_kind: Optional[str] = None,
+            metadata: Optional[Dict[str, Any]] = None) -> str:
         """Register a URL under the current binding; returns its token.
 
         The same URL under the same binding within the TTL returns the
@@ -224,20 +236,28 @@ class CandidateStore:
                     (url, binding.profile_id,
                      binding.lib2_track_id, binding.lib2_album_id, kind),
                 ).fetchone()
+                metadata_json = (
+                    json.dumps(metadata, separators=(",", ":"))
+                    if metadata else None
+                )
                 if row is not None:
-                    # Refresh the TTL — the candidate was just seen again.
+                    # Refresh the TTL — the candidate was just seen again — and
+                    # the evidence with it: a re-search may carry categories the
+                    # first sighting did not.
                     conn.execute(
-                        "UPDATE candidate_tokens SET expires_at=? WHERE token=?",
-                        (now + self._ttl, row["token"]))
+                        "UPDATE candidate_tokens SET expires_at=?,"
+                        " metadata_json=COALESCE(?, metadata_json) WHERE token=?",
+                        (now + self._ttl, metadata_json, row["token"]))
                     return row["token"]
                 token = TOKEN_PREFIX + secrets.token_urlsafe(24)
                 conn.execute(
                     "INSERT INTO candidate_tokens"
-                    " (token, url, profile_id, lib2_track_id, lib2_album_id, result_kind, expires_at)"
-                    " VALUES (?,?,?,?,?,?,?)",
+                    " (token, url, profile_id, lib2_track_id, lib2_album_id,"
+                    "  result_kind, metadata_json, expires_at)"
+                    " VALUES (?,?,?,?,?,?,?,?)",
                     (token, url, binding.profile_id,
                      binding.lib2_track_id, binding.lib2_album_id, kind,
-                     now + self._ttl))
+                     metadata_json, now + self._ttl))
                 overflow = conn.execute(
                     "SELECT COUNT(*) AS n FROM candidate_tokens").fetchone()["n"] - self._max
                 if overflow > 0:
@@ -252,32 +272,46 @@ class CandidateStore:
     def resolve(self, token: str) -> Optional[str]:
         """The URL behind a token, or None when unknown, expired, or the
         token's binding doesn't match the caller's current scope."""
+        url, _metadata = self.resolve_with_metadata(token)
+        return url
+
+    def resolve_with_metadata(
+        self, token: str,
+    ) -> Tuple[Optional[str], Dict[str, Any]]:
+        """``(url, metadata)`` under every binding check ``resolve`` applies.
+
+        Ported from upstream, which reads the candidate's indexer categories
+        here so `evaluate_release` can judge on evidence before falling back to
+        the title. A rejected token yields ``(None, {})`` — the metadata is
+        never handed out for a candidate the caller may not have.
+        """
         if not self.is_token(token):
-            return None
+            return None, {}
         binding = current_binding()
         now = time.time()
         with self._lock, contextlib.closing(self._connect()) as conn:
             with conn:
                 row = conn.execute(
-                    "SELECT url, profile_id, lib2_track_id, lib2_album_id, result_kind, expires_at"
+                    "SELECT url, profile_id, lib2_track_id, lib2_album_id,"
+                    " result_kind, metadata_json, expires_at"
                     " FROM candidate_tokens WHERE token=?", (token,)).fetchone()
                 if row is None:
-                    return None
+                    return None, {}
                 if row["expires_at"] < now:
                     conn.execute(
                         "DELETE FROM candidate_tokens WHERE token=?", (token,))
-                    return None
+                    return None, {}
         if row["profile_id"] != binding.profile_id:
             logger.warning(
                 "Candidate token rejected: minted for profile %s, grabbed as "
                 "profile %s", row["profile_id"], binding.profile_id)
-            return None
+            return None, {}
         if binding.result_kind is not None and row["result_kind"] != binding.result_kind:
             logger.warning(
                 "Candidate token rejected: minted as %s, grabbed as %s",
                 row["result_kind"] or "legacy/unbound", binding.result_kind,
             )
-            return None
+            return None, {}
         # Entity binding is one-directional strict: a token searched FOR a
         # specific lib2 entity may not be redirected at a different one.
         # Tokens from generic searches (no entity) stay usable for entity
@@ -289,8 +323,12 @@ class CandidateStore:
                 logger.warning(
                     "Candidate token rejected: minted for %s=%s, grabbed for "
                     "%s=%s", col, row[col], col, ctx_val)
-                return None
-        return row["url"]
+                return None, {}
+        try:
+            metadata = json.loads(row["metadata_json"] or "{}")
+        except (TypeError, ValueError):
+            metadata = {}
+        return row["url"], deepcopy(metadata if isinstance(metadata, dict) else {})
 
 
 _store: Optional[CandidateStore] = None

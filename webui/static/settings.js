@@ -1715,6 +1715,7 @@ async function loadSettingsData() {
         // Load service master toggles
         document.getElementById('embed-spotify').checked = settings.spotify?.embed_tags !== false;
         document.getElementById('embed-itunes').checked = settings.itunes?.embed_tags !== false;
+        loadMusicBrainzServerSettings(settings);
         document.getElementById('embed-musicbrainz').checked = settings.musicbrainz?.embed_tags !== false;
         document.getElementById('embed-deezer').checked = settings.deezer?.embed_tags !== false;
         document.getElementById('embed-audiodb').checked = settings.audiodb?.embed_tags !== false;
@@ -4397,6 +4398,14 @@ async function saveSettings(quiet = false) {
         return;
     }
 
+    let musicBrainzServerSettings;
+    try {
+        musicBrainzServerSettings = collectMusicBrainzServerSettings();
+    } catch (error) {
+        if (!quiet) showToast(error.message, 'error');
+        return;
+    }
+
     // Validate file organization templates before saving
     const validationErrors = validateFileOrganizationTemplates();
     if (validationErrors.length > 0) {
@@ -4674,6 +4683,7 @@ async function saveSettings(quiet = false) {
             }
         },
         musicbrainz: {
+            ...musicBrainzServerSettings,
             embed_tags: document.getElementById('embed-musicbrainz').checked,
             tags: _collectServiceTags('musicbrainz')
         },
@@ -6890,3 +6900,29 @@ async function runImageCacheClear() {
         if (btn) { btn.disabled = false; btn.textContent = 'Clear cache'; }
     }
 }
+
+// MUSICBRAINZ SERVER SETTINGS
+function loadMusicBrainzServerSettings(settings) {
+    document.getElementById('musicbrainz-base-url').value = settings.musicbrainz?.base_url || '';
+    document.getElementById('musicbrainz-request-interval').value = settings.musicbrainz?.request_interval ?? 1.05;
+}
+
+function collectMusicBrainzServerSettings() {
+    const base_url = document.getElementById('musicbrainz-base-url').value.trim();
+    const rawInterval = document.getElementById('musicbrainz-request-interval').value.trim();
+    const request_interval = rawInterval === '' ? 1.05 : Number(rawInterval);
+    if (base_url) {
+        let url;
+        try { url = new URL(base_url); } catch (_) {
+            throw new Error('MusicBrainz server URL must start with http:// or https://.');
+        }
+        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+            throw new Error('Use a MusicBrainz HTTP(S) URL without credentials, query strings or fragments.');
+        }
+    }
+    if (!Number.isFinite(request_interval) || request_interval < 0) {
+        throw new Error('MusicBrainz request interval must be zero or a positive number of seconds.');
+    }
+    return { base_url, request_interval };
+}
+// END MUSICBRAINZ SERVER SETTINGS
