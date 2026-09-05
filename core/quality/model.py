@@ -223,7 +223,9 @@ def rank_candidate(aq: AudioQuality, targets: List[QualityTarget]) -> Tuple[int,
     return (len(targets), aq.tier_score())
 
 
-def satisfies_a_target_on_stated_facts(aq, targets) -> bool:
+def satisfies_a_target_on_stated_facts(
+    aq, targets, *, unproven_resolution_ok: bool = True,
+) -> bool:
     """Whether a release COULD satisfy any target, judged on what it claimed.
 
     ``matches_target`` is the rule for a probed file: a FLAC with no stated
@@ -241,6 +243,14 @@ def satisfies_a_target_on_stated_facts(aq, targets) -> bool:
     Lives here so the per-track lane and the album-bundle picker cannot drift.
     They did: the picker used ``matches_target`` and refused whole albums the
     per-track lane accepted from the same indexer.
+
+    ``unproven_resolution_ok=False`` keeps the silence rule for BITRATE only and
+    still requires a hi-res target's sample rate / bit depth to be stated. A
+    lossy title almost never carries its bitrate, so relaxing that is the
+    difference between filtering the lane and emptying it. Asking for 24/96 is
+    the opposite: a deliberate, narrow request, and a whole album is a lot of
+    bandwidth to spend on the hope that a bare ``[FLAC]`` happens to be hi-res.
+    The album picker passes False for that reason.
     """
     fmt = str(getattr(aq, 'format', '') or '').lower()
     for target in targets or ():
@@ -255,12 +265,20 @@ def satisfies_a_target_on_stated_facts(aq, targets) -> bool:
             continue
         sample_rate = getattr(aq, 'sample_rate', None)
         min_rate = getattr(target, 'min_sample_rate', None)
-        if min_rate and sample_rate is not None and sample_rate < min_rate:
-            continue
+        if min_rate:
+            if sample_rate is None:
+                if not unproven_resolution_ok:
+                    continue
+            elif sample_rate < min_rate:
+                continue
         depth = getattr(aq, 'bit_depth', None)
         min_depth = getattr(target, 'bit_depth', None)
-        if min_depth and depth is not None and depth < min_depth:
-            continue
+        if min_depth:
+            if depth is None:
+                if not unproven_resolution_ok:
+                    continue
+            elif depth < min_depth:
+                continue
         return True
     return False
 

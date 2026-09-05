@@ -85,9 +85,10 @@ def test_a_matched_target_still_wins_over_a_rescued_one():
 def test_a_proven_hi_res_release_still_beats_a_bare_flac():
     """The rescue only saves a release from refusal, it never promotes one.
 
-    Under a hi-res-only profile a bare "[FLAC]" states no sample rate, so it
-    survives instead of being refused, but the release that actually says
-    24-96 still wins.
+    The 24-96 release matches the target outright, so the rescue branch never
+    runs at all here and the bare "[FLAC]" loses on rank. (Alone, that bare
+    FLAC is refused outright: see
+    test_a_bare_flac_does_not_satisfy_a_hi_res_album_target.)
     """
     hires = [QualityTarget(format='flac', min_sample_rate=96000, bit_depth=24)]
     assert _pick([
@@ -120,3 +121,59 @@ def test_fallback_enabled_is_untouched():
         'Miles Davis - Kind Of Blue [MP3]',
         'Miles Davis - Kind Of Blue [FLAC]',
     ], fallback_enabled=True) == 'Miles Davis - Kind Of Blue [FLAC]'
+
+
+# ---------------------------------------------------------------------------
+# The silence rule is BITRATE only. Resolution is not relaxed for an album.
+# ---------------------------------------------------------------------------
+
+HIRES = [QualityTarget(label='FLAC 24/96', format='flac',
+                       bit_depth=24, min_sample_rate=96_000)]
+
+
+def test_a_bare_flac_does_not_satisfy_a_hi_res_album_target():
+    """The guard I broke once. test_album_bundle pins this too, deliberately.
+
+    Relaxing an unstated bitrate is the difference between filtering the lossy
+    lane and emptying it, because a title almost never carries its bitrate.
+    Asking for 24/96 is the opposite: a narrow, deliberate request. A whole
+    album is far too much bandwidth to spend on the hope that a bare "[FLAC]"
+    turns out to be hi-res, so silence about resolution stays disqualifying.
+    """
+    assert _pick(['Miles Davis - Kind Of Blue [FLAC]'], HIRES) is None
+
+
+def test_a_stated_hi_res_release_still_passes_the_same_gate():
+    assert _pick(['Miles Davis - Kind Of Blue [FLAC 24-96]'], HIRES) == (
+        'Miles Davis - Kind Of Blue [FLAC 24-96]'
+    )
+
+
+def test_the_flag_is_what_separates_the_two_lanes():
+    """Same release, same target, opposite answers by design.
+
+    The per-track lane keeps the permissive reading (it grabs one track, and
+    the import probe is right behind it). The album picker passes
+    unproven_resolution_ok=False because it commits to a whole release.
+    """
+    from core.quality.model import AudioQuality
+
+    bare_flac = AudioQuality(format='flac')
+
+    assert satisfies_a_target_on_stated_facts(bare_flac, HIRES) is True
+    assert satisfies_a_target_on_stated_facts(
+        bare_flac, HIRES, unproven_resolution_ok=False,
+    ) is False
+
+
+def test_bitrate_silence_is_still_relaxed_under_the_strict_flag():
+    """Narrowing the rescue must not take the MP3-320 fix with it."""
+    from core.quality.model import AudioQuality
+
+    assert satisfies_a_target_on_stated_facts(
+        AudioQuality(format='mp3'), TARGETS, unproven_resolution_ok=False,
+    ) is True
+    assert satisfies_a_target_on_stated_facts(
+        AudioQuality(format='mp3', bitrate=128), TARGETS,
+        unproven_resolution_ok=False,
+    ) is False

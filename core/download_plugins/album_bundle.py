@@ -513,14 +513,21 @@ def pick_best_album_release(candidates, quality_guess,
         elif not fallback_enabled:
             # Nothing matched outright, which is NOT the same as the profile
             # refusing these releases. A prowlarr title almost never states a
-            # bitrate or a sample rate, and the stock MP3 target asks for 320,
-            # so judging a title by the probed-file rule refuses whole albums
-            # the per-track lane accepts from the same indexer. Keep the ones
-            # that only failed on something they never claimed, refuse the rest.
-            # The post-download probe is still the last word.
+            # bitrate, and the stock MP3 target asks for 320, so judging a title
+            # by the probed-file rule refuses whole albums the per-track lane
+            # accepts from the same indexer. Keep the ones that only failed on a
+            # bitrate they never claimed, refuse the rest. The post-download
+            # probe is still the last word.
+            #
+            # A hi-res target is NOT relaxed the same way: asking for 24/96 is a
+            # narrow, deliberate request, and a bare [FLAC] must not be grabbed
+            # on the hope it happens to be hi-res. A whole album is too much
+            # bandwidth to spend on that guess.
             provable = [
                 row for row in quality_rows
-                if satisfies_a_target_on_stated_facts(row[1], quality_targets)
+                if satisfies_a_target_on_stated_facts(
+                    row[1], quality_targets, unproven_resolution_ok=False,
+                )
             ]
             if not provable:
                 logger.warning(
