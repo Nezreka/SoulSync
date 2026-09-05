@@ -14,6 +14,11 @@ import { DiscoverMixCard } from '../routes/discover/-ui/mix-shelf';
  * component either. This renders the real components here and writes the HTML
  * where the probes can load it. playwright.offline.config.ts regenerates it
  * before every run, so it cannot go stale.
+ *
+ * NOT a .html extension, deliberately. dev.py restarts the backend on any
+ * .html change in the tree, and gunicorn's dev config gives in-flight requests
+ * one second before it kills them, so writing an .html fixture here dropped
+ * every open request on the running app once per probe run.
  */
 
 const OUT = resolve(process.cwd(), 'tests/layout/__fixtures__');
@@ -50,7 +55,7 @@ describe('layout fixtures', () => {
         onOpenBlacklist={() => {}}
       />,
     );
-    emit('discover-hero.html', container.innerHTML);
+    emit('discover-hero.fixture.txt', container.innerHTML);
   });
 
   it('writes a mix card', () => {
@@ -72,6 +77,6 @@ describe('layout fixtures', () => {
         />
       </div>,
     );
-    emit('discover-mix-card.html', container.innerHTML);
+    emit('discover-mix-card.fixture.txt', container.innerHTML);
   });
 });

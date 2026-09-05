@@ -1,7 +1,6 @@
+import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-
-import { expect, test, type Page } from '@playwright/test';
 
 /**
  * M01: nothing in the hero foot may sit on anything else.
@@ -16,7 +15,7 @@ const STYLE = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
 const MOBILE = readFileSync(resolve(process.cwd(), 'static/mobile.css'), 'utf8');
 
 const HERO_HTML = readFileSync(
-  resolve(process.cwd(), 'tests/layout/__fixtures__/discover-hero.html'),
+  resolve(process.cwd(), 'tests/layout/__fixtures__/discover-hero.fixture.txt'),
   'utf8',
 );
 
@@ -119,11 +118,12 @@ test('an 80-character title does not push the actions out of the hero', async ({
   const { titleLen, actionsInside } = await page.evaluate(() => {
     const hero = document.querySelector('.discover-hero')!.getBoundingClientRect();
     const title = document.querySelector('.discover-hero-title')!.textContent!;
-    const inside = [...document.querySelectorAll('.discover-hero-actions > *, .discover-hero-controls button')]
-      .every((el) => {
-        const r = el.getBoundingClientRect();
-        return r.top >= hero.top - 1 && r.bottom <= hero.bottom + 1 && r.width > 0 && r.height > 0;
-      });
+    const inside = [
+      ...document.querySelectorAll('.discover-hero-actions > *, .discover-hero-controls button'),
+    ].every((el) => {
+      const r = el.getBoundingClientRect();
+      return r.top >= hero.top - 1 && r.bottom <= hero.bottom + 1 && r.width > 0 && r.height > 0;
+    });
     return { titleLen: title.length, actionsInside: inside };
   });
   expect(titleLen).toBeGreaterThan(60);
