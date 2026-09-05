@@ -39,28 +39,24 @@ class _Album:
 
 
 def _seed(db):
+    """A catalogue that already holds the artist and the album, both stamped
+    with the server's own ids — what the scan's earlier passes leave behind."""
+    from core.library2.schema import ensure_library_v2_schema
+
+    ensure_library_v2_schema(db._conn)
     cur = db._conn.cursor()
-    cur.execute("""
-        CREATE TABLE albums (
-            id TEXT PRIMARY KEY,
-            artist_id TEXT,
-            title TEXT,
-            year INTEGER,
-            thumb_url TEXT,
-            genres TEXT,
-            track_count INTEGER,
-            duration INTEGER,
-            server_source TEXT,
-            created_at TEXT,
-            updated_at TEXT
-        )
-    """)
-    cur.execute("""
-        INSERT INTO albums
-            (id, artist_id, title, year, thumb_url, server_source)
-        VALUES
-            ('album-1', 'artist-1', 'Flower Boy', 2017, '/rest/getCoverArt?id=correct-cover', 'navidrome')
-    """)
+    artist = cur.execute(
+        "INSERT INTO lib2_artists (name, name_key, server_source, server_id)"
+        " VALUES ('Tyler', 'tyler', 'navidrome', 'artist-1')").lastrowid
+    album = cur.execute(
+        "INSERT INTO lib2_albums (primary_artist_id, title, year, image_url, origin,"
+        "                         server_source, server_id)"
+        " VALUES (?, 'Flower Boy', 2017, '/rest/getCoverArt?id=correct-cover',"
+        "         'library', 'navidrome', 'album-1')", (artist,)).lastrowid
+    track = cur.execute("INSERT INTO lib2_tracks(album_id,title) VALUES(?,'Track')",
+                        (album,)).lastrowid
+    cur.execute("INSERT INTO lib2_track_files(track_id,path) VALUES(?, '/music/track.flac')",
+                (track,))
     db._conn.commit()
 
 
@@ -70,11 +66,12 @@ def test_album_refresh_preserves_existing_thumb_when_incoming_thumb_missing():
 
     assert db.insert_or_update_media_album(_Album(), "artist-1", server_source="navidrome") is True
 
-    row = db._conn.execute("SELECT thumb_url FROM albums WHERE id = 'album-1'").fetchone()
-    assert row["thumb_url"] == "/rest/getCoverArt?id=correct-cover"
+    row = db._conn.execute(
+        "SELECT image_url FROM lib2_albums WHERE server_id = 'album-1'").fetchone()
+    assert row["image_url"] == "/rest/getCoverArt?id=correct-cover"
 
 
-def test_album_refresh_updates_existing_thumb_when_incoming_thumb_present():
+def test_album_refresh_does_not_replace_catalogue_thumb():
     db = _InMemoryDB()
     _seed(db)
 
@@ -83,5 +80,6 @@ def test_album_refresh_updates_existing_thumb_when_incoming_thumb_present():
 
     assert db.insert_or_update_media_album(album, "artist-1", server_source="navidrome") is True
 
-    row = db._conn.execute("SELECT thumb_url FROM albums WHERE id = 'album-1'").fetchone()
-    assert row["thumb_url"] == "/rest/getCoverArt?id=new-cover"
+    row = db._conn.execute(
+        "SELECT image_url FROM lib2_albums WHERE server_id = 'album-1'").fetchone()
+    assert row["image_url"] == "/rest/getCoverArt?id=correct-cover"

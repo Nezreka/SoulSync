@@ -53,6 +53,72 @@ def test_typed_path_used_for_known_source():
     assert out['external_urls'] == {'spotify': 'https://open.spotify.com/album/sp123'}
 
 
+def test_typed_path_keeps_every_collaborative_album_artist():
+    raw = dict(SAMPLE_SPOTIFY_RELEASE)
+    raw['artists'] = [
+        {'id': 'kdot', 'name': 'Kendrick Lamar'},
+        {'id': 'sza', 'name': 'SZA'},
+    ]
+
+    normalized = discography._build_discography_release_dict(
+        raw, artist_id='kdot', source='spotify',
+    )
+    card = discography._build_artist_detail_release_card(normalized)
+
+    assert normalized['artist_name'] == 'Kendrick Lamar'
+    assert normalized['artists'] == ['Kendrick Lamar', 'SZA']
+    assert normalized['artist_credits'] == [
+        {'name': 'Kendrick Lamar', 'id': 'kdot'},
+        {'name': 'SZA', 'id': 'sza'},
+    ]
+    assert card['artists'] == ['Kendrick Lamar', 'SZA']
+    assert card['artist_credits'] == normalized['artist_credits']
+
+
+def test_musicbrainz_collaborative_credit_keeps_each_artist_mbid():
+    raw = {
+        'id': 'mb-release',
+        'title': 'Shared Score',
+        'artist-credit': [
+            {'artist': {'id': 'mb-composer-a', 'name': 'Composer A'}},
+            {'artist': {'id': 'mb-composer-b', 'name': 'Composer B'}},
+        ],
+        'release-group': {'primary-type': 'Album'},
+    }
+
+    normalized = discography._build_discography_release_dict(
+        raw, artist_id='mb-composer-a', source='musicbrainz',
+    )
+
+    assert normalized['artist_credits'] == [
+        {'name': 'Composer A', 'id': 'mb-composer-a'},
+        {'name': 'Composer B', 'id': 'mb-composer-b'},
+    ]
+
+
+def test_spotify_album_object_rejoins_parallel_artist_ids():
+    from core.spotify_client import Album as SpotifyAlbum
+
+    raw = SpotifyAlbum(
+        id='sp-release',
+        name='Shared Score',
+        artists=['Composer A', 'Composer B'],
+        artist_ids=['sp-composer-a', 'sp-composer-b'],
+        release_date='2026-01-01',
+        total_tracks=12,
+        album_type='album',
+    )
+
+    normalized = discography._build_discography_release_dict(
+        raw, artist_id='sp-composer-a', source='spotify',
+    )
+
+    assert normalized['artist_credits'] == [
+        {'name': 'Composer A', 'id': 'sp-composer-a'},
+        {'name': 'Composer B', 'id': 'sp-composer-b'},
+    ]
+
+
 def test_legacy_path_used_when_no_source():
     out = discography._build_discography_release_dict(
         SAMPLE_SPOTIFY_RELEASE, artist_id='kdot',
@@ -189,3 +255,44 @@ def test_artist_detail_card_legacy_path_missing_external_urls_defaults_empty():
     canonical = {'id': 'sp123', 'name': 'GNX', 'album_type': 'album'}
     card = discography._build_artist_detail_release_card(canonical)
     assert card['external_urls'] == {}
+
+
+# ---------------------------------------------------------------------------
+# release_group_id survives the two-stage build
+#
+# MusicBrainz's discography browse projects release GROUPS, so the card's `id`
+# is a group mbid rather than a release one. Library v2 needs to know which it
+# has; the id alone cannot say, since both are uuids. The value therefore has
+# to survive `_build_discography_release_dict` AND the artist-detail card built
+# from its output — dropping it in either stage loses it for good.
+# ---------------------------------------------------------------------------
+
+MB_GROUP = 'f17d521f-f8e9-41d8-9b0e-e270d5d905ed'
+
+
+def test_release_group_id_survives_the_canonical_dict():
+    from core.musicbrainz_search import Album as MBAlbum
+
+    album = MBAlbum(
+        id=MB_GROUP, name='Ultra', artists=['Depeche Mode'],
+        release_date='1997-04-14', total_tracks=10, album_type='album',
+        release_group_id=MB_GROUP,
+    )
+    out = discography._build_discography_release_dict(
+        album, artist_id='dm', source='musicbrainz')
+    assert out['release_group_id'] == MB_GROUP
+
+
+def test_release_group_id_survives_the_artist_detail_card():
+    canonical = {
+        'id': MB_GROUP, 'name': 'Ultra', 'album_type': 'album',
+        'release_group_id': MB_GROUP,
+    }
+    card = discography._build_artist_detail_release_card(canonical)
+    assert card['release_group_id'] == MB_GROUP
+
+
+def test_a_provider_without_release_groups_reports_none():
+    card = discography._build_artist_detail_release_card(
+        {'id': 'sp123', 'name': 'GNX', 'album_type': 'album'})
+    assert card['release_group_id'] is None

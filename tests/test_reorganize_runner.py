@@ -81,12 +81,10 @@ def _make_item(*, queue_id='qid-1', album_id='alb-1', source=None):
 
 def _build(monkeypatch, *, download_path_fn, transfer_path_fn,
            reorganize_album_fn, get_database=lambda: object()):
-    """Helper: stub out the heavy reorganize_album call so we can test
-    the wiring without a real DB / post-process pipeline."""
-    # Patch the import inside reorganize_runner.build_runner.
-    import core.reorganize_runner as mod
+    """Helper: stub out the mover so the wiring can be tested without a real
+    DB. The mover is the only executor now — the staging pipeline is gone."""
     monkeypatch.setattr(
-        'core.library_reorganize.reorganize_album',
+        'core.library_reorganize.reorganize_album_rename_only',
         reorganize_album_fn,
         raising=True,
     )
@@ -99,6 +97,7 @@ def _build(monkeypatch, *, download_path_fn, transfer_path_fn,
         is_shutting_down_fn=lambda: False,
         get_download_path=download_path_fn,
         get_transfer_path=transfer_path_fn,
+        build_final_path_fn=lambda *a, **k: (None, True),
     )
 
 
@@ -123,12 +122,14 @@ def test_runner_invokes_reorganize_album_with_injected_deps(monkeypatch, tmp_pat
 
     assert summary['status'] == 'completed'
     assert captured['album_id'] == 'alb-X'
-    assert captured['primary_source'] == 'deezer'
-    assert captured['strict_source'] is True
-    # staging_root is download_path / ssync_staging
-    assert captured['staging_root'].endswith('ssync_staging')
+    assert captured['transfer_dir'].endswith('transfer')
+    assert callable(captured['build_final_path_fn'])
     assert callable(captured['on_progress'])
     assert callable(captured['stop_check'])
+    # No staging root anywhere: a reorganize does not copy a file the user
+    # already owns into a folder for incoming downloads.
+    assert 'staging_root' not in captured
+    assert not (tmp_path / 'ssync_staging').exists()
 
 
 def test_runner_reads_config_per_call(monkeypatch, tmp_path):
@@ -136,10 +137,10 @@ def test_runner_reads_config_per_call(monkeypatch, tmp_path):
     the path-resolver lambda AT call time — not at build_runner time.
     This is the explicit fix for kettui-style "config change requires
     server restart" feedback."""
-    seen_staging_roots = []
+    seen_transfer_dirs = []
 
     def fake_reorganize_album(**kwargs):
-        seen_staging_roots.append(kwargs['staging_root'])
+        seen_transfer_dirs.append(kwargs['transfer_dir'])
         return {
             'status': 'completed', 'source': None,
             'total': 0, 'moved': 0, 'skipped': 0, 'failed': 0, 'errors': [],
@@ -148,8 +149,8 @@ def test_runner_reads_config_per_call(monkeypatch, tmp_path):
     current_path = {'value': str(tmp_path / 'first')}
     runner = _build(
         monkeypatch,
-        download_path_fn=lambda: current_path['value'],
-        transfer_path_fn=lambda: '/tmp/transfer',
+        download_path_fn=lambda: str(tmp_path),
+        transfer_path_fn=lambda: current_path['value'],
         reorganize_album_fn=fake_reorganize_album,
     )
 
@@ -157,27 +158,30 @@ def test_runner_reads_config_per_call(monkeypatch, tmp_path):
     current_path['value'] = str(tmp_path / 'second')
     runner(_make_item())
 
-    assert len(seen_staging_roots) == 2
-    assert 'first' in seen_staging_roots[0]
-    assert 'second' in seen_staging_roots[1]
+    assert len(seen_transfer_dirs) == 2
+    assert 'first' in seen_transfer_dirs[0]
+    assert 'second' in seen_transfer_dirs[1]
 
 
-def test_runner_returns_setup_failed_on_unwritable_path(monkeypatch, tmp_path):
-    """If the staging dir can't be created (permission denied, etc.),
-    the runner returns a clean ``setup_failed`` summary so the queue
-    marks the item failed without an unhandled exception."""
+def test_runner_returns_setup_failed_without_a_path_builder(monkeypatch, tmp_path):
+    """Nothing can be planned without the path builder, so the queue gets a
+    clean ``setup_failed`` summary rather than an unhandled exception.
+
+    This replaces the old unwritable-staging-dir case: there is no staging dir
+    to create any more."""
     def fake_reorganize_album(**kwargs):
-        pytest.fail("reorganize_album should not run when setup fails")
+        pytest.fail("the mover should not run when setup fails")
 
-    # Point at a child of an existing FILE — makedirs will raise OSError.
-    blocking_file = tmp_path / 'blocker'
-    blocking_file.write_text('x')
-
-    runner = _build(
-        monkeypatch,
-        download_path_fn=lambda: str(blocking_file),  # makedirs fails here
-        transfer_path_fn=lambda: '/tmp/transfer',
-        reorganize_album_fn=fake_reorganize_album,
+    monkeypatch.setattr('core.library_reorganize.reorganize_album_rename_only',
+                        fake_reorganize_album, raising=True)
+    runner = build_runner(
+        get_database=lambda: object(),
+        resolve_file_path_fn=lambda p: p,
+        post_process_fn=lambda *a, **k: None,
+        cleanup_empty_directories_fn=lambda *a, **k: None,
+        is_shutting_down_fn=lambda: False,
+        get_download_path=lambda: str(tmp_path),
+        get_transfer_path=lambda: str(tmp_path / 'transfer'),
     )
     summary = runner(_make_item())
     assert summary['status'] == 'setup_failed'
@@ -275,6 +279,82 @@ def test_rename_only_item_routes_to_rename_executor(monkeypatch, tmp_path):
     assert not (tmp_path / 'ssync_staging').exists()   # no staging for rename-only
 
 
+def test_an_item_without_the_flag_also_only_moves_files(monkeypatch, tmp_path):
+    """Reorganize reorganizes. The "full" mode copied the file into staging and
+    put it back through the download post-processing pipeline — an ADMISSION
+    check for a file the user already owns. It fingerprinted a library file and
+    quarantined it over its own audio (a Kanji artist name vs the Romaji the
+    catalogue held), and it accumulated four opt-outs, one per bug report,
+    each turning off a gate that should never have run here.
+
+    Re-tagging still exists — it is a separate job with its own preview, its
+    own findings and its own respect for hand-set fields. So there is nothing
+    left for the staging path to contribute, and every item takes the mover.
+    """
+    captured = {}
+
+    def fake_rename_only(**kwargs):
+        captured.update(kwargs)
+        return {'status': 'completed', 'source': None,
+                'total': 1, 'moved': 1, 'skipped': 0, 'failed': 0, 'errors': []}
+
+    def fail_full(**kwargs):
+        raise AssertionError("the staging pipeline must not run for a reorganize")
+
+    monkeypatch.setattr('core.library_reorganize.reorganize_album', fail_full, raising=True)
+    monkeypatch.setattr('core.library_reorganize.reorganize_album_rename_only',
+                        fake_rename_only, raising=True)
+
+    runner = build_runner(
+        get_database=lambda: object(),
+        resolve_file_path_fn=lambda p: p,
+        post_process_fn=lambda *a, **k: None,
+        cleanup_empty_directories_fn=lambda *a, **k: None,
+        is_shutting_down_fn=lambda: False,
+        get_download_path=lambda: str(tmp_path),
+        get_transfer_path=lambda: str(tmp_path / 'transfer'),
+        build_final_path_fn=lambda *a, **k: (None, True),
+    )
+    item = _make_item(album_id='alb-Q', source='deezer')
+    item.rename_only = False          # the old "full mode" request
+
+    summary = runner(item)
+
+    assert summary['moved'] == 1
+    assert not (tmp_path / 'ssync_staging').exists()
+
+
+def test_the_plan_comes_from_the_catalogue_not_a_provider(monkeypatch, tmp_path):
+    """The executor acts on what a `preview_fn` computed. Injecting the
+    catalogue planner is what takes the provider out of the path: no source-id
+    requirement, no live tracklist, no 400s for candidate ids that were never
+    Spotify's."""
+    captured = {}
+
+    def fake_rename_only(**kwargs):
+        captured.update(kwargs)
+        return {'status': 'completed', 'source': None,
+                'total': 0, 'moved': 0, 'skipped': 0, 'failed': 0, 'errors': []}
+
+    monkeypatch.setattr('core.library_reorganize.reorganize_album_rename_only',
+                        fake_rename_only, raising=True)
+
+    runner = build_runner(
+        get_database=lambda: object(),
+        resolve_file_path_fn=lambda p: p,
+        post_process_fn=lambda *a, **k: None,
+        cleanup_empty_directories_fn=lambda *a, **k: None,
+        is_shutting_down_fn=lambda: False,
+        get_download_path=lambda: str(tmp_path),
+        get_transfer_path=lambda: str(tmp_path / 'transfer'),
+        build_final_path_fn=lambda *a, **k: (None, True),
+    )
+    runner(_make_item())
+
+    from core.library2.reorganize_bridge import catalogue_preview_fn
+    assert captured['preview_fn'] is catalogue_preview_fn
+
+
 def test_rename_only_without_path_builder_fails_cleanly(monkeypatch, tmp_path):
     # Defensive: build_final_path_fn omitted → rename-only can't run, returns setup_failed
     # instead of crashing.
@@ -322,8 +402,9 @@ class _KeepOpen(sqlite3.Connection):
 def repoint(monkeypatch, tmp_path):
     """Returns (update_track_path_fn, conn) — the REAL production closure."""
     conn = sqlite3.connect(":memory:", factory=_KeepOpen)
-    conn.execute("CREATE TABLE tracks (id TEXT PRIMARY KEY, file_path TEXT, "
-                 "updated_at TIMESTAMP)")
+    conn.row_factory = sqlite3.Row
+    from core.library2.schema import ensure_library_v2_schema
+    ensure_library_v2_schema(conn)
     conn.execute("CREATE TABLE repair_findings (id INTEGER PRIMARY KEY AUTOINCREMENT, "
                  "file_path TEXT, status TEXT DEFAULT 'pending', "
                  "details_json TEXT DEFAULT '{}', updated_at TIMESTAMP)")
@@ -352,8 +433,22 @@ NEW = '/music/New Artist/Album/01 - Track.flac'
 
 
 def _add_track(conn, path=OLD, track_id='t1'):
-    conn.execute("INSERT INTO tracks (id, file_path) VALUES (?, ?)", (track_id, path))
+    artist_id = conn.execute(
+        "INSERT INTO lib2_artists(name, name_key) VALUES('Artist', 'artist')"
+    ).lastrowid
+    album_id = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Album')",
+        (artist_id,),
+    ).lastrowid
+    native_track_id = conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Track')", (album_id,)
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path, is_primary, file_state) "
+        "VALUES(?,?,1,'active')", (native_track_id, path),
+    )
     conn.commit()
+    return native_track_id
 
 
 def _add_finding(conn, *, path=OLD, status='pending', details=None):
@@ -372,10 +467,10 @@ def _finding(conn, fid):
 
 def test_a_pending_finding_follows_the_file(repoint):
     update_path, conn = repoint
-    _add_track(conn)
+    track_id = _add_track(conn)
     fid = _add_finding(conn)
 
-    update_path('t1', NEW)
+    update_path(track_id, NEW)
 
     assert _finding(conn, fid)[0] == NEW, 'the finding still names the old path'
 
@@ -385,10 +480,10 @@ def test_the_details_path_moves_too(repoint):
     column, so updating only the column would leave the fix using the stale
     path while the UI displayed the new one."""
     update_path, conn = repoint
-    _add_track(conn)
+    track_id = _add_track(conn)
     fid = _add_finding(conn, details={'file_path': OLD, 'track_title': 'Song'})
 
-    update_path('t1', NEW)
+    update_path(track_id, NEW)
 
     path, details_json = _finding(conn, fid)
     details = _json.loads(details_json)
@@ -399,20 +494,20 @@ def test_the_details_path_moves_too(repoint):
 
 def test_the_track_row_is_still_updated(repoint):
     update_path, conn = repoint
-    _add_track(conn)
+    track_id = _add_track(conn)
 
-    update_path('t1', NEW)
+    update_path(track_id, NEW)
 
     assert conn.execute(
-        "SELECT file_path FROM tracks WHERE id = 't1'").fetchone()[0] == NEW
+        "SELECT path FROM lib2_track_files WHERE track_id = ?", (track_id,)).fetchone()[0] == NEW
 
 
 def test_findings_on_other_files_are_untouched(repoint):
     update_path, conn = repoint
-    _add_track(conn)
+    track_id = _add_track(conn)
     other = _add_finding(conn, path='/music/Someone Else/x.flac')
 
-    update_path('t1', NEW)
+    update_path(track_id, NEW)
 
     assert _finding(conn, other)[0] == '/music/Someone Else/x.flac'
 
@@ -421,10 +516,10 @@ def test_a_resolved_finding_keeps_its_historical_path(repoint):
     """Resolved rows are a record of work that happened at a location. Only
     pending rows will be acted on again, so only those need re-pointing."""
     update_path, conn = repoint
-    _add_track(conn)
+    track_id = _add_track(conn)
     done = _add_finding(conn, status='resolved')
 
-    update_path('t1', NEW)
+    update_path(track_id, NEW)
 
     assert _finding(conn, done)[0] == OLD
 
@@ -433,13 +528,13 @@ def test_unparseable_details_still_get_the_column_fixed(repoint):
     """A finding with corrupt details_json must not lose its re-point — the
     column is what the list view and the missing-file check read."""
     update_path, conn = repoint
-    _add_track(conn)
+    track_id = _add_track(conn)
     conn.execute("INSERT INTO repair_findings (file_path, details_json) VALUES (?, ?)",
                  (OLD, 'not json at all'))
     conn.commit()
     fid = conn.execute("SELECT MAX(id) FROM repair_findings").fetchone()[0]
 
-    update_path('t1', NEW)
+    update_path(track_id, NEW)
 
     assert _finding(conn, fid)[0] == NEW
 
@@ -448,59 +543,52 @@ def test_a_missing_findings_table_does_not_break_the_reorganize(repoint):
     """Best-effort by design: the track path update is the important write and
     must survive a database without the maintenance tables."""
     update_path, conn = repoint
-    _add_track(conn)
+    track_id = _add_track(conn)
     conn.execute("DROP TABLE repair_findings")
     conn.commit()
 
-    update_path('t1', NEW)   # must not raise
+    update_path(track_id, NEW)   # must not raise
 
     assert conn.execute(
-        "SELECT file_path FROM tracks WHERE id = 't1'").fetchone()[0] == NEW
+        "SELECT path FROM lib2_track_files WHERE track_id = ?", (track_id,)).fetchone()[0] == NEW
 
 
 # ── the catalogue update must never fail silently ────────────────────────────
 #
-# `_finalize_track` (core/library_reorganize.py) decides "the DB row now points
-# at the new path" SOLELY by whether this callback raised. On success it goes on
-# to `os.remove` the original. A callback that swallows its errors therefore
-# destroys the user's only copy while the catalogue still names the old path —
-# the track reads as MISSING and the file sits somewhere nothing points at.
+# `_finalize_track` (core/library_reorganize.py) decides "the catalogue row now
+# points at the new path" SOLELY by whether this callback raised. On success it
+# goes on to `os.remove` the original. A callback that swallows its errors
+# therefore destroys the user's only copy while the catalogue still names the
+# old path — the track reads as MISSING and the file sits somewhere nothing
+# points at.
 #
 # Reported against a fresh library: songs downloaded, Reorganize run while the
 # import pipeline still held the SQLite write lock, tracks came back missing.
+# The lib2 twin of the guard upstream added on the legacy `tracks` table.
 
-def test_a_failed_db_write_raises_instead_of_being_swallowed(repoint):
-    """`database is locked` (or any DB error) must reach the caller. Swallowing
-    it makes `_finalize_track` delete the original after a failed update."""
+def test_a_catalogue_that_cannot_be_read_raises_instead_of_being_swallowed(repoint):
+    """Any failure to resolve and repoint the file row must reach the caller.
+    Swallowing it makes `_finalize_track` delete the original after a failed
+    update."""
     update_path, conn = repoint
-    _add_track(conn)
-    conn.execute("DROP TABLE tracks")
+    track_id = _add_track(conn)
+    conn.execute("DROP TABLE lib2_track_files")
     conn.commit()
 
     with pytest.raises(Exception):
-        update_path('t1', NEW)
+        update_path(track_id, NEW)
 
 
 def test_an_update_that_matched_no_row_raises(repoint):
     """A 0-row UPDATE is not an SQLite error — it is silent success. Without an
-    explicit rowcount check the file is moved and deleted for a track the
-    catalogue never repointed."""
+    explicit "exactly one file row" check the file is moved and deleted for a
+    track the catalogue never repointed."""
     update_path, conn = repoint
-    _add_track(conn)          # id 't1' exists ...
+    track_id = _add_track(conn)          # this one exists ...
 
     with pytest.raises(Exception):
-        update_path('nope', NEW)   # ... but this one does not
+        update_path(track_id + 9999, NEW)   # ... but this one does not
 
     assert conn.execute(
-        "SELECT file_path FROM tracks WHERE id = 't1'").fetchone()[0] == OLD
-
-
-def test_a_successful_update_still_does_not_raise(repoint):
-    """The guard must not turn ordinary success into a failure."""
-    update_path, conn = repoint
-    _add_track(conn)
-
-    update_path('t1', NEW)
-
-    assert conn.execute(
-        "SELECT file_path FROM tracks WHERE id = 't1'").fetchone()[0] == NEW
+        "SELECT path FROM lib2_track_files WHERE track_id = ?",
+        (track_id,)).fetchone()[0] == OLD

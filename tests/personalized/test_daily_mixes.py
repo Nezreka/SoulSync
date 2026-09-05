@@ -83,15 +83,19 @@ def db(tmp_path):
     artists = [(1, 'Daft Punk', 'sp1'), (2, 'Justice', 'sp2'),
                (3, 'QOTSA', 'sp3'), (4, 'Foo Fighters', 'sp4')]
     for aid, name, sp in artists:
-        cur.execute("INSERT INTO artists (id, name, spotify_artist_id) VALUES (?,?,?)",
-                    (aid, name, sp))
-        cur.execute("INSERT INTO albums (id, title, artist_id) VALUES (?,?,?)",
-                    (aid * 10, f'{name} Album', aid))
+        cur.execute(
+            "INSERT INTO lib2_artists (id, name, name_key, spotify_id) VALUES (?,?,?,?)",
+            (aid, name, name.lower(), sp))
+        cur.execute(
+            "INSERT INTO lib2_albums (id, title, primary_artist_id) VALUES (?,?,?)",
+            (aid * 10, f'{name} Album', aid))
         for t in range(8):
             cur.execute(
-                "INSERT INTO tracks (title, artist_id, album_id, file_path, play_count) "
-                "VALUES (?,?,?,?,?)",
-                (f'{name} Song {t}', aid, aid * 10, f'/m/{aid}-{t}.flac', 10 - t))
+                "INSERT INTO lib2_tracks (title, album_id, play_count) VALUES (?,?,?)",
+                (f'{name} Song {t}', aid * 10, 10 - t))
+            cur.execute(
+                "INSERT INTO lib2_track_files (track_id, path, is_primary, file_state) "
+                "VALUES (?,?,1,'active')", (cur.lastrowid, f'/m/{aid}-{t}.flac'))
     for _aid, name, _sp in artists:
         for i in range(20):
             cur.execute(

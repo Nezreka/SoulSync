@@ -7,13 +7,10 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.metadata.registry import get_jiosaavn_client, is_jiosaavn_enabled
-from core.worker_utils import (
-    accept_artist_match,
-    artist_name_matches,
-    interruptible_sleep,
-    set_album_api_track_count,
+from core.worker_utils import artist_name_matches, interruptible_sleep
+from core.library2.worker_support import (
+    MATCHED, accept_artist_match, honor_stored_match,
 )
-from core.enrichment.manual_match_honoring import MATCHED, honor_stored_match
 
 logger = get_logger("jiosaavn_worker")
 
@@ -155,117 +152,30 @@ class JioSaavnWorker:
 
         logger.info("JioSaavn worker thread finished")
 
+    # JioSaavn retries 'error' alongside 'not_found'. Issue #964: a detail fetch
+    # that fails after a search match is marked rather than left unattempted, so the
+    # queue stops re-picking it every tick — but it has to come back eventually.
+    _RETRY_STATUSES = ('error', 'not_found')
+
     def _get_next_item(self) -> Optional[Dict[str, Any]]:
+        """Get next item to process from the Library-v2 catalogue.
+
+        Priority, retry window and the pinned-group override all live in
+        ``core.library2.worker_queue`` — the same rules every enrichment worker uses
+        (docs §32.3.1 stage 2).
+        """
         conn = None
         try:
+            from core.library2.worker_queue import next_pending
+            from core.worker_utils import read_enrichment_priority
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            from core.worker_utils import read_enrichment_priority, priority_pending_item
-            _prio = read_enrichment_priority('jiosaavn')
-            if _prio:
-                _pi = priority_pending_item(cursor, 'jiosaavn', _prio)
-                if _pi:
-                    return _pi
-
-            cursor.execute("""
-                SELECT id, name
-                FROM artists
-                WHERE jiosaavn_match_status IS NULL AND id IS NOT NULL
-                ORDER BY id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name, ar.jiosaavn_id AS artist_jiosaavn_id
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.jiosaavn_match_status IS NULL AND a.id IS NOT NULL
-                ORDER BY a.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {
-                    'type': 'album',
-                    'id': row[0],
-                    'name': row[1],
-                    'artist': row[2],
-                    'artist_jiosaavn_id': row[3],
-                }
-
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name, ar.jiosaavn_id AS artist_jiosaavn_id
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.jiosaavn_match_status IS NULL AND t.id IS NOT NULL
-                ORDER BY t.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {
-                    'type': 'track',
-                    'id': row[0],
-                    'name': row[1],
-                    'artist': row[2],
-                    'artist_jiosaavn_id': row[3],
-                }
-
-            not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
-
-            cursor.execute("""
-                SELECT id, name
-                FROM artists
-                WHERE jiosaavn_match_status IN ('not_found', 'error') AND jiosaavn_last_attempted < ?
-                ORDER BY jiosaavn_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                logger.info("Retrying artist '%s' (last attempted before cutoff)", row[1])
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name, ar.jiosaavn_id AS artist_jiosaavn_id
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.jiosaavn_match_status IN ('not_found', 'error') AND a.jiosaavn_last_attempted < ?
-                ORDER BY a.jiosaavn_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {
-                    'type': 'album',
-                    'id': row[0],
-                    'name': row[1],
-                    'artist': row[2],
-                    'artist_jiosaavn_id': row[3],
-                }
-
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name, ar.jiosaavn_id AS artist_jiosaavn_id
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.jiosaavn_match_status IN ('not_found', 'error') AND t.jiosaavn_last_attempted < ?
-                ORDER BY t.jiosaavn_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {
-                    'type': 'track',
-                    'id': row[0],
-                    'name': row[1],
-                    'artist': row[2],
-                    'artist_jiosaavn_id': row[3],
-                }
-
-            return None
+            return next_pending(
+                conn, 'jiosaavn',
+                retry_after_days=self.retry_days,
+                pinned=read_enrichment_priority('jiosaavn') or None,
+                retry_statuses=self._RETRY_STATUSES,
+            )
 
         except Exception as e:
             logger.error("Error getting next item: %s", e)
@@ -325,17 +235,13 @@ class JioSaavnWorker:
                 logger.error("Error updating item status: %s", e2)
 
     def _get_existing_id(self, entity_type: str, entity_id: int) -> Optional[str]:
-        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-        table = table_map.get(entity_type)
-        if not table:
-            return None
+        """The JioSaavn id already stored for this entity, if any."""
         conn = None
         try:
+            from core.library2.worker_support import stored_provider_id
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT jiosaavn_id FROM {table} WHERE id = ?", (entity_id,))
-            row = cursor.fetchone()
-            return row[0] if row and row[0] else None
+            return stored_provider_id(conn, entity_type, entity_id, 'jiosaavn')
         except Exception:
             return None
         finally:
@@ -357,10 +263,14 @@ class JioSaavnWorker:
         chosen = gated[0] if gated else None
 
         if chosen:
-            ok, reason = accept_artist_match(
-                self.db, 'jiosaavn_id', chosen.id, artist_id,
-                artist_name, chosen.name,
-            )
+            conn = self.db._get_connection()
+            try:
+                ok, reason = accept_artist_match(
+                    conn, 'jiosaavn', chosen.id, artist_id,
+                    artist_name, chosen.name,
+                )
+            finally:
+                conn.close()
             if ok:
                 self._update_artist(artist_id, chosen)
                 self.stats['matched'] += 1
@@ -382,19 +292,16 @@ class JioSaavnWorker:
 
     def _process_album(self, album_id: int, album_name: str, artist_name: str):
         _stored = honor_stored_match(
-            db=self.db, entity_table='albums', entity_id=album_id,
-            id_column='jiosaavn_id',
-            client_fetch_fn=self.client.get_album,
-            on_match_fn=self._refresh_album_via_stored_id,
-            mark_status_fn=self._mark_status,
-            status_column='jiosaavn_match_status',
+            self.db, entity_type='album', entity_id=album_id, service='jiosaavn',
+            fetch=self.client.get_album,
+            on_match=self._refresh_album_via_stored_id,
             log_prefix='JioSaavn',
         )
         if _stored:
-            # L2-005: a stored ID the source could not confirm right now is
-            # NOT released to a fuzzy name search below — a transient provider
-            # failure is not evidence that the ID is wrong, and searching
-            # overwrote deliberately chosen matches with whatever came back.
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
             if _stored == MATCHED:
                 self.stats['matched'] += 1
             return
@@ -442,19 +349,16 @@ class JioSaavnWorker:
 
     def _process_track(self, track_id: int, track_name: str, artist_name: str):
         _stored = honor_stored_match(
-            db=self.db, entity_table='tracks', entity_id=track_id,
-            id_column='jiosaavn_id',
-            client_fetch_fn=self.client.get_track_details,
-            on_match_fn=self._refresh_track_via_stored_id,
-            mark_status_fn=self._mark_status,
-            status_column='jiosaavn_match_status',
+            self.db, entity_type='track', entity_id=track_id, service='jiosaavn',
+            fetch=self.client.get_track_details,
+            on_match=self._refresh_track_via_stored_id,
             log_prefix='JioSaavn',
         )
         if _stored:
-            # L2-005: a stored ID the source could not confirm right now is
-            # NOT released to a fuzzy name search below — a transient provider
-            # failure is not evidence that the ID is wrong, and searching
-            # overwrote deliberately chosen matches with whatever came back.
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
             if _stored == MATCHED:
                 self.stats['matched'] += 1
             return
@@ -498,127 +402,87 @@ class JioSaavnWorker:
             logger.debug("No match for track '%s'", track_name)
 
     def _update_artist(self, artist_id: int, data) -> None:
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            artist_js_id = str(getattr(data, 'id', None) or data.get('id'))
-            cursor.execute("""
-                UPDATE artists SET
-                    jiosaavn_id = ?,
-                    jiosaavn_match_status = 'matched',
-                    jiosaavn_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (artist_js_id, artist_id))
-
-            thumb_url = getattr(data, 'image_url', None) or (data.get('image_url') if isinstance(data, dict) else None)
-            if thumb_url:
-                cursor.execute("""
-                    UPDATE artists SET thumb_url = ?
-                    WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
-                """, (thumb_url, artist_id))
-
-            conn.commit()
-
-        except Exception as e:
-            logger.error("Error updating artist #%s with JioSaavn data: %s", artist_id, e)
-            raise
-        finally:
-            if conn:
-                conn.close()
+        artist_js_id = str(getattr(data, 'id', None) or data.get('id'))
+        thumb_url = getattr(data, 'image_url', None) or (
+            data.get('image_url') if isinstance(data, dict) else None)
+        self._write('artist', artist_id, artist_js_id, image=thumb_url)
 
     def _update_album(self, album_id: int, data: Dict[str, Any]) -> None:
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            label = data.get('label')
-            album_type = data.get('album_type')
-
-            cursor.execute("""
-                UPDATE albums SET
-                    jiosaavn_id = ?,
-                    jiosaavn_match_status = 'matched',
-                    jiosaavn_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (str(data.get('id')), album_id))
-
-            if label:
-                cursor.execute("""
-                    UPDATE albums SET label = ?
-                    WHERE id = ? AND (label IS NULL OR label = '')
-                """, (label, album_id))
-
-            if album_type:
-                cursor.execute("""
-                    UPDATE albums SET record_type = ?
-                    WHERE id = ? AND (record_type IS NULL OR record_type = '')
-                """, (album_type, album_id))
-
-            thumb_url = data.get('image_url')
-            if thumb_url:
-                cursor.execute("""
-                    UPDATE albums SET thumb_url = ?
-                    WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
-                """, (thumb_url, album_id))
-
-            set_album_api_track_count(cursor, album_id, data.get('total_tracks'))
-
-            conn.commit()
-
-        except Exception as e:
-            logger.error("Error updating album #%s with JioSaavn data: %s", album_id, e)
-            raise
-        finally:
-            if conn:
-                conn.close()
+        # `album_type` has no lib2 equivalent to backfill: legacy `record_type` could
+        # be empty, while `lib2_albums.album_type` always carries a classification
+        # (the importer and MB reconcile own it, defaulting to 'album'). Keeping
+        # JioSaavn's word in the enrichment payload loses nothing and overwrites
+        # nobody.
+        self._write(
+            'album', album_id, str(data.get('id')),
+            payload={'album_type': data.get('album_type')},
+            image=data.get('image_url'),
+            label=data.get('label'),
+            total_tracks=data.get('total_tracks'),
+        )
 
     def _update_track(self, track_id: int, data: Dict[str, Any]) -> None:
+        self._write('track', track_id, str(data.get('id')))
+
+    def _write(self, entity_type: str, entity_id: int, provider_id,
+               payload: Optional[Dict[str, Any]] = None,
+               image: Optional[str] = None, label: Optional[str] = None,
+               total_tracks: Any = None) -> None:
+        """One write path for all three entity types (docs §32.3.1 stage 2).
+
+        Everything outside JioSaavn's own namespace is backfill: its artwork and
+        label are stand-ins, not authorities, and must not overwrite what a better
+        source or the user chose.
+        """
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+            from core.library2.provider_writes import write_provider_enrichment
+            from core.library2.worker_support import set_expected_track_count
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
 
-            cursor.execute("""
-                UPDATE tracks SET
-                    jiosaavn_id = ?,
-                    jiosaavn_match_status = 'matched',
-                    jiosaavn_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (str(data.get('id')), track_id))
+            backfill = {}
+            if image:
+                backfill['image_url'] = image
+            if label:
+                backfill['label'] = label
 
+            write_provider_enrichment(
+                conn, entity_type=entity_type, entity_id=entity_id,
+                service='jiosaavn',
+                payload=payload,
+                provider_id=provider_id,
+                backfill=backfill or None,
+            )
+            if entity_type == 'album':
+                set_expected_track_count(conn, entity_id, total_tracks)
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='jiosaavn', status='matched')
             conn.commit()
 
         except Exception as e:
-            logger.error("Error updating track #%s with JioSaavn data: %s", track_id, e)
+            logger.error("Error updating %s #%s with JioSaavn data: %s",
+                         entity_type, entity_id, e)
             raise
         finally:
             if conn:
                 conn.close()
 
     def _mark_status(self, entity_type: str, entity_id: int, status: str) -> None:
-        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-        table = table_map.get(entity_type)
-        if not table:
-            logger.error("Unknown entity type: %s", entity_type)
-            return
+        """Record the outcome of an attempt in the provider ledger.
 
+        Replaces the legacy `jiosaavn_match_status`/`_last_attempted` column pair.
+        Both `not_found` and `error` become due again after the retry window here —
+        see `_RETRY_STATUSES`.
+        """
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                UPDATE {table} SET
-                    jiosaavn_match_status = ?,
-                    jiosaavn_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (status, entity_id))
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='jiosaavn', status=status)
             conn.commit()
         except Exception as e:
             logger.error("Error marking %s #%s status: %s", entity_type, entity_id, e)
@@ -629,17 +493,11 @@ class JioSaavnWorker:
     def _count_pending_items(self) -> int:
         conn = None
         try:
+            from core.library2.worker_queue import pending_count
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT
-                    (SELECT COUNT(*) FROM artists WHERE jiosaavn_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM albums WHERE jiosaavn_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM tracks WHERE jiosaavn_match_status IS NULL AND id IS NOT NULL)
-                AS pending
-            """)
-            row = cursor.fetchone()
-            return row[0] if row else 0
+            return pending_count(conn, 'jiosaavn', retry_after_days=self.retry_days,
+                                 retry_statuses=self._RETRY_STATUSES)
         except Exception as e:
             logger.error("Error counting pending items: %s", e)
             return 0
@@ -650,28 +508,10 @@ class JioSaavnWorker:
     def _get_progress_breakdown(self) -> Dict[str, Dict[str, int]]:
         conn = None
         try:
+            from core.library2.worker_queue import progress_breakdown
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            progress = {}
-
-            for entity, table in (('artists', 'artists'), ('albums', 'albums'), ('tracks', 'tracks')):
-                cursor.execute(f"""
-                    SELECT
-                        COUNT(*) AS total,
-                        SUM(CASE WHEN jiosaavn_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                    FROM {table}
-                """)
-                row = cursor.fetchone()
-                if row:
-                    total, processed = row[0], row[1] or 0
-                    progress[entity] = {
-                        'matched': processed,
-                        'total': total,
-                        'percent': int((processed / total * 100) if total > 0 else 0),
-                    }
-
-            return progress
-
+            return progress_breakdown(conn, 'jiosaavn')
         except Exception as e:
             logger.error("Error getting progress breakdown: %s", e)
             return {}

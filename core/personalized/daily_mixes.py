@@ -158,8 +158,12 @@ def _seed_edges(database, seed_names: List[str], profile_id: int):
     owned, seed_source_ids, seed_id_to_name = set(), [], {}
     with database._get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT name, spotify_artist_id, itunes_artist_id, deezer_id, "
-                    "musicbrainz_id FROM artists WHERE name IS NOT NULL AND name != ''")
+        cur.execute(
+            "SELECT name, spotify_id, "
+            "json_extract(external_ids, '$.itunes'), "
+            "json_extract(external_ids, '$.deezer'), "
+            "musicbrainz_id FROM lib2_artists "
+            "WHERE name IS NOT NULL AND name != ''")
         wanted = set(seed_names)
         for row in cur.fetchall():
             nm = row[0]
@@ -198,13 +202,17 @@ def _owned_tracks_for(database, artist_names: Sequence[str]) -> Dict[str, List[d
         cur.execute(
             f"""
             SELECT t.title, t.duration, t.play_count,
-                   ar.name AS artist, al.title AS album,
-                   COALESCE(al.thumb_url, ar.thumb_url) AS cover
-            FROM tracks t
-            JOIN artists ar ON ar.id = t.artist_id
-            LEFT JOIN albums al ON al.id = t.album_id
-            WHERE t.file_path IS NOT NULL AND t.file_path != ''
-              AND LOWER(ar.name) IN ({placeholders})
+                   COALESCE(NULLIF(t.track_artist, ''), ar.name) AS artist,
+                   al.title AS album,
+                   COALESCE(al.image_url, ar.image_url) AS cover
+            FROM lib2_tracks t
+            JOIN lib2_albums al ON al.id = t.album_id
+            JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+            WHERE EXISTS (SELECT 1 FROM lib2_track_files f
+                          WHERE f.track_id = t.id
+                            AND f.path IS NOT NULL AND TRIM(f.path) != ''
+                            AND COALESCE(f.file_state, 'active') = 'active')
+              AND LOWER(COALESCE(NULLIF(t.track_artist, ''), ar.name)) IN ({placeholders})
             """,
             [_norm(a) for a in artist_names])
         from core.metadata import normalize_image_url
@@ -218,7 +226,8 @@ def _owned_tracks_for(database, artist_names: Sequence[str]) -> Dict[str, List[d
                 "artists": [{"name": r["artist"]}],
                 "album": {"name": r["album"] or "",
                           "images": [{"url": cover}] if cover else []},
-                "duration_ms": int((r["duration"] or 0) * 1000),
+                # lib2 keeps duration in MILLIseconds (legacy stored seconds).
+                "duration_ms": int(r["duration"] or 0),
                 "play_count": r.get("play_count") or 0,
                 "owned": True,
             }

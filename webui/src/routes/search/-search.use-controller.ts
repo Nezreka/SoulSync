@@ -12,6 +12,7 @@ import {
 import {
   canSelectSource,
   emptySourceResults,
+  knownDbArtists,
   fallbackFor,
   pickerSource,
   resolveInitialSource,
@@ -233,7 +234,18 @@ export function useSearchController({
               ...prev,
               sources: {
                 ...prev.sources,
-                [source]: { ...emptySourceResults(), videos },
+                [source]: {
+                  ...emptySourceResults(),
+                  // iss29-B04a: "In Your Library" is a LOCAL result — it comes
+                  // from the catalogue, not from the provider being viewed — so
+                  // it is the same for every source of the same query. The
+                  // video path builds its results from scratch and so dropped
+                  // it, and the whole section vanished for as long as the
+                  // YouTube icon stayed active. Carry over whatever a sibling
+                  // source already resolved for this query.
+                  db_artists: knownDbArtists(prev.sources),
+                  videos,
+                },
               },
             }));
           },

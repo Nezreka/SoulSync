@@ -5,15 +5,15 @@ without booting the Flask app, Spotify client, Soulseek connection, etc.
 
 Two concepts live here:
 
-  * ``SOURCE_ID_FIELD`` — the per-source column on the ``artists`` table that
-    stores the external service ID (Spotify track ID, Deezer artist ID, …).
-    This map is what ties a result clicked in the source-aware Search results
-    back to a library record so we can serve the richer library view.
+  * ``SOURCE_ID_FIELD`` — the field name each source's external service ID
+    (Spotify artist ID, Deezer artist ID, …) travels under. It names the
+    sources eligible for a library upgrade, and it is the key the source-only
+    artist payload stamps its id under so the right service badge renders.
 
   * ``find_library_artist_for_source`` — given a source-aware click (e.g.
     ``deezer:525046``), try to locate a matching library artist. First by
-    direct column match against the source's ID column, then by case-
-    insensitive name match scoped to the active media server.
+    direct match against wherever the catalogue keeps that source's id, then
+    by folded name match scoped to the active media server.
 """
 
 from __future__ import annotations
@@ -63,8 +63,12 @@ def find_library_artist_for_source(
 
     Returns ``None`` on miss or on any database error.
     """
-    column = SOURCE_ID_FIELD.get(source)
-    if not column:
+    from core.library2.provider_ids import provider_id_sql
+
+    if source not in SOURCE_ID_FIELD:
+        return None
+    id_expression = provider_id_sql(source)
+    if not id_expression:
         return None
 
     try:
@@ -72,7 +76,7 @@ def find_library_artist_for_source(
             cursor = conn.cursor()
             # LIMIT 2 so we can tell a unique match from an ambiguous one.
             cursor.execute(
-                f"SELECT id FROM artists WHERE {column} = ? LIMIT 2",
+                f"SELECT id FROM lib2_artists WHERE {id_expression} = ? LIMIT 2",
                 (str(source_artist_id),),
             )
             rows = cursor.fetchall()
@@ -89,10 +93,17 @@ def find_library_artist_for_source(
                 )
 
             if artist_name and active_server:
+                from core.library2.importer import normalize_name
+
+                # `name_key` is the stored casefold. SQLite's LOWER() only
+                # folds A-Z, so a searched "björk" never met a stored "Björk".
                 cursor.execute(
-                    "SELECT id FROM artists "
-                    "WHERE LOWER(name) = LOWER(?) AND server_source = ? LIMIT 1",
-                    (artist_name, active_server),
+                    "SELECT id FROM lib2_artists "
+                    "WHERE name_key = ? AND (server_source = ? OR EXISTS ("
+                    "SELECT 1 FROM lib2_media_server_mappings m "
+                    "WHERE m.entity_type='artist' AND m.entity_id=lib2_artists.id "
+                    "AND m.server_source=?)) LIMIT 1",
+                    (normalize_name(artist_name), active_server, active_server),
                 )
                 row = cursor.fetchone()
                 if row:

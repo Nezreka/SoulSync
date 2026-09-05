@@ -226,28 +226,25 @@ class TestGetProvenanceByFilePath:
 
 
 class TestBackfillTrackExternalIdsFromProvenance:
-    def _seed_artist_album_and_track(self, db, *, track_id, file_path):
-        """Insert a minimal artists/albums/tracks chain so backfill has
-        a row to update."""
+    def _seed_artist_album_and_track(self, db, *, file_path):
+        """A catalogue track with a file, so backfill has a row to update.
+        Returns its id."""
+        from tests.support.catalogue_seed import seed_library_track
         conn = db._get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO artists (id, name, server_source) VALUES (?, ?, 'plex')",
-            ('artist-1', 'Test Artist'),
-        )
-        cursor.execute(
-            "INSERT INTO albums (id, artist_id, title, server_source) VALUES (?, ?, ?, 'plex')",
-            ('album-1', 'artist-1', 'Test Album'),
-        )
-        cursor.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, file_path, server_source) "
-            "VALUES (?, ?, ?, ?, ?, 'plex')",
-            (track_id, 'album-1', 'artist-1', 'Test Track', file_path),
-        )
+        track_id = seed_library_track(
+            conn, artist='Test Artist', album='Test Album', title='Test Track',
+            file_path=file_path)
         conn.commit()
+        return track_id
 
-    def test_copies_all_ids_when_tracks_columns_empty(self, db):
-        self._seed_artist_album_and_track(db, track_id='t1', file_path='/lib/Track.mp3')
+    def _ids_of(self, db, track_id):
+        row = db._get_connection().execute(
+            "SELECT spotify_id, json_extract(external_ids, '$.deezer'), isrc"
+            " FROM lib2_tracks WHERE id = ?", (track_id,)).fetchone()
+        return tuple(row)
+
+    def test_copies_all_ids_when_track_has_none(self, db):
+        track_id = self._seed_artist_album_and_track(db, file_path='/lib/Track.mp3')
         db.record_track_download(
             file_path='/lib/Track.mp3',
             source_service='soulseek', source_username='u', source_filename='Track.mp3',
@@ -256,27 +253,23 @@ class TestBackfillTrackExternalIdsFromProvenance:
             isrc='USRC17607839',
         )
 
-        updated = db.backfill_track_external_ids_from_provenance('t1', '/lib/Track.mp3')
+        updated = db.backfill_track_external_ids_from_provenance(track_id, '/lib/Track.mp3')
         assert updated > 0
 
-        conn = db._get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT spotify_track_id, deezer_id, isrc FROM tracks WHERE id = ?",
-            ('t1',),
-        )
-        assert tuple(cursor.fetchone()) == ('sp1', 'dz1', 'USRC17607839')
+        assert self._ids_of(db, track_id) == ('sp1', 'dz1', 'USRC17607839')
 
     def test_preserves_existing_ids(self, db):
-        """COALESCE-update — if the enrichment worker already wrote a
-        spotify_track_id, the provenance backfill must NOT overwrite it
-        (enrichment is generally more authoritative for late binding)."""
-        self._seed_artist_album_and_track(db, track_id='t1', file_path='/lib/Track.mp3')
+        """Fill-empty only — if the enrichment worker already wrote a Spotify
+        id, the provenance backfill must NOT overwrite it (enrichment is
+        generally more authoritative for late binding). That holds for the
+        `external_ids` providers too, which merge rather than replace."""
+        track_id = self._seed_artist_album_and_track(db, file_path='/lib/Track.mp3')
 
-        # Pre-populate spotify_track_id with the enrichment-worker value
         conn = db._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("UPDATE tracks SET spotify_track_id = 'sp-from-enrichment' WHERE id = ?", ('t1',))
+        conn.execute(
+            "UPDATE lib2_tracks SET spotify_id = 'sp-from-enrichment',"
+            "       external_ids = '{\"tidal\": \"td-from-enrichment\"}' WHERE id = ?",
+            (track_id,))
         conn.commit()
 
         # Provenance has a different value
@@ -284,43 +277,24 @@ class TestBackfillTrackExternalIdsFromProvenance:
             file_path='/lib/Track.mp3',
             source_service='soulseek', source_username='u', source_filename='Track.mp3',
             spotify_track_id='sp-from-provenance',
-            deezer_track_id='dz1',  # This one IS missing on tracks, should backfill
+            tidal_track_id='td-from-provenance',
+            deezer_track_id='dz1',  # This one IS missing, should backfill
         )
 
-        db.backfill_track_external_ids_from_provenance('t1', '/lib/Track.mp3')
+        db.backfill_track_external_ids_from_provenance(track_id, '/lib/Track.mp3')
 
-        cursor.execute("SELECT spotify_track_id, deezer_id FROM tracks WHERE id = ?", ('t1',))
-        row = cursor.fetchone()
-        assert row[0] == 'sp-from-enrichment', "Existing spotify_track_id must be preserved"
-        assert row[1] == 'dz1', "Empty deezer_id should be filled from provenance"
-
-    def test_copies_retention_provenance_to_media_server_track(self, db):
-        self._seed_artist_album_and_track(db, track_id='t1', file_path='/lib/Track.mp3')
-        db.record_track_download(
-            file_path='/app/Transfer/Track.mp3',
-            source_service='soulseek', source_username='u',
-            source_filename='Track.flac',
-            acquired_quality_json='{"format":"flac","bit_depth":24}',
-            retention_json='[{"type":"lossy_copy","source_replaced":true}]',
-        )
-
-        updated = db.backfill_track_external_ids_from_provenance(
-            't1', '/lib/Track.mp3')
-
-        assert updated > 0
-        conn = db._get_connection()
-        row = conn.execute(
-            "SELECT acquired_quality_json, retention_json FROM tracks WHERE id='t1'"
-        ).fetchone()
-        assert tuple(row) == (
-            '{"format":"flac","bit_depth":24}',
-            '[{"type":"lossy_copy","source_replaced":true}]',
-        )
+        spotify, deezer, _ = self._ids_of(db, track_id)
+        assert spotify == 'sp-from-enrichment', "Existing Spotify id must be preserved"
+        assert deezer == 'dz1', "Empty Deezer id should be filled from provenance"
+        tidal = db._get_connection().execute(
+            "SELECT json_extract(external_ids, '$.tidal') FROM lib2_tracks WHERE id = ?",
+            (track_id,)).fetchone()[0]
+        assert tidal == 'td-from-enrichment', "A bucketed id is preserved just the same"
 
     def test_returns_zero_when_no_provenance(self, db):
-        self._seed_artist_album_and_track(db, track_id='t1', file_path='/lib/Track.mp3')
+        track_id = self._seed_artist_album_and_track(db, file_path='/lib/Track.mp3')
         # No record_track_download call — no provenance row exists
-        updated = db.backfill_track_external_ids_from_provenance('t1', '/lib/Track.mp3')
+        updated = db.backfill_track_external_ids_from_provenance(track_id, '/lib/Track.mp3')
         assert updated == 0
 
     def test_returns_zero_for_empty_inputs(self, db):

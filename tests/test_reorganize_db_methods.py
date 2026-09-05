@@ -88,22 +88,26 @@ class _NonClosingConn:
 
 def _seed(db, *, artists=(), albums=()):
     cur = db._conn.cursor()
-    cur.execute("CREATE TABLE artists (id TEXT PRIMARY KEY, name TEXT)")
+    cur.execute("CREATE TABLE lib2_artists (id INTEGER PRIMARY KEY, name TEXT)")
     cur.execute("""
-        CREATE TABLE albums (
-            id TEXT PRIMARY KEY,
-            artist_id TEXT,
+        CREATE TABLE lib2_albums (
+            id INTEGER PRIMARY KEY,
+            primary_artist_id INTEGER,
             title TEXT,
             year INTEGER
         )
     """)
+    cur.execute("CREATE TABLE lib2_tracks (id INTEGER PRIMARY KEY, album_id INTEGER)")
+    cur.execute("CREATE TABLE lib2_track_files (track_id INTEGER, file_state TEXT)")
     for ar in artists:
-        cur.execute("INSERT INTO artists VALUES (?, ?)", ar)
-    for al in albums:
+        cur.execute("INSERT INTO lib2_artists VALUES (?, ?)", ar)
+    for index, al in enumerate(albums, 1):
         cur.execute(
-            "INSERT INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)",
+            "INSERT INTO lib2_albums (id, primary_artist_id, title, year) VALUES (?, ?, ?, ?)",
             al,
         )
+        cur.execute("INSERT INTO lib2_tracks VALUES (?, ?)", (index, al[0]))
+        cur.execute("INSERT INTO lib2_track_files VALUES (?, 'active')", (index,))
     db._conn.commit()
 
 
@@ -117,31 +121,31 @@ def db():
 
 def test_get_album_display_meta_returns_dict_for_known_album(db):
     _seed(db,
-          artists=[('ar-1', 'Kendrick Lamar')],
-          albums=[('alb-1', 'ar-1', 'good kid, m.A.A.d city', 2012)])
-    meta = db.get_album_display_meta('alb-1')
+          artists=[(1, 'Kendrick Lamar')],
+          albums=[(1, 1, 'good kid, m.A.A.d city', 2012)])
+    meta = db.get_album_display_meta(1)
     assert meta == {
         'album_title': 'good kid, m.A.A.d city',
-        'artist_id': 'ar-1',
+        'artist_id': '1',
         'artist_name': 'Kendrick Lamar',
     }
 
 
 def test_get_album_display_meta_returns_none_for_missing_album(db):
-    _seed(db, artists=[('ar-1', 'Aerosmith')])
-    assert db.get_album_display_meta('does-not-exist') is None
+    _seed(db, artists=[(1, 'Aerosmith')])
+    assert db.get_album_display_meta(999) is None
 
 
 def test_get_album_display_meta_falls_back_for_blank_strings(db):
     """Albums with empty title or artist name in the DB still need a
     safe display value — the queue UI should never render '(blank)'."""
     _seed(db,
-          artists=[('ar-1', '')],
-          albums=[('alb-1', 'ar-1', '', 2015)])
-    meta = db.get_album_display_meta('alb-1')
+          artists=[(1, '')],
+          albums=[(1, 1, '', 2015)])
+    meta = db.get_album_display_meta(1)
     assert meta['album_title'] == 'Unknown Album'
     assert meta['artist_name'] == 'Unknown Artist'
-    assert meta['artist_id'] == 'ar-1'
+    assert meta['artist_id'] == '1'
 
 
 # ── get_artist_albums_for_reorganize ──────────────────────────────────────
@@ -149,46 +153,46 @@ def test_get_album_display_meta_falls_back_for_blank_strings(db):
 
 def test_get_artist_albums_for_reorganize_orders_by_year_then_title(db):
     _seed(db,
-          artists=[('ar-1', 'Aerosmith')],
+          artists=[(1, 'Aerosmith')],
           albums=[
-              ('alb-c', 'ar-1', 'Toys in the Attic', 1975),
-              ('alb-a', 'ar-1', 'Aerosmith', 1973),
-              ('alb-b', 'ar-1', 'Get Your Wings', 1974),
+              (3, 1, 'Toys in the Attic', 1975),
+              (1, 1, 'Aerosmith', 1973),
+              (2, 1, 'Get Your Wings', 1974),
           ])
-    rows = db.get_artist_albums_for_reorganize('ar-1')
-    assert [r['album_id'] for r in rows] == ['alb-a', 'alb-b', 'alb-c']
+    rows = db.get_artist_albums_for_reorganize(1)
+    assert [r['album_id'] for r in rows] == [1, 2, 3]
     assert all(r['artist_name'] == 'Aerosmith' for r in rows)
 
 
 def test_get_artist_albums_for_reorganize_secondary_sorts_by_title(db):
     """Same release year → tiebreak on title alphabetically."""
     _seed(db,
-          artists=[('ar-1', 'X')],
+          artists=[(1, 'X')],
           albums=[
-              ('alb-z', 'ar-1', 'Zebra', 1990),
-              ('alb-a', 'ar-1', 'Apple', 1990),
-              ('alb-m', 'ar-1', 'Mango', 1990),
+              (3, 1, 'Zebra', 1990),
+              (1, 1, 'Apple', 1990),
+              (2, 1, 'Mango', 1990),
           ])
-    rows = db.get_artist_albums_for_reorganize('ar-1')
+    rows = db.get_artist_albums_for_reorganize(1)
     assert [r['album_title'] for r in rows] == ['Apple', 'Mango', 'Zebra']
 
 
 def test_get_artist_albums_for_reorganize_returns_empty_for_unknown_artist(db):
-    _seed(db, artists=[('ar-1', 'Aerosmith')])
-    assert db.get_artist_albums_for_reorganize('not-a-real-artist') == []
+    _seed(db, artists=[(1, 'Aerosmith')])
+    assert db.get_artist_albums_for_reorganize(999) == []
 
 
 def test_get_artist_albums_for_reorganize_isolates_by_artist(db):
     """Pulling albums for artist A must NOT leak in albums from artist B."""
     _seed(db,
-          artists=[('ar-1', 'A'), ('ar-2', 'B')],
+          artists=[(1, 'A'), (2, 'B')],
           albums=[
-              ('alb-1', 'ar-1', 'A1', 2000),
-              ('alb-2', 'ar-2', 'B1', 2000),
-              ('alb-3', 'ar-1', 'A2', 2001),
+              (1, 1, 'A1', 2000),
+              (2, 2, 'B1', 2000),
+              (3, 1, 'A2', 2001),
           ])
-    rows = db.get_artist_albums_for_reorganize('ar-1')
-    assert {r['album_id'] for r in rows} == {'alb-1', 'alb-3'}
+    rows = db.get_artist_albums_for_reorganize(1)
+    assert {r['album_id'] for r in rows} == {1, 3}
 
 
 # ── error propagation ────────────────────────────────────────────────────
@@ -205,9 +209,9 @@ def test_get_album_display_meta_propagates_db_errors(db):
     # Don't seed — the schema is empty, so the SELECT will fail with
     # OperationalError ("no such table: albums").
     with pytest.raises(sqlite3.OperationalError):
-        db.get_album_display_meta('alb-1')
+        db.get_album_display_meta(1)
 
 
 def test_get_artist_albums_for_reorganize_propagates_db_errors(db):
     with pytest.raises(sqlite3.OperationalError):
-        db.get_artist_albums_for_reorganize('ar-1')
+        db.get_artist_albums_for_reorganize(1)

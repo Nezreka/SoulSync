@@ -3,7 +3,7 @@ import sqlite3
 from database.music_database import MusicDatabase
 
 
-def test_clear_server_data_does_not_fail_when_vacuum_hits_disk_io():
+def test_clear_server_data_does_not_vacuum_detached_rows():
     db = object.__new__(MusicDatabase)
 
     class _Cursor:
@@ -14,8 +14,6 @@ def test_clear_server_data_does_not_fail_when_vacuum_hits_disk_io():
 
         def execute(self, query, params=None):
             self.calls.append((query, params))
-            if query == "VACUUM":
-                raise sqlite3.OperationalError("disk I/O error")
             if "tracks" in query:
                 self.rowcount = 1500
             elif "albums" in query:
@@ -42,11 +40,14 @@ def test_clear_server_data_does_not_fail_when_vacuum_hits_disk_io():
 
     conn = _Conn()
     db._get_connection = lambda: conn
+    db._detach_server_contribution = lambda *_args, **_kwargs: {
+        'artists_removed': 20, 'albums_removed': 200, 'tracks_removed': 1500,
+    }
 
     db.clear_server_data("jellyfin")
 
     assert conn.commits == 1
-    assert any(call[0] == "VACUUM" for call in conn.cursor_obj.calls)
+    assert not any(call[0] == "VACUUM" for call in conn.cursor_obj.calls)
 
 
 def test_clear_server_data_retries_transient_disk_io_before_commit(monkeypatch):
@@ -62,7 +63,7 @@ def test_clear_server_data_retries_transient_disk_io_before_commit(monkeypatch):
 
         def execute(self, query, params=None):
             self.calls.append((query, params))
-            if self.fail_first_delete and "DELETE FROM tracks" in query:
+            if self.fail_first_delete and "UPDATE lib2_tracks" in query:
                 self.fail_first_delete = False
                 raise sqlite3.OperationalError("disk I/O error")
             self.rowcount = 1
@@ -90,6 +91,15 @@ def test_clear_server_data_retries_transient_disk_io_before_commit(monkeypatch):
         return conn
 
     db._get_connection = _connect
+    detach_calls = []
+
+    def _detach(*_args, **_kwargs):
+        detach_calls.append(1)
+        if len(detach_calls) == 1:
+            raise sqlite3.OperationalError("disk I/O error")
+        return {'artists_removed': 1, 'albums_removed': 1, 'tracks_removed': 1}
+
+    db._detach_server_contribution = _detach
     monkeypatch.setattr("database.music_database.time.sleep", lambda _seconds: None)
 
     db.clear_server_data("jellyfin")

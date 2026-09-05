@@ -14,6 +14,20 @@ from typing import Optional, Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 
+
+def _name_key(name) -> str:
+    """The catalogue's own name fold — indexed on ``lib2_artists.name_key``."""
+    from core.library2.importer import normalize_name
+
+    return normalize_name(str(name or ""))
+
+
+def _presence_key(title, artist) -> str:
+    """``title|||artist``, folded the same way the search/library check folds it."""
+    from core.wishlist.presence import presence_key
+
+    return presence_key(title, artist)
+
 # Hard ceiling on cached entity rows. TTL-only eviction has no upper bound, so
 # heavy discovery/enrichment within the TTL window let this table reach ~1.8M
 # rows / 7.6 GB (and helped bloat the main DB toward a corruption incident).
@@ -1440,7 +1454,7 @@ class MetadataCache:
             return []
 
     def get_deep_cuts(self, artist_names, source=None, popularity_cap=30, limit=20):
-        """Find low-popularity tracks from artists the user listens to."""
+        """Find low-popularity tracks by the artists the user listens to."""
         if not artist_names:
             return []
         try:
@@ -1538,7 +1552,7 @@ class MetadataCache:
                 artists = list(seen_artists.values())[:artist_limit]
 
                 # If not enough artists found (e.g. Deezer), find artists via album genres
-                # Two-step: get artist names from albums, then look up artist entities
+                # Two-step: read artist names off the album entities, then look them up
                 if len(artists) < artist_limit:
                     existing_names = {a['name'].lower() for a in artists}
                     album_params = [f'%{genre}%'] + source_params
@@ -1650,36 +1664,52 @@ class MetadataCache:
                     key=lambda x: x['count'], reverse=True
                 )[:12]
 
-                # Step 5: Check which albums are in the library
+                # Step 5: Check which albums are in the library (docs §50.4.4.16).
+                # Owned means an active physical file; catalogue provenance
+                # alone must not suppress a download on the discover page.
+                #
+                # The artist half is narrowed in SQL through the indexed
+                # `name_key`; the title is compared in Python, because lib2 has
+                # no folded title key and SQLite's `LOWER()` is ASCII-only — the
+                # old `LOWER(al.title) = ?` left every non-Latin title
+                # unmatched, so those albums were reported as not owned.
                 if albums:
-                    album_keys = [(a['name'].lower().strip(), a['artist_name'].lower().strip()) for a in albums]
-                    or_clauses = ' OR '.join(['(LOWER(al.title) = ? AND LOWER(ar.name) = ?)' for _ in album_keys])
-                    lib_params = []
-                    for k in album_keys:
-                        lib_params.extend(k)
+                    artist_keys = sorted({_name_key(a['artist_name']) for a in albums})
+                    key_ph = ','.join(['?'] * len(artist_keys))
                     cursor.execute(f"""
-                        SELECT LOWER(al.title), LOWER(ar.name) FROM albums al
-                        JOIN artists ar ON ar.id = al.artist_id
-                        WHERE {or_clauses}
-                    """, lib_params)
-                    lib_set = {(r[0].strip(), r[1].strip()) for r in cursor.fetchall()}
+                        SELECT al.title, ar.name
+                        FROM lib2_albums al
+                        JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                        WHERE ar.name_key IN ({key_ph})
+                          AND EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
+                                      ON f.track_id=t.id WHERE t.album_id=al.id
+                                      AND f.file_state='active' AND TRIM(f.path)<>'')
+                    """, artist_keys)
+                    lib_set = {_presence_key(r[0], r[1]) for r in cursor.fetchall()}
                     for album in albums:
-                        album['in_library'] = (album['name'].lower().strip(), album['artist_name'].lower().strip()) in lib_set
+                        album['in_library'] = _presence_key(
+                            album['name'], album['artist_name']) in lib_set
 
-                # Step 6: Resolve library artist IDs for navigation (batched)
+                # Step 6: Resolve library artist IDs for navigation (batched).
+                # The id stays the LEGACY one — it is handed to the artist-detail
+                # route, which resolves a bare numeric id against the legacy table
+                # by contract. A native-only artist has none and is left without a
+                # link rather than with one that opens nothing.
                 if artists:
-                    lib_name_placeholders = ','.join(['LOWER(?)'] * len(artists))
-                    lib_name_params = [a['name'] for a in artists]
+                    keys = [_name_key(a['name']) for a in artists]
+                    lib_name_placeholders = ','.join(['?'] * len(keys))
                     try:
                         cursor.execute(f"""
-                            SELECT id, LOWER(name) as lname FROM artists
-                            WHERE LOWER(name) IN ({lib_name_placeholders})
-                        """, lib_name_params)
-                        lib_id_map = {r['lname']: r['id'] for r in cursor.fetchall()}
+                            SELECT legacy_artist_id, name_key FROM lib2_artists
+                            WHERE name_key IN ({lib_name_placeholders})
+                              AND legacy_artist_id IS NOT NULL
+                        """, keys)
+                        lib_id_map = {r['name_key']: r['legacy_artist_id']
+                                      for r in cursor.fetchall()}
                     except Exception:
                         lib_id_map = {}
                     for artist in artists:
-                        artist['library_id'] = lib_id_map.get(artist['name'].lower())
+                        artist['library_id'] = lib_id_map.get(_name_key(artist['name']))
 
                 _payload = {'artists': artists, 'albums': albums, 'tracks': tracks,
                             'related_genres': related}
@@ -1838,7 +1868,7 @@ class MetadataCache:
                 logger.info(f"Deezer album genre backfill: updated {updated} albums")
 
                 # Phase 2: Propagate album genres to Deezer artist entities
-                # Match by artist_name or artist_id from albums that have genres
+                # Match by artist_name or artist_id on album entities that have genres
                 artist_updated = 0
                 cursor.execute("""
                     SELECT DISTINCT artist_name, artist_id, genres

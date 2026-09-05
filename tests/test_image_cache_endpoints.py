@@ -207,4 +207,3 @@ def test_image_cache_settings_actually_persist():
     assert int(config_manager.get('image_cache.max_cache_mb')) == 512
 
     config_manager.set('image_cache.thumbnails', False)   # leave it off again
-

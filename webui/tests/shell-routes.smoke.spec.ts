@@ -38,11 +38,9 @@ function getExpectedNavPage(pageId: ShellPageId): string {
 
 async function expectNavHighlight(page: Page, pageId: ShellPageId) {
   const navPage = getExpectedNavPage(pageId);
-  const activeNavPage = await page.evaluate(() => {
-    return document.querySelector('.nav-button.active')?.getAttribute('data-page') ?? '';
-  });
-
-  expect(activeNavPage).toBe(navPage);
+  const navButton = page.locator(`.nav-button[data-page="${navPage}"]`);
+  await expect(navButton).toHaveClass(/\bactive\b/);
+  await expect(navButton).toHaveAttribute('aria-current', 'page');
 }
 
 async function verifyIssuesRoute(page: Page) {
@@ -64,7 +62,7 @@ function expectedUrlPattern(path: string, pageId: ShellPageId): RegExp {
     return /\/import\/album$/;
   }
 
-  return new RegExp(`${path.replace('/', '\\/')}$`);
+  return new RegExp(`${path.replace('/', '\\/')}(?:\\?.*)?$`);
 }
 
 test('direct load activates all known shell routes', async ({ page, baseURL }) => {
@@ -76,6 +74,10 @@ test('direct load activates all known shell routes', async ({ page, baseURL }) =
   await selectProfile(page, baseURL);
 
   for (const route of shellRouteManifest) {
+    // Detail routes need an entity id and have dedicated deep-link tests.
+    // Their manifest base paths are routing metadata, not valid destinations.
+    if (route.pageId === 'artist-detail' || route.pageId === 'label-detail') continue;
+
     const routePage = await page.context().newPage();
     try {
       await routePage.goto(new URL(route.path, baseURL).toString(), {
@@ -186,9 +188,7 @@ for (const viewport of invariantViewports) {
           .soft(overflow.scrollWidth, `${route.path} overflows horizontally at ${viewport.name}`)
           .toBeLessThanOrEqual(overflow.clientWidth + 1);
 
-        expect
-          .soft(problems.pageErrors, `${route.path} threw at ${viewport.name}`)
-          .toEqual([]);
+        expect.soft(problems.pageErrors, `${route.path} threw at ${viewport.name}`).toEqual([]);
         expect
           .soft(problems.consoleErrors, `${route.path} logged errors at ${viewport.name}`)
           .toEqual([]);
@@ -236,7 +236,7 @@ test('browser history restores shell routes', async ({ page, baseURL }) => {
   await expect(page).toHaveURL(/\/issues(?:\?status=open&category=all)?$/);
 });
 
-test('browser history leaves artist detail when going back to library', async ({
+test('browser history leaves the Library v2 artist view when going back to its index', async ({
   page,
   baseURL,
 }) => {
@@ -249,11 +249,18 @@ test('browser history leaves artist detail when going back to library', async ({
 
   await page.goto(new URL('/library', baseURL).toString(), { waitUntil: 'domcontentloaded' });
   await waitForShellRoute(page, 'library');
-  await expect.poll(async () => page.locator('.library-artist-card').count()).toBeGreaterThan(0);
+  const artistsResponse = await page.request.get(
+    new URL('/api/library/v2/artists?page=1&sort=name&monitored=all', baseURL).toString(),
+  );
+  expect(artistsResponse.ok()).toBe(true);
+  const artist = (await artistsResponse.json()).artists?.[0];
+  test.skip(!artist, 'library has no artists to navigate into');
+  const firstArtist = page.getByRole('button', { name: /^Open / }).first();
+  await expect(firstArtist).toBeVisible();
 
-  await page.locator('.library-artist-card').first().click();
-  await waitForShellRoute(page, 'artist-detail');
-  await expect(page).toHaveURL(/\/artist-detail\/library\/[^/]+$/);
+  await firstArtist.click();
+  await waitForShellRoute(page, 'library');
+  await expect(page).toHaveURL(/\/library\?.*artist=/);
 
   await page.goBack();
   await waitForShellRoute(page, 'library');

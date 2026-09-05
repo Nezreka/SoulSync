@@ -119,18 +119,28 @@ describe('the vanilla side of the progress seam', () => {
   });
 
   it('does not keep the wishlist notification pinned on a stale processing flag', () => {
-    expect(read('downloads.js')).toContain('const hasActiveBatchSignal = data.active_batches != null');
-    expect(read('downloads.js')).toContain('const active = !!data.is_auto_processing && (!hasActiveBatchSignal || activeBatches > 0)');
+    expect(read('downloads.js')).toContain(
+      'const hasActiveBatchSignal = data.active_batches != null',
+    );
+    expect(read('downloads.js')).toContain(
+      'const active = !!data.is_auto_processing && (!hasActiveBatchSignal || activeBatches > 0)',
+    );
   });
 
   it('clears map-style notification tasks when the backend reports no active jobs', () => {
-    expect(read('downloads.js')).toContain('for (const aid of Object.keys(_musicAutomationTasks)) delete _musicAutomationTasks[aid]');
-    expect(read('downloads.js')).toContain('for (const jobId of Object.keys(_musicRepairTasks)) delete _musicRepairTasks[jobId]');
+    expect(read('downloads.js')).toContain(
+      'for (const aid of Object.keys(_musicAutomationTasks)) delete _musicAutomationTasks[aid]',
+    );
+    expect(read('downloads.js')).toContain(
+      'for (const jobId of Object.keys(_musicRepairTasks)) delete _musicRepairTasks[jobId]',
+    );
   });
 
   it('clamps notification percentages before rendering them', () => {
     expect(read('downloads.js')).toContain('function _taskClampPct(value, fallback = 0)');
-    expect(read('downloads.js')).toContain('const safePct = _taskHasPct(pct) ? _taskClampPct(pct) : 0');
+    expect(read('downloads.js')).toContain(
+      'const safePct = _taskHasPct(pct) ? _taskClampPct(pct) : 0',
+    );
   });
 
   it('renders an indeterminate notification bar when real progress is unavailable', () => {

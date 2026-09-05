@@ -83,10 +83,10 @@ class _ForwardingService:
                                              error_message, profile_id=profile_id)
 
 
-def _wishlisted_track(db, sp_id="trk1"):
+def _wishlisted_track(db, sp_id="trk1", album_id="a1"):
     payload = {
         'id': sp_id, 'name': 'Elusive Song', 'artists': [{'name': 'Ghost Artist'}],
-        'album': {'id': 'a1', 'name': 'Elusive Song', 'artists': [{'name': 'Ghost Artist'}],
+        'album': {'id': album_id, 'name': 'Elusive Song', 'artists': [{'name': 'Ghost Artist'}],
                   'images': [], 'album_type': 'single', 'release_date': '2020-01-01',
                   'total_tracks': 1},
         'duration_ms': 1000, 'track_number': 1, 'disc_number': 1,
@@ -109,6 +109,30 @@ def test_record_failed_attempt_accumulates(tmp_path):
     assert row['retry_count'] == 2
     assert row['last_attempted']                       # stamped
     assert row['failure_reason'] == 'Still not found'
+
+
+def test_retry_update_scopes_composite_keys_and_supports_bare_legacy_callers(tmp_path):
+    from database.music_database import MusicDatabase
+
+    db = MusicDatabase(database_path=str(tmp_path / 'm.db'))
+    _wishlisted_track(db, album_id="a1")
+    _wishlisted_track(db, album_id="a2")
+
+    assert db.update_wishlist_retry("trk1::a1", False, "first", profile_id=1)
+    rows = {
+        row["spotify_track_id"]: row
+        for row in db.get_wishlist_tracks()
+    }
+    assert rows["trk1::a1"]["retry_count"] == 1
+    assert rows["trk1::a2"]["retry_count"] == 0
+
+    assert db.update_wishlist_retry("trk1", False, "both", profile_id=1)
+    rows = {
+        row["spotify_track_id"]: row
+        for row in db.get_wishlist_tracks()
+    }
+    assert rows["trk1::a1"]["retry_count"] == 2
+    assert rows["trk1::a2"]["retry_count"] == 1
 
 
 def test_record_failed_attempt_guards(tmp_path):
@@ -232,13 +256,19 @@ def test_manual_run_clears_the_retry_clock_on_failing_tracks(tmp_path):
         record_failed_attempt(svc, {'id': 'trk1'}, 'No matching track found', 1)
     record_failed_attempt(svc, {'id': 'trk2'}, 'No matching track found', 1)
 
-    rows = {r['spotify_track_id']: r for r in db.get_wishlist_tracks()}
+    # A wishlist row's id is per-ALBUM on this branch (`<track>::<album>`), so
+    # index by the SOURCE track id the caller actually holds.
+    def _by_source_id(database):
+        return {str(r['spotify_track_id']).split('::')[0]: r
+                for r in database.get_wishlist_tracks()}
+
+    rows = _by_source_id(db)
     assert rows['trk1']['retry_count'] == 4          # 7-day cooldown earned
     assert cooldown_seconds(rows['trk1']['retry_count']) == 7 * 24 * 3600
 
     cleared = db.reset_wishlist_retry_backoff(['trk1', 'trk2'])
     assert cleared == 2
-    rows = {r['spotify_track_id']: r for r in db.get_wishlist_tracks()}
+    rows = _by_source_id(db)
     assert rows['trk1']['retry_count'] == 0
     assert rows['trk1']['last_attempted'] is None
     # ...and the track is due again on the very next scheduled cycle

@@ -84,8 +84,15 @@ def test_real_file_moves_into_staging(tmp_path):
 
 
 # ── handler integration: _fix_acoustid_mismatch relocate end-to-end ─────────
-def test_relocate_handler_moves_file_and_drops_row(tmp_path):
+def test_relocate_handler_moves_the_file_out_of_the_wrong_album(tmp_path):
+    """The subject is ``lib2:1`` because that is the only kind
+    ``acoustid_scanner`` emits. Written against a legacy ``'t1'`` this drove a
+    branch no scan could reach, and asserted a legacy row drop that the native
+    path deliberately does not do: the file leaving is the fact, and the
+    maintenance bridge recomputes what the track is owed from
+    ``library_v2_file_deleted``."""
     from database.music_database import MusicDatabase
+    from core.library2.schema import ensure_library_v2_schema
     from core.repair_worker import RepairWorker
 
     db = MusicDatabase(str(tmp_path / 'm.db'))
@@ -96,10 +103,12 @@ def test_relocate_handler_moves_file_and_drops_row(tmp_path):
     staging = tmp_path / 'Staging'; staging.mkdir()
 
     with db._get_connection() as conn:
-        conn.execute("INSERT OR REPLACE INTO artists (id, name, server_source) VALUES ('a1','Wrong Artist','plex')")
-        conn.execute("INSERT OR REPLACE INTO albums (id, title, artist_id) VALUES (10,'Wrong Album','a1')")
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, file_path, server_source) "
-                     "VALUES ('t1',10,'a1','Wrong Title',3,100,?, 'plex')", (str(wrong),))
+        ensure_library_v2_schema(conn)
+        conn.execute("INSERT INTO lib2_artists(id, name, sort_name) VALUES(1,'Wrong Artist','Wrong Artist')")
+        conn.execute("INSERT INTO lib2_albums(id, primary_artist_id, title) VALUES(10,1,'Wrong Album')")
+        conn.execute("INSERT INTO lib2_tracks(id, album_id, title, track_number) VALUES(1,10,'Wrong Title',3)")
+        conn.execute("INSERT INTO lib2_track_files(track_id, path, format, is_primary) VALUES(1,?, 'mp3', 1)",
+                     (str(wrong),))
         conn.commit()
 
     worker = RepairWorker(db)
@@ -107,11 +116,10 @@ def test_relocate_handler_moves_file_and_drops_row(tmp_path):
         'get': staticmethod(lambda k, d=None: str(staging) if k == 'import.staging_path' else d)})()
 
     res = worker._fix_acoustid_mismatch(
-        'track', 't1', str(wrong),
+        'track', 'lib2:1', str(wrong),
         {'_fix_action': 'relocate', 'acoustid_title': 'Real Song', 'acoustid_artist': 'Real Artist'})
 
     assert res['success'] is True and res['action'] == 'relocated'
+    assert res['library_v2_file_deleted'] is True
     assert not wrong.exists()                           # gone from the wrong album folder
     assert (staging / '03 - wrong.mp3').exists()        # now staged for re-import
-    with db._get_connection() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM tracks WHERE id='t1'").fetchone()[0] == 0  # stale row dropped

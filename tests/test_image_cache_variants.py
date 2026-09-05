@@ -229,4 +229,3 @@ def test_the_fetch_timeout_is_configurable_and_short_by_default(tmp_path):
     cache.get_url(URL)
 
     assert seen["timeout"] == 2.5, "the configured timeout never reached the request"
-

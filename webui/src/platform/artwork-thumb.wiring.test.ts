@@ -18,8 +18,7 @@ import { describe, expect, it } from 'vitest';
 const SURFACES: Array<[string, string]> = [
   ['discover album shelves', 'src/routes/discover/-ui/album-shelves.tsx'],
   ['dashboard content rails', 'src/routes/dashboard/-ui/content-rails.tsx'],
-  ['library artist grid', 'src/routes/library/-ui/library-artist-card.tsx'],
-  ['artist-detail album grid', 'src/routes/artist-detail/-ui/enhanced-view.tsx'],
+  ['library artist + album grids', 'src/routes/library/-ui/library-v2-page.tsx'],
 ];
 
 describe('the named surfaces request a sized image', () => {

@@ -72,4 +72,15 @@ describe('label-detail route', () => {
     renderRoute(['/label-detail/mbid-x?name=1200']);
     await screen.findByText('1200');
   });
+
+  it('does not display a structured search param as [object Object]', async () => {
+    // TanStack JSON-parses search params, so an object literal in ?name=
+    // arrives as an OBJECT. String()-ing it would paint "[object Object]" as
+    // the label name; the schema drops it instead and the catalog resolves the
+    // name, exactly as it does when ?name= is absent.
+    renderRoute(['/label-detail/mbid-x?name=%7B%22unexpected%22%3Atrue%7D']);
+
+    await screen.findByText('mbid-x');
+    expect(screen.queryByText('[object Object]')).not.toBeInTheDocument();
+  });
 });

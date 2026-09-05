@@ -119,43 +119,43 @@ def _setup_album(db, *, album_id='alb-1', spotify_id='', deezer_id='',
     `tracks` is a list of `(track_id, track_number, title, file_path)`.
     """
     cur = db._conn.cursor()
-    cur.execute("CREATE TABLE artists (id TEXT PRIMARY KEY, name TEXT)")
+    cur.execute("CREATE TABLE lib2_artists (id TEXT PRIMARY KEY, name TEXT)")
     cur.execute("""
-        CREATE TABLE albums (
+        CREATE TABLE lib2_albums (
             id TEXT PRIMARY KEY,
-            artist_id TEXT,
+            primary_artist_id TEXT,
             title TEXT,
-            spotify_album_id TEXT,
-            deezer_id TEXT,
-            itunes_album_id TEXT,
-            discogs_id TEXT,
+            spotify_id TEXT,
+            musicbrainz_id TEXT,
+            external_ids TEXT,
             soul_id TEXT
         )
     """)
     cur.execute("""
-        CREATE TABLE tracks (
+        CREATE TABLE lib2_tracks (
             id TEXT PRIMARY KEY,
             album_id TEXT,
-            artist_id TEXT,
             title TEXT,
             track_number INTEGER,
-            file_path TEXT,
+            disc_number INTEGER,
             updated_at TEXT
         )
     """)
-    cur.execute("INSERT INTO artists VALUES (?, ?)", ('artist-1', 'Aerosmith'))
+    cur.execute("CREATE TABLE lib2_track_files (id INTEGER PRIMARY KEY, track_id TEXT, path TEXT, file_state TEXT, is_primary INTEGER)")
+    cur.execute("INSERT INTO lib2_artists VALUES (?, ?)", ('artist-1', 'Aerosmith'))
     cur.execute(
-        "INSERT INTO albums (id, artist_id, title, spotify_album_id, deezer_id, "
-        "itunes_album_id, discogs_id, soul_id) VALUES (?,?,?,?,?,?,?,?)",
+        "INSERT INTO lib2_albums (id, primary_artist_id, title, spotify_id, external_ids, soul_id) "
+        "VALUES (?,?,?,?,json_object('deezer',?,'itunes',?,'discogs',?),?)",
         (album_id, 'artist-1', 'Aerosmith (1973)', spotify_id, deezer_id,
          itunes_id, discogs_id, soul_id),
     )
-    for tid, tn, title, fp in tracks:
+    for index, (tid, tn, title, fp) in enumerate(tracks, 1):
         cur.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path) "
-            "VALUES (?,?,?,?,?,?)",
-            (tid, album_id, 'artist-1', title, tn, fp),
+            "INSERT INTO lib2_tracks (id, album_id, title, track_number, disc_number) "
+            "VALUES (?,?,?,?,1)", (tid, album_id, title, tn),
         )
+        cur.execute("INSERT INTO lib2_track_files VALUES (?,?,?,'active',1)",
+                    (index, tid, fp))
     db._conn.commit()
 
 
@@ -927,6 +927,57 @@ def test_successful_run_removes_original_and_updates_db(monkeypatch, tmpdirs):
     assert db_updates == [('t1', str(final_dir / 't1.flac'))]
 
 
+def test_same_file_with_absolute_source_and_relative_destination_is_never_deleted(
+        monkeypatch, tmp_path):
+    """Production regression: resolver output and template output can alias.
+
+    The resolver returned ``/app/Transfer/...`` while the configured template
+    returned ``./Transfer/...``.  They named the same file, but the old
+    normpath-only check treated them as different and unlinked the file after
+    updating the DB.
+    """
+    monkeypatch.chdir(tmp_path)
+    library = tmp_path / 'Transfer'
+    staging = tmp_path / 'staging'
+    library.mkdir()
+    staging.mkdir()
+    src = _make_audio_file(library, '02 - The Reluctant Heroes.flac')
+
+    db = _FakeDB()
+    _setup_album(db, deezer_id='dz-1', tracks=[
+        ('t1', 2, 'The Reluctant Heroes', 'server/synthesized/01-02.flac'),
+    ])
+    monkeypatch.setattr(library_reorganize, 'get_primary_source', lambda: 'deezer')
+    monkeypatch.setattr(library_reorganize, 'get_source_priority', lambda p: [p])
+    monkeypatch.setattr(library_reorganize, 'get_album_for_source',
+                        lambda *a: {'id': 'dz-1', 'name': 'A'})
+    monkeypatch.setattr(
+        library_reorganize, 'get_album_tracks_for_source',
+        lambda *a: {'items': [{
+            'id': 'a2', 'name': 'The Reluctant Heroes', 'track_number': 2,
+        }]},
+    )
+
+    relative_final = os.path.join('.', 'Transfer', os.path.basename(src))
+
+    def pp(_key, ctx, _staged_file):
+        # The real pipeline sees the destination already exists, keeps it, and
+        # returns the path builder's relative spelling.
+        ctx['_final_processed_path'] = relative_final
+
+    updates = []
+    summary = library_reorganize.reorganize_album(
+        album_id='alb-1', db=db, staging_root=str(staging),
+        resolve_file_path_fn=lambda _p: os.path.abspath(src),
+        post_process_fn=pp,
+        update_track_path_fn=lambda track_id, path: updates.append((track_id, path)),
+    )
+
+    assert summary['moved'] == 1
+    assert os.path.isfile(src), 'same physical file must never be unlinked'
+    assert updates == [('t1', relative_final)]
+
+
 # --- tests: cleanup -------------------------------------------------------
 
 def test_staging_dir_cleaned_up_on_success(monkeypatch, tmpdirs):
@@ -1241,6 +1292,40 @@ def test_preview_uses_album_mode_not_single_mode(monkeypatch, tmpdirs):
     assert not any(p.endswith('/Sherane.flac') for p in paths)
 
 
+def test_preview_marks_absolute_and_relative_alias_as_unchanged(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    transfer = tmp_path / 'Transfer'
+    transfer.mkdir()
+    current = transfer / '02 - The Reluctant Heroes.flac'
+    current.write_bytes(b'audio')
+
+    db = _FakeDB()
+    _setup_album(db, deezer_id='dz-1', tracks=[
+        ('t1', 2, 'The Reluctant Heroes', 'server/synthesized/01-02.flac'),
+    ])
+    monkeypatch.setattr(library_reorganize, 'get_primary_source', lambda: 'deezer')
+    monkeypatch.setattr(library_reorganize, 'get_source_priority', lambda p: [p])
+    monkeypatch.setattr(library_reorganize, 'get_album_for_source',
+                        lambda *a: {'id': 'dz-1', 'name': 'A'})
+    monkeypatch.setattr(
+        library_reorganize, 'get_album_tracks_for_source',
+        lambda *a: {'items': [{
+            'id': 'a2', 'name': 'The Reluctant Heroes', 'track_number': 2,
+        }]},
+    )
+
+    result = library_reorganize.preview_album_reorganize(
+        album_id='alb-1', db=db, transfer_dir='./Transfer',
+        resolve_file_path_fn=lambda _p: str(current),
+        build_final_path_fn=lambda *_a, **_kw: (
+            './Transfer/02 - The Reluctant Heroes.flac', True,
+        ),
+    )
+
+    assert result['success'] is True
+    assert result['tracks'][0]['unchanged'] is True
+
+
 def test_preview_emits_disc_subfolders_for_multi_disc_albums(monkeypatch, tmpdirs):
     """The bug winecountrygames hit: preview showed all tracks at the
     album root with no Disc N/ subfolders, even on a deluxe edition.
@@ -1434,6 +1519,15 @@ def test_reorganize_context_disables_folder_reuse():
         'Aerosmith', 'Rocks', 1,
     )
     assert context['_no_album_folder_reuse'] is True
+
+
+def test_reorganize_context_defers_catalogue_registration_to_runner():
+    context = library_reorganize._build_post_process_context(
+        {'id': 'dz-1', 'name': 'Rocks'},
+        {'id': 'a1', 'name': 'Back in the Saddle', 'track_number': 1},
+        'Aerosmith', 'Rocks', 1,
+    )
+    assert context['_library_reorganize'] is True
 
 
 def test_reorganize_context_is_a_local_import():
@@ -1643,16 +1737,16 @@ def test_returns_no_album_when_id_does_not_exist(tmpdirs):
     _library, staging, _transfer = tmpdirs
     db = _FakeDB()
     cur = db._conn.cursor()
-    cur.execute("CREATE TABLE artists (id TEXT, name TEXT)")
+    cur.execute("CREATE TABLE lib2_artists (id TEXT, name TEXT)")
     cur.execute(
-        "CREATE TABLE albums (id TEXT, artist_id TEXT, title TEXT, "
-        "spotify_album_id TEXT, deezer_id TEXT, itunes_album_id TEXT, "
-        "discogs_id TEXT, soul_id TEXT)"
+        "CREATE TABLE lib2_albums (id TEXT, primary_artist_id TEXT, title TEXT, "
+        "spotify_id TEXT, musicbrainz_id TEXT, external_ids TEXT, soul_id TEXT)"
     )
     cur.execute(
-        "CREATE TABLE tracks (id TEXT, album_id TEXT, artist_id TEXT, "
-        "title TEXT, track_number INTEGER, file_path TEXT, updated_at TEXT)"
+        "CREATE TABLE lib2_tracks (id TEXT, album_id TEXT, title TEXT, "
+        "track_number INTEGER, disc_number INTEGER, updated_at TEXT)"
     )
+    cur.execute("CREATE TABLE lib2_track_files (id INTEGER, track_id TEXT, path TEXT, file_state TEXT, is_primary INTEGER)")
     db._conn.commit()
 
     summary = library_reorganize.reorganize_album(

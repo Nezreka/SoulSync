@@ -53,9 +53,7 @@ describe('AdlDeletedRow', () => {
   it('shows name, destination, source and size, with both verbs wired', () => {
     const onRestore = vi.fn();
     const onPurge = vi.fn();
-    const { container } = render(
-      <AdlDeletedRow entry={ENTRY} handlers={{ onRestore, onPurge }} />,
-    );
+    const { container } = render(<AdlDeletedRow entry={ENTRY} handlers={{ onRestore, onPurge }} />);
     expect(container.textContent).toContain('01 - Song.flac');
     expect(container.textContent).toContain('/music/Artist/Album/01 - Song.flac');
     expect(container.textContent).toContain('Duplicate cleaner');
@@ -188,10 +186,7 @@ describe('the deleted-file actions', () => {
         }),
       ),
     );
-    await restoreAllDeleted(
-      [ENTRY, { ...ENTRY, id: 'deleted:b.mp3' }],
-      vi.fn(),
-    );
+    await restoreAllDeleted([ENTRY, { ...ENTRY, id: 'deleted:b.mp3' }], vi.fn());
     expect(toasts[0]).toContain('Restored 1, 1 failed');
     expect(toasts[0]).toContain('already exists');
   });

@@ -1,4 +1,5 @@
 from database.music_database import MusicDatabase
+from tests.support.catalogue_seed import seed_artist
 
 
 def _names(artists):
@@ -45,19 +46,28 @@ def test_top_similar_artists_can_exclude_active_server_library_artists(tmp_path)
     )
 
     with db._get_connection() as conn:
-        conn.executemany(
-            """
-            INSERT INTO artists (name, server_source, spotify_artist_id, deezer_id, musicbrainz_id)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            [
-                ("Library Alias", "navidrome", "sp-owned", None, None),
-                ("Library Deezer Alias", "navidrome", None, "dz-owned", None),
-                ("Library MusicBrainz Alias", "navidrome", None, None, "mb-owned"),
-                ("owned by name", "navidrome", None, None, None),
-                ("Different Server Artist", "plex", "sp-other-server", None, None),
-            ],
-        )
+        library = [
+            ("Library Alias", "navidrome", "sp-owned", None, None),
+            ("Library Deezer Alias", "navidrome", None, "dz-owned", None),
+            ("Library MusicBrainz Alias", "navidrome", None, None, "mb-owned"),
+            ("owned by name", "navidrome", None, None, None),
+            ("Different Server Artist", "plex", "sp-other-server", None, None),
+        ]
+        for index, (name, server, spotify, deezer, mbid) in enumerate(library):
+            artist_id = seed_artist(conn, server_id=f"lib-{index}", name=name,
+                                    server_source=server)
+            conn.execute(
+                "UPDATE lib2_artists SET spotify_id=?, musicbrainz_id=?,"
+                "       external_ids=CASE WHEN ? IS NULL THEN external_ids"
+                "                         ELSE json_set(external_ids,'$.deezer',?) END"
+                " WHERE id=?",
+                (spotify, mbid, deezer, deezer, artist_id))
+            if name == "Different Server Artist":
+                conn.execute(
+                    "INSERT INTO lib2_media_server_mappings "
+                    "(entity_type,entity_id,server_source,server_id) "
+                    "VALUES('artist',?,'navidrome','nav-mapped')", (artist_id,),
+                )
         conn.commit()
 
     artists = db.get_top_similar_artists(
@@ -66,7 +76,7 @@ def test_top_similar_artists_can_exclude_active_server_library_artists(tmp_path)
         exclude_library_server="navidrome",
     )
 
-    assert _names(artists) == {"Different Server Artist", "Fresh Artist"}
+    assert _names(artists) == {"Fresh Artist"}
 
 
 def test_top_similar_artists_can_require_musicbrainz_source(tmp_path):
@@ -102,10 +112,11 @@ def test_top_similar_artists_keeps_existing_behavior_without_library_filter(tmp_
     with db._get_connection() as conn:
         conn.execute(
             """
-            INSERT INTO artists (name, server_source, spotify_artist_id)
-            VALUES (?, ?, ?)
+            INSERT INTO lib2_artists (name, name_key, spotify_id,
+                                      server_source, server_id)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            ("Owned Artist", "navidrome", "sp-owned"),
+            ("Owned Artist", "owned artist", "sp-owned", "navidrome", "na-1"),
         )
         conn.commit()
 

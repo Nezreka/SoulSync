@@ -234,6 +234,7 @@ def _build_payloads_for_kinds(
         tracks_json = [_track_to_sync_shape(t) for t in tracks]
         payloads.append({
             'name': record.name,
+            'profile_id': profile_id,
             'kind': record.kind,
             'variant': record.variant,
             'tracks_json': tracks_json,

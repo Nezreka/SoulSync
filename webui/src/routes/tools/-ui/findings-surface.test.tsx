@@ -891,6 +891,110 @@ describe('per-finding actions', () => {
     expect(onStatusChanged).toHaveBeenCalled();
   });
 
+  it('offers a corrupt file with no track behind it a delete, not a re-download', async () => {
+    // The corruption detector walks the library folders as well as the
+    // catalogue. Those rows carry `entity_type: 'file'` and no id, had no
+    // per-row button at all, and the group button said "Re-download" over a
+    // fix that could only answer "No track ID associated with this finding".
+    routes({
+      [FINDINGS]: page([
+        finding({
+          id: 4,
+          job_id: 'audio_corruption_detector',
+          finding_type: 'corrupt_audio',
+          severity: 'error',
+          title: 'Corrupt file: Unknown - 01 - Miss YOU!',
+          entity_type: 'file',
+          entity_id: null,
+        }),
+      ]),
+      '/api/repair/findings/4/fix': { success: true, message: 'Deleted the corrupt file.' },
+    });
+    await renderList();
+    await flush();
+
+    const button = document.querySelector('.repair-finding-btn.fix') as HTMLElement;
+    expect(button?.textContent).toBe('Delete File');
+
+    fireEvent.click(button);
+    await flush();
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(String(confirmSpy.mock.calls[0]?.[0]?.message)).not.toContain('re-download');
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith('/4/fix'))).toBe(true);
+  });
+
+  it('does not delete the file when that confirm is declined', async () => {
+    confirmSpy.mockResolvedValue(false);
+    routes({
+      [FINDINGS]: page([
+        finding({ id: 4, finding_type: 'corrupt_audio', entity_type: 'file', entity_id: null }),
+      ]),
+    });
+    await renderList();
+    await flush();
+
+    fireEvent.click(document.querySelector('.repair-finding-btn.fix') as HTMLElement);
+    await flush();
+
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith('/fix'))).toBe(false);
+  });
+
+  it('lets a re-tag with a hand-set field be settled per row', async () => {
+    // lib2 keeps a per-field override layer, and a re-tag respects it. That is
+    // the right default and the wrong thing to make silent: someone who fixed
+    // a title months ago and has since fixed the catalogue needs a way to say
+    // "the catalogue wins now".
+    routes({
+      [FINDINGS]: page([
+        finding({
+          id: 6,
+          job_id: 'library_retag',
+          finding_type: 'library_retag',
+          title: 'Tags out of date: Drake - One Dance',
+          entity_type: 'track',
+          entity_id: 'lib2:6',
+          details: { has_manual_conflict: true, manual_fields: ['Title'] },
+        }),
+      ]),
+      '/api/repair/findings/6/fix': { success: true, message: 'Wrote tags' },
+    });
+    await renderList();
+    await flush();
+
+    fireEvent.click(document.querySelector('.repair-finding-btn.fix') as HTMLElement);
+    await flush();
+    clickPrompt('_retag-overwrite');
+    await flush();
+
+    expect(bodyOf('/6/fix')).toEqual({ fix_action: 'overwrite_manual' });
+  });
+
+  it('does not stop to ask when nothing on the row was hand-set', async () => {
+    routes({
+      [FINDINGS]: page([
+        finding({
+          id: 7,
+          job_id: 'library_retag',
+          finding_type: 'library_retag',
+          entity_type: 'track',
+          entity_id: 'lib2:7',
+          details: { has_manual_conflict: false },
+        }),
+      ]),
+      '/api/repair/findings/7/fix': { success: true, message: 'Wrote tags' },
+    });
+    await renderList();
+    await flush();
+
+    fireEvent.click(document.querySelector('.repair-finding-btn.fix') as HTMLElement);
+    await flush();
+
+    // No fix_action at all: keeping hand-set fields is what the handler does
+    // with none, so sending 'safe' would add a string nothing reads.
+    expect(bodyOf('/7/fix')).toEqual({});
+  });
+
   it('sends nothing when the prompt is cancelled', async () => {
     routes({ [FINDINGS]: page([finding({ id: 1 })]) });
     await renderList();

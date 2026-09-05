@@ -2,156 +2,53 @@
 
 Phase 0a extracted the radio SELECTION logic into core.radio.selection but the
 DB method still owns the SQL. These tests drive the REAL get_radio_tracks
-against an in-memory sqlite to prove the refactor preserved behavior — the
-4-tier fallback (same-artist cap → genre → mood/style → random), dedup, and
+against a real catalogue database to prove the refactor preserved behavior —
+the 4-tier fallback (same-artist cap → genre → mood/style → random), dedup, and
 exclude handling all still work through the extracted helpers.
 
-Reuses the in-memory MusicDatabase harness pattern from
-tests/test_reorganize_db_methods.py.
+Rows are seeded the way the media-server scan leaves them (see
+tests/support/catalogue_seed.py); the helpers hand back the catalogue id, which
+is what the assertions compare against.
 """
-
-import sqlite3
-import sys
-import types
 
 import pytest
 
-
-# ── stubs (same shape used elsewhere in the suite) ────────────────────────
-if "spotipy" not in sys.modules:
-    spotipy = types.ModuleType("spotipy")
-    spotipy.Spotify = object
-    oauth2 = types.ModuleType("spotipy.oauth2")
-    oauth2.SpotifyOAuth = object
-    oauth2.SpotifyClientCredentials = object
-    spotipy.oauth2 = oauth2
-    sys.modules["spotipy"] = spotipy
-    sys.modules["spotipy.oauth2"] = oauth2
-
-if "core.settings" not in sys.modules:
-    config_pkg = types.ModuleType("config")
-    settings_mod = types.ModuleType("core.settings")
-
-    class _DummyConfigManager:
-        def get(self, key, default=None):
-            return default
-
-        def get_active_media_server(self):
-            return "primary"
-
-    settings_mod.config_manager = _DummyConfigManager()
-    config_pkg.settings = settings_mod
-    sys.modules["config"] = config_pkg
-    sys.modules["core.settings"] = settings_mod
+from database.music_database import MusicDatabase
+from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
 
 
-from database.music_database import MusicDatabase  # noqa: E402
-
-
-class _InMemoryDB(MusicDatabase):
-    def __init__(self):
-        self._conn = sqlite3.connect(":memory:")
-        self._conn.row_factory = sqlite3.Row
-
-    def _get_connection(self):
-        return _NonClosingConn(self._conn)
-
-
-class _NonClosingConn:
-    def __init__(self, real):
-        self._real = real
-
-    def cursor(self):
-        return self._real.cursor()
-
-    def commit(self):
-        return self._real.commit()
-
-    def close(self):
-        pass
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        pass
-
-
-def _schema(db):
-    cur = db._conn.cursor()
-    cur.execute("""
-        CREATE TABLE artists (
-            id TEXT PRIMARY KEY, name TEXT,
-            genres TEXT, mood TEXT, style TEXT, thumb_url TEXT
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE albums (
-            id TEXT PRIMARY KEY, artist_id TEXT, title TEXT,
-            genres TEXT, mood TEXT, style TEXT, thumb_url TEXT
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE tracks (
-            id TEXT PRIMARY KEY, album_id TEXT, artist_id TEXT,
-            title TEXT, track_number INTEGER, duration INTEGER,
-            file_path TEXT, bitrate INTEGER,
-            play_count INTEGER DEFAULT 0, lastfm_playcount INTEGER
-        )
-    """)
-    db._conn.commit()
-
-
-def _schema_no_rank_cols(db):
-    """Schema WITHOUT play_count / lastfm_playcount — proves radio still works
-    on a DB that predates the smart-ranking migration (defensive column probe)."""
-    cur = db._conn.cursor()
-    cur.execute("CREATE TABLE artists (id TEXT PRIMARY KEY, name TEXT, genres TEXT, mood TEXT, style TEXT, thumb_url TEXT)")
-    cur.execute("CREATE TABLE albums (id TEXT PRIMARY KEY, artist_id TEXT, title TEXT, genres TEXT, mood TEXT, style TEXT, thumb_url TEXT)")
-    cur.execute("""
-        CREATE TABLE tracks (
-            id TEXT PRIMARY KEY, album_id TEXT, artist_id TEXT,
-            title TEXT, track_number INTEGER, duration INTEGER,
-            file_path TEXT, bitrate INTEGER
-        )
-    """)
-    db._conn.commit()
+@pytest.fixture
+def db(tmp_path):
+    return MusicDatabase(str(tmp_path / "music.db"))
 
 
 def _add_artist(db, aid, name, genres="", mood="", style=""):
-    db._conn.execute(
-        "INSERT INTO artists (id, name, genres, mood, style, thumb_url) VALUES (?,?,?,?,?,?)",
-        (aid, name, genres, mood, style, ""),
-    )
+    conn = db._get_connection()
+    artist_id = seed_artist(conn, server_id=aid, name=name)
+    conn.execute("UPDATE lib2_artists SET genres=?, mood=?, style=? WHERE id=?",
+                 (genres or '[]', mood, style, artist_id))
+    conn.commit()
+    return artist_id
 
 
 def _add_album(db, alid, aid, title, genres="", mood="", style=""):
-    db._conn.execute(
-        "INSERT INTO albums (id, artist_id, title, genres, mood, style, thumb_url) VALUES (?,?,?,?,?,?,?)",
-        (alid, aid, title, genres, mood, style, ""),
-    )
+    conn = db._get_connection()
+    album_id = seed_album(conn, server_id=alid, title=title, artist_id=aid)
+    conn.execute("UPDATE lib2_albums SET genres=?, mood=?, style=? WHERE id=?",
+                 (genres or '[]', mood, style, album_id))
+    conn.commit()
+    return album_id
 
 
 def _add_track(db, tid, alid, aid, title, file_path="/m/x.flac", play_count=0):
-    db._conn.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, play_count) "
-        "VALUES (?,?,?,?,?,?,?,?,?)",
-        (tid, alid, aid, title, 1, 200, file_path, 1000, play_count),
-    )
-
-
-@pytest.fixture
-def db():
-    d = _InMemoryDB()
-    _schema(d)
-    return d
-
-
-@pytest.fixture
-def db_no_rank():
-    d = _InMemoryDB()
-    _schema_no_rank_cols(d)
-    return d
+    conn = db._get_connection()
+    track_id = seed_track(conn, server_id=tid, title=title, album_id=alid,
+                          artist_id=aid, track_number=1, duration=200,
+                          file_path=file_path or None, bitrate=1000)
+    conn.execute("UPDATE lib2_tracks SET play_count=? WHERE id=?",
+                 (play_count, track_id))
+    conn.commit()
+    return track_id
 
 
 def test_missing_seed_track_returns_failure(db):
@@ -160,90 +57,117 @@ def test_missing_seed_track_returns_failure(db):
 
 
 def test_tier1_same_artist_other_albums(db):
-    _add_artist(db, "ar1", "Artist One")
-    _add_album(db, "al1", "ar1", "Album A")
-    _add_album(db, "al2", "ar1", "Album B")
-    _add_track(db, "seed", "al1", "ar1", "Seed")
-    _add_track(db, "t2", "al2", "ar1", "Other Album Track")
-    db._conn.commit()
+    ar1 = _add_artist(db, "ar1", "Artist One")
+    al1 = _add_album(db, "al1", ar1, "Album A")
+    al2 = _add_album(db, "al2", ar1, "Album B")
+    seed = _add_track(db, "seed", al1, ar1, "Seed")
+    t2 = _add_track(db, "t2", al2, ar1, "Other Album Track")
 
-    res = db.get_radio_tracks("seed", limit=10)
+    res = db.get_radio_tracks(seed, limit=10)
     assert res["success"] is True
     ids = [t["id"] for t in res["tracks"]]
-    assert "t2" in ids
-    assert "seed" not in ids          # seed always excluded
+    assert t2 in ids
+    assert seed not in ids          # seed always excluded
 
 
 def test_excludes_caller_supplied_ids(db):
-    _add_artist(db, "ar1", "Artist One")
-    _add_album(db, "al1", "ar1", "Album A")
-    _add_album(db, "al2", "ar1", "Album B")
-    _add_track(db, "seed", "al1", "ar1", "Seed")
-    _add_track(db, "t2", "al2", "ar1", "T2")
-    _add_track(db, "t3", "al2", "ar1", "T3")
-    db._conn.commit()
+    ar1 = _add_artist(db, "ar1", "Artist One")
+    al1 = _add_album(db, "al1", ar1, "Album A")
+    al2 = _add_album(db, "al2", ar1, "Album B")
+    seed = _add_track(db, "seed", al1, ar1, "Seed")
+    t2 = _add_track(db, "t2", al2, ar1, "T2")
+    t3 = _add_track(db, "t3", al2, ar1, "T3")
 
-    res = db.get_radio_tracks("seed", limit=10, exclude_ids=["t2"])
+    res = db.get_radio_tracks(seed, limit=10, exclude_ids=[t2])
     ids = [t["id"] for t in res["tracks"]]
-    assert "t2" not in ids
-    assert "t3" in ids
+    assert t2 not in ids
+    assert t3 in ids
 
 
 def test_tier2_genre_match_other_artists(db):
     # No same-artist alternatives; falls to genre tier.
-    _add_artist(db, "ar1", "Seed Artist", genres='["shoegaze"]')
-    _add_artist(db, "ar2", "Other Artist", genres='["shoegaze"]')
-    _add_album(db, "al1", "ar1", "Seed Album", genres='["shoegaze"]')
-    _add_album(db, "al2", "ar2", "Other Album", genres='["shoegaze"]')
-    _add_track(db, "seed", "al1", "ar1", "Seed")
-    _add_track(db, "g1", "al2", "ar2", "Genre Match")
-    db._conn.commit()
+    ar1 = _add_artist(db, "ar1", "Seed Artist", genres='["shoegaze"]')
+    ar2 = _add_artist(db, "ar2", "Other Artist", genres='["shoegaze"]')
+    al1 = _add_album(db, "al1", ar1, "Seed Album", genres='["shoegaze"]')
+    al2 = _add_album(db, "al2", ar2, "Other Album", genres='["shoegaze"]')
+    seed = _add_track(db, "seed", al1, ar1, "Seed")
+    g1 = _add_track(db, "g1", al2, ar2, "Genre Match")
 
-    res = db.get_radio_tracks("seed", limit=10)
+    res = db.get_radio_tracks(seed, limit=10)
     ids = [t["id"] for t in res["tracks"]]
-    assert "g1" in ids
+    assert g1 in ids
 
 
 def test_tier4_random_fallback_fills_when_no_metadata_match(db):
     # Seed has no genre/mood/style and no same-artist alts → random tier.
-    _add_artist(db, "ar1", "Seed Artist")
-    _add_artist(db, "ar2", "Unrelated")
-    _add_album(db, "al1", "ar1", "Seed Album")
-    _add_album(db, "al2", "ar2", "Unrelated Album")
-    _add_track(db, "seed", "al1", "ar1", "Seed")
-    _add_track(db, "r1", "al2", "ar2", "Random One")
-    db._conn.commit()
+    ar1 = _add_artist(db, "ar1", "Seed Artist")
+    ar2 = _add_artist(db, "ar2", "Unrelated")
+    al1 = _add_album(db, "al1", ar1, "Seed Album")
+    al2 = _add_album(db, "al2", ar2, "Unrelated Album")
+    seed = _add_track(db, "seed", al1, ar1, "Seed")
+    r1 = _add_track(db, "r1", al2, ar2, "Random One")
 
-    res = db.get_radio_tracks("seed", limit=10)
+    res = db.get_radio_tracks(seed, limit=10)
     ids = [t["id"] for t in res["tracks"]]
-    assert "r1" in ids                # filled from random tier
+    assert r1 in ids                # filled from random tier
 
 
 def test_only_returns_tracks_with_files(db):
-    _add_artist(db, "ar1", "Artist One")
-    _add_album(db, "al1", "ar1", "Album A")
-    _add_album(db, "al2", "ar1", "Album B")
-    _add_track(db, "seed", "al1", "ar1", "Seed")
-    _add_track(db, "nofile", "al2", "ar1", "No File", file_path="")
-    db._conn.commit()
+    ar1 = _add_artist(db, "ar1", "Artist One")
+    al1 = _add_album(db, "al1", ar1, "Album A")
+    al2 = _add_album(db, "al2", ar1, "Album B")
+    seed = _add_track(db, "seed", al1, ar1, "Seed")
+    nofile = _add_track(db, "nofile", al2, ar1, "No File", file_path="")
 
-    res = db.get_radio_tracks("seed", limit=10)
+    res = db.get_radio_tracks(seed, limit=10)
     ids = [t["id"] for t in res["tracks"]]
-    assert "nofile" not in ids        # file_path filter still enforced
+    assert nofile not in ids        # a track without a live file never plays
+
+
+def test_a_deleted_file_does_not_qualify_a_track(db):
+    """A deleted file row is history (ADR-03), not something to queue up."""
+    ar1 = _add_artist(db, "ar1", "Artist One")
+    al1 = _add_album(db, "al1", ar1, "Album A")
+    al2 = _add_album(db, "al2", ar1, "Album B")
+    seed = _add_track(db, "seed", al1, ar1, "Seed")
+    gone = _add_track(db, "gone", al2, ar1, "Deleted File")
+    conn = db._get_connection()
+    conn.execute("UPDATE lib2_track_files SET file_state='deleted' WHERE track_id=?",
+                 (gone,))
+    conn.commit()
+
+    res = db.get_radio_tracks(seed, limit=10)
+    assert gone not in [t["id"] for t in res["tracks"]]
+
+
+def test_discography_tracks_are_not_queued(db):
+    """A tracked artist's provider discography lives in the same tables. It has
+    no files, so it must never reach the queue."""
+    ar1 = _add_artist(db, "ar1", "Artist One")
+    al1 = _add_album(db, "al1", ar1, "Album A")
+    seed = _add_track(db, "seed", al1, ar1, "Seed")
+    conn = db._get_connection()
+    wish_album = seed_album(conn, server_id="al-wish", title="Not Owned",
+                            artist_id=ar1, origin='discography')
+    wish = seed_track(conn, server_id="t-wish", title="Wanted",
+                      album_id=wish_album, artist_id=ar1)
+    conn.commit()
+
+    res = db.get_radio_tracks(seed, limit=10)
+    assert wish not in [t["id"] for t in res["tracks"]]
 
 
 def test_no_duplicate_ids_across_tiers(db):
     # A track that qualifies for both same-artist AND genre must appear once.
-    _add_artist(db, "ar1", "Artist One", genres='["pop"]')
-    _add_album(db, "al1", "ar1", "Album A", genres='["pop"]')
-    _add_album(db, "al2", "ar1", "Album B", genres='["pop"]')
-    _add_track(db, "seed", "al1", "ar1", "Seed")
-    _add_track(db, "dup", "al2", "ar1", "Could Match Twice")
-    db._conn.commit()
+    ar1 = _add_artist(db, "ar1", "Artist One", genres='["pop"]')
+    al1 = _add_album(db, "al1", ar1, "Album A", genres='["pop"]')
+    al2 = _add_album(db, "al2", ar1, "Album B", genres='["pop"]')
+    seed = _add_track(db, "seed", al1, ar1, "Seed")
+    dup = _add_track(db, "dup", al2, ar1, "Could Match Twice")
 
-    res = db.get_radio_tracks("seed", limit=10)
+    res = db.get_radio_tracks(seed, limit=10)
     ids = [t["id"] for t in res["tracks"]]
-    assert ids.count("dup") == 1
+    assert ids.count(dup) == 1
 
 
 def test_smart_ranking_prefers_more_played_in_same_tier(db):
@@ -257,20 +181,38 @@ def test_smart_ranking_prefers_more_played_in_same_tier(db):
     level) — those can't pass against pre-Phase-2 code at all. We seed many
     unplayed decoys so a pre-Phase-2 ``ORDER BY RANDOM()`` would only return
     'hit' first by a ~1-in-N fluke, making the wiring claim meaningful."""
-    _add_artist(db, "ar1", "Artist One")
-    _add_album(db, "al1", "ar1", "Seed Album")
-    _add_album(db, "al2", "ar1", "Other Album")
-    _add_track(db, "seed", "al1", "ar1", "Seed")
+    ar1 = _add_artist(db, "ar1", "Artist One")
+    al1 = _add_album(db, "al1", ar1, "Seed Album")
+    al2 = _add_album(db, "al2", ar1, "Other Album")
+    seed = _add_track(db, "seed", al1, ar1, "Seed")
     for i in range(15):
-        _add_track(db, f"rare{i}", "al2", "ar1", f"Rarely Played {i}", play_count=0)
-    _add_track(db, "hit", "al2", "ar1", "Big Hit", play_count=5000)
-    db._conn.commit()
+        _add_track(db, f"rare{i}", al2, ar1, f"Rarely Played {i}", play_count=0)
+    hit = _add_track(db, "hit", al2, ar1, "Big Hit", play_count=5000)
 
-    res = db.get_radio_tracks("seed", limit=5)
+    res = db.get_radio_tracks(seed, limit=5)
     assert res["success"] is True
     ids = [t["id"] for t in res["tracks"]]
     # The heavily-played track is ranked first out of the same-artist pool.
-    assert ids[0] == "hit"
+    assert ids[0] == hit
+
+
+def test_global_popularity_ranks_when_nothing_was_played_locally(db):
+    """Global popularity lives in the Library-v2 enrichment payload."""
+    ar1 = _add_artist(db, "ar1", "Artist One")
+    al1 = _add_album(db, "al1", ar1, "Seed Album")
+    al2 = _add_album(db, "al2", ar1, "Other Album")
+    seed = _add_track(db, "seed", al1, ar1, "Seed")
+    for i in range(15):
+        _add_track(db, f"rare{i}", al2, ar1, f"Unknown {i}")
+    famous = _add_track(db, "famous", al2, ar1, "Famous Elsewhere")
+    conn = db._get_connection()
+    conn.execute(
+        "UPDATE lib2_tracks SET enrichment='{\"lastfm\": {\"playcount\": 9000000}}'"
+        " WHERE id=?", (famous,))
+    conn.commit()
+
+    res = db.get_radio_tracks(seed, limit=5)
+    assert [t["id"] for t in res["tracks"]][0] == famous
 
 
 # ── Library Radio (seedless mode) ─────────────────────────────────────────
@@ -279,73 +221,49 @@ def test_smart_ranking_prefers_more_played_in_same_tier(db):
 def test_library_radio_returns_tracks_with_no_seed_and_no_excludes(db):
     """The seedless path with an EMPTY exclude set must not emit `NOT IN ()`
     (a sqlite syntax error) — the clause is conditional."""
-    _add_artist(db, "ar1", "A One")
-    _add_artist(db, "ar2", "A Two")
-    _add_album(db, "al1", "ar1", "Album One")
-    _add_album(db, "al2", "ar2", "Album Two")
-    _add_track(db, "t1", "al1", "ar1", "T1")
-    _add_track(db, "t2", "al2", "ar2", "T2")
-    db._conn.commit()
+    ar1 = _add_artist(db, "ar1", "A One")
+    ar2 = _add_artist(db, "ar2", "A Two")
+    al1 = _add_album(db, "al1", ar1, "Album One")
+    al2 = _add_album(db, "al2", ar2, "Album Two")
+    t1 = _add_track(db, "t1", al1, ar1, "T1")
+    t2 = _add_track(db, "t2", al2, ar2, "T2")
 
     res = db.get_library_radio_tracks(limit=10)
     assert res["success"] is True
-    assert {t["id"] for t in res["tracks"]} == {"t1", "t2"}
+    assert {t["id"] for t in res["tracks"]} == {t1, t2}
 
 
 def test_library_radio_honors_excludes_and_file_filter(db):
-    _add_artist(db, "ar1", "A One")
-    _add_album(db, "al1", "ar1", "Album One")
-    _add_track(db, "keep", "al1", "ar1", "Keep")
-    _add_track(db, "skip", "al1", "ar1", "Skip Me")
-    _add_track(db, "nofile", "al1", "ar1", "No File", file_path="")
-    db._conn.commit()
+    ar1 = _add_artist(db, "ar1", "A One")
+    al1 = _add_album(db, "al1", ar1, "Album One")
+    keep = _add_track(db, "keep", al1, ar1, "Keep")
+    skip = _add_track(db, "skip", al1, ar1, "Skip Me")
+    _add_track(db, "nofile", al1, ar1, "No File", file_path="")
 
-    res = db.get_library_radio_tracks(limit=10, exclude_ids=["skip"])
+    res = db.get_library_radio_tracks(limit=10, exclude_ids=[skip])
     ids = [t["id"] for t in res["tracks"]]
-    assert ids == ["keep"]
+    assert ids == [keep]
 
 
 def test_library_radio_ranking_is_wired(db):
     """Same wiring claim as the seeded test: the heavily-played track ranks
     first out of the pooled random fetch."""
-    _add_artist(db, "ar1", "A One")
-    _add_album(db, "al1", "ar1", "Album One")
+    ar1 = _add_artist(db, "ar1", "A One")
+    al1 = _add_album(db, "al1", ar1, "Album One")
     for i in range(15):
-        _add_track(db, f"rare{i}", "al1", "ar1", f"Rare {i}", play_count=0)
-    _add_track(db, "hit", "al1", "ar1", "Big Hit", play_count=5000)
-    db._conn.commit()
+        _add_track(db, f"rare{i}", al1, ar1, f"Rare {i}", play_count=0)
+    hit = _add_track(db, "hit", al1, ar1, "Big Hit", play_count=5000)
 
     res = db.get_library_radio_tracks(limit=5)
     assert res["success"] is True
-    assert res["tracks"][0]["id"] == "hit"
+    assert res["tracks"][0]["id"] == hit
 
 
 def test_library_radio_respects_limit(db):
-    _add_artist(db, "ar1", "A One")
-    _add_album(db, "al1", "ar1", "Album One")
+    ar1 = _add_artist(db, "ar1", "A One")
+    al1 = _add_album(db, "al1", ar1, "Album One")
     for i in range(30):
-        _add_track(db, f"t{i}", "al1", "ar1", f"T {i}")
-    db._conn.commit()
+        _add_track(db, f"t{i}", al1, ar1, f"T {i}")
 
     res = db.get_library_radio_tracks(limit=5)
     assert len(res["tracks"]) == 5
-
-
-def test_works_without_ranking_columns(db_no_rank):
-    """Defensive: a DB predating the play_count/lastfm migration must still
-    return radio tracks (column probe omits the missing fields)."""
-    _add_artist(db_no_rank, "ar1", "Artist One")
-    _add_album(db_no_rank, "al1", "ar1", "Album A")
-    _add_album(db_no_rank, "al2", "ar1", "Album B")
-    # _add_track inserts play_count, so insert directly without it here.
-    db_no_rank._conn.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, file_path, bitrate) "
-        "VALUES (?,?,?,?,?,?,?,?)", ("seed", "al1", "ar1", "Seed", 1, 200, "/m/s.flac", 1000))
-    db_no_rank._conn.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, file_path, bitrate) "
-        "VALUES (?,?,?,?,?,?,?,?)", ("t2", "al2", "ar1", "Other", 1, 200, "/m/t2.flac", 1000))
-    db_no_rank._conn.commit()
-
-    res = db_no_rank.get_radio_tracks("seed", limit=10)
-    assert res["success"] is True
-    assert "t2" in [t["id"] for t in res["tracks"]]

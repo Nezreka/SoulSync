@@ -13,6 +13,13 @@ from typing import Dict, Any
 from utils.logging_config import get_logger
 from core.worker_utils import interruptible_sleep
 
+
+def _name_key(name) -> str:
+    """The catalogue's folded artist key (indexed, and not ASCII-only)."""
+    from core.library2.importer import normalize_name
+
+    return normalize_name(str(name or ''))
+
 logger = get_logger("listening_stats_worker")
 
 
@@ -190,15 +197,15 @@ class ListeningStatsWorker:
             id_map = self._resolve_db_track_ids_batch(events)
             for ev in events:
                 title_l = (ev.get('title') or '').strip().lower()
-                artist_l = (ev.get('artist') or '').strip().lower()
+                artist_l = _name_key((ev.get('artist') or '').strip())
                 if title_l:
-                    ev['db_track_id'] = id_map.get((title_l, artist_l))
+                    ev['lib2_track_id'] = id_map.get((title_l, artist_l))
 
             inserted = self.db.insert_listening_events(events)
             self.stats['events_added'] += inserted
             logger.info(f"Inserted {inserted} new listening events (of {len(events)} total)")
 
-        # Step 2: Fetch play counts and update tracks table
+        # Step 2: Fetch play counts and record them per track
         self.current_item = f"Updating play counts from {active_server}..."
         try:
             server_counts = client.get_track_play_counts()
@@ -458,11 +465,12 @@ class ListeningStatsWorker:
             conn = self.db._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT t.id FROM tracks t
-                JOIN artists ar ON ar.id = t.artist_id
-                WHERE LOWER(t.title) = LOWER(?) AND LOWER(ar.name) = LOWER(?)
+                SELECT t.id FROM lib2_tracks t
+                JOIN lib2_albums al ON al.id = t.album_id
+                JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                WHERE LOWER(t.title) = LOWER(?) AND ar.name_key = ?
                 LIMIT 1
-            """, (title.strip(), (artist or '').strip()))
+            """, (title.strip(), _name_key(artist)))
             row = cursor.fetchone()
             return row[0] if row else None
         except Exception:
@@ -486,7 +494,7 @@ class ListeningStatsWorker:
             title = (ev.get('title') or '').strip()
             artist = (ev.get('artist') or '').strip()
             if title:
-                pairs.add((title.lower(), artist.lower()))
+                pairs.add((title.lower(), _name_key(artist)))
 
         result = {}
         if not pairs:
@@ -502,13 +510,16 @@ class ListeningStatsWorker:
             for i in range(0, len(pair_list), chunk_size):
                 chunk = pair_list[i:i + chunk_size]
                 placeholders = ','.join(['(?,?)'] * len(chunk))
+                # The artist half is matched on the indexed, accent-preserving
+                # fold `name_key`; SQLite's LOWER() is ASCII-only (iss29-D13).
                 flat_args = [v for pair in chunk for v in pair]
                 cursor.execute(
                     f"""
-                    SELECT LOWER(t.title), LOWER(ar.name), t.id
-                    FROM tracks t
-                    JOIN artists ar ON ar.id = t.artist_id
-                    WHERE (LOWER(t.title), LOWER(ar.name)) IN ({placeholders})
+                    SELECT LOWER(t.title), ar.name_key, t.id
+                    FROM lib2_tracks t
+                    JOIN lib2_albums al ON al.id = t.album_id
+                    JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                    WHERE (LOWER(t.title), ar.name_key) IN ({placeholders})
                     """,
                     flat_args,
                 )
@@ -525,11 +536,13 @@ class ListeningStatsWorker:
         return result
 
     def _map_play_counts_to_db(self, server_counts, server_source):
-        """Map server track IDs to DB track IDs for play count updates.
+        """Map server track ids onto catalogue rows for play-count updates.
 
-        Looks up which server IDs exist in the tracks table. Replaces a
-        previous N+1 pattern of one SELECT per server ID with a single
-        batched IN query (chunked for safety).
+        The counts arrive keyed by the media server's own id. Library v2 keeps
+        that identity in the server-scoped mapping table; the singular track
+        columns are only an upgrade fallback.
+        Rows the catalogue has not been told about yet are skipped, exactly as
+        before.
         """
         if not server_counts:
             return []
@@ -539,26 +552,42 @@ class ListeningStatsWorker:
             conn = self.db._get_connection()
             cursor = conn.cursor()
 
-            ids = list(server_counts.keys())
-            existing = set()
+            ids = [str(i) for i in server_counts.keys()]
+            by_server_id = {}
             chunk_size = 500
             for i in range(0, len(ids), chunk_size):
                 chunk = ids[i:i + chunk_size]
                 placeholders = ','.join(['?'] * len(chunk))
+                # Mapping first, snapshot only for what it does not answer. A
+                # UNION has no defined row order — SQLite sorts it, so the lower
+                # entity id won, not the authoritative row — and after a
+                # re-match the stale snapshot is usually the older, lower id.
+                # Play counts landed on the wrong track.
                 cursor.execute(
-                    f"SELECT id FROM tracks WHERE id IN ({placeholders})",
-                    chunk,
+                    f"SELECT m.server_id, m.entity_id FROM lib2_media_server_mappings m "
+                    f"WHERE m.entity_type='track' AND m.server_source=? "
+                    f"AND m.server_id IN ({placeholders})",
+                    [server_source, *chunk],
                 )
-                existing.update(r[0] for r in cursor.fetchall())
+                for server_id, track_id in cursor.fetchall():
+                    by_server_id[str(server_id)] = track_id
+                cursor.execute(
+                    f"SELECT t.server_id, t.id FROM lib2_tracks t "
+                    f"WHERE t.server_source=? AND t.server_id IN ({placeholders})",
+                    [server_source, *chunk],
+                )
+                for server_id, track_id in cursor.fetchall():
+                    by_server_id.setdefault(str(server_id), track_id)
 
             return [
                 {
                     'db_track_id': server_id,
+                    'lib2_track_id': by_server_id[str(server_id)],
                     'play_count': play_count,
                     'last_played': None,  # Could be fetched separately
                 }
                 for server_id, play_count in server_counts.items()
-                if server_id in existing
+                if str(server_id) in by_server_id
             ]
         except Exception as e:
             logger.error(f"Error mapping play counts: {e}")

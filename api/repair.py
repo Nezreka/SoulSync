@@ -157,14 +157,37 @@ def repair_job_settings(job_id):
 
 @bp.route('/api/repair/jobs/<job_id>/run', methods=['POST'])
 def repair_job_run(job_id):
-    """Trigger immediate run of a specific job"""
+    """Trigger immediate run of a specific job.
+
+    Optional JSON body ``{"artist_id": 1, "artist_name": "..."}`` resolves a
+    Library-v2 artist to an exact file allowlist. Jobs that move/delete files
+    enforce that path scope; metadata-only jobs use the accompanying name.
+    Other jobs ignore the scope and run library-wide."""
     try:
         if _repair_worker() is None:
             return jsonify({'error': 'Repair worker not initialized'}), 400
 
-        _repair_worker().run_job_now(job_id)
-        logger.info("Repair job %s triggered manually via UI", job_id)
-        return jsonify({'success': True, 'job_id': job_id}), 200
+        body = request.get_json(silent=True) or {}
+        artist_name = str(body.get('artist_name') or '').strip()
+        artist_id = body.get('artist_id')
+        scope = None
+        if artist_id is not None:
+            from core.repair_jobs.base import build_artist_file_scope
+            scope = build_artist_file_scope(_repair_worker().db, artist_id, artist_name)
+            artist_name = scope['artist_name']
+        elif artist_name:
+            scope = {'artist_name': artist_name}
+        _repair_worker().run_job_now(job_id, scope=scope)
+        logger.info("Repair job %s triggered manually via UI%s", job_id,
+                    f" (artist scope: {artist_name})" if artist_name else "")
+        return jsonify({
+            'success': True,
+            'job_id': job_id,
+            'scoped_to': artist_name or None,
+            'scope_files': len(scope.get('file_paths', [])) if scope else None,
+        }), 200
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         logger.error(f"Error running repair job {job_id}: {e}")
         return jsonify({'error': str(e)}), 500

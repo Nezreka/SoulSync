@@ -9,22 +9,24 @@ on, both pinned here:
   duplicates, and must terminate;
 * the payload is an ALLOWLIST — nothing install-local (media-server ids, file
   paths, listening behaviour) may leave the box, and a column added to
-  ``tracks`` next year must not silently join the export. The excluded-field
-  assertions below are the important ones: they are what stops that.
+  ``lib2_tracks`` next year must not silently join the export. The
+  excluded-field assertions below are the important ones: they are what
+  stops that.
 """
 
 from __future__ import annotations
 
 import base64
 import hashlib
-import sqlite3
 from urllib.parse import urlencode
+import sqlite3
 
 import pytest
 from flask import Flask
 
 from api import create_api_blueprint, limiter
 from database.music_database import MusicDatabase
+from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
 
 RAW_KEY = "sk_metasync_test_key"
 
@@ -58,43 +60,46 @@ def db(tmp_path):
 
 
 def _seed(db, artists=1, albums_per_artist=1, tracks_per_album=3, soul_prefix="soul_"):
-    """Insert a small library directly. Returns (artist_ids, album_ids, track_ids)."""
+    """Insert a small catalogue directly. Returns (artist_ids, album_ids, track_ids).
+
+    Library v2 rows, because that is where the SoulID worker writes and so the
+    only place a ``soul_id`` exists. The seed helpers leave a row the way the
+    media-server scan does; the UPDATEs add the identity fields the export is
+    actually about.
+    """
     conn = db._get_connection()
-    cur = conn.cursor()
     a_ids, al_ids, t_ids = [], [], []
     for a in range(artists):
-        aid = f"ar{a:03d}"
-        cur.execute(
-            "INSERT INTO artists (id, name, soul_id, soul_id_path, spotify_artist_id, "
-            "spotify_match_status, updated_at) VALUES (?,?,?,?,?,?,?)",
-            (aid, f"Artist {a}", f"{soul_prefix}artist_{a}", "canonical",
-             f"sp_ar_{a}", "matched", "2026-08-01T00:00:00"),
-        )
+        aid = seed_artist(conn, server_id=f"ar{a:03d}", name=f"Artist {a}")
+        conn.execute(
+            "UPDATE lib2_artists SET soul_id=?, soul_id_path=?, spotify_id=?, "
+            "updated_at=? WHERE id=?",
+            (f"{soul_prefix}artist_{a}", "canonical", f"sp_ar_{a}",
+             "2026-08-01T00:00:00", aid))
         a_ids.append(aid)
         for b in range(albums_per_artist):
-            alid = f"al{a:03d}{b:03d}"
-            cur.execute(
-                "INSERT INTO albums (id, artist_id, title, soul_id, year, "
-                "spotify_album_id, spotify_match_status, updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?)",
-                (alid, aid, f"Album {a}-{b}", f"{soul_prefix}album_{a}_{b}", 2020,
-                 f"sp_al_{a}_{b}", "matched", "2026-08-01T00:00:00"),
-            )
+            alid = seed_album(conn, server_id=f"al{a:03d}{b:03d}",
+                              title=f"Album {a}-{b}", artist_id=aid, year=2020)
+            conn.execute(
+                "UPDATE lib2_albums SET soul_id=?, spotify_id=?, updated_at=? "
+                "WHERE id=?",
+                (f"{soul_prefix}album_{a}_{b}", f"sp_al_{a}_{b}",
+                 "2026-08-01T00:00:00", alid))
             al_ids.append(alid)
             for t in range(tracks_per_album):
-                tid = f"tr{a:03d}{b:03d}{t:03d}"
-                cur.execute(
-                    "INSERT INTO tracks (id, album_id, artist_id, title, soul_id, "
-                    "album_soul_id, track_number, file_path, play_count, "
-                    "genius_lyrics, spotify_track_id, spotify_match_status, "
-                    "track_artist, updated_at) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (tid, alid, aid, f"Track {t}", f"{soul_prefix}track_{a}_{b}_{t}",
-                     f"{soul_prefix}album_{a}_{b}", t + 1,
-                     "/music/secret/path.flac", 42, "all the lyrics",
-                     f"sp_tr_{a}_{b}_{t}", "matched", "TAG ARTIST NAME",
-                     "2026-08-01T00:00:00"),
-                )
+                tid = seed_track(
+                    conn, server_id=f"tr{a:03d}{b:03d}{t:03d}",
+                    title=f"Track {t}", album_id=alid, artist_id=aid,
+                    track_number=t + 1,
+                    file_path=f"/music/secret/{a}-{b}-{t}.flac",
+                    track_artist="TAG ARTIST NAME")
+                conn.execute(
+                    "UPDATE lib2_tracks SET soul_id=?, album_soul_id=?, "
+                    "spotify_id=?, play_count=?, genius_lyrics=?, updated_at=? "
+                    "WHERE id=?",
+                    (f"{soul_prefix}track_{a}_{b}_{t}",
+                     f"{soul_prefix}album_{a}_{b}", f"sp_tr_{a}_{b}_{t}", 42,
+                     "all the lyrics", "2026-08-01T00:00:00", tid))
                 t_ids.append(tid)
     conn.commit()
     return a_ids, al_ids, t_ids
@@ -161,16 +166,16 @@ def test_cursor_is_opaque_base64_of_the_last_id(db, client):
     a_ids, _, _ = _seed(db, artists=2, albums_per_artist=0, tracks_per_album=0)
     data = _get(client, entity="artist", limit=1).get_json()["data"]
     decoded = base64.urlsafe_b64decode(data["next_cursor"].encode()).decode()
-    assert decoded == a_ids[0]
+    assert decoded == str(a_ids[0])
 
 
 # ── since ─────────────────────────────────────────────────────────────────
 
 def test_since_filters_to_changed_rows(db, client):
-    _seed(db, artists=2, albums_per_artist=0, tracks_per_album=0)
+    a_ids, _, _ = _seed(db, artists=2, albums_per_artist=0, tracks_per_album=0)
     conn = db._get_connection()
-    conn.execute("UPDATE artists SET updated_at = ? WHERE id = ?",
-                 ("2026-08-18T12:00:00", "ar001"))
+    conn.execute("UPDATE lib2_artists SET updated_at = ? WHERE id = ?",
+                 ("2026-08-18T12:00:00", a_ids[1]))
     conn.commit()
 
     items = _get(client, entity="artist", since="2026-08-10T00:00:00").get_json()["data"]["items"]
@@ -180,75 +185,52 @@ def test_since_filters_to_changed_rows(db, client):
     assert len(everything) == 2
 
 
+def _incremental(client, entity, since):
+    return [i["soul_id"] for i in
+            _get(client, entity=entity, since=since).get_json()["data"]["items"]]
+
+
 def test_a_same_day_change_is_not_lost_to_a_text_comparison(db, client):
     """L2-010: SQLite writes CURRENT_TIMESTAMP as 'YYYY-MM-DD HH:MM:SS' while
     the API takes ISO-8601 with a 'T'. Compared as text, 'T' > ' ', so asking
     for everything since midnight silently returned nothing from that same
     day — a permanent hole in every consumer's incremental feed."""
-    _seed(db, artists=1, albums_per_artist=0, tracks_per_album=0)
+    a_ids, _, _ = _seed(db, artists=1, albums_per_artist=0, tracks_per_album=0)
     conn = db._get_connection()
-    conn.execute("UPDATE artists SET updated_at = ? WHERE id = ?",
-                 ("2026-08-21 12:00:00", "ar000"))
+    conn.execute("UPDATE lib2_artists SET updated_at = ? WHERE id = ?",
+                 ("2026-08-21 12:00:00", a_ids[0]))
     conn.commit()
 
     for since in ("2026-08-21T00:00:00", "2026-08-21 00:00:00",
-                  "2026-08-21T00:00:00Z"):
-        items = _get(client, entity="artist", since=since).get_json()["data"]["items"]
-        assert [i["soul_id"] for i in items] == ["soul_artist_0"], since
+                  "2026-08-21T00:00:00Z", "2026-08-21T12:00:00"):
+        assert _incremental(client, "artist", since) == ["soul_artist_0"], since
 
 
 def test_offsets_are_compared_as_instants_not_as_text(db, client):
     """13:00+02:00 is 11:00 UTC, so a row stamped 11:30 UTC is after it — but
     ranked as text the offset string decided the answer instead."""
-    _seed(db, artists=1, albums_per_artist=0, tracks_per_album=0)
+    a_ids, _, _ = _seed(db, artists=1, albums_per_artist=0, tracks_per_album=0)
     conn = db._get_connection()
-    conn.execute("UPDATE artists SET updated_at = ? WHERE id = ?",
-                 ("2026-08-21 11:30:00", "ar000"))
+    conn.execute("UPDATE lib2_artists SET updated_at = ? WHERE id = ?",
+                 ("2026-08-21 11:30:00", a_ids[0]))
     conn.commit()
 
-    included = _get(client, entity="artist",
-                    since="2026-08-21T13:00:00+02:00").get_json()["data"]["items"]
-    assert [i["soul_id"] for i in included] == ["soul_artist_0"]
-
-    excluded = _get(client, entity="artist",
-                    since="2026-08-21T14:00:00+02:00").get_json()["data"]["items"]
-    assert excluded == []
-
-
-def test_the_boundary_itself_is_included(db, client):
-    _seed(db, artists=1, albums_per_artist=0, tracks_per_album=0)
-    conn = db._get_connection()
-    conn.execute("UPDATE artists SET updated_at = ? WHERE id = ?",
-                 ("2026-08-21 12:00:00", "ar000"))
-    conn.commit()
-
-    items = _get(client, entity="artist",
-                 since="2026-08-21T12:00:00").get_json()["data"]["items"]
-    assert [i["soul_id"] for i in items] == ["soul_artist_0"]
+    assert _incremental(client, "artist",
+                        "2026-08-21T13:00:00+02:00") == ["soul_artist_0"]
+    assert _incremental(client, "artist", "2026-08-21T14:00:00+02:00") == []
 
 
 # ── L2-011: the change feed has to cover the whole payload ────────────────
-
-def _touch(db, table, row_id, when):
-    conn = db._get_connection()
-    conn.execute(f"UPDATE {table} SET updated_at = ? WHERE id = ?", (when, row_id))
-    conn.commit()
-
-
-def _incremental(client, entity, since):
-    return [i["soul_id"] for i in
-            _get(client, entity=entity, since=since).get_json()["data"]["items"]]
-
 
 def test_an_artist_rename_invalidates_its_albums_and_tracks(db, client):
     """The album payload carries the artist's NAME and the track payload carries
     the artist name plus the album title. Renaming an artist rewrites what the
     export says about every one of its children while touching none of their
     timestamps, so a consumer that had already walked them was never told."""
-    _seed(db, artists=1, albums_per_artist=1, tracks_per_album=1)
+    a_ids, _, _ = _seed(db, artists=1, albums_per_artist=1, tracks_per_album=1)
     conn = db._get_connection()
-    conn.execute("UPDATE artists SET name = 'Renamed', updated_at = ? WHERE id = 'ar000'",
-                 ("2026-08-21 12:00:00",))
+    conn.execute("UPDATE lib2_artists SET name='Renamed', updated_at=? WHERE id=?",
+                 ("2026-08-21 12:00:00", a_ids[0]))
     conn.commit()
 
     since = "2026-08-21T00:00:00"
@@ -257,9 +239,11 @@ def test_an_artist_rename_invalidates_its_albums_and_tracks(db, client):
 
 
 def test_an_album_retitle_invalidates_its_tracks(db, client):
-    """A track's payload carries its album's title and year."""
-    _seed(db, artists=1, albums_per_artist=1, tracks_per_album=1)
-    _touch(db, "albums", "al000000", "2026-08-21 12:00:00")
+    _, al_ids, _ = _seed(db, artists=1, albums_per_artist=1, tracks_per_album=1)
+    conn = db._get_connection()
+    conn.execute("UPDATE lib2_albums SET updated_at=? WHERE id=?",
+                 ("2026-08-21 12:00:00", al_ids[0]))
+    conn.commit()
 
     assert _incremental(client, "track", "2026-08-21T00:00:00") == ["soul_track_0_0_0"]
 
@@ -278,20 +262,18 @@ def test_minting_a_soul_id_makes_the_row_appear_in_the_incremental(db, client):
     one is the moment it starts existing for consumers. The SoulID worker used
     to write it without touching updated_at, so a full walk that ran before the
     worker meant the row never appeared in any later incremental either."""
-    from core.soulid_worker import SoulIDWorker  # noqa: F401  (import guard only)
-
-    _seed(db, artists=1, albums_per_artist=0, tracks_per_album=0)
+    a_ids, _, _ = _seed(db, artists=1, albums_per_artist=0, tracks_per_album=0)
     conn = db._get_connection()
-    conn.execute("UPDATE artists SET soul_id = NULL WHERE id = 'ar000'")
+    conn.execute("UPDATE lib2_artists SET soul_id = NULL WHERE id = ?", (a_ids[0],))
     conn.commit()
     assert _incremental(client, "artist", "2026-08-01T00:00:00") == []
 
     # What the worker's write now does, verbatim.
     conn = db._get_connection()
-    conn.execute("UPDATE artists SET soul_id = ?, soul_id_path = ?, "
+    conn.execute("UPDATE lib2_artists SET soul_id = ?, soul_id_path = ?, "
                  "updated_at = CURRENT_TIMESTAMP "
                  "WHERE id = ? AND (soul_id IS NULL OR soul_id = '')",
-                 ("soul_artist_0", "canonical", "ar000"))
+                 ("soul_artist_0", "canonical", a_ids[0]))
     conn.commit()
 
     assert _incremental(client, "artist", "2026-08-01T00:00:00") == ["soul_artist_0"]
@@ -299,12 +281,60 @@ def test_minting_a_soul_id_makes_the_row_appear_in_the_incremental(db, client):
 
 def test_a_canonical_claim_shows_up_in_the_incremental(db, client):
     """canonical_source/canonical_album_id are exported fields."""
-    _seed(db, artists=1, albums_per_artist=1, tracks_per_album=0)
+    _, al_ids, _ = _seed(db, artists=1, albums_per_artist=1, tracks_per_album=0)
     assert _incremental(client, "album", "2026-08-21T00:00:00") == []
 
-    assert db.set_album_canonical("al000000", "musicbrainz", "mb-1", 0.9) is True
+    assert db.set_album_canonical(al_ids[0], "musicbrainz", "mb-1", 0.9) is True
 
     assert _incremental(client, "album", "2026-08-21T00:00:00") == ["soul_album_0_0"]
+
+
+def test_a_provider_status_change_shows_up_in_the_incremental(db, client):
+    """The ledger's not_found/error statuses are projected into the payload as
+    <service>_match_status, so a recorded attempt changes what the export says
+    about a row while touching nothing on the row itself."""
+    from core.library2.provider_attempts import (
+        ensure_provider_attempt_schema, record_attempt,
+    )
+
+    a_ids, _, _ = _seed(db, artists=1, albums_per_artist=0, tracks_per_album=0)
+    conn = db._get_connection()
+    ensure_provider_attempt_schema(conn.cursor())
+    conn.execute("UPDATE lib2_artists SET spotify_id=NULL, external_ids='{}' "
+                 "WHERE id=?", (a_ids[0],))
+    conn.commit()
+    assert _incremental(client, "artist", "2026-08-21T00:00:00") == []
+
+    conn = db._get_connection()
+    record_attempt(conn, entity_type="artist", entity_id=a_ids[0],
+                   service="spotify", status="not_found")
+    conn.commit()
+
+    assert _incremental(client, "artist", "2026-08-21T00:00:00") == ["soul_artist_0"]
+
+
+def test_recording_the_same_status_again_does_not_republish_the_row(db, client):
+    """This runs on every provider cycle. Touching unconditionally would put the
+    whole library into every incremental slice."""
+    from core.library2.provider_attempts import (
+        ensure_provider_attempt_schema, record_attempt,
+    )
+
+    a_ids, _, _ = _seed(db, artists=1, albums_per_artist=0, tracks_per_album=0)
+    conn = db._get_connection()
+    ensure_provider_attempt_schema(conn.cursor())
+    record_attempt(conn, entity_type="artist", entity_id=a_ids[0],
+                   service="spotify", status="not_found")
+    conn.execute("UPDATE lib2_artists SET updated_at=? WHERE id=?",
+                 ("2026-08-01T00:00:00", a_ids[0]))
+    conn.commit()
+
+    conn = db._get_connection()
+    record_attempt(conn, entity_type="artist", entity_id=a_ids[0],
+                   service="spotify", status="not_found")
+    conn.commit()
+
+    assert _incremental(client, "artist", "2026-08-21T00:00:00") == []
 
 
 # ── unpublishable rows are never served ───────────────────────────────────
@@ -315,8 +345,8 @@ def test_rows_without_a_usable_soul_id_are_omitted(db, client):
     _seed(db, artists=1, albums_per_artist=0, tracks_per_album=0)
     conn = db._get_connection()
     for i, soul in enumerate((None, "", "soul_unnamed_997"), start=90):
-        conn.execute("INSERT INTO artists (id, name, soul_id) VALUES (?,?,?)",
-                     (f"ar{i}", f"Bad {i}", soul))
+        conn.execute("INSERT INTO lib2_artists (name, soul_id) VALUES (?,?)",
+                     (f"Bad {i}", soul))
     conn.commit()
 
     items = _get(client, entity="artist").get_json()["data"]["items"]
@@ -329,10 +359,10 @@ def test_unnamed_rows_do_not_shorten_a_page_and_end_the_walk(db, client):
     unnamed row mid-library used to end the export early and silently drop
     everything after it."""
     conn = db._get_connection()
-    rows = [("ar001", "soul_a"), ("ar002", "soul_unnamed_2"), ("ar003", "soul_b")]
-    for rid, soul in rows:
-        conn.execute("INSERT INTO artists (id, name, soul_id) VALUES (?,?,?)",
-                     (rid, rid, soul))
+    for name, soul in (("ar001", "soul_a"), ("ar002", "soul_unnamed_2"),
+                       ("ar003", "soul_b")):
+        conn.execute("INSERT INTO lib2_artists (name, soul_id) VALUES (?,?)",
+                     (name, soul))
     conn.commit()
 
     seen, cursor = [], ""
@@ -380,9 +410,9 @@ def test_track_export_carries_identity_and_provider_status(db, client):
 
 
 def test_track_artist_name_comes_from_the_joined_artist_not_the_tag(db, client):
-    """soulid_worker._process_tracks computes the track soul_id from the JOINED
-    artists.name, so exporting tracks.track_artist would make an importer
-    normalize a different string and derive a different key."""
+    """soulid_worker._process_tracks computes the track soul_id from the album's
+    primary artist name, so exporting lib2_tracks.track_artist would make an
+    importer normalize a different string and derive a different key."""
     _seed(db, artists=1, albums_per_artist=1, tracks_per_album=1)
     item = _get(client, entity="track").get_json()["data"]["items"][0]
     assert item["artist_name"] == "Artist 0"
@@ -404,14 +434,12 @@ def test_a_missing_column_yields_none_instead_of_raising(db, client, tmp_path):
     column in the SQL would fail the whole export with 'no such column'."""
     _seed(db, artists=1, albums_per_artist=0, tracks_per_album=0)
     conn = db._get_connection()
-    # Rebuild `artists` without soul_id_path, simulating a pre-migration DB.
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(artists)")]
-    keep = [c for c in cols if c != "soul_id_path"]
-    collist = ", ".join(keep)
-    conn.execute(f"CREATE TABLE artists_old AS SELECT {collist} FROM artists")
-    conn.execute("DROP TABLE artists")
-    conn.execute("ALTER TABLE artists_old RENAME TO artists")
+    # Take soul_id_path away again, simulating a database that has not run the
+    # lib2 migration yet.
+    conn.execute("ALTER TABLE lib2_artists DROP COLUMN soul_id_path")
     conn.commit()
+    assert "soul_id_path" not in {
+        r[1] for r in conn.execute("PRAGMA table_info(lib2_artists)")}
 
     resp = _get(client, entity="artist")
     assert resp.status_code == 200, resp.get_json()

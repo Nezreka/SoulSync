@@ -2,11 +2,27 @@
 just albums named beach' (aug 25 user report)."""
 
 import contextlib
+import json
 import sqlite3
 
 import pytest
 
 from core import seasonal_vibes as sv
+
+
+def _enrichment(tags=None, playcount=None):
+    """A lib2 ``enrichment`` blob carrying the Last.fm payload.
+
+    v2 folds every provider field into this one JSON column (see
+    core/library2/enrich._ENRICHMENT_PAYLOAD), where legacy had a
+    ``lastfm_tags`` / ``lastfm_playcount`` column per field.
+    """
+    lastfm = {}
+    if tags is not None:
+        lastfm["tags"] = tags
+    if playcount is not None:
+        lastfm["playcount"] = playcount
+    return json.dumps({"lastfm": lastfm}) if lastfm else None
 
 
 class FakeDb:
@@ -20,17 +36,23 @@ class FakeDb:
                 CREATE TABLE listening_history (
                     id INTEGER PRIMARY KEY, artist TEXT, title TEXT,
                     album TEXT, played_at TEXT);
-                CREATE TABLE artists (
-                    id INTEGER PRIMARY KEY, name TEXT, lastfm_tags TEXT,
+                CREATE TABLE lib2_artists (
+                    id INTEGER PRIMARY KEY, name TEXT, name_key TEXT,
+                    image_url TEXT, spotify_id TEXT, musicbrainz_id TEXT,
+                    external_ids TEXT, enrichment TEXT,
                     genres TEXT, mood TEXT, style TEXT);
-                CREATE TABLE albums (
-                    id INTEGER PRIMARY KEY, artist_id INTEGER, title TEXT,
-                    thumb_url TEXT, release_date TEXT, lastfm_tags TEXT,
-                    genres TEXT, mood TEXT, style TEXT, lastfm_playcount INTEGER,
-                    spotify_album_id TEXT, itunes_album_id TEXT, deezer_id TEXT);
-                CREATE TABLE tracks (
-                    id INTEGER PRIMARY KEY, album_id INTEGER, artist_id INTEGER,
-                    title TEXT, track_number INTEGER, duration INTEGER);
+                CREATE TABLE lib2_albums (
+                    id INTEGER PRIMARY KEY, primary_artist_id INTEGER, title TEXT,
+                    image_url TEXT, release_date TEXT, enrichment TEXT,
+                    genres TEXT, mood TEXT, style TEXT,
+                    spotify_id TEXT, musicbrainz_id TEXT, external_ids TEXT);
+                CREATE TABLE lib2_tracks (
+                    id INTEGER PRIMARY KEY, album_id INTEGER,
+                    title TEXT, track_number INTEGER, duration INTEGER,
+                    track_artist TEXT);
+                CREATE TABLE lib2_track_files (
+                    id INTEGER PRIMARY KEY, track_id INTEGER, path TEXT,
+                    is_primary INTEGER DEFAULT 1, file_state TEXT DEFAULT 'active');
                 CREATE TABLE discovery_pool (
                     id INTEGER PRIMARY KEY, source TEXT, spotify_track_id TEXT,
                     itunes_track_id TEXT, track_name TEXT, artist_name TEXT,
@@ -57,11 +79,22 @@ def db(tmp_path):
 def _seed_artist(db, aid, name, **tags):
     with db._get_connection() as conn:
         conn.execute(
-            "INSERT INTO artists (id, name, lastfm_tags, genres, mood, style)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            (aid, name, tags.get('lastfm_tags'), tags.get('genres'),
-             tags.get('mood'), tags.get('style')))
+            "INSERT INTO lib2_artists (id, name, name_key, enrichment,"
+            " genres, mood, style) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (aid, name, name.lower(), _enrichment(tags.get('lastfm_tags')),
+             tags.get('genres'), tags.get('mood'), tags.get('style')))
         conn.commit()
+
+
+def _own(conn, track_id, path=None):
+    """Give a catalogued recording the live file row that makes it OWNED.
+
+    v2 keeps discography and wishlist rows beside the owned ones, where the
+    legacy tables this replaces WERE the owned library by construction.
+    """
+    conn.execute(
+        "INSERT INTO lib2_track_files (track_id, path, is_primary, file_state)"
+        " VALUES (?, ?, 1, 'active')", (track_id, path or f"/m/{track_id}.flac"))
 
 
 def _seed_plays(db, artist, title, album, month, count, year=2025):
@@ -109,10 +142,13 @@ class TestRewind:
         monkeypatch.setattr(sv, '_normalize_art', lambda u: f"norm:{u}" if u else None)
         _seed_artist(db, 1, 'Kesha')
         with db._get_connection() as conn:
-            conn.execute("INSERT INTO albums (id, artist_id, title, thumb_url)"
-                         " VALUES (10, 1, 'Rainbow', '/library/metadata/1/thumb')")
-            conn.execute("INSERT INTO tracks (album_id, artist_id, title, duration)"
-                         " VALUES (10, 1, 'Praying', 240)")
+            conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title,"
+                         " image_url) VALUES (10, 1, 'Rainbow',"
+                         " '/library/metadata/1/thumb')")
+            # v2 stores duration in MILLIseconds; legacy stored seconds.
+            conn.execute("INSERT INTO lib2_tracks (id, album_id, title, duration)"
+                         " VALUES (100, 10, 'Praying', 240000)")
+            _own(conn, 100)
             conn.commit()
         _seed_plays(db, 'Kesha', 'Praying', 'Rainbow', month=7, count=3)
         row = sv.rewind_tracks(db, [7])[0]
@@ -123,10 +159,12 @@ class TestRewind:
         monkeypatch.setattr(sv, '_normalize_art', lambda u: u)
         _seed_artist(db, 1, 'Bad Bunny')
         with db._get_connection() as conn:
-            conn.execute("INSERT INTO albums (id, artist_id, title, thumb_url)"
-                         " VALUES (10, 1, 'Un Verano Sin Ti', 'https://art/verano.jpg')")
-            conn.execute("INSERT INTO tracks (album_id, artist_id, title, duration)"
-                         " VALUES (10, 1, 'Moscow Mule', 200)")
+            conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title,"
+                         " image_url) VALUES (10, 1, 'Un Verano Sin Ti',"
+                         " 'https://art/verano.jpg')")
+            conn.execute("INSERT INTO lib2_tracks (id, album_id, title, duration)"
+                         " VALUES (100, 10, 'Moscow Mule', 200000)")
+            _own(conn, 100)
             conn.commit()
         _seed_plays(db, 'Bad Bunny, Jhayco', 'DAKITI', 'DAKITI', month=6, count=4)
         row = sv.rewind_tracks(db, [6])[0]
@@ -139,8 +177,9 @@ class TestVibeArtistNames:
         _seed_artist(db, 2, 'Album Tagged')
         _seed_artist(db, 3, 'Nothing Seasonal', lastfm_tags='["metal"]')
         with db._get_connection() as conn:
-            conn.execute("INSERT INTO albums (artist_id, title, lastfm_tags)"
-                         " VALUES (2, 'Beach Days', '[\"tropical\"]')")
+            conn.execute("INSERT INTO lib2_albums (primary_artist_id, title,"
+                         " enrichment) VALUES (2, 'Beach Days', ?)",
+                         (_enrichment(["tropical"]),))
             conn.commit()
         names = sv._vibe_artist_names(db, 'summer')
         assert names == {'surf rockers', 'album tagged'}
@@ -178,17 +217,20 @@ class TestVibeOwnedTracks:
         _seed_artist(db, 1, 'Chill Act')
         with db._get_connection() as conn:
             conn.execute(
-                "INSERT INTO albums (id, artist_id, title, thumb_url, lastfm_tags,"
-                " lastfm_playcount) VALUES (10, 1, 'Chill Album', 'https://a.jpg',"
-                " '[\"feel good\"]', 500)")
+                "INSERT INTO lib2_albums (id, primary_artist_id, title, image_url,"
+                " enrichment) VALUES (10, 1, 'Chill Album', 'https://a.jpg', ?)",
+                (_enrichment(["feel good"], playcount=500),))
             for i in range(5):
-                conn.execute("INSERT INTO tracks (album_id, artist_id, title,"
-                             " track_number, duration) VALUES (10, 1, ?, ?, 100)",
-                             (f'Track {i}', i + 1))
-            conn.execute("INSERT INTO albums (id, artist_id, title, lastfm_tags)"
-                         " VALUES (11, 1, 'Metal Album', '[\"metal\"]')")
-            conn.execute("INSERT INTO tracks (album_id, artist_id, title)"
-                         " VALUES (11, 1, 'Doom')")
+                conn.execute("INSERT INTO lib2_tracks (id, album_id, title,"
+                             " track_number, duration) VALUES (?, 10, ?, ?, 100000)",
+                             (100 + i, f'Track {i}', i + 1))
+                _own(conn, 100 + i)
+            conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title,"
+                         " enrichment) VALUES (11, 1, 'Metal Album', ?)",
+                         (_enrichment(["metal"]),))
+            conn.execute("INSERT INTO lib2_tracks (id, album_id, title)"
+                         " VALUES (200, 11, 'Doom')")
+            _own(conn, 200)
             conn.commit()
         rows = sv.vibe_owned_tracks(db, 'summer')
         assert [r['track_name'] for r in rows] == ['Track 0', 'Track 1']
@@ -203,15 +245,26 @@ class TestVibeLibraryAlbums:
         _seed_artist(db, 2, 'Surfy')
         with db._get_connection() as conn:
             # played this window, has a spotify id -> leg a
-            conn.execute("INSERT INTO albums (id, artist_id, title, thumb_url,"
-                         " spotify_album_id) VALUES (10, 1, 'Rainbow', 'https://r.jpg', 'sp10')")
+            conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title,"
+                         " image_url, spotify_id)"
+                         " VALUES (10, 1, 'Rainbow', 'https://r.jpg', 'sp10')")
+            conn.execute("INSERT INTO lib2_tracks (id, album_id, title)"
+                         " VALUES (100, 10, 'Praying')")
+            _own(conn, 100)
             # vibe tagged, has an id -> leg b
-            conn.execute("INSERT INTO albums (id, artist_id, title, lastfm_tags,"
-                         " spotify_album_id, lastfm_playcount)"
-                         " VALUES (11, 2, 'Waves', '[\"surf\"]', 'sp11', 5)")
+            conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title,"
+                         " enrichment, spotify_id) VALUES (11, 2, 'Waves', ?, 'sp11')",
+                         (_enrichment(["surf"], playcount=5),))
+            conn.execute("INSERT INTO lib2_tracks (id, album_id, title)"
+                         " VALUES (110, 11, 'Wave One')")
+            _own(conn, 110)
             # vibe tagged, NO id -> excluded, the shelf click fetches by id
-            conn.execute("INSERT INTO albums (id, artist_id, title, lastfm_tags)"
-                         " VALUES (12, 2, 'No Id', '[\"surf\"]')")
+            conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title,"
+                         " enrichment) VALUES (12, 2, 'No Id', ?)",
+                         (_enrichment(["surf"]),))
+            conn.execute("INSERT INTO lib2_tracks (id, album_id, title)"
+                         " VALUES (120, 12, 'Nameless')")
+            _own(conn, 120)
             conn.commit()
         _seed_plays(db, 'Kesha', 'Praying', 'Rainbow', month=7, count=3)
         albums = sv.vibe_library_albums(db, 'summer', [6, 7, 8], 'spotify')
@@ -225,8 +278,13 @@ class TestVibeLibraryAlbums:
         monkeypatch.setattr(sv, '_normalize_art', lambda u: u)
         _seed_artist(db, 1, 'Surfy')
         with db._get_connection() as conn:
-            conn.execute("INSERT INTO albums (id, artist_id, title, lastfm_tags,"
-                         " itunes_album_id) VALUES (10, 1, 'Waves', '[\"surf\"]', 'it10')")
+            conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title,"
+                         " enrichment, external_ids)"
+                         " VALUES (10, 1, 'Waves', ?, '{\"itunes\": \"it10\"}')",
+                         (_enrichment(["surf"]),))
+            conn.execute("INSERT INTO lib2_tracks (id, album_id, title)"
+                         " VALUES (100, 10, 'Wave One')")
+            _own(conn, 100)
             conn.commit()
         albums = sv.vibe_library_albums(db, 'summer', [6], 'itunes')
         assert [a['spotify_album_id'] for a in albums] == ['it10']

@@ -11,6 +11,7 @@ import os
 
 from database.music_database import MusicDatabase
 from core.soulsync_client import _read_tags
+from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
 
 
 def test_read_tags_estimates_opus_bitrate_without_header(tmp_path, monkeypatch):
@@ -34,21 +35,16 @@ def test_artist_full_detail_fills_opus_bitrate_from_size_and_duration(tmp_path):
     enhanced payload must still show the average so the table is not a dash."""
     db = MusicDatabase(os.path.join(tmp_path, "t.db"))
     conn = db._get_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO artists (id, name, server_source) VALUES ('1', 'Skyforest', 'soulsync')"
-    )
-    cur.execute("INSERT INTO albums (id, artist_id, title) VALUES ('a1', '1', 'Autumn')")
-    cur.execute(
-        """
-        INSERT INTO tracks (id, album_id, artist_id, title, duration, file_path, bitrate, file_size)
-        VALUES ('t1', 'a1', '1', 'Autumnal Embrace', 2000, 'Autumnal Embrace.opus', 0, 40000)
-        """
-    )
+    artist_id = seed_artist(conn, server_id="ar-1", name="Skyforest", server_source="soulsync")
+    album_id = seed_album(conn, server_id="al-1", title="Autumn", artist_id=artist_id,
+                          server_source="soulsync")
+    seed_track(conn, server_id="tr-1", title="Autumnal Embrace", album_id=album_id,
+              artist_id=artist_id, server_source="soulsync", duration=2000,
+              file_path="Autumnal Embrace.opus", bitrate=0, file_size=40000)
     conn.commit()
     conn.close()
 
-    result = db.get_artist_full_detail("1")
+    result = db.get_artist_full_detail(artist_id)
     assert result["success"] is True
     track = result["albums"][0]["tracks"][0]
     assert track["bitrate"] == 160

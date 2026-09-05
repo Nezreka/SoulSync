@@ -257,7 +257,14 @@ def _boot_auto_import_worker():
             automation_engine=automation_engine,
         )
         if config_manager.get('auto_import.enabled', False):
-            auto_import_worker.start()
+            # NOT a bare start(): on an installation still migrating into lib2
+            # the auto-importer would import against a half-built catalogue.
+            # defer_or_start holds it behind the upgrade barrier, the same gate
+            # every enrichment worker goes through (and api/auto_import.py's
+            # start endpoint).
+            from core.library2.migration_gate import defer_or_start
+
+            defer_or_start(auto_import_worker, _ai_db)
             logger.info("Auto-import worker started")
         else:
             logger.info("Auto-import worker initialized (disabled)")

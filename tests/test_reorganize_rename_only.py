@@ -49,6 +49,18 @@ def test_rename_same_path_is_noop_ok(tmp_path):
     assert ok and f.exists()
 
 
+def test_rename_absolute_and_relative_alias_is_noop_ok(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    f = tmp_path / "Transfer" / "x.flac"
+    f.parent.mkdir()
+    f.write_bytes(b"a")
+
+    ok, err = _rename_track_in_place(str(f), "./Transfer/x.flac")
+
+    assert ok and err is None
+    assert f.exists() and f.read_bytes() == b"a"
+
+
 def test_rename_carries_sibling_format_file(tmp_path):
     # lossy-copy pair: canonical .flac + sibling .opus in the same folder
     src = tmp_path / "old" / "01 - Song.flac"
@@ -62,6 +74,49 @@ def test_rename_carries_sibling_format_file(tmp_path):
     assert ok
     assert dst.exists()
     assert (tmp_path / "new" / "Song.opus").exists()    # sibling came along, renamed stem
+
+
+def test_rename_carries_the_track_s_lyrics_sidecar(tmp_path):
+    """A .lrc is part of the track, not release junk — SoulSync writes it
+    itself. The import path has carried it since lilbob5769's report
+    (`move_companion_sidecars`); reorganize moved the audio and stranded the
+    lyrics in the old folder, because it only ever looked for sibling AUDIO.
+
+    Same helper as the import on purpose: a reorganized album and a freshly
+    downloaded one have to end up with the same files next to each other.
+    """
+    src = tmp_path / "old" / "01 - Song.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"flac")
+    (tmp_path / "old" / "01 - Song.lrc").write_text("[00:01.00] la")
+    dst = tmp_path / "new" / "Song.flac"
+
+    ok, _ = _rename_track_in_place(str(src), str(dst))
+
+    assert ok
+    assert (tmp_path / "new" / "Song.lrc").read_text() == "[00:01.00] la"
+    assert not (tmp_path / "old" / "01 - Song.lrc").exists()
+
+
+def test_a_sidecar_problem_never_fails_the_move(tmp_path, monkeypatch):
+    """The audio is already at its destination by the time sidecars are
+    considered. Reporting a failure there would tell the caller the track did
+    not move, and the catalogue would keep pointing at a path nothing is at."""
+    src = tmp_path / "old" / "01 - Song.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"flac")
+    (tmp_path / "old" / "01 - Song.lrc").write_text("la")
+    dst = tmp_path / "new" / "Song.flac"
+
+    def _boom(*_a, **_k):
+        raise OSError("sidecar volume went away")
+
+    monkeypatch.setattr("core.imports.file_ops.move_companion_sidecars", _boom)
+
+    ok, err = _rename_track_in_place(str(src), str(dst))
+
+    assert ok and err is None
+    assert dst.exists()
 
 
 # ── reorganize_album_rename_only (fake preview injected) ──

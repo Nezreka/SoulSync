@@ -18,9 +18,13 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.discogs_client import DiscogsClient, _discogs_album_kind, _tag_discogs_album_id
-from core.worker_utils import accept_artist_match, interruptible_sleep, set_album_api_track_count
+from core.worker_utils import interruptible_sleep
 
 logger = get_logger("discogs_worker")
+
+# Discogs exposes artists and releases, not recordings — there is no track
+# endpoint to call.
+_ENTITY_TYPES = ('artist', 'album')
 
 
 def count_discogs_real_tracks(tracklist) -> int:
@@ -168,68 +172,27 @@ class DiscogsWorker:
         logger.info("Discogs worker thread finished")
 
     def _get_next_item(self) -> Optional[Dict[str, Any]]:
-        """Get next item to process (artists → albums → retries)."""
+        """Get next item to process from the Library-v2 catalogue.
+
+        Priority, retry window and the pinned-group override all live in
+        ``core.library2.worker_queue`` — the same rules every enrichment worker
+        uses (docs §32.3.1 stage 2). Discogs has no track endpoint, so tracks are
+        never offered: attempting them would mark every one ``not_found`` and
+        count that as progress.
+        """
         conn = None
         try:
+            from core.library2.worker_queue import next_pending
+            from core.worker_utils import read_enrichment_priority
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            # Pinned-group override (Manage Enrichment Workers): process one
-            # entity type first, then fall through to the normal chain. Discogs
-            # has no track endpoint, so only artist/album are honored.
-            from core.worker_utils import read_enrichment_priority, priority_pending_item
             _prio = read_enrichment_priority('discogs')
-            if _prio in ('artist', 'album'):
-                _pi = priority_pending_item(cursor, 'discogs', _prio)
-                if _pi:
-                    return _pi
-
-            # Priority 1: Unattempted artists
-            cursor.execute("""
-                SELECT id, name FROM artists
-                WHERE discogs_match_status IS NULL AND id IS NOT NULL
-                ORDER BY id ASC LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            # Priority 2: Unattempted albums
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name, ar.discogs_id AS artist_discogs_id
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.discogs_match_status IS NULL AND a.id IS NOT NULL
-                ORDER BY a.id ASC LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_discogs_id': row[3]}
-
-            # Priority 3: Retry 'not_found' artists after retry_days
-            not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
-            cursor.execute("""
-                SELECT id, name FROM artists
-                WHERE discogs_match_status IN ('not_found', 'error') AND discogs_last_attempted < ?
-                ORDER BY discogs_last_attempted ASC LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            # Priority 4: Retry 'not_found' albums
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name, ar.discogs_id AS artist_discogs_id
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.discogs_match_status IN ('not_found', 'error') AND a.discogs_last_attempted < ?
-                ORDER BY a.discogs_last_attempted ASC LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_discogs_id': row[3]}
-
-            return None
+            return next_pending(
+                conn, 'discogs',
+                retry_after_days=self.retry_days,
+                pinned=_prio if _prio in _ENTITY_TYPES else None,
+                entity_types=_ENTITY_TYPES,
+            )
         except Exception as e:
             logger.error(f"Error getting next Discogs item: {e}")
             return None
@@ -239,17 +202,18 @@ class DiscogsWorker:
 
     def _count_pending_items(self) -> int:
         """Count items still needing Discogs enrichment."""
+        conn = None
         try:
+            from core.library2.worker_queue import pending_count
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM artists WHERE discogs_match_status IS NULL AND id IS NOT NULL")
-            artists = cursor.fetchone()[0]
-            cursor.execute("SELECT COUNT(*) FROM albums WHERE discogs_match_status IS NULL AND id IS NOT NULL")
-            albums = cursor.fetchone()[0]
-            conn.close()
-            return artists + albums
+            return pending_count(conn, 'discogs', retry_after_days=self.retry_days,
+                                 entity_types=_ENTITY_TYPES)
         except Exception:
             return 0
+        finally:
+            if conn:
+                conn.close()
 
     def _normalize_name(self, name: str) -> str:
         """Normalize name for comparison."""
@@ -265,12 +229,9 @@ class DiscogsWorker:
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
         if not norm_query or not norm_result:
-            # Titles that normalize to NOTHING ("(Intro)", "[Skit]", "!!!",
-            # "...") would compare at SequenceMatcher ratio 1.0 against any
-            # other such title — fall back to exact raw comparison instead.
-            raw_q = (query_name or '').strip().lower()
-            raw_r = (result_name or '').strip().lower()
-            return bool(raw_q) and raw_q == raw_r
+            raw_query = (query_name or '').strip().lower()
+            raw_result = (result_name or '').strip().lower()
+            return bool(raw_query) and raw_query == raw_result
         similarity = SequenceMatcher(None, norm_query, norm_result).ratio()
         return similarity >= self.name_similarity_threshold
 
@@ -308,7 +269,7 @@ class DiscogsWorker:
             if item_type == 'artist':
                 self._search_and_match_artist(item_id, item_name)
             elif item_type == 'album':
-                self._search_and_match_album(item_id, item_name, item.get('artist', ''), item.get('artist_discogs_id'))
+                self._search_and_match_album(item_id, item_name, item.get('artist', ''))
 
         except Exception as e:
             logger.error(f"Error processing {item.get('type')} #{item.get('id')}: {e}")
@@ -319,17 +280,22 @@ class DiscogsWorker:
                 logger.debug("mark item status error failed: %s", e)
 
     def _get_existing_id(self, entity_type: str, entity_id) -> Optional[str]:
-        """Check if entity already has a discogs_id."""
-        table = 'artists' if entity_type == 'artist' else 'albums'
+        """The Discogs id already stored for this entity, if any.
+
+        Set by a manual match or an earlier run; honoring it is what keeps a
+        manual match from being searched over (issue #501).
+        """
+        conn = None
         try:
+            from core.library2.worker_support import stored_provider_id
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT discogs_id FROM {table} WHERE id = ?", (entity_id,))
-            row = cursor.fetchone()
-            conn.close()
-            return row[0] if row and row[0] else None
+            return stored_provider_id(conn, entity_type, entity_id, 'discogs')
         except Exception:
             return None
+        finally:
+            if conn:
+                conn.close()
 
     def _search_and_match_artist(self, artist_id, artist_name: str):
         """Search Discogs for an artist and store metadata if matched."""
@@ -341,10 +307,18 @@ class DiscogsWorker:
 
         # Find best match by name similarity (skipping ids already claimed by
         # a differently-named artist, so we don't create a shared/duplicate id).
-        for result in results:
-            ok, reason = accept_artist_match(
-                self.db, 'discogs_id', result.id, artist_id, artist_name, result.name,
-            )
+        from core.library2.worker_support import accept_artist_match
+
+        conn = self.db._get_connection()
+        try:
+            gate = [
+                (result, *accept_artist_match(
+                    conn, 'discogs', result.id, artist_id, artist_name, result.name))
+                for result in results
+            ]
+        finally:
+            conn.close()
+        for result, ok, _reason in gate:
             if ok:
                 # Fetch full artist detail (uses cache)
                 data = self.client._fetch_and_cache_artist(result.id)
@@ -358,7 +332,7 @@ class DiscogsWorker:
         self.stats['not_found'] += 1
         logger.debug(f"No confident match for artist '{artist_name}'")
 
-    def _search_and_match_album(self, album_id, album_name: str, artist_name: str, artist_discogs_id: str = None):
+    def _search_and_match_album(self, album_id, album_name: str, artist_name: str):
         """Search Discogs for an album and store metadata if matched."""
         # Search with artist + album for better precision
         query = f"{artist_name} {album_name}" if artist_name else album_name
@@ -387,12 +361,11 @@ class DiscogsWorker:
         conn = None
         try:
             conn = self.db._get_connection()
-            cursor = conn.cursor()
 
             discogs_id = str(data.get('id', ''))
             bio = data.get('profile', '')
-            members = json.dumps([m.get('name', '') for m in data.get('members', [])]) if data.get('members') else None
-            urls = json.dumps(data.get('urls', [])) if data.get('urls') else None
+            members = [m.get('name', '') for m in data.get('members', [])] or None
+            urls = data.get('urls') or None
 
             # Get image
             image_url = None
@@ -401,32 +374,25 @@ class DiscogsWorker:
                 primary = next((img for img in images if img.get('type') == 'primary'), None)
                 image_url = (primary or images[0]).get('uri')
 
-            cursor.execute("""
-                UPDATE artists SET
-                    discogs_id = ?,
-                    discogs_match_status = 'matched',
-                    discogs_last_attempted = CURRENT_TIMESTAMP,
-                    discogs_bio = ?,
-                    discogs_members = ?,
-                    discogs_urls = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (discogs_id, bio, members, urls, artist_id))
+            # Library v2 is the catalogue (docs §32.3.1 stage 2). The payload keys
+            # are the mirror's own declaration for Discogs, so a natively written
+            # row is indistinguishable from a mirrored one.
+            from core.library2.provider_attempts import record_attempt
+            from core.library2.provider_writes import write_provider_enrichment
 
-            # Backfill summary/bio if empty (AudioDB backfill)
+            backfill = {}
             if bio:
-                cursor.execute("""
-                    UPDATE artists SET summary = ?
-                    WHERE id = ? AND (summary IS NULL OR summary = '')
-                """, (bio, artist_id))
-
-            # Backfill thumb_url if empty
+                backfill['summary'] = bio
             if image_url:
-                cursor.execute("""
-                    UPDATE artists SET thumb_url = ?
-                    WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
-                """, (image_url, artist_id))
-
+                backfill['image_url'] = image_url
+            write_provider_enrichment(
+                conn, entity_type='artist', entity_id=artist_id, service='discogs',
+                payload={'bio': bio or None, 'members': members, 'urls': urls},
+                provider_id=discogs_id,
+                backfill=backfill or None,
+            )
+            record_attempt(conn, entity_type='artist', entity_id=artist_id,
+                           service='discogs', status='matched')
             conn.commit()
 
         except Exception as e:
@@ -441,13 +407,12 @@ class DiscogsWorker:
         conn = None
         try:
             conn = self.db._get_connection()
-            cursor = conn.cursor()
 
             # Tag the ID with its Discogs type so later re-fetches hit the right
             # endpoint (master vs release share one numeric space).
             discogs_id = _tag_discogs_album_id(data.get('id', ''), _discogs_album_kind(data))
-            genres = json.dumps(data.get('genres', []))
-            styles = json.dumps(data.get('styles', []))
+            genres = data.get('genres') or None
+            styles = data.get('styles') or None
             labels = data.get('labels', [])
             label = labels[0].get('name', '') if labels else ''
             catno = labels[0].get('catno', '') if labels else ''
@@ -466,50 +431,41 @@ class DiscogsWorker:
                 primary = next((img for img in images if img.get('type') == 'primary'), None)
                 image_url = (primary or images[0]).get('uri')
 
-            cursor.execute("""
-                UPDATE albums SET
-                    discogs_id = ?,
-                    discogs_match_status = 'matched',
-                    discogs_last_attempted = CURRENT_TIMESTAMP,
-                    discogs_genres = ?,
-                    discogs_styles = ?,
-                    discogs_label = ?,
-                    discogs_catno = ?,
-                    discogs_country = ?,
-                    discogs_rating = ?,
-                    discogs_rating_count = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (discogs_id, genres, styles, label, catno, country, rating_avg, rating_count, album_id))
+            from core.library2.provider_attempts import record_attempt
+            from core.library2.provider_writes import write_provider_enrichment
+            from core.library2.worker_support import set_expected_track_count
 
-            # Backfill genres if empty
-            if data.get('genres'):
+            backfill = {}
+            if image_url:
+                backfill['image_url'] = image_url
+            if genres:
                 from core.genre_filter import filter_genres
                 from core.settings import config_manager as _cfg
-                _filtered = filter_genres(data.get('genres', []), _cfg)
+                _filtered = filter_genres(list(genres), _cfg)
                 if _filtered:
-                    cursor.execute("""
-                        UPDATE albums SET genres = ?
-                        WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
-                    """, (json.dumps(_filtered), album_id))
-
-            # Backfill thumb_url if empty
-            if image_url:
-                cursor.execute("""
-                    UPDATE albums SET thumb_url = ?
-                    WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
-                """, (image_url, album_id))
+                    backfill['genres'] = json.dumps(_filtered)
+            write_provider_enrichment(
+                conn, entity_type='album', entity_id=album_id, service='discogs',
+                payload={
+                    'genres': genres, 'styles': styles,
+                    'label': label or None, 'catno': catno or None,
+                    'country': country or None,
+                    'rating': rating_avg or None,
+                    'rating_count': rating_count or None,
+                },
+                provider_id=discogs_id,
+                backfill=backfill or None,
+            )
 
             # Cache the authoritative expected track count for the Album
             # Completeness repair job. See `count_discogs_real_tracks`
             # for why we accept both `type_ == 'track'` and empty `type_`
             # (kettui's PR #374 review — narrower filter undercounted).
-            set_album_api_track_count(
-                cursor,
-                album_id,
-                count_discogs_real_tracks(data.get('tracklist')),
-            )
+            set_expected_track_count(
+                conn, album_id, count_discogs_real_tracks(data.get('tracklist')))
 
+            record_attempt(conn, entity_type='album', entity_id=album_id,
+                           service='discogs', status='matched')
             conn.commit()
 
         except Exception as e:
@@ -520,20 +476,23 @@ class DiscogsWorker:
                 conn.close()
 
     def _mark_status(self, entity_type: str, entity_id, status: str):
-        """Mark entity's Discogs match status."""
-        table = {'artist': 'artists', 'album': 'albums'}.get(entity_type)
-        if not table:
-            return
+        """Record the outcome of an attempt in the provider ledger.
+
+        Replaces the legacy `discogs_match_status`/`_last_attempted` column pair.
+        Both `not_found` and `error` become due again after the retry
+        window; a source-wide outage is handled by the worker's own backoff
+        before an attempt is ever recorded, so it cannot become a tight loop.
+        """
+        conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                UPDATE {table} SET
-                    discogs_match_status = ?,
-                    discogs_last_attempted = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (status, entity_id))
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='discogs', status=status)
             conn.commit()
-            conn.close()
         except Exception as e:
             logger.error(f"Error marking {entity_type} #{entity_id} status: {e}")
+        finally:
+            if conn:
+                conn.close()

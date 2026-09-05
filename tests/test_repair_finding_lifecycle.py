@@ -126,7 +126,9 @@ def test_pending_rescan_refreshes_the_snapshot_instead_of_skipping(worker):
     rows = _rows(worker)
     assert len(rows) == 1, "a rescan must not duplicate the row"
     assert rows[0][2] == 'still gone, now 3 days'
-    assert json.loads(rows[0][3]) == {'v': 2}
+    refreshed = json.loads(rows[0][3])
+    assert refreshed['v'] == 2
+    assert refreshed['_dedup_fingerprint']
 
 
 def test_dismissed_suppresses_forever(worker):

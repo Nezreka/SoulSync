@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as LibraryV2RouteImport } from './routes/library-v2'
 import { Route as SplatRouteImport } from './routes/$'
 import { Route as WishlistRouteRouteImport } from './routes/wishlist/route'
 import { Route as WatchlistRouteRouteImport } from './routes/watchlist/route'
@@ -32,6 +33,11 @@ import { Route as ImportAutoRouteImport } from './routes/import/auto'
 import { Route as ImportAlbumRouteImport } from './routes/import/album'
 import { Route as ArtistDetailSourceIdRouteImport } from './routes/artist-detail/$source/$id'
 
+const LibraryV2Route = LibraryV2RouteImport.update({
+  id: '/library-v2',
+  path: '/library-v2',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SplatRoute = SplatRouteImport.update({
   id: '/$',
   path: '/$',
@@ -160,6 +166,7 @@ export interface FileRoutesByFullPath {
   '/watchlist': typeof WatchlistRouteRoute
   '/wishlist': typeof WishlistRouteRoute
   '/$': typeof SplatRoute
+  '/library-v2': typeof LibraryV2Route
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
@@ -183,6 +190,7 @@ export interface FileRoutesByTo {
   '/watchlist': typeof WatchlistRouteRoute
   '/wishlist': typeof WishlistRouteRoute
   '/$': typeof SplatRoute
+  '/library-v2': typeof LibraryV2Route
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
@@ -208,6 +216,7 @@ export interface FileRoutesById {
   '/watchlist': typeof WatchlistRouteRoute
   '/wishlist': typeof WishlistRouteRoute
   '/$': typeof SplatRoute
+  '/library-v2': typeof LibraryV2Route
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
@@ -234,6 +243,7 @@ export interface FileRouteTypes {
     | '/watchlist'
     | '/wishlist'
     | '/$'
+    | '/library-v2'
     | '/import/album'
     | '/import/auto'
     | '/import/singles'
@@ -257,6 +267,7 @@ export interface FileRouteTypes {
     | '/watchlist'
     | '/wishlist'
     | '/$'
+    | '/library-v2'
     | '/import/album'
     | '/import/auto'
     | '/import/singles'
@@ -281,6 +292,7 @@ export interface FileRouteTypes {
     | '/watchlist'
     | '/wishlist'
     | '/$'
+    | '/library-v2'
     | '/import/album'
     | '/import/auto'
     | '/import/singles'
@@ -306,12 +318,20 @@ export interface RootRouteChildren {
   WatchlistRouteRoute: typeof WatchlistRouteRoute
   WishlistRouteRoute: typeof WishlistRouteRoute
   SplatRoute: typeof SplatRoute
+  LibraryV2Route: typeof LibraryV2Route
   LabelDetailIdRoute: typeof LabelDetailIdRoute
   ArtistDetailSourceIdRoute: typeof ArtistDetailSourceIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/library-v2': {
+      id: '/library-v2'
+      path: '/library-v2'
+      fullPath: '/library-v2'
+      preLoaderRoute: typeof LibraryV2RouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/$': {
       id: '/$'
       path: '/$'
@@ -504,6 +524,7 @@ const rootRouteChildren: RootRouteChildren = {
   WatchlistRouteRoute: WatchlistRouteRoute,
   WishlistRouteRoute: WishlistRouteRoute,
   SplatRoute: SplatRoute,
+  LibraryV2Route: LibraryV2Route,
   LabelDetailIdRoute: LabelDetailIdRoute,
   ArtistDetailSourceIdRoute: ArtistDetailSourceIdRoute,
 }

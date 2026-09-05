@@ -519,6 +519,9 @@ function setCurrentProfile(profile) {
 const LEGACY_PROFILE_PAGE_ALIASES = {
     downloads: 'search',
     artists: 'search',
+    // Library v2 became the Library; anything still naming the old route id
+    // resolves to the same permission rather than to an unknown page.
+    'library-v2': 'library',
 };
 
 function normalizeProfilePageId(pageId) {
@@ -1428,8 +1431,7 @@ function updateProfileIndicator() {
         } else if (currentProfile.id === 1) {
             btn.style.display = ''; // Root admin sees all
         } else {
-            const ap = currentProfile.allowed_pages;
-            btn.style.display = (!ap || ap.includes(page)) ? '' : 'none';
+            btn.style.display = isPageAllowed(page) ? '' : 'none';
         }
     });
 
@@ -3017,7 +3019,12 @@ function initializeNavigation() {
 
 const _DEEPLINK_VALID_PAGES = new Set([
     'dashboard', 'sync', 'search', 'discover', 'automations',
-    'library', 'import', 'settings', 'help', 'issues', 'stats', 'watchlist',
+    // iss29-B07: '/library-v2' is a live alias that redirects to '/library'
+    // (query string preserved). It was missing here, so this fallback resolved
+    // a bookmark to it as 'dashboard'. React usually wins the race and the
+    // right page appears anyway — which is exactly what makes the gap easy to
+    // miss and unreliable to depend on.
+    'library', 'library-v2', 'import', 'settings', 'help', 'issues', 'stats', 'watchlist',
     'wishlist', 'active-downloads', 'artist-detail', 'playlist-explorer',
     'hydrabase', 'tools', 'chat'
 ]);
@@ -3034,6 +3041,9 @@ function _getPageFromPath() {
     if (!_DEEPLINK_VALID_PAGES.has(basePage)) return 'dashboard';
     // Context-dependent pages fall back to a sensible parent
     if (basePage === 'playlist-explorer') return 'library';
+    // The alias and its target are the same page as far as the shell chrome
+    // is concerned (iss29-B07).
+    if (basePage === 'library-v2') return 'library';
     return basePage;
 }
 

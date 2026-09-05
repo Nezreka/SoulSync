@@ -64,7 +64,7 @@ import {
   cacheHealthLabel,
   cacheHealthScore,
   findingFilePath,
-  findingFixLabel,
+  findingRowFixLabel,
   findingSeverityIcon,
   findingStatusBadge,
   findingTypeLabel,
@@ -104,6 +104,7 @@ function readStoredPageSize(): number {
 const TYPE_ORPHAN = 'orphan_file';
 const TYPE_DEAD = 'dead_file';
 const TYPE_ACOUSTID = 'acoustid_mismatch';
+const TYPE_RETAG = 'library_retag';
 const TYPE_BACKFILL = 'missing_discography_track';
 const TYPE_QUALITY = 'quality_upgrade';
 
@@ -477,6 +478,13 @@ export function FindingsSurface({
           return;
         }
       }
+      if (type === TYPE_RETAG && !finding.details?.has_manual_conflict) {
+        // Nothing to settle on this row — the plain apply is the whole action.
+      } else if (type === TYPE_RETAG) {
+        fixAction = await prompts.promptRetag(1, 1);
+        if (!fixAction) return;
+        if (fixAction === 'safe') fixAction = null;
+      }
       if (type === TYPE_BACKFILL) {
         const choice = await prompts.promptBackfill(1);
         if (!choice) return;
@@ -486,6 +494,20 @@ export function FindingsSurface({
         }
         // 'add_to_wishlist' falls through with no fix_action — the handler
         // already adds to the wishlist by default.
+      }
+
+      // A finding with no catalogue subject cannot be re-downloaded — the fix
+      // is a plain delete, and unlike every prompt above it has no dialog of
+      // its own to stop at. Confirm it here rather than let one click remove a
+      // file from disk.
+      if (findingRowFixLabel(finding) === 'Delete File') {
+        const confirmed = await window.showConfirmDialog?.({
+          title: 'Delete File',
+          message: `Permanently delete ${findingFilePath(finding) || 'this file'} from disk? It is not in your library, so nothing will be queued to replace it.`,
+          confirmText: 'Delete',
+          destructive: true,
+        });
+        if (!confirmed) return;
       }
 
       setBusyFix((current) => new Set(current).add(finding.id));
@@ -726,6 +748,15 @@ export function FindingsSurface({
           return;
         }
         // 'add_to_wishlist' falls through with no fix_action.
+      } else if (group.finding_type === TYPE_RETAG) {
+        // Two requests wear one button: write the library's values, and write
+        // them even over the fields this user edited by hand. The count comes
+        // with the group so the choice is informed rather than a coin toss.
+        fixAction = await prompts.promptRetag(count, group.manual_conflicts || 0);
+        if (!fixAction) return;
+        // 'safe' IS the default the handler takes with no action at all;
+        // sending it would only add a string nothing reads.
+        if (fixAction === 'safe') fixAction = null;
       } else if (group.finding_type === TYPE_DEAD) {
         fixAction = await prompts.promptDeadFile();
         if (!fixAction) return;
@@ -1329,7 +1360,7 @@ function FindingCard({
 }) {
   const details = finding.details || {};
   const filePath = findingFilePath(finding);
-  const fixLabel = findingFixLabel(finding.finding_type);
+  const fixLabel = findingRowFixLabel(finding);
   const statusBadge = findingStatusBadge(finding.status, finding.user_action);
 
   return (

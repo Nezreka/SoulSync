@@ -109,9 +109,7 @@ describe('AdlClientsTab', () => {
   it('renders three pills with health dots; soulseek opens first', async () => {
     mockAll();
     const { container } = render(<AdlClientsTab />);
-    await waitFor(() =>
-      expect(container.querySelector('.adl-client-dot-ok')).not.toBeNull(),
-    );
+    await waitFor(() => expect(container.querySelector('.adl-client-dot-ok')).not.toBeNull());
     expect(container.querySelectorAll('[data-client-tab]')).toHaveLength(3);
     // soulseek is the active tab: its transfer renders, filename basename first
     expect(container.textContent).toContain('song.flac');
@@ -312,14 +310,11 @@ describe('AdlClientsTab', () => {
     await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
     fireEvent.click(pill(container, 'torrent'));
     await waitFor(() => expect(container.textContent).toContain('Movie (2026)'));
-    const owners = [...container.querySelectorAll('.adl-client-owner')].map(
-      (el) => el.textContent,
-    );
+    const owners = [...container.querySelectorAll('.adl-client-owner')].map((el) => el.textContent);
     expect(owners).toContain('Movie (2026)');
     expect(owners).toContain('external');
   });
 });
-
 
 describe('the toolbar', () => {
   it('search filters the list by name', async () => {

@@ -9,18 +9,14 @@ in one WAL-concurrent read; this pins that method's contract.
 from __future__ import annotations
 
 from database.music_database import MusicDatabase
+from tests.support.catalogue_seed import seed_library_track
 
 
 def _db_with_track(tmp_path, *, title, artist, file_path, server='jellyfin'):
     db = MusicDatabase(str(tmp_path / 'm.db'))
     with db._get_connection() as c:
-        c.execute("INSERT INTO artists (id, name) VALUES (1, ?)", (artist,))
-        c.execute("INSERT INTO albums (id, title, artist_id) VALUES (1, 'Album', 1)")
-        c.execute(
-            "INSERT INTO tracks (id, title, artist_id, album_id, file_path, server_source) "
-            "VALUES (1, ?, 1, 1, ?, ?)",
-            (title, file_path, server),
-        )
+        seed_library_track(c, artist=artist, album='Album', title=title,
+                           file_path=file_path, server_source=server)
         c.commit()
     return db
 
@@ -42,13 +38,12 @@ def test_filters_by_server_source(tmp_path):
 def test_excludes_rows_without_file_path(tmp_path):
     db = MusicDatabase(str(tmp_path / 'm.db'))
     with db._get_connection() as c:
-        c.execute("INSERT INTO artists (id, name) VALUES (1, 'A')")
-        c.execute("INSERT INTO albums (id, title, artist_id) VALUES (1, 'Al', 1)")
-        # one with a path, one without — only the first should come back.
-        c.execute("INSERT INTO tracks (id, title, artist_id, album_id, file_path, server_source) "
-                  "VALUES (1, 'Has Path', 1, 1, '/m/a.flac', 'jellyfin')")
-        c.execute("INSERT INTO tracks (id, title, artist_id, album_id, file_path, server_source) "
-                  "VALUES (2, 'No Path', 1, 1, NULL, 'jellyfin')")
+        # one with a file, one without — only the first should come back.
+        seed_library_track(c, artist='A', album='Al', title='Has Path',
+                           track_server_id='t1', file_path='/m/a.flac',
+                           server_source='jellyfin')
+        seed_library_track(c, artist='A', album='Al', title='No Path',
+                           track_server_id='t2', server_source='jellyfin')
         c.commit()
     rows = db.get_tracks_for_m3u_resolution()
     titles = {r['title'] for r in rows}

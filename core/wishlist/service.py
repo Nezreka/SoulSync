@@ -163,7 +163,7 @@ class WishlistService:
             logger.error("No track data provided for wishlist add")
             return self.database._wishlist_outcome("rejected", reason="no track data")
 
-        return self.database.add_to_wishlist_detailed(
+        outcome = self.database.add_to_wishlist_detailed(
             track_data=track_data,
             failure_reason=failure_reason,
             source_type=source_type,
@@ -172,6 +172,24 @@ class WishlistService:
             user_initiated=user_initiated,
             quality_profile_id=quality_profile_id,
         )
+        if outcome.get("applied"):
+            # dd28-12: the Wishlist→lib2 edge only existed for REMOVALS. A
+            # track queued here (failed-download dialog, retry logic, Artist
+            # Enhance) that maps onto a lib2 row but owns no lib2 rule making
+            # it wanted landed in the hourly reconciler's prune set and was
+            # dropped again within the hour — so it silently stopped being
+            # retried, the exact opposite of what queueing it meant.
+            try:
+                from core.settings import config_manager
+                from core.library2.monitor_sync import sync_wishlist_addition
+                sync_wishlist_addition(
+                    self.database, config_manager,
+                    [{"track_data": track_data, "source_info": source_context or {}}],
+                    profile_id=profile_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - never fail the add
+                logger.debug("wishlist→library monitor sync skipped: %s", exc)
+        return outcome
 
     def add_spotify_track_to_wishlist(
         self,

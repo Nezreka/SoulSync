@@ -304,7 +304,10 @@ export function SearchResults({
                 // renderCompactSection stamped these attributes on EVERY artist
                 // card with an id, and a library artist whose server has no
                 // thumb is exactly the case that needs resolving.
-                artistId={artist.id}
+                // iss29-B04c: a lib2-native row's id is not resolvable by the
+                // provider image endpoint — withholding it keeps the
+                // placeholder instead of another artist's face.
+                artistId={artist.image_is_native ? undefined : artist.id}
                 artistName={artist.name}
               />
             ))}

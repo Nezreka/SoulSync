@@ -60,6 +60,7 @@ SOULSYNC_VERSION = None
 _automatic_wishlist_cleanup_after_db_update = None
 _reconcile_after_scan = None
 _update_automation_progress = None
+_restart_library_v2_migration = None
 # rebindable worker fleet - injected as getters
 _amazon_worker = None
 _audiodb_worker = None
@@ -354,22 +355,20 @@ def _resume_workers_after_scan():
     _workers_paused_by_scan = set()
 
 def _run_soulsync_full_refresh():
-    """Full refresh for SoulSync standalone — wipe all soulsync records, re-scan output folder, rebuild library from file tags."""
-    try:
-        from core.soulsync_client import _read_tags, _stable_id
+    """Re-index the standalone output folder through the native import writer.
 
+    This is an explicit local import/recovery operation, not a media-server
+    sync.  It never clears catalogue rows or server mappings up front.
+    """
+    try:
         transfer_path = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
         if not os.path.isdir(transfer_path):
             _db_update_error_callback(f"Output folder not found: {transfer_path}")
             return
 
-        logger.info(f"[SoulSync Full Refresh] Starting — clearing soulsync data, re-scanning: {transfer_path}")
-        _db_update_phase_callback('Clearing library...')
-
+        logger.info("[SoulSync Full Refresh] Re-indexing local files: %s", transfer_path)
         db = get_database()
-        db.clear_server_data('soulsync')
 
-        # Collect all audio files
         _db_update_phase_callback('Scanning output folder...')
         audio_exts = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif', '.ape'}
         audio_files = []
@@ -379,97 +378,78 @@ def _run_soulsync_full_refresh():
                     audio_files.append(os.path.join(root, fname))
 
         total = len(audio_files)
-        logger.info(f"[SoulSync Full Refresh] Found {total} audio files, rebuilding library...")
-        if total == 0:
-            _db_update_finished_callback(0, 0, 0, 0, 0)
-            return
-
-        # Group files by artist → album using tags
-        _db_update_phase_callback(f'Reading tags from {total} files...')
-        artists_map = {}  # artist_name → { albums_map: { album_name → [tracks] } }
-        processed = 0
-
-        for file_path in audio_files:
-            tags = _read_tags(file_path)
-            artist_name = tags.get('album_artist') or tags.get('artist') or 'Unknown Artist'
-            album_name = tags.get('album') or 'Unknown Album'
-
-            if artist_name not in artists_map:
-                artists_map[artist_name] = {}
-            if album_name not in artists_map[artist_name]:
-                artists_map[artist_name][album_name] = []
-            artists_map[artist_name][album_name].append((file_path, tags))
-
-            processed += 1
-            if processed % 50 == 0:
-                _db_update_phase_callback(f'Reading tags... {processed}/{total}')
-
-        # Write to DB
-        _db_update_phase_callback('Writing to database...')
+        logger.info("[SoulSync Full Refresh] Found %d audio files", total)
+        _db_update_phase_callback(f'Importing local index from {total} files...')
         successful = 0
         failed = 0
+        from core.library2.autolink import link_download_into_library_v2
+        for index, file_path in enumerate(audio_files, 1):
+            try:
+                file_id = link_download_into_library_v2(
+                    {
+                        '_final_processed_path': file_path,
+                        '_download_username': 'standalone_refresh',
+                        'username': 'standalone_refresh',
+                    },
+                    raise_on_error=True,
+                )
+                if file_id is None:
+                    raise RuntimeError("native import returned no file row")
+                successful += 1
+            except Exception as exc:
+                failed += 1
+                logger.error("[SoulSync Full Refresh] Could not import %s: %s", file_path, exc)
+            if index % 50 == 0:
+                _db_update_phase_callback(f'Importing local index... {index}/{total}')
 
-        try:
-            with db._get_connection() as conn:
-                cursor = conn.cursor()
+        # Existing rows that disappeared enter the normal two-scan missing
+        # lifecycle.  They are never hard-deleted by this recovery scan.
+        scoped_file_ids = []
+        transfer_root = os.path.realpath(transfer_path)
+        from core.library2.paths import resolve_lib2_directory, resolve_lib2_path
+        with db._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT id,path FROM lib2_track_files "
+                "WHERE COALESCE(file_state,'active')<>'deleted'"
+            ).fetchall()
+        for row in rows:
+            stored = str(row['path'])
+            resolved = resolve_lib2_path(stored)
+            resolved_dir = None if resolved else resolve_lib2_directory(stored)
+            candidate = os.path.realpath(
+                resolved
+                or (os.path.join(
+                    resolved_dir, os.path.basename(stored.replace('\\', '/'))
+                ) if resolved_dir else stored)
+            )
+            try:
+                if os.path.commonpath((transfer_root, candidate)) == transfer_root:
+                    scoped_file_ids.append(int(row['id']))
+            except ValueError:
+                continue
+        if scoped_file_ids:
+            from core.library2.scan import rescan_files
+            rescan_files(db, file_ids=scoped_file_ids)
 
-                for artist_name, albums in artists_map.items():
-                    artist_id = _stable_id(artist_name.lower()) + '::soulsync'
-
-                    # Insert artist
-                    try:
-                        cursor.execute("""
-                            INSERT OR IGNORE INTO artists (id, name, server_source, created_at, updated_at)
-                            VALUES (?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                        """, (artist_id, artist_name))
-                    except Exception as e:
-                        logger.debug("soulsync artist insert failed: %s", e)
-
-                    for album_name, tracks in albums.items():
-                        album_key = f"{artist_name.lower()}::{album_name.lower()}"
-                        album_id = _stable_id(album_key) + '::soulsync'
-
-                        # Get year from first track with a year
-                        year = ''
-                        for _, t in tracks:
-                            if t.get('year'):
-                                year = t['year']
-                                break
-
-                        # Insert album
-                        try:
-                            cursor.execute("""
-                                INSERT OR IGNORE INTO albums (id, artist_id, title, year, track_count, server_source, created_at, updated_at)
-                                VALUES (?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                            """, (album_id, artist_id, album_name, year, len(tracks)))
-                        except Exception as e:
-                            logger.debug("soulsync album insert failed: %s", e)
-
-                        # Insert tracks
-                        for file_path, tags in tracks:
-                            track_id = _stable_id(file_path) + '::soulsync'
-                            try:
-                                cursor.execute("""
-                                    INSERT OR IGNORE INTO tracks (id, album_id, artist_id, title, track_number, disc_number,
-                                        duration, file_path, bitrate, year, server_source, created_at, updated_at)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                                """, (track_id, album_id, artist_id, tags['title'], tags['track_number'],
-                                      tags['disc_number'], tags['duration_ms'], file_path,
-                                      tags['bitrate'], tags.get('year', '')))
-                                successful += 1
-                            except Exception as e:
-                                failed += 1
-                                logger.error(f"[SoulSync Full Refresh] Track insert error: {e}")
-
-                conn.commit()
-        except Exception as e:
-            logger.error(f"[SoulSync Full Refresh] DB error: {e}")
-            _db_update_error_callback(f"Database error: {e}")
-            return
-
-        artist_count = len(artists_map)
-        album_count = sum(len(albums) for albums in artists_map.values())
-        summary = f"Full refresh complete: {successful} tracks from {album_count} albums by {artist_count} artists"
+        artist_ids, album_ids = set(), set()
+        with db._get_connection() as conn:
+            for start in range(0, len(scoped_file_ids), 500):
+                chunk = scoped_file_ids[start:start + 500]
+                marks = ",".join("?" for _ in chunk)
+                for row in conn.execute(
+                    f"""SELECT ar.id,al.id
+                           FROM lib2_track_files f
+                           JOIN lib2_tracks t ON t.id=f.track_id
+                           JOIN lib2_albums al ON al.id=t.album_id
+                           JOIN lib2_artists ar ON ar.id=al.primary_artist_id
+                          WHERE f.id IN ({marks})""",
+                    chunk,
+                ):
+                    artist_ids.add(int(row[0]))
+                    album_ids.add(int(row[1]))
+        artist_count, album_count = len(artist_ids), len(album_ids)
+        summary = (f"Full refresh complete: {successful} local tracks indexed "
+                   f"from {album_count} albums by {artist_count} artists")
         if failed > 0:
             summary += f" ({failed} failed)"
         logger.info(f"[SoulSync Full Refresh] {summary}")
@@ -487,9 +467,9 @@ def _run_soulsync_deep_scan():
     """Deep scan for SoulSync standalone mode.
 
     1. Scans the output folder for all audio files
-    2. Compares against soulsync DB records (by file_path)
+    2. Compares against imported Library-v2 file rows (by resolved path)
     3. Untracked files → moved to import folder for auto-import processing
-    4. Stale DB records (file gone) → removed from DB
+    4. Missing files → normal suspected/confirmed lifecycle (never raw DELETE)
     """
     try:
         import shutil
@@ -509,20 +489,42 @@ def _run_soulsync_deep_scan():
         for root, _dirs, files in os.walk(transfer_path):
             for filename in files:
                 if os.path.splitext(filename)[1].lower() in audio_extensions:
-                    transfer_files.add(os.path.join(root, filename))
+                    transfer_files.add(os.path.realpath(os.path.join(root, filename)))
 
         logger.info(f"[SoulSync Deep Scan] Found {len(transfer_files)} audio files in Transfer")
 
-        # Phase 2: Get all soulsync file paths from DB
+        # Phase 2: Get all imported file rows that resolve inside Transfer.
+        # Entity server_source is deliberately irrelevant: standalone/import
+        # ownership and media-server recognition are separate dimensions.
         db = get_database()
         db_paths = set()
+        db_file_ids_by_path = {}
         try:
+            from core.library2.paths import resolve_lib2_directory, resolve_lib2_path
+            transfer_root = os.path.realpath(transfer_path)
             with db._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT file_path FROM tracks WHERE server_source = 'soulsync' AND file_path IS NOT NULL")
+                cursor.execute(
+                    "SELECT f.id AS file_id,f.path AS file_path FROM lib2_track_files f"
+                    " WHERE f.path IS NOT NULL"
+                    "   AND COALESCE(f.file_state, 'active') <> 'deleted'")
                 for row in cursor.fetchall():
-                    if row['file_path']:
-                        db_paths.add(row['file_path'])
+                    stored = str(row['file_path'] or '')
+                    resolved = resolve_lib2_path(stored)
+                    resolved_dir = None if resolved else resolve_lib2_directory(stored)
+                    candidate = os.path.realpath(
+                        resolved
+                        or (os.path.join(
+                            resolved_dir, os.path.basename(stored.replace('\\', '/'))
+                        ) if resolved_dir else stored)
+                    )
+                    try:
+                        if os.path.commonpath((transfer_root, candidate)) != transfer_root:
+                            continue
+                    except ValueError:
+                        continue
+                    db_paths.add(candidate)
+                    db_file_ids_by_path[candidate] = int(row['file_id'])
         except Exception as e:
             logger.error(f"[SoulSync Deep Scan] Error reading DB paths: {e}")
 
@@ -587,10 +589,10 @@ def _run_soulsync_deep_scan():
         # Phase 5: Find stale DB records (in DB but file gone from disk)
         _db_update_phase_callback('cleanup')
         stale_count = 0
-        stale_track_ids = []
+        stale_file_ids = []
         for db_path in db_paths:
-            if not os.path.exists(db_path):
-                stale_track_ids.append(db_path)
+            if db_path not in transfer_files and not os.path.exists(db_path):
+                stale_file_ids.append(db_file_ids_by_path[db_path])
                 stale_count += 1
 
         # Guard the deletes the same way as the move (#904): if a desync blocked the
@@ -599,45 +601,27 @@ def _run_soulsync_deep_scan():
         # is implausibly large (storage unreachable / remount), mirroring the orphan guard.
         from core.library.stale_guard import is_implausible_stale_removal
         if move_blocked and block_reason == BLOCK_DESYNC:
-            if stale_track_ids:
+            if stale_file_ids:
                 logger.warning(f"[SoulSync Deep Scan] Skipping removal of {stale_count} 'stale' "
                                f"records — move was blocked for desync, mapping is unreliable.")
-            stale_track_ids = []
+            stale_file_ids = []
             stale_count = 0
         elif is_implausible_stale_removal(stale_count, len(db_paths)):
             logger.warning(f"[SoulSync Deep Scan] Skipping removal of {stale_count}/{len(db_paths)} "
                            f"'stale' records — implausibly large share, storage likely unreachable.")
-            stale_track_ids = []
+            stale_file_ids = []
             stale_count = 0
 
-        # Remove stale records
-        if stale_track_ids:
+        # Observe missing files through Library v2's two-scan lifecycle. This
+        # preserves metadata, wanted state, history and repair visibility.
+        if stale_file_ids:
             try:
-                with db._get_connection() as conn:
-                    cursor = conn.cursor()
-                    for fp in stale_track_ids:
-                        cursor.execute("DELETE FROM tracks WHERE file_path = ? AND server_source = 'soulsync'", (fp,))
-                    conn.commit()
-
-                    # Clean up orphaned albums (no tracks left)
-                    cursor.execute("""
-                        DELETE FROM albums WHERE server_source = 'soulsync'
-                        AND id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE server_source = 'soulsync')
-                    """)
-                    orphan_albums = cursor.rowcount
-
-                    # Clean up orphaned artists (no albums left)
-                    cursor.execute("""
-                        DELETE FROM artists WHERE server_source = 'soulsync'
-                        AND id NOT IN (SELECT DISTINCT artist_id FROM albums WHERE server_source = 'soulsync')
-                    """)
-                    orphan_artists = cursor.rowcount
-                    conn.commit()
-
-                    if orphan_albums > 0 or orphan_artists > 0:
-                        logger.warning(f"[SoulSync Deep Scan] Cleaned up {orphan_albums} orphaned albums, {orphan_artists} orphaned artists")
+                from core.library2.scan import rescan_files
+                observed = rescan_files(db, file_ids=stale_file_ids)
+                stale_count = int(observed.get('missing', 0))
             except Exception as e:
-                logger.error(f"[SoulSync Deep Scan] Error cleaning stale records: {e}")
+                stale_count = 0
+                logger.error(f"[SoulSync Deep Scan] Error observing missing records: {e}")
 
         summary = f"Deep scan complete: {len(transfer_files)} files scanned"
         if moved_count > 0:
@@ -645,7 +629,7 @@ def _run_soulsync_deep_scan():
         if blocked_count > 0:
             summary += f", {blocked_count} untracked files LEFT IN PLACE (move blocked — see warning)"
         if stale_count > 0:
-            summary += f", {stale_count} stale records removed"
+            summary += f", {stale_count} missing files recorded for repair"
         if moved_count == 0 and blocked_count == 0 and stale_count == 0:
             summary += " — library is clean"
 
@@ -713,9 +697,9 @@ def _run_db_update_task(full_refresh, server_type):
             db_update_worker.connect_callback('finished', _db_update_finished_callback)
             db_update_worker.connect_callback('error', _db_update_error_callback)
 
-    # Auto-reconcile runs as the FINAL scan phase (inside run(), before the
-    # 'finished' signal) so status stays 'running' through it — automations,
-    # the dashboard card, and the Tools page all treat it as part of the scan.
+    # Auto-reconcile runs as the FINAL scan phase (inside the worker, before the
+    # 'finished' signal) so status stays 'running' through it — automations, the
+    # dashboard card and the Tools page all treat it as part of the scan.
     db_update_worker.post_scan_hook = _reconcile_after_scan
 
     # This is a blocking call that runs the worker logic
@@ -766,7 +750,7 @@ def _run_deep_scan_task(server_type):
             db_update_worker.connect_callback('finished', _db_update_finished_callback)
             db_update_worker.connect_callback('error', _db_update_error_callback)
 
-    # Auto-reconcile runs as the final scan phase (see _run_database_update_task).
+    # Auto-reconcile runs as the FINAL scan phase (see _run_database_update_task).
     db_update_worker.post_scan_hook = _reconcile_after_scan
 
     # Run deep scan instead of normal run()
@@ -1036,14 +1020,34 @@ def restore_backup_endpoint(filename):
         db = get_database()
         with db._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM artists")
+            cursor.execute("SELECT COUNT(*) FROM lib2_artists")
             artist_count = cursor.fetchone()[0]
+
+        # MIG-02: `get_database()` only creates the lib2 schema (DDL, no
+        # backfills). A backup taken before the catalogue cutover — or any
+        # backup whose lib2_* tables are empty — therefore lands as an EMPTY
+        # native catalogue, and the startup migration that would have filled it
+        # already retired. Left alone, the supervisor sees a required migration
+        # it will never run and pauses every catalogue worker indefinitely.
+        # Re-arm the same lifecycle startup uses so the restored database gets
+        # migrated instead of just being declared restored.
+        migration_restarted = False
+        try:
+            from core.library2.migration_gate import migration_required
+            if migration_required(db) and _restart_library_v2_migration is not None:
+                migration_restarted = bool(_restart_library_v2_migration())
+                logger.info(
+                    "Restore left the native catalogue unmigrated; migration "
+                    "re-armed (started=%s)", migration_restarted)
+        except Exception as e:
+            logger.warning("Could not re-arm the catalogue migration after restore: %s", e)
 
         result = {
             "success": True,
             "restored_from": filename,
             "safety_backup": safety_filename,
-            "artist_count": artist_count
+            "artist_count": artist_count,
+            "migration_restarted": migration_restarted,
         }
         if backup_version:
             result["backup_version"] = backup_version

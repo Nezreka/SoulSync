@@ -200,23 +200,18 @@ class _FakeDatabase:
     def __init__(self):
         self._conn = sqlite3.connect(':memory:')
         self._conn.row_factory = sqlite3.Row
-        # Schema mirrors the columns the helper reads — only the ones we
-        # actually use need to exist.
-        self._conn.execute("""
-            CREATE TABLE tracks (
-                id INTEGER PRIMARY KEY,
-                title TEXT,
-                spotify_track_id TEXT,
-                itunes_track_id TEXT,
-                deezer_id TEXT,
-                tidal_id TEXT,
-                qobuz_id TEXT,
-                musicbrainz_recording_id TEXT,
-                audiodb_id TEXT,
-                soul_id TEXT,
-                isrc TEXT,
-                server_source TEXT
-            )
+        self._conn.executescript("""
+            CREATE TABLE lib2_albums (id INTEGER PRIMARY KEY, title TEXT);
+            CREATE TABLE lib2_tracks (
+                id INTEGER PRIMARY KEY, album_id INTEGER, title TEXT,
+                spotify_id TEXT, musicbrainz_id TEXT, external_ids TEXT DEFAULT '{}',
+                soul_id TEXT, isrc TEXT, server_source TEXT, server_id TEXT);
+            CREATE TABLE lib2_track_files (
+                id INTEGER PRIMARY KEY, track_id INTEGER, path TEXT,
+                file_state TEXT DEFAULT 'active', is_primary INTEGER DEFAULT 1);
+            CREATE TABLE lib2_media_server_mappings (
+                entity_type TEXT, entity_id INTEGER, server_source TEXT, server_id TEXT);
+            INSERT INTO lib2_albums(id,title) VALUES(1,'Album');
         """)
         self._conn.commit()
 
@@ -236,12 +231,33 @@ class _FakeDatabase:
 
         return _NoCloseConn(self._conn)
 
-    def insert(self, **kwargs):
-        cols = ', '.join(kwargs.keys())
-        placeholders = ', '.join('?' * len(kwargs))
+    def insert(self, owned=True, **kwargs):
+        import json
+        external = {}
+        for old, source in (('itunes_track_id', 'itunes'), ('deezer_id', 'deezer'),
+                            ('tidal_id', 'tidal'), ('qobuz_id', 'qobuz'),
+                            ('audiodb_id', 'audiodb')):
+            if kwargs.get(old):
+                external[source] = kwargs[old]
+        cur = self._conn.execute(
+            "INSERT INTO lib2_tracks(album_id,title,spotify_id,musicbrainz_id,"
+            "external_ids,soul_id,isrc,server_source) VALUES(1,?,?,?,?,?,?,?)",
+            (kwargs.get('title'), kwargs.get('spotify_track_id'),
+             kwargs.get('musicbrainz_recording_id'), json.dumps(external),
+             kwargs.get('soul_id'), kwargs.get('isrc'), kwargs.get('server_source')),
+        )
+        if owned:
+            self._conn.execute(
+                "INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)",
+                (cur.lastrowid, f"/{cur.lastrowid}.flac"))
+        self._conn.commit()
+        return int(cur.lastrowid)
+
+    def map(self, track_id, server_source, server_id):
         self._conn.execute(
-            f"INSERT INTO tracks ({cols}) VALUES ({placeholders})",
-            list(kwargs.values()),
+            "INSERT INTO lib2_media_server_mappings "
+            "(entity_type,entity_id,server_source,server_id) VALUES('track',?,?,?)",
+            (track_id, server_source, server_id),
         )
         self._conn.commit()
 
@@ -270,6 +286,11 @@ class TestFindLibraryTrackBySpotifyId:
         db.insert(title='NoIDs')  # all IDs NULL
         # Empty external_ids → no match
         assert find_library_track_by_external_id(db, external_ids={}) is None
+
+    def test_provider_only_catalogue_row_is_not_owned(self, db):
+        db.insert(title='Missing', spotify_track_id='sp1', owned=False)
+        assert find_library_track_by_external_id(
+            db, external_ids={'spotify_id': 'sp1'}) is None
 
 
 class TestFindLibraryTrackProviderNeutral:
@@ -364,13 +385,23 @@ class TestFindLibraryTrackServerSourceFilter:
         )
         assert result is not None
 
-    def test_server_source_mismatch_with_filter(self, db):
+    def test_server_source_mismatch_does_not_hide_local_ownership(self, db):
         db.insert(title='Hello', spotify_track_id='sp1', server_source='jellyfin')
         result = find_library_track_by_external_id(
             db, external_ids={'spotify_id': 'sp1'}, server_source='plex',
         )
-        # Filter excludes jellyfin, so no match.
-        assert result is None
+        assert result is not None
+
+    def test_requested_media_mapping_wins_when_external_id_is_duplicated(self, db):
+        db.insert(title='Other', spotify_track_id='sp1', server_source='jellyfin')
+        mapped = db.insert(title='Mapped', spotify_track_id='sp1', server_source='jellyfin')
+        db.map(mapped, 'plex', 'plex-track')
+
+        result = find_library_track_by_external_id(
+            db, external_ids={'spotify_id': 'sp1'}, server_source='plex',
+        )
+
+        assert result['id'] == mapped
 
     def test_null_server_source_passes_filter(self, db):
         """Older library rows may have NULL server_source — those should
@@ -402,7 +433,7 @@ class TestExternalIdColumnsMap:
         # Sample of ID names extract_external_ids can return; keep in sync.
         known_id_names = {
             'spotify_id', 'itunes_id', 'deezer_id', 'tidal_id', 'qobuz_id',
-            'mbid', 'audiodb_id', 'soul_id', 'isrc',
+            'mbid', 'audiodb_id', 'jiosaavn_id', 'soul_id', 'isrc',
         }
         assert set(EXTERNAL_ID_COLUMNS.keys()) == known_id_names
 

@@ -46,53 +46,52 @@ def find_existing_soulsync_album_id(
     cursor: Any,
     *,
     name_key_id: str,
-    artist_id: str,
+    artist_id: Any,
     album_name: str,
     album_source_col: Optional[str] = None,
     album_source_id: Optional[str] = None,
-) -> Optional[str]:
-    """Resolve the existing ``soulsync`` album row a track should join, or None
-    (caller inserts a new row keyed by ``name_key_id``).
+    source: Optional[str] = None,
+) -> Optional[int]:
+    """Resolve the catalogue album row a track should join, or None.
 
     Match precedence:
-      1. ``name_key_id`` — the exact prior stable-name-hash id (unchanged
-         behaviour: a re-import with the identical name hits its own row).
-      2. ``album_source_col == album_source_id`` — CANONICAL grouping: an
-         existing row already carrying THIS release's source id, so a
-         differently-named import of the same release unifies instead of
-         splitting. Only when the column is allow-listed and the id is non-empty.
-      3. ``(title, artist_id)`` — the legacy name match (kept so nothing that
-         grouped before stops grouping now).
+      1. ``name_key_id`` — the stable name hash the import mints, kept as the
+         row's ``server_id`` (a re-import with the identical name hits its own
+         row).
+      2. the release's own source id — CANONICAL grouping, so a differently
+         named import of the same release unifies instead of splitting. v2
+         promotes Spotify and MusicBrainz to columns and keeps the rest in
+         ``external_ids``.
+      3. ``(title, artist)`` — the name match, kept so nothing that grouped
+         before stops grouping now.
     """
-    cursor.execute(
-        "SELECT id FROM albums WHERE id = ? AND server_source = 'soulsync'",
-        (name_key_id,),
-    )
-    row = cursor.fetchone()
+    row = cursor.execute(
+        "SELECT id FROM lib2_albums WHERE server_source = 'soulsync' AND server_id = ?",
+        (str(name_key_id),),
+    ).fetchone()
     if row:
-        return row[0]
+        return int(row[0])
 
-    if album_source_col in ALLOWED_ALBUM_SOURCE_COLS and album_source_id:
+    provider = (source or '').strip().lower()
+    if album_source_id and provider:
+        if provider in ('spotify', 'musicbrainz'):
+            column = 'spotify_id' if provider == 'spotify' else 'musicbrainz_id'
+            where = f"{column} = ?"
+        else:
+            where = f"json_extract(external_ids, '$.{provider}') = ?"
         try:
-            cursor.execute(
-                f"SELECT id FROM albums WHERE {album_source_col} = ? "
-                "AND server_source = 'soulsync' LIMIT 1",
+            row = cursor.execute(
+                f"SELECT id FROM lib2_albums WHERE {where} LIMIT 1",
                 (album_source_id,),
-            )
-            row = cursor.fetchone()
+            ).fetchone()
             if row:
-                return row[0]
+                return int(row[0])
         except Exception as exc:
-            # That source has no dedicated album column on this DB (e.g. Deezer
-            # doesn't split per-entity id columns) — fall through to the name
-            # match rather than break the import. Mirrors the guarded source-id
-            # UPDATE the caller already does on insert.
-            logger.debug("album source-id lookup skipped (%s): %s", album_source_col, exc)
+            logger.debug("album source-id lookup skipped (%s): %s", provider, exc)
 
-    cursor.execute(
-        "SELECT id FROM albums WHERE title COLLATE NOCASE = ? AND artist_id = ? "
-        "AND server_source = 'soulsync' LIMIT 1",
+    row = cursor.execute(
+        "SELECT id FROM lib2_albums WHERE title COLLATE NOCASE = ? "
+        "  AND primary_artist_id = ? LIMIT 1",
         (album_name, artist_id),
-    )
-    row = cursor.fetchone()
-    return row[0] if row else None
+    ).fetchone()
+    return int(row[0]) if row else None

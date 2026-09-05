@@ -14,6 +14,32 @@ from utils.logging_config import get_logger
 
 logger = get_logger("personalized_playlists")
 
+
+# "Do I already own this?" against Library v2 (docs §50.4.4.17).
+#
+# Legacy compared three plain columns. lib2 promotes only Spotify to a column of
+# its own and keeps every other provider in ``external_ids``, so two thirds of
+# this test became a JSON lookup. Written inline it would run ``json_extract``
+# over the whole track table once per discovery candidate — and this filter runs
+# *before* the LIMIT, so on a large library that is the whole table many times
+# over. ``AS MATERIALIZED`` pins it to one pass: the JSON is unpacked once into
+# a narrow three-column table the NOT EXISTS then scans.
+#
+# Ownership requires an active physical file; provenance alone must not hide a
+# missing/provider track from discovery. The column-name asymmetry survives on the
+# discovery side: ``discovery_pool.deezer_track_id``, not ``deezer_id``.
+_OWNED_PROVIDER_IDS_CTE = """
+                WITH owned AS MATERIALIZED (
+                    SELECT t.spotify_id AS spotify_id,
+                           json_extract(t.external_ids, '$.itunes') AS itunes_id,
+                           json_extract(t.external_ids, '$.deezer') AS deezer_id
+                    FROM lib2_tracks t
+                    WHERE EXISTS (SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id
+                                  AND f.file_state='active' AND TRIM(f.path)<>'')
+                      AND (t.spotify_id IS NOT NULL OR t.external_ids NOT IN ('', '{}'))
+                )"""
+
+
 class PersonalizedPlaylistsService:
     """Service for generating personalized playlists from library and discovery pool"""
 
@@ -211,18 +237,19 @@ class PersonalizedPlaylistsService:
             select_cols = ",\n                        ".join(columns)
 
             owned_clause = ""
+            owned_cte = ""
             if exclude_owned:
-                # Note column-name asymmetry: discovery_pool.deezer_track_id
-                # but tracks.deezer_id. Don't refactor without checking.
+                owned_cte = _OWNED_PROVIDER_IDS_CTE
                 owned_clause = """
                   AND NOT EXISTS (
-                      SELECT 1 FROM tracks t
-                      WHERE (t.spotify_track_id IS NOT NULL AND t.spotify_track_id = discovery_pool.spotify_track_id)
-                         OR (t.itunes_track_id IS NOT NULL AND t.itunes_track_id = discovery_pool.itunes_track_id)
-                         OR (t.deezer_id IS NOT NULL AND t.deezer_id = discovery_pool.deezer_track_id)
+                      SELECT 1 FROM owned o
+                      WHERE (o.spotify_id IS NOT NULL AND o.spotify_id = discovery_pool.spotify_track_id)
+                         OR (o.itunes_id IS NOT NULL AND o.itunes_id = discovery_pool.itunes_track_id)
+                         OR (o.deezer_id IS NOT NULL AND o.deezer_id = discovery_pool.deezer_track_id)
                   )"""
 
             query = f"""
+                {owned_cte}
                 SELECT
                         {select_cols}
                 FROM discovery_pool
@@ -703,50 +730,51 @@ class PersonalizedPlaylistsService:
             with self.database._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Try to get genres from tracks or albums
-                cursor.execute("PRAGMA table_info(tracks)")
-                columns = [row['name'] for row in cursor.fetchall()]
+                # lib2 keeps genres on the release, not the recording: a track
+                # inherits its album's list, which is where the importer and
+                # every provider worker write it (docs §50.4.4.17).
+                cursor.execute("""
+                    SELECT al.genres AS genres
+                    FROM lib2_albums al
+                    WHERE al.genres IS NOT NULL AND al.genres NOT IN ('', '[]')
+                      AND EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
+                                  ON f.track_id=t.id WHERE t.album_id=al.id
+                                  AND f.file_state='active' AND TRIM(f.path)<>'')
+                """)
 
-                if 'genres' in columns:
-                    # Get genres directly from tracks
-                    cursor.execute("""
-                        SELECT genres FROM tracks WHERE genres IS NOT NULL
-                    """)
-                    rows = cursor.fetchall()
+                # Parse genres (JSON array, or a comma-separated legacy value)
+                all_genres = []
+                for row in cursor.fetchall():
+                    genres_str = row['genres']
+                    if not genres_str:
+                        continue
+                    try:
+                        parsed = json.loads(genres_str)
+                    except (ValueError, TypeError):
+                        parsed = [g.strip() for g in str(genres_str).split(',')]
+                    all_genres.extend(g for g in parsed if g)
 
-                    # Parse genres (assuming JSON array or comma-separated)
-                    all_genres = []
-                    for row in rows:
-                        genres_str = row['genres']
-                        if genres_str:
-                            # Try JSON parse first
-                            try:
-                                import json
-                                genres = json.loads(genres_str)
-                                all_genres.extend(genres)
-                            except:
-                                # Fallback to comma-separated
-                                genres = [g.strip() for g in genres_str.split(',')]
-                                all_genres.extend(genres)
+                if all_genres:
+                    return Counter(all_genres).most_common(limit)
 
-                    # Count genres
-                    genre_counts = Counter(all_genres)
-                    return genre_counts.most_common(limit)
-                else:
-                    # Fallback: use artist names as "genres"
-                    logger.warning("No genres column - using top artists as categories")
-                    cursor.execute("""
-                        SELECT ar.name, COUNT(*) as count
-                        FROM tracks t
-                        LEFT JOIN artists ar ON t.artist_id = ar.id
-                        WHERE ar.name IS NOT NULL
-                        GROUP BY ar.name
-                        ORDER BY count DESC
-                        LIMIT ?
-                    """, (limit,))
-
-                    rows = cursor.fetchall()
-                    return [(row['name'], row['count']) for row in rows]
+                # Fallback: use artist names as "genres". The trigger used to be
+                # "the schema has no genres column", which lib2 always has — but
+                # the situation it covered is real and now says so directly: a
+                # library nothing has enriched yet still needs categories.
+                logger.warning("No genres in the library - using top artists as categories")
+                cursor.execute("""
+                    SELECT ar.name AS name, COUNT(*) AS count
+                    FROM lib2_tracks t
+                    JOIN lib2_albums al ON al.id = t.album_id
+                    JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                    WHERE ar.name IS NOT NULL AND ar.name != ''
+                      AND EXISTS (SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id
+                                  AND f.file_state='active' AND TRIM(f.path)<>'')
+                    GROUP BY ar.name
+                    ORDER BY count DESC
+                    LIMIT ?
+                """, (limit,))
+                return [(row['name'], row['count']) for row in cursor.fetchall()]
 
         except Exception as e:
             logger.error(f"Error getting top genres: {e}")
@@ -899,7 +927,7 @@ class PersonalizedPlaylistsService:
         1. Get similar artists for each seed artist (max 25 total)
         2. Get albums from those similar artists
         3. Select 20 random albums
-        4. Build playlist from tracks in those albums (max 50 tracks)
+        4. Build the playlist out of those albums' tracks (max 50)
 
         Args:
             seed_artist_ids: List of 1-5 artist IDs (Spotify or iTunes)
@@ -1027,7 +1055,7 @@ class PersonalizedPlaylistsService:
 
             logger.info(f"Selected {len(selected_albums)} random albums")
 
-            # Step 4: Build playlist from tracks in those albums
+            # Step 4: Build the playlist out of those albums' tracks
             all_tracks = []
             if use_spotify:
                 for album in selected_albums:

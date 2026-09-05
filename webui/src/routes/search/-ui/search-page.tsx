@@ -26,6 +26,7 @@ import { fetchLabels, lookupById } from '../-search.api';
 import {
   artistDetailPath,
   fallbackBannerText,
+  inLibraryArtistPath,
   isIdLookupQuery,
   labelDetailPath,
   loadRecentSearches,
@@ -272,13 +273,15 @@ export function SearchPage() {
   const served = state.fallbacks[state.activeSource];
 
   /**
-   * A library artist resolves under 'library'; a found one under the source it
-   * came from, with its name in tow. Both need the source SEGMENT — the route is
-   * /artist-detail/$source/$id and a two-segment path resolves to nothing.
+   * A library artist opens in Library v2 when v2 knows it, and otherwise
+   * resolves under 'library'; a found one resolves under the source it came
+   * from, with its name in tow. Both artist-detail forms need the source
+   * SEGMENT — the route is /artist-detail/$source/$id and a two-segment path
+   * resolves to nothing.
    */
   const onArtistHref = (artist: SearchArtist, inLibrary: boolean) =>
     inLibrary
-      ? artistDetailPath(artist.id ?? '')
+      ? inLibraryArtistPath(artist)
       : artistDetailPath(artist.id ?? '', state.activeSource, artist.name);
 
   const onLabelHref = (label: SearchLabel) => labelDetailPath(label.id ?? '', label.name);

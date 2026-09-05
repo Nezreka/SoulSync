@@ -312,6 +312,35 @@ def test_finalize_auto_wishlist_completion_toggles_when_last_sibling_done():
     assert automation_engine.events  # event emitted
 
 
+def test_finalize_playlist_scoped_run_leaves_global_cycle_unchanged():
+    db = _FakeDB()
+    resets = []
+    summary = {"tracks_added": 0, "total_failed": 0, "errors": 0}
+
+    processing.finalize_auto_wishlist_completion(
+        "batch-scoped",
+        summary,
+        download_batches={
+            "batch-scoped": {
+                "current_cycle": "playlist",
+                "wishlist_run_id": "run-scoped",
+                "toggle_wishlist_cycle": False,
+                "phase": "complete",
+            },
+        },
+        tasks_lock=_FakeLock(),
+        reset_processing_state=lambda: resets.append(True),
+        add_activity_item=lambda *_args: None,
+        automation_engine=None,
+        db_factory=lambda: db,
+        logger=_FakeLogger(),
+    )
+
+    assert resets == [True]
+    assert db.connection.cursor_obj.calls == []
+    assert db.connection.committed is False
+
+
 def test_finalize_auto_wishlist_completion_legacy_no_run_id_toggles_immediately():
     """Back-compat: a batch with NO ``wishlist_run_id`` (legacy
     single-batch run from before Phase 1c.2.1) should keep firing

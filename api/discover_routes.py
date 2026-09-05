@@ -89,6 +89,15 @@ get_database = None
 config_manager = None
 download_orchestrator = None
 _get_active_discovery_source = None
+
+
+def _catalogue_name_key(name):
+    """The catalogue's folded artist key. SQLite's LOWER() is ASCII-only, so a
+    stored "Björk" never answered a searched "björk" (iss29-D13)."""
+    from core.library2.importer import normalize_name
+
+    return normalize_name(str(name or ""))
+
 _spotify_client = None
 _tidal_client = None
 _hydrabase_client = None
@@ -554,6 +563,10 @@ def _autostart_popularity_backfill():
             from core.discovery import popularity_backfill as pb
             if not pb.is_running():
                 database = get_database()
+                from core.library2.migration_gate import migration_required
+                if migration_required(database):
+                    _t.sleep(30)
+                    continue
                 missing = database.count_similar_artists_missing_popularity(1)
                 if missing > 0:
                     spotify_free, lastfm, deezer = _resolve_popularity_sources()
@@ -1121,7 +1134,8 @@ def get_discover_because_you_listen_to():
                 try:
                     conn = database._get_connection()
                     cursor = conn.cursor()
-                    cursor.execute("SELECT thumb_url FROM artists WHERE LOWER(name) = LOWER(?) LIMIT 1", (artist_name,))
+                    cursor.execute("SELECT image_url AS thumb_url FROM lib2_artists WHERE name_key = ? LIMIT 1",
+                                   (_catalogue_name_key(artist_name),))
                     row = cursor.fetchone()
                     if row and row[0]:
                         artist_image = fix_artist_image_url(row[0])
@@ -1160,7 +1174,11 @@ def get_discover_undiscovered_albums():
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT LOWER(al.title), LOWER(ar.name)
-                FROM albums al JOIN artists ar ON ar.id = al.artist_id
+                FROM lib2_albums al
+                JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                WHERE EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
+                              ON f.track_id=t.id WHERE t.album_id=al.id
+                              AND f.file_state='active' AND TRIM(f.path)<>'')
             """)
             library_keys = {(r[0].strip(), r[1].strip()) for r in cursor.fetchall()}
 
@@ -1198,8 +1216,11 @@ def get_discover_label_explorer():
         with database._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT DISTINCT label FROM albums
-                WHERE label IS NOT NULL AND label != ''
+                SELECT DISTINCT al.label FROM lib2_albums al
+                WHERE al.label IS NOT NULL AND al.label != ''
+                  AND EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
+                              ON f.track_id=t.id WHERE t.album_id=al.id
+                              AND f.file_state='active' AND TRIM(f.path)<>'')
                 LIMIT 30
             """)
             labels = {r[0] for r in cursor.fetchall()}
@@ -1215,7 +1236,7 @@ def get_discover_label_explorer():
 @bp.route('/api/discover/deep-cuts', methods=['GET'])
 @_discover_shelf_cache()
 def get_discover_deep_cuts():
-    """Low-popularity tracks from artists you listen to — from cache."""
+    """Low-popularity tracks by the artists you listen to — from cache."""
     try:
         database = get_database()
         cache = get_metadata_cache()
@@ -2589,26 +2610,34 @@ def get_your_artist_info(artist_id):
             cursor = conn.cursor()
             # Check by various ID columns
             cursor.execute("""
-                SELECT * FROM artists WHERE id = ? OR spotify_artist_id = ? OR itunes_artist_id = ?
-                OR deezer_id = ? OR discogs_id = ? LIMIT 1
+                SELECT * FROM lib2_artists WHERE id = ? OR spotify_id = ?
+                   OR json_extract(external_ids, '$.itunes') = ?
+                   OR json_extract(external_ids, '$.deezer') = ?
+                   OR json_extract(external_ids, '$.discogs') = ? LIMIT 1
             """, (artist_id, artist_id, artist_id, artist_id, artist_id))
             row = cursor.fetchone()
             if row:
                 r = dict(row)
+                from core.library2.provider_ids import parse_external_ids
+                ids = parse_external_ids(r.get('external_ids'))
+                try:
+                    lastfm = (json.loads(r.get('enrichment') or '{}').get('lastfm') or {})
+                except (TypeError, ValueError):
+                    lastfm = {}
                 result.update({
                     'name': r.get('name', artist_name),
                     'genres': json.loads(r['genres']) if r.get('genres') else [],
                     'summary': r.get('summary', ''),
-                    'image_url': r.get('thumb_url', ''),
-                    'spotify_artist_id': r.get('spotify_artist_id'),
+                    'image_url': r.get('image_url', ''),
+                    'spotify_artist_id': r.get('spotify_id'),
                     'musicbrainz_id': r.get('musicbrainz_id'),
-                    'deezer_id': r.get('deezer_id'),
-                    'itunes_artist_id': r.get('itunes_artist_id'),
-                    'discogs_id': r.get('discogs_id'),
-                    'lastfm_url': r.get('lastfm_url'),
-                    'tidal_id': r.get('tidal_id'),
-                    'lastfm_listeners': r.get('lastfm_listeners', 0),
-                    'lastfm_playcount': r.get('lastfm_playcount', 0),
+                    'deezer_id': ids.get('deezer'),
+                    'itunes_artist_id': ids.get('itunes'),
+                    'discogs_id': ids.get('discogs'),
+                    'lastfm_url': ids.get('lastfm') or lastfm.get('url'),
+                    'tidal_id': ids.get('tidal'),
+                    'lastfm_listeners': lastfm.get('listeners', 0),
+                    'lastfm_playcount': lastfm.get('playcount', 0),
                 })
                 return jsonify(result)
         except Exception as e:
@@ -2780,8 +2809,20 @@ def serve_cached_image(cache_key):
         response.headers['X-SoulSync-Image-Cache'] = cached.status
         return response
     except Exception as exc:
-        logger.debug("cached image serve failed for %s: %s", cache_key, exc)
-        return '', 404
+        # An empty 404 made every distinct failure look identical from the
+        # browser — "key not found", "upstream refused", "host unreachable" and
+        # "not an image" were indistinguishable, so a production report could
+        # only say "218 images 404" without saying why. The reason travels in a
+        # header (secrets redacted) rather than a body so nothing about the
+        # response contract changes for the <img> that requested it.
+        from core.metadata.artwork import _redact_url_secrets
+        reason = ' '.join(_redact_url_secrets(str(exc)).split())[:200] \
+            or exc.__class__.__name__
+        logger.debug("cached image serve failed for %s: %s", cache_key, reason)
+        response = Response('', status=404)
+        response.headers['X-SoulSync-Image-Error'] = reason
+        response.headers['Cache-Control'] = 'no-store'
+        return response
 
 
 from core.artists.map import (

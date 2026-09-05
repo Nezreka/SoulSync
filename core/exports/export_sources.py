@@ -34,57 +34,42 @@ from core.exports.mbid_resolver import (
 logger = get_logger("exports.export_sources")
 
 
-def _db_match(artist: str, title: str) -> Tuple[Optional[str], Optional[str]]:
-    """Text-match a library track by (artist, title); return (recording_mbid, file_path).
-    Either may be None. Fail-safe — any DB error returns (None, None)."""
+# The library half of the waterfall reads Library v2 (docs §50.4.4.15). The
+# artist side of the text match goes through the indexed ``name_key`` — SQLite's
+# ``LOWER()`` is ASCII-only, so the old comparison silently skipped the DB step
+# for every non-Latin artist and sent those rows on to the rate-limited
+# MusicBrainz tail. The title keeps ``LOWER()``: lib2 has no folded title key,
+# and inventing one here would only move the same limitation.
+_MATCHED_TRACK_SQL = """
+    SELECT t.musicbrainz_id, t.spotify_id, t.external_ids,
+           (SELECT f.path FROM lib2_track_files f
+             WHERE f.track_id = t.id
+               AND COALESCE(f.file_state, 'active') = 'active'
+               AND f.path IS NOT NULL AND f.path != ''
+             ORDER BY f.is_primary DESC, f.id LIMIT 1) AS file_path
+      FROM lib2_tracks t
+      JOIN lib2_albums al ON al.id = t.album_id
+      JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+     WHERE LOWER(t.title) = LOWER(?) AND ar.name_key = ?
+     ORDER BY (t.musicbrainz_id IS NULL), t.id
+     LIMIT 1
+"""
+
+
+def _name_key(name: str) -> str:
+    from core.library2.importer import normalize_name
+
+    return normalize_name(str(name or ""))
+
+
+def _matched_track(artist: str, title: str) -> Optional[Dict[str, Any]]:
+    """The library track a (artist, title) pair names, or ``None``.
+
+    Fail-safe by contract: every caller is one rung of a waterfall, so a missing
+    table or an unreadable database means "this source has no answer", never an
+    export that stops.
+    """
     if not title:
-        return (None, None)
-    try:
-        from database.music_database import get_database
-        db = get_database()
-        conn = db._get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT t.musicbrainz_recording_id, t.file_path "
-                "FROM tracks t JOIN artists a ON t.artist_id = a.id "
-                "WHERE LOWER(t.title) = LOWER(?) AND LOWER(a.name) = LOWER(?) "
-                "LIMIT 1",
-                (title, artist),
-            )
-            row = cur.fetchone()
-            if not row:
-                return (None, None)
-            mbid = row[0] if not hasattr(row, "keys") else row["musicbrainz_recording_id"]
-            fpath = row[1] if not hasattr(row, "keys") else row["file_path"]
-            return ((mbid or None), (fpath or None))
-        finally:
-            try:
-                conn.close()
-            except Exception:  # noqa: S110
-                pass
-    except Exception as exc:
-        logger.debug(f"export db_match failed for '{artist} - {title}': {exc}")
-        return (None, None)
-
-
-def db_recording_mbid(artist: str, title: str) -> Optional[str]:
-    """Recording MBID stored on a matched library track (``musicbrainz_recording_id``)."""
-    return _db_match(artist, title)[0]
-
-
-# Service → the tracks-table column carrying that service's track ID (set by enrichment).
-# Trusted constants — never user input — so safe to interpolate into the SELECT below.
-_SERVICE_ID_COLUMNS = {"spotify": "spotify_track_id", "deezer": "deezer_id"}
-
-
-def db_service_track_id(artist: str, title: str, service: str) -> Optional[str]:
-    """The service track ID (``spotify_track_id`` / ``deezer_id``) stored on a matched
-    library track — what lets a mirrored playlist be exported BACK to Spotify/Deezer
-    without re-searching, since enrichment already pinned it (#945). Text-matches by
-    (artist, title), same as the MBID resolver. Fail-safe: any miss/error returns None."""
-    column = _SERVICE_ID_COLUMNS.get((service or "").lower())
-    if not column or not title:
         return None
     try:
         from database.music_database import get_database
@@ -92,21 +77,64 @@ def db_service_track_id(artist: str, title: str, service: str) -> Optional[str]:
         conn = db._get_connection()
         try:
             cur = conn.cursor()
-            cur.execute(
-                f"SELECT t.{column} FROM tracks t JOIN artists a ON t.artist_id = a.id "
-                "WHERE LOWER(t.title) = LOWER(?) AND LOWER(a.name) = LOWER(?) LIMIT 1",
-                (title, artist),
-            )
+            cur.execute(_MATCHED_TRACK_SQL, (title, _name_key(artist)))
             row = cur.fetchone()
             if not row:
                 return None
-            val = row[0] if not hasattr(row, "keys") else row[column]
-            return val or None
+            return {
+                "musicbrainz_id": row[0],
+                "spotify_id": row[1],
+                "external_ids": row[2],
+                "file_path": row[3],
+            }
         finally:
             try:
                 conn.close()
             except Exception:  # noqa: S110
                 pass
+    except Exception as exc:
+        logger.debug(f"export db_match failed for '{artist} - {title}': {exc}")
+        return None
+
+
+def _db_match(artist: str, title: str) -> Tuple[Optional[str], Optional[str]]:
+    """Text-match a library track by (artist, title); return (recording_mbid, file_path).
+    Either may be None. Fail-safe — any DB error returns (None, None)."""
+    row = _matched_track(artist, title)
+    if not row:
+        return (None, None)
+    return ((row["musicbrainz_id"] or None), (row["file_path"] or None))
+
+
+def db_recording_mbid(artist: str, title: str) -> Optional[str]:
+    """Recording MBID stored on a matched library track (``musicbrainz_recording_id``)."""
+    return _db_match(artist, title)[0]
+
+
+# Services this export can address a track by. lib2 stores the two most indexed
+# ids in their own columns and every other provider in ``external_ids``, so
+# Spotify is read from the column and Deezer from the JSON — the same split the
+# rest of lib2 makes, not a special case for exports.
+_SERVICES = ("spotify", "deezer")
+
+
+def db_service_track_id(artist: str, title: str, service: str) -> Optional[str]:
+    """The service track ID stored on a matched library track — what lets a mirrored
+    playlist be exported BACK to Spotify/Deezer without re-searching, since enrichment
+    already pinned it (#945). Text-matches by (artist, title), same as the MBID
+    resolver. Fail-safe: any miss/error returns None."""
+    name = (service or "").lower()
+    if name not in _SERVICES or not title:
+        return None
+    row = _matched_track(artist, title)
+    if not row:
+        return None
+    if name == "spotify" and row["spotify_id"]:
+        return row["spotify_id"]
+    try:
+        from core.library2.provider_ids import parse_external_ids
+
+        return parse_external_ids(row["external_ids"]).get(name) or None
     except Exception as exc:
         logger.debug(f"export service-id lookup failed for '{artist} - {title}' ({service}): {exc}")
         return None

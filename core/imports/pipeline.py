@@ -6,6 +6,7 @@ import json
 import os
 import threading
 import time
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 
@@ -55,6 +56,7 @@ from core.imports.side_effects import (
     record_download_provenance,
     record_library_history_download,
     record_soulsync_library_entry,
+    require_library_v2_registration,
 )
 from core.wishlist.resolution import check_and_remove_from_wishlist
 from core.runtime_state import (
@@ -87,6 +89,9 @@ from utils.logging_config import get_logger
 
 logger = get_logger("imports.pipeline")
 pp_logger = get_logger("post_processing")
+
+_upgrade_locks_guard = threading.Lock()
+_upgrade_locks: dict[int, tuple[threading.Lock, int]] = {}
 
 __all__ = [
     "build_import_pipeline_runtime",
@@ -152,6 +157,198 @@ def _should_skip_quarantine_check(context: dict, check_name: str) -> bool:
     if isinstance(bypass, (list, tuple, set)):
         return 'all' in bypass or check_name in bypass
     return bypass == check_name
+
+
+def _try_force_grab_quarantine_approval(
+    context: dict,
+    *,
+    reason_code: str,
+    trigger: str,
+    reason: str,
+) -> bool:
+    """Use a persisted Force-Grab approval only for the exact same reason."""
+    try:
+        from core.acquisition.pipeline_callback import (
+            notify_force_quarantine_auto_approved,
+        )
+        approved = notify_force_quarantine_auto_approved(
+            context,
+            reason_code=reason_code,
+            trigger=trigger,
+            reason=reason,
+        )
+    except Exception as exc:  # Fail closed into the normal quarantine flow.
+        logger.warning("Force-Grab quarantine bridge failed: %s", exc)
+        return False
+    if approved:
+        context['_force_approved_quarantine_reason'] = reason_code
+    return approved
+
+
+def _journal_pipeline_started(context: dict) -> bool:
+    """Fail-open bridge into the correlated Acquisition timeline."""
+    try:
+        from core.acquisition.pipeline_callback import notify_pipeline_import_started
+
+        return notify_pipeline_import_started(context)
+    except Exception as exc:  # noqa: BLE001 — bookkeeping cannot block import
+        logger.debug("acquisition pipeline-start journal skipped: %s", exc)
+        return False
+
+
+def _journal_pipeline_check(
+    context: dict,
+    *,
+    check: str,
+    status: str,
+    reason_code: str,
+    message: str | None = None,
+    actor: str = "system",
+    payload: dict | None = None,
+) -> bool:
+    """Fail-open bridge for one granular pipeline check verdict."""
+    try:
+        from core.acquisition.pipeline_callback import notify_pipeline_check_result
+
+        return notify_pipeline_check_result(
+            context,
+            check=check,
+            status=status,
+            reason_code=reason_code,
+            message=message,
+            actor=actor,
+            payload=payload,
+        )
+    except Exception as exc:  # noqa: BLE001 — bookkeeping cannot block import
+        logger.debug("acquisition %s journal skipped: %s", check, exc)
+        return False
+
+
+def _journal_previous_file_replaced(context: dict, *, reason: str, message: str | None = None) -> bool:
+    """Fail-open bridge for the F-10 ``previous_file_replaced`` history step."""
+    try:
+        from core.acquisition.pipeline_callback import notify_previous_file_replaced
+
+        return notify_previous_file_replaced(context, reason=reason, message=message)
+    except Exception as exc:  # noqa: BLE001 — bookkeeping cannot block import
+        logger.debug("acquisition previous_file_replaced journal skipped: %s", exc)
+        return False
+
+
+def _record_replaced_file_path(context: dict, removed_path: str) -> None:
+    """Remember a library file this run physically deleted (dd28-08).
+
+    ``core.library2.autolink`` reads this when it links the replacement, so the
+    catalog row for the deleted file is retired in the same transaction that
+    records the new one — instead of both rows surviving with the *stale* one
+    still flagged primary.
+    """
+    if not removed_path:
+        return
+    try:
+        paths = context.setdefault("_replaced_file_paths", [])
+        if isinstance(paths, list) and removed_path not in paths:
+            paths.append(removed_path)
+    except Exception as exc:  # noqa: BLE001 — bookkeeping cannot block import
+        logger.debug("replaced-path bookkeeping skipped: %s", exc)
+
+
+def _resolve_enhance_original_path(recorded_path: str) -> str:
+    """Map an enhance's recorded library path onto this process's mounts.
+
+    Stored library paths are the media server's view ("/music/…"); this process
+    may mount the same library somewhere else entirely. Returns the recorded
+    path unchanged when it already exists or nothing better is found, so the
+    caller's existence check stays the single decision point (#1109).
+    """
+    if not recorded_path or os.path.exists(recorded_path):
+        return recorded_path
+    try:
+        from core.library.path_resolver import resolve_library_file_path
+        resolved = resolve_library_file_path(
+            recorded_path, config_manager=config_manager)
+    except Exception as exc:  # noqa: BLE001 — resolution is best-effort
+        logger.debug("[Enhance] could not resolve %r: %s", recorded_path, exc)
+        return recorded_path
+    return resolved or recorded_path
+
+
+def _retire_lib2_path_after_redownload(old_path: str, new_path: str) -> None:
+    """Point the lib2 row of a redownloaded track at its new file (dd28-08).
+
+    The redownload hook fires outside the autolink callback for tracks that
+    were already in the catalog, so the retirement has to happen here too.
+    """
+    try:
+        # No feature gate: `library_v2_enabled()` returns True unconditionally
+        # (core/library2/feature.py), so the `if not ...: return` that stood here
+        # was unreachable.
+        from core.settings import config_manager as _cm
+        from core.library2.track_files import retire_replaced_files
+        from database.music_database import get_database
+
+        conn = get_database()._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT track_id FROM lib2_track_files WHERE path=? LIMIT 1",
+                (old_path,),
+            ).fetchone()
+            if row is None or row[0] is None:
+                return
+            retire_replaced_files(
+                conn, row[0], keep_path=new_path, removed_paths=[old_path],
+                config_manager=_cm,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 — reconciliation stays fail-open
+        logger.debug("lib2 redownload path retirement skipped: %s", exc)
+
+
+def _quality_history_payload(context: dict, actual_quality: str | None) -> dict:
+    track_info = context.get("track_info")
+    track_info = track_info if isinstance(track_info, dict) else {}
+    source_info = track_info.get("source_info") or {}
+    if isinstance(source_info, str):
+        try:
+            source_info = json.loads(source_info)
+        except (TypeError, ValueError):
+            source_info = {}
+    source_info = source_info if isinstance(source_info, dict) else {}
+    profile = _resolve_context_quality_profile(context)
+    profile_id = track_info.get("quality_profile_id") or profile.get("id")
+    before_quality = (
+        source_info.get("original_quality")
+        or source_info.get("original_format")
+    )
+    return {
+        key: value
+        for key, value in {
+            "quality_profile_id": profile_id,
+            "before_quality": before_quality,
+            "after_quality": actual_quality,
+        }.items()
+        if value not in (None, "")
+    }
+
+
+def _journal_checks_not_run(
+    context: dict,
+    *,
+    checks: tuple[str, ...],
+    reason_code: str,
+    message: str,
+) -> None:
+    for check in checks:
+        _journal_pipeline_check(
+            context,
+            check=check,
+            status="not_run",
+            reason_code=reason_code,
+            message=message,
+            payload={"decision": "not_run", "blocked_by": reason_code},
+        )
 
 
 def _build_simple_download_tag_data(
@@ -235,6 +432,211 @@ def _resolve_context_quality_profile(context: dict) -> dict:
     return profile
 
 
+@dataclass(frozen=True)
+class _UpgradeSnapshot:
+    track_id: int
+    primary_id: int | None
+    primary_path: str | None
+    primary_resolved_path: str | None
+    profile: dict
+    profile_fingerprint: str
+    acquired_quality_json: str | None = None
+    retention_json: str | None = None
+
+
+def _claim_upgrade_lock(track_id: int) -> threading.Lock:
+    with _upgrade_locks_guard:
+        lock, users = _upgrade_locks.get(track_id, (threading.Lock(), 0))
+        _upgrade_locks[track_id] = (lock, users + 1)
+    lock.acquire()
+    return lock
+
+
+def _release_upgrade_lock(track_id: int, lock: threading.Lock) -> None:
+    lock.release()
+    with _upgrade_locks_guard:
+        current, users = _upgrade_locks.get(track_id, (lock, 1))
+        if current is lock and users <= 1:
+            _upgrade_locks.pop(track_id, None)
+        elif current is lock:
+            _upgrade_locks[track_id] = (lock, users - 1)
+
+
+def _profile_fingerprint(profile: dict) -> str:
+    return json.dumps(profile, sort_keys=True, default=str, separators=(",", ":"))
+
+
+def _load_upgrade_snapshot(track_id: int) -> _UpgradeSnapshot:
+    from core.library2.paths import resolve_lib2_path
+    from core.library2.quality_eval import effective_track_profile
+    from core.library2.track_files import primary_file_row
+
+    conn = get_database()._get_connection()
+    try:
+        profile = effective_track_profile(conn, track_id)
+        primary = primary_file_row(conn, track_id)
+    finally:
+        conn.close()
+    path = str(primary.get("path") or "") if primary else None
+    resolved = None
+    if path:
+        resolved = path if os.path.isfile(path) else resolve_lib2_path(
+            path, config_manager=config_manager)
+    return _UpgradeSnapshot(
+        track_id=track_id,
+        primary_id=int(primary["id"]) if primary and primary.get("id") else None,
+        primary_path=path,
+        primary_resolved_path=resolved,
+        acquired_quality_json=(primary.get("acquired_quality_json") if primary else None),
+        retention_json=(primary.get("retention_json") if primary else None),
+        profile=dict(profile),
+        profile_fingerprint=_profile_fingerprint(dict(profile)),
+    )
+
+
+def _decide_snapshot_upgrade(snapshot: _UpgradeSnapshot, incoming_path: str):
+    from core.imports.file_ops import probe_audio_quality
+    from core.library2.quality_eval import (
+        UpgradeDecision,
+        is_upgrade_policy,
+        profile_targets,
+        upgrade_complete,
+    )
+    from core.quality.model import rank_candidate
+    from core.quality.retention import best_quality_for_targets
+    from core.quality.selection import targets_from_profile
+
+    base = {
+        "track_id": snapshot.track_id,
+        "profile_id": snapshot.profile.get("id"),
+        "existing_path": snapshot.primary_path,
+        "existing_resolved_path": snapshot.primary_resolved_path,
+    }
+    if snapshot.primary_id is None:
+        return UpgradeDecision(False, True, "The track has no previous primary file", **base)
+    old_quality = (
+        probe_audio_quality(snapshot.primary_resolved_path)
+        if snapshot.primary_resolved_path else None
+    )
+    new_quality = probe_audio_quality(incoming_path)
+    base.update(existing_quality=old_quality, incoming_quality=new_quality)
+    if old_quality is None:
+        return UpgradeDecision(True, False, "Existing file quality could not be verified", **base)
+    if new_quality is None:
+        return UpgradeDecision(True, False, "Retained file quality could not be verified", **base)
+    targets, policy, cutoff = profile_targets(snapshot.profile)
+    if not targets or not is_upgrade_policy(policy):
+        return UpgradeDecision(True, False, "The effective profile no longer requests upgrades", **base)
+    _targets, fallback_enabled = targets_from_profile(snapshot.profile)
+    effective_old_quality = best_quality_for_targets(
+        old_quality,
+        targets,
+        acquired_quality_json=snapshot.acquired_quality_json,
+        retention_json=snapshot.retention_json,
+    ) or old_quality
+    base["existing_quality"] = effective_old_quality
+    old_rank, old_score = rank_candidate(effective_old_quality, targets)
+    new_rank, new_score = rank_candidate(new_quality, targets)
+    if not fallback_enabled and new_rank == len(targets):
+        return UpgradeDecision(True, False, "Retained file is outside the strict profile", **base)
+    if upgrade_complete(old_rank, len(targets), policy, cutoff):
+        return UpgradeDecision(True, False, "The existing file already meets the upgrade cutoff", **base)
+    if not (
+        new_rank < old_rank
+        or (
+            new_rank == old_rank
+            and new_score > old_score + 0.001
+            and (
+                new_rank == len(targets)
+                or str(new_quality.format).lower() == str(effective_old_quality.format).lower()
+            )
+        )
+    ):
+        return UpgradeDecision(
+            True, False,
+            f"Retained quality {new_quality.label()} is not better than "
+            f"{effective_old_quality.label()}",
+            **base,
+        )
+    return UpgradeDecision(
+        True, True,
+        f"Upgrade {effective_old_quality.label()} → {new_quality.label()}",
+        **base,
+    )
+
+
+def _upgrade_snapshot_still_current(snapshot: _UpgradeSnapshot) -> bool:
+    current = _load_upgrade_snapshot(snapshot.track_id)
+    return (
+        current.primary_id == snapshot.primary_id
+        and current.primary_path == snapshot.primary_path
+        and current.acquired_quality_json == snapshot.acquired_quality_json
+        and current.retention_json == snapshot.retention_json
+        and current.profile_fingerprint == snapshot.profile_fingerprint
+    )
+
+
+def _prepare_upgrade_artifact(file_path: str, context: dict, profile: dict):
+    """Apply profile transforms in staging and return (primary, companions)."""
+    from core.imports.file_ops import probe_audio_quality
+    from core.quality.lossless import is_lossless_audio_path
+
+    primary = file_path
+    companions: list[str] = []
+    before = probe_audio_quality(primary)
+    if before is not None:
+        context['_acquired_audio_quality'] = before.to_dict()
+    expects_downsample = bool(
+        profile.get("downsample_enabled")
+        and before
+        and before.format.lower() == "flac"
+        and ((before.bit_depth or 0) > 16 or (before.sample_rate or 0) > 44100)
+    )
+    downsampled = downsample_hires_flac(
+        primary, context, enabled=profile.get("downsample_enabled"))
+    if expects_downsample and not downsampled:
+        raise RuntimeError("Configured upgrade downsample failed; previous file kept")
+    if downsampled:
+        primary = downsampled
+        context["_quality_fallback_downsample"] = True
+        retained_quality = probe_audio_quality(primary)
+        context.setdefault('_retention_transforms', []).append({
+            'type': 'downsample_hires_flac',
+            'source_replaced': True,
+            'target_bit_depth': 16,
+            'target_sample_rate': 44100,
+            'output_quality': retained_quality.to_dict() if retained_quality else None,
+        })
+
+    lossy_enabled = bool(profile.get("lossy_copy_enabled"))
+    expects_lossy = lossy_enabled and is_lossless_audio_path(primary)
+    lossy = create_lossy_copy(primary, settings={
+        "enabled": profile.get("lossy_copy_enabled"),
+        "codec": profile.get("lossy_copy_codec"),
+        "bitrate": profile.get("lossy_copy_bitrate"),
+        "delete_original": profile.get("lossy_copy_delete_original"),
+    })
+    if expects_lossy and not lossy:
+        raise RuntimeError("Configured upgrade lossy transform failed; previous file kept")
+    if lossy:
+        context["_quality_fallback_lossy_copy"] = True
+        source_retained = os.path.exists(primary)
+        lossy_quality = probe_audio_quality(lossy)
+        context.setdefault('_retention_transforms', []).append({
+            'type': 'lossy_copy',
+            'source_replaced': not source_retained,
+            'codec': profile.get('lossy_copy_codec'),
+            'bitrate': profile.get('lossy_copy_bitrate'),
+            'output_quality': lossy_quality.to_dict() if lossy_quality else None,
+        })
+        if source_retained:
+            companions.append(lossy)
+        else:
+            primary = lossy
+    context["_audio_quality"] = get_audio_quality_string(primary)
+    return primary, companions
+
+
 def _mark_task_quarantined(context: dict, quarantine_path: str | None) -> None:
     if not quarantine_path:
         return
@@ -306,6 +708,8 @@ def import_rejection_reason(context: dict) -> str | None:
         return "rejected by audio guard (incomplete or silent audio)"
     if context.get('_race_guard_failed'):
         return "source file disappeared before import completed"
+    if context.get('_context_failure_msg'):
+        return str(context['_context_failure_msg'])
     return None
 
 
@@ -433,6 +837,127 @@ def _persist_verification_status(context, final_path):
         logger.debug(f"verification-status persist skipped: {_vs_err}")
 
 
+def _attach_manual_skip_path(context_key, final_path):
+    """Bind a dispatch-time Library-v2 skip audit to the successful final file."""
+    try:
+        from core.library2.manual_skips import attach_manual_skip_file
+        attach_manual_skip_file(
+            get_database(), content_key=context_key, file_path=final_path
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("manual-skip final-path attach skipped: %s", exc)
+
+
+def _recover_moved_file_bookkeeping(context, artist_context=None, album_info=None):
+    """Best-effort DB reconciliation after a post-move pipeline exception.
+
+    Once ``safe_move_file`` has consumed the source, retrying the ordinary
+    pipeline is unsafe.  The destination is nevertheless a real imported file
+    and must not remain invisible to both library indexes or leave a correlated
+    Acquisition grab open forever.  Every operation here is idempotent by its
+    own contract: the standalone-library writer keys the track by final path,
+    Library-v2 autolink updates an existing path row, and the Acquisition
+    callbacks tolerate an already-terminal request.
+
+    History/provenance are deliberately not replayed here because those tables
+    are append-only and an exception may have happened after their first write.
+    """
+    final_path = context.get('_final_processed_path') or context.get('_final_path')
+    if not final_path or not os.path.isfile(str(final_path)):
+        return False
+
+    context['_post_move_recovered'] = True
+    # Reorganize is not a new import. Its runner owns the existing catalogue
+    # row and repoints it after this pipeline returns with a verified
+    # destination. Running the normal recovery writers here created a second
+    # file row at that destination before the old row was repointed there too.
+    if context.get('_library_reorganize') is True:
+        return True
+    try:
+        record_soulsync_library_entry(
+            context,
+            artist_context if isinstance(artist_context, dict) else {},
+            album_info if isinstance(album_info, dict) else {},
+        )
+    except Exception as exc:  # noqa: BLE001 - keep reconciling the other indexes
+        logger.warning("Post-move standalone-library reconciliation failed: %s", exc)
+    try:
+        from core.library2.autolink import link_download_into_library_v2
+        linked_lib2_file_id = link_download_into_library_v2(
+            context, raise_on_error=True)
+        if linked_lib2_file_id is None:
+            raise RuntimeError("Library v2 did not create a file row")
+        from core.settings import config_manager
+        from database.music_database import get_database
+        from core.library2.track_reconcile_trigger import (
+            schedule_file_track_reconcile,
+        )
+        schedule_file_track_reconcile(
+            get_database(),
+            linked_lib2_file_id,
+            config_manager,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Post-move Library-v2 reconciliation failed: %s", exc)
+        return False
+    try:
+        from core.acquisition.pipeline_callback import notify_pipeline_import_success
+        notify_pipeline_import_success(context)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Post-move Acquisition import reconciliation failed: %s", exc)
+    try:
+        from core.acquisition.pipeline_callback import notify_manual_grab_import_success
+        notify_manual_grab_import_success(context)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Post-move correlated-grab reconciliation failed: %s", exc)
+    return True
+
+
+def _confirm_existing_file_bookkeeping(context, artist_context=None, album_info=None):
+    """Treat an already-moved destination as success only after lib2 owns it.
+
+    Race guards and duplicate-download protection legitimately encounter a
+    destination after the source has gone.  The file is safe, but its presence
+    alone is not the import-success contract: Library v2 must also have an
+    active file row.  Recovery is idempotent, so it is safe both after another
+    worker completed and after an earlier attempt stopped between move+link.
+    """
+    if context.get('_pipeline_import_succeeded'):
+        return True
+    if _recover_moved_file_bookkeeping(context, artist_context, album_info):
+        context['_pipeline_import_succeeded'] = True
+        return True
+    context.setdefault(
+        '_context_failure_msg',
+        'the file is at its destination, but Library v2 could not register it',
+    )
+    return False
+
+
+def _record_completed_import_side_effects(
+    context, artist_context, album_info, automation_engine,
+):
+    """Register a genuine new import and emit its download events.
+
+    Reorganize deliberately reuses the file-processing half of this pipeline,
+    but it must leave registration to the runner so one existing file row is
+    updated instead of creating a second row for the same destination.
+    Returns ``True`` when ordinary import side effects ran.
+    """
+    if context.get('_library_reorganize') is True:
+        logger.info(
+            "[Reorganize] Destination ready; catalogue path update deferred "
+            "to the reorganize runner"
+        )
+        return False
+    record_download_provenance(context)
+    record_soulsync_library_entry(context, artist_context, album_info)
+    require_library_v2_registration(context)
+    emit_track_downloaded(context, automation_engine)
+    record_library_history_download(context)
+    return True
+
+
 def _apply_profile_output_transforms(final_path: str, context: dict,
                                      profile: dict) -> str:
     """Apply downsample/lossy retention while preserving acquisition truth."""
@@ -453,6 +978,7 @@ def _apply_profile_output_transforms(final_path: str, context: dict,
             'target_sample_rate': 44100,
             'output_quality': retained_quality.to_dict() if retained_quality else None,
         })
+        context['_quality_fallback_downsample'] = True
 
     _persist_verification_status(context, final_path)
 
@@ -474,6 +1000,7 @@ def _apply_profile_output_transforms(final_path: str, context: dict,
         'bitrate': profile.get('lossy_copy_bitrate'),
         'output_quality': lossy_quality.to_dict() if lossy_quality else None,
     })
+    context['_quality_fallback_lossy_copy'] = True
     if source_retained:
         companions = context.setdefault('_companion_file_paths', [])
         if lossy_path not in companions:
@@ -496,6 +1023,13 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         if on_download_completed:
             on_download_completed(batch_id, task_id, success=success)
 
+    from core.imports.upgrade_intent import get_upgrade_intent
+    _server_upgrade_intent = get_upgrade_intent(context)
+    _upgrade_track_lock = None
+    _upgrade_snapshot = None
+    if _server_upgrade_intent is not None:
+        _upgrade_track_lock = _claim_upgrade_lock(_server_upgrade_intent.track_id)
+
     with post_process_locks_lock:
         if context_key not in post_process_locks:
             post_process_locks[context_key] = threading.Lock()
@@ -510,7 +1044,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     f"[Race Guard] Source gone but destination exists — already processed by another thread: "
                     f"{os.path.basename(existing_final)}"
                 )
-                context['_pipeline_import_succeeded'] = True
+                _confirm_existing_file_bookkeeping(context)
                 return
             # File was intentionally moved to quarantine by a concurrent/earlier
             # post-process call — this is a stale duplicate dispatch, not a race.
@@ -547,6 +1081,19 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             time.sleep(1.5)
         else:
             logger.info(f"File may still be writing after stability checks: {_basename} ({_prev_size} bytes)")
+
+        if _server_upgrade_intent is not None:
+            # Resolve one live Track→Album→Artist→Global profile snapshot.
+            # Every gate and transform in this import consumes this exact dict;
+            # the pre-publish CAS below aborts if either it or the primary moved.
+            _upgrade_snapshot = _load_upgrade_snapshot(
+                _server_upgrade_intent.track_id)
+            context['_quality_profile'] = dict(_upgrade_snapshot.profile)
+
+        # This is the first point where the shared pipeline has claimed a
+        # stable source file. Correlated native/manual/scheduled grabs now get
+        # an explicit import-start before any guard can fail.
+        _journal_pipeline_started(context)
 
         # File integrity check: catches broken slskd transfers (truncated,
         # corrupted, wrong file masquerading as the target) before we burn
@@ -595,6 +1142,12 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             logger.error(f"[Integrity] Rejected {_basename}: {integrity.reason}")
             context['_integrity_failure_msg'] = integrity.reason
             context['_integrity_checks'] = integrity.checks
+            _journal_checks_not_run(
+                context,
+                checks=('quality', 'acoustic_id'),
+                reason_code='blocked_by_integrity',
+                message=f"Not run because integrity failed: {integrity.reason}",
+            )
             try:
                 quarantine_path = move_to_quarantine(
                     file_path,
@@ -661,6 +1214,12 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         if audio_reason:
             logger.error(f"[AudioGuard] Rejected {_basename}: {audio_reason}")
             context['_silence_rejected'] = True
+            _journal_checks_not_run(
+                context,
+                checks=('quality', 'acoustic_id'),
+                reason_code='blocked_by_audio_guard',
+                message=f"Not run because the audio guard failed: {audio_reason}",
+            )
             # Stashed for the verification wrapper, which runs this pipeline
             # with task_id popped out of the context (see _mark_task_quarantined)
             # and so must do the retry/fail marking itself afterward.
@@ -717,10 +1276,78 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
 
             _skip_quality = _should_skip_quarantine_check(context, 'bit_depth') or \
                             _should_skip_quarantine_check(context, 'quality')
-            rejection_reason = None if _skip_quality else check_quality_target(file_path, context)
+            _quality_payload = _quality_history_payload(
+                context, context['_audio_quality'])
+            if _skip_quality:
+                rejection_reason = None
+            else:
+                try:
+                    rejection_reason = check_quality_target(file_path, context)
+                except Exception as quality_error:
+                    _journal_pipeline_check(
+                        context,
+                        check='quality',
+                        status='error',
+                        reason_code='quality_check_error',
+                        message=str(quality_error),
+                        payload={**_quality_payload, 'decision': 'error'},
+                    )
+                    _journal_checks_not_run(
+                        context,
+                        checks=('acoustic_id',),
+                        reason_code='blocked_by_quality_error',
+                        message='Not run because the quality check errored',
+                    )
+                    raise
             if _skip_quality:
                 logger.info(f"[QualityGuard] Skipped (user approval) for {_basename}")
+                _journal_pipeline_check(
+                    context,
+                    check='quality',
+                    status='skipped',
+                    reason_code='user_override',
+                    message='Quality check skipped by user approval',
+                    actor='user',
+                    payload={**_quality_payload, 'decision': 'user_override'},
+                )
+            elif rejection_reason:
+                # Record the actual guard verdict before a persisted Force-Grab
+                # decision potentially approves that exact rejection.
+                _journal_pipeline_check(
+                    context,
+                    check='quality',
+                    status='failed',
+                    reason_code='quality_not_allowed',
+                    message=rejection_reason,
+                    payload={**_quality_payload, 'decision': 'rejected'},
+                )
+            else:
+                _journal_pipeline_check(
+                    context,
+                    check='quality',
+                    status='passed',
+                    reason_code='quality_allowed',
+                    payload={**_quality_payload, 'decision': 'allowed'},
+                )
+            if rejection_reason and _try_force_grab_quarantine_approval(
+                context,
+                reason_code='quality_not_allowed',
+                trigger='quality',
+                reason=rejection_reason,
+            ):
+                logger.info(
+                    "[QualityGuard] Auto-approved exact Force-Grab reason "
+                    "quality_not_allowed for %s",
+                    _basename,
+                )
+                rejection_reason = None
             if rejection_reason:
+                _journal_checks_not_run(
+                    context,
+                    checks=('acoustic_id',),
+                    reason_code='blocked_by_quality',
+                    message='Not run because the quality check rejected the file',
+                )
                 try:
                     quarantine_path = move_to_quarantine(
                         file_path,
@@ -764,114 +1391,227 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 if task_id and batch_id:
                     _notify_download_completed(batch_id, task_id, success=False)
                 return
+        else:
+            _journal_pipeline_check(
+                context,
+                check='quality',
+                status='not_run',
+                reason_code='quality_detection_unavailable',
+                message='Audio quality could not be detected',
+                payload={**_quality_history_payload(context, None), 'decision': 'not_run'},
+            )
 
         _skip_acoustid = _should_skip_quarantine_check(context, 'acoustid')
         if _skip_acoustid:
-            logger.info(f"[AcoustID] Skipped (user approval) for {_basename}")
-        try:
-            from core.acoustid_verification import AcoustIDVerification, VerificationResult
+            _automatic_fallback = bool(context.get('_version_mismatch_fallback'))
+            logger.info(
+                "[AcoustID] Skipped (%s) for %s",
+                "version-mismatch fallback" if _automatic_fallback else "user approval",
+                _basename,
+            )
+            context['_acoustid_result'] = 'skip'
+            context['_acoustid_message'] = (
+                'AcoustID skipped by version-mismatch fallback'
+                if _automatic_fallback
+                else 'AcoustID skipped by user approval'
+            )
+            _journal_pipeline_check(
+                context,
+                check='acoustic_id',
+                status='skipped',
+                reason_code=(
+                    'version_mismatch_fallback'
+                    if _automatic_fallback
+                    else 'user_override'
+                ),
+                message=context['_acoustid_message'],
+                actor='system' if _automatic_fallback else 'user',
+                payload={
+                    'decision': (
+                        'version_mismatch_fallback'
+                        if _automatic_fallback
+                        else 'user_override'
+                    ),
+                },
+            )
+        else:
+            try:
+                from core.acoustid_verification import AcoustIDVerification, VerificationResult
 
-            verifier = AcoustIDVerification()
-            available, available_reason = verifier.quick_check_available()
-            if available and not _skip_acoustid:
-                context = normalize_import_context(context)
-                track_info = get_import_track_info(context)
-                original_search = get_import_original_search(context)
-                artist_context = get_import_context_artist(context)
+                verifier = AcoustIDVerification()
+                available, available_reason = verifier.quick_check_available()
+                if available:
+                    context = normalize_import_context(context)
+                    track_info = get_import_track_info(context)
+                    original_search = get_import_original_search(context)
+                    artist_context = get_import_context_artist(context)
 
-                expected_track = get_import_clean_title(context, default=original_search.get('title', ''))
-                expected_artist = ''
-                track_artists = track_info.get('artists', [])
-                if track_artists:
-                    first = track_artists[0]
-                    if isinstance(first, dict):
-                        expected_artist = first.get('name', '')
-                    elif isinstance(first, str):
-                        expected_artist = first
-                if not expected_artist:
-                    expected_artist = extract_artist_name(artist_context) or get_import_clean_artist(context, default='')
+                    expected_track = get_import_clean_title(context, default=original_search.get('title', ''))
+                    expected_artist = ''
+                    track_artists = track_info.get('artists', [])
+                    if track_artists:
+                        first = track_artists[0]
+                        if isinstance(first, dict):
+                            expected_artist = first.get('name', '')
+                        elif isinstance(first, str):
+                            expected_artist = first
+                    if not expected_artist:
+                        expected_artist = extract_artist_name(artist_context) or get_import_clean_artist(context, default='')
 
-                if expected_track and expected_artist:
-                    logger.info(f"Running AcoustID verification for: '{expected_track}' by '{expected_artist}'")
-                    verification_result, verification_msg = verifier.verify_audio_file(
-                        file_path,
-                        expected_track,
-                        expected_artist,
-                        context,
-                    )
-                    logger.info(f"AcoustID verification result: {verification_result.value} - {verification_msg}")
-                    context['_acoustid_result'] = verification_result.value
-
-                    # Fail-closed mode: when the item's quality profile
-                    # requires a hard AcoustID PASS, a SKIP (ran but couldn't
-                    # confirm — no fingerprint match / cross-script metadata)
-                    # is treated like a FAIL: quarantine + try the next
-                    # candidate, instead of importing an unverified file.
-                    # ERROR (rate-limit / infra) is NOT blocked — that would
-                    # stall the whole pipeline during an outage; those still
-                    # import with their existing flag.
-                    require_verified = _resolve_context_quality_profile(context).get(
-                        'acoustid_required',
-                        config_manager.get('acoustid.require_verified', False))
-                    _skip_as_fail = (
-                        require_verified
-                        and verification_result == VerificationResult.SKIP
-                    )
-                    if _skip_as_fail:
-                        verification_msg = (
-                            f"AcoustID could not confirm the track and 'require verified' "
-                            f"is on — rejecting unverified file ({verification_msg})"
+                    if expected_track and expected_artist:
+                        logger.info(f"Running AcoustID verification for: '{expected_track}' by '{expected_artist}'")
+                        verification_result, verification_msg = verifier.verify_audio_file(
+                            file_path,
+                            expected_track,
+                            expected_artist,
+                            context,
                         )
-                        logger.warning("[AcoustID] Require-verified: SKIP treated as FAIL — %s", verification_msg)
+                        logger.info(f"AcoustID verification result: {verification_result.value} - {verification_msg}")
+                        raw_result = str(verification_result.value or '').lower()
+                        context['_acoustid_result'] = verification_result.value
+                        # Deep-dive A7: the concrete AcoustID reason is otherwise lost the
+                        # moment this function returns — stash it now so the lib2 autolink
+                        # callback can persist it onto the file row for the Info-tab.
+                        context['_acoustid_message'] = verification_msg
 
-                    if verification_result == VerificationResult.FAIL or _skip_as_fail:
-                        try:
-                            quarantine_path = move_to_quarantine(
-                                file_path,
-                                context,
-                                verification_msg,
-                                automation_engine,
-                                trigger='acoustid_unverified' if _skip_as_fail else 'acoustid',
+                        # Fail-closed mode: when the item's quality profile
+                        # requires a hard AcoustID PASS, a SKIP (ran but couldn't
+                        # confirm — no fingerprint match / cross-script metadata)
+                        # is treated like a FAIL: quarantine + try the next
+                        # candidate, instead of importing an unverified file.
+                        # ERROR (rate-limit / infra) is NOT blocked — that would
+                        # stall the whole pipeline during an outage; those still
+                        # import with their existing flag.
+                        require_verified = _resolve_context_quality_profile(context).get(
+                            'acoustid_required',
+                            config_manager.get('acoustid.require_verified', False))
+                        _skip_as_fail = raw_result == 'skip' and require_verified
+                        if _skip_as_fail:
+                            verification_msg = (
+                                f"AcoustID could not confirm the track and 'require verified' "
+                                f"is on — rejecting unverified file ({verification_msg})"
                             )
-                            _mark_task_quarantined(context, quarantine_path)
-                            logger.error(f"File quarantined due to verification failure: {quarantine_path}")
-                        except Exception as quarantine_error:
-                            # Don't delete a file we couldn't quarantine — leave it for
-                            # retry instead of forcing a re-download (data loss). The
-                            # task is still marked failed / requeued below. See integrity.
-                            logger.error(
-                                f"Quarantine failed ({quarantine_error}) — leaving file "
-                                f"in place for retry (not deleting): {file_path}"
+                            context['_acoustid_message'] = verification_msg
+                            logger.warning("[AcoustID] Require-verified: SKIP treated as FAIL — %s", verification_msg)
+
+                        verification_failed = (
+                            verification_result == VerificationResult.FAIL
+                            or _skip_as_fail
+                        )
+                        if verification_failed:
+                            check_status = 'failed'
+                            reason_code = (
+                                'acoustid_unverified_required'
+                                if _skip_as_fail
+                                else 'acoustid_mismatch'
                             )
+                            decision = 'rejected'
+                        elif raw_result in {'pass', 'passed'}:
+                            check_status = 'passed'
+                            reason_code = 'acoustid_verified'
+                            decision = 'verified'
+                        elif raw_result == 'skip':
+                            check_status = 'skipped'
+                            reason_code = 'acoustid_inconclusive_allowed'
+                            decision = 'inconclusive_allowed'
+                        else:
+                            check_status = 'error'
+                            reason_code = 'acoustid_result_error'
+                            decision = 'error_allowed'
+                        _journal_pipeline_check(
+                            context,
+                            check='acoustic_id',
+                            status=check_status,
+                            reason_code=reason_code,
+                            message=verification_msg,
+                            payload={
+                                'decision': decision,
+                                'raw_result': raw_result,
+                                'require_verified': bool(require_verified),
+                            },
+                        )
 
-                        context['_acoustid_quarantined'] = True
-                        context['_acoustid_failure_msg'] = verification_msg
-                        with matched_context_lock:
-                            if context_key in matched_downloads_context:
-                                del matched_downloads_context[context_key]
+                        if verification_failed:
+                            try:
+                                quarantine_path = move_to_quarantine(
+                                    file_path,
+                                    context,
+                                    verification_msg,
+                                    automation_engine,
+                                    trigger='acoustid_unverified' if _skip_as_fail else 'acoustid',
+                                )
+                                _mark_task_quarantined(context, quarantine_path)
+                                logger.error(f"File quarantined due to verification failure: {quarantine_path}")
+                            except Exception as quarantine_error:
+                                # Don't delete a file we couldn't quarantine — leave it for
+                                # retry instead of forcing a re-download (data loss). The
+                                # task is still marked failed / requeued below. See integrity.
+                                logger.error(
+                                    f"Quarantine failed ({quarantine_error}) — leaving file "
+                                    f"in place for retry (not deleting): {file_path}"
+                                )
 
-                        task_id = context.get('task_id')
-                        batch_id = context.get('batch_id')
-                        if task_id:
-                            with tasks_lock:
-                                if task_id in download_tasks:
-                                    download_tasks[task_id]['status'] = 'failed'
-                                    download_tasks[task_id]['error_message'] = (
-                                        f"AcoustID verification failed: {verification_msg}"
-                                    )
+                            context['_acoustid_quarantined'] = True
+                            context['_acoustid_failure_msg'] = verification_msg
+                            with matched_context_lock:
+                                if context_key in matched_downloads_context:
+                                    del matched_downloads_context[context_key]
 
-                        if task_id and batch_id:
-                            _notify_download_completed(batch_id, task_id, success=False)
-                        return
+                            task_id = context.get('task_id')
+                            batch_id = context.get('batch_id')
+                            if task_id:
+                                with tasks_lock:
+                                    if task_id in download_tasks:
+                                        download_tasks[task_id]['status'] = 'failed'
+                                        download_tasks[task_id]['error_message'] = (
+                                            f"AcoustID verification failed: {verification_msg}"
+                                        )
+
+                            if task_id and batch_id:
+                                _notify_download_completed(batch_id, task_id, success=False)
+                            return
+                    else:
+                        logger.warning("AcoustID verification not run: missing track/artist info")
+                        context['_acoustid_result'] = 'skip'
+                        context['_acoustid_message'] = 'missing track/artist info'
+                        _journal_pipeline_check(
+                            context,
+                            check='acoustic_id',
+                            status='not_run',
+                            reason_code='missing_expected_metadata',
+                            message=context['_acoustid_message'],
+                            payload={'decision': 'not_run'},
+                        )
                 else:
-                    logger.warning("AcoustID verification skipped: missing track/artist info")
-                    context['_acoustid_result'] = 'skip'
-            else:
-                logger.info(f"ℹ️ AcoustID verification not available: {available_reason}")
-                context['_acoustid_result'] = 'disabled'
-        except Exception as verify_error:
-            logger.error(f"AcoustID verification error (continuing normally): {verify_error}")
-            context['_acoustid_result'] = 'error'
+                    logger.info(f"ℹ️ AcoustID verification not available: {available_reason}")
+                    context['_acoustid_result'] = 'disabled'
+                    context['_acoustid_message'] = available_reason
+                    _journal_pipeline_check(
+                        context,
+                        check='acoustic_id',
+                        status='not_run',
+                        reason_code='verification_unavailable',
+                        message=available_reason,
+                        payload={'decision': 'not_run'},
+                    )
+            except Exception as verify_error:
+                logger.error(f"AcoustID verification error (continuing normally): {verify_error}")
+                context['_acoustid_result'] = 'error'
+                context['_acoustid_message'] = str(verify_error)
+                _journal_pipeline_check(
+                    context,
+                    check='acoustic_id',
+                    status='error',
+                    reason_code='verification_error',
+                    message=str(verify_error),
+                    payload={'decision': 'error_allowed'},
+                )
+
+        # Upgrade authority is a sealed process-local object, never source_info
+        # or any other client-/wishlist-serialisable JSON field.  The exact
+        # retained artifact is evaluated after profile transforms below.
+        _upgrade_decision = None
+        _upgrade_companions: list[str] = []
 
         search_result = context.get('search_result', {}) or {}
         if not isinstance(search_result, dict):
@@ -934,16 +1674,17 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     daemon=True,
                 ).start()
 
+            context['_final_path'] = str(destination)
+            _persist_verification_status(context, destination)
+            _attach_manual_skip_path(context_key, destination)
+            record_download_provenance(context, True)
             activity_target = f"{album_name}/{filename}" if album_name else filename
             add_activity_item("", "Download Complete", activity_target, "Now")
             logger.info(f"Simple download post-processing complete: {activity_target}")
-            context['_simple_download_completed'] = True
-            context['_final_path'] = str(destination)
-            context['_pipeline_import_succeeded'] = True
-            _persist_verification_status(context, destination)
             emit_track_downloaded(context, automation_engine)
             record_library_history_download(context)
-            record_download_provenance(context)
+            context['_simple_download_completed'] = True
+            context['_pipeline_import_succeeded'] = True
             try:
                 check_and_remove_from_wishlist(context)
             except Exception as wishlist_error:
@@ -959,7 +1700,16 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         has_clean_metadata = get_import_has_clean_metadata(context)
 
         if not artist_context:
+            # dd28-39: returning with no flag set left the outer wrapper with
+            # no ``_final_processed_path`` and no rejection reason, so it logged
+            # "cannot verify, assuming success" and marked the task COMPLETED
+            # while the file sat unimported in the download folder. Name the
+            # failure so both the download path and the manual-import routes
+            # report it.
             logger.error("Post-processing failed: Missing artist context.")
+            context['_context_failure_msg'] = (
+                "no artist context — the download could not be attributed to an artist"
+            )
             return
 
         _junk_artist_names = {'', 'unknown', 'unknown artist', 'various artists', 'none', 'null'}
@@ -1157,6 +1907,50 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     "preserving the file's existing tags (not wiping): %s",
                     os.path.basename(file_path))
 
+        if _upgrade_snapshot is not None:
+            file_path, _upgrade_companions = _prepare_upgrade_artifact(
+                file_path, context, _upgrade_snapshot.profile)
+            file_ext = os.path.splitext(file_path)[1]
+            final_path, _ = build_final_path_for_track(
+                context, artist_context, album_info, file_ext)
+            final_path = _maybe_stage_album_track(context, final_path)
+            context['_final_processed_path'] = final_path
+            _upgrade_decision = _decide_snapshot_upgrade(
+                _upgrade_snapshot, file_path)
+            if _upgrade_decision.applicable and not _upgrade_decision.allowed:
+                reason = f"Upgrade rejected: {_upgrade_decision.reason}"
+                context['_upgrade_rejected'] = True
+                context['_upgrade_failure_msg'] = reason
+                try:
+                    quarantine_path = move_to_quarantine(
+                        file_path, context, reason, automation_engine,
+                        trigger='quality')
+                    _mark_task_quarantined(context, quarantine_path)
+                except Exception as quarantine_error:
+                    logger.error(
+                        "Upgrade quarantine failed (%s) — retaining the old "
+                        "primary and transformed incoming artifact",
+                        quarantine_error,
+                    )
+                with matched_context_lock:
+                    matched_downloads_context.pop(context_key, None)
+                task_id = context.get('task_id')
+                batch_id = context.get('batch_id')
+                if task_id and _requeue_quarantined_task_for_retry(
+                    task_id, batch_id, 'upgrade_quality'
+                ):
+                    return
+                if task_id:
+                    with tasks_lock:
+                        if task_id in download_tasks:
+                            download_tasks[task_id]['status'] = 'failed'
+                            download_tasks[task_id]['error_message'] = reason
+                    if batch_id:
+                        _notify_download_completed(batch_id, task_id, success=False)
+                return
+            if _upgrade_decision.applicable:
+                logger.info("[Upgrade] %s", _upgrade_decision.reason)
+
         _enhance_source_info = context.get('track_info', {}).get('source_info') or {}
         if isinstance(_enhance_source_info, str):
             try:
@@ -1169,16 +1963,29 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         # discard it (#1045). Rides the same replace path as enhance — the
         # short-file replacement guard above still applies.
         force_replace = _batch_force_replace(context)
+        # F-10 history step: set when replacement is selected, then journaled
+        # only after the atomic publish succeeds.
+        _verified_upgrade = bool(
+            _upgrade_decision
+            and _upgrade_decision.applicable
+            and _upgrade_decision.allowed
+        )
+        _upgrade_old_path = (
+            _upgrade_decision.existing_path if _verified_upgrade else None)
+        _upgrade_old_local = (
+            _upgrade_decision.existing_resolved_path if _verified_upgrade else None)
+        _replace_reason: str | None = "quality_upgrade" if _verified_upgrade else None
 
         logger.info(f"Moving '{os.path.basename(file_path)}' to '{final_path}'")
         if os.path.exists(final_path):
             if not os.path.exists(file_path):
                 logger.info(f"[Protection] Destination exists and source already gone - file already transferred: {os.path.basename(final_path)}")
-                context['_pipeline_import_succeeded'] = True
+                _confirm_existing_file_bookkeeping(
+                    context, artist_context, album_info)
                 return
             # THE backstop for sella's incident: an upgrade/replace must NEVER
-            # swap a good library file for a materially shorter one. Every path
-            # below can os.remove(final_path) and move the incoming file in — so
+            # swap a good library file for a materially shorter one. Before any
+            # branch atomically publishes over final_path, compare decoded lengths.
             # before any of them, compare the REAL decoded lengths. A 30s HiFi
             # preview replacing a 220s track is caught here even if every header
             # (and AcoustID) was faked, and even for files no other gate saw.
@@ -1216,7 +2023,17 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 from mutagen import File as MutagenFile
                 existing_file = MutagenFile(final_path)
                 has_metadata = existing_file is not None and len(existing_file.tags or {}) > 2
-                if has_metadata and not is_enhance_download and not force_replace:
+                _same_path_upgrade = bool(
+                    _upgrade_old_local
+                    and os.path.normcase(os.path.normpath(_upgrade_old_local))
+                    == os.path.normcase(os.path.normpath(final_path))
+                )
+                if _same_path_upgrade:
+                    logger.info(
+                        "[Upgrade] Atomically replacing %s after real-quality comparison",
+                        os.path.basename(final_path),
+                    )
+                elif has_metadata and not is_enhance_download and not force_replace:
                     _replace_lower = _resolve_context_quality_profile(context).get(
                         'replace_lower_quality',
                         config_manager.get('import.replace_lower_quality', False))
@@ -1225,6 +2042,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                         _incoming_tier = get_quality_tier_from_extension(file_path)
                         if _incoming_tier[1] < _existing_tier[1]:
                             logger.info(f"[Quality Replace] Replacing {_existing_tier[0]} with {_incoming_tier[0]}: {os.path.basename(final_path)}")
+                            _replace_reason = "quality_upgrade"
                         else:
                             logger.info(
                                 f"[Protection] Existing file is same or better quality ({_existing_tier[0]} vs {_incoming_tier[0]}) - skipping: "
@@ -1236,9 +2054,11 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                                 pass
                             except Exception as e:
                                 logger.error(f"[Protection] Error removing redundant file: {e}")
-                            context['_pipeline_import_succeeded'] = not os.path.exists(file_path)
-                            if not context['_pipeline_import_succeeded']:
+                            if os.path.exists(file_path):
                                 context['_context_failure_msg'] = 'could not remove redundant import source'
+                            else:
+                                _confirm_existing_file_bookkeeping(
+                                    context, artist_context, album_info)
                             return
                     else:
                         logger.info(f"[Protection] Existing file already has metadata enhancement - skipping overwrite: {os.path.basename(final_path)}")
@@ -1249,26 +2069,32 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                             logger.error(f"[Protection] Could not remove redundant file (already gone): {file_path}")
                         except Exception as e:
                             logger.error(f"[Protection] Error removing redundant file: {e}")
-                        context['_pipeline_import_succeeded'] = not os.path.exists(file_path)
-                        if not context['_pipeline_import_succeeded']:
+                        if os.path.exists(file_path):
                             context['_context_failure_msg'] = 'could not remove redundant import source'
+                        else:
+                            _confirm_existing_file_bookkeeping(
+                                context, artist_context, album_info)
                         return
                 elif is_enhance_download or force_replace:
                     if is_enhance_download:
                         logger.info(f"[Enhance] Quality enhance mode — replacing existing file: {os.path.basename(final_path)}")
                     else:
                         logger.info(f"[Force] User-forced re-download — replacing existing file: {os.path.basename(final_path)}")
+                    _replace_reason = "enhance" if is_enhance_download else "force"
                 else:
                     logger.info(f"[Protection] Existing file lacks metadata - safe to overwrite: {os.path.basename(final_path)}")
+                    _replace_reason = "no_metadata_overwrite"
             except Exception as check_error:
                 logger.error(f"[Protection] Error checking existing file metadata, proceeding with overwrite: {check_error}")
+                _replace_reason = "metadata_check_error_overwrite"
 
         if not os.path.exists(file_path):
             if os.path.exists(final_path):
                 logger.info(f"[Pre-Move] Source already gone and destination exists - another thread completed transfer: {os.path.basename(final_path)}")
                 download_cover_art(album_info, os.path.dirname(final_path), context)
                 generate_lrc_file(final_path, context, artist_context, album_info)
-                context['_pipeline_import_succeeded'] = True
+                _confirm_existing_file_bookkeeping(
+                    context, artist_context, album_info)
                 return
             expected_dir = os.path.dirname(final_path)
             expected_stem = os.path.splitext(os.path.basename(final_path))[0]
@@ -1293,40 +2119,78 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 context['_final_processed_path'] = found_variant
                 download_cover_art(album_info, expected_dir, context)
                 generate_lrc_file(found_variant, context, artist_context, album_info)
-                context['_pipeline_import_succeeded'] = True
+                _confirm_existing_file_bookkeeping(
+                    context, artist_context, album_info)
                 return
             logger.warning(f"[Pre-Move] Source file gone and no matching file in destination: {os.path.basename(file_path)}")
             raise FileNotFoundError(f"Source file vanished before move and destination does not exist: {file_path}")
 
+        if _verified_upgrade:
+            if not _upgrade_snapshot_still_current(_upgrade_snapshot):
+                raise RuntimeError(
+                    "Library-v2 upgrade conflict: primary file or profile changed; "
+                    "previous file kept and incoming artifact left recoverable"
+                )
+            if (_upgrade_old_local and os.path.exists(_upgrade_old_local)
+                    and not _replacement_length_is_safe(
+                        _upgrade_old_local, file_path)):
+                raise RuntimeError(
+                    "Library-v2 upgrade rejected: retained artifact is materially "
+                    "shorter than the current primary"
+                )
+
         safe_move_file(file_path, final_path)
+        for companion_source in _upgrade_companions:
+            companion_final = os.path.splitext(final_path)[0] + os.path.splitext(
+                companion_source)[1]
+            safe_move_file(companion_source, companion_final)
+            context.setdefault('_companion_file_paths', []).append(companion_final)
+        if _verified_upgrade and _upgrade_old_local:
+            same_upgrade_path = (
+                os.path.normcase(os.path.normpath(_upgrade_old_local))
+                == os.path.normcase(os.path.normpath(final_path))
+            )
+            if not same_upgrade_path and os.path.exists(_upgrade_old_local):
+                try:
+                    os.remove(_upgrade_old_local)
+                except OSError as retirement_error:
+                    # Keep the known-good file and restore the candidate to
+                    # staging when a cross-extension retirement cannot finish.
+                    try:
+                        safe_move_file(final_path, file_path)
+                    except Exception as rollback_error:  # noqa: BLE001
+                        logger.error("Upgrade rollback also failed: %s", rollback_error)
+                    raise RuntimeError(
+                        f"Could not retire previous upgrade file: {retirement_error}"
+                    ) from retirement_error
+                _record_replaced_file_path(context, _upgrade_old_path)
         from core.imports.file_ops import move_companion_sidecars
         move_companion_sidecars(file_path, final_path)
         cleanup_slskd_dedup_siblings(file_path)
+        if _replace_reason:
+            _journal_previous_file_replaced(context, reason=_replace_reason)
 
         if is_enhance_download and _enhance_source_info.get('original_file_path'):
-            original_enhance_path = _enhance_source_info['original_file_path']
-            # #1109 second half: the recorded path is the MEDIA SERVER's view of
-            # the library ("/music/…"), which this process usually cannot see.
-            # `os.path.exists` therefore said False, the removal was skipped, and
-            # the branch below logged "Replaced in-place" — while the superseded
-            # copy stayed on disk next to the new one. Resolve it through the
-            # same resolver the destination uses before deciding.
-            _old_path = original_enhance_path
-            if not os.path.exists(_old_path):
+            # #1109: the recorded path is the media server's view of the
+            # library. Resolve it to this process's mount first, or the
+            # superseded file is never found — os.path.exists() said False and
+            # the branch below happily logged "Replaced in-place" while the old
+            # copy stayed on disk next to the new one.
+            _recorded_enhance_path = _enhance_source_info['original_file_path']
+            original_enhance_path = _resolve_enhance_original_path(
+                _recorded_enhance_path)
+            if os.path.normpath(original_enhance_path) != os.path.normpath(final_path) and os.path.exists(original_enhance_path):
                 try:
-                    from core.library.path_resolver import resolve_library_file_path
-                    _old_path = resolve_library_file_path(
-                        original_enhance_path, config_manager=config_manager) or _old_path
-                except Exception as _resolve_err:   # noqa: BLE001 - best effort
-                    logger.debug(
-                        f"[Enhance] could not resolve the old file's path: {_resolve_err}")
-            # Compare the RESOLVED path, not the recorded one. An in-place
-            # replacement resolves to the file we just wrote; deleting that would
-            # destroy the upgrade itself.
-            if os.path.normpath(_old_path) != os.path.normpath(final_path) and os.path.exists(_old_path):
-                try:
-                    os.remove(_old_path)
-                    old_fmt = os.path.splitext(_old_path)[1]
+                    os.remove(original_enhance_path)
+                    # dd28-08: the new file lands at a DIFFERENT path (new
+                    # extension), so the catalog row for the old one has to be
+                    # retired explicitly — autolink keys on (track_id, path)
+                    # and would otherwise just add a second row.
+                    _record_replaced_file_path(context, original_enhance_path)
+                    # The catalog row may hold either form of the path; retire
+                    # both so a resolved deletion still clears the stored row.
+                    _record_replaced_file_path(context, _recorded_enhance_path)
+                    old_fmt = os.path.splitext(original_enhance_path)[1]
                     new_fmt = os.path.splitext(final_path)[1]
                     logger.info(f"[Enhance] Upgraded {old_fmt} → {new_fmt}: {os.path.basename(final_path)}")
                 except Exception as e:
@@ -1351,18 +2215,27 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 pp_logger.debug(f"ReplayGain analysis skipped: {rg_err}")
 
         _qp_post = _resolve_context_quality_profile(context)
-        final_path = _apply_profile_output_transforms(
-            final_path, context, _qp_post)
+        if _upgrade_snapshot is None:
+            final_path = _apply_profile_output_transforms(
+                final_path, context, _qp_post)
+        else:
+            # Upgrade artifacts were transformed transactionally in staging;
+            # only persist the verification tag after their final move.
+            _persist_verification_status(context, final_path)
+
+        _attach_manual_skip_path(context_key, final_path)
 
         downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
         cleanup_empty_directories(downloads_path, file_path)
 
         logger.info(f"Post-processing complete for: {context.get('_final_processed_path', final_path)}")
 
-        emit_track_downloaded(context, automation_engine)
-        record_library_history_download(context)
-        record_download_provenance(context)
-        record_soulsync_library_entry(context, artist_context, album_info)
+        # Genuine downloads run both catalogue writers before the registration
+        # gate. Reorganize is excluded: the runner updates the one existing
+        # file row after this pipeline proves the destination exists.
+        _record_completed_import_side_effects(
+            context, artist_context, album_info, automation_engine,
+        )
 
         try:
             completed_path = context.get('_final_processed_path', final_path)
@@ -1394,10 +2267,11 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         except Exception as cons_err:
             logger.error(f"[Post-Process] Album consistency registration failed: {cons_err}")
 
-        try:
-            check_and_remove_from_wishlist(context)
-        except Exception as wishlist_error:
-            logger.error(f"[Post-Process] Error checking wishlist removal: {wishlist_error}")
+        if context.get('_library_reorganize') is not True:
+            try:
+                check_and_remove_from_wishlist(context)
+            except Exception as wishlist_error:
+                logger.error(f"[Post-Process] Error checking wishlist removal: {wishlist_error}")
 
         task_id = context.get('task_id')
         batch_id = context.get('batch_id')
@@ -1433,11 +2307,30 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     matched_downloads_context[context_key] = context
                     logger.warning(f"Re-added {context_key} to context for retry")
         else:
-            logger.warning(f"Source file gone, not retrying: {context_key}")
+            if _recover_moved_file_bookkeeping(
+                context,
+                locals().get('artist_context'),
+                locals().get('album_info'),
+            ):
+                context['_pipeline_import_succeeded'] = True
+                logger.warning(
+                    "Source consumed but destination exists; recovered library "
+                    "bookkeeping for %s",
+                    context_key,
+                )
+            else:
+                context.setdefault(
+                    '_context_failure_msg',
+                    'the file was moved, but Library v2 could not register it',
+                )
+                logger.warning(f"Source file gone, not retrying: {context_key}")
     finally:
         file_lock.release()
         with post_process_locks_lock:
             post_process_locks.pop(context_key, None)
+        if _upgrade_track_lock is not None:
+            _release_upgrade_lock(
+                _server_upgrade_intent.track_id, _upgrade_track_lock)
 
 
 def _attempt_version_mismatch_fallback(context, task_id, batch_id, runtime, metadata_runtime):
@@ -1511,6 +2404,25 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             context['task_id'] = original_task_id
         if original_batch_id:
             context['batch_id'] = original_batch_id
+
+        if context.get('_upgrade_rejected'):
+            failure_msg = context.get(
+                '_upgrade_failure_msg', 'Downloaded file was not a valid upgrade')
+            with matched_context_lock:
+                matched_downloads_context.pop(context_key, None)
+            if _requeue_quarantined_task_for_retry(
+                task_id, batch_id, 'upgrade_quality'
+            ):
+                return
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['status'] = 'failed'
+                    download_tasks[task_id]['error_message'] = failure_msg
+                    entry_id = context.get('_quarantine_entry_id')
+                    if entry_id:
+                        download_tasks[task_id]['quarantine_entry_id'] = entry_id
+            _notify_download_completed(batch_id, task_id, success=False)
+            return
 
         # Quality / audio-guard quarantine. The wrapper must NOT continue to the
         # "assume success" fall-through — that marked the quarantined file
@@ -1703,21 +2615,38 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             return
 
         expected_final_path = context.get('_final_processed_path')
-        if not expected_final_path:
-            logger.info(f"No _final_processed_path in context for task {task_id} — cannot verify, assuming success")
+        if not context.get('_pipeline_import_succeeded'):
+            # A file on disk is only half an import.  Every successful path in
+            # the inner pipeline now sets this flag *after* the strict lib2
+            # registration (including race/recovery paths), so absence is an
+            # explicit failure rather than an unverifiable success.
+            failure_msg = str(context.get(
+                '_context_failure_msg',
+                'post-processing did not complete Library v2 registration',
+            ))
+            logger.error(
+                "Post-processing did not import (task=%s): %s", task_id, failure_msg,
+            )
             with tasks_lock:
                 if task_id in download_tasks:
-                    _mark_task_completed(task_id, context.get('track_info'))
-                    if context.get('_verification_status'):
-                        download_tasks[task_id]['verification_status'] = context['_verification_status']
-                    if context.get('_history_id'):
-                        download_tasks[task_id]['history_id'] = context['_history_id']
-                    if context.get('_audio_quality'):
-                        download_tasks[task_id]['quality'] = context['_audio_quality']
+                    download_tasks[task_id]['status'] = 'failed'
+                    download_tasks[task_id]['error_message'] = failure_msg
             with matched_context_lock:
                 if context_key in matched_downloads_context:
                     del matched_downloads_context[context_key]
-            _notify_download_completed(batch_id, task_id, success=True)
+            _notify_download_completed(batch_id, task_id, success=False)
+            return
+        if not expected_final_path:
+            failure_msg = 'post-processing reported success without a destination path'
+            logger.error("Task %s: %s", task_id, failure_msg)
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['status'] = 'failed'
+                    download_tasks[task_id]['error_message'] = failure_msg
+            with matched_context_lock:
+                if context_key in matched_downloads_context:
+                    del matched_downloads_context[context_key]
+            _notify_download_completed(batch_id, task_id, success=False)
             return
 
         if os.path.exists(expected_final_path):
@@ -1752,21 +2681,27 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                     if redownload_ctx.get('delete_old_file') and old_path and os.path.exists(old_path):
                         if os.path.normpath(old_path) != os.path.normpath(expected_final_path):
                             os.remove(old_path)
+                            # dd28-08: the redownload hook used to update only
+                            # the LEGACY tracks.file_path, leaving the lib2 row
+                            # pointing at the file it had just deleted.
+                            _record_replaced_file_path(context, old_path)
+                            _retire_lib2_path_after_redownload(old_path, expected_final_path)
                             logger.info(f"[Redownload] Deleted old file: {old_path}")
-                    if lib_track_id and expected_final_path:
+                    # Guarded on `old_path`, because that is what the repoint
+                    # matches on — the row is keyed by the path we stored, not
+                    # by the track id the old legacy UPDATE used. Report the
+                    # rows actually moved: zero is normal once the delete branch
+                    # above has retired the row, but it is not "updated".
+                    if old_path and expected_final_path:
                         _rd_db = get_database()
                         _rd_conn = _rd_db._get_connection()
-                        _rd_cursor = _rd_conn.cursor()
-                        _rd_cursor.execute(
-                            """
-                            UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP
-                            WHERE id = ?
-                            """,
-                            (expected_final_path, lib_track_id),
-                        )
+                        from core.library2.track_files import repoint_file_path
+                        _rd_moved = repoint_file_path(_rd_conn, old_path, expected_final_path)
                         _rd_conn.commit()
                         _rd_conn.close()
-                        logger.info(f"[Redownload] Updated DB path for track {lib_track_id}")
+                        logger.info(
+                            f"[Redownload] Repointed {_rd_moved} lib2 file row(s) "
+                            f"for track {lib_track_id}")
                 except Exception as e:
                     logger.error(f"[Redownload] Post-processing hook error: {e}")
 

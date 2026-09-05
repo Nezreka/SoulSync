@@ -4653,6 +4653,7 @@
                                             onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                     </div>
                                     <select id="quality-upgrade-policy" style="width:100%;max-width:420px;" onchange="onUpgradePolicyChange(); debouncedSaveQualityProfile();">
+                                        <option value="none">No upgrades</option>
                                         <option value="acceptable">Any accepted target</option>
                                         <option value="until_cutoff">Selected target or better</option>
                                     </select>
@@ -4661,6 +4662,8 @@
                                         <select id="quality-upgrade-cutoff" onchange="debouncedSaveQualityProfile()"></select>
                                     </div>
                                     <div class="help-text setting-help-body" hidden>
+                                        <strong>No upgrades</strong> never replaces a file that already exists.
+                                        <br><br>
                                         <strong>Any accepted target</strong> stops upgrade findings as soon as a file matches any target in the list.
                                         <br><br>
                                         <strong>Selected target or better</strong> keeps the Quality Upgrade job proposing replacements until the file reaches the selected rank.

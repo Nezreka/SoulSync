@@ -16,7 +16,7 @@ import os
 
 from core.library.path_resolver import resolve_library_file_path
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, scoped_file_subjects
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.missing_lyrics")
@@ -51,6 +51,7 @@ class MissingLyricsJob(RepairJob):
     default_interval_hours = 48
     default_settings = {}
     auto_fix = False
+    supports_file_scope = True
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -71,26 +72,23 @@ class MissingLyricsJob(RepairJob):
             return result
 
         rows = []
-        conn = None
+        native_subjects = {}
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name, al.title, t.file_path, t.duration
-                FROM tracks t
-                LEFT JOIN albums al ON al.id = t.album_id
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                WHERE t.file_path IS NOT NULL AND t.file_path != ''
-                  AND t.title IS NOT NULL AND t.title != ''
-            """)
-            rows = cursor.fetchall()
+            from core.library2.maintenance_subjects import active_file_subjects
+
+            for subject in scoped_file_subjects(context, active_file_subjects(
+                context.db, context.config_manager,
+            )):
+                file_path = str(subject["path"])
+                native_subjects[file_path] = subject
+                rows.append((
+                    f"lib2:{subject['track_id']}", subject["title"],
+                    subject["artist_name"], subject["album_title"],
+                    file_path, subject["duration"],
+                ))
         except Exception as e:
-            logger.error("[Lyrics Filler] Error reading tracks: %s", e, exc_info=True)
+            logger.warning("[Lyrics Filler] V2 subject enumeration failed: %s", e)
             result.errors += 1
-            return result
-        finally:
-            if conn:
-                conn.close()
 
         # The stored file_path may not exist as-is in this process's filesystem view (docker mounts,
         # a Plex/SoulSync path mismatch). The .lrc check below MUST run against the resolved on-disk
@@ -118,12 +116,20 @@ class MissingLyricsJob(RepairJob):
             # Resolve the stored path to the real file before checking for the sidecar (see note
             # above). Fall back to the raw path when the resolver returns nothing — the common docker
             # case where the container path already equals the stored path.
-            resolved_path = resolve_library_file_path(
-                file_path,
-                transfer_folder=getattr(context, 'transfer_folder', None),
-                download_folder=download_folder,
-                config_manager=context.config_manager,
-            ) or file_path
+            subject = native_subjects.get(str(file_path))
+            if subject:
+                from core.library2.paths import resolve_lib2_path
+
+                resolved_path = resolve_lib2_path(
+                    file_path, config_manager=context.config_manager,
+                ) or file_path
+            else:
+                resolved_path = resolve_library_file_path(
+                    file_path,
+                    transfer_folder=getattr(context, 'transfer_folder', None),
+                    download_folder=download_folder,
+                    config_manager=context.config_manager,
+                ) or file_path
 
             # Already has a sidecar on disk → nothing to do.
             if _has_lrc_sidecar(resolved_path):
@@ -163,6 +169,18 @@ class MissingLyricsJob(RepairJob):
 
             if context.create_finding:
                 try:
+                    details = {
+                        'track_id': track_id,
+                        'track_title': title,
+                        'artist': artist_name,
+                        'album_title': album_title,
+                        'file_path': resolved_path,
+                        'duration': duration_s,
+                    }
+                    if subject:
+                        from core.library2.maintenance_subjects import subject_details
+
+                        details.update(subject_details(subject))
                     inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='missing_lyrics',
@@ -172,14 +190,7 @@ class MissingLyricsJob(RepairJob):
                         file_path=file_path,
                         title=f'Missing lyrics: {title or "Unknown"}',
                         description=f'"{title}" by {artist_name or "Unknown"} has no .lrc — lyrics found on LRClib.',
-                        details={
-                            'track_id': track_id,
-                            'track_title': title,
-                            'artist': artist_name,
-                            'album_title': album_title,
-                            'file_path': file_path,
-                            'duration': duration_s,
-                        })
+                        details=details)
                     if inserted:
                         result.findings_created += 1
                     else:
@@ -198,19 +209,9 @@ class MissingLyricsJob(RepairJob):
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
-        conn = None
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*) FROM tracks
-                WHERE file_path IS NOT NULL AND file_path != ''
-                  AND title IS NOT NULL AND title != ''
-            """)
-            row = cursor.fetchone()
-            return row[0] if row else 0
+            from core.library2.maintenance_subjects import count_active_files
+
+            return count_active_files(context.db, context.config_manager)
         except Exception:
             return 0
-        finally:
-            if conn:
-                conn.close()

@@ -20,6 +20,91 @@ logger = logging.getLogger(__name__)
 ImageUrlFixer = Callable[[Optional[str]], Optional[str]]
 
 
+# The stats page shows names the media server reported for a play; the catalogue
+# has to be found by name because there is no id in a listening-history row.
+# Three things about doing that against Library v2 (docs §50.4.4.13, corrected
+# in §50.4.4.22):
+#
+# **The id is the lib2 one.** Every id here is handed to the artist-detail
+# link, and that route redirects `/artist-detail/library/<id>` into Library V2
+# as `?artist=<id>` (ldp-01) — where the number is read as `lib2_artists.id`.
+# §50.4.4.13 kept the legacy id because the page it knew resolved against the
+# legacy table; that page is gone, so a legacy id there opens a different
+# artist or none at all. A row without a legacy twin is therefore no longer a
+# row without a link, and the ``ORDER BY`` prefers the canonical row (an alias
+# member folds into it anyway) rather than a linked one.
+#
+# **Artists match on ``name_key``, not ``LOWER(name)``.** It is the indexed
+# dedup key, and SQLite's ``lower()`` is ASCII-only — the old comparison missed
+# every Cyrillic/Greek/Turkish name it was supposed to find (iss29-D13).
+#
+# **A path is a file row.** lib2 keeps paths and bitrate on
+# ``lib2_track_files`` (ADR-03), so "has a playable file" is a join, and the
+# stored path is returned as stored — resolving it to disk is the caller's job,
+# as it was when the column lived on the track.
+_ARTIST_BY_NAME_SQL = """
+    SELECT image_url,
+           json_extract(enrichment, '$.lastfm.listeners'),
+           json_extract(enrichment, '$.lastfm.playcount'),
+           soul_id,
+           COALESCE(canonical_artist_id, id)
+      FROM lib2_artists
+     WHERE name_key = ?
+     ORDER BY (canonical_artist_id IS NOT NULL), id
+     LIMIT 1
+"""
+
+_ALBUM_BY_TITLE_SQL = """
+    SELECT al.image_url, al.id, COALESCE(ar.canonical_artist_id, ar.id)
+      FROM lib2_albums al
+      JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+     WHERE LOWER(al.title) = LOWER(?)
+       AND al.image_url IS NOT NULL AND al.image_url != ''
+     ORDER BY al.id
+     LIMIT 1
+"""
+
+_TRACK_BY_TITLE_AND_ARTIST_SQL = """
+    SELECT al.image_url, t.id, COALESCE(ar.canonical_artist_id, ar.id)
+      FROM lib2_tracks t
+      JOIN lib2_albums al ON al.id = t.album_id
+      JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+     WHERE LOWER(t.title) = LOWER(?) AND ar.name_key = ?
+     ORDER BY t.id
+     LIMIT 1
+"""
+
+# INT-03: a play resolves on the TRACK's artist. Matching only the album's
+# primary artist meant a Muse track on a Various Artists compilation could not
+# be resolved from a listening event that correctly named Muse — the local file
+# was there and the stats view could not find it. The album artist stays as the
+# fallback it always was; it is simply no longer the only credit consulted.
+_PLAYABLE_TRACK_SQL = """
+    SELECT t.id, t.title, f.path, f.bitrate, t.duration,
+           ar.name, al.title, al.image_url,
+           COALESCE(ar.canonical_artist_id, ar.id), al.id
+      FROM lib2_tracks t
+      JOIN lib2_albums al ON al.id = t.album_id
+      JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+      JOIN lib2_track_files f ON f.track_id = t.id
+     WHERE LOWER(t.title) = LOWER(?)
+       AND (ar.name_key = ?
+            OR EXISTS (SELECT 1 FROM lib2_track_artists ta
+                        JOIN lib2_artists credit ON credit.id = ta.artist_id
+                       WHERE ta.track_id = t.id AND credit.name_key = ?))
+       AND f.path IS NOT NULL AND f.path != ''
+       AND COALESCE(f.file_state, 'active') = 'active'
+     ORDER BY (ar.name_key = ?) DESC, f.is_primary DESC, f.id
+     LIMIT 1
+"""
+
+
+def _name_key(name: Any) -> str:
+    from core.library2.importer import normalize_name
+
+    return normalize_name(str(name or ""))
+
+
 def get_cached_stats(database, image_url_fixer: ImageUrlFixer, time_range: str) -> dict:
     """Read pre-computed stats cache for a time range. Instant response."""
     conn = database._get_connection()
@@ -103,10 +188,10 @@ def get_album_play_tracks(database, album_id, image_url_fixer: ImageUrlFixer) ->
     ``npMapRadioTrack`` (media-player.js) maps — anything else silently drops
     out of the queue.
 
-    Tracks with no ``file_path`` are EXCLUDED here rather than filtered in the
-    player: a row the player would skip is not a track you own, and counting
-    it would make "play album" look like it lost songs. Ordered by track
-    number so the album plays as an album.
+    Tracks with no active file row are EXCLUDED here rather than filtered in
+    the player: a row the player would skip is not a track you own, and
+    counting it would make "play album" look like it lost songs. One preferred
+    file is selected per recording and the result follows album track order.
     """
     conn = None
     try:
@@ -114,13 +199,25 @@ def get_album_play_tracks(database, album_id, image_url_fixer: ImageUrlFixer) ->
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT t.id, t.title, ar.name, al.title, t.file_path, t.bitrate,
-                   t.artist_id, t.album_id, al.thumb_url
-            FROM tracks t
-            JOIN albums al ON al.id = t.album_id
-            JOIN artists ar ON ar.id = t.artist_id
+            SELECT t.id, t.title,
+                   COALESCE(NULLIF(t.track_artist, ''), ar.name), al.title,
+                   f.path, f.bitrate,
+                   COALESCE(ar.canonical_artist_id, ar.id), t.album_id,
+                   al.image_url
+            FROM lib2_tracks t
+            JOIN lib2_albums al ON al.id = t.album_id
+            JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+            JOIN lib2_track_files f ON f.id = (
+                SELECT preferred.id
+                FROM lib2_track_files preferred
+                WHERE preferred.track_id = t.id
+                  AND preferred.path IS NOT NULL
+                  AND TRIM(preferred.path) != ''
+                  AND COALESCE(preferred.file_state, 'active') = 'active'
+                ORDER BY preferred.is_primary DESC, preferred.id
+                LIMIT 1
+            )
             WHERE t.album_id = ?
-              AND t.file_path IS NOT NULL AND t.file_path != ''
             ORDER BY COALESCE(t.track_number, 999999), t.title
             """,
             (album_id,),
@@ -163,22 +260,14 @@ def get_top_artists(database, image_url_fixer: ImageUrlFixer, time_range: str, l
             conn = database._get_connection()
             try:
                 cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT thumb_url, id, lastfm_listeners, lastfm_playcount, soul_id
-                    FROM artists
-                    WHERE LOWER(name) = LOWER(?)
-                    LIMIT 1
-                    """,
-                    (artist['name'],),
-                )
+                cursor.execute(_ARTIST_BY_NAME_SQL, (_name_key(artist['name']),))
                 row = cursor.fetchone()
                 if row:
                     artist['image_url'] = image_url_fixer(row[0]) if row[0] else None
-                    artist['id'] = row[1]
-                    artist['global_listeners'] = row[2]
-                    artist['global_playcount'] = row[3]
-                    artist['soul_id'] = row[4]
+                    artist['global_listeners'] = row[1]
+                    artist['global_playcount'] = row[2]
+                    artist['soul_id'] = row[3]
+                    artist['id'] = row[4]
             finally:
                 conn.close()
         except Exception as e:
@@ -196,14 +285,7 @@ def get_top_albums(database, image_url_fixer: ImageUrlFixer, time_range: str, li
             conn = database._get_connection()
             try:
                 cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT al.thumb_url, al.id, al.artist_id FROM albums al
-                    WHERE LOWER(al.title) = LOWER(?) AND al.thumb_url IS NOT NULL AND al.thumb_url != ''
-                    LIMIT 1
-                    """,
-                    (album['name'],),
-                )
+                cursor.execute(_ALBUM_BY_TITLE_SQL, (album['name'],))
                 row = cursor.fetchone()
                 if row:
                     album['image_url'] = image_url_fixer(row[0]) if row[0] else None
@@ -226,16 +308,8 @@ def get_top_tracks(database, image_url_fixer: ImageUrlFixer, time_range: str, li
             conn = database._get_connection()
             try:
                 cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT al.thumb_url, t.id, t.artist_id FROM tracks t
-                    JOIN albums al ON al.id = t.album_id
-                    JOIN artists ar ON ar.id = t.artist_id
-                    WHERE LOWER(t.title) = LOWER(?) AND LOWER(ar.name) = LOWER(?)
-                    LIMIT 1
-                    """,
-                    (track['name'], track['artist']),
-                )
+                cursor.execute(_TRACK_BY_TITLE_AND_ARTIST_SQL,
+                               (track['name'], _name_key(track['artist'])))
                 row = cursor.fetchone()
                 if row:
                     track['image_url'] = image_url_fixer(row[0]) if row[0] else None
@@ -283,7 +357,7 @@ def get_library_disk_usage(database) -> dict:
 def get_recent_tracks(database, limit: int, image_url_fixer: Optional[ImageUrlFixer] = None) -> list[dict]:
     """Recently played tracks from listening_history.
 
-    Joins album art through db_track_id when the play was matched to a
+    Joins album art through lib2_track_id when the play was matched to a
     library track (the listening-stats worker sets it; media-server plays it
     couldn't match leave it NULL, and those rows come back with image_url
     None). Art passes through ``image_url_fixer`` because server-synced thumb
@@ -295,10 +369,12 @@ def get_recent_tracks(database, limit: int, image_url_fixer: Optional[ImageUrlFi
         cursor.execute(
             """
             SELECT lh.title, lh.artist, lh.album, lh.played_at, lh.duration_ms,
-                   lh.server_source, al.thumb_url, t.artist_id
+                   lh.server_source, al.image_url,
+                   COALESCE(ar.canonical_artist_id, ar.id)
             FROM listening_history lh
-            LEFT JOIN tracks t ON t.id = lh.db_track_id
-            LEFT JOIN albums al ON al.id = t.album_id
+            LEFT JOIN lib2_tracks t ON t.id = lh.lib2_track_id
+            LEFT JOIN lib2_albums al ON al.id = t.album_id
+            LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
             ORDER BY lh.played_at DESC
             LIMIT ?
             """,
@@ -396,12 +472,21 @@ def get_listening_events(
                 ORDER BY lh.played_at DESC
                 LIMIT ?
             )
+            -- INT-02: `lib2_track_id` is the catalogue link. Both writers of
+            -- the catalogue id — the media-server importer and the Last.fm one
+            -- — fill that column; `db_track_id` is the media server's OWN id
+            -- namespace. Joining the catalogue on it left every chart detail
+            -- without cover, artist link and track link, and on a numeric
+            -- collision pointed at somebody else's row. `get_recent_tracks`
+            -- already reads the right column; this is the same contract.
             SELECT lh.title, lh.artist, lh.album, lh.played_at, lh.duration_ms,
-                   lh.server_source, al.thumb_url, t.artist_id, t.id AS db_track_id
+                   lh.server_source, al.image_url,
+                   COALESCE(ar.canonical_artist_id, ar.id), t.id AS db_track_id
             FROM picked
             JOIN listening_history lh ON lh.id = picked.id
-            LEFT JOIN tracks t ON t.id = CAST(lh.db_track_id AS TEXT)
-            LEFT JOIN albums al ON al.id = t.album_id
+            LEFT JOIN lib2_tracks t ON t.id = lh.lib2_track_id
+            LEFT JOIN lib2_albums al ON al.id = t.album_id
+            LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
             ORDER BY lh.played_at DESC
             """,
             params + [limit + 1],
@@ -454,20 +539,10 @@ def resolve_track(database, image_url_fixer: ImageUrlFixer, title: str, artist: 
     conn = database._get_connection()
     try:
         cursor = conn.cursor()
+        artist_key = _name_key(artist)
         cursor.execute(
-            """
-            SELECT t.id, t.title, t.file_path, t.bitrate, t.duration,
-                   ar.name as artist_name, al.title as album_title,
-                   al.thumb_url, t.artist_id, t.album_id
-            FROM tracks t
-            JOIN artists ar ON ar.id = t.artist_id
-            LEFT JOIN albums al ON al.id = t.album_id
-            WHERE LOWER(t.title) = LOWER(?) AND LOWER(ar.name) = LOWER(?)
-              AND t.file_path IS NOT NULL AND t.file_path != ''
-            LIMIT 1
-            """,
-            (title.strip(), artist.strip()),
-        )
+            _PLAYABLE_TRACK_SQL,
+            (title.strip(), artist_key, artist_key, artist_key))
         row = cursor.fetchone()
     finally:
         conn.close()
@@ -486,6 +561,11 @@ def resolve_track(database, image_url_fixer: ImageUrlFixer, title: str, artist: 
         'image_url': image_url_fixer(row[7]) if row[7] else None,
         'artist_id': row[8],
         'album_id': row[9],
+        # The player takes the v2 ids by their own names (iss29-B08): its
+        # "Go to artist" button then routes straight into the Library page
+        # instead of going through the artist-detail redirect.
+        'lib2_track_id': row[0],
+        'lib2_artist_id': row[8],
     }
 
 

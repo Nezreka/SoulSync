@@ -3,16 +3,19 @@
 The scan inserts an album row, then its tracks, then sweeps orphans. Between
 the first two steps a real album legitimately has zero tracks, so if the
 server's track list for that one album comes back short (no exception, no
-timeout - just an incomplete answer) the sweep deletes the row the same run
+timeout - just an incomplete answer) the sweep acts on the row the same run
 created.
 
-That loss is permanent, not transient: with the row gone the media server no
-longer reports the album as recently added, so the next incremental scan never
-rediscovers it. The reporter watched the same "Added artist ... for processing"
-line repeat every scan forever with nothing landing.
-
-The rule: a row this run touched is not an orphan yet. Only rows left trackless
+The rule: a row this run touched is not an orphan yet. Only rows left fileless
 by an EARLIER run are.
+
+Ported to Library v2. The sweep here DETACHES the media-server stamp instead of
+deleting catalogue rows - v2 keeps discography and monitored releases beside
+the owned ones, so a fileless album is normal and deleting it would lose data
+the server never owned. That makes upstream's permanent-loss shape impossible,
+but the same race still reaches the STAMP: strip the server link off an album
+written seconds ago and it stops resolving on the server until a deep scan puts
+it back. So the ledger still has to be honoured, and these pin that.
 """
 
 from __future__ import annotations
@@ -27,112 +30,134 @@ def db(tmp_path):
     return MusicDatabase(database_path=str(tmp_path / "music.db"))
 
 
-def _artist(db, artist_id, name):
+def _artist(db, artist_id, name, *, stamped=True):
+    """A catalogue artist, by default carrying a media-server stamp (only
+    stamped rows are candidates for the sweep at all)."""
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name) VALUES (?, ?)", (artist_id, name))
+        conn.execute(
+            "INSERT INTO lib2_artists (id, name, name_key, server_source, server_id) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (artist_id, name, str(name).lower(),
+             'plex' if stamped else None, f"srv-{artist_id}" if stamped else None))
         conn.commit()
 
 
-def _album(db, album_id, artist_id, title):
+def _album(db, album_id, artist_id, title, *, stamped=True):
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES (?, ?, ?)",
-                     (album_id, artist_id, title))
+        conn.execute(
+            "INSERT INTO lib2_albums (id, primary_artist_id, title, server_source, server_id) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (album_id, artist_id, title,
+             'plex' if stamped else None, f"srv-{album_id}" if stamped else None))
         conn.commit()
 
 
 def _track(db, track_id, album_id, artist_id, title):
+    """A track WITH a live file - what makes its album and artist owned."""
     with db._get_connection() as conn:
+        conn.execute("INSERT INTO lib2_tracks (id, album_id, title) VALUES (?, ?, ?)",
+                     (track_id, album_id, title))
         conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title) VALUES (?, ?, ?, ?)",
-            (track_id, album_id, artist_id, title))
+            "INSERT INTO lib2_track_files (track_id, path, is_primary, file_state) "
+            "VALUES (?, ?, 1, 'active')", (track_id, f"/music/{track_id}.flac"))
         conn.commit()
 
 
-def _ids(db, table):
+def _stamped(db, table):
+    """Ids that still carry a media-server stamp. The v2 sweep detaches rather
+    than deletes, so this is the set the tests are actually about."""
+    with db._get_connection() as conn:
+        return {str(r[0]) for r in conn.execute(
+            f"SELECT id FROM {table} WHERE server_id IS NOT NULL")}
+
+
+def _rows(db, table):
     with db._get_connection() as conn:
         return {str(r[0]) for r in conn.execute(f"SELECT id FROM {table}")}
 
 
-def test_a_trackless_album_from_an_earlier_run_is_still_removed(db):
-    """The sweep's actual job, unchanged."""
-    _artist(db, "a1", "Ghost Artist")
-    _album(db, "al1", "a1", "Ghost Album")
+def test_a_fileless_album_from_an_earlier_run_is_detached(db):
+    """The sweep's actual job: retire a stamp the server no longer earns."""
+    _artist(db, 1, "Ghost Artist")
+    _album(db, 1, 1, "Ghost Album")
 
     result = db.cleanup_orphaned_records()
 
     assert result['orphaned_albums_removed'] == 1
     assert result['orphaned_artists_removed'] == 1
-    assert _ids(db, "albums") == set()
-    assert _ids(db, "artists") == set()
+    assert _stamped(db, "lib2_albums") == set()
+    assert _stamped(db, "lib2_artists") == set()
+    # the catalogue rows themselves survive - that is the v2 difference
+    assert _rows(db, "lib2_albums") == {"1"} and _rows(db, "lib2_artists") == {"1"}
 
 
 def test_an_album_this_run_wrote_survives_its_own_sweep(db):
-    """#1216: the album is trackless only because its tracks have not landed
-    yet. Deleting it here is what made the loss permanent."""
-    _artist(db, "a1", "Various Artists")
-    _album(db, "al1", "a1", "Compilation")
+    """#1216: the album is fileless only because its tracks have not landed
+    yet. Acting on it here is what broke the reporter's library."""
+    _artist(db, 1, "Various Artists")
+    _album(db, 1, 1, "Compilation")
 
     result = db.cleanup_orphaned_records(
-        protected_artist_ids={"a1"}, protected_album_ids={"al1"})
+        protected_artist_ids={1}, protected_album_ids={1})
 
     assert result['orphaned_albums_removed'] == 0
     assert result['albums_protected'] == 1
     assert result['artists_protected'] == 1
-    assert _ids(db, "albums") == {"al1"}, "the run's own album was deleted — #1216 is back"
-    assert _ids(db, "artists") == {"a1"}
+    assert _stamped(db, "lib2_albums") == {"1"}, "the run's own album was detached — #1216 is back"
+    assert _stamped(db, "lib2_artists") == {"1"}
 
 
 def test_protection_is_per_row_not_all_or_nothing(db):
     """A run that touched one artist must not shield last week's orphans."""
-    _artist(db, "fresh", "This Run")
-    _album(db, "fresh-al", "fresh", "Just Inserted")
-    _artist(db, "stale", "Long Gone")
-    _album(db, "stale-al", "stale", "Left Trackless Ages Ago")
+    _artist(db, 1, "This Run")
+    _album(db, 1, 1, "Just Inserted")
+    _artist(db, 2, "Long Gone")
+    _album(db, 2, 2, "Left Fileless Ages Ago")
 
     result = db.cleanup_orphaned_records(
-        protected_artist_ids={"fresh"}, protected_album_ids={"fresh-al"})
+        protected_artist_ids={1}, protected_album_ids={1})
 
     assert result['orphaned_albums_removed'] == 1
     assert result['orphaned_artists_removed'] == 1
-    assert _ids(db, "albums") == {"fresh-al"}
-    assert _ids(db, "artists") == {"fresh"}
+    assert _stamped(db, "lib2_albums") == {"1"}
+    assert _stamped(db, "lib2_artists") == {"1"}
 
 
-def test_an_album_with_tracks_is_never_touched(db):
-    _artist(db, "a1", "Real Artist")
-    _album(db, "al1", "a1", "Real Album")
-    _track(db, "t1", "al1", "a1", "Real Track")
+def test_an_album_with_files_is_never_touched(db):
+    _artist(db, 1, "Real Artist")
+    _album(db, 1, 1, "Real Album")
+    _track(db, 1, 1, 1, "Real Track")
 
     result = db.cleanup_orphaned_records()
 
     assert result['orphaned_albums_removed'] == 0
-    assert _ids(db, "albums") == {"al1"}
+    assert _stamped(db, "lib2_albums") == {"1"}
 
 
 def test_ids_are_compared_as_strings(db):
-    """Server ids arrive as ints from Plex and strings from Jellyfin/Navidrome;
-    the ledger must match either way."""
-    _artist(db, "77", "Numeric Id")
-    _album(db, "88", "77", "Numeric Album")
+    """Server ids arrive as ints from Plex and strings from Jellyfin/Navidrome,
+    and lib2 keys are INTEGER; the ledger must match either way."""
+    _artist(db, 77, "Numeric Id")
+    _album(db, 88, 77, "Numeric Album")
 
     result = db.cleanup_orphaned_records(
-        protected_artist_ids={77}, protected_album_ids={88})
+        protected_artist_ids={"77"}, protected_album_ids={"88"})
 
     assert result['orphaned_albums_removed'] == 0
-    assert _ids(db, "albums") == {"88"}
+    assert _stamped(db, "lib2_albums") == {"88"}
 
 
 def test_a_sweep_larger_than_one_chunk_still_clears(db):
-    """The delete is chunked around SQLite's bound-variable cap; 600 orphans
+    """The detach is chunked around SQLite's bound-variable cap; 600 orphans
     must not silently leave 100 behind."""
-    _artist(db, "a1", "Prolific")
+    _artist(db, 1, "Prolific")
     for n in range(600):
-        _album(db, f"al{n}", "a1", f"Album {n}")
+        _album(db, n + 1, 1, f"Album {n}")
 
-    result = db.cleanup_orphaned_records(protected_artist_ids={"a1"})
+    result = db.cleanup_orphaned_records(protected_artist_ids={1})
 
     assert result['orphaned_albums_removed'] == 600
-    assert _ids(db, "albums") == set()
+    assert _stamped(db, "lib2_albums") == set()
 
 
 def test_nothing_to_do_reports_zeroes(db):
@@ -217,28 +242,29 @@ def test_both_cleanup_call_sites_pass_the_ledger(tmp_path):
         f"{calls} cleanup call site(s), {protected} passing the ledger")
 
 
-def test_deleting_an_orphan_artist_cannot_cascade_over_a_protected_album(db):
-    """PRAGMA foreign_keys is ON and albums cascade from artists, so sparing an
-    album means nothing if its artist is swept in the same call. The worker
-    happens to protect both, but the guarantee belongs here."""
-    _artist(db, "a1", "Various Artists")
-    _album(db, "al1", "a1", "Compilation")
+def test_the_owner_of_a_protected_album_is_protected_too(db):
+    """Nothing cascades here (the stamp is detached, not the row deleted), but
+    an artist that owns an album this run just wrote was written by the same
+    run one step earlier - stripping its stamp is the same race on the same
+    rows. Upstream rests this on the caller remembering both; pin it here."""
+    _artist(db, 1, "Various Artists")
+    _album(db, 1, 1, "Compilation")
 
-    # Only the ALBUM is named — the artist is trackless and unprotected.
-    result = db.cleanup_orphaned_records(protected_album_ids={"al1"})
+    # Only the ALBUM is named — the artist is fileless and unprotected.
+    result = db.cleanup_orphaned_records(protected_album_ids={1})
 
-    assert _ids(db, "albums") == {"al1"}, "the protected album was cascaded away"
-    assert _ids(db, "artists") == {"a1"}
+    assert _stamped(db, "lib2_albums") == {"1"}, "the protected album was detached"
+    assert _stamped(db, "lib2_artists") == {"1"}
     assert result['orphaned_artists_removed'] == 0
 
 
 def test_an_unrelated_orphan_artist_still_goes(db):
     """Sparing the owner must not spare everyone else."""
-    _artist(db, "keep", "Owns A Protected Album")
-    _album(db, "keep-al", "keep", "Just Inserted")
-    _artist(db, "drop", "Owns Nothing")
+    _artist(db, 1, "Owns A Protected Album")
+    _album(db, 1, 1, "Just Inserted")
+    _artist(db, 2, "Owns Nothing")
 
-    result = db.cleanup_orphaned_records(protected_album_ids={"keep-al"})
+    result = db.cleanup_orphaned_records(protected_album_ids={1})
 
-    assert _ids(db, "artists") == {"keep"}
+    assert _stamped(db, "lib2_artists") == {"1"}
     assert result['orphaned_artists_removed'] == 1

@@ -35,6 +35,18 @@ def test_unknown_value_falls_back_to_priority(monkeypatch):
     assert selection.load_search_mode() == "priority"
 
 
+def test_resolves_the_requested_profile_id(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        selection, "load_profile_by_id",
+        lambda profile_id=None: (
+            seen.append(profile_id) or {"search_mode": "best_quality"}
+        ),
+    )
+    assert selection.load_search_mode(7) == "best_quality"
+    assert seen == [7]
+
+
 def test_specific_profile_controls_search_mode(monkeypatch):
     seen = []
 

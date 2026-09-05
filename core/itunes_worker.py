@@ -10,16 +10,18 @@ from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.itunes_client import iTunesClient
 from core.worker_utils import (
-    accept_artist_match,
     artist_name_matches,
     idle_backoff_seconds,
     interruptible_sleep,
-    owned_album_titles,
     pick_artist_by_catalog,
     release_titles,
-    set_album_api_track_count,
 )
-from core.enrichment.manual_match_honoring import MATCHED, honor_stored_match
+from core.library2.worker_support import (
+    MATCHED,
+    accept_artist_match,
+    honor_stored_match,
+    owned_album_titles,
+)
 
 logger = get_logger("itunes_worker")
 
@@ -181,148 +183,24 @@ class iTunesWorker:
     # ── Priority queue ─────────────────────────────────────────────────
 
     def _get_next_item(self) -> Optional[Dict[str, Any]]:
+        """Get next item to process from the Library-v2 catalogue.
+
+        The batch-first order — pinned group, unattempted artists, an album batch, a
+        track batch, then the individual fallbacks for children whose own parent
+        never matched — lives in ``core.library2.worker_queue`` and is shared with
+        the Spotify worker, which had the identical queue (docs §32.3.1 stage 2).
+        """
         conn = None
         try:
+            from core.library2.worker_queue import next_batch_pending
+            from core.worker_utils import read_enrichment_priority
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            # Pinned-group override (Manage Enrichment Workers): process one
-            # entity type first, then fall through to the normal chain. Unset or
-            # exhausted ⇒ default artist→album→track order, unchanged.
-            from core.worker_utils import read_enrichment_priority, priority_pending_item
-            _prio = read_enrichment_priority('itunes')
-            if _prio:
-                _pi = priority_pending_item(cursor, 'itunes', _prio,
-                                            {'album': 'album_individual', 'track': 'track_individual'})
-                if _pi:
-                    return _pi
-
-            # Priority 1: Unattempted artists
-            cursor.execute("""
-                SELECT id, name
-                FROM artists
-                WHERE itunes_match_status IS NULL AND id IS NOT NULL
-                ORDER BY id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            # Priority 2: Album batch — matched artist with unattempted albums
-            cursor.execute("""
-                SELECT ar.id, ar.name, ar.itunes_artist_id
-                FROM artists ar
-                WHERE ar.itunes_match_status = 'matched'
-                  AND ar.itunes_artist_id IS NOT NULL
-                  AND EXISTS (
-                      SELECT 1 FROM albums al
-                      WHERE al.artist_id = ar.id AND al.itunes_match_status IS NULL AND al.id IS NOT NULL
-                  )
-                ORDER BY ar.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {
-                    'type': 'album_batch',
-                    'artist_id': row[0],
-                    'artist_name': row[1],
-                    'itunes_artist_id': row[2],
-                    'name': f"Albums for {row[1]}"
-                }
-
-            # Priority 3: Track batch — matched album with unattempted tracks
-            cursor.execute("""
-                SELECT al.id, al.title, al.itunes_album_id, ar.name AS artist_name
-                FROM albums al
-                JOIN artists ar ON al.artist_id = ar.id
-                WHERE al.itunes_match_status = 'matched'
-                  AND al.itunes_album_id IS NOT NULL
-                  AND EXISTS (
-                      SELECT 1 FROM tracks t
-                      WHERE t.album_id = al.id AND t.itunes_match_status IS NULL AND t.id IS NOT NULL
-                  )
-                ORDER BY al.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {
-                    'type': 'track_batch',
-                    'album_id': row[0],
-                    'album_name': row[1],
-                    'itunes_album_id': row[2],
-                    'artist_name': row[3],
-                    'name': f"Tracks on {row[1]}"
-                }
-
-            # Priority 4: Fallback individual albums (parent artist unmatched)
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.itunes_match_status IS NULL AND a.id IS NOT NULL
-                ORDER BY a.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album_individual', 'id': row[0], 'name': row[1], 'artist': row[2]}
-
-            # Priority 5: Fallback individual tracks (parent album unmatched)
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.itunes_match_status IS NULL AND t.id IS NOT NULL
-                ORDER BY t.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track_individual', 'id': row[0], 'name': row[1], 'artist': row[2]}
-
-            # Priority 6: Retry stale not_found items only (errors don't auto-retry —
-            # they require a user-triggered full refresh to prevent infinite retry loops)
-            not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
-
-            cursor.execute("""
-                SELECT id, name
-                FROM artists
-                WHERE itunes_match_status IN ('not_found', 'error') AND itunes_last_attempted < ?
-                ORDER BY itunes_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.itunes_match_status IN ('not_found', 'error') AND a.itunes_last_attempted < ?
-                ORDER BY a.itunes_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album_individual', 'id': row[0], 'name': row[1], 'artist': row[2]}
-
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.itunes_match_status IN ('not_found', 'error') AND t.itunes_last_attempted < ?
-                ORDER BY t.itunes_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track_individual', 'id': row[0], 'name': row[1], 'artist': row[2]}
-
-            return None
+            return next_batch_pending(
+                conn, 'itunes',
+                retry_after_days=self.retry_days,
+                pinned=read_enrichment_priority('itunes') or None,
+            )
 
         except Exception as e:
             logger.error(f"Error getting next item: {e}")
@@ -370,20 +248,17 @@ class iTunesWorker:
     # ── Artist processing ──────────────────────────────────────────────
 
     def _get_existing_id(self, entity_type: str, entity_id: int) -> Optional[str]:
-        """Check if an entity already has an itunes_artist_id/itunes_album_id/itunes_track_id."""
-        col_map = {'artist': 'itunes_artist_id', 'album': 'itunes_album_id', 'track': 'itunes_track_id'}
-        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-        col = col_map.get(entity_type)
-        table = table_map.get(entity_type)
-        if not col or not table:
-            return None
+        """The iTunes id already stored for this entity, if any.
+
+        Legacy needed a per-entity column map (itunes_artist_id / itunes_album_id /
+        itunes_track_id); lib2 keeps it under one service key on every entity.
+        """
         conn = None
         try:
+            from core.library2.worker_support import stored_provider_id
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT {col} FROM {table} WHERE id = ?", (entity_id,))
-            row = cursor.fetchone()
-            return row[0] if row and row[0] else None
+            return stored_provider_id(conn, entity_type, entity_id, 'itunes')
         except Exception:
             return None
         finally:
@@ -396,12 +271,8 @@ class iTunesWorker:
 
         existing_id = self._get_existing_id('artist', artist_id)
         if existing_id:
-            # Has an id but status may still be NULL (e.g. an id-only manual
-            # match) and _get_next_item selects NULL rows every loop — stamp
-            # 'matched' so this artist stops re-selecting and blocking the
-            # queue (#964, the JioSaavn fix applied here too).
-            self._mark_status('artist', artist_id, 'matched')
             logger.debug(f"Preserving existing iTunes ID for artist '{artist_name}': {existing_id}")
+            self._mark_status('artist', artist_id, 'matched')
             return
 
         results = self.client.search_artists(artist_name, limit=5)
@@ -415,17 +286,26 @@ class iTunesWorker:
         # the legacy "first passing" pick), then disambiguate same-name artists by
         # which one's catalog overlaps the albums this library owns.
         gated = [a for a in results if artist_name_matches(artist_name, a.name)]
+        conn = self.db._get_connection()
+        try:
+            _owned = owned_album_titles(conn, artist_id)
+        finally:
+            conn.close()
         chosen, _overlap = pick_artist_by_catalog(
             gated,
-            owned_album_titles(self.db, artist_id),
+            _owned,
             lambda a: release_titles(self.client.get_artist_albums(a.id)),
         )
 
         if chosen:
-            ok, reason = accept_artist_match(
-                self.db, 'itunes_artist_id', chosen.id, artist_id,
-                artist_name, chosen.name,
-            )
+            conn = self.db._get_connection()
+            try:
+                ok, reason = accept_artist_match(
+                    conn, 'itunes', chosen.id, artist_id,
+                    artist_name, chosen.name,
+                )
+            finally:
+                conn.close()
             if ok:
                 if not self._is_itunes_id(chosen.id):
                     logger.warning(f"Rejecting non-iTunes ID '{chosen.id}' for artist '{artist_name}'")
@@ -606,19 +486,16 @@ class iTunesWorker:
         # Issue #501: honor manual matches (see SpotifyWorker for full
         # explanation — same pattern across every per-source worker).
         _stored = honor_stored_match(
-            db=self.db, entity_table='albums', entity_id=album_id,
-            id_column='itunes_album_id',
-            client_fetch_fn=self.client.get_album,
-            on_match_fn=self._refresh_album_via_stored_id,
-            mark_status_fn=self._mark_status,
-            status_column='itunes_match_status',
+            self.db, entity_type='album', entity_id=album_id, service='itunes',
+            fetch=self.client.get_album,
+            on_match=self._refresh_album_via_stored_id,
             log_prefix='iTunes',
         )
         if _stored:
-            # L2-005: a stored ID the source could not confirm right now is
-            # NOT released to a fuzzy name search below — a transient provider
-            # failure is not evidence that the ID is wrong, and searching
-            # overwrote deliberately chosen matches with whatever came back.
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
             if _stored == MATCHED:
                 self.stats['matched'] += 1
             return
@@ -655,19 +532,16 @@ class iTunesWorker:
 
         # Issue #501: honor manual matches.
         _stored = honor_stored_match(
-            db=self.db, entity_table='tracks', entity_id=track_id,
-            id_column='itunes_track_id',
-            client_fetch_fn=self.client.get_track_details,
-            on_match_fn=self._refresh_track_via_stored_id,
-            mark_status_fn=self._mark_status,
-            status_column='itunes_match_status',
+            self.db, entity_type='track', entity_id=track_id, service='itunes',
+            fetch=self.client.get_track_details,
+            on_match=self._refresh_track_via_stored_id,
             log_prefix='iTunes',
         )
         if _stored:
-            # L2-005: a stored ID the source could not confirm right now is
-            # NOT released to a fuzzy name search below — a transient provider
-            # failure is not evidence that the ID is wrong, and searching
-            # overwrote deliberately chosen matches with whatever came back.
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
             if _stored == MATCHED:
                 self.stats['matched'] += 1
             return
@@ -701,156 +575,79 @@ class iTunesWorker:
 
     def _update_artist(self, artist_id: int, artist_obj):
         """Store iTunes metadata for an artist (from Artist dataclass)"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                UPDATE artists SET
-                    itunes_artist_id = ?,
-                    itunes_match_status = 'matched',
-                    itunes_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (str(artist_obj.id), artist_id))
-
-            # Backfill thumb_url if empty
-            if artist_obj.image_url:
-                cursor.execute("""
-                    UPDATE artists SET thumb_url = ?
-                    WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
-                """, (artist_obj.image_url, artist_id))
-
-            # Backfill genres if empty
-            if artist_obj.genres:
-                from core.genre_filter import filter_genres
-                from core.settings import config_manager as _cfg
-                _filtered = filter_genres(list(artist_obj.genres), _cfg)
-                if _filtered:
-                    cursor.execute("""
-                        UPDATE artists SET genres = ?
-                        WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
-                    """, (json.dumps(_filtered), artist_id))
-
-            conn.commit()
-        except Exception as e:
-            logger.error(f"Error updating artist #{artist_id} with iTunes data: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
+        backfill = {}
+        if artist_obj.image_url:
+            backfill['image_url'] = artist_obj.image_url
+        if artist_obj.genres:
+            from core.genre_filter import filter_genres
+            from core.settings import config_manager as _cfg
+            _filtered = filter_genres(list(artist_obj.genres), _cfg)
+            if _filtered:
+                backfill['genres'] = json.dumps(_filtered)
+        self._write('artist', artist_id, artist_obj.id, backfill=backfill)
 
     def _update_album(self, album_id: int, album_obj):
         """Store iTunes metadata for an album (from Album dataclass)"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                UPDATE albums SET
-                    itunes_album_id = ?,
-                    itunes_match_status = 'matched',
-                    itunes_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (str(album_obj.id), album_id))
-
-            # Backfill thumb_url if empty
-            if album_obj.image_url:
-                cursor.execute("""
-                    UPDATE albums SET thumb_url = ?
-                    WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
-                """, (album_obj.image_url, album_id))
-
-            # Backfill record_type if empty
-            if album_obj.album_type:
-                cursor.execute("""
-                    UPDATE albums SET record_type = ?
-                    WHERE id = ? AND (record_type IS NULL OR record_type = '')
-                """, (album_obj.album_type, album_id))
-
-            # Backfill year from release_date if empty
-            if album_obj.release_date:
-                year = album_obj.release_date[:4] if len(album_obj.release_date) >= 4 else None
-                if year and year.isdigit():
-                    cursor.execute("""
-                        UPDATE albums SET year = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE id = ? AND (year IS NULL OR year = '' OR year = '0')
-                    """, (year, album_id))
-                # #824: also store the FULL release date when iTunes has one
-                # (YYYY-MM or YYYY-MM-DD). Only when empty — never clobber a
-                # manually-set release_date.
-                if len(album_obj.release_date) > 4:
-                    cursor.execute("""
-                        UPDATE albums SET release_date = ?
-                        WHERE id = ? AND (release_date IS NULL OR release_date = '')
-                    """, (album_obj.release_date, album_id))
-
-            # Cache the authoritative expected track count for the Album
-            # Completeness repair job (see set_album_api_track_count docstring).
-            set_album_api_track_count(cursor, album_id, getattr(album_obj, 'total_tracks', 0))
-
-            conn.commit()
-        except Exception as e:
-            logger.error(f"Error updating album #{album_id} with iTunes data: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
+        backfill = {}
+        if album_obj.image_url:
+            backfill['image_url'] = album_obj.image_url
+        if album_obj.release_date:
+            year = album_obj.release_date[:4] if len(album_obj.release_date) >= 4 else None
+            if year and year.isdigit():
+                backfill['year'] = year
+            # #824: also store the FULL release date when iTunes has one (YYYY-MM or
+            # YYYY-MM-DD). Backfill only — never clobber a manually-set date.
+            if len(album_obj.release_date) > 4:
+                backfill['release_date'] = album_obj.release_date
+        # `record_type` has no lib2 counterpart to backfill: lib2_albums.album_type
+        # always carries a classification (the importer and MB reconcile own it), so
+        # there is no empty state to fill. iTunes' word goes in the payload.
+        self._write('album', album_id, album_obj.id, backfill=backfill,
+                    payload={'album_type': album_obj.album_type},
+                    total_tracks=getattr(album_obj, 'total_tracks', 0))
 
     def _update_track(self, track_id: int, track_data: Dict[str, Any]):
         """Store iTunes metadata for a track (from get_album_tracks dict)"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            itunes_id = str(track_data.get('id', ''))
-
-            cursor.execute("""
-                UPDATE tracks SET
-                    itunes_track_id = ?,
-                    itunes_match_status = 'matched',
-                    itunes_last_attempted = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (itunes_id, track_id))
-
-            # Backfill explicit flag
-            if 'explicit' in track_data:
-                explicit_val = 1 if track_data['explicit'] else 0
-                cursor.execute("""
-                    UPDATE tracks SET explicit = ?
-                    WHERE id = ? AND explicit IS NULL
-                """, (explicit_val, track_id))
-
-            conn.commit()
-        except Exception as e:
-            logger.error(f"Error updating track #{track_id} with iTunes data: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
+        backfill = {}
+        if 'explicit' in track_data:
+            backfill['explicit'] = 1 if track_data['explicit'] else 0
+        self._write('track', track_id, track_data.get('id', ''), backfill=backfill)
 
     def _update_track_from_search(self, track_id: int, track_obj):
         """Store iTunes metadata for a track (from Track dataclass, individual search)"""
+        self._write('track', track_id, track_obj.id)
+
+    def _write(self, entity_type: str, entity_id: int, provider_id,
+               backfill: Optional[Dict[str, Any]] = None,
+               payload: Optional[Dict[str, Any]] = None,
+               total_tracks: Any = None):
+        """One write path for all three entity types (docs §32.3.1 stage 2).
+
+        Everything outside iTunes' own id is backfill: artwork, genres, year and the
+        explicit flag are shared with better sources and with the user's own choice.
+        """
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+            from core.library2.provider_writes import write_provider_enrichment
+            from core.library2.worker_support import set_expected_track_count
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                UPDATE tracks SET
-                    itunes_track_id = ?,
-                    itunes_match_status = 'matched',
-                    itunes_last_attempted = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (str(track_obj.id), track_id))
-
+            write_provider_enrichment(
+                conn, entity_type=entity_type, entity_id=entity_id,
+                service='itunes',
+                payload=payload,
+                provider_id=str(provider_id) if provider_id else None,
+                backfill=backfill or None,
+            )
+            if entity_type == 'album':
+                # The authoritative expected total for the Album Completeness job.
+                set_expected_track_count(conn, entity_id, total_tracks)
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='itunes', status='matched')
             conn.commit()
         except Exception as e:
-            logger.error(f"Error updating track #{track_id} with iTunes data: {e}")
+            logger.error(f"Error updating {entity_type} #{entity_id} with iTunes data: {e}")
             raise
         finally:
             if conn:
@@ -861,14 +658,11 @@ class iTunesWorker:
     def _get_unmatched_albums_for_artist(self, artist_id: int) -> List[Dict[str, Any]]:
         conn = None
         try:
+            from core.library2.worker_queue import pending_children
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, title FROM albums
-                WHERE artist_id = ? AND itunes_match_status IS NULL
-                ORDER BY id ASC
-            """, (artist_id,))
-            return [{'id': row[0], 'title': row[1]} for row in cursor.fetchall()]
+            return pending_children(conn, 'itunes', 'artist', artist_id,
+                                    child='album')
         except Exception as e:
             logger.error(f"Error getting unmatched albums for artist #{artist_id}: {e}")
             return []
@@ -879,14 +673,10 @@ class iTunesWorker:
     def _get_unmatched_tracks_for_album(self, album_id: int) -> List[Dict[str, Any]]:
         conn = None
         try:
+            from core.library2.worker_queue import pending_children
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, title, track_number FROM tracks
-                WHERE album_id = ? AND itunes_match_status IS NULL AND id IS NOT NULL
-                ORDER BY id ASC
-            """, (album_id,))
-            return [{'id': row[0], 'title': row[1], 'track_number': row[2]} for row in cursor.fetchall()]
+            return pending_children(conn, 'itunes', 'album', album_id, child='track')
         except Exception as e:
             logger.error(f"Error getting unmatched tracks for album #{album_id}: {e}")
             return []
@@ -894,99 +684,57 @@ class iTunesWorker:
             if conn:
                 conn.close()
 
-    def _mark_artist_albums_error(self, artist_id: int):
+    def _record_batch(self, parent_type: str, parent_id: int, status: str,
+                      child: str):
+        """One outcome for every still-unattempted child of a failed bulk call.
+
+        Children the provider already settled are left alone — the batch was never
+        about them.
+        """
         conn = None
         try:
+            from core.library2.worker_queue import record_children
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE albums SET
-                    itunes_match_status = 'error',
-                    itunes_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE artist_id = ? AND itunes_match_status IS NULL
-            """, (artist_id,))
+            record_children(conn, 'itunes', parent_type, parent_id, status,
+                            child=child)
             conn.commit()
         except Exception as e:
-            logger.error(f"Error bulk-marking albums for artist #{artist_id}: {e}")
+            logger.error(f"Error bulk-marking {child}s for {parent_type} "
+                         f"#{parent_id}: {e}")
         finally:
             if conn:
                 conn.close()
+
+    def _mark_artist_albums_error(self, artist_id: int):
+        self._record_batch('artist', artist_id, 'error', 'album')
 
     def _mark_artist_albums_not_found(self, artist_id: int):
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE albums SET
-                    itunes_match_status = 'not_found',
-                    itunes_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE artist_id = ? AND itunes_match_status IS NULL
-            """, (artist_id,))
-            conn.commit()
-        except Exception as e:
-            logger.error(f"Error bulk-marking albums not_found for artist #{artist_id}: {e}")
-        finally:
-            if conn:
-                conn.close()
+        self._record_batch('artist', artist_id, 'not_found', 'album')
 
     def _mark_album_tracks_error(self, album_id: int):
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE tracks SET
-                    itunes_match_status = 'error',
-                    itunes_last_attempted = CURRENT_TIMESTAMP
-                WHERE album_id = ? AND itunes_match_status IS NULL
-            """, (album_id,))
-            conn.commit()
-        except Exception as e:
-            logger.error(f"Error bulk-marking tracks for album #{album_id}: {e}")
-        finally:
-            if conn:
-                conn.close()
+        self._record_batch('album', album_id, 'error', 'track')
 
     def _mark_album_tracks_not_found(self, album_id: int):
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE tracks SET
-                    itunes_match_status = 'not_found',
-                    itunes_last_attempted = CURRENT_TIMESTAMP
-                WHERE album_id = ? AND itunes_match_status IS NULL
-            """, (album_id,))
-            conn.commit()
-        except Exception as e:
-            logger.error(f"Error bulk-marking tracks not_found for album #{album_id}: {e}")
-        finally:
-            if conn:
-                conn.close()
+        self._record_batch('album', album_id, 'not_found', 'track')
 
     # ── Status / counting ──────────────────────────────────────────────
 
     def _mark_status(self, entity_type: str, entity_id: int, status: str):
-        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-        table = table_map.get(entity_type)
-        if not table:
-            return
+        """Record the outcome of an attempt in the provider ledger.
 
+        Replaces the legacy `itunes_match_status`/`_last_attempted` column pair.
+        Both `not_found` and `error` become due again after the retry
+        window; a source-wide outage is handled by the worker's own backoff
+        before an attempt is ever recorded, so it cannot become a tight loop.
+        """
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                UPDATE {table} SET
-                    itunes_match_status = ?,
-                    itunes_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (status, entity_id))
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='itunes', status=status)
             conn.commit()
         except Exception as e:
             logger.error(f"Error marking {entity_type} #{entity_id} status: {e}")
@@ -997,17 +745,10 @@ class iTunesWorker:
     def _count_pending_items(self) -> int:
         conn = None
         try:
+            from core.library2.worker_queue import pending_count
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT
-                    (SELECT COUNT(*) FROM artists WHERE itunes_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM albums WHERE itunes_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM tracks WHERE itunes_match_status IS NULL AND id IS NOT NULL)
-                AS pending
-            """)
-            row = cursor.fetchone()
-            return row[0] if row else 0
+            return pending_count(conn, 'itunes', retry_after_days=self.retry_days)
         except Exception as e:
             logger.error(f"Error counting pending items: {e}")
             return 0
@@ -1018,27 +759,10 @@ class iTunesWorker:
     def _get_progress_breakdown(self) -> Dict[str, Dict[str, int]]:
         conn = None
         try:
+            from core.library2.worker_queue import progress_breakdown
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            progress = {}
-
-            for entity, table in [('artists', 'artists'), ('albums', 'albums'), ('tracks', 'tracks')]:
-                cursor.execute(f"""
-                    SELECT
-                        COUNT(*) AS total,
-                        SUM(CASE WHEN itunes_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                    FROM {table}
-                """)
-                row = cursor.fetchone()
-                if row:
-                    total, processed = row[0], row[1] or 0
-                    progress[entity] = {
-                        'matched': processed,
-                        'total': total,
-                        'percent': int((processed / total * 100) if total > 0 else 0)
-                    }
-
-            return progress
+            return progress_breakdown(conn, 'itunes')
         except Exception as e:
             logger.error(f"Error getting progress breakdown: {e}")
             return {}
@@ -1069,12 +793,9 @@ class iTunesWorker:
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
         if not norm_query or not norm_result:
-            # Titles that normalize to NOTHING ("(Intro)", "[Skit]", "!!!",
-            # "...") would compare at SequenceMatcher ratio 1.0 against any
-            # other such title — fall back to exact raw comparison instead.
-            raw_q = (query_name or '').strip().lower()
-            raw_r = (result_name or '').strip().lower()
-            return bool(raw_q) and raw_q == raw_r
+            raw_query = (query_name or '').strip().lower()
+            raw_result = (result_name or '').strip().lower()
+            return bool(raw_query) and raw_query == raw_result
         similarity = SequenceMatcher(None, norm_query, norm_result).ratio()
         logger.debug(f"Name similarity: '{query_name}' vs '{result_name}' = {similarity:.2f}")
         return similarity >= self.name_similarity_threshold

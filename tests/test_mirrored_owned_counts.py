@@ -18,15 +18,31 @@ def _build_db(tmp_path):
     db = MusicDatabase(str(tmp_path / "owned_counts.db"))
     with db._get_connection() as conn:
         c = conn.cursor()
-        c.execute("INSERT INTO artists (id, name) VALUES (1, 'Kendrick Lamar')")
-        c.execute("INSERT INTO albums (id, artist_id, title) VALUES (1, 1, 'DAMN.')")
+        c.execute(
+            "INSERT INTO lib2_artists (id, name, name_key)"
+            " VALUES (1, 'Kendrick Lamar', 'kendrick lamar')"
+        )
+        c.execute(
+            "INSERT INTO lib2_albums (id, primary_artist_id, title)"
+            " VALUES (1, 1, 'DAMN.')"
+        )
         # The library's copy of HUMBLE. carries a different display title than
         # the playlist's — only the spotify id links them.
-        c.execute("""INSERT INTO tracks (id, album_id, artist_id, title, spotify_track_id)
-                     VALUES (1, 1, 1, 'HUMBLE. - Explicit Version', 'sp-humble')""")
+        c.execute("""INSERT INTO lib2_tracks (id, album_id, title, spotify_id)
+                     VALUES (1, 1, 'HUMBLE. - Explicit Version', 'sp-humble')""")
         # DNA. matches by exact name; its spotify id was never enriched.
-        c.execute("""INSERT INTO tracks (id, album_id, artist_id, title, spotify_track_id)
-                     VALUES (2, 1, 1, 'DNA.', NULL)""")
+        c.execute("""INSERT INTO lib2_tracks (id, album_id, title, spotify_id)
+                     VALUES (2, 1, 'DNA.', NULL)""")
+        c.executemany(
+            "INSERT INTO lib2_track_artists (track_id, artist_id, role, position)"
+            " VALUES (?, 1, 'primary', 0)", [(1,), (2,)],
+        )
+        c.executemany(
+            "INSERT INTO lib2_track_files"
+            " (track_id, path, is_primary, file_state, source)"
+            " VALUES (?, ?, 1, 'active', 'import')",
+            [(1, '/music/humble.flac'), (2, '/music/dna.flac')],
+        )
 
         c.execute("""INSERT INTO mirrored_playlists (id, source, source_playlist_id, name, profile_id)
                      VALUES (10, 'spotify', 'plX', 'Test Mix', 1)""")
@@ -63,7 +79,7 @@ def test_track_owned_by_id_and_name_counts_once(tmp_path):
     db = _build_db(tmp_path)
     with db._get_connection() as conn:
         # Make DNA.'s row ALSO id-matchable — must not double-count.
-        conn.execute("UPDATE tracks SET spotify_track_id = 'sp-dna' WHERE id = 2")
+        conn.execute("UPDATE lib2_tracks SET spotify_id = 'sp-dna' WHERE id = 2")
         conn.commit()
     assert db.get_all_mirrored_playlist_status_counts(profile_id=1)[10]['in_library'] == 2
     assert db.get_mirrored_playlist_status_counts(10)['in_library'] == 2

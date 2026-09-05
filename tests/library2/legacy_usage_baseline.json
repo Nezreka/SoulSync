@@ -1,0 +1,7 @@
+{
+  "_note": "Runtime legacy access is zero. The resumable upgrade importer is isolated and separately pinned until legacy upgrades are retired.",
+  "reads": 0,
+  "writes": 0,
+  "upgrade_reads": 5,
+  "upgrade_writes": 0
+}

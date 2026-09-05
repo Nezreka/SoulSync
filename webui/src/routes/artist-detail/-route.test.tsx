@@ -1,23 +1,10 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
 import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
-
-function stubDetail(body: unknown) {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(
-      async () =>
-        new Response(JSON.stringify(body), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-    ),
-  );
-}
 
 function renderArtistDetailRoute(initialEntries = ['/artist-detail/library/42']) {
   const queryClient = createTestQueryClient();
@@ -32,31 +19,29 @@ function renderArtistDetailRoute(initialEntries = ['/artist-detail/library/42'])
 }
 
 /**
- * Every URL the page requested, so the source/name round-trip can be checked.
+ * The destination's PARSED search params.
  *
- * ky hands fetch a Request object rather than a string, so the url has to be
- * read off it — String() would give "[object Request]" and every assertion
- * below would pass vacuously.
+ * Read off the router, not the raw query string: TanStack JSON-encodes search
+ * values, so an all-digits name is on the wire as `discoverName=%22311%22` and
+ * a string comparison against the raw form would fail for a URL that is
+ * actually correct. What matters is the value the destination route receives.
  */
-const requestedUrls = () =>
-  (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((call) =>
-    call[0] instanceof Request ? call[0].url : String(call[0]),
-  );
-
-const detailUrl = () => requestedUrls().find((url) => url.includes('/api/artist-detail')) ?? '';
+const landedSearch = (router: { state: { location: { search: unknown } } }) =>
+  router.state.location.search as Record<string, unknown>;
 
 beforeEach(() => {
   window.SoulSyncWebShellBridge = createShellBridge();
   window.showToast = vi.fn();
-  window.loadSimilarArtists = vi.fn();
-  window.cancelSimilarArtistsLoad = vi.fn();
-  window.checkArtistEnhanceEligibility = vi.fn();
-  window.observeLazyBackgrounds = vi.fn();
-  stubDetail({
-    success: true,
-    artist: { id: 42, name: 'Aphex Twin', server_source: 'plex' },
-    discography: { albums: [{ id: 1, title: 'SAW', owned: true }], source: 'spotify' },
-  });
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify({ success: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    ),
+  );
 });
 
 afterEach(() => {
@@ -68,194 +53,91 @@ afterEach(() => {
   delete window.hideLoadingOverlay;
 });
 
+/**
+ * ldp-01: this route is a redirect into Library V2, not a page.
+ *
+ * It was one before the 2026-07-31 upstream sync, briefly became upstream's own
+ * React artist page during it, and was restored afterwards — the sync regressed
+ * the search → Library V2 flow this fork exists for (iss29-B02). These tests
+ * replace the ones that pinned upstream's page rendering here; they are not
+ * repairs of them.
+ */
 describe('artist-detail route', () => {
-  it('renders the React page rather than handing off to the legacy shell', async () => {
-    renderArtistDetailRoute(['/artist-detail/spotify/2YZyLoL8N0Wb9xBt1NhZWg']);
+  it('opens a legacy library id as the owned Library V2 artist', async () => {
+    const { history, router } = renderArtistDetailRoute(['/artist-detail/library/42']);
 
-    await screen.findByText('Aphex Twin');
+    await waitFor(() => expect(history.location.pathname).toBe('/library'));
+    expect(landedSearch(router).artist).toBe(42);
+    expect(landedSearch(router).discover).toBeUndefined();
+  });
+
+  it('redirects into Library V2 discovery mode instead of rendering a page', async () => {
+    const { history, router } = renderArtistDetailRoute([
+      '/artist-detail/spotify/2YZyLoL8N0Wb9xBt1NhZWg',
+    ]);
+
+    await waitFor(() => expect(history.location.pathname).toBe('/library'));
+    expect(landedSearch(router).discover).toBe('spotify:2YZyLoL8N0Wb9xBt1NhZWg');
+    // The legacy shell must not be handed the artist as well — two owners of
+    // the same navigation is exactly what the sync collision was.
     expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).not.toHaveBeenCalled();
+  });
+
+  it('preselects the view a search arrival expects (ldp-05)', async () => {
+    const { history, router } = renderArtistDetailRoute(['/artist-detail/spotify/abc']);
+
+    await waitFor(() => expect(history.location.pathname).toBe('/library'));
+    const search = landedSearch(router);
+    expect(search.releases).toBe('all');
+    expect(search.releaseView).toBe('cards');
+    expect(search.header).toBe('rich');
   });
 
   it('survives an all-digits artist name (311) in ?name=', async () => {
     // TanStack's search parser JSON-parses param values, so name=311 arrives as
     // a NUMBER. A bare z.string() schema threw SearchParamError, the route died
     // in its error boundary, and clicking the artist "did nothing". This has
-    // regressed once already.
-    renderArtistDetailRoute(['/artist-detail/deezer/2481?name=311']);
+    // regressed once already, which is why it outlived the page it was written
+    // for.
+    const { history, router } = renderArtistDetailRoute(['/artist-detail/deezer/2481?name=311']);
 
-    await screen.findByText('Aphex Twin');
-    await waitFor(() => expect(detailUrl()).toContain('name=311'));
+    await waitFor(() => expect(history.location.pathname).toBe('/library'));
+    expect(landedSearch(router).discoverName).toBe('311');
   });
 
-  it('round-trips the ?name= search param into the request', async () => {
+  it('carries the display name for sources with no ID lookup', async () => {
     // Bandcamp (and any other source with no numeric-ID lookup API) can only
     // resolve an artist by name — the URL is the only channel that survives a
     // page load or a browser-back.
-    renderArtistDetailRoute(['/artist-detail/bandcamp/3957198221?name=Radiohead']);
-
-    await screen.findByText('Aphex Twin');
-    expect(detailUrl()).toContain('name=Radiohead');
-    expect(detailUrl()).toContain('source=bandcamp');
-  });
-
-  it('normalizes a library source away rather than sending it', async () => {
-    // "library" is not a metadata source; sending it would ask the backend to
-    // resolve the artist somewhere it does not exist.
-    renderArtistDetailRoute(['/artist-detail/library/42']);
-
-    await screen.findByText('Aphex Twin');
-    // Assert the request was found first — a missing url would make the
-    // not.toContain below pass for the wrong reason.
-    expect(detailUrl()).toContain('/api/artist-detail/42');
-    expect(detailUrl()).not.toContain('source=library');
-  });
-
-  it('cancels the similar-artists stream when the route unmounts', async () => {
-    const { unmount } = renderArtistDetailRoute(['/artist-detail/spotify/2YZyLoL8N0Wb9xBt1NhZWg']);
-
-    await waitFor(() => expect(window.loadSimilarArtists).toHaveBeenCalledWith('Aphex Twin'));
-    (window.cancelSimilarArtistsLoad as ReturnType<typeof vi.fn>).mockClear();
-
-    unmount();
-    expect(window.cancelSimilarArtistsLoad).toHaveBeenCalled();
-  });
-
-  it('loads an album tracklist and sends the complete context to the queue', async () => {
-    window.playTrackList = vi.fn();
-    window.showLoadingOverlay = vi.fn();
-    window.hideLoadingOverlay = vi.fn();
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = input instanceof Request ? input.url : String(input);
-        let body: unknown = { success: false, tracks: [] };
-        if (url.includes('/api/artist-detail/')) {
-          body = {
-            success: true,
-            artist: { id: 42, name: 'Aphex Twin', server_source: 'plex' },
-            discography: {
-              albums: [{ id: 1, title: 'SAW', owned: true, image_url: 'album.jpg' }],
-              source: 'spotify',
-            },
-          };
-        } else if (url.includes('/api/album/1/tracks')) {
-          body = {
-            success: true,
-            tracks: [
-              { id: 'sp-1', name: 'Xtal' },
-              { id: 'sp-2', name: 'Tha' },
-            ],
-          };
-        }
-        return new Response(JSON.stringify(body), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }),
-    );
-
-    renderArtistDetailRoute();
-    await screen.findByText('SAW');
-    fireEvent.click(document.querySelector('.release-card-play-btn')!);
-
-    await waitFor(() => expect(window.playTrackList).toHaveBeenCalledTimes(1));
-    expect(window.playTrackList).toHaveBeenCalledWith(
-      [
-        expect.objectContaining({ title: 'Xtal', artist: 'Aphex Twin', album: 'SAW' }),
-        expect.objectContaining({ title: 'Tha', artist: 'Aphex Twin', album: 'SAW' }),
-      ],
-      'SAW',
-    );
-  });
-
-  it('plays an owned album from the library instead of trying to download it', async () => {
-    // The metadata endpoint never returns a file_path, and the player reads a
-    // missing one as "download this first". Auto-download for queue tracks is
-    // OFF by default, so every row of an album owned in full used to fail with
-    // "Auto-download is disabled for missing queue tracks".
-    window.playTrackList = vi.fn();
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = input instanceof Request ? input.url : String(input);
-        let body: unknown = { success: false, tracks: [] };
-        if (url.includes('/api/artist-detail/')) {
-          body = {
-            success: true,
-            artist: { id: 42, name: 'Aphex Twin', server_source: 'plex' },
-            discography: {
-              albums: [{ id: 1, title: 'SAW', owned: true, image_url: 'album.jpg' }],
-              source: 'spotify',
-            },
-          };
-        } else if (url.includes('/api/album/1/tracks')) {
-          body = { success: true, tracks: [{ id: 'sp-1', name: 'Xtal' }, { id: 'sp-2', name: 'Tha' }] };
-        } else if (url.includes('/api/library/check-tracks')) {
-          body = {
-            success: true,
-            owned_tracks: {
-              Xtal: { owned: true, file_path: '/music/xtal.flac', format: 'FLAC' },
-              Tha: { owned: true, file_path: '/music/tha.flac', format: 'FLAC' },
-            },
-          };
-        }
-        return new Response(JSON.stringify(body), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }),
-    );
-
-    renderArtistDetailRoute();
-    await screen.findByText('SAW');
-    fireEvent.click(document.querySelector('.release-card-play-btn')!);
-
-    await waitFor(() => expect(window.playTrackList).toHaveBeenCalledTimes(1));
-    expect(requestedUrls().some((u) => u.includes('/api/library/check-tracks'))).toBe(true);
-    const queued = (window.playTrackList as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    expect(queued).toEqual([
-      expect.objectContaining({ title: 'Xtal', file_path: '/music/xtal.flac', is_library: true }),
-      expect.objectContaining({ title: 'Tha', file_path: '/music/tha.flac', is_library: true }),
+    const { history, router } = renderArtistDetailRoute([
+      '/artist-detail/bandcamp/3957198221?name=Radiohead',
     ]);
+
+    await waitFor(() => expect(history.location.pathname).toBe('/library'));
+    const search = landedSearch(router);
+    expect(search.discover).toBe('bandcamp:3957198221');
+    expect(search.discoverName).toBe('Radiohead');
   });
 
-  it('still plays what it can when the ownership lookup fails', async () => {
-    // A dead check-tracks must not take the play button down with it: hand the
-    // queue over anyway and let the normal download path sort out the rest.
-    window.playTrackList = vi.fn();
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = input instanceof Request ? input.url : String(input);
-        if (url.includes('/api/library/check-tracks')) throw new Error('boom');
-        let body: unknown = { success: false, tracks: [] };
-        if (url.includes('/api/artist-detail/')) {
-          body = {
-            success: true,
-            artist: { id: 42, name: 'Aphex Twin', server_source: 'plex' },
-            discography: {
-              albums: [{ id: 1, title: 'SAW', owned: true, image_url: 'album.jpg' }],
-              source: 'spotify',
-            },
-          };
-        } else if (url.includes('/api/album/1/tracks')) {
-          body = { success: true, tracks: [{ id: 'sp-1', name: 'Xtal' }] };
-        }
-        return new Response(JSON.stringify(body), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }),
-    );
+  it('lowercases the source segment', async () => {
+    // The discovery resolver keys on a lowercase namespace; a capitalised
+    // segment from a hand-built link would miss every provider match.
+    const { history, router } = renderArtistDetailRoute(['/artist-detail/Spotify/42']);
 
-    renderArtistDetailRoute();
-    await screen.findByText('SAW');
-    fireEvent.click(document.querySelector('.release-card-play-btn')!);
-
-    await waitFor(() => expect(window.playTrackList).toHaveBeenCalledTimes(1));
-    expect(window.showToast).not.toHaveBeenCalledWith(
-      expect.stringContaining('Could not play'),
-      'error',
-    );
+    await waitFor(() => expect(history.location.pathname).toBe('/library'));
+    expect(landedSearch(router).discover).toBe('spotify:42');
   });
+
+  it('replaces the history entry so Back leaves the artist, not the redirect', async () => {
+    const { history } = renderArtistDetailRoute(['/artist-detail/spotify/42']);
+
+    await waitFor(() => expect(history.location.pathname).toBe('/library'));
+    expect(history.canGoBack()).toBe(false);
+  });
+  // Upstream's three play-button tests (`loads an album tracklist...`, `plays an
+  // owned album...`, `still plays what it can...`) are not carried here: they
+  // click `.release-card-play-btn`, which lives in the legacy artist-detail
+  // release card this branch deleted for Library v2. The helper they exercise,
+  // -artist-detail.owned-tracks.ts, IS kept with its own unit test - it is what
+  // a Library-v2 play button would be built on.
 });

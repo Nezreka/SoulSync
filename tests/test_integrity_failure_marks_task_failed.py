@@ -14,11 +14,9 @@ verification wrapper saw no path and fell through to the "assuming
 success" branch, marking the task as ✅ Completed even though the file
 was in quarantine and would never reach the destination.
 
-Fix: the wrapper now explicitly checks for ``_integrity_failure_msg``
-and ``_race_guard_failed`` markers BEFORE the "assume success" branch.
-If any failure marker is set, the task is marked failed with a
-descriptive error message and the batch tracker is notified with
-``success=False``.
+Fix: the wrapper handles the explicit quarantine/race markers first and then
+requires the inner pipeline's positive success contract. Silence or a file on
+disk without a committed Library-v2 file row is not accepted as success.
 """
 
 from __future__ import annotations
@@ -199,10 +197,8 @@ def test_silence_quarantine_does_not_mark_completed(_isolate_state):
     assert ('b6', 't6', True) not in completion_calls
 
 
-def test_no_failure_markers_still_assumes_success(_isolate_state):
-    """The pre-existing "assume success" fallback must STILL fire when
-    no failure markers are set — some legitimate flows complete without
-    setting `_final_processed_path`. Don't regress that behavior."""
+def test_no_success_contract_never_assumes_success(_isolate_state):
+    """Silence from the inner pipeline is not evidence of a valid import."""
     completion_calls = []
     runtime = _build_runtime(completion_calls)
 
@@ -225,8 +221,35 @@ def test_no_failure_markers_still_assumes_success(_isolate_state):
             'test::ctx3', context, '/fake/source.flac', 't3', 'b3', runtime,
         )
 
-    assert runtime_state.download_tasks['t3']['status'] == 'completed'
-    assert ('b3', 't3', True) in completion_calls
+    assert runtime_state.download_tasks['t3']['status'] == 'failed'
+    assert ('b3', 't3', False) in completion_calls
+    assert ('b3', 't3', True) not in completion_calls
+
+
+def test_destination_on_disk_without_library_registration_is_failed(
+    _isolate_state, tmp_path,
+):
+    """A moved file must not hide a failed Library-v2 registration."""
+    completion_calls = []
+    runtime = _build_runtime(completion_calls)
+    _seed_task('t7', 'b7')
+    destination = tmp_path / 'Library' / 'Track.flac'
+    destination.parent.mkdir()
+    destination.write_bytes(b'audio')
+    context = {'task_id': 't7', 'batch_id': 'b7'}
+
+    def _inner(*_args, **_kwargs):
+        context['_final_processed_path'] = str(destination)
+        context['_context_failure_msg'] = 'Library v2 registration failed'
+
+    with patch.object(import_pipeline, 'post_process_matched_download', _inner):
+        import_pipeline.post_process_matched_download_with_verification(
+            'test::ctx7', context, '/fake/source.flac', 't7', 'b7', runtime,
+        )
+
+    assert runtime_state.download_tasks['t7']['status'] == 'failed'
+    assert 'Library v2' in runtime_state.download_tasks['t7']['error_message']
+    assert completion_calls == [('b7', 't7', False)]
 
 
 def test_integrity_failure_takes_priority_over_missing_final_path(_isolate_state):

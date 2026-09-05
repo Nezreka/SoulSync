@@ -100,11 +100,56 @@ class _Client:
 
 
 class _DB:
-    def __init__(self, artists=None):
-        self._artists = artists or []
+    """A database without the Library v2 tables — a fresh install.
 
-    def search_artists(self, q, limit=5, server_source=None):
-        return self._artists
+    Mirrors ``MusicDatabase._get_connection``: a NEW connection per call, which
+    the caller closes, carrying the ``unidecode_lower`` function registered on
+    it (database/music_database.py:270).
+    """
+
+    def __init__(self, path=':memory:'):
+        self._path = str(path)
+
+    def _get_connection(self):
+        import sqlite3
+        conn = sqlite3.connect(self._path)
+        conn.row_factory = sqlite3.Row
+        try:
+            from unidecode import unidecode as _ud
+            conn.create_function(
+                'unidecode_lower', 1, lambda x: _ud(x).lower() if x else '')
+        except ImportError:  # pragma: no cover - Unidecode is a hard dependency
+            conn.create_function(
+                'unidecode_lower', 1, lambda x: x.lower() if x else '')
+        return conn
+
+
+class _Lib2DB(_DB):
+    """The same contract, on a throwaway file carrying the real v2 schema."""
+
+    def __init__(self, path):
+        super().__init__(path)
+        from core.library2.schema import ensure_library_v2_schema
+        conn = self._get_connection()
+        try:
+            ensure_library_v2_schema(conn)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def artist(self, name, *, image_url=None, alias_of=None) -> int:
+        from core.library2.importer import normalize_name
+        conn = self._get_connection()
+        try:
+            artist_id = conn.execute(
+                "INSERT INTO lib2_artists(name, name_key, image_url,"
+                "                         canonical_artist_id) VALUES(?,?,?,?)",
+                (name, normalize_name(name), image_url, alias_of),
+            ).lastrowid
+            conn.commit()
+            return int(artist_id)
+        finally:
+            conn.close()
 
 
 class _Cfg:
@@ -113,9 +158,6 @@ class _Cfg:
 
     def get(self, k, default=None):
         return self._v.get(k, default)
-
-    def get_active_media_server(self):
-        return self._v.get('__active_server', 'plex')
 
 
 class _Worker:
@@ -251,11 +293,12 @@ def test_resolve_unknown_source_returns_none():
 # run_enhanced_search — short query path
 # ---------------------------------------------------------------------------
 
-def test_short_query_skips_remote_search():
-    db_artist = _Artist('a1', 'Aretha', thumb_url='http://x/a.jpg')
-    deps = _build_deps(database=_DB(artists=[db_artist]))
+def test_short_query_skips_remote_search(tmp_path):
+    db = _Lib2DB(tmp_path / 'short.sqlite')
+    db.artist('Aretha', image_url='http://x/a.jpg')
+    deps = _build_deps(database=db)
 
-    result = orchestrator.run_enhanced_search('aa', '', deps)
+    result = orchestrator.run_enhanced_search('ar', '', deps)
     assert result['db_artists'][0]['name'] == 'Aretha'
     assert result['spotify_artists'] == []
     assert result['spotify_albums'] == []
@@ -269,6 +312,100 @@ def test_short_query_with_explicit_source_uses_that_source_label():
     result = orchestrator.run_enhanced_search('aa', 'deezer', deps)
     assert result['primary_source'] == 'deezer'
     assert result['metadata_source'] == 'deezer'
+
+
+def test_library_bucket_is_the_v2_catalogue(tmp_path):
+    """"In Your Library" is Library v2's catalogue and nothing else.
+
+    Every entry therefore carries a lib2 id in both ``id`` and
+    ``library_v2_id``, which is what routes the card to the v2 artist page —
+    the page that can actually manage the artist.
+    """
+    db = _Lib2DB(tmp_path / 'search.sqlite')
+    matched = db.artist('Shared Artist', image_url='cover.jpg')
+    db.artist('Someone Else')
+    deps = _build_deps(database=db)
+
+    result = orchestrator.run_enhanced_search('shared', '', deps)
+
+    assert result['db_artists'] == [{
+        'id': matched,
+        'library_v2_id': matched,
+        'name': 'Shared Artist',
+        'image_url': 'FIXED::cover.jpg',
+        # iss29-B04c: `id` is a LIB2 id, so the generic /api/artist/<id>/image
+        # resolver must not be asked to resolve it — it forwards ids straight
+        # to the providers and returned whichever Deezer or iTunes artist
+        # happened to own that number.
+        'image_is_native': True,
+    }]
+
+
+def test_library_bucket_matches_across_diacritics(tmp_path):
+    """Legacy folded accents (``unidecode_lower``); the v2 half of the old
+    merge used SQLite's ``LOWER()``, which is ASCII-only (iss29-D13). A port
+    that carried the v2 spelling over would have lost 'Tiesto' → 'Tiësto'."""
+    db = _Lib2DB(tmp_path / 'diacritics.sqlite')
+    tiesto = db.artist('Tiësto')
+    deps = _build_deps(database=db)
+
+    result = orchestrator.run_enhanced_search('tiesto', '', deps)
+
+    assert [artist['id'] for artist in result['db_artists']] == [tiesto]
+
+
+def test_library_bucket_answers_an_alias_with_its_canonical_artist(tmp_path):
+    """§40: an alias row is the same artist under another provider identity.
+    It is never listed on its own — the library page does not list it either,
+    and its id would open a page that folds into the canonical one anyway."""
+    db = _Lib2DB(tmp_path / 'alias.sqlite')
+    canonical = db.artist('Beyoncé', image_url='queen.jpg')
+    db.artist('Beyonce Knowles', alias_of=canonical)
+    deps = _build_deps(database=db)
+
+    result = orchestrator.run_enhanced_search('knowles', '', deps)
+
+    assert result['db_artists'] == [{
+        'id': canonical,
+        'library_v2_id': canonical,
+        'name': 'Beyoncé',
+        'image_url': 'FIXED::queen.jpg',
+        'image_is_native': True,
+    }]
+
+
+def test_library_bucket_lists_a_canonical_artist_once(tmp_path):
+    """A query that matches the canonical row *and* one of its aliases is
+    still one artist."""
+    db = _Lib2DB(tmp_path / 'alias-both.sqlite')
+    canonical = db.artist('Beyoncé')
+    db.artist('Beyonce Knowles', alias_of=canonical)
+    deps = _build_deps(database=db)
+
+    result = orchestrator.run_enhanced_search('beyonc', '', deps)
+
+    assert [artist['id'] for artist in result['db_artists']] == [canonical]
+
+
+def test_library_bucket_serves_v2_artwork_when_the_row_has_no_image(tmp_path):
+    db = _Lib2DB(tmp_path / 'artwork.sqlite')
+    artist_id = db.artist('Imageless Artist')
+    deps = _build_deps(database=db)
+
+    result = orchestrator.run_enhanced_search('imageless', '', deps)
+
+    assert result['db_artists'][0]['image_url'] == (
+        f'/api/library/v2/artwork/artist/{artist_id}')
+
+
+def test_library_bucket_is_empty_before_the_v2_tables_exist():
+    """A fresh install answers "nothing in your library" rather than failing
+    the whole search — the catalogue is simply not there yet."""
+    deps = _build_deps(database=_DB())
+
+    result = orchestrator.run_enhanced_search('anything', '', deps)
+
+    assert result['db_artists'] == []
 
 
 # ---------------------------------------------------------------------------
@@ -481,9 +618,10 @@ def test_fanout_hydrabase_worker_skipped_in_prod_mode():
     assert worker.enqueued == []
 
 
-def test_fanout_db_artists_get_image_url_fixed():
-    db_artist = _Artist('a1', 'Aretha', thumb_url='/library/a.jpg')
-    deps = _build_deps(database=_DB(artists=[db_artist]))
+def test_fanout_db_artists_get_image_url_fixed(tmp_path):
+    db = _Lib2DB(tmp_path / 'fanout.sqlite')
+    db.artist('Pink Floyd', image_url='/library/a.jpg')
+    deps = _build_deps(database=db)
     result = orchestrator.run_enhanced_search('pink floyd', '', deps)
     assert result['db_artists'][0]['image_url'] == 'FIXED::/library/a.jpg'
 

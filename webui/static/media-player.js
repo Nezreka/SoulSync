@@ -163,7 +163,16 @@ function setTrackInfo(track) {
 
     const gotoArtistBtn = document.getElementById('np-goto-artist');
     if (gotoArtistBtn) {
-        if (track.artist_id) {
+        // iss29-B08: a Library V2 track has no LEGACY artist id — `artist_id`
+        // is correctly null — so this button was permanently disabled for the
+        // whole of V2 playback. The V2 id travels separately and routes into
+        // the Library page, which is where that artist actually lives.
+        if (track.lib2_artist_id) {
+            gotoArtistBtn.href = `/library?artist=${encodeURIComponent(track.lib2_artist_id)}`;
+            gotoArtistBtn.style.pointerEvents = '';
+            gotoArtistBtn.setAttribute('aria-disabled', 'false');
+            gotoArtistBtn.tabIndex = 0;
+        } else if (track.artist_id) {
             gotoArtistBtn.href = buildArtistDetailPath(track.artist_id, track.artist_source || null);
             gotoArtistBtn.style.pointerEvents = '';
             gotoArtistBtn.setAttribute('aria-disabled', 'false');
@@ -2611,7 +2620,16 @@ async function playQueueItem(index, options = {}) {
                 is_library: true,
                 image_url: track.image_url,
                 id: track.id,
+                // A queue row can come from Library v2 (album/artist Play), and
+                // those rows address the catalogue by TYPED id — `id` is then a
+                // server/legacy id or null. Dropping them here is what left a
+                // queued v2 play without play-log attribution and with a dead
+                // "Go to artist"; playLibraryTrack has threaded them all along.
+                lib2_track_id: track.lib2_track_id || null,
+                legacy_track_id: track.legacy_track_id || null,
+                server_track_id: track.server_track_id || null,
                 artist_id: track.artist_id,
+                lib2_artist_id: track.lib2_artist_id || null,
                 album_id: track.album_id,
                 bitrate: track.bitrate,
                 sample_rate: track.sample_rate
@@ -2628,8 +2646,14 @@ async function playQueueItem(index, options = {}) {
                     album: track.album || '',
                     // Server song id (Navidrome/Subsonic) so playback can fall
                     // back to streaming via the server when the file isn't on
-                    // SoulSync's disk (#809).
-                    track_id: track.id || null
+                    // SoulSync's disk (#809). A Library v2 `id` means nothing
+                    // to the media server, so only a server/legacy id may be
+                    // sent as `track_id` -- same contract as playLibraryTrack.
+                    track_id: track.server_track_id || track.legacy_track_id ||
+                        (track.lib2_track_id ? null : (track.id || null)),
+                    lib2_track_id: track.lib2_track_id || null,
+                    legacy_track_id: track.legacy_track_id || null,
+                    server_track_id: track.server_track_id || null
                 })
             });
             const result = await response.json();
@@ -3636,6 +3660,9 @@ function npMaybeLogPlay() {
             body: JSON.stringify({
                 track: {
                     id: currentTrack.id,
+                    lib2_track_id: currentTrack.lib2_track_id || null,
+                    legacy_track_id: currentTrack.legacy_track_id || null,
+                    server_track_id: currentTrack.server_track_id || null,
                     title: currentTrack.title,
                     artist: currentTrack.artist,
                     album: currentTrack.album,

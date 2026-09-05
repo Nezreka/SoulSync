@@ -1,9 +1,11 @@
 """Findings-based, additive genre enrichment."""
 import json
 from core.repair_jobs import register_job
+from core.library2.sql_util import owned_sql
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from core.metadata.genre_enrichment import (collect_cached_candidates, collect_local_candidates,
-    extract_provider_genres, parse_values, propose_genres, whitelist_from_config)
+    extract_provider_genres, parse_values, propose_genres, provider_ids_from_row,
+    whitelist_from_config)
 
 
 @register_job
@@ -47,21 +49,34 @@ class GenreEnrichmentJob(RepairJob):
             return result
         conn = context.db._get_connection()
         conn.row_factory = None
+        # Owned rows only, like every sibling job. v2 keeps a watched artist's
+        # discography and the wishlist in the same tables, and findings raised
+        # against those are not about the user's library — with allow_live_calls
+        # on they also spend real provider requests.
         entity_specs = []
         if settings['include_artists']:
-            entity_specs.append(('artist', 'artists'))
+            entity_specs.append(('artist', 'lib2_artists a', owned_sql('artist', 'a')))
         if settings['include_albums']:
-            entity_specs.append(('album', 'albums'))
+            entity_specs.append(('album', 'lib2_albums al', owned_sql('album', 'al')))
         total = 0
-        for _, table in entity_specs:
-            count_row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+        for _, source, owned in entity_specs:
+            count_row = conn.execute(
+                f"SELECT COUNT(*) FROM {source} WHERE {owned}").fetchone()
             total += int(count_row[0] or 0)
         if context.update_progress: context.update_progress(0, total)
 
         def iter_entities():
-            for kind, table in entity_specs:
+            for kind, _source, owned in entity_specs:
                 cur = conn.cursor()
-                cur.execute(f"SELECT * FROM {table}")
+                if kind == 'album':
+                    cur.execute(
+                        "SELECT al.*, ar.name AS artist_name "
+                        "FROM lib2_albums al "
+                        "LEFT JOIN lib2_artists ar ON ar.id=al.primary_artist_id "
+                        f"WHERE {owned}"
+                    )
+                else:
+                    cur.execute(f"SELECT * FROM lib2_artists a WHERE {owned}")
                 columns = [x[0] for x in cur.description]
                 for raw_row in cur:
                     yield kind, dict(zip(columns, raw_row, strict=True))
@@ -99,13 +114,15 @@ class GenreEnrichmentJob(RepairJob):
                 entity_id, name = row.get('id'), row.get('name') or row.get('title')
                 details = dict(proposal, entity=kind, name=name, max_genres=settings['max_genres'],
                                cache_stats={'metadata_cache_hits': hits, 'translation_cache_hits': sum(1 for x in proposal['translations'] if x.get('cache_hit')), 'live_calls': live_calls, 'live_call_failures': live_failures},
-                               artist_id=row.get('artist_id') if kind == 'album' else row.get('id'),
+                               library_v2_native=True,
+                               library_v2={('artist_ids' if kind == 'artist' else 'album_ids'): [int(entity_id)]},
+                               artist_id=row.get('primary_artist_id') if kind == 'album' else row.get('id'),
                                artist_name=row.get('artist_name') if kind == 'album' else name,
                                album_title=name if kind == 'album' else None)
                 if context.create_finding:
                     inserted = context.create_finding(job_id=self.job_id, finding_type=self.job_id,
                         severity='warning' if proposal['ambiguous_genres'] else 'info', entity_type=kind,
-                        entity_id=str(entity_id), file_path=None, title=f'Enrich genres: {name}',
+                        entity_id=f'lib2:{entity_id}', file_path=None, title=f'Enrich genres: {name}',
                         description=f"{len(proposal['added_genres'])} genre(s) can be added to {kind} {name}", details=details)
                     if inserted: result.findings_created += 1
                     else: result.findings_skipped_dedup += 1
@@ -120,10 +137,7 @@ class GenreEnrichmentJob(RepairJob):
     def _live_candidates(context, row, kind):
         """Fetch detail by an existing provider ID only; never search by name."""
         from core.metadata import get_client_for_source
-        ids = {'spotify': row.get('spotify_artist_id' if kind == 'artist' else 'spotify_album_id'),
-               'itunes': row.get('itunes_artist_id' if kind == 'artist' else 'itunes_album_id'),
-               'deezer': row.get('deezer_id') or row.get('deezer_artist_id' if kind == 'artist' else 'deezer_album_id'),
-               'discogs': row.get('discogs_id')}
+        ids = provider_ids_from_row(row, kind)
         methods = {'spotify': 'get_artist' if kind == 'artist' else 'get_album',
                    'itunes': 'get_artist' if kind == 'artist' else 'get_album',
                    'deezer': 'get_artist_info' if kind == 'artist' else 'get_album_raw',

@@ -12,13 +12,15 @@ from core.spotify_client import SpotifyClient, SpotifyRateLimitError
 from core.worker_utils import (
     ARTIST_NAME_MATCH_THRESHOLD,
     interruptible_sleep,
-    owned_album_titles,
     pick_artist_by_catalog,
     release_titles,
-    set_album_api_track_count,
-    source_id_conflict,
 )
-from core.enrichment.manual_match_honoring import MATCHED, honor_stored_match
+from core.library2.worker_support import (
+    MATCHED,
+    honor_stored_match,
+    owned_album_titles,
+    provider_id_conflict,
+)
 
 logger = get_logger("spotify_worker")
 
@@ -353,147 +355,26 @@ class SpotifyWorker:
     # ── Priority queue ─────────────────────────────────────────────────
 
     def _get_next_item(self) -> Optional[Dict[str, Any]]:
+        """Get next item to process from the Library-v2 catalogue.
+
+        The whole batch-first order — pinned group, unattempted artists, an album
+        batch, a track batch, then the individual fallbacks for children whose own
+        parent never matched — lives in ``core.library2.worker_queue`` and is shared
+        with the iTunes worker, which had the identical queue (docs §32.3.1 stage 2).
+        The item dicts it returns are the ones the process methods below already
+        consume, including the ``spotify_artist_id`` key.
+        """
         conn = None
         try:
+            from core.library2.worker_queue import next_batch_pending
+            from core.worker_utils import read_enrichment_priority
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            # Pinned-group override (Manage Enrichment Workers): process one
-            # entity type first, then fall through to the normal chain. Unset or
-            # exhausted ⇒ default artist→album→track order, unchanged.
-            from core.worker_utils import read_enrichment_priority, priority_pending_item
-            _prio = read_enrichment_priority('spotify')
-            if _prio:
-                _pi = priority_pending_item(cursor, 'spotify', _prio,
-                                            {'album': 'album_individual', 'track': 'track_individual'})
-                if _pi:
-                    return _pi
-
-            # Priority 1: Unattempted artists
-            cursor.execute("""
-                SELECT id, name
-                FROM artists
-                WHERE spotify_match_status IS NULL AND id IS NOT NULL
-                ORDER BY id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            # Priority 2: Album batch — matched artist with unattempted albums
-            cursor.execute("""
-                SELECT ar.id, ar.name, ar.spotify_artist_id
-                FROM artists ar
-                WHERE ar.spotify_match_status = 'matched'
-                  AND ar.spotify_artist_id IS NOT NULL
-                  AND EXISTS (
-                      SELECT 1 FROM albums al
-                      WHERE al.artist_id = ar.id AND al.spotify_match_status IS NULL AND al.id IS NOT NULL
-                  )
-                ORDER BY ar.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {
-                    'type': 'album_batch',
-                    'artist_id': row[0],
-                    'artist_name': row[1],
-                    'spotify_artist_id': row[2],
-                    'name': f"Albums for {row[1]}"
-                }
-
-            # Priority 3: Track batch — matched album with unattempted tracks
-            cursor.execute("""
-                SELECT al.id, al.title, al.spotify_album_id, ar.name AS artist_name
-                FROM albums al
-                JOIN artists ar ON al.artist_id = ar.id
-                WHERE al.spotify_match_status = 'matched'
-                  AND al.spotify_album_id IS NOT NULL
-                  AND EXISTS (
-                      SELECT 1 FROM tracks t
-                      WHERE t.album_id = al.id AND t.spotify_match_status IS NULL AND t.id IS NOT NULL
-                  )
-                ORDER BY al.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {
-                    'type': 'track_batch',
-                    'album_id': row[0],
-                    'album_name': row[1],
-                    'spotify_album_id': row[2],
-                    'artist_name': row[3],
-                    'name': f"Tracks on {row[1]}"
-                }
-
-            # Priority 4: Fallback individual albums (parent artist unmatched)
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.spotify_match_status IS NULL AND a.id IS NOT NULL
-                ORDER BY a.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album_individual', 'id': row[0], 'name': row[1], 'artist': row[2]}
-
-            # Priority 5: Fallback individual tracks (parent album unmatched)
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.spotify_match_status IS NULL AND t.id IS NOT NULL
-                ORDER BY t.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track_individual', 'id': row[0], 'name': row[1], 'artist': row[2]}
-
-            # Priority 6: Retry stale 'not_found' failures
-            not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
-
-            cursor.execute("""
-                SELECT id, name
-                FROM artists
-                WHERE spotify_match_status IN ('not_found', 'error') AND spotify_last_attempted < ?
-                ORDER BY spotify_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.spotify_match_status IN ('not_found', 'error') AND a.spotify_last_attempted < ?
-                ORDER BY a.spotify_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album_individual', 'id': row[0], 'name': row[1], 'artist': row[2]}
-
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.spotify_match_status IN ('not_found', 'error') AND t.spotify_last_attempted < ?
-                ORDER BY t.spotify_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track_individual', 'id': row[0], 'name': row[1], 'artist': row[2]}
-
-            return None
+            return next_batch_pending(
+                conn, 'spotify',
+                retry_after_days=self.retry_days,
+                pinned=read_enrichment_priority('spotify') or None,
+            )
 
         except Exception as e:
             logger.error(f"Error getting next item: {e}")
@@ -544,20 +425,13 @@ class SpotifyWorker:
     # ── Artist processing ──────────────────────────────────────────────
 
     def _get_existing_id(self, entity_type: str, entity_id: int) -> Optional[str]:
-        """Check if an entity already has a spotify_artist_id/spotify_album_id/spotify_track_id."""
-        col_map = {'artist': 'spotify_artist_id', 'album': 'spotify_album_id', 'track': 'spotify_track_id'}
-        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-        col = col_map.get(entity_type)
-        table = table_map.get(entity_type)
-        if not col or not table:
-            return None
+        """The Spotify id already stored for this entity, if any."""
         conn = None
         try:
+            from core.library2.worker_support import stored_provider_id
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT {col} FROM {table} WHERE id = ?", (entity_id,))
-            row = cursor.fetchone()
-            return row[0] if row and row[0] else None
+            return stored_provider_id(conn, entity_type, entity_id, 'spotify')
         except Exception:
             return None
         finally:
@@ -592,9 +466,14 @@ class SpotifyWorker:
 
         # Same-name disambiguation: when more than one "Rone" clears the gate,
         # pick the one whose catalog overlaps the albums this library owns.
+        conn = self.db._get_connection()
+        try:
+            _owned = owned_album_titles(conn, artist_id)
+        finally:
+            conn.close()
         best_obj, _overlap = pick_artist_by_catalog(
             gated,
-            owned_album_titles(self.db, artist_id),
+            _owned,
             lambda a: release_titles(self.client.get_artist_albums(a.id)),
         )
         best_score = self._name_similarity(artist_name, best_obj.name) if best_obj else 0
@@ -607,9 +486,12 @@ class SpotifyWorker:
                 return
             # Don't assign a Spotify id another (differently-named) artist
             # already holds — prevents one id smeared across artists.
-            conflict = source_id_conflict(
-                self.db, 'spotify_artist_id', best_obj.id, artist_id, artist_name
-            )
+            conn = self.db._get_connection()
+            try:
+                conflict = provider_id_conflict(
+                    conn, 'spotify', best_obj.id, artist_id, artist_name)
+            finally:
+                conn.close()
             if conflict:
                 self._mark_status('artist', artist_id, 'not_found')
                 self.stats['not_found'] += 1
@@ -801,19 +683,16 @@ class SpotifyWorker:
         # would otherwise overwrite the manual match with whatever
         # name-search returned.
         _stored = honor_stored_match(
-            db=self.db, entity_table='albums', entity_id=album_id,
-            id_column='spotify_album_id',
-            client_fetch_fn=self.client.get_album,
-            on_match_fn=self._refresh_album_via_stored_id,
-            mark_status_fn=self._mark_status,
-            status_column='spotify_match_status',
+            self.db, entity_type='album', entity_id=album_id, service='spotify',
+            fetch=self.client.get_album,
+            on_match=self._refresh_album_via_stored_id,
             log_prefix='Spotify',
         )
         if _stored:
-            # L2-005: a stored ID the source could not confirm right now is
-            # NOT released to a fuzzy name search below — a transient provider
-            # failure is not evidence that the ID is wrong, and searching
-            # overwrote deliberately chosen matches with whatever came back.
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
             if _stored == MATCHED:
                 self.stats['matched'] += 1
             return
@@ -860,19 +739,16 @@ class SpotifyWorker:
 
         # Issue #501: honor manual matches (see _process_album_individual).
         _stored = honor_stored_match(
-            db=self.db, entity_table='tracks', entity_id=track_id,
-            id_column='spotify_track_id',
-            client_fetch_fn=self.client.get_track_details,
-            on_match_fn=self._refresh_track_via_stored_id,
-            mark_status_fn=self._mark_status,
-            status_column='spotify_match_status',
+            self.db, entity_type='track', entity_id=track_id, service='spotify',
+            fetch=self.client.get_track_details,
+            on_match=self._refresh_track_via_stored_id,
             log_prefix='Spotify',
         )
         if _stored:
-            # L2-005: a stored ID the source could not confirm right now is
-            # NOT released to a fuzzy name search below — a transient provider
-            # failure is not evidence that the ID is wrong, and searching
-            # overwrote deliberately chosen matches with whatever came back.
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
             if _stored == MATCHED:
                 self.stats['matched'] += 1
             return
@@ -913,156 +789,83 @@ class SpotifyWorker:
 
     def _update_artist(self, artist_id: int, artist_obj):
         """Store Spotify metadata for an artist (from Artist dataclass)"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                UPDATE artists SET
-                    spotify_artist_id = ?,
-                    spotify_match_status = 'matched',
-                    spotify_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (str(artist_obj.id), artist_id))
-
-            # Backfill thumb_url if empty
-            if artist_obj.image_url:
-                cursor.execute("""
-                    UPDATE artists SET thumb_url = ?
-                    WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
-                """, (artist_obj.image_url, artist_id))
-
-            # Backfill genres if empty
-            if artist_obj.genres:
-                from core.genre_filter import filter_genres
-                from core.settings import config_manager as _cfg
-                _filtered = filter_genres(list(artist_obj.genres), _cfg)
-                if _filtered:
-                    cursor.execute("""
-                        UPDATE artists SET genres = ?
-                        WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
-                    """, (json.dumps(_filtered), artist_id))
-
-            conn.commit()
-        except Exception as e:
-            logger.error(f"Error updating artist #{artist_id} with Spotify data: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
+        backfill = {}
+        if artist_obj.image_url:
+            backfill['image_url'] = artist_obj.image_url
+        if artist_obj.genres:
+            from core.genre_filter import filter_genres
+            from core.settings import config_manager as _cfg
+            _filtered = filter_genres(list(artist_obj.genres), _cfg)
+            if _filtered:
+                backfill['genres'] = json.dumps(_filtered)
+        self._write('artist', artist_id, artist_obj.id, backfill=backfill)
 
     def _update_album(self, album_id: int, album_obj):
         """Store Spotify metadata for an album (from Album dataclass)"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                UPDATE albums SET
-                    spotify_album_id = ?,
-                    spotify_match_status = 'matched',
-                    spotify_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (str(album_obj.id), album_id))
-
-            # Backfill thumb_url if empty
-            if album_obj.image_url:
-                cursor.execute("""
-                    UPDATE albums SET thumb_url = ?
-                    WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
-                """, (album_obj.image_url, album_id))
-
-            # Backfill record_type if empty
-            if album_obj.album_type:
-                cursor.execute("""
-                    UPDATE albums SET record_type = ?
-                    WHERE id = ? AND (record_type IS NULL OR record_type = '')
-                """, (album_obj.album_type, album_id))
-
-            # Backfill year from release_date if empty
-            if album_obj.release_date:
-                year = album_obj.release_date[:4] if len(album_obj.release_date) >= 4 else None
-                if year and year.isdigit():
-                    cursor.execute("""
-                        UPDATE albums SET year = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE id = ? AND (year IS NULL OR year = '' OR year = '0')
-                    """, (year, album_id))
-                # #824: also store the FULL release date when Spotify has one
-                # (YYYY-MM or YYYY-MM-DD, not just a bare year). Only when empty —
-                # never clobber a manually-set release_date.
-                if len(album_obj.release_date) > 4:
-                    cursor.execute("""
-                        UPDATE albums SET release_date = ?
-                        WHERE id = ? AND (release_date IS NULL OR release_date = '')
-                    """, (album_obj.release_date, album_id))
-
-            # Cache the authoritative expected track count for the Album
-            # Completeness repair job (see set_album_api_track_count docstring).
-            set_album_api_track_count(cursor, album_id, getattr(album_obj, 'total_tracks', 0))
-
-            conn.commit()
-        except Exception as e:
-            logger.error(f"Error updating album #{album_id} with Spotify data: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
+        backfill = {}
+        if album_obj.image_url:
+            backfill['image_url'] = album_obj.image_url
+        if album_obj.release_date:
+            year = album_obj.release_date[:4] if len(album_obj.release_date) >= 4 else None
+            if year and year.isdigit():
+                backfill['year'] = year
+            # #824: also store the FULL release date when Spotify has one (YYYY-MM or
+            # YYYY-MM-DD, not just a bare year). Backfill only — never clobber a
+            # manually-set release_date.
+            if len(album_obj.release_date) > 4:
+                backfill['release_date'] = album_obj.release_date
+        # `record_type` has no lib2 counterpart to backfill: lib2_albums.album_type
+        # always carries a classification (the importer and MB reconcile own it,
+        # defaulting to 'album'), so there is no empty state to fill. Spotify's word
+        # goes in the payload, which loses nothing and overwrites nobody.
+        self._write('album', album_id, album_obj.id, backfill=backfill,
+                    payload={'album_type': album_obj.album_type},
+                    total_tracks=getattr(album_obj, 'total_tracks', 0))
 
     def _update_track(self, track_id: int, track_data: Dict[str, Any]):
         """Store Spotify metadata for a track (from get_album_tracks dict)"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            spotify_id = str(track_data.get('id', ''))
-
-            cursor.execute("""
-                UPDATE tracks SET
-                    spotify_track_id = ?,
-                    spotify_match_status = 'matched',
-                    spotify_last_attempted = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (spotify_id, track_id))
-
-            # Backfill explicit flag
-            if 'explicit' in track_data:
-                explicit_val = 1 if track_data['explicit'] else 0
-                cursor.execute("""
-                    UPDATE tracks SET explicit = ?
-                    WHERE id = ? AND explicit IS NULL
-                """, (explicit_val, track_id))
-
-            conn.commit()
-        except Exception as e:
-            logger.error(f"Error updating track #{track_id} with Spotify data: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
+        backfill = {}
+        if 'explicit' in track_data:
+            backfill['explicit'] = 1 if track_data['explicit'] else 0
+        self._write('track', track_id, track_data.get('id', ''), backfill=backfill)
 
     def _update_track_from_search(self, track_id: int, track_obj):
         """Store Spotify metadata for a track (from Track dataclass, individual search)"""
+        self._write('track', track_id, track_obj.id)
+
+    def _write(self, entity_type: str, entity_id: int, provider_id,
+               backfill: Optional[Dict[str, Any]] = None,
+               payload: Optional[Dict[str, Any]] = None,
+               total_tracks: Any = None):
+        """One write path for all three entity types (docs §32.3.1 stage 2).
+
+        Spotify's id is promoted to a real ``spotify_id`` column as well as
+        ``external_ids`` — write_provider_enrichment keeps both in step, and the read
+        paths join on the column. Everything else is backfill: artwork, genres, year
+        and the explicit flag are all shared with better sources and with the user.
+        """
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+            from core.library2.provider_writes import write_provider_enrichment
+            from core.library2.worker_support import set_expected_track_count
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                UPDATE tracks SET
-                    spotify_track_id = ?,
-                    spotify_match_status = 'matched',
-                    spotify_last_attempted = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (str(track_obj.id), track_id))
-
+            write_provider_enrichment(
+                conn, entity_type=entity_type, entity_id=entity_id,
+                service='spotify',
+                payload=payload,
+                provider_id=str(provider_id) if provider_id else None,
+                backfill=backfill or None,
+            )
+            if entity_type == 'album':
+                # The authoritative expected total for the Album Completeness job.
+                set_expected_track_count(conn, entity_id, total_tracks)
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='spotify', status='matched')
             conn.commit()
         except Exception as e:
-            logger.error(f"Error updating track #{track_id} with Spotify data: {e}")
+            logger.error(f"Error updating {entity_type} #{entity_id} with Spotify data: {e}")
             raise
         finally:
             if conn:
@@ -1073,14 +876,11 @@ class SpotifyWorker:
     def _get_unmatched_albums_for_artist(self, artist_id: int) -> List[Dict[str, Any]]:
         conn = None
         try:
+            from core.library2.worker_queue import pending_children
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, title FROM albums
-                WHERE artist_id = ? AND spotify_match_status IS NULL
-                ORDER BY id ASC
-            """, (artist_id,))
-            return [{'id': row[0], 'title': row[1]} for row in cursor.fetchall()]
+            return pending_children(conn, 'spotify', 'artist', artist_id,
+                                    child='album')
         except Exception as e:
             logger.error(f"Error getting unmatched albums for artist #{artist_id}: {e}")
             return []
@@ -1091,14 +891,11 @@ class SpotifyWorker:
     def _get_unmatched_tracks_for_album(self, album_id: int) -> List[Dict[str, Any]]:
         conn = None
         try:
+            from core.library2.worker_queue import pending_children
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, title, track_number FROM tracks
-                WHERE album_id = ? AND spotify_match_status IS NULL AND id IS NOT NULL
-                ORDER BY id ASC
-            """, (album_id,))
-            return [{'id': row[0], 'title': row[1], 'track_number': row[2]} for row in cursor.fetchall()]
+            return pending_children(conn, 'spotify', 'album', album_id,
+                                    child='track')
         except Exception as e:
             logger.error(f"Error getting unmatched tracks for album #{album_id}: {e}")
             return []
@@ -1106,103 +903,61 @@ class SpotifyWorker:
             if conn:
                 conn.close()
 
-    def _mark_artist_albums_error(self, artist_id: int):
-        """Bulk mark unattempted albums for an artist as 'error'"""
+    def _record_batch(self, parent_type: str, parent_id: int, status: str,
+                      child: str):
+        """One outcome for every still-unattempted child of a failed bulk call.
+
+        Children the provider already settled are left alone — the batch was never
+        about them.
+        """
         conn = None
         try:
+            from core.library2.worker_queue import record_children
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE albums SET
-                    spotify_match_status = 'error',
-                    spotify_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE artist_id = ? AND spotify_match_status IS NULL
-            """, (artist_id,))
+            record_children(conn, 'spotify', parent_type, parent_id, status,
+                            child=child)
             conn.commit()
         except Exception as e:
-            logger.error(f"Error bulk-marking albums for artist #{artist_id}: {e}")
+            logger.error(f"Error bulk-marking {child}s for {parent_type} "
+                         f"#{parent_id}: {e}")
         finally:
             if conn:
                 conn.close()
+
+    def _mark_artist_albums_error(self, artist_id: int):
+        """Bulk mark unattempted albums for an artist as 'error'"""
+        self._record_batch('artist', artist_id, 'error', 'album')
 
     def _mark_artist_albums_not_found(self, artist_id: int):
         """Bulk mark unattempted albums for an artist as 'not_found'"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE albums SET
-                    spotify_match_status = 'not_found',
-                    spotify_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE artist_id = ? AND spotify_match_status IS NULL
-            """, (artist_id,))
-            conn.commit()
-        except Exception as e:
-            logger.error(f"Error bulk-marking albums not_found for artist #{artist_id}: {e}")
-        finally:
-            if conn:
-                conn.close()
+        self._record_batch('artist', artist_id, 'not_found', 'album')
 
     def _mark_album_tracks_error(self, album_id: int):
         """Bulk mark unattempted tracks for an album as 'error'"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE tracks SET
-                    spotify_match_status = 'error',
-                    spotify_last_attempted = CURRENT_TIMESTAMP
-                WHERE album_id = ? AND spotify_match_status IS NULL
-            """, (album_id,))
-            conn.commit()
-        except Exception as e:
-            logger.error(f"Error bulk-marking tracks for album #{album_id}: {e}")
-        finally:
-            if conn:
-                conn.close()
+        self._record_batch('album', album_id, 'error', 'track')
 
     def _mark_album_tracks_not_found(self, album_id: int):
         """Bulk mark unattempted tracks for an album as 'not_found'"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE tracks SET
-                    spotify_match_status = 'not_found',
-                    spotify_last_attempted = CURRENT_TIMESTAMP
-                WHERE album_id = ? AND spotify_match_status IS NULL
-            """, (album_id,))
-            conn.commit()
-        except Exception as e:
-            logger.error(f"Error bulk-marking tracks not_found for album #{album_id}: {e}")
-        finally:
-            if conn:
-                conn.close()
+        self._record_batch('album', album_id, 'not_found', 'track')
 
     # ── Status / counting ──────────────────────────────────────────────
 
     def _mark_status(self, entity_type: str, entity_id: int, status: str):
-        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-        table = table_map.get(entity_type)
-        if not table:
-            return
+        """Record the outcome of an attempt in the provider ledger.
 
+        Replaces the legacy `spotify_match_status`/`_last_attempted` column pair.
+        Both `not_found` and `error` become due again after the retry
+        window; a source-wide outage is handled by the worker's own backoff
+        before an attempt is ever recorded, so it cannot become a tight loop.
+        """
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                UPDATE {table} SET
-                    spotify_match_status = ?,
-                    spotify_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (status, entity_id))
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='spotify', status=status)
             conn.commit()
         except Exception as e:
             logger.error(f"Error marking {entity_type} #{entity_id} status: {e}")
@@ -1213,17 +968,10 @@ class SpotifyWorker:
     def _count_pending_items(self) -> int:
         conn = None
         try:
+            from core.library2.worker_queue import pending_count
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT
-                    (SELECT COUNT(*) FROM artists WHERE spotify_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM albums WHERE spotify_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM tracks WHERE spotify_match_status IS NULL AND id IS NOT NULL)
-                AS pending
-            """)
-            row = cursor.fetchone()
-            return row[0] if row else 0
+            return pending_count(conn, 'spotify', retry_after_days=self.retry_days)
         except Exception as e:
             logger.error(f"Error counting pending items: {e}")
             return 0
@@ -1234,35 +982,16 @@ class SpotifyWorker:
     def _get_progress_breakdown(self) -> Dict[str, Dict[str, int]]:
         conn = None
         try:
+            from core.library2.worker_queue import progress_breakdown
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            progress = {}
-
-            for entity, table in [('artists', 'artists'), ('albums', 'albums'), ('tracks', 'tracks')]:
-                cursor.execute(f"""
-                    SELECT
-                        COUNT(*) AS total,
-                        SUM(CASE WHEN spotify_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                    FROM {table}
-                """)
-                row = cursor.fetchone()
-                if row:
-                    total, processed = row[0], row[1] or 0
-                    progress[entity] = {
-                        'matched': processed,
-                        'total': total,
-                        'percent': int((processed / total * 100) if total > 0 else 0)
-                    }
-
-            return progress
+            return progress_breakdown(conn, 'spotify')
         except Exception as e:
             logger.error(f"Error getting progress breakdown: {e}")
             return {}
         finally:
             if conn:
                 conn.close()
-
-    # ── ID validation ────────────────────────────────────────────────
 
     def _is_spotify_id(self, id_str: str) -> bool:
         """Spotify IDs are alphanumeric (contain letters). iTunes IDs are purely numeric.
@@ -1285,12 +1014,9 @@ class SpotifyWorker:
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
         if not norm_query or not norm_result:
-            # Names that normalize to NOTHING ("!!!", "+", "...") score a
-            # perfect 1.0 against any other such name — exact raw equality is
-            # the only honest signal left for them.
-            raw_q = (query_name or '').strip().lower()
-            raw_r = (result_name or '').strip().lower()
-            return 1.0 if (raw_q and raw_q == raw_r) else 0.0
+            raw_query = (query_name or '').strip().lower()
+            raw_result = (result_name or '').strip().lower()
+            return 1.0 if raw_query and raw_query == raw_result else 0.0
         return SequenceMatcher(None, norm_query, norm_result).ratio()
 
     def _name_matches(self, query_name: str, result_name: str) -> bool:

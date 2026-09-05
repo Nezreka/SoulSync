@@ -75,14 +75,22 @@ def test_gathers_one_candidate_per_connected_source(monkeypatch):
 
 
 def test_duplicate_urls_dedupe_and_skip_sources_excluded(monkeypatch):
+    import time
+
     same = "https://cdn/same.jpg"
+
+    class SlowSpotify(_Client):
+        def search_artists(self, name, limit=1):
+            time.sleep(0.02)
+            return super().search_artists(name, limit)
+
     clients = {
         "deezer": _Client(search_hit=SimpleNamespace(image_url=same)),
         "musicbrainz": _Client(search_hit=SimpleNamespace(image_url="https://mb/x.jpg")),
     }
     _wire_registry(monkeypatch, clients, ["spotify", "deezer", "musicbrainz"])
     monkeypatch.setattr(ai.metadata_registry, "get_spotify_client",
-                        lambda **kw: _Client(search_hit=SimpleNamespace(image_url=same)))
+                        lambda **kw: SlowSpotify(search_hit=SimpleNamespace(image_url=same)))
 
     cands = ai.gather_artist_image_candidates("Adele", {})
     assert len(cands) == 1                            # deduped by url
@@ -98,24 +106,25 @@ def test_no_sources_returns_empty(monkeypatch):
 
 def test_set_artist_thumb_url_pins_and_workers_respect_it(tmp_path):
     from database.music_database import MusicDatabase
+    from tests.support.catalogue_seed import seed_artist
     db = MusicDatabase(database_path=str(tmp_path / "m.db"))
     conn = db._get_connection()
-    conn.execute("INSERT INTO artists (id, name, thumb_url) VALUES (1, 'Adele', '')")
+    artist_id = seed_artist(conn, server_id='ar1', name='Adele', image_url='')
     conn.commit()
     conn.close()
 
-    assert db.set_artist_thumb_url(1, "https://picked/photo.jpg") is True
-    artist = db.get_artist(1)
+    assert db.set_artist_thumb_url(artist_id, "https://picked/photo.jpg") is True
+    artist = db.get_artist(artist_id)
     assert artist.thumb_url == "https://picked/photo.jpg"
 
-    # The enrichment workers' guard (thumb only filled when empty) must leave
+    # The enrichment workers' guard (image only filled when empty) must leave
     # a user pick alone — same WHERE clause every worker uses.
     conn = db._get_connection()
-    conn.execute("UPDATE artists SET thumb_url = ? WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')",
-                 ("https://worker/other.jpg", 1))
+    conn.execute("UPDATE lib2_artists SET image_url = ? WHERE id = ? AND (image_url IS NULL OR image_url = '')",
+                 ("https://worker/other.jpg", artist_id))
     conn.commit()
     conn.close()
-    assert db.get_artist(1).thumb_url == "https://picked/photo.jpg"
+    assert db.get_artist(artist_id).thumb_url == "https://picked/photo.jpg"
 
     assert db.set_artist_thumb_url(999, "x") is False   # unknown artist -> False
 
@@ -190,15 +199,6 @@ def test_endpoint_cache_is_id_keyed_and_forgives_empties():
     assert "_ART_OPTIONS_CACHE.pop(('artist', artist_id), None)" in apply_h
 
 
-def test_picker_grid_never_goes_silently_blank():
-    # The picker is React now (art-picker.tsx); same pin, new home.
-    from pathlib import Path
-    tsx = (Path(__file__).resolve().parent.parent / "webui" / "src" / "routes"
-           / "artist-detail" / "-ui" / "art-picker.tsx").read_text(encoding="utf-8")
-    # dead image URLs remove tiles — an emptied grid must SAY so
-    assert "none of the images would load" in tsx
-
-
 def test_spotify_free_mode_contributes(monkeypatch):
     """The registry gate requires FULL Spotify auth, but the wrapper serves
     artist metadata in Free mode — the picker asks the wrapper directly, so
@@ -240,15 +240,6 @@ def test_image_sniffer():
     assert ws._looks_like_image(b"") is False
 
 
-def test_picker_has_the_custom_url_row():
-    # React renders the row declaratively, so the vanilla's mount-after-reset
-    # ordering hazard is structurally impossible; only the row itself is pinned.
-    from pathlib import Path
-    tsx = (Path(__file__).resolve().parent.parent / "webui" / "src" / "routes"
-           / "artist-detail" / "-ui" / "art-picker.tsx").read_text(encoding="utf-8")
-    assert "paste an image URL" in tsx
-
-
 def test_spotify_403_falls_through_to_free_metadata(monkeypatch):
     """Live finding (Boulder's box): Spotify 403s dev apps whose owner lacks
     active Premium — token refresh still works, so auth LOOKS healthy and the
@@ -285,37 +276,82 @@ def test_spotify_403_falls_through_to_free_metadata(monkeypatch):
 # markup — a silent ReferenceError) cannot exist in the React module system.
 
 
-def test_current_photo_leads_the_grid_as_reference():
-    """The current artist photo shows first, badged 'current', display-only —
-    it's read from the PAGE (the DB may hold a local cache path that must
-    never round-trip through the apply endpoint as a source URL)."""
-    from pathlib import Path
-    tsx = (Path(__file__).resolve().parent.parent / "webui" / "src" / "routes"
-           / "artist-detail" / "-ui" / "art-picker.tsx").read_text(encoding="utf-8")
-    # a DIV, not a button — it can't be selected/applied
-    assert '<div className="art-picker-tile art-picker-tile--current">' in tsx
-    assert "art-picker-badge--current" in tsx
+def test_musicbrainz_relations_contribute_a_candidate_when_mbid_is_known(monkeypatch):
+    """iss27-03: MusicBrainz is excluded from the generic by-name search (see
+    the skip-set test above), but the picker already has the artist's own
+    MBID — its exact url-relations lookup must still be asked instead of
+    treating "musicbrainz" as entirely unqueryable."""
+    monkeypatch.setattr(ai, "_image_from_musicbrainz_relations",
+                        lambda mbid: "https://mb-rel/photo.jpg" if mbid == "mb-1" else None)
+    _wire_registry(monkeypatch, {}, ["spotify"])
+
+    cands = ai.gather_artist_image_candidates(
+        "Adele", {"musicbrainz_artist_id": "mb-1"})
+
+    assert {"source": "musicbrainz", "url": "https://mb-rel/photo.jpg"} in cands
 
 
+def test_musicbrainz_relations_skipped_without_an_mbid(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ai, "_image_from_musicbrainz_relations",
+                        lambda mbid: calls.append(mbid) or None)
+    _wire_registry(monkeypatch, {}, ["spotify"])
 
-def test_text_artist_ids_work_end_to_end(tmp_path):
-    """#1069: the exact Navidrome shape from the report — a TEXT primary key.
-    Every db call the art endpoints make must take the string id verbatim."""
+    ai.gather_artist_image_candidates("Adele", {})
+
+    assert calls == []
+
+
+def test_one_slow_source_does_not_block_or_drop_the_others(monkeypatch):
+    """iss27-03: a provider stuck past the shared time budget (module-level
+    rate-limit backoff sleeping inside the worker thread, in production) must
+    not blank out sources that already answered — only the slow one is
+    missing from this round."""
+    import threading as _threading
+
+    released = _threading.Event()
+
+    class _SlowClient(_Client):
+        def search_artists(self, name, limit=1):
+            released.wait(timeout=5)  # blocks well past the gather's budget
+            return super().search_artists(name, limit=limit)
+
+    monkeypatch.setattr(ai, "_CANDIDATE_GATHER_TIMEOUT_S", 0.2)
+    clients = {
+        "deezer": _Client(search_hit=SimpleNamespace(image_url="https://dz/img.jpg")),
+        "itunes": _SlowClient(search_hit=SimpleNamespace(image_url="https://slow/img.jpg")),
+    }
+    _wire_registry(monkeypatch, clients, ["spotify", "deezer", "itunes"])
+
+    try:
+        cands = ai.gather_artist_image_candidates("Adele", {})
+    finally:
+        released.set()  # let the background thread finish so it doesn't leak
+
+    assert cands == [{"source": "deezer", "url": "https://dz/img.jpg"}]
+
+
+def test_server_native_string_ids_work_end_to_end(tmp_path):
+    """#1069: the exact Navidrome shape from the report — a server whose own
+    ids are opaque strings. The catalogue keeps those as `server_id` and mints
+    its own row id, so the art endpoints address rows by the catalogue id and
+    the string never reaches a lookup."""
     from database.music_database import MusicDatabase
+    from tests.support.catalogue_seed import seed_album, seed_artist
     db = MusicDatabase(database_path=str(tmp_path / "m.db"))
     conn = db._get_connection()
-    conn.execute("INSERT INTO artists (id, name, server_source) VALUES "
-                 "('7dB07x8Q2P9jPvGeDHxIFa', 'Ed Sheeran', 'navidrome')")
-    conn.execute("INSERT INTO albums (id, artist_id, title, server_source) VALUES "
-                 "('al-x', '7dB07x8Q2P9jPvGeDHxIFa', 'Divide', 'navidrome')")
+    artist_id = seed_artist(conn, server_id='7dB07x8Q2P9jPvGeDHxIFa',
+                            name='Ed Sheeran', server_source='navidrome')
+    seed_album(conn, server_id='al-x', title='Divide', artist_id=artist_id,
+               server_source='navidrome')
     conn.commit()
     conn.close()
 
-    artist = db.get_artist('7dB07x8Q2P9jPvGeDHxIFa')
+    artist = db.get_artist(artist_id)
     assert artist is not None and artist.name == 'Ed Sheeran'
-    assert db.set_artist_thumb_url('7dB07x8Q2P9jPvGeDHxIFa', 'https://x/p.jpg') is True
-    assert db.get_artist('7dB07x8Q2P9jPvGeDHxIFa').thumb_url == 'https://x/p.jpg'
-    albums = db.get_albums_by_artist('7dB07x8Q2P9jPvGeDHxIFa')
+    assert db.set_artist_thumb_url(artist_id, 'https://x/p.jpg') is True
+    assert db.get_artist(artist_id).thumb_url == 'https://x/p.jpg'
+    albums = db.get_albums_by_artist(artist_id)
     assert [a.title for a in albums] == ['Divide']
 
 

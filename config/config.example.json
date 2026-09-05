@@ -78,6 +78,10 @@
   "listenbrainz": {
     "token": ""
   },
+  "features": {
+    "_comment": "library_v2 is retained only for config compatibility. Library V2 is now the non-disableable native catalogue and repair engine; false is ignored with a migration warning.",
+    "library_v2": true
+  },
   "image_cache": {
     "enabled": true,
     "thumbnails": false,

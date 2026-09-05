@@ -2,6 +2,7 @@ import json
 
 from core.genre_filter import _normalize_for_match, filter_genres
 from core.metadata.genre_enrichment import (
+    collect_cached_candidates,
     collect_local_candidates,
     propose_genres,
     translate_genre,
@@ -73,6 +74,35 @@ def test_lastfm_local_candidates_do_not_require_a_lastfm_id_column():
     }]
 
 
+def test_library_v2_provider_ids_and_enrichment_payload_are_collected():
+    row = {
+        'spotify_id': 'sp-artist',
+        'external_ids': json.dumps({'discogs': 'dg-artist'}),
+        'enrichment': json.dumps({
+            'discogs': {'genres': ['Electronic'], 'styles': ['Trip Hop']},
+            'lastfm': {'tags': ['Downtempo']},
+        }),
+    }
+    assert collect_local_candidates(row) == [
+        {'raw_genre': 'Electronic', 'source': 'discogs',
+         'source_entity_id': 'dg-artist', 'origin': 'library'},
+        {'raw_genre': 'Trip Hop', 'source': 'discogs',
+         'source_entity_id': 'dg-artist', 'origin': 'library'},
+        {'raw_genre': 'Downtempo', 'source': 'lastfm',
+         'source_entity_id': None, 'origin': 'library'},
+    ]
+
+    class Cache:
+        def get_entity(self, source, entity_type, source_id):
+            if (source, entity_type, source_id) == ('spotify', 'artist', 'sp-artist'):
+                return {'genres': ['Rock']}
+            return None
+
+    candidates, hits = collect_cached_candidates(Cache(), row, 'artist')
+    assert hits == 1
+    assert candidates[0]['raw_genre'] == 'Rock'
+
+
 class _GenreConfig:
     def __init__(self, enabled, genres=None):
         self.values = {
@@ -94,22 +124,49 @@ def test_strict_filter_keeps_existing_case_and_whitespace_matches():
 def test_ambiguous_only_fix_does_not_report_success(tmp_path):
     db = MusicDatabase(str(tmp_path / 'music.db'))
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, genres) VALUES (?, ?, ?)",
-                     ('artist-1', 'Artist', json.dumps(['Rock'])))
+        artist_id = conn.execute(
+            "INSERT INTO lib2_artists (name, genres) VALUES (?, ?) RETURNING id",
+            ('Artist', json.dumps(['Rock'])),
+        ).fetchone()[0]
         conn.commit()
 
     worker = RepairWorker.__new__(RepairWorker)
     worker.db = db
     result = worker._fix_genre_enrichment(
-        'artist', 'artist-1', None,
+        'artist', f'lib2:{artist_id}', None,
         {'added_genres': [], 'ambiguous_genres': [{'raw': 'alt rock'}]},
     )
 
     assert result['success'] is False
     with db._get_connection() as conn:
         assert json.loads(conn.execute(
-            "SELECT genres FROM artists WHERE id = ?", ('artist-1',)
+            "SELECT genres FROM lib2_artists WHERE id = ?", (artist_id,)
         ).fetchone()['genres']) == ['Rock']
+
+
+def test_genre_fix_updates_library_v2_and_refuses_a_legacy_subject(tmp_path):
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    with db._get_connection() as conn:
+        artist_id = conn.execute(
+            "INSERT INTO lib2_artists (name, genres) VALUES (?, ?) RETURNING id",
+            ('Artist', json.dumps(['Rock'])),
+        ).fetchone()[0]
+        conn.commit()
+
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = db
+    applied = worker._fix_genre_enrichment(
+        'artist', f'lib2:{artist_id}', None, {'added_genres': ['Hip Hop']})
+    stale = worker._fix_genre_enrichment(
+        'artist', str(artist_id), None, {'added_genres': ['Pop']})
+
+    assert applied == {'success': True, 'action': 'genres_applied'}
+    assert stale['success'] is False
+    assert stale['stale_subject'] is True
+    with db._get_connection() as conn:
+        assert json.loads(conn.execute(
+            "SELECT genres FROM lib2_artists WHERE id = ?", (artist_id,)
+        ).fetchone()['genres']) == ['Rock', 'Hip Hop']
 
 
 def test_genre_enrichment_belongs_to_tags_and_metadata_category():

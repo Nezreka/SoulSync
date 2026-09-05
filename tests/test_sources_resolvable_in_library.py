@@ -16,6 +16,7 @@ from contextlib import contextmanager
 import pytest
 
 from core.artist_source_lookup import sources_resolvable_in_library
+from core.library2.schema import ensure_library_v2_schema
 
 
 class _FakeDb:
@@ -37,28 +38,18 @@ class _FakeDb:
 def db(tmp_path):
     path = tmp_path / "music.db"
     conn = sqlite3.connect(str(path))
-    conn.execute(
-        """CREATE TABLE artists (
-               id INTEGER PRIMARY KEY,
-               name TEXT,
-               server_source TEXT,
-               spotify_artist_id TEXT,
-               deezer_id TEXT,
-               itunes_artist_id TEXT,
-               musicbrainz_id TEXT,
-               discogs_id TEXT
-           )"""
-    )
+    ensure_library_v2_schema(conn)
     conn.executemany(
-        "INSERT INTO artists (name, server_source, spotify_artist_id, deezer_id)"
-        " VALUES (?, ?, ?, ?)",
+        "INSERT INTO lib2_artists"
+        " (name, name_key, server_source, spotify_id, external_ids)"
+        " VALUES (?, ?, ?, ?, ?)",
         [
-            ("Owned Artist", "plex", "sp-owned", None),
+            ("Owned Artist", "owned artist", "plex", "sp-owned", "{}"),
             # One Deezer id smeared onto two rows — the enrichment-corruption
             # shape. The route refuses to upgrade on an ambiguous id, so the
             # helper must refuse to vouch for it too.
-            ("Smeared A", "plex", None, "dz-dupe"),
-            ("Smeared B", "plex", None, "dz-dupe"),
+            ("Smeared A", "smeared a", "plex", None, '{"deezer":"dz-dupe"}'),
+            ("Smeared B", "smeared b", "plex", None, '{"deezer":"dz-dupe"}'),
         ],
     )
     conn.commit()

@@ -50,7 +50,10 @@ def auto_import_toggle():
     if enabled:
         config_manager.set('auto_import.enabled', True)
         if not _auto_import_worker().running:
-            _auto_import_worker().start()
+            # Never a bare .start(): a v2 upgrade still in progress must hold
+            # the worker back, or it imports against a half-migrated catalogue.
+            from core.library2.migration_gate import defer_or_start
+            defer_or_start(_auto_import_worker(), get_database())
     else:
         config_manager.set('auto_import.enabled', False)
         _auto_import_worker().stop()

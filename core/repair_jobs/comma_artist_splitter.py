@@ -133,8 +133,9 @@ class CommaArtistSplitterJob(RepairJob):
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT COUNT(*)
-                    FROM tracks t
-                    WHERE t.file_path IS NOT NULL AND t.file_path != ''
+                    FROM lib2_track_files f
+                    WHERE f.path IS NOT NULL AND f.path != ''
+                      AND COALESCE(f.file_state, 'active') = 'active'
                 """)
                 return cursor.fetchone()[0]
             finally:
@@ -165,7 +166,7 @@ class CommaArtistSplitterJob(RepairJob):
         if settings.get('ampersand_splitter', True):
             symbols.append('&')
         return symbols
-    
+
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
         settings = self._get_settings(context)
@@ -180,10 +181,27 @@ class CommaArtistSplitterJob(RepairJob):
             conn = context.db._get_connection()
             cursor = conn.cursor()
             cursor.execute(f"""
-                SELECT t.id, t.file_path, t.artist_id, ar.name, ar.thumb_url
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                WHERE t.file_path IS NOT NULL AND t.file_path != ''
+                WITH native_files AS (
+                    SELECT t.id AS track_id, f.id AS file_id, f.path,
+                           COALESCE(
+                               (SELECT ta.artist_id
+                                  FROM lib2_track_artists ta
+                                 WHERE ta.track_id = t.id
+                                 ORDER BY CASE ta.role WHEN 'primary' THEN 0 ELSE 1 END,
+                                          ta.position, ta.artist_id
+                                 LIMIT 1),
+                               al.primary_artist_id
+                           ) AS artist_id
+                      FROM lib2_track_files f
+                      JOIN lib2_tracks t ON t.id = f.track_id
+                 LEFT JOIN lib2_albums al ON al.id = t.album_id
+                     WHERE f.path IS NOT NULL AND f.path != ''
+                       AND COALESCE(f.file_state, 'active') = 'active'
+                )
+                SELECT nf.track_id, nf.file_id, nf.path, nf.artist_id,
+                       ar.name, ar.image_url
+                  FROM native_files nf
+             LEFT JOIN lib2_artists ar ON ar.id = nf.artist_id
                 LIMIT {SCAN_ARTIST_LIMIT * 10}
             """)
             tracks = cursor.fetchall()
@@ -208,7 +226,7 @@ class CommaArtistSplitterJob(RepairJob):
                                     total=len(tracks))
 
         from mutagen import File as MutagenFile
-        from core.library.path_resolver import resolve_library_file_path
+        from core.library2.paths import resolve_lib2_path
 
         # Memoize: combined_artist_string → (parts, primary, display)
         memo_splits = {}
@@ -217,7 +235,8 @@ class CommaArtistSplitterJob(RepairJob):
         # Track: combined_artist → (artist_id, db_artist_name, thumb_url, files_with_this_tag)
         findings_map = {}
 
-        for i, (_track_id, file_path, artist_id, db_artist_name, thumb_url) in enumerate(tracks):
+        for i, (track_id, file_id, file_path, artist_id,
+                db_artist_name, thumb_url) in enumerate(tracks):
             if context.check_stop():
                 logger.debug("Scan stopped by user request")
                 return result
@@ -229,9 +248,10 @@ class CommaArtistSplitterJob(RepairJob):
 
             result.scanned += 1
             try:
-                resolved = resolve_library_file_path(
-                    file_path, transfer_folder=context.transfer_folder if hasattr(context, 'transfer_folder') else None,
-                    config_manager=context._config_manager if hasattr(context, '_config_manager') else None)
+                resolved = (
+                    file_path if os.path.isfile(file_path) else
+                    resolve_lib2_path(file_path, config_manager=context.config_manager)
+                )
                 if not resolved or not os.path.exists(resolved):
                     logger.debug(f"File not found or inaccessible: {file_path}")
                     continue
@@ -286,6 +306,7 @@ class CommaArtistSplitterJob(RepairJob):
                 if file_artist not in findings_map:
                     findings_map[file_artist] = {
                         'artist_id': artist_id,
+                        'artist_ids': set(),
                         'db_artist_name': db_artist_name,
                         'thumb_url': thumb_url,
                         'parts': parts,
@@ -295,8 +316,16 @@ class CommaArtistSplitterJob(RepairJob):
                         'parts_resolution': parts_resolution,
                         'files': []
                     }
-                findings_map[file_artist]['files'].append({'title': audio.get('title', ['Unknown'])[0] if isinstance(audio.get('title'), list) else audio.get('title', 'Unknown'),
-                                                           'file_path': file_path})
+                if artist_id is not None:
+                    findings_map[file_artist]['artist_ids'].add(int(artist_id))
+                findings_map[file_artist]['files'].append({
+                    'title': (audio.get('title', ['Unknown'])[0]
+                              if isinstance(audio.get('title'), list)
+                              else audio.get('title', 'Unknown')),
+                    'file_path': file_path,
+                    'lib2_file_id': int(file_id),
+                    'lib2_track_id': int(track_id),
+                })
 
             except Exception as e:
                 logger.debug("Error scanning track %s: %s", file_path, e)
@@ -317,6 +346,18 @@ class CommaArtistSplitterJob(RepairJob):
                 return result
 
             sample_files = info['files'][:TRACK_SAMPLE_LIMIT]
+            artist_ids = sorted(info.get('artist_ids') or [])
+            track_ids = sorted({
+                int(item['lib2_track_id']) for item in info['files']
+            })
+            if artist_ids:
+                finding_entity_type = 'artist'
+                finding_entity_id = f'lib2:{artist_ids[0]}'
+            else:
+                # A malformed/uncredited native track still has a resolvable
+                # subject; the details carry every related track/file id.
+                finding_entity_type = 'track'
+                finding_entity_id = f'lib2:{track_ids[0]}'
 
             if context.report_progress:
                 context.report_progress(
@@ -326,6 +367,7 @@ class CommaArtistSplitterJob(RepairJob):
 
             details = {
                 'combined_name': combined_name,
+                'artist_name': combined_name,
                 'split_artists': info['parts'],
                 'primary_artist': info['primary'],
                 'new_display_artist': info['display'],
@@ -335,8 +377,17 @@ class CommaArtistSplitterJob(RepairJob):
                 'parts_resolution': info['parts_resolution'],
                 'checked_sources': info['checked_sources'],
                 'file_count': len(info['files']),
+                'track_count': len(track_ids),
                 'files': sample_files,
                 'all_files': info['files'],
+                'library_v2_native': True,
+                'library_v2': {
+                    'artist_ids': artist_ids,
+                    'track_ids': track_ids,
+                    'file_ids': sorted({
+                        int(item['lib2_file_id']) for item in info['files']
+                    }),
+                },
             }
 
             if dry_run and context.create_finding:
@@ -345,8 +396,8 @@ class CommaArtistSplitterJob(RepairJob):
                         job_id=self.job_id,
                         finding_type='comma_artist_split',
                         severity='warning',
-                        entity_type='track',
-                        entity_id=combined_name,  # Stable ID for dedup
+                        entity_type=finding_entity_type,
+                        entity_id=finding_entity_id,
                         file_path=None,
                         title=f'Combined artist: {combined_name}',
                         description=(
@@ -365,7 +416,7 @@ class CommaArtistSplitterJob(RepairJob):
                     result.errors += 1
             elif not dry_run:
                 applied = fixer._fix_comma_artist_split(
-                    'track', combined_name, None, details)
+                    finding_entity_type, finding_entity_id, None, details)
                 if applied.get('success') and applied.get('action') == 'artists_split':
                     result.auto_fixed += applied.get('fixed', 0)
                     self._record_resolved_finding(
@@ -374,6 +425,8 @@ class CommaArtistSplitterJob(RepairJob):
                         info=info,
                         details=details,
                         fixed_count=int(applied.get('fixed', 0)),
+                        entity_type=finding_entity_type,
+                        entity_id=finding_entity_id,
                     )
                 elif not applied.get('success'):
                     result.errors += 1
@@ -396,7 +449,8 @@ class CommaArtistSplitterJob(RepairJob):
         return result
 
     def _record_resolved_finding(self, context: JobContext, combined_name: str, info: dict,
-                                 details: dict, fixed_count: int) -> None:
+                                 details: dict, fixed_count: int,
+                                 entity_type: str, entity_id: str) -> None:
         """Persist an auto-applied split as a resolved finding entry."""
         conn = None
         try:
@@ -410,7 +464,7 @@ class CommaArtistSplitterJob(RepairJob):
                     updated_at = CURRENT_TIMESTAMP
                 WHERE job_id = ? AND finding_type = ? AND entity_type = ? AND entity_id = ?
                   AND status = 'pending'
-            """, (self.job_id, 'comma_artist_split', 'track', combined_name))
+            """, (self.job_id, 'comma_artist_split', entity_type, entity_id))
             if cursor.rowcount > 0:
                 conn.commit()
                 return
@@ -420,7 +474,7 @@ class CommaArtistSplitterJob(RepairJob):
                 WHERE job_id = ? AND finding_type = ? AND entity_type = ? AND entity_id = ?
                   AND status IN ('resolved', 'dismissed')
                 LIMIT 1
-            """, (self.job_id, 'comma_artist_split', 'track', combined_name))
+            """, (self.job_id, 'comma_artist_split', entity_type, entity_id))
             if cursor.fetchone():
                 conn.commit()
                 return
@@ -434,8 +488,8 @@ class CommaArtistSplitterJob(RepairJob):
                 self.job_id,
                 'comma_artist_split',
                 'warning',
-                'track',
-                combined_name,
+                entity_type,
+                entity_id,
                 None,
                 f'Combined artist: {combined_name}',
                 (
@@ -460,7 +514,7 @@ class CommaArtistSplitterJob(RepairJob):
         try:
             from mutagen.id3 import ID3
             from mutagen.mp4 import MP4
-            
+
             if isinstance(audio.tags, ID3):
                 tpe1 = audio.tags.get('TPE1')
                 if tpe1:
@@ -548,7 +602,9 @@ class CommaArtistSplitterJob(RepairJob):
             conn = context.db._get_connection()
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id FROM artists WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1",
+                "SELECT id FROM lib2_artists "
+                "WHERE canonical_artist_id IS NULL "
+                "AND LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1",
                 (name,))
             row = cursor.fetchone()
             return row[0] if row else None
@@ -564,13 +620,18 @@ class CommaArtistSplitterJob(RepairJob):
             conn = context.db._get_connection()
             cursor = conn.cursor()
             cursor.execute(f"""
-                SELECT t.title, t.file_path, al.title
-                FROM tracks t
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.artist_id = ? AND t.file_path IS NOT NULL AND t.file_path != ''
-                ORDER BY al.title, t.track_number
+                SELECT t.title, f.path, al.title
+                  FROM lib2_tracks t
+                  JOIN lib2_track_files f ON f.track_id = t.id
+             LEFT JOIN lib2_albums al ON al.id = t.album_id
+                 WHERE f.path IS NOT NULL AND f.path != ''
+                   AND COALESCE(f.file_state, 'active') = 'active'
+                   AND (al.primary_artist_id = ? OR EXISTS (
+                       SELECT 1 FROM lib2_track_artists ta
+                       WHERE ta.track_id = t.id AND ta.artist_id = ?))
+              ORDER BY al.title, t.track_number
                 LIMIT {TRACK_SAMPLE_LIMIT}
-            """, (artist_id,))
+            """, (artist_id, artist_id))
             return [{'title': r[0], 'file_path': r[1], 'album': r[2] or ''}
                     for r in cursor.fetchall()]
         except Exception:

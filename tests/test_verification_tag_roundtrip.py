@@ -42,9 +42,16 @@ def test_missing_file_returns_false_not_raises(tmp_path):
     assert write_verification_status(str(tmp_path / 'nope.flac'), 'verified') is False
 
 
-def test_db_migration_adds_verification_status_column(tmp_path):
+def test_the_catalogue_has_somewhere_to_store_what_the_tag_says(tmp_path):
+    """The scan reads the file tag and writes it back to the catalogue, so the
+    column has to exist. It lives on the FILE row, not the track: two files for
+    one track can be verified independently (a lossless keeper and a lossy
+    stand-in), which the single legacy ``tracks.verification_status`` could not
+    express."""
     from database.music_database import MusicDatabase
     db = MusicDatabase(str(tmp_path / 't.db'))
     with db._get_connection() as conn:
-        cols = [r[1] for r in conn.execute('PRAGMA table_info(tracks)').fetchall()]
+        cols = [r[1] for r in conn.execute(
+            'PRAGMA table_info(lib2_track_files)').fetchall()]
     assert 'verification_status' in cols
+    assert 'acoustid_status' in cols

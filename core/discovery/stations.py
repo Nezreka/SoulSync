@@ -49,13 +49,19 @@ def build_stations(database, profile_id: int = 1,
         placeholders = ",".join("?" * len(seed_names))
         cur.execute(
             f"""
-            SELECT ar.id, ar.name, ar.thumb_url,
-                   ar.spotify_artist_id, ar.itunes_artist_id, ar.deezer_id,
+            SELECT ar.id, ar.name, ar.image_url AS thumb_url,
+                   ar.spotify_id AS spotify_artist_id,
+                   json_extract(ar.external_ids, '$.itunes') AS itunes_artist_id,
+                   json_extract(ar.external_ids, '$.deezer') AS deezer_id,
                    ar.musicbrainz_id,
-                   (SELECT COUNT(*) FROM tracks t
-                    WHERE t.artist_id = ar.id
-                      AND t.file_path IS NOT NULL AND t.file_path != '') AS playable
-            FROM artists ar
+                   (SELECT COUNT(*)
+                      FROM lib2_tracks t
+                      JOIN lib2_albums al ON al.id = t.album_id
+                      JOIN lib2_track_files f ON f.track_id = t.id
+                     WHERE al.primary_artist_id = ar.id
+                       AND f.path IS NOT NULL AND TRIM(f.path) != ''
+                       AND COALESCE(f.file_state, 'active') = 'active') AS playable
+            FROM lib2_artists ar
             WHERE LOWER(ar.name) IN ({placeholders})
             """,
             seed_names)

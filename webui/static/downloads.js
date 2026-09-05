@@ -5447,7 +5447,20 @@ function showToast(message, type = 'success', helpSection = null) {
 }
 
 function _escToast(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-function _escAttr(s) { return _escToast(s).replace(/'/g, "\\'").replace(/\n/g, ' ').replace(/\r/g, ''); }
+// `_escAttr` used to be redefined here as a JS-string escaper. Both this file
+// and stats-automations.js declared a global `function _escAttr`, and
+// stats-automations.js loads SECOND (index.html), so its HTML-entity version
+// won for every call site in BOTH files. The onclick builders below therefore
+// got &#39; where they needed \' -- the attribute parser decoded it back to a
+// bare apostrophe, which terminated the JS string literal and threw a
+// SyntaxError that silently killed the whole handler. That is the
+// "Road trip-The Rolfe's" delete-button bug, and it was still live
+// (frontend-audit FE-07).
+//
+// There is no second definition now. `_escAttr` (HTML attribute content) and
+// `_escJs` (a JS string literal inside an HTML attribute -- the double-decoded
+// case) both live in stats-automations.js, and each call site below uses the
+// one that matches its context.
 
 function _updateNotifBadge() {
     const badge = document.getElementById('notif-bell-badge');
@@ -6023,7 +6036,7 @@ function _gsUpdateVisibility() {
     if (!bar) return;
     // Hide on pages where global search doesn't belong, and always on the
     // video side (the global/music search is music-only).
-    const _gsHidePages = new Set(['search', 'downloads', 'settings', 'help', 'issues', 'import']);
+    const _gsHidePages = new Set(['search', 'downloads', 'settings', 'help', 'issues', 'import', 'library']);
     const onVideoSide = document.body.getAttribute('data-side') === 'video';
     const onHidePage = onVideoSide || (typeof currentPage !== 'undefined' && _gsHidePages.has(currentPage));
     bar.style.display = onHidePage ? 'none' : '';
@@ -6192,7 +6205,7 @@ function _gsRenderFromState(state) {
 
     if (dbArtists.length) {
         h += '<div class="gsearch-section-header">📚 In Your Library</div><div class="gsearch-grid">';
-        h += dbArtists.map(a => `<a class="gsearch-item" href="${a.id ? buildArtistDetailPath(a.id, null) : '#'}" onclick="_gsDeactivate()" style="text-decoration:none;color:inherit;">${a.image_url ? `<div class="gsearch-item-art"><img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'"></div>` : '<div class="gsearch-item-art">🎤</div>'}<div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">Library</div></div></a>`).join('');
+        h += dbArtists.map(a => `<a class="gsearch-item" href="${a.library_v2_id ? `/library?artist=${encodeURIComponent(a.library_v2_id)}` : (a.id ? buildArtistDetailPath(a.id, null) : '#')}" onclick="_gsDeactivate()" style="text-decoration:none;color:inherit;">${a.image_url ? `<div class="gsearch-item-art"><img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'"></div>` : '<div class="gsearch-item-art">🎤</div>'}<div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">Library</div></div></a>`).join('');
         h += '</div>';
     }
 
@@ -6208,7 +6221,7 @@ function _gsRenderFromState(state) {
             const ar = a.artist || (a.artists ? a.artists.join(', ') : '');
             const yr = a.release_date ? a.release_date.substring(0, 4) : '';
             const img = (a.image_url || '').replace(/'/g, "\\'");
-            return `<div class="gsearch-item" onclick="_gsClickAlbum('${a.id}', '${_escAttr(a.name)}', '${_escAttr(ar)}', '${img}', '${activeSrc}')"><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='💿'">` : '💿'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}${yr ? ` · ${yr}` : ''}</div></div></div>`;
+            return `<div class="gsearch-item" onclick="_gsClickAlbum('${a.id}', '${_escJs(a.name)}', '${_escJs(ar)}', '${img}', '${activeSrc}')"><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='💿'">` : '💿'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}${yr ? ` · ${yr}` : ''}</div></div></div>`;
         }).join('');
         h += '</div>';
     }
@@ -6218,7 +6231,7 @@ function _gsRenderFromState(state) {
         h += singles.map(a => {
             const ar = a.artist || (a.artists ? a.artists.join(', ') : '');
             const img = (a.image_url || '').replace(/'/g, "\\'");
-            return `<div class="gsearch-item" onclick="_gsClickAlbum('${a.id}', '${_escAttr(a.name)}', '${_escAttr(ar)}', '${img}', '${activeSrc}')"><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎶'">` : '🎶'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}</div></div></div>`;
+            return `<div class="gsearch-item" onclick="_gsClickAlbum('${a.id}', '${_escJs(a.name)}', '${_escJs(ar)}', '${img}', '${activeSrc}')"><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎶'">` : '🎶'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}</div></div></div>`;
         }).join('');
         h += '</div>';
     }
@@ -6228,7 +6241,7 @@ function _gsRenderFromState(state) {
         h += tracks.map(t => {
             const ar = t.artist || (t.artists ? t.artists.join(', ') : '');
             const dur = t.duration_ms ? `${Math.floor(t.duration_ms / 60000)}:${String(Math.floor((t.duration_ms % 60000) / 1000)).padStart(2, '0')}` : '';
-            return `<div class="gsearch-track" onclick="_gsClickTrack('${_escAttr(ar)}', '${_escAttr(t.name)}', '${_escAttr(t.album || '')}', '${_escAttr(t.id || '')}', '${_escAttr(t.image_url || '')}', ${t.duration_ms || 0})"><div class="gsearch-item-art" style="width:32px;height:32px;border-radius:6px">${t.image_url ? `<img src="${t.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎵'">` : '🎵'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(t.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}${t.album ? ` · ${_escToast(t.album)}` : ''}</div></div><div class="gsearch-track-dur">${dur}</div><button class="gsearch-play-btn" onclick="event.stopPropagation(); _gsPlayTrack('${_escAttr(t.name)}', '${_escAttr(ar)}', '${_escAttr(t.album || '')}')" title="Stream">▶</button></div>`;
+            return `<div class="gsearch-track" onclick="_gsClickTrack('${_escJs(ar)}', '${_escJs(t.name)}', '${_escJs(t.album || '')}', '${_escJs(t.id || '')}', '${_escJs(t.image_url || '')}', ${t.duration_ms || 0})"><div class="gsearch-item-art" style="width:32px;height:32px;border-radius:6px">${t.image_url ? `<img src="${t.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎵'">` : '🎵'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(t.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}${t.album ? ` · ${_escToast(t.album)}` : ''}</div></div><div class="gsearch-track-dur">${dur}</div><button class="gsearch-play-btn" onclick="event.stopPropagation(); _gsPlayTrack('${_escJs(t.name)}', '${_escJs(ar)}', '${_escJs(t.album || '')}')" title="Stream">▶</button></div>`;
         }).join('');
         h += '</div>';
     }

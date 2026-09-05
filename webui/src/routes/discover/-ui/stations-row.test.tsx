@@ -20,7 +20,10 @@ beforeEach(() => {
 });
 
 function stubFetch(payload: unknown) {
-  vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => payload })));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({ json: async () => payload })),
+  );
 }
 
 describe('StationsRow', () => {
@@ -43,9 +46,12 @@ describe('StationsRow', () => {
   });
 
   it('a failed fetch also renders nothing rather than a broken row', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => {
-      throw new Error('down');
-    }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('down');
+      }),
+    );
     const { container } = render(<StationsRow />);
     await waitFor(() =>
       expect(container.querySelector('#recommended-stations-section')).toBeNull(),

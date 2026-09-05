@@ -985,20 +985,22 @@ def _update_album_year_in_database(db, metadata: dict, release_year) -> None:
         album_name_for_db = metadata.get("album", "")
         album_artist_for_db = metadata.get("album_artist", "") or metadata.get("artist", "")
         if album_name_for_db and album_artist_for_db:
+            from core.library2.importer import normalize_name
             conn = db._get_connection()
             try:
                 cursor = conn.cursor()
                 cursor.execute(
                     """
-                    UPDATE albums SET year = ?
+                    UPDATE lib2_albums SET year = ?
                     WHERE (year IS NULL OR year = 0)
                       AND id IN (
-                        SELECT al.id FROM albums al
-                        JOIN artists ar ON ar.id = al.artist_id
-                        WHERE LOWER(al.title) = LOWER(?) AND LOWER(ar.name) = LOWER(?)
+                        SELECT al.id FROM lib2_albums al
+                        JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                        WHERE LOWER(al.title) = LOWER(?) AND ar.name_key = ?
                       )
                     """,
-                    (int(release_year), album_name_for_db, album_artist_for_db),
+                    (int(release_year), album_name_for_db,
+                     normalize_name(album_artist_for_db)),
                 )
                 if cursor.rowcount > 0:
                     conn.commit()

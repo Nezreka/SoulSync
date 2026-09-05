@@ -153,6 +153,23 @@ export function emptySourceResults(): SourceResults {
   return { db_artists: [], artists: [], albums: [], tracks: [], videos: [] };
 }
 
+/**
+ * The library artists any source of this query already resolved (iss29-B04a).
+ *
+ * "In Your Library" is a local catalogue result: it does not depend on which
+ * provider tab is active, so a source that cannot produce it (the video
+ * search) should show what a sibling already found rather than an empty
+ * section.
+ */
+export function knownDbArtists(
+  sources: Partial<Record<string, SourceResults>>,
+): SourceResults['db_artists'] {
+  for (const results of Object.values(sources)) {
+    if (results?.db_artists?.length) return results.db_artists;
+  }
+  return [];
+}
+
 /** Unpack /api/enhanced-search into the per-source cache shape. */
 export function sourceResultsFromResponse(data: EnhancedSearchResponse): SourceResults {
   return {
@@ -328,6 +345,30 @@ export function artistDetailPath(
       .toLowerCase() || 'library';
   const path = `/artist-detail/${encodeURIComponent(normalized)}/${encodeURIComponent(String(artistId))}`;
   return name ? `${path}?name=${encodeURIComponent(name)}` : path;
+}
+
+/**
+ * Where an "In Your Library" artist card points.
+ *
+ * The library is Library v2 now, and so is the bucket: `_build_db_artists`
+ * reads the v2 catalogue, so every card here has a v2 id and opens the page
+ * that can actually manage the artist (monitoring, wanted, quality profile).
+ * The artist-detail fallback stays for callers that pass an artist from
+ * somewhere else — inventing a v2 id for one would 404 the page.
+ */
+export function inLibraryArtistPath(artist: {
+  id?: string | number;
+  library_v2_id?: number | null;
+}): string {
+  return artist.library_v2_id
+    ? // ldp-05 (iss29-B05): arriving from a search result means landing on what
+      // the legacy artist page showed — full discography, cards, rich header.
+      // Without these the direct deep link fell back to the in-library defaults
+      // (My Library / table / compact), so the same artist looked different
+      // depending on whether v2 had mapped it yet.
+      `/library?artist=${encodeURIComponent(String(artist.library_v2_id))}` +
+        `&releases=all&releaseView=cards&header=rich`
+    : artistDetailPath(artist.id ?? '');
 }
 
 /** Where a label card points — buildLabelDetailPath (init.js:3003). */

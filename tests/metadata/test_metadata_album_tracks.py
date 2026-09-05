@@ -159,28 +159,25 @@ def test_resolve_album_reference_prefers_stored_external_id(monkeypatch):
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
+    cursor.execute("CREATE TABLE lib2_artists (id INTEGER PRIMARY KEY, name TEXT)")
     cursor.execute(
         """
-        CREATE TABLE albums (
+        CREATE TABLE lib2_albums (
             id INTEGER PRIMARY KEY,
             title TEXT,
-            artist_id INTEGER,
-            spotify_album_id TEXT,
-            itunes_album_id TEXT,
-            deezer_id TEXT,
-            deezer_album_id TEXT,
-            discogs_id TEXT,
+            primary_artist_id INTEGER,
+            spotify_id TEXT,
+            musicbrainz_id TEXT,
             soul_id TEXT,
-            hydrabase_album_id TEXT
+            external_ids TEXT NOT NULL DEFAULT '{}'
         )
         """
     )
-    cursor.execute("INSERT INTO artists (id, name) VALUES (1, 'Artist One')")
+    cursor.execute("INSERT INTO lib2_artists (id, name) VALUES (1, 'Artist One')")
     cursor.execute(
         """
-        INSERT INTO albums (id, title, artist_id, deezer_id)
-        VALUES (1, 'Album One', 1, 'deezer-abc')
+        INSERT INTO lib2_albums (id, title, primary_artist_id, external_ids)
+        VALUES (1, 'Album One', 1, '{"deezer": "deezer-abc"}')
         """
     )
     conn.commit()
@@ -203,25 +200,23 @@ def test_resolve_album_reference_searches_by_name_when_no_external_id_exists(mon
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
+    cursor.execute("CREATE TABLE lib2_artists (id INTEGER PRIMARY KEY, name TEXT)")
     cursor.execute(
         """
-        CREATE TABLE albums (
+        CREATE TABLE lib2_albums (
             id INTEGER PRIMARY KEY,
             title TEXT,
-            artist_id INTEGER,
-            spotify_album_id TEXT,
-            itunes_album_id TEXT,
-            deezer_id TEXT,
-            deezer_album_id TEXT,
-            discogs_id TEXT,
+            primary_artist_id INTEGER,
+            spotify_id TEXT,
+            musicbrainz_id TEXT,
             soul_id TEXT,
-            hydrabase_album_id TEXT
+            external_ids TEXT NOT NULL DEFAULT '{}'
         )
         """
     )
-    cursor.execute("INSERT INTO artists (id, name) VALUES (1, 'Artist One')")
-    cursor.execute("INSERT INTO albums (id, title, artist_id) VALUES (1, 'Album One', 1)")
+    cursor.execute("INSERT INTO lib2_artists (id, name) VALUES (1, 'Artist One')")
+    cursor.execute("INSERT INTO lib2_albums (id, title, primary_artist_id)"
+                   " VALUES (1, 'Album One', 1)")
     conn.commit()
 
     class _FakeDatabase:
@@ -253,22 +248,25 @@ def test_resolve_album_reference_prefers_stored_jiosaavn_id(monkeypatch):
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
+    cursor.execute("CREATE TABLE lib2_artists (id INTEGER PRIMARY KEY, name TEXT)")
     cursor.execute(
         """
-        CREATE TABLE albums (
+        CREATE TABLE lib2_albums (
             id INTEGER PRIMARY KEY,
             title TEXT,
-            artist_id INTEGER,
-            jiosaavn_id TEXT
+            primary_artist_id INTEGER,
+            spotify_id TEXT,
+            musicbrainz_id TEXT,
+            soul_id TEXT,
+            external_ids TEXT NOT NULL DEFAULT '{}'
         )
         """
     )
-    cursor.execute("INSERT INTO artists (id, name) VALUES (1, 'Badshah')")
+    cursor.execute("INSERT INTO lib2_artists (id, name) VALUES (1, 'Badshah')")
     cursor.execute(
         """
-        INSERT INTO albums (id, title, artist_id, jiosaavn_id)
-        VALUES (1, 'Jugnu', 1, '30471107')
+        INSERT INTO lib2_albums (id, title, primary_artist_id, external_ids)
+        VALUES (1, 'Jugnu', 1, '{"jiosaavn": "30471107"}')
         """
     )
     conn.commit()
@@ -294,18 +292,23 @@ def test_resolve_album_reference_skips_jiosaavn_client_when_disabled(monkeypatch
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
+    cursor.execute("CREATE TABLE lib2_artists (id INTEGER PRIMARY KEY, name TEXT)")
     cursor.execute(
         """
-        CREATE TABLE albums (
+        CREATE TABLE lib2_albums (
             id INTEGER PRIMARY KEY,
             title TEXT,
-            artist_id INTEGER
+            primary_artist_id INTEGER,
+            spotify_id TEXT,
+            musicbrainz_id TEXT,
+            soul_id TEXT,
+            external_ids TEXT NOT NULL DEFAULT '{}'
         )
         """
     )
-    cursor.execute("INSERT INTO artists (id, name) VALUES (1, 'Artist One')")
-    cursor.execute("INSERT INTO albums (id, title, artist_id) VALUES (1, 'Album One', 1)")
+    cursor.execute("INSERT INTO lib2_artists (id, name) VALUES (1, 'Artist One')")
+    cursor.execute("INSERT INTO lib2_albums (id, title, primary_artist_id)"
+                   " VALUES (1, 'Album One', 1)")
     conn.commit()
 
     class _FakeDatabase:

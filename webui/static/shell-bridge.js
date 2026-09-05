@@ -278,6 +278,21 @@ function _handleShellLinkClick(event) {
     const navPageId = anchor.matches('.nav-button[data-page]') ? anchor.getAttribute('data-page') : null;
     if (navPageId) {
         event.preventDefault();
+        // iss29-B01: `navigateToPage` early-returns on `pageId === currentPage`
+        // (init.js:3175), and every Library V2 sub-view keeps currentPage at
+        // 'library' — so from /library?artist=42 the sidebar's own "Library"
+        // button did nothing at all: no URL change, no view change, no
+        // feedback. Sending a React page to its BASE path instead both escapes
+        // that guard and does what the click means: drop the sub-view's search
+        // params and show the page itself.
+        const navRoute = getWebRouter()?.routeManifest?.find((entry) => entry.pageId === navPageId);
+        if (navRoute?.kind === 'react' && getWebRouter()?.navigateToHref) {
+            notifyPageWillChange(navPageId);
+            showReactHost(navPageId);
+            setActivePageChrome(navPageId);
+            navigateOrFollow(getWebRouter(), navRoute.path, pathname);
+            return;
+        }
         void navigateToPage(navPageId);
         return;
     }
@@ -294,6 +309,56 @@ function _handleShellLinkClick(event) {
     if (pathname.startsWith('/label-detail/')) {
         _handleLabelDetailLinkClick(event, pathname, anchor);
         return;
+    }
+
+    _handleReactRouteLinkClick(event, pathname, anchor);
+}
+
+/**
+ * Hand a plain anchor pointing at a React-owned route back to the SPA router.
+ *
+ * iss29-B03: a search result for an artist Library V2 knows is a bare
+ * `<a href="/library?artist=7">` — no onClick, and TanStack does not intercept
+ * raw anchors. Nothing above matched it, so the browser performed a FULL
+ * document load. The href travels whole, query string included.
+ */
+function _handleReactRouteLinkClick(event, pathname, anchor) {
+    const router = getWebRouter();
+    if (!router?.navigateToHref) return;
+
+    const targetPage = router.resolvePageId?.(pathname);
+    if (!targetPage) return;
+    const route = router.routeManifest?.find((entry) => entry.pageId === targetPage);
+    if (route?.kind !== 'react') return;
+    if (!isPageAllowed(targetPage)) return;
+
+    event.preventDefault();
+    notifyPageWillChange(targetPage);
+    showReactHost(targetPage);
+    setActivePageChrome(targetPage);
+    navigateOrFollow(router, `${pathname}${anchor.search || ''}${anchor.hash || ''}`, anchor.href);
+}
+
+/** Navigate, and if the router rejects it, fall back to a real page load.
+ *
+ * These call sites `preventDefault()` the click first, so a rejected promise
+ * used to leave a dead link: the browser did not follow it, the router did not
+ * take it, and `void` discarded the reason. `location.assign` is the honest
+ * fallback -- the user asked to go somewhere, so go there, even if it costs a
+ * full reload (frontend-audit FE-09).
+ */
+function navigateOrFollow(router, href, fallbackHref) {
+    try {
+        const result = router.navigateToHref(href);
+        if (result && typeof result.catch === 'function') {
+            result.catch((error) => {
+                console.error('SPA navigation to', href, 'failed:', error);
+                window.location.assign(fallbackHref ?? href);
+            });
+        }
+    } catch (error) {
+        console.error('SPA navigation to', href, 'threw:', error);
+        window.location.assign(fallbackHref ?? href);
     }
 }
 

@@ -5,6 +5,19 @@ When a wrong MBID is embedded, media servers like Navidrome use it to look up
 metadata from MusicBrainz, overriding the file's correct title/artist tags.
 This causes tracks to display with wrong names in the media server even though
 SoulSync shows them correctly.
+
+iss32-S01 — this job was Nezreka's (commit 87b39634a) and the Library-v2
+migration retired it: the id went into ``RETIRED_JOB_IDS``, the module and its
+fix handlers were deleted, and nothing native replaced it. Nothing else in the
+tree reads an embedded MusicBrainz recording id and verifies it, so retiring
+it was a plain loss of function — exactly what the ``library_reorganize``
+comment two lines above it warns against.
+
+It is back, and native: subjects come from the Library-v2 catalogue
+(``active_file_subjects``), paths resolve through ``resolve_lib2_path``, and
+findings carry ``lib2:<track_id>`` entity ids like every other migrated job.
+The tag reading/writing below is unchanged from the original — it only ever
+touched files, never the legacy tables, so there was nothing there to migrate.
 """
 
 import os
@@ -14,7 +27,7 @@ from typing import Optional
 
 from core.library.path_resolver import resolve_library_file_path
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, scoped_file_subjects
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.mbid_mismatch")
@@ -286,14 +299,26 @@ def _write_album_mbid_to_file(file_path: str, new_mbid: str) -> bool:
         return False
 
 
-def _resolve_file_path(file_path, transfer_folder, download_folder=None, config_manager=None):
-    """Backwards-compat wrapper. Use ``resolve_library_file_path`` directly."""
-    return resolve_library_file_path(
-        file_path,
-        transfer_folder=transfer_folder,
-        download_folder=download_folder,
-        config_manager=config_manager,
-    )
+
+
+def _native_subjects(context: JobContext):
+    """Every indexed Library-v2 file, with the entity context this job needs.
+
+    One enumeration serves both phases — the original ran two nearly identical
+    queries against the legacy ``tracks`` table.
+    """
+    from core.library2.maintenance_subjects import active_file_subjects
+
+    return scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager))
+
+
+def _resolved_path(subject, context: JobContext) -> Optional[str]:
+    from core.library2.paths import resolve_lib2_path
+
+    path = str(subject.get("path") or "")
+    if not path:
+        return None
+    return resolve_lib2_path(path, config_manager=context.config_manager) or path
 
 
 @register_job
@@ -310,6 +335,9 @@ class MbidMismatchDetectorJob(RepairJob):
         'media server even though SoulSync shows them correctly.\n\n'
         'The fix action removes the bad MBID tag from the audio file, allowing the media '
         'server to fall back to the file\'s actual title/artist tags.\n\n'
+        'A second pass compares the embedded MusicBrainz Album Id across the tracks of '
+        'each album and flags the dissenters — that mismatch is what makes Navidrome '
+        'split one album into several.\n\n'
         'This job reads each audio file\'s tags and queries MusicBrainz to verify the '
         'embedded MBID points to the correct recording. Rate-limited to avoid overloading '
         'the MusicBrainz API.'
@@ -321,48 +349,27 @@ class MbidMismatchDetectorJob(RepairJob):
         'similarity_threshold': 0.55,
     }
     auto_fix = False
+    supports_file_scope = True
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
 
-        # Get all tracks with file paths
-        tracks = []
-        conn = None
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name, al.title, t.file_path,
-                       al.thumb_url, ar.thumb_url, ar.id
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.file_path IS NOT NULL AND t.file_path != ''
-            """)
-            tracks = cursor.fetchall()
+            subjects = _native_subjects(context)
         except Exception as e:
-            logger.error("Error fetching tracks: %s", e, exc_info=True)
+            logger.error("V2 subject enumeration failed: %s", e, exc_info=True)
             result.errors += 1
             return result
-        finally:
-            if conn:
-                conn.close()
 
-        total = len(tracks)
+        total = len(subjects)
         if context.update_progress:
             context.update_progress(0, total)
         if context.report_progress:
-            context.report_progress(phase=f'Scanning {total} tracks for MBID mismatches...', total=total)
+            context.report_progress(
+                phase=f'Scanning {total} tracks for MBID mismatches...', total=total)
 
-        download_folder = None
-        if context.config_manager:
-            download_folder = context.config_manager.get('soulseek.download_path', '')
-
-        # We need a MusicBrainz client for MBID lookups
-        mb_client = None
-        if context.mb_client:
-            mb_client = context.mb_client
-        else:
+        mb_client = context.mb_client
+        if not mb_client:
             try:
                 from core.musicbrainz_client import MusicBrainzClient
                 mb_client = MusicBrainzClient()
@@ -374,41 +381,32 @@ class MbidMismatchDetectorJob(RepairJob):
             if context.report_progress:
                 context.report_progress(
                     log_line='MusicBrainz client not available — cannot verify MBIDs',
-                    log_type='error'
-                )
+                    log_type='error')
             return result
 
         checked = 0
-        import time
-
-        for i, row in enumerate(tracks):
+        for i, subject in enumerate(subjects):
             if context.check_stop():
                 return result
             if i % 100 == 0 and context.wait_if_paused():
                 return result
-
-            track_id, title, artist_name, album_title, file_path, album_thumb, artist_thumb, artist_id = row
-
             if context.update_progress and (i + 1) % 50 == 0:
                 context.update_progress(i + 1, total)
 
-            # Resolve the file path
-            resolved = _resolve_file_path(file_path, context.transfer_folder, download_folder,
-                                           config_manager=context.config_manager)
+            resolved = _resolved_path(subject, context)
             if not resolved:
                 result.scanned += 1
                 continue
 
-            # Read MBID and embedded title from file tags
-            mbid, embedded_title, fmt = _read_file_tags(resolved)
+            mbid, embedded_title, _fmt = _read_file_tags(resolved)
             if not mbid:
                 result.scanned += 1
                 continue
 
-            # Use the embedded TITLE tag for comparison; fall back to DB title only if absent
+            title = subject.get("title")
+            artist_name = subject.get("artist_name")
+            album_title = subject.get("album_title")
             file_title = embedded_title if embedded_title else title
-
-            # Validate the MBID against MusicBrainz
             checked += 1
 
             if context.report_progress and checked % 10 == 0:
@@ -416,8 +414,7 @@ class MbidMismatchDetectorJob(RepairJob):
                     scanned=i + 1, total=total,
                     phase=f'Verifying MBIDs ({checked} checked, {i + 1}/{total} files)',
                     log_line=f'Checking: {title or "Unknown"} — {artist_name or "Unknown"}',
-                    log_type='info'
-                )
+                    log_type='info')
 
             try:
                 # Rate limit: MusicBrainz allows ~1 req/sec
@@ -426,297 +423,225 @@ class MbidMismatchDetectorJob(RepairJob):
 
                 recording = mb_client.get_recording(mbid, includes=['artist-credits'])
                 if not recording:
-                    # MBID doesn't exist — definitely wrong
                     self._create_mismatch_finding(
-                        context, result, track_id, title, artist_name, album_title,
-                        resolved, album_thumb, artist_thumb, mbid, artist_id=artist_id,
+                        context, result, subject, resolved, mbid,
                         mb_title='[MBID not found]', mb_artist='[Unknown]',
-                        reason='MBID does not exist in MusicBrainz'
-                    )
+                        reason='MBID does not exist in MusicBrainz')
                     result.scanned += 1
                     continue
 
                 mb_title = recording.get('title', '')
-                mb_artists = recording.get('artist-credit', [])
                 mb_artist = ''
-                if mb_artists:
-                    for credit in mb_artists:
-                        if isinstance(credit, dict) and 'artist' in credit:
-                            mb_artist = credit['artist'].get('name', '')
-                            break
+                for credit in recording.get('artist-credit', []) or []:
+                    if isinstance(credit, dict) and 'artist' in credit:
+                        mb_artist = credit['artist'].get('name', '')
+                        break
 
-                # Compare: does the MBID's title match the file's embedded title?
                 if not _title_matches(file_title, mb_title):
                     self._create_mismatch_finding(
-                        context, result, track_id, title, artist_name, album_title,
-                        resolved, album_thumb, artist_thumb, mbid, artist_id=artist_id,
+                        context, result, subject, resolved, mbid,
                         mb_title=mb_title, mb_artist=mb_artist,
-                        reason=f'MBID points to "{mb_title}" by {mb_artist}, expected "{file_title}"'
-                    )
-
+                        reason=(f'MBID points to "{mb_title}" by {mb_artist}, '
+                                f'expected "{file_title}"'))
             except Exception as e:
-                logger.debug("Error verifying MBID %s for track %s: %s", mbid, track_id, e)
-                # Don't count as error — could be transient network issue
+                logger.debug("Error verifying MBID %s for track %s: %s",
+                             mbid, subject.get("track_id"), e)
+                # Don't count as error — could be a transient network issue.
 
             result.scanned += 1
 
         if context.update_progress:
             context.update_progress(total, total)
 
-        logger.info("MBID mismatch scan (track-level): %d files scanned, %d with MBIDs verified, %d mismatches found",
-                     total, checked, result.findings_created)
+        track_findings = result.findings_created
+        logger.info(
+            "MBID mismatch scan (track-level): %d files scanned, %d with MBIDs verified, "
+            "%d mismatches found", total, checked, track_findings)
 
-        # Phase 2: Album MBID consistency check.
-        #
-        # Tracks of the same album that carry different MUSICBRAINZ_ALBUMID
-        # tags cause Navidrome (and other media servers grouping by album
-        # MBID) to split the album into multiple entries. Reported by user
-        # Samuel [KC]. Detection strategy: group tracks by DB album_id,
-        # find the consensus (most-common) album MBID, flag the dissenters.
-        # No MusicBrainz API calls — this is a pure consistency check, so
-        # it doesn't compete with the rate-limited track scan above.
-        track_findings_so_far = result.findings_created
-        self._scan_album_mbid_consistency(context, result, download_folder)
-        album_findings = result.findings_created - track_findings_so_far
+        self._scan_album_mbid_consistency(context, result, subjects)
+        album_findings = result.findings_created - track_findings
 
         if context.report_progress:
             context.report_progress(
-                scanned=total, total=total,
-                phase='Complete',
+                scanned=total, total=total, phase='Complete',
                 log_line=(
-                    f'Verified {checked} track MBIDs ({track_findings_so_far} mismatches) — '
-                    f'album consistency check found {album_findings} dissenters'
-                ),
-                log_type='success' if result.findings_created == 0 else 'warning'
-            )
-
+                    f'Verified {checked} track MBIDs ({track_findings} mismatches) — '
+                    f'album consistency check found {album_findings} dissenters'),
+                log_type='success' if result.findings_created == 0 else 'warning')
         return result
 
     def _scan_album_mbid_consistency(self, context: JobContext, result: JobResult,
-                                     download_folder: str) -> None:
-        """Group tracks by DB album, flag tracks whose embedded album
-        MBID differs from the consensus across the album's other tracks."""
-        # Pull tracks grouped by album. Singles (album NULL) skipped — they
-        # can't have a consistency issue.
-        rows = []
-        conn = None
-        try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.id, t.title, t.album_id, t.file_path,
-                       ar.name AS artist_name, al.title AS album_title,
-                       al.thumb_url AS album_thumb, ar.thumb_url AS artist_thumb,
-                       ar.id AS artist_row_id
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.file_path IS NOT NULL AND t.file_path != ''
-                  AND t.album_id IS NOT NULL
-            """)
-            rows = cursor.fetchall()
-        except Exception as e:
-            logger.error("Album MBID consistency scan: DB fetch failed: %s", e, exc_info=True)
-            return
-        finally:
-            if conn:
-                conn.close()
+                                     subjects) -> None:
+        """Flag tracks whose embedded album MBID disagrees with their album.
 
-        if not rows:
-            return
-
-        # Group by album_id. Read each track's embedded album MBID — only
-        # include rows where the read succeeded (skips files that don't
-        # have an album MBID at all; those don't break Navidrome since
-        # there's no MBID for it to disagree on).
-        by_album: dict = defaultdict(list)
-        for row in rows:
+        Pure consistency check over the tags already on disk — no MusicBrainz
+        calls, so it never competes with the rate-limited pass above.
+        """
+        by_album = defaultdict(list)
+        for subject in subjects:
             if context.check_stop():
                 return
-            track_id = row['id']
-            album_id = row['album_id']
-            file_path = row['file_path']
-
-            resolved = _resolve_file_path(
-                file_path, context.transfer_folder, download_folder,
-                config_manager=context.config_manager,
-            )
+            album_id = subject.get("album_id")
+            if not album_id:
+                continue  # a single can't disagree with itself
+            resolved = _resolved_path(subject, context)
             if not resolved:
                 continue
             album_mbid = _read_album_mbid_from_file(resolved)
             if not album_mbid:
                 continue
-            by_album[album_id].append({
-                'track_id': track_id,
-                'title': row['title'],
-                'album_title': row['album_title'],
-                'artist_name': row['artist_name'],
-                'album_thumb': row['album_thumb'],
-                'artist_thumb': row['artist_thumb'],
-                'artist_id': row['artist_row_id'],
-                'file_path': file_path,
-                'resolved': resolved,
-                'album_mbid': album_mbid,
-            })
+            by_album[album_id].append((subject, resolved, album_mbid))
 
         if context.report_progress:
             context.report_progress(
                 phase=f'Checking album MBID consistency across {len(by_album)} albums...',
-                log_type='info',
-            )
+                log_type='info')
 
-        for album_id, tracks_in_album in by_album.items():
+        for album_id, entries in by_album.items():
             if context.check_stop():
                 return
-            # Need at least 2 tracks to detect a mismatch.
-            if len(tracks_in_album) < 2:
+            if len(entries) < 2:
                 continue
-
-            mbid_counts = Counter(t['album_mbid'] for t in tracks_in_album)
-            if len(mbid_counts) == 1:
-                continue  # All tracks agree → nothing to flag
-
-            consensus_mbid, consensus_count = mbid_counts.most_common(1)[0]
-
-            # Defensive: if no MBID has a clear plurality (e.g. 3 tracks,
-            # 3 different MBIDs), skip rather than picking a random one.
-            # Counter.most_common returns ties in arbitrary order; we don't
-            # want to fix a track to a "consensus" that's really a 1/N tie.
-            second_count = mbid_counts.most_common(2)[1][1] if len(mbid_counts) > 1 else 0
+            counts = Counter(mbid for _s, _p, mbid in entries)
+            if len(counts) == 1:
+                continue
+            consensus_mbid, consensus_count = counts.most_common(1)[0]
+            second_count = counts.most_common(2)[1][1]
             if consensus_count == second_count:
+                # A 1/N tie is not a consensus; fixing to a coin flip would be
+                # worse than leaving the album alone.
                 logger.info(
                     "Album %s has tied album MBID counts %s — no clear consensus, skipping",
-                    album_id, dict(mbid_counts),
-                )
+                    album_id, dict(counts))
                 continue
-
-            for track in tracks_in_album:
-                if track['album_mbid'] == consensus_mbid:
+            for subject, resolved, album_mbid in entries:
+                if album_mbid == consensus_mbid:
                     continue
                 self._create_album_mbid_mismatch_finding(
-                    context, result, track,
+                    context, result, subject, resolved, album_mbid,
                     consensus_mbid=consensus_mbid,
                     consensus_count=consensus_count,
-                    total_tracks=len(tracks_in_album),
-                )
+                    total_tracks=len(entries))
 
-    def _create_album_mbid_mismatch_finding(self, context: JobContext, result: JobResult,
-                                            track: dict, consensus_mbid: str,
-                                            consensus_count: int, total_tracks: int) -> None:
-        """Create a finding for a track whose album MBID disagrees with
-        the consensus across the album's other tracks."""
-        title = track['title']
-        artist_name = track['artist_name']
-        album_title = track['album_title']
-        if context.report_progress:
-            context.report_progress(
-                log_line=(
-                    f'Album MBID mismatch: "{title}" — has {track["album_mbid"][:8]}…, '
-                    f'consensus is {consensus_mbid[:8]}… ({consensus_count}/{total_tracks} tracks)'
-                ),
-                log_type='warning'
-            )
-        if context.create_finding:
-            try:
-                inserted = context.create_finding(
-                    job_id=self.job_id,
-                    finding_type='album_mbid_mismatch',
-                    severity='warning',
-                    entity_type='track',
-                    entity_id=str(track['track_id']),
-                    file_path=track['file_path'],
-                    title=f'Album MBID mismatch: {title or "Unknown"}',
-                    description=(
-                        f'Track "{title}" by {artist_name or "Unknown"} on album '
-                        f'"{album_title or "Unknown"}" has a different '
-                        f'MusicBrainz Album Id than the album\'s other tracks. '
-                        f'This causes media servers like Navidrome to split the album.'
-                    ),
-                    details={
-                        'track_id': track['track_id'],
-                        'title': title,
-                        'artist': artist_name,
-                        'album': album_title,
-                        'file_path': track['file_path'],
-                        'wrong_mbid': track['album_mbid'],
-                        'consensus_mbid': consensus_mbid,
-                        'consensus_count': consensus_count,
-                        'total_tracks_with_mbid': total_tracks,
-                        'reason': (
-                            f'{consensus_count}/{total_tracks} tracks of this album use '
-                            f'MBID {consensus_mbid}; this track uses {track["album_mbid"]}'
-                        ),
-                        'album_thumb_url': track['album_thumb'] or None,
-                        'artist_thumb_url': track['artist_thumb'] or None,
-                        'artist_id': track.get('artist_id'),
-                    }
-                )
-                if inserted:
-                    result.findings_created += 1
-                else:
-                    result.findings_skipped_dedup += 1
-            except Exception as e:
-                logger.debug("Error creating album MBID mismatch finding for track %s: %s",
-                              track['track_id'], e)
-                result.errors += 1
+    @staticmethod
+    def _finding_identity(subject, resolved):
+        """The native (entity_id, file_path, thumbnails) tuple for a finding."""
+        return (
+            f"lib2:{subject.get('track_id')}",
+            str(subject.get("path") or resolved),
+            subject.get("album_image") or None,
+            subject.get("artist_image") or subject.get("artist_thumb") or None,
+            subject.get("artist_id"),
+        )
 
-    def _create_mismatch_finding(self, context, result, track_id, title, artist_name,
-                                  album_title, file_path, album_thumb, artist_thumb,
-                                  mbid, mb_title, mb_artist, reason, artist_id=None):
-        """Create a finding for a mismatched MBID."""
+    def _create_mismatch_finding(self, context, result, subject, resolved, mbid,
+                                 mb_title, mb_artist, reason):
+        entity_id, file_path, album_thumb, artist_thumb, artist_id = \
+            self._finding_identity(subject, resolved)
+        title = subject.get("title")
+        artist_name = subject.get("artist_name")
+        album_title = subject.get("album_title")
         if context.report_progress:
             context.report_progress(
                 log_line=f'Mismatch: "{title}" has MBID for "{mb_title}"',
-                log_type='error'
-            )
-        if context.create_finding:
-            try:
-                inserted = context.create_finding(
-                    job_id=self.job_id,
-                    finding_type='mbid_mismatch',
-                    severity='warning',
-                    entity_type='track',
-                    entity_id=str(track_id),
-                    file_path=file_path,
-                    title=f'MBID mismatch: {title or "Unknown"}',
-                    description=(
-                        f'Track "{title}" by {artist_name or "Unknown"} has an embedded '
-                        f'MusicBrainz ID that points to "{mb_title}" by {mb_artist}. '
-                        f'This causes media servers like Navidrome to display the wrong track name.'
-                    ),
-                    details={
-                        'track_id': track_id,
-                        'title': title,
-                        'artist': artist_name,
-                        'album': album_title,
-                        'file_path': file_path,
-                        'mbid': mbid,
-                        'mb_title': mb_title,
-                        'mb_artist': mb_artist,
-                        'reason': reason,
-                        'album_thumb_url': album_thumb or None,
-                        'artist_thumb_url': artist_thumb or None,
-                        'artist_id': artist_id,
-                    }
-                )
-                if inserted:
-                    result.findings_created += 1
-                else:
-                    result.findings_skipped_dedup += 1
-            except Exception as e:
-                logger.debug("Error creating MBID mismatch finding for track %s: %s", track_id, e)
-                result.errors += 1
+                log_type='error')
+        if not context.create_finding:
+            return
+        try:
+            inserted = context.create_finding(
+                job_id=self.job_id,
+                finding_type='mbid_mismatch',
+                severity='warning',
+                entity_type='track',
+                entity_id=entity_id,
+                file_path=file_path,
+                title=f'MBID mismatch: {title or "Unknown"}',
+                description=(
+                    f'Track "{title}" by {artist_name or "Unknown"} has an embedded '
+                    f'MusicBrainz ID that points to "{mb_title}" by {mb_artist}. '
+                    f'This causes media servers like Navidrome to display the wrong track name.'
+                ),
+                details={
+                    'track_id': entity_id,
+                    'title': title,
+                    'artist': artist_name,
+                    'album': album_title,
+                    'file_path': file_path,
+                    'mbid': mbid,
+                    'mb_title': mb_title,
+                    'mb_artist': mb_artist,
+                    'reason': reason,
+                    'album_thumb_url': album_thumb,
+                    'artist_thumb_url': artist_thumb,
+                    'artist_id': artist_id,
+                })
+            if inserted:
+                result.findings_created += 1
+            else:
+                result.findings_skipped_dedup += 1
+        except Exception as e:
+            logger.debug("Error creating MBID mismatch finding for %s: %s", entity_id, e)
+            result.errors += 1
+
+    def _create_album_mbid_mismatch_finding(self, context, result, subject, resolved,
+                                            album_mbid, consensus_mbid,
+                                            consensus_count, total_tracks):
+        entity_id, file_path, album_thumb, artist_thumb, artist_id = \
+            self._finding_identity(subject, resolved)
+        title = subject.get("title")
+        artist_name = subject.get("artist_name")
+        album_title = subject.get("album_title")
+        if context.report_progress:
+            context.report_progress(
+                log_line=(
+                    f'Album MBID mismatch: "{title}" — has {album_mbid[:8]}…, '
+                    f'consensus is {consensus_mbid[:8]}… ({consensus_count}/{total_tracks} tracks)'
+                ),
+                log_type='warning')
+        if not context.create_finding:
+            return
+        try:
+            inserted = context.create_finding(
+                job_id=self.job_id,
+                finding_type='album_mbid_mismatch',
+                severity='warning',
+                entity_type='track',
+                entity_id=entity_id,
+                file_path=file_path,
+                title=f'Album MBID mismatch: {title or "Unknown"}',
+                description=(
+                    f'Track "{title}" by {artist_name or "Unknown"} on album '
+                    f'"{album_title or "Unknown"}" has a different '
+                    f'MusicBrainz Album Id than the album\'s other tracks. '
+                    f'This causes media servers like Navidrome to split the album.'
+                ),
+                details={
+                    'track_id': entity_id,
+                    'title': title,
+                    'artist': artist_name,
+                    'album': album_title,
+                    'file_path': file_path,
+                    'wrong_mbid': album_mbid,
+                    'consensus_mbid': consensus_mbid,
+                    'consensus_count': consensus_count,
+                    'total_tracks_with_mbid': total_tracks,
+                    'reason': (
+                        f'{consensus_count}/{total_tracks} tracks of this album use '
+                        f'MBID {consensus_mbid}; this track uses {album_mbid}'),
+                    'album_thumb_url': album_thumb,
+                    'artist_thumb_url': artist_thumb,
+                    'artist_id': artist_id,
+                })
+            if inserted:
+                result.findings_created += 1
+            else:
+                result.findings_skipped_dedup += 1
+        except Exception as e:
+            logger.debug("Error creating album MBID mismatch finding for %s: %s", entity_id, e)
+            result.errors += 1
 
     def estimate_scope(self, context: JobContext) -> int:
-        conn = None
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM tracks WHERE file_path IS NOT NULL AND file_path != ''")
-            row = cursor.fetchone()
-            return row[0] if row else 0
+            return len(_native_subjects(context))
         except Exception:
             return 0
-        finally:
-            if conn:
-                conn.close()

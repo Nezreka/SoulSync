@@ -469,6 +469,11 @@ class AutomationEngine:
         self._timers = {}       # automation_id → threading.Timer
         self._lock = threading.Lock()
         self._running = False
+        # iss32-M02: set while a Library-v2 bootstrap migration holds SQLite's
+        # only writer. Scheduled slots are skipped the same way the master
+        # pause skips them — the schedule stays alive, so nothing has to be
+        # restarted and no catch-up burst follows.
+        self._migration_paused = False
 
         # Action handlers registered by web_server.py (avoids circular imports)
         # Format: {type: {'handler': fn(config)->dict, 'guard': fn()->bool or None}}
@@ -864,6 +869,22 @@ class AutomationEngine:
         self._rebuild_event_cache()
         logger.info(f"AutomationEngine started — {scheduled} scheduled, {event_count} event-based")
 
+    def pause_for_migration(self):
+        """Skip scheduled slots while a Library-v2 migration holds the writer."""
+        if not self._migration_paused:
+            self._migration_paused = True
+            logger.info("AutomationEngine paused — Library v2 migration in progress")
+
+    def resume_after_migration(self):
+        """Undo :meth:`pause_for_migration`. Idempotent."""
+        if self._migration_paused:
+            self._migration_paused = False
+            logger.info("AutomationEngine resumed — Library v2 migration finished")
+
+    @property
+    def migration_paused(self):
+        return self._migration_paused
+
     def stop(self):
         """Cancel all timers on shutdown."""
         self._running = False
@@ -1224,6 +1245,15 @@ class AutomationEngine:
                 logger.info(f"Automation '{auto.get('name')}' skipped — {side} automations are paused")
                 self._finish_run(auto, automation_id,
                                  {'status': 'skipped', 'reason': f'{side} automations are paused'},
+                                 error=None)
+                return
+            # iss32-M02: same treatment while the catalogue migration owns the
+            # writer. Running here would only produce "database is locked" and
+            # a failed run in the history.
+            if self._migration_paused:
+                logger.info(f"Automation '{auto.get('name')}' skipped — Library v2 migration in progress")
+                self._finish_run(auto, automation_id,
+                                 {'status': 'skipped', 'reason': 'Library v2 migration in progress'},
                                  error=None)
                 return
 

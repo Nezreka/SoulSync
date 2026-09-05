@@ -24,6 +24,7 @@ import {
   cacheSourceLabel,
   findingFilePath,
   findingFixLabel,
+  findingRowFixLabel,
   findingSeverityClass,
   findingSeverityIcon,
   findingStatusBadge,
@@ -199,6 +200,28 @@ describe('finding labels', () => {
     expect(findingFixLabel('comma_artist_split')).toBe('Split Artists');
     expect(findingFixLabel('fake_lossless')).toBeNull();
     expect(findingFixLabel('path_mismatch')).toBeNull();
+  });
+
+  it('names the delete for a finding with no track behind it', () => {
+    // The corruption detector walks the library folders too, so it raises rows
+    // with `entity_type: 'file'` and no id. There is no track to re-request,
+    // and the button used to promise one anyway — over a fix that could only
+    // answer "No track ID associated with this finding".
+    const stray = { finding_type: 'corrupt_audio', entity_type: 'file', entity_id: null };
+    expect(findingRowFixLabel(stray)).toBe('Delete File');
+    expect(findingRowFixLabel({ ...stray, finding_type: 'short_preview_track' })).toBe(
+      'Delete File',
+    );
+  });
+
+  it('leaves a finding that DOES name a track on the re-download wording', () => {
+    expect(
+      findingRowFixLabel({
+        finding_type: 'short_preview_track',
+        entity_type: 'track',
+        entity_id: 'lib2:7',
+      }),
+    ).toBe('Re-download');
   });
 
   it('knows missing_discography_track is fixable despite having no type label', () => {

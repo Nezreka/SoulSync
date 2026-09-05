@@ -73,6 +73,38 @@ from utils.logging_config import get_logger
 logger = get_logger("library_reorganize")
 
 
+def _canonical_file_path(path: Any) -> str:
+    """Return one comparison form for relative, absolute and symlinked paths.
+
+    The library resolver normally returns an absolute container path while the
+    path builder may preserve a configured spelling such as ``./Transfer``.
+    ``normpath`` alone leaves those different even when they name the same
+    location, which made the old finalizer unlink the user's only copy as the
+    supposed source.
+    """
+    if path in (None, ""):
+        return ""
+    try:
+        return os.path.normcase(os.path.realpath(os.path.abspath(os.fspath(path))))
+    except (TypeError, ValueError, OSError):
+        return ""
+
+
+def _same_physical_file(left: Any, right: Any) -> bool:
+    """Whether two path spellings designate the same physical file/location."""
+    left_canonical = _canonical_file_path(left)
+    right_canonical = _canonical_file_path(right)
+    if not left_canonical or not right_canonical:
+        return False
+    if left_canonical == right_canonical:
+        return True
+    try:
+        return bool(os.path.exists(left) and os.path.exists(right)
+                    and os.path.samefile(left, right))
+    except (OSError, TypeError, ValueError):
+        return False
+
+
 def _safe_filename(name: str) -> str:
     """Strip path-illegal characters so we can use the value as a
     filename component on the staging path."""
@@ -94,7 +126,7 @@ def _normalize_album_tracks(api_tracks):
 
 SUPPORTED_SOURCES = ('spotify', 'itunes', 'deezer', 'discogs', 'hydrabase')
 
-# Per-source album-ID column mapping on the `albums` table row.
+# Compatibility aliases projected by :func:`load_album_and_tracks`.
 _ALBUM_ID_COLUMNS = {
     'spotify': 'spotify_album_id',
     'itunes': 'itunes_album_id',
@@ -791,9 +823,15 @@ def load_album_and_tracks(db, album_id):
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT al.*, ar.name as artist_name
-            FROM albums al
-            JOIN artists ar ON al.artist_id = ar.id
+            SELECT al.*, al.primary_artist_id AS artist_id,
+                   al.spotify_id AS spotify_album_id,
+                   al.musicbrainz_id AS musicbrainz_release_id,
+                   json_extract(al.external_ids, '$.itunes') AS itunes_album_id,
+                   json_extract(al.external_ids, '$.deezer') AS deezer_id,
+                   json_extract(al.external_ids, '$.discogs') AS discogs_id,
+                   ar.name AS artist_name
+            FROM lib2_albums al
+            JOIN lib2_artists ar ON al.primary_artist_id = ar.id
             WHERE al.id = ?
             """,
             (str(album_id),),
@@ -805,11 +843,17 @@ def load_album_and_tracks(db, album_id):
 
         cursor.execute(
             """
-            SELECT t.*, ar.name as artist_name
-            FROM tracks t
-            JOIN artists ar ON t.artist_id = ar.id
+            SELECT t.*, ar.name AS artist_name,
+                   (SELECT f.path FROM lib2_track_files f
+                     WHERE f.track_id=t.id AND f.file_state='active'
+                     ORDER BY f.is_primary DESC, f.id LIMIT 1) AS file_path
+            FROM lib2_tracks t
+            JOIN lib2_albums al ON t.album_id = al.id
+            JOIN lib2_artists ar ON al.primary_artist_id = ar.id
             WHERE t.album_id = ?
-            ORDER BY t.track_number
+              AND EXISTS (SELECT 1 FROM lib2_track_files f
+                           WHERE f.track_id=t.id AND f.file_state='active')
+            ORDER BY COALESCE(t.disc_number, 1), t.track_number, t.id
             """,
             (str(album_id),),
         )
@@ -1180,6 +1224,11 @@ def _build_post_process_context(
         # that stayed happily in the library (TheHomeGuy: 'Through Glass'
         # 283s vs Discogs' 241s). Size + parse corruption legs still run.
         'is_local_import': True,
+        # This pipeline run mutates an EXISTING library file. The reorganize
+        # runner owns its one catalogue path update after the destination is
+        # proven present; ordinary download registration would insert a second
+        # lib2_track_files row for the same track and destination.
+        '_library_reorganize': True,
         # ...and for the same reason, the AcoustID identity leg does not get to
         # quarantine this file. A reorganize stages a COPY of a track the user
         # ALREADY OWNS and runs it through the download post-process; when the
@@ -1372,7 +1421,7 @@ def preview_album_reorganize(
             )
             item['new_path_abs'] = new_full or ''
             item['new_path'] = _display_relative_to_root(new_full, transfer_dir)
-            if resolved and new_full and os.path.normpath(resolved) == os.path.normpath(new_full):
+            if resolved and new_full and _same_physical_file(resolved, new_full):
                 item['unchanged'] = True
         except Exception as e:
             item['reason'] = f"Couldn't compute destination path: {e}"
@@ -1385,7 +1434,7 @@ def preview_album_reorganize(
     for it in preview_tracks:
         if not it['matched'] or it['unchanged'] or not it['new_path']:
             continue
-        norm = os.path.normpath(it['new_path'])
+        norm = _canonical_file_path(it.get('new_path_abs') or it['new_path'])
         if norm in seen:
             it['collision'] = True
             seen[norm]['collision'] = True
@@ -1673,7 +1722,7 @@ def _finalize_track(ctx: _RunContext, track_id, resolved_src, new_path) -> bool:
                 f"— leaving original at {resolved_src} so the library scan can recover."
             )
             return False
-    if os.path.normpath(resolved_src) == os.path.normpath(new_path):
+    if _same_physical_file(resolved_src, new_path):
         return True  # in-place edit; DB already correct, nothing to remove
     with ctx.state_lock:
         ctx.src_dirs_touched.add(os.path.dirname(resolved_src))
@@ -1699,7 +1748,7 @@ def _finalize_track(ctx: _RunContext, track_id, resolved_src, new_path) -> bool:
         os.remove(resolved_src)
     except OSError as rm_err:
         logger.warning(f"[Reorganize] Couldn't remove original {resolved_src}: {rm_err}")
-    _delete_track_sidecars(resolved_src)
+    _carry_track_sidecars(resolved_src, new_path)
     return True
 
 
@@ -2076,14 +2125,17 @@ def _rename_track_in_place(current_abs: str, new_abs: str) -> Tuple[bool, Option
     try:
         if current_abs and not os.path.exists(current_abs):
             return False, 'source file no longer on disk'
-        same = os.path.normpath(current_abs) == os.path.normpath(new_abs)
+        same = _same_physical_file(current_abs, new_abs)
+        if same:
+            return True, None
         if os.path.exists(new_abs) and not same:
             return False, 'destination already exists'
         os.makedirs(os.path.dirname(new_abs), exist_ok=True)
-        # Carry sibling-format audio to the same destination with the renamed stem —
-        # mirrors _finalize_track so lossy-copy pairs don't get orphaned.
-        for sibling_src in _find_sibling_audio_files(current_abs):
-            _move_sibling_to_destination(sibling_src, new_abs)
+        # Siblings are collected BEFORE the rename (the source stem is gone
+        # afterwards) but carried AFTER it succeeds (iss29-E02): moving them
+        # first meant a failed canonical rename left the album split across two
+        # directories, with no error path that could put it back.
+        siblings = _find_sibling_audio_files(current_abs)
         try:
             os.rename(current_abs, new_abs)
         except OSError as e:
@@ -2091,6 +2143,26 @@ def _rename_track_in_place(current_abs: str, new_abs: str) -> Tuple[bool, Option
                 shutil.move(current_abs, new_abs)  # crosses a filesystem boundary
             else:
                 raise
+        # Carry sibling-format audio to the same destination with the renamed stem —
+        # mirrors _finalize_track so lossy-copy pairs don't get orphaned.
+        for sibling_src in siblings:
+            _move_sibling_to_destination(sibling_src, new_abs)
+        # And the track's own sidecars. A .lrc is part of the track — SoulSync
+        # writes it itself — and the import path has carried it since
+        # lilbob5769's report. Reorganize looked for sibling AUDIO only and
+        # stranded the lyrics in the old folder. Same helper as the import, so
+        # a reorganized album and a freshly downloaded one end up with the same
+        # files beside each other.
+        #
+        # Best-effort by design: the audio is already at its destination here.
+        # Failing the move over a sidecar would report a track that did not
+        # move, and leave the catalogue pointing at a path nothing is at.
+        try:
+            from core.imports.file_ops import move_companion_sidecars
+            move_companion_sidecars(current_abs, new_abs)
+        except Exception as sidecar_err:  # noqa: BLE001
+            logger.warning("[Reorganize/rename] sidecar move failed for %s: %s",
+                           os.path.basename(new_abs), sidecar_err)
         return True, None
     except Exception as e:
         return False, str(e)
@@ -2425,13 +2497,28 @@ def _move_sibling_to_destination(sibling_src: str, canonical_dst: str) -> Option
 
     Returns the destination path on success, None on failure (logged
     at warning, doesn't raise — sibling moves are best-effort).
+
+    iss29-E02: refuses to overwrite a DIFFERENT file already at the
+    destination, exactly like ``_rename_track_in_place``. ``shutil.move``
+    resolves to ``os.rename`` for a regular file on POSIX and overwrites
+    silently — no error, no log, no counter. With lossy-copy enabled and a
+    destination already holding a file under the canonical's post-rename stem
+    (an earlier partial run, a second edition), that destroyed a file nothing
+    in the catalogue was tracking.
     """
     dst_dir = os.path.dirname(canonical_dst)
     canonical_stem = os.path.splitext(os.path.basename(canonical_dst))[0]
     _, sibling_ext = os.path.splitext(sibling_src)
     sibling_dst = os.path.join(dst_dir, canonical_stem + sibling_ext)
-    if os.path.normpath(sibling_src) == os.path.normpath(sibling_dst):
+    if _same_physical_file(sibling_src, sibling_dst):
         return sibling_dst  # already at the right place
+    if os.path.exists(sibling_dst):
+        logger.warning(
+            "[Reorganize] Not moving sibling-format file %s → %s: destination "
+            "already exists; leaving the source in place",
+            sibling_src, sibling_dst,
+        )
+        return None
     try:
         os.makedirs(dst_dir, exist_ok=True)
         shutil.move(sibling_src, sibling_dst)
@@ -2444,19 +2531,49 @@ def _move_sibling_to_destination(sibling_src: str, canonical_dst: str) -> Option
         return None
 
 
-def _delete_track_sidecars(audio_path: str) -> None:
-    """Delete per-track sidecars (.lrc / .nfo / .txt / .cue / .json) that
-    sit alongside `audio_path` and share its filename stem. Best-effort —
-    individual failures are logged at debug and never raised."""
-    src_dir = os.path.dirname(audio_path)
-    stem = os.path.splitext(os.path.basename(audio_path))[0]
+def _carry_track_sidecars(src_audio: str, dst_audio: str) -> None:
+    """Move per-track sidecars (.lrc / .nfo / .txt / .cue / .json) to sit
+    alongside the moved audio, under the destination's stem.
+
+    iss29-E05: these used to be DELETED at the source. The full reorganize run
+    stages only the audio file (``_stage_track``), so the sidecar was never
+    carried across — meaning "Fetch Lyrics" followed by "Reorganize" on the same
+    page silently emptied the lyrics column. Library V2 writes exactly these
+    files (``core/library2/lyrics.py``), so reorganize was deleting its own
+    application's data. Every other mover in the project already carries them:
+    ``_fix_path_mismatch`` and ``_rename_to_basename`` both move the sidecar —
+    reorganize was the outlier.
+
+    A sidecar whose destination name is already taken is removed rather than
+    moved: the destination copy belongs to the same track at the same path, so
+    the source one is a leftover and keeping it would block the empty-folder
+    cleanup this function exists to enable. Best-effort throughout — individual
+    failures are logged at debug and never raised.
+    """
+    src_dir = os.path.dirname(src_audio)
+    src_stem = os.path.splitext(os.path.basename(src_audio))[0]
+    dst_dir = os.path.dirname(dst_audio)
+    dst_stem = os.path.splitext(os.path.basename(dst_audio))[0]
     for ext in _TRACK_SIDECAR_EXTS:
-        sidecar = os.path.join(src_dir, stem + ext)
-        if os.path.isfile(sidecar):
+        sidecar_src = os.path.join(src_dir, src_stem + ext)
+        if not os.path.isfile(sidecar_src):
+            continue
+        sidecar_dst = os.path.join(dst_dir, dst_stem + ext)
+        if _same_physical_file(sidecar_src, sidecar_dst):
+            continue
+        if os.path.exists(sidecar_dst):
             try:
-                os.remove(sidecar)
+                os.remove(sidecar_src)
             except OSError as e:
-                logger.debug(f"[Reorganize] Couldn't remove sidecar {sidecar}: {e}")
+                logger.debug(f"[Reorganize] Couldn't remove sidecar {sidecar_src}: {e}")
+            continue
+        try:
+            os.makedirs(dst_dir, exist_ok=True)
+            shutil.move(sidecar_src, sidecar_dst)
+        except OSError as e:
+            logger.debug(
+                f"[Reorganize] Couldn't carry sidecar {sidecar_src} → {sidecar_dst}: {e}"
+            )
 
 
 def _delete_album_sidecars(src_dir: str) -> None:

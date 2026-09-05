@@ -1499,14 +1499,43 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                             _prov_si.get('playlist_name') or batch_playlist_name
                         )
 
+                from core.imports.upgrade_intent import (
+                    CONTEXT_KEY as _UPGRADE_INTENT_KEY,
+                    is_upgrade_intent,
+                    issue_upgrade_intent,
+                )
+                _upgrade_intent = track_info.pop(_UPGRADE_INTENT_KEY, None)
+                if (
+                    not is_upgrade_intent(_upgrade_intent)
+                    and playlist_id == 'wishlist'
+                    and int(batch_profile_id or 1) == 1
+                ):
+                    _upgrade_source = track_info.get('source_info') or {}
+                    if isinstance(_upgrade_source, str):
+                        try:
+                            _upgrade_source = json.loads(_upgrade_source)
+                        except (TypeError, ValueError):
+                            _upgrade_source = {}
+                    if (
+                        isinstance(_upgrade_source, dict)
+                        and _upgrade_source.get('source') == 'library_v2'
+                        and _upgrade_source.get('upgrade_check') is True
+                        and _upgrade_source.get('lib2_track_id')
+                    ):
+                        _upgrade_intent = issue_upgrade_intent(
+                            _upgrade_source['lib2_track_id'], origin='wishlist')
+
                 download_tasks[task_id] = {
                     'status': 'pending', 'track_info': track_info,
+                    'profile_id': batch_profile_id,
                     'playlist_id': playlist_id, 'batch_id': batch_id,
                     'track_index': res['track_index'], 'retry_count': 0,
                     'cached_candidates': [], 'used_sources': set(),
                     'status_change_time': time.time(),
                     'metadata_enhanced': False
                 }
+                if is_upgrade_intent(_upgrade_intent):
+                    download_tasks[task_id][_UPGRADE_INTENT_KEY] = _upgrade_intent
                 download_batches[batch_id]['queue'].append(task_id)
 
         deps.download_monitor.start_monitoring(batch_id)

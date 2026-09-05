@@ -34,15 +34,17 @@ def library(tmp_path):
     with the album's Deezer id."""
     db = MusicDatabase(str(tmp_path / 'm.db'))
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, server_source) VALUES ('AR1', 'The Cure', 'test')")
-        conn.execute(
-            "INSERT INTO albums (id, artist_id, title, year, track_count, server_source, deezer_id) "
-            "VALUES ('AL1', 'AR1', 'Disintegration', 2014, 12, 'test', 'DZ-9')")
+        from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
+
+        artist = seed_artist(conn, server_id='AR1', name='The Cure', server_source='test')
+        album = seed_album(conn, server_id='AL1', artist_id=artist, server_source='test',
+                           title='Disintegration', year=2014, track_count=12)
+        conn.execute("UPDATE lib2_albums SET external_ids=? WHERE id=?",
+                     ('{"deezer": "DZ-9"}', album))
         for i in range(12):
-            conn.execute(
-                "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, server_source) "
-                "VALUES (?, 'AL1', 'AR1', ?, ?, ?, 'test')",
-                (f'T{i}', f'Track {i}', i + 1, f'/m/t{i}.flac'))
+            seed_track(conn, server_id=f'T{i}', title=f'Track {i}', album_id=album,
+                       artist_id=artist, server_source='test', track_number=i + 1,
+                       file_path=f'/m/t{i}.flac')
         conn.commit()
     candidates = db.get_candidate_albums_for_artist('The Cure', server_source='test')
     assert len(candidates) == 1
@@ -118,15 +120,19 @@ def test_wrong_source_id_space_never_matches(library):
 def test_ep_branch_gets_the_same_rescue(tmp_path):
     db = MusicDatabase(str(tmp_path / 'm.db'))
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, server_source) VALUES ('AR1', 'Muse', 'test')")
-        conn.execute(
-            "INSERT INTO albums (id, artist_id, title, year, track_count, server_source, itunes_album_id) "
-            "VALUES ('AL2', 'AR1', 'Hullabaloo EP', 2012, 4, 'test', 'IT-55')")
+        from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
+
+        from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
+
+        artist = seed_artist(conn, server_id='AR1', name='Muse', server_source='test')
+        album = seed_album(conn, server_id='AL2', artist_id=artist, server_source='test',
+                           title='Hullabaloo EP', year=2002, track_count=4)
+        conn.execute("UPDATE lib2_albums SET external_ids=? WHERE id=?",
+                     ('{"itunes": "IT-55"}', album))
         for i in range(4):
-            conn.execute(
-                "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, server_source) "
-                "VALUES (?, 'AL2', 'AR1', ?, ?, ?, 'test')",
-                (f'E{i}', f'Cut {i}', i + 1, f'/m/e{i}.flac'))
+            seed_track(conn, server_id=f'E{i}', title=f'Cut {i}', album_id=album,
+                       artist_id=artist, server_source='test', track_number=i + 1,
+                       file_path=f'/m/e{i}.flac')
         conn.commit()
     candidates = db.get_candidate_albums_for_artist('Muse', server_source='test')
     ep = {'id': 'IT-55', 'name': 'Hullabaloo EP', 'total_tracks': 4,
@@ -137,18 +143,25 @@ def test_ep_branch_gets_the_same_rescue(tmp_path):
 
 
 def test_get_album_source_ids_shape(tmp_path):
+    """The keys stay the legacy column names — that is the vocabulary the
+    ownership proof speaks — while the values come out of the catalogue's
+    promoted columns and its `external_ids` payload."""
+    from tests.support.catalogue_seed import seed_album, seed_artist
+
     db = MusicDatabase(str(tmp_path / 'm.db'))
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, server_source) VALUES ('AR1', 'X', 'test')")
+        artist = seed_artist(conn, server_id='AR1', name='X', server_source='test')
+        enriched = seed_album(conn, server_id='AL1', artist_id=artist, title='A',
+                              server_source='test')
         conn.execute(
-            "INSERT INTO albums (id, artist_id, title, server_source, deezer_id, spotify_album_id) "
-            "VALUES ('AL1', 'AR1', 'A', 'test', 'D1', 'S1')")
-        conn.execute(
-            "INSERT INTO albums (id, artist_id, title, server_source) VALUES ('AL2', 'AR1', 'B', 'test')")
+            "UPDATE lib2_albums SET spotify_id='S1', external_ids=? WHERE id=?",
+            ('{"deezer": "D1"}', enriched))
+        bare = seed_album(conn, server_id='AL2', artist_id=artist, title='B',
+                          server_source='test')
         conn.commit()
-    m = db.get_album_source_ids(['AL1', 'AL2'])
-    assert m['AL1']['deezer_id'] == 'D1' and m['AL1']['spotify_album_id'] == 'S1'
-    assert 'AL2' not in m                 # no enrichment ids → omitted
+    m = db.get_album_source_ids([enriched, bare])
+    assert m[enriched]['deezer_id'] == 'D1' and m[enriched]['spotify_album_id'] == 'S1'
+    assert bare not in m                  # no enrichment ids → omitted
     assert db.get_album_source_ids([]) == {}
 
 
@@ -160,28 +173,3 @@ def test_library_stream_honors_per_item_source():
     assert "item.get('source')" in src
     assert "source_override=item_source" in src
 
-
-def test_gap_cards_ride_the_ownership_stream():
-    """The frontend half of the per-item source contract above.
-
-    #1071: a gap card's id is only meaningful on the source that listed it, so
-    the completion-stream payload has to carry a source PER ITEM rather than one
-    source for the request. The endpoint honours item['source'] (asserted
-    above); this pins that the client actually sends it.
-
-    Reads the React page -- artist detail moved off library.js, and the vanilla
-    _streamGapOwnership this used to read was deleted with it.
-    """
-    react = _ROOT / "webui" / "src" / "routes" / "artist-detail"
-    payload = (react / "-artist-detail.gap-fill.ts").read_text(encoding="utf-8")
-    body = payload[payload.index("export function gapStreamPayload"):]
-    body = body[:body.index("\n}\n") + 3]
-    assert "source: gap._gap_source || null" in body     # per-item source travels
-    assert "source: null" in body                        # request-level source does NOT
-
-    stream = (react / "-artist-detail.use-gap-fill.ts").read_text(encoding="utf-8")
-    assert "'/api/library/completion-stream'" in stream  # same endpoint as base cards
-    assert "gapStreamPayload(artistName, gaps)" in stream
-    # The vanilla guarded stale responses with a request sequence number; React
-    # aborts the request itself when the artist changes.
-    assert "controller.abort()" in stream

@@ -62,14 +62,12 @@ def test_cap_keeps_counting_tracks_for_kept_cards(tmp_path):
 def test_missing_art_backfills_from_the_library_album_row(tmp_path):
     db = _db(tmp_path)
     with db._get_connection() as conn:
-        # Explicit ids: the soulid_v2 migration rebuilds artists/albums with
-        # TEXT primary keys, so lastrowid-style implicit ids leave id NULL and
-        # the albums FK rejects the row.
+        artist_id = conn.execute(
+            "INSERT INTO lib2_artists(name, image_url) VALUES('Ado', 'artist.jpg')"
+        ).lastrowid
         conn.execute(
-            "INSERT INTO artists (id, name, thumb_url) VALUES ('ar1', 'Ado', 'artist.jpg')")
-        conn.execute(
-            "INSERT INTO albums (id, artist_id, title, thumb_url)"
-            " VALUES ('al1', 'ar1', 'Kyougen', 'album.jpg')")
+            "INSERT INTO lib2_albums(primary_artist_id, title, image_url, origin)"
+            " VALUES(?, 'Kyougen', 'album.jpg', 'library')", (artist_id,))
         conn.commit()
     # History row lands with NO art — the common case.
     _land(db, 'Vivarium', 'Ado', 'Kyougen', thumb='')
@@ -83,7 +81,8 @@ def test_feat_credited_history_row_still_finds_the_primary_artists_art(tmp_path)
     retry is what closes it."""
     db = _db(tmp_path)
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, thumb_url) VALUES ('ar1', 'Camellia', 'cam.jpg')")
+        conn.execute(
+            "INSERT INTO lib2_artists(name, image_url) VALUES('Camellia', 'cam.jpg')")
         conn.commit()
     _land(db, 'crystallized', 'Camellia feat. Nanahira', 'no such album', thumb='')
     cards = db.get_recently_added_albums(limit=20)
@@ -94,7 +93,8 @@ def test_feat_credited_history_row_still_finds_the_primary_artists_art(tmp_path)
 def test_art_falls_back_to_the_artist_thumb_when_no_album_row_matches(tmp_path):
     db = _db(tmp_path)
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, thumb_url) VALUES ('ar1', 'Ado', 'artist.jpg')")
+        conn.execute(
+            "INSERT INTO lib2_artists(name, image_url) VALUES('Ado', 'artist.jpg')")
         conn.commit()
     _land(db, 'Loose Single', 'Ado', 'Not In Library', thumb='')
     cards = db.get_recently_added_albums(limit=20)

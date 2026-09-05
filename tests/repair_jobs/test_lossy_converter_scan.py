@@ -23,6 +23,37 @@ from core.repair_jobs.base import JobContext
 from core.repair_jobs.lossy_converter import LossyConverterJob
 
 
+@pytest.fixture(autouse=True)
+def _native_subject_boundary(monkeypatch):
+    """Feed the scanner native subject rows; it must never query old tracks."""
+
+    def subjects(database, _config_manager, **_kwargs):
+        result = []
+        for row in database._rows:
+            track_id, title, artist, album, path, album_image, artist_image, artist_id = row[:8]
+            result.append({
+                "file_id": track_id,
+                "track_id": track_id,
+                "album_id": 1,
+                "artist_id": artist_id,
+                "title": title,
+                "artist_name": artist,
+                "album_title": album,
+                "path": path,
+                "is_primary": True,
+                "album_image": album_image,
+                "artist_image": artist_image,
+                "track_source_ids": {},
+                "album_source_ids": {},
+                "artist_source_ids": {},
+            })
+        return result
+
+    monkeypatch.setattr(
+        "core.library2.maintenance_subjects.active_file_subjects", subjects
+    )
+
+
 class _FakeCursor:
     def __init__(self, rows):
         self._rows = rows
@@ -65,6 +96,7 @@ def _row(track_id, title, path, profile_id=None):
 def _context(rows, tmp_path: Path):
     cfg = MagicMock()
     values = {
+        "features.library_v2": True,
         "lossy_copy.enabled": True,
         "lossy_copy.codec": "opus",
         "lossy_copy.bitrate": "256",
@@ -140,9 +172,9 @@ def test_each_track_uses_its_assigned_profile(monkeypatch, tmp_path: Path):
     flac = tmp_path / "05 - Profile Track.flac"
     flac.write_bytes(b"x")
     monkeypatch.setattr(
-        "core.repair_jobs.lossy_converter.load_profile_by_id",
-        lambda profile_id: {
-            "id": profile_id,
+        "core.library2.quality_eval.effective_track_profile",
+        lambda _conn, track_id: {
+            "id": 77,
             "name": "Portable",
             "lossy_copy_enabled": True,
             "lossy_copy_codec": "mp3",
@@ -151,7 +183,7 @@ def test_each_track_uses_its_assigned_profile(monkeypatch, tmp_path: Path):
         },
     )
     ctx, findings, _ = _context(
-        [_row(5, "Profile Track", str(flac), profile_id=77)], tmp_path)
+        [_row(5, "Profile Track", str(flac))], tmp_path)
 
     result = LossyConverterJob().scan(ctx)
 
@@ -164,19 +196,25 @@ def test_each_track_uses_its_assigned_profile(monkeypatch, tmp_path: Path):
     assert details["delete_original"] is True
 
 
-def test_unassigned_track_preserves_live_default_pointer(tmp_path: Path):
+def test_unassigned_track_preserves_live_default_pointer(
+        monkeypatch, tmp_path: Path):
     flac = tmp_path / "06 - Default Track.flac"
     flac.write_bytes(b"x")
     ctx, findings, _ = _context(
         [_row(6, "Default Track", str(flac), profile_id=None)], tmp_path)
-    ctx.db._default_profile = {
-        "id": 88,
-        "name": "Current Default",
-        "lossy_copy_enabled": True,
-        "lossy_copy_codec": "mp3",
-        "lossy_copy_bitrate": "192",
-        "lossy_copy_delete_original": True,
-    }
+    monkeypatch.setattr(
+        "core.library2.quality_eval.effective_track_profile",
+        lambda _conn, track_id: {
+            "id": 88,
+            "name": "Current Default",
+            "explicit": False,
+            "source": "global",
+            "lossy_copy_enabled": True,
+            "lossy_copy_codec": "mp3",
+            "lossy_copy_bitrate": "192",
+            "lossy_copy_delete_original": True,
+        },
+    )
 
     result = LossyConverterJob().scan(ctx)
 

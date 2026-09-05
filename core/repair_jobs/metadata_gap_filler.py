@@ -1,8 +1,11 @@
 """Metadata Gap Filler Job — finds tracks missing key metadata and locates it from APIs."""
 
+from typing import Any, Dict
+from core.library2.maintenance_subjects import subject_details
+from core.library2.maintenance_subjects import active_file_subjects
 from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import get_scope_artist, JobContext, JobResult, RepairJob, scoped_file_subjects
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.metadata_gap")
@@ -31,203 +34,139 @@ class MetadataGapFillerJob(RepairJob):
         'fill_musicbrainz_id': True,
     }
     auto_fix = False
+    supports_file_scope = True
+    supports_artist_scope = True
 
     def scan(self, context: JobContext) -> JobResult:
+        # These three are already imported at module scope. Re-importing them
+        # here rebound the names locally, which silently made the module-level
+        # ones impossible to substitute — a test that swapped the source
+        # priority or the client factory was overridden by the real thing and
+        # went out to the live provider instead.
         result = JobResult()
-
         settings = self._get_settings(context)
-        fill_isrc = settings.get('fill_isrc', True)
-        fill_mb_id = settings.get('fill_musicbrainz_id', True)
-        source_priority = get_source_priority(get_primary_source())
-
-        # Build WHERE clauses for missing fields (only columns that exist on tracks)
-        conditions = []
-        if fill_isrc:
-            conditions.append("(t.isrc IS NULL OR t.isrc = '')")
-        if fill_mb_id:
-            conditions.append("(t.musicbrainz_recording_id IS NULL OR t.musicbrainz_recording_id = '')")
-
-        if not conditions:
+        fill_isrc = settings.get("fill_isrc", True)
+        fill_mb_id = settings.get("fill_musicbrainz_id", True)
+        if not (fill_isrc or fill_mb_id):
             return result
+        source_priority = list(get_source_priority(get_primary_source()))
+        scope_artist = get_scope_artist(context)
+        scope_key = scope_artist.casefold() if scope_artist else None
 
-        where = " OR ".join(conditions)
+        subjects: Dict[int, Dict[str, Any]] = {}
+        for subject in scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager)):
+            track_id = int(subject["track_id"])
+            if track_id in subjects and not subject.get("is_primary"):
+                continue
+            if scope_key and str(subject.get("artist_name") or "").casefold() != scope_key:
+                continue
+            missing_isrc = fill_isrc and not str(subject.get("isrc") or "").strip()
+            missing_mbid = fill_mb_id and not str(
+                (subject.get("track_source_ids") or {}).get("musicbrainz") or ""
+            ).strip()
+            if missing_isrc or missing_mbid:
+                subjects[track_id] = subject
+        work = list(subjects.values())
+        work.sort(key=lambda item: int(item["track_id"]))
+        cursor_key = (
+            f"repair.metadata_gap.cursor:{int(bool(fill_isrc))}:"
+            f"{int(bool(fill_mb_id))}:{scope_key or '*'}"
+        )
+        cursor = _gap_cursor(context, cursor_key)
+        page = [item for item in work if int(item["track_id"]) > cursor][
+            :_METADATA_GAP_BATCH
+        ]
+        if not page and work:
+            page = work[:_METADATA_GAP_BATCH]
+        work = page
+        total = len(work)
 
-        # Fetch tracks with gaps, prioritizing those with source track IDs.
-        tracks = []
-        conn = None
-        try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("PRAGMA table_info(tracks)")
-            track_columns = {column[1] for column in cursor.fetchall()}
-
-            select_cols = [
-                "t.id",
-                "t.title",
-                "ar.name",
-                "al.title",
-                "t.isrc",
-                "t.musicbrainz_recording_id",
-                "al.thumb_url",
-                "ar.thumb_url",
-                "ar.id",
-            ]
-            column_map = [
-                ("spotify_track_id", "t.spotify_track_id"),
-                ("itunes_track_id", "t.itunes_track_id"),
-                ("deezer_track_id", "t.deezer_track_id"),
-            ]
-            column_index = {}
-            for alias, column in column_map:
-                if column.split('.', 1)[1] in track_columns:
-                    column_index[alias] = len(select_cols)
-                    select_cols.append(f"{column} AS {alias}")
-
-            cursor.execute(f"""
-                SELECT {', '.join(select_cols)}
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.title IS NOT NULL AND t.title != ''
-                  AND ({where})
-                LIMIT 500
-            """)
-            tracks = cursor.fetchall()
-            tracks = sorted(tracks, key=lambda row: _track_row_priority(row, column_index, source_priority))
-        except Exception as e:
-            logger.error("Error fetching tracks with metadata gaps: %s", e, exc_info=True)
-            result.errors += 1
-            return result
-        finally:
-            if conn:
-                conn.close()
-
-        total = len(tracks)
-        if context.update_progress:
-            context.update_progress(0, total)
-
-        logger.info("Found %d tracks with metadata gaps", total)
-
-        if context.report_progress:
-            context.report_progress(phase=f'Enriching {total} tracks...', total=total)
-
-        for i, row in enumerate(tracks):
-            if context.check_stop():
+        for index, subject in enumerate(work):
+            if context.check_stop() or (index % 20 == 0 and context.wait_if_paused()):
                 return result
-            if i % 20 == 0 and context.wait_if_paused():
-                return result
-
-            track_id, title, artist_name, album_title, isrc, mb_id, album_thumb, artist_thumb = row[:8]
-            artist_id = row[8]
-            source_track_ids = {
-                'spotify': row[column_index['spotify_track_id']] if 'spotify_track_id' in column_index else None,
-                'itunes': row[column_index['itunes_track_id']] if 'itunes_track_id' in column_index else None,
-                'deezer': row[column_index['deezer_track_id']] if 'deezer_track_id' in column_index else None,
-            }
             result.scanned += 1
-
-            if context.report_progress:
-                context.report_progress(
-                    scanned=i + 1, total=total,
-                    phase=f'Enriching {i + 1} / {total}',
-                    log_line=f'Looking up: {title or "Unknown"} — {artist_name or "Unknown"}',
-                    log_type='info'
-                )
-            found_fields = {}
+            source_ids = dict(subject.get("track_source_ids") or {})
+            order = list(source_priority)
+            order.extend(sorted(set(source_ids) - set(order)))
+            found: Dict[str, Any] = {}
             resolved_source = None
             resolved_track_id = None
 
-            # Try source-aware track detail lookups only when ISRC enrichment is enabled.
-            if fill_isrc and not isrc:
-                for source in source_priority:
-                    track_source_id = source_track_ids.get(source)
-                    if not track_source_id:
+            if fill_isrc and not subject.get("isrc"):
+                for source in order:
+                    provider_id = source_ids.get(source)
+                    if not provider_id:
                         continue
                     try:
                         client = get_client_for_source(source)
-                        if not client or not hasattr(client, 'get_track_details'):
+                        getter = getattr(client, "get_track_details", None) if client else None
+                        if not callable(getter):
                             continue
-                        track_data = client.get_track_details(track_source_id)
-                        if track_data:
-                            isrc_value = _extract_isrc(track_data)
-                            if isrc_value:
-                                found_fields['isrc'] = isrc_value
-                                resolved_source = source
-                                resolved_track_id = track_source_id
-                                break
-                    except Exception as e:
-                        logger.debug("%s enrichment failed for track %s: %s", source.capitalize(), track_id, e)
+                        try:
+                            payload = getter(provider_id, allow_fallback=False)
+                        except TypeError:
+                            payload = getter(provider_id)
+                        value = _extract_isrc(payload)
+                        if value:
+                            found["isrc"] = value
+                            resolved_source = source
+                            resolved_track_id = provider_id
+                            break
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("%s ISRC lookup failed: %s", source, exc)
 
-            # Try MusicBrainz for MB recording ID
-            if fill_mb_id and not mb_id and context.mb_client:
+            if fill_mb_id and not source_ids.get("musicbrainz") and context.mb_client:
                 try:
-                    recordings = context.mb_client.search_recording(
-                        title, artist_name=artist_name, limit=1
+                    rows = context.mb_client.search_recording(
+                        subject.get("title"),
+                        artist_name=subject.get("artist_name"),
+                        limit=1,
                     )
-                    if recordings:
-                        found_fields['musicbrainz_recording_id'] = recordings[0].get('id', '')
-                except Exception as e:
-                    logger.debug("MusicBrainz lookup failed for track %s: %s", track_id, e)
+                    if rows and rows[0].get("id"):
+                        found["musicbrainz_recording_id"] = rows[0]["id"]
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("MusicBrainz recording lookup failed: %s", exc)
 
-            # Create finding for user to review instead of auto-writing
-            if found_fields:
-                if context.report_progress:
-                    context.report_progress(
-                        log_line=f'Found: {", ".join(found_fields.keys())} for {title or "Unknown"}',
-                        log_type='success'
-                    )
-                if context.create_finding:
-                    try:
-                        field_names = ', '.join(found_fields.keys())
-                        inserted = context.create_finding(
-                            job_id=self.job_id,
-                            finding_type='metadata_gap',
-                            severity='info',
-                            entity_type='track',
-                            entity_id=str(track_id),
-                            file_path=None,
-                            title=f'Missing metadata: {title or "Unknown"}',
-                            description=(
-                                f'Track "{title}" by {artist_name or "Unknown"} is missing: {field_names}. '
-                                f'Found values from API lookup.'
-                            ),
-                            details={
-                                'track_id': track_id,
-                                'title': title,
-                                'artist': artist_name,
-                                'album': album_title,
-                                'track_ids': source_track_ids,
-                                'resolved_source': resolved_source,
-                                'resolved_track_id': resolved_track_id,
-                                'found_fields': found_fields,
-                                'album_thumb_url': album_thumb or None,
-                                'artist_thumb_url': artist_thumb or None,
-                                'artist_id': artist_id,
-                            }
-                        )
-                        if inserted:
-                            result.findings_created += 1
-                        else:
-                            result.findings_skipped_dedup += 1
-                    except Exception as e:
-                        logger.debug("Error creating metadata gap finding for track %s: %s", track_id, e)
-                        result.errors += 1
-            else:
+            if not found:
                 result.skipped += 1
-
-            # Rate limit API calls
-            if fill_isrc and any(source_track_ids.values()):
-                if context.sleep_or_stop(0.5):
-                    return result
-
-            if context.update_progress and (i + 1) % 10 == 0:
-                context.update_progress(i + 1, total)
-
+                continue
+            details = {
+                "track_id": f"lib2:{subject['track_id']}",
+                "title": subject.get("title"),
+                "artist": subject.get("artist_name"),
+                "artist_id": subject.get("artist_id"),
+                "album": subject.get("album_title"),
+                "track_ids": source_ids,
+                "resolved_source": resolved_source,
+                "resolved_track_id": resolved_track_id,
+                "found_fields": found,
+                "album_thumb_url": subject.get("album_image"),
+                "artist_thumb_url": subject.get("artist_image"),
+            }
+            details.update(subject_details(subject))
+            if context.create_finding:
+                inserted = context.create_finding(
+                    job_id=self.job_id,
+                    finding_type="metadata_gap",
+                    severity="info",
+                    entity_type="track",
+                    entity_id=f"lib2:{subject['track_id']}",
+                    file_path=subject.get("path"),
+                    title=f"Missing metadata: {subject.get('title') or 'Unknown'}",
+                    description=(
+                        f'Found {", ".join(found)} for "{subject.get("title")}" '
+                        f'by {subject.get("artist_name") or "Unknown"}.'
+                    ),
+                    details=details,
+                )
+                if inserted:
+                    result.findings_created += 1
+                else:
+                    result.findings_skipped_dedup += 1
         if context.update_progress:
             context.update_progress(total, total)
-
-        logger.info("Metadata gap scan: %d tracks checked, %d gaps found, %d skipped",
-                     result.scanned, result.findings_created, result.skipped)
+        if work:
+            _gap_cursor(context, cursor_key, int(work[-1]["track_id"]))
         return result
 
     def _get_settings(self, context: JobContext) -> dict:
@@ -239,23 +178,17 @@ class MetadataGapFillerJob(RepairJob):
         return merged
 
     def estimate_scope(self, context: JobContext) -> int:
-        conn = None
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*) FROM tracks
-                WHERE title IS NOT NULL AND title != ''
-                  AND ((isrc IS NULL OR isrc = '')
-                    OR (musicbrainz_recording_id IS NULL OR musicbrainz_recording_id = ''))
-            """)
-            row = cursor.fetchone()
-            return min(row[0], 500) if row else 0
+            track_ids = set()
+            for subject in scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager)):
+                ids = subject.get("track_source_ids") or {}
+                if not subject.get("isrc") or not ids.get("musicbrainz"):
+                    track_ids.add(int(subject["track_id"]))
+            return len(track_ids)
         except Exception:
             return 0
-        finally:
-            if conn:
-                conn.close()
+
+
 
 
 def _extract_isrc(track_data):
@@ -301,3 +234,22 @@ def _track_row_priority(row, column_index, source_priority):
             return idx
 
     return len(source_priority)
+
+_METADATA_GAP_BATCH = 500
+
+
+def _gap_cursor(context: JobContext, key: str, value: int | None = None) -> int:
+    """Read or persist the bounded metadata-gap scan cursor."""
+    try:
+        with context.db._get_connection() as conn:
+            if value is None:
+                row = conn.execute("SELECT value FROM metadata WHERE key=?", (key,)).fetchone()
+                return int(row[0]) if row else 0
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata(key,value,updated_at) "
+                "VALUES(?,?,CURRENT_TIMESTAMP)", (key, str(value)),
+            )
+            conn.commit()
+    except Exception:  # Cursor persistence must not disable the repair tool.
+        return 0
+    return value or 0

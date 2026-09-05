@@ -1,51 +1,45 @@
 import { createFileRoute } from '@tanstack/react-router';
 
-import { LegacyRouteController } from '@/platform/shell/route-controllers';
 import { guardPageAccess } from '@/platform/shell/route-guard';
-import { getShellRouteByPageId } from '@/platform/shell/route-manifest';
 
-import { libraryArtistsQueryOptions } from './-library.api';
-import { librarySearchSchema } from './-library.types';
-import { LibraryPage } from './-ui/library-page';
-
-/**
- * Whether the shell has handed /library over to React yet.
- *
- * The route file exists (and is tested) before the React page reaches parity.
- * Without this check TanStack would match /library regardless of the manifest
- * and the vanilla page and the React host would both activate. Delete this
- * indirection once the vanilla library page is gone.
- */
-function isReactOwned(): boolean {
-  return getShellRouteByPageId('library')?.kind === 'react';
-}
+import {
+  libraryV2AlbumQueryOptions,
+  libraryV2ArtistsQueryOptions,
+  libraryV2EnabledQueryOptions,
+  libraryV2WantedQueryOptions,
+} from './-library-v2.api';
+import { libraryV2SearchSchema } from './-library-v2.types';
+import { LibraryV2Page } from './-ui/library-v2-page';
 
 export const Route = createFileRoute('/library')({
-  validateSearch: librarySearchSchema,
+  validateSearch: libraryV2SearchSchema,
   beforeLoad: ({ context }) => {
     guardPageAccess(context.shell.bridge, 'library');
   },
-  loaderDeps: ({ search }) => search,
+  loaderDeps: ({ search }) => ({
+    q: search.q,
+    sort: search.sort,
+    page: search.page,
+    monitored: search.monitored,
+    album: search.album,
+    section: search.section,
+    wantedKind: search.wantedKind,
+  }),
   loader: async ({ context, deps }) => {
-    if (!isReactOwned()) return;
-
-    const { profile } = context.shell;
-    // Warming the cache for the first paint — NOT a gate. Letting this reject
-    // would hand the route to defaultErrorComponent and replace the whole page
-    // with "Something went wrong" on any backend hiccup, where the vanilla page
-    // toasted and stayed usable (filters and the alphabet still work, and the
-    // next click retries). The component's useQuery reads the same failure and
-    // renders the error state itself.
+    // Warm the feature-flag check + first page of artists; never block on a
+    // transient fetch failure — the page owns its own empty/error/disabled state.
     await context.queryClient
-      .ensureQueryData(libraryArtistsQueryOptions(profile.profileId, deps))
+      .ensureQueryData(libraryV2EnabledQueryOptions())
       .catch(() => undefined);
+    if (deps.section === 'wanted') {
+      void context.queryClient.prefetchQuery(
+        libraryV2WantedQueryOptions({ q: deps.q, page: deps.page, wantedKind: deps.wantedKind }),
+      );
+    } else if (deps.album) {
+      void context.queryClient.prefetchQuery(libraryV2AlbumQueryOptions(deps.album));
+    } else {
+      void context.queryClient.prefetchQuery(libraryV2ArtistsQueryOptions(deps));
+    }
   },
-  component: LibraryRouteComponent,
+  component: LibraryV2Page,
 });
-
-function LibraryRouteComponent() {
-  if (!isReactOwned()) {
-    return <LegacyRouteController pathname="/library" />;
-  }
-  return <LibraryPage />;
-}

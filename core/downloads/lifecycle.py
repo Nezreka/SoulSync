@@ -102,42 +102,38 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
 
         db = MusicDatabase()
 
-        def _db_update(staged_path: str, final_path: str):
-            """Repoint one file, returning how many library rows moved with it.
+        def _db_update(staged_path: str, final_path: str) -> int:
+            # The tracks were imported FROM staging, so the Library-v2 file row
+            # holds the staging path — inside the tree this publish is about to
+            # delete. Repointing only the legacy row left it naming a file that
+            # exists nowhere, which is also the one state path_drift_reconcile
+            # cannot repair (it finds the file by that stored path).
+            #
+            # L2-002: the rowcount is returned, not discarded. repoint_file_path
+            # reports it precisely so a caller can tell "the catalogue did not
+            # know this file" from "done", and that first case IS the state
+            # above — a row naming a staging path that is about to stop
+            # existing. The publish treats a zero for an audio file as a failed
+            # publish and rolls the album back.
+            #
+            # Upstream gates this proof on the active media server being
+            # 'soulsync', because there the staged row comes from
+            # record_soulsync_library_entry and a Plex/Navidrome/Jellyfin
+            # install legitimately has none (3934742fd — atomic albums stranded
+            # in staging). That gate does not belong here: the file row this
+            # repoints is written by require_library_v2_registration, which the
+            # import pipeline runs on EVERY install regardless of media server.
+            # A zero is therefore real evidence on this branch, and dropping it
+            # would disable the L2-002 guard rather than fix anything.
+            from core.library2.track_files import repoint_file_path
 
-            The count is the publish's proof that the library knows where the
-            file went; an audio file that repoints nothing leaves the library
-            pointing at a staging path this publish is about to remove. None
-            means the count carries no meaning — "unknown", not "zero" — and an
-            unknown must not fail a publish that may well have worked.
-
-            THAT PROOF ONLY EXISTS ON A 'soulsync' SERVER. Rows with a staged
-            path are written by record_soulsync_library_entry, which is gated on
-            the active media server being soulsync — on a Plex/Navidrome/Jellyfin
-            install there is legitimately NO row until the server scans the
-            PUBLISHED files. Reading that 0 as a failure made every atomic album
-            publish on a media-server install roll itself back and strand the
-            album in .soulsync_atomic_staging forever (Lil-Uzi-Chimp, Docker +
-            Navidrome: two direct albums landed, the one staged album stuck).
-            The UPDATE still runs — a row from an earlier soulsync-mode session
-            deserves repointing — but its count is only evidence where the rows
-            are ours to expect."""
             conn = db._get_connection()
             try:
-                cur = conn.cursor()
-                cur.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
-                            (final_path, staged_path))
+                repointed = repoint_file_path(conn, staged_path, final_path)
                 conn.commit()
-                rowcount = getattr(cur, 'rowcount', None)
+                return repointed
             finally:
                 conn.close()
-            try:
-                from core.settings import config_manager as _cm
-                if _cm.get_active_media_server() != 'soulsync':
-                    return None
-            except Exception:   # noqa: BLE001 - can't tell whose rows these are → unknown
-                return None
-            return int(rowcount) if isinstance(rowcount, int) else None
 
         result = publish_album_batch(staging_root, transfer_dir, safe_move_file, _db_update)
 
@@ -529,6 +525,14 @@ def start_next_batch_of_downloads(batch_id: str, deps: LifecycleDeps) -> None:
 # on_download_completed
 # ---------------------------------------------------------------------------
 
+# Statuses that mean "this task will not do any more work". `already_owned` is
+# here because a task that stood down against a sibling that already has the
+# file has genuinely finished — leaving it out let a deduped task hold its batch
+# in 'downloading' forever, since the batch waits for every queue entry to reach
+# a terminal state.
+_FINISHED_TASK_STATUSES = ('completed', 'failed', 'cancelled', 'not_found',
+                           'already_owned')
+
 
 def _wake_waiting_batches(finished_batch_id: str, deps: LifecycleDeps) -> None:
     """Offer a just-freed worker slot to the batches the global gate is holding.
@@ -773,7 +777,7 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
                         finished_count += 1
                     else:
                         retrying_count += 1
-                elif task_status in ['completed', 'failed', 'cancelled', 'not_found']:
+                elif task_status in _FINISHED_TASK_STATUSES:
                     finished_count += 1
             else:
                 # Task ID in queue but not in download_tasks - treat as completed to prevent blocking
@@ -1027,7 +1031,7 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                             finished_count += 1
                         else:
                             retrying_count += 1
-                    elif task_status in ['completed', 'failed', 'cancelled', 'not_found']:
+                    elif task_status in _FINISHED_TASK_STATUSES:
                         finished_count += 1
                 else:
                     # Task ID in queue but not in download_tasks - treat as completed to prevent blocking

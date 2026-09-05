@@ -105,12 +105,43 @@ def _should_treat_unresolved_as_mapping_error(raw_path, config_manager) -> bool:
 
 def delete_origin_download(db, entry, config_manager, transfer_folder=None) -> dict:
     """Delete one origin-tracked download: the file on disk (resolved through
-    the shared resolver), its library track row, and the history entry. A file
+    the shared resolver), its catalogue row, and the history entry. A file
     that refuses deletion keeps its history row and reports the error. Returns
-    {removed, file_deleted, error}."""
+    {removed, file_deleted, error, library_v2}.
+
+    The Library-v2 subjects are captured BEFORE the file goes, because the
+    catalogue is resolved from the path — once the file is gone there is
+    nothing left to resolve. A capture or a sync that fails leaves the history
+    row in place so the next run retries the whole deletion rather than
+    orphaning a catalogue row nobody will ever revisit.
+    """
     raw_path = entry.get('file_path') or ''
     file_deleted = False
     error = None
+    sync_result = None
+    try:
+        from core.library2.maintenance_sync import annotate_finding_details
+
+        sync_details = annotate_finding_details(
+            db,
+            config_manager,
+            entity_type='track',
+            entity_id=None,
+            file_path=raw_path,
+            details={
+                'history_id': entry.get('id'),
+                'file_path': raw_path,
+                'origin': entry.get('origin'),
+                'origin_context': entry.get('origin_context'),
+            },
+        )
+    except Exception as e:  # do not delete when V2 subjects cannot be captured
+        return {
+            'removed': 0,
+            'file_deleted': False,
+            'error': f'Library-v2 delete preparation failed: {e}',
+            'library_v2': None,
+        }
     if raw_path:
         resolved = resolve_library_file_path(
             raw_path,
@@ -125,16 +156,39 @@ def delete_origin_download(db, entry, config_manager, transfer_folder=None) -> d
                 error = str(e)
         elif resolved is None and _should_treat_unresolved_as_mapping_error(raw_path, config_manager):
             error = f'Could not locate file: {raw_path}. {_path_mapping_hint(config_manager)}'
-        # File gone or deleted → clean up the library track row either way.
+        # File gone or deleted → clean up the catalogue row either way.
         if error is None:
             try:
                 db.delete_track_by_file_path(raw_path)
             except Exception as e:
                 logger.debug("expired cleanup: track row delete failed: %s", e)
+    if error is None:
+        try:
+            from core.library2.maintenance_sync import sync_repair_change
+
+            sync_result = sync_repair_change(
+                db,
+                config_manager,
+                job_id='expired_download_cleaner',
+                finding_type='expired_download',
+                action='deleted_file',
+                entity_type='track',
+                entity_id=None,
+                file_path=raw_path,
+                details=sync_details,
+                result={'library_v2_file_deleted': True},
+            )
+        except Exception as e:  # preserve history row so the job can retry
+            error = f'Library-v2 delete synchronization failed: {e}'
     removed = 0
     if error is None:
         removed = db.delete_library_history_rows([entry['id']])
-    return {'removed': removed, 'file_deleted': file_deleted, 'error': error}
+    return {
+        'removed': removed,
+        'file_deleted': file_deleted,
+        'error': error,
+        'library_v2': sync_result,
+    }
 
 
 @register_job
@@ -385,7 +439,15 @@ class ExpiredDownloadCleanerJob(RepairJob):
                     res = delete_origin_download(
                         context.db, entry, context.config_manager,
                         transfer_folder=context.transfer_folder)
-                    if res.get('removed') or res.get('file_deleted'):
+                    # A Library-v2 capture/sync failure is REPORTED, not raised
+                    # (the history row is deliberately kept so the next run
+                    # retries) — without counting it the run would claim a
+                    # clean sweep while nothing was deleted.
+                    if res.get('error'):
+                        logger.error("expired auto-delete failed for %s: %s",
+                                     entry.get('title'), res['error'])
+                        result.errors += 1
+                    elif res.get('removed') or res.get('file_deleted'):
                         result.auto_fixed += 1
                 except Exception as e:
                     logger.error("expired auto-delete failed for %s: %s", entry.get('title'), e)

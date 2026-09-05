@@ -46,6 +46,8 @@ class _FakeClient:
         self.mode = mode
         self.search_calls = []
         self.exclude_calls = []  # exclude_sources arg per search() call
+        self.search_modes = []
+        self.search_profile_ids = []
         self._client_map = {}
         for k, v in (subclients or {}).items():
             if k in self._CLIENT_NAMES:
@@ -57,10 +59,39 @@ class _FakeClient:
     def client(self, name):
         return self._client_map.get(name)
 
-    async def search(self, query, timeout=30, exclude_sources=None, progress_callback=None):
+    async def search(self, query, timeout=30, exclude_sources=None,
+                     progress_callback=None, search_mode=None,
+                     quality_profile_id=None):
         self.search_calls.append((query, timeout))
         self.exclude_calls.append(exclude_sources)
+        self.search_modes.append(search_mode)
+        self.search_profile_ids.append(quality_profile_id)
         return (self._results, None)
+
+
+def test_worker_passes_the_item_profile_search_mode(monkeypatch):
+    from core.quality import selection
+
+    monkeypatch.setattr(
+        selection, "load_profile_by_id",
+        lambda profile_id=None: {
+            "search_mode": "best_quality",
+            "rank_candidates_by_quality": False,
+            "ranked_targets": [],
+        },
+    )
+    _seed_task(track_info={**_SOLO_TRACK, "quality_profile_id": 7})
+    client = _FakeClient(results=[])
+    deps, _ = _build_deps(
+        soulseek=client, matching=_FakeMatchEngine(queries=["Solo"]))
+
+    tw.download_track_worker("t1", "b1", deps)
+
+    assert client.search_modes and set(client.search_modes) == {"best_quality"}
+    # Upstream's delta: the item's profile reaches the search too, so hybrid
+    # search can decide for THIS item whether to stop at the first source or
+    # pool every source for best-quality selection.
+    assert set(client.search_profile_ids) == {7}
 
 
 class _FakeMatchEngine:
@@ -444,6 +475,42 @@ def test_no_results_marks_not_found_and_calls_completion():
     assert ('done', ('b1', 't1', False), {}) in rec.calls
 
 
+def test_no_results_reports_acquisition_retry_exhaustion(monkeypatch):
+    track_info = {
+        'id': 'lib2-track:42',
+        'name': 'Money',
+        'artists': ['Pink Floyd'],
+        'album': 'DSOTM',
+        'duration_ms': 383000,
+        '_acquisition_import_id': 'aim1-test',
+    }
+    _seed_task(track_info=track_info)
+    exhausted = []
+    monkeypatch.setattr(
+        tw,
+        '_notify_acquisition_retry_exhausted',
+        lambda context, error: exhausted.append((context, error)) or True,
+    )
+    deps, _ = _build_deps(
+        soulseek=_FakeClient(results=[]),
+        matching=_FakeMatchEngine(queries=['q1']),
+    )
+
+    tw.download_track_worker('t1', None, deps)
+
+    assert download_tasks['t1']['status'] == 'not_found'
+    # Two, not three: upstream reduced the broad fallback searches and this
+    # branch-owned assertion was never updated with it. The property under test
+    # is that exhaustion is reported at all, with the count the shared pipeline
+    # actually ran — so read it from the same source instead of restating it.
+    assert len(exhausted) == 1
+    reported_context, reported_error = exhausted[0]
+    assert reported_context == track_info
+    assert reported_error == (
+        f"No match found after {download_tasks['t1']['query_count']} "
+        "shared-pipeline queries")
+
+
 def test_results_but_no_valid_candidates_stores_raw_for_review():
     """Each query that returns results contributes top 20 to cached_candidates.
     With legacy fallback queries (track-only, cleaned), multiple queries fire."""
@@ -482,7 +549,8 @@ def test_cancellation_mid_query_returns_without_completion():
     _seed_task()
     rec = _Recorder()
 
-    def _cancel_during_search(query, timeout=30, exclude_sources=None, progress_callback=None):
+    def _cancel_during_search(query, timeout=30, exclude_sources=None,
+                              progress_callback=None, search_mode=None):
         download_tasks['t1']['status'] = 'cancelled'
 
         async def _empty():
@@ -698,7 +766,8 @@ def test_search_ticker_never_takes_tasks_lock():
     from core.runtime_state import tasks_lock
 
     class _CallbackUnderLock(_FakeClient):
-        async def search(self, query, timeout=30, exclude_sources=None, progress_callback=None):
+        async def search(self, query, timeout=30, exclude_sources=None,
+                         progress_callback=None, search_mode=None):
             if progress_callback:
                 with tasks_lock:
                     progress_callback([object()] * 3, [], 2)

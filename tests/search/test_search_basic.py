@@ -156,6 +156,54 @@ def test_source_param_routes_to_specific_client():
     assert orch.default_search_calls == 0
     # Tidal client was called exactly once.
     assert orch.per_source_calls.get('tidal') == 1
+    assert result[0]['source'] == 'tidal'
+
+
+def test_scoped_prowlarr_result_keeps_release_title_and_uses_entity_artist():
+    """Indexer release titles are not semantic artist/title columns.
+
+    A Library-v2 search has server-validated entity metadata, so it should use
+    that identity while preserving Prowlarr's raw value as the release title.
+    """
+    meta = {
+        'protocol': 'usenet',
+        'indexer': 'NZBGeek',
+        'release_title': 'TEAM-WEB-Various.Artists-Compilation-FLAC-2026',
+    }
+    track = _real_track(
+        username='usenet',
+        artist='TEAM',
+        title='WEB-Various.Artists-Compilation',
+        _source_metadata=meta,
+    )
+    album = _real_album(
+        username='usenet',
+        artist='TEAM',
+        album_title='WEB-Various.Artists-Compilation',
+        tracks=[track],
+    )
+    client = _FakeSoulseek(tracks=[track], albums=[album])
+
+    result = basic.run_basic_search(
+        'Real Artist Real Album',
+        client,
+        _sync_run_async,
+        source='usenet',
+        entity_context={
+            'album_id': 7,
+            'artist_name': 'Real Artist',
+            'album_name': 'Real Album',
+        },
+    )
+
+    # Album-scoped Prowlarr searches expose one release row, not the legacy
+    # track+album duplicate pair.
+    assert len(result) == 1
+    assert result[0]['result_type'] == 'album'
+    assert result[0]['artist'] == 'Real Artist'
+    assert result[0]['matched_album_title'] == 'Real Album'
+    assert result[0]['release_title'] == meta['release_title']
+    assert result[0]['source'] == 'usenet'
 
 
 def test_no_source_param_falls_through_to_orchestrator_default():

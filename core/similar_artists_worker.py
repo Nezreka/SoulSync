@@ -42,10 +42,11 @@ _SOURCE_ID_FIELD = {
     'musicbrainz': 'similar_artist_musicbrainz_id',
 }
 
-# Library-artist source-id columns, in the same priority the watchlist scanner
-# uses to key its rows — so a library artist and (if also watchlisted) its
-# watchlist row resolve to the SAME source_artist_id and don't duplicate work.
-_LIBRARY_ID_COLUMNS = ('spotify_artist_id', 'itunes_artist_id', 'deezer_id', 'musicbrainz_id')
+# Library-artist source priority — the same order the watchlist scanner uses to
+# key its rows, so a library artist and (if also watchlisted) its watchlist row
+# resolve to the SAME source_artist_id and don't duplicate work. Only these four
+# are usable keys: they are the ones the similar_artists table has id columns for.
+_LIBRARY_ID_SOURCES = ('spotify', 'itunes', 'deezer', 'musicbrainz')
 
 
 def map_payload_to_store_kwargs(payload: Dict[str, Any]) -> Dict[str, Optional[str]]:
@@ -58,11 +59,22 @@ def map_payload_to_store_kwargs(payload: Dict[str, Any]) -> Dict[str, Optional[s
 
 def pick_source_artist_id(row: Dict[str, Any]) -> Optional[str]:
     """The metadata source id to key a library artist's similars by, or None if
-    the artist isn't matched to any metadata source yet (→ skip it)."""
-    for key in _LIBRARY_ID_COLUMNS:
-        v = row.get(key)
-        if v:
-            return str(v)
+    the artist isn't matched to any metadata source yet (→ skip it).
+
+    Reads a Library-v2 artist row: Spotify and MusicBrainz sit in promoted columns
+    and the rest in ``external_ids``, which may arrive as the raw JSON text the row
+    carries or as an already-parsed mapping.
+    """
+    from core.library2.provider_ids import parse_external_ids
+
+    ids = parse_external_ids(row.get('external_ids'))
+    for column, source in (('spotify_id', 'spotify'), ('musicbrainz_id', 'musicbrainz')):
+        if row.get(column):
+            ids[source] = str(row[column])
+    for source in _LIBRARY_ID_SOURCES:
+        value = ids.get(source)
+        if value:
+            return str(value)
     return None
 
 
@@ -265,79 +277,80 @@ class SimilarArtistsWorker:
         logger.info("Similar Artists worker thread finished")
 
     # ── DB helpers (thin; the testable logic lives in the pure seams above) ──
-    def _has_source_id_clause(self) -> str:
-        return '(' + ' OR '.join(f"{c} IS NOT NULL AND {c} != ''" for c in _LIBRARY_ID_COLUMNS) + ')'
+    #
+    # Two deliberate differences from the enrichment workers, both preserved from
+    # the legacy queries this replaces (docs §32.3.1 stage 2):
+    #   * 'error' is retried alongside 'not_found' — MusicMap errors are timeouts
+    #     and 5xx, and process_artist already sorts a definitive 400/404 into
+    #     'not_found', so a retry is right here where it would loop elsewhere;
+    #   * the universe is only artists matched to a metadata source, because the
+    #     similars are keyed by that id. An unmatched artist has nothing to key by
+    #     and offering it would mark it failed forever.
+    _RETRY_STATUSES = ('error', 'not_found')
 
     def _get_next_artist(self) -> Optional[Dict[str, Any]]:
+        conn = None
         try:
+            from core.library2.worker_queue import next_pending
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cols = "id, name, " + ", ".join(_LIBRARY_ID_COLUMNS)
-            have_id = self._has_source_id_clause()
-            # 1) Unattempted source-matched artists.
-            cursor.execute(f"""
-                SELECT {cols} FROM artists
-                WHERE id IS NOT NULL AND name IS NOT NULL
-                  AND similar_artists_match_status IS NULL
-                  AND {have_id}
-                ORDER BY id ASC LIMIT 1
-            """)
-            row = cursor.fetchone()
-            # 2) Retry transient failures (and re-check 'not_found') after retry_days.
-            if not row:
-                cursor.execute(f"""
-                    SELECT {cols} FROM artists
-                    WHERE id IS NOT NULL AND name IS NOT NULL
-                      AND similar_artists_match_status IN ('error', 'not_found')
-                      AND (similar_artists_last_attempted IS NULL
-                           OR similar_artists_last_attempted < datetime('now', ?))
-                      AND {have_id}
-                    ORDER BY similar_artists_last_attempted ASC LIMIT 1
-                """, (f'-{self.retry_days} days',))
-                row = cursor.fetchone()
-            if not row:
+            item = next_pending(
+                conn, 'similar_artists',
+                retry_after_days=self.retry_days,
+                entity_types=('artist',),
+                retry_statuses=self._RETRY_STATUSES,
+                require_provider_id=True,
+            )
+            if not item:
                 return None
-            keys = ['id', 'name'] + list(_LIBRARY_ID_COLUMNS)
-            return dict(zip(keys, row, strict=False))
+            row = conn.execute(
+                "SELECT spotify_id, musicbrainz_id, external_ids FROM lib2_artists "
+                "WHERE id = ?", (item['id'],)).fetchone()
+            out = {'id': item['id'], 'name': item['name']}
+            if row is not None:
+                out.update(spotify_id=row['spotify_id'],
+                           musicbrainz_id=row['musicbrainz_id'],
+                           external_ids=row['external_ids'])
+            return out
         except Exception as exc:
             logger.debug("Similar Artists _get_next_artist failed: %s", exc)
             return None
+        finally:
+            if conn:
+                conn.close()
 
     def _mark(self, artist_id, status: str):
+        conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE artists SET similar_artists_match_status = ?, "
-                "similar_artists_last_attempted = CURRENT_TIMESTAMP WHERE id = ?",
-                (status, artist_id),
-            )
+            record_attempt(conn, entity_type='artist', entity_id=artist_id,
+                           service='similar_artists', status=status)
             conn.commit()
         except Exception as exc:
             logger.debug("Similar Artists _mark failed for %s: %s", artist_id, exc)
+        finally:
+            if conn:
+                conn.close()
 
     def _count_pending(self) -> int:
         return self._db_counts()['pending']
 
     def _db_counts(self) -> Dict[str, int]:
         """Persistent tallies over the worker's universe (source-matched library
-        artists): matched / not_found / error / pending(NULL) / total."""
+        artists): matched / not_found / error / pending(never attempted) / total."""
         out = {'matched': 0, 'not_found': 0, 'error': 0, 'pending': 0, 'total': 0}
+        conn = None
         try:
+            from core.library2.worker_queue import status_counts
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                SELECT
-                    SUM(CASE WHEN similar_artists_match_status = 'matched' THEN 1 ELSE 0 END),
-                    SUM(CASE WHEN similar_artists_match_status = 'not_found' THEN 1 ELSE 0 END),
-                    SUM(CASE WHEN similar_artists_match_status = 'error' THEN 1 ELSE 0 END),
-                    SUM(CASE WHEN similar_artists_match_status IS NULL THEN 1 ELSE 0 END),
-                    COUNT(*)
-                FROM artists WHERE {self._has_source_id_clause()}
-            """)
-            row = cursor.fetchone() or (0, 0, 0, 0, 0)
-            out.update(matched=int(row[0] or 0), not_found=int(row[1] or 0),
-                       error=int(row[2] or 0), pending=int(row[3] or 0), total=int(row[4] or 0))
+            out.update(status_counts(conn, 'similar_artists', 'artist',
+                                     require_provider_id=True))
         except Exception as exc:
             logger.debug("Similar Artists _db_counts failed: %s", exc)
+        finally:
+            if conn:
+                conn.close()
         return out

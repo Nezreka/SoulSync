@@ -77,6 +77,56 @@ def test_full_refresh_clears_cache_before_fetching(dbpath):
     assert client.calls.index("clear_cache") < client.calls.index("get_all_artists")
 
 
+def test_full_refresh_keeps_old_mappings_until_server_fetch_succeeds(dbpath, monkeypatch):
+    client = _RecordingClient(artists=[SimpleNamespace(title="Artist")])
+    worker = _worker(dbpath, client, full_refresh=True)
+    events = []
+    db = MusicDatabase(dbpath)
+    monkeypatch.setattr("core.database_update_worker.get_database", lambda path=None: db)
+    monkeypatch.setattr(
+        db, "clear_server_data", lambda source: events.append(("clear", source)))
+    worker._process_all_artists = lambda artists: events.append(("process", len(artists)))
+    worker._detect_and_remove_stale_content = lambda: {}
+
+    worker.run()
+
+    assert events == [("process", 1)]
+
+
+def test_full_refresh_detaches_only_after_two_verified_empty_reads(dbpath, monkeypatch):
+    client = _RecordingClient(artists=[])
+    worker = _worker(dbpath, client, full_refresh=True)
+    events = []
+    db = MusicDatabase(dbpath)
+    monkeypatch.setattr("core.database_update_worker.get_database", lambda path=None: db)
+    monkeypatch.setattr(
+        db, "clear_server_data", lambda source: events.append(("clear", source)))
+    worker._process_all_artists = lambda artists: events.append(("process", len(artists)))
+    worker._detect_and_remove_stale_content = lambda: {}
+
+    worker.run()
+
+    assert client.calls.count("get_all_artists") == 2
+    assert events == [("clear", "navidrome"), ("process", 0)]
+
+
+def test_full_refresh_fetch_failure_never_detaches_mappings(dbpath, monkeypatch):
+    client = _RecordingClient(artists=[])
+    client.last_fetch_failed = True
+    worker = _worker(dbpath, client, full_refresh=True)
+    events = []
+    db = MusicDatabase(dbpath)
+    monkeypatch.setattr("core.database_update_worker.get_database", lambda path=None: db)
+    monkeypatch.setattr(
+        db, "clear_server_data", lambda source: events.append(("clear", source)))
+    worker._process_all_artists = lambda artists: events.append(("process", len(artists)))
+
+    worker.run()
+
+    assert client.calls.count("get_all_artists") == 1
+    assert events == []
+
+
 def test_incremental_no_new_content_still_clears(dbpath):
     # the early "no new content" exit used to skip the clear — the probe's own
     # cached listings then poisoned the next deep scan

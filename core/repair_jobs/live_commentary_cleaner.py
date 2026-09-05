@@ -1,10 +1,15 @@
 """Live/Commentary Cleaner Job — finds live, commentary, and interview content in the library."""
 
 import re
+from core.library2.maintenance_subjects import (
+    active_file_subjects,
+    count_active_files,
+    subject_details,
+)
 from collections import defaultdict
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, scoped_file_subjects
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.live_commentary_cleaner")
@@ -94,6 +99,7 @@ class LiveCommentaryCleanerJob(RepairJob):
         'scope': 'tracks',  # 'tracks' or 'albums'
     }
     auto_fix = False
+    supports_file_scope = True
 
     def _get_settings(self, context: JobContext) -> dict:
         if not context.config_manager:
@@ -103,154 +109,81 @@ class LiveCommentaryCleanerJob(RepairJob):
         merged.update(cfg)
         return merged
 
+    def estimate_scope(self, context: JobContext) -> int:
+        return count_active_files(context.db, context.config_manager)
+
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
-
         settings = self._get_settings(context)
-        enabled_types = set()
-        if settings.get('flag_live', True):
-            enabled_types.add('live')
-        if settings.get('flag_commentary', True):
-            enabled_types.add('commentary')
-        if settings.get('flag_interviews', True):
-            enabled_types.add('interview')
-        if settings.get('flag_spoken_word', True):
-            enabled_types.add('spoken_word')
-
+        enabled_types = {
+            content_type
+            for content_type, key in (
+                ("live", "flag_live"),
+                ("commentary", "flag_commentary"),
+                ("interview", "flag_interviews"),
+                ("spoken_word", "flag_spoken_word"),
+            )
+            if settings.get(key, True)
+        }
         if not enabled_types:
             return result
-
-        scan_album_titles = settings.get('scan_album_titles', True)
-        scope = settings.get('scope', 'tracks')
-
-        conn = None
-        try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name, al.title, al.id, al.record_type,
-                       t.file_path, t.bitrate, t.duration, t.track_number,
-                       al.thumb_url, ar.thumb_url, ar.id
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.title IS NOT NULL AND t.title != ''
-                  AND t.file_path IS NOT NULL AND t.file_path != ''
-            """)
-            tracks = cursor.fetchall()
-        except Exception as e:
-            logger.error("Error fetching tracks: %s", e, exc_info=True)
-            result.errors += 1
-            return result
-        finally:
-            if conn:
-                conn.close()
-
-        if not tracks:
-            return result
-
-        total = len(tracks)
-        if context.update_progress:
-            context.update_progress(0, total)
-        if context.report_progress:
-            context.report_progress(phase=f'Scanning {total} tracks...', total=total)
-
-        # Track which albums we've already flagged (for album scope)
-        flagged_album_ids = set()
-
-        for idx, row in enumerate(tracks):
+        scan_album_titles = settings.get("scan_album_titles", True)
+        subjects = scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager))
+        for subject in subjects:
             if context.check_stop():
                 return result
-
             result.scanned += 1
-
-            if idx % 200 == 0:
-                if context.report_progress:
-                    context.report_progress(
-                        scanned=idx, total=total,
-                        phase=f'Scanning {idx} / {total}',
-                        log_line=f'Checking: {row[1]}',
-                        log_type='info'
-                    )
-                if context.update_progress:
-                    context.update_progress(idx, total)
-
-            (track_id, title, artist_name, album_title, album_id,
-             album_type, file_path, bitrate, duration, track_number,
-             album_thumb, artist_thumb, artist_id) = row
-
-            # Check track title
-            content_type = _detect_content_type(title, '')
-
-            # Check album title if enabled and track title didn't match
+            content_type = _detect_content_type(subject.get("title"), "")
             album_matched = False
-            if not content_type and scan_album_titles and album_title:
-                content_type = _detect_content_type('', album_title)
-                if content_type:
-                    album_matched = True
-
-            if not content_type:
+            if not content_type and scan_album_titles:
+                content_type = _detect_content_type("", subject.get("album_title"))
+                album_matched = bool(content_type)
+            if not content_type or content_type not in enabled_types:
                 continue
-
-            # Skip if this content type isn't enabled
-            if content_type not in enabled_types:
-                continue
-
-            # Album scope: flag once per album, not per track
-            if scope == 'albums' and album_matched and album_id:
-                if album_id in flagged_album_ids:
-                    continue
-                flagged_album_ids.add(album_id)
-
+            album_id = int(subject["album_id"])
             type_label = _format_type(content_type)
-            match_source = f'album "{album_title}"' if album_matched else f'track "{title}"'
-
+            details = {
+                "track": {
+                    "id": f"lib2:{subject['track_id']}",
+                    "title": subject.get("title"),
+                    "artist": subject.get("artist_name") or "",
+                    "album": subject.get("album_title") or "",
+                    "album_id": f"lib2:{album_id}",
+                    "album_type": subject.get("album_type") or "",
+                    "file_path": subject.get("path"),
+                    "bitrate": subject.get("bitrate"),
+                    "duration": subject.get("duration"),
+                    "track_number": subject.get("track_number"),
+                },
+                "content_type": content_type,
+                "type_label": type_label,
+                "album_matched": album_matched,
+                "album_thumb_url": subject.get("album_image"),
+                "artist_thumb_url": subject.get("artist_image"),
+                "artist_id": subject.get("artist_id"),
+            }
+            details.update(subject_details(subject))
             if context.create_finding:
-                try:
-                    inserted = context.create_finding(
-                        job_id=self.job_id,
-                        finding_type='unwanted_content',
-                        severity='info',
-                        entity_type='album' if (scope == 'albums' and album_matched) else 'track',
-                        entity_id=str(album_id if (scope == 'albums' and album_matched) else track_id),
-                        file_path=file_path,
-                        title=f'{type_label}: {title} by {artist_name or "Unknown"}',
-                        description=(
-                            f'{type_label} content detected in {match_source}. '
-                            f'Album: "{album_title or "Unknown"}" ({album_type or "unknown"} type).'
-                        ),
-                        details={
-                            'track': {
-                                'id': track_id,
-                                'title': title,
-                                'artist': artist_name or '',
-                                'album': album_title or '',
-                                'album_id': album_id,
-                                'album_type': album_type or '',
-                                'file_path': file_path,
-                                'bitrate': bitrate,
-                                'duration': duration,
-                                'track_number': track_number,
-                            },
-                            'content_type': content_type,
-                            'type_label': type_label,
-                            'album_matched': album_matched,
-                            'album_thumb_url': album_thumb or None,
-                            'artist_thumb_url': artist_thumb or None,
-                            'artist_id': artist_id,
-                        }
-                    )
-                    if inserted:
-                        result.findings_created += 1
-                    else:
-                        result.findings_skipped_dedup += 1
-                except Exception as e:
-                    logger.debug("Error creating finding: %s", e)
-                    result.errors += 1
-
-        if context.update_progress:
-            context.update_progress(total, total)
-
-        logger.info("Live/Commentary cleaner: scanned %d tracks, found %d",
-                     result.scanned, result.findings_created)
+                inserted = context.create_finding(
+                    job_id=self.job_id,
+                    finding_type="unwanted_content",
+                    severity="info",
+                    entity_type="track",
+                    entity_id=f"lib2:{subject['track_id']}",
+                    file_path=subject.get("path"),
+                    title=(
+                        f'{type_label}: {subject.get("title")} by '
+                        f'{subject.get("artist_name") or "Unknown"}'
+                    ),
+                    description=(
+                        f'{type_label} content detected in '
+                        f'{"album" if album_matched else "track"} metadata.'
+                    ),
+                    details=details,
+                )
+                if inserted:
+                    result.findings_created += 1
+                else:
+                    result.findings_skipped_dedup += 1
         return result
+

@@ -11,9 +11,48 @@ module.
 from __future__ import annotations
 
 import logging
-from typing import Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 
 logger = logging.getLogger(__name__)
+_CANONICAL_SOURCES = frozenset({
+    'soulseek', 'torrent', 'usenet', 'youtube', 'hifi', 'qobuz', 'tidal',
+    'deezer_dl', 'lidarr', 'soundcloud', 'amazon',
+})
+
+
+def _effective_source_metadata(result: Mapping[str, Any]) -> dict:
+    direct = result.get('_source_metadata')
+    if isinstance(direct, dict):
+        return direct
+    tracks = result.get('tracks')
+    if isinstance(tracks, list) and tracks and isinstance(tracks[0], dict):
+        return tracks[0].get('_source_metadata') or {}
+    return {}
+
+
+def _decorate_result(
+    result: dict,
+    *,
+    source: Optional[str],
+    entity_context: Optional[Mapping[str, Any]],
+) -> dict:
+    username = str(result.get('username') or '').strip().lower()
+    metadata = _effective_source_metadata(result)
+    protocol = str(metadata.get('protocol') or '').strip().lower()
+    result['source'] = (source or protocol or (
+        username if username in _CANONICAL_SOURCES else 'soulseek')).strip().lower()
+    if protocol not in ('torrent', 'usenet'):
+        return result
+    if metadata.get('release_title'):
+        result['release_title'] = metadata['release_title']
+    if entity_context:
+        for target, context_key in (
+            ('artist', 'artist_name'), ('matched_album_title', 'album_name'),
+            ('matched_track_title', 'track_title'),
+        ):
+            if entity_context.get(context_key):
+                result[target] = entity_context[context_key]
+    return result
 
 
 def _quality_score(result) -> float:
@@ -44,6 +83,7 @@ def run_basic_search(
     run_async: Callable,
     *,
     source: Optional[str] = None,
+    entity_context: Optional[Mapping[str, Any]] = None,
 ) -> list[dict]:
     """Search ``source`` (or the active/first hybrid source) for ``query``.
 
@@ -89,6 +129,7 @@ def run_basic_search(
                 raise ValueError("SoundCloud isn't connected — enable it in "
                                  "Settings to resolve a SoundCloud link.")
             logger.warning("basic search: no client for source %r — falling back to orchestrator", source)
+            source = None
             tracks, albums = run_async(download_orchestrator.search(query))
         else:
             logger.info("basic search: targeting %r for %r", source, query)
@@ -104,14 +145,27 @@ def run_basic_search(
         ]
         album_dict['result_type'] = 'album'
         album_dict['quality_score'] = _quality_score(album)
-        processed_albums.append(album_dict)
+        processed_albums.append(_decorate_result(
+            album_dict, source=source, entity_context=entity_context))
 
     processed_tracks = []
     for track in tracks:
         track_dict = track.__dict__.copy()
         track_dict['result_type'] = 'track'
         track_dict['quality_score'] = _quality_score(track)
-        processed_tracks.append(track_dict)
+        processed_tracks.append(_decorate_result(
+            track_dict, source=source, entity_context=entity_context))
+
+    if entity_context:
+        def is_release(row):
+            return (
+                str(_effective_source_metadata(row).get('protocol') or '').lower()
+                in ('torrent', 'usenet')
+            )
+        if entity_context.get('track_id') is not None:
+            processed_albums = [row for row in processed_albums if not is_release(row)]
+        elif entity_context.get('album_id') is not None:
+            processed_tracks = [row for row in processed_tracks if not is_release(row)]
 
     return sorted(
         processed_albums + processed_tracks,

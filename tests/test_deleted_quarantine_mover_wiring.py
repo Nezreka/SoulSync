@@ -122,6 +122,36 @@ def test_a_quality_profile_also_protects_its_lossy_copy(cleaner, monkeypatch, tm
     assert state['deleted'] == 0
 
 
+def test_alac_m4a_source_and_opus_companion_are_both_kept(cleaner, monkeypatch):
+    state, transfer = cleaner
+    monkeypatch.setattr(
+        dc, 'config_manager',
+        _FakeConfig(transfer, lossy_enabled=True, lossy_codec='opus'),
+    )
+    monkeypatch.setattr(
+        'core.imports.file_ops.m4a_codec', lambda path: (
+            'alac' if str(path).lower().endswith('.m4a') else None
+        ),
+    )
+    album = os.path.join(transfer, 'Artist', 'Album')
+    os.makedirs(album)
+    alac = os.path.join(album, 'song.m4a')
+    opus = os.path.join(album, 'song.opus')
+    with open(alac, 'wb') as handle:
+        handle.write(b'alac' * 100)
+    with open(opus, 'wb') as handle:
+        handle.write(b'opus')
+
+    dc._run_duplicate_cleaner()
+
+    # Opus sorts ahead of M4A in the cleaner. The codec probe must still
+    # recognise the M4A as the lossless source and protect both directions.
+    assert os.path.isfile(alac)
+    assert os.path.isfile(opus)
+    assert state['duplicates_found'] == 0
+    assert state['deleted'] == 0
+
+
 def test_the_duplicate_cleaner_still_removes_a_real_cross_format_duplicate(
         cleaner, monkeypatch):
     state, transfer = cleaner

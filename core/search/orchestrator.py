@@ -119,18 +119,72 @@ def resolve_client(source_name: str, deps: SearchDeps) -> tuple[Any, bool]:
 
 
 def _build_db_artists(query: str, deps: SearchDeps) -> list[dict]:
-    active_server = deps.config_manager.get_active_media_server()
-    artist_objs = deps.database.search_artists(query, limit=5, server_source=active_server)
+    """The "In Your Library" bucket — Library v2's catalogue, and nothing else.
+
+    Every entry is a lib2 artist, so ``id`` and ``library_v2_id`` are the same
+    lib2 id and every card routes to the v2 artist page — the page that can
+    actually manage the artist (monitoring, wanted, quality profile). Before
+    this the bucket was a merge: legacy ``artists`` searched first, lib2 rows
+    folded in by back-reference, provider id or unambiguous name, with an
+    off-thread repair that wrote the name-resolved link back. One catalogue
+    needs none of it.
+
+    Two details survive from the two halves it replaces:
+
+    - **Accents fold.** Legacy searched ``unidecode_lower(name)``; the lib2
+      half searched ``LOWER(name)``, which SQLite applies to ASCII only
+      (iss29-D13), so it never answered a 'Tiesto' typed without the
+      diaeresis. The function is registered on every ``MusicDatabase``
+      connection (``database/music_database.py``), which is the connection
+      this reads from.
+    - **An alias is not an entry.** §40 alias members fold into their
+      canonical artist, spelled as ``library2.queries.list_artists`` spells it
+      (iss29-D04) so the membership test stays index-servable.
+    """
+    from core.text.normalize import normalize_for_comparison
+
     out: list[dict] = []
-    for artist in artist_objs:
-        image_url = None
-        if hasattr(artist, 'thumb_url') and artist.thumb_url:
-            image_url = deps.fix_artist_image_url(artist.thumb_url)
-        out.append({
-            'id': artist.id,
-            'name': artist.name,
-            'image_url': image_url,
-        })
+    conn = None
+    try:
+        conn = deps.database._get_connection()
+        rows = conn.execute(
+            """SELECT a.id, a.name, a.image_url
+                 FROM lib2_artists a
+                WHERE a.canonical_artist_id IS NULL
+                  AND EXISTS (
+                      SELECT 1 FROM lib2_artists member
+                       WHERE (member.canonical_artist_id = a.id
+                              OR (member.canonical_artist_id IS NULL
+                                  AND member.id = a.id))
+                         AND unidecode_lower(member.name) LIKE :needle)
+                ORDER BY a.name COLLATE NOCASE, a.id
+                LIMIT 10""",
+            {"needle": f"%{normalize_for_comparison(query)}%"},
+        ).fetchall()
+        for row in rows:
+            artist_id = int(row['id'])
+            out.append({
+                'id': artist_id,
+                'library_v2_id': artist_id,
+                'name': row['name'],
+                # iss29-B04c: `id` is a lib2 id, and the generic
+                # `/api/artist/<id>/image` resolver forwards whatever id it is
+                # given to the providers — which means a lib2 id resolved to
+                # whichever Deezer/iTunes artist happens to own that number, a
+                # confidently wrong face on the card. Library V2 serves this
+                # artist's own artwork, so point at that.
+                'image_url': (
+                    deps.fix_artist_image_url(row['image_url'])
+                    if row['image_url']
+                    else f"/api/library/v2/artwork/artist/{artist_id}"
+                ),
+                'image_is_native': True,
+            })
+    except Exception as exc:  # a database without the v2 tables yet
+        logger.debug("Library-v2 artist search unavailable: %s", exc)
+    finally:
+        if conn is not None:
+            conn.close()
     return out
 
 

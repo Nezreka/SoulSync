@@ -698,7 +698,10 @@ export function WatchlistPage() {
                 adding={addArtist.isPending}
               />
 
-              <WatchlistRecentReleasesPanel releases={recentReleases} loading={recentReleasesQuery.isLoading} />
+              <WatchlistRecentReleasesPanel
+                releases={recentReleases}
+                loading={recentReleasesQuery.isLoading}
+              />
 
               <div className="watchlist-toolbar">
                 <div className="watchlist-search-container">
@@ -936,11 +939,18 @@ function WatchlistArtistCard({
       </div>
       <div className="watchlist-row-stats">
         <span>{releaseTypeText(artist)}</span>
-        <span>{artist.date_added ? `Added ${new Date(artist.date_added).toLocaleDateString()}` : 'Added date unknown'}</span>
+        <span>
+          {artist.date_added
+            ? `Added ${new Date(artist.date_added).toLocaleDateString()}`
+            : 'Added date unknown'}
+        </span>
       </div>
       <div className="watchlist-row-tags">
         {sources.length > 0 ? (
-          <div className="watchlist-card-sources" aria-label={`Matched sources for ${artist.artist_name}`}>
+          <div
+            className="watchlist-card-sources"
+            aria-label={`Matched sources for ${artist.artist_name}`}
+          >
             {sources.map((key) => (
               <span
                 key={key}
@@ -952,7 +962,10 @@ function WatchlistArtistCard({
           </div>
         ) : null}
         {pills.length > 0 ? (
-          <div className="watchlist-card-pills" aria-label={`Watch rules for ${artist.artist_name}`}>
+          <div
+            className="watchlist-card-pills"
+            aria-label={`Watch rules for ${artist.artist_name}`}
+          >
             {pills.map((pill) => (
               <span key={pill.label} className={`watchlist-pill watchlist-pill-${pill.kind}`}>
                 {pill.label}
@@ -984,37 +997,37 @@ function WatchlistArtistCard({
       </button>
       {menuOpen && menuPosition
         ? createPortal(
-        <div
-          ref={menuRef}
-          className="watchlist-row-menu"
-          style={{ top: menuPosition.top, right: menuPosition.right }}
-          role="menu"
-          aria-label={`Actions for ${artist.artist_name}`}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <button type="button" role="menuitem" onClick={() => runMenuAction(onOpenDetail)}>
-            Manage in sidebar
-          </button>
-          <button type="button" role="menuitem" onClick={() => runMenuAction(onOpenFullDetail)}>
-            Full profile
-          </button>
-          <button type="button" role="menuitem" onClick={() => runMenuAction(onOpenConfig)}>
-            Edit rules
-          </button>
-          <button type="button" role="menuitem" onClick={() => runMenuAction(onToggleSelect)}>
-            {selected ? 'Clear selection' : 'Select for batch'}
-          </button>
-          <div className="watchlist-row-menu-sep" />
-          <button
-            type="button"
-            role="menuitem"
-            className="watchlist-row-menu-danger"
-            onClick={() => runMenuAction(onRemove)}
-          >
-            Remove from watchlist
-          </button>
-        </div>,
-        document.body,
+            <div
+              ref={menuRef}
+              className="watchlist-row-menu"
+              style={{ top: menuPosition.top, right: menuPosition.right }}
+              role="menu"
+              aria-label={`Actions for ${artist.artist_name}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button type="button" role="menuitem" onClick={() => runMenuAction(onOpenDetail)}>
+                Manage in sidebar
+              </button>
+              <button type="button" role="menuitem" onClick={() => runMenuAction(onOpenFullDetail)}>
+                Full profile
+              </button>
+              <button type="button" role="menuitem" onClick={() => runMenuAction(onOpenConfig)}>
+                Edit rules
+              </button>
+              <button type="button" role="menuitem" onClick={() => runMenuAction(onToggleSelect)}>
+                {selected ? 'Clear selection' : 'Select for batch'}
+              </button>
+              <div className="watchlist-row-menu-sep" />
+              <button
+                type="button"
+                role="menuitem"
+                className="watchlist-row-menu-danger"
+                onClick={() => runMenuAction(onRemove)}
+              >
+                Remove from watchlist
+              </button>
+            </div>,
+            document.body,
           )
         : null}
     </div>
@@ -1076,7 +1089,8 @@ function WatchlistAddArtistSearch({
   adding: boolean;
 }) {
   const [query, setQuery] = useState('');
-  const [provider, setProvider] = useState<(typeof ADD_PROVIDER_OPTIONS)[number]['value']>('deezer');
+  const [provider, setProvider] =
+    useState<(typeof ADD_PROVIDER_OPTIONS)[number]['value']>('deezer');
   const [debouncedQuery, setDebouncedQuery] = useState('');
 
   useEffect(() => {
@@ -1090,7 +1104,13 @@ function WatchlistAddArtistSearch({
   }, [query, provider]);
 
   const resultsQuery = useQuery({
-    queryKey: [...WATCHLIST_QUERY_KEY, 'artist-search', profileId, provider, debouncedQuery] as const,
+    queryKey: [
+      ...WATCHLIST_QUERY_KEY,
+      'artist-search',
+      profileId,
+      provider,
+      debouncedQuery,
+    ] as const,
     queryFn: () => searchProviderArtists(provider, debouncedQuery),
     enabled: debouncedQuery.length >= 2,
   });
@@ -1130,7 +1150,11 @@ function WatchlistAddArtistSearch({
           onChange={(event) => setQuery(event.target.value)}
         />
         <div className="watchlist-add-status" aria-live="polite">
-          {searching ? 'Searching...' : debouncedQuery ? `${results.length} found` : 'Type 2+ letters'}
+          {searching
+            ? 'Searching...'
+            : debouncedQuery
+              ? `${results.length} found`
+              : 'Type 2+ letters'}
         </div>
         {query ? (
           <button
@@ -1148,15 +1172,17 @@ function WatchlistAddArtistSearch({
           {resultsQuery.isError ? (
             <div className="watchlist-add-empty">Could not search {providerLabel(provider)}.</div>
           ) : results.length > 0 ? (
-            results.slice(0, 5).map((result) => (
-              <WatchlistAddResult
-                key={`${provider}-${result.id}`}
-                result={result}
-                provider={provider}
-                adding={adding}
-                onAddArtist={onAddArtist}
-              />
-            ))
+            results
+              .slice(0, 5)
+              .map((result) => (
+                <WatchlistAddResult
+                  key={`${provider}-${result.id}`}
+                  result={result}
+                  provider={provider}
+                  adding={adding}
+                  onAddArtist={onAddArtist}
+                />
+              ))
           ) : searching ? (
             <div className="watchlist-add-empty">Searching {providerLabel(provider)}...</div>
           ) : (
@@ -1291,7 +1317,10 @@ function WatchlistArtistInspector({
   return (
     <aside className="watchlist-inspector">
       <div className="watchlist-inspector-hero">
-        <ArtistImage url={artist.image_url || payload?.artist?.image_url || null} name={artist.artist_name} />
+        <ArtistImage
+          url={artist.image_url || payload?.artist?.image_url || null}
+          name={artist.artist_name}
+        />
         <div>
           <span className="watchlist-panel-kicker">Selected artist</span>
           <h3 title={artist.artist_name} data-artist-name={artist.artist_name}>
@@ -1302,10 +1331,18 @@ function WatchlistArtistInspector({
       </div>
 
       <div className="watchlist-inspector-actions">
-        <button type="button" className="wl-chip wl-chip--cta" onClick={() => onOpenConfig(artistId)}>
+        <button
+          type="button"
+          className="wl-chip wl-chip--cta"
+          onClick={() => onOpenConfig(artistId)}
+        >
           Edit Rules
         </button>
-        <button type="button" className="wl-chip wl-chip--slate" onClick={() => onOpenDetail(artistId)}>
+        <button
+          type="button"
+          className="wl-chip wl-chip--slate"
+          onClick={() => onOpenDetail(artistId)}
+        >
           Full Profile
         </button>
         <button type="button" className="wl-chip wl-chip--red" onClick={() => onRemove(artistId)}>
@@ -1460,11 +1497,7 @@ function WatchlistEmptyState({
       </div>
       <h3>Your watchlist is empty</h3>
       <p>Use Search to find an artist, then add them to your watchlist from the artist page.</p>
-      <WatchlistAddArtistSearch
-        profileId={profileId}
-        onAddArtist={onAddArtist}
-        adding={adding}
-      />
+      <WatchlistAddArtistSearch profileId={profileId} onAddArtist={onAddArtist} adding={adding} />
       {/* Search is still a legacy page, so this goes out as an href and lands
           on the splat route, which hands off to the vanilla renderer. */}
       <button

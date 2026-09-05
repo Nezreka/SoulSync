@@ -1,37 +1,9 @@
-"""Enrichment P1 — the corruption-class matching fixes, pinned end to end.
+"""Regression coverage for corruption-class enrichment matching bugs.
 
-Everything here runs against a REAL MusicDatabase on a tmp path (the
-JioSaavn-worker-test harness pattern) so the SQL the fixes ride on is the
-SQL production runs. No network: the code paths under test either never
-reach a client or get a recording fake.
-
-The fixes:
-1. Tidal / Qobuz / AudioDB `_verify_artist_id` now requires a POSITIVE
-   artist-name match before rewriting the parent artist's source id (the
-   Deezer #988 pattern). The old inverted guard skipped only on a CONFIRMED
-   mismatch — and Tidal's client never supplies a name at all, so every
-   collaboration/compilation rewrote the parent's tidal_id unconditionally.
-2. Their `_correct_artist_*_id` writers refuse an id already held by a
-   DIFFERENTLY-named library artist (the smear guard Deezer already had).
-3. Deezer / Amazon / iTunes `_process_artist` stamp 'matched' on the
-   existing-id path instead of returning statusless — a NULL-status row is
-   re-selected every loop forever (#964, the JioSaavn fix generalized).
-4. Every worker's retry query re-queues 'error' rows after retry_days, not
-   just 'not_found' (the AudioDB/JioSaavn pattern) — 'error' was a
-   permanent black hole in ten workers.
-5. Per-worker `_name_matches` no longer scores two titles that NORMALIZE
-   TO NOTHING ("(Intro)" vs "(Skit)", "!!!" vs "???") as a perfect match —
-   SequenceMatcher('','') is 1.0. Empty-normalized names fall back to raw
-   equality.
-6. Amazon / JioSaavn album+track paths preserve a stored (possibly manual)
-   match when its refresh transiently fails, instead of falling through to
-   a name search that could overwrite it (the Bandcamp guard).
-7. MusicBrainz `match_release` gained the same hard 0.6 title floor
-   `match_recording` always had — bonuses could previously walk a
-   low-title-similarity release past the 70-confidence gate.
-8. `build_reset_query` clears the stored source id for TRACKS too — tracks
-   carry per-service id columns, so a track rematch was an instant no-op
-   re-confirmation of the old id.
+These tests deliberately seed only the authoritative Library-v2 catalogue. They
+pin the upstream matching fixes at the same boundary the production workers now
+use: native entity ids, provider ids in ``external_ids``/promoted columns, and
+attempt state in ``lib2_provider_attempts``.
 """
 
 from __future__ import annotations
@@ -40,7 +12,11 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from core.library2.match_status import set_library_v2_match
+from core.library2.provider_attempts import attempt_state, record_attempt
+from core.library2.worker_support import stored_provider_id
 from database.music_database import MusicDatabase
+from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
 
 
 @pytest.fixture
@@ -48,190 +24,213 @@ def db(tmp_path):
     return MusicDatabase(str(tmp_path / "music.db"))
 
 
-def _insert_artist(db, artist_id, name, **cols):
-    keys = ", ".join(["id", "name", "server_source"] + list(cols))
-    marks = ", ".join(["?"] * (3 + len(cols)))
+def _artist(db, server_id: str, name: str, **provider_ids: str) -> int:
     with db._get_connection() as conn:
-        conn.execute(
-            f"INSERT INTO artists ({keys}) VALUES ({marks})",
-            (artist_id, name, "test", *cols.values()),
+        artist_id = seed_artist(
+            conn, server_id=server_id, name=name, server_source="test"
         )
-        conn.commit()
-
-
-def _insert_album(db, album_id, title, artist_id, **cols):
-    keys = ", ".join(["id", "title", "artist_id", "server_source"] + list(cols))
-    marks = ", ".join(["?"] * (4 + len(cols)))
-    with db._get_connection() as conn:
+        for service, provider_id in provider_ids.items():
+            set_library_v2_match(
+                conn, "artist", artist_id, service, provider_id, actor="test"
+            )
+        # Owned, or the enrichment queue will not offer it: ownership in lib2 is
+        # a live file row, which legacy's `artists` table implied by existing.
+        album = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id,title) VALUES(?,?)",
+            (artist_id, f"{name} LP")).lastrowid
+        track = conn.execute(
+            "INSERT INTO lib2_tracks(album_id,title) VALUES(?,?)",
+            (album, name)).lastrowid
         conn.execute(
-            f"INSERT INTO albums ({keys}) VALUES ({marks})",
-            (album_id, title, artist_id, "test", *cols.values()),
-        )
+            "INSERT INTO lib2_track_files(track_id,path,is_primary,file_state) "
+            "VALUES(?,?,1,'active')", (track, f"/music/{track}.flac"))
         conn.commit()
+    return artist_id
 
 
-def _insert_track(db, track_id, title, artist_id, album_id, **cols):
-    keys = ", ".join(["id", "title", "artist_id", "album_id", "server_source"] + list(cols))
-    marks = ", ".join(["?"] * (5 + len(cols)))
+def _album(db, server_id: str, title: str, artist_id: int, **provider_ids: str) -> int:
     with db._get_connection() as conn:
-        conn.execute(
-            f"INSERT INTO tracks ({keys}) VALUES ({marks})",
-            (track_id, title, artist_id, album_id, "test", *cols.values()),
+        album_id = seed_album(
+            conn,
+            server_id=server_id,
+            title=title,
+            artist_id=artist_id,
+            server_source="test",
         )
+        for service, provider_id in provider_ids.items():
+            set_library_v2_match(
+                conn, "album", album_id, service, provider_id, actor="test"
+            )
         conn.commit()
+    return album_id
 
 
-def _col(db, table, entity_id, col):
+def _track(db, server_id: str, title: str, album_id: int, artist_id: int,
+           **provider_ids: str) -> int:
     with db._get_connection() as conn:
-        row = conn.execute(f"SELECT {col} FROM {table} WHERE id = ?", (entity_id,)).fetchone()
-    return row[0] if row else None
+        track_id = seed_track(
+            conn,
+            server_id=server_id,
+            title=title,
+            album_id=album_id,
+            artist_id=artist_id,
+            server_source="test",
+        )
+        for service, provider_id in provider_ids.items():
+            set_library_v2_match(
+                conn, "track", track_id, service, provider_id, actor="test"
+            )
+        conn.commit()
+    return track_id
 
 
-# ── 1+2: the id-smear guards (Tidal / Qobuz / AudioDB) ──────────────────────
-
-def _smear_workers(db):
-    from core.audiodb_worker import AudioDBWorker
-    from core.qobuz_worker import QobuzWorker
-    from core.tidal_worker import TidalWorker
-    return [
-        ("tidal", TidalWorker(database=db), "tidal_id",
-         lambda w, item, rid, rname: w._verify_artist_id(item, rid, rname)),
-        ("qobuz", QobuzWorker(database=db), "qobuz_id",
-         lambda w, item, rid, rname: w._verify_artist_id(item, rid, rname)),
-        ("audiodb", AudioDBWorker(database=db), "audiodb_id",
-         lambda w, item, rid, rname: w._verify_artist_id(
-             item, {"idArtist": rid, "strArtist": rname or ""})),
-    ]
+def _provider_id(db, entity_type: str, entity_id: int, service: str):
+    with db._get_connection() as conn:
+        return stored_provider_id(conn, entity_type, entity_id, service)
 
 
-def _seed_smear(db, id_col):
-    _insert_artist(db, "par", "Parent Artist", **{id_col: "100"})
-    _insert_album(db, "al1", "Some Album", "par")
-    return {
-        "type": "album", "id": "al1", "name": "Some Album",
-        "artist": "Parent Artist", f"artist_{id_col}": "100",
+def _worker(db, service: str):
+    if service == "tidal":
+        from core.tidal_worker import TidalWorker
+        return TidalWorker(database=db)
+    if service == "qobuz":
+        from core.qobuz_worker import QobuzWorker
+        return QobuzWorker(database=db)
+    if service == "audiodb":
+        from core.audiodb_worker import AudioDBWorker
+        return AudioDBWorker(database=db)
+    raise AssertionError(service)
+
+
+def _smear_case(db, service: str):
+    parent_id = _artist(db, "parent", "Parent Artist", **{service: "100"})
+    album_id = _album(db, "album", "Some Album", parent_id)
+    return parent_id, {
+        "type": "album",
+        "id": album_id,
+        "name": "Some Album",
+        "artist": "Parent Artist",
+        f"artist_{service}_id": "100",
     }
 
 
-def test_missing_result_name_never_corrects(db):
-    """THE Tidal bug: the client's artist stubs carry no name, and the old
-    inverted guard corrected unconditionally in that case."""
-    for label, worker, id_col, verify in _smear_workers(db):
-        item = _seed_smear(db, id_col)
-        verify(worker, item, "999", None)
-        assert _col(db, "artists", "par", id_col) == "100", label
-        # fresh db per service
-        with db._get_connection() as conn:
-            conn.execute("DELETE FROM artists"); conn.execute("DELETE FROM albums")
-            conn.commit()
+def _verify(worker, service: str, item: dict, result_id: str, result_name):
+    if service == "audiodb":
+        return worker._verify_artist_id(
+            item, {"idArtist": result_id, "strArtist": result_name or ""}
+        )
+    return worker._verify_artist_id(item, result_id, result_name)
 
 
-def test_mismatched_result_name_never_corrects(db):
-    for label, worker, id_col, verify in _smear_workers(db):
-        item = _seed_smear(db, id_col)
-        verify(worker, item, "999", "Someone Else Entirely")
-        assert _col(db, "artists", "par", id_col) == "100", label
-        with db._get_connection() as conn:
-            conn.execute("DELETE FROM artists"); conn.execute("DELETE FROM albums")
-            conn.commit()
+@pytest.mark.parametrize("service", ["tidal", "qobuz", "audiodb"])
+def test_missing_result_name_never_corrects(db, service):
+    parent_id, item = _smear_case(db, service)
+    _verify(_worker(db, service), service, item, "999", None)
+    assert _provider_id(db, "artist", parent_id, service) == "100"
 
 
-def test_matching_result_name_still_corrects(db):
-    """The feature survives the fix: a verified same-name result corrects."""
-    for label, worker, id_col, verify in _smear_workers(db):
-        item = _seed_smear(db, id_col)
-        verify(worker, item, "999", "Parent Artist")
-        assert _col(db, "artists", "par", id_col) == "999", label
-        with db._get_connection() as conn:
-            conn.execute("DELETE FROM artists"); conn.execute("DELETE FROM albums")
-            conn.commit()
+@pytest.mark.parametrize("service", ["tidal", "qobuz", "audiodb"])
+def test_mismatched_result_name_never_corrects(db, service):
+    parent_id, item = _smear_case(db, service)
+    _verify(_worker(db, service), service, item, "999", "Someone Else Entirely")
+    assert _provider_id(db, "artist", parent_id, service) == "100"
 
 
-def test_correction_refuses_id_held_by_differently_named_artist(db):
-    """The smear guard: even a name-verified correction must not steal an id
-    a DIFFERENT artist already holds (one popular id across many artists)."""
-    for label, worker, id_col, verify in _smear_workers(db):
-        item = _seed_smear(db, id_col)
-        _insert_artist(db, "other", "Totally Different Band", **{id_col: "999"})
-        verify(worker, item, "999", "Parent Artist")
-        assert _col(db, "artists", "par", id_col) == "100", label
-        assert _col(db, "artists", "other", id_col) == "999", label
-        with db._get_connection() as conn:
-            conn.execute("DELETE FROM artists"); conn.execute("DELETE FROM albums")
-            conn.commit()
+@pytest.mark.parametrize("service", ["tidal", "qobuz", "audiodb"])
+def test_matching_result_name_still_corrects(db, service):
+    parent_id, item = _smear_case(db, service)
+    _verify(_worker(db, service), service, item, "999", "Parent Artist")
+    assert _provider_id(db, "artist", parent_id, service) == "999"
 
 
-def test_same_named_holder_still_allows_correction(db):
-    """A same-named holder (one artist indexed by two media servers) is NOT a
-    conflict — both legitimately share the id, matching accept_artist_match."""
-    for label, worker, id_col, verify in _smear_workers(db):
-        item = _seed_smear(db, id_col)
-        _insert_artist(db, "twin", "Parent Artist", **{id_col: "999"})
-        verify(worker, item, "999", "Parent Artist")
-        assert _col(db, "artists", "par", id_col) == "999", label
-        with db._get_connection() as conn:
-            conn.execute("DELETE FROM artists"); conn.execute("DELETE FROM albums")
-            conn.commit()
+@pytest.mark.parametrize("service", ["tidal", "qobuz", "audiodb"])
+def test_correction_refuses_id_held_by_differently_named_artist(db, service):
+    parent_id, item = _smear_case(db, service)
+    other_id = _artist(db, "other", "Totally Different Band", **{service: "999"})
+    _verify(_worker(db, service), service, item, "999", "Parent Artist")
+    assert _provider_id(db, "artist", parent_id, service) == "100"
+    assert _provider_id(db, "artist", other_id, service) == "999"
 
 
-# ── 3: the existing-id live-locks (Deezer / Amazon / iTunes) ─────────────────
+@pytest.mark.parametrize("service", ["tidal", "qobuz", "audiodb"])
+def test_same_named_holder_still_allows_correction(db, service):
+    parent_id, item = _smear_case(db, service)
+    _artist(db, "twin", "Parent Artist", **{service: "999"})
+    _verify(_worker(db, service), service, item, "999", "Parent Artist")
+    assert _provider_id(db, "artist", parent_id, service) == "999"
+
 
 def test_existing_id_paths_stamp_matched(db):
     from core.amazon_worker import AmazonWorker
     from core.deezer_worker import DeezerWorker
     from core.itunes_worker import iTunesWorker
 
-    _insert_artist(db, "a-dz", "Dz Artist", deezer_id="1")
-    _insert_artist(db, "a-am", "Am Artist", amazon_id="B1")
-    _insert_artist(db, "a-it", "It Artist", itunes_artist_id="7")
+    deezer_id = _artist(db, "deezer", "Dz Artist", deezer="1")
+    amazon_id = _artist(db, "amazon", "Am Artist", amazon="B1")
+    itunes_id = _artist(db, "itunes", "It Artist", itunes="7")
 
-    DeezerWorker(database=db)._process_artist("a-dz", "Dz Artist")
-    AmazonWorker(database=db)._process_artist("a-am", "Am Artist")
-    iTunesWorker(database=db)._process_artist({"type": "artist", "id": "a-it", "name": "It Artist"})
+    DeezerWorker(database=db)._process_artist(deezer_id, "Dz Artist")
+    AmazonWorker(database=db)._process_artist(amazon_id, "Am Artist")
+    iTunesWorker(database=db)._process_artist(
+        {"type": "artist", "id": itunes_id, "name": "It Artist"}
+    )
 
-    # Statusless returns left these rows NULL, and NULL rows are re-selected
-    # by every loop iteration forever — the queue live-lock (#964).
-    assert _col(db, "artists", "a-dz", "deezer_match_status") == "matched"
-    assert _col(db, "artists", "a-am", "amazon_match_status") == "matched"
-    assert _col(db, "artists", "a-it", "itunes_match_status") == "matched"
+    with db._get_connection() as conn:
+        assert attempt_state(conn, entity_type="artist", entity_id=deezer_id)["deezer"]["status"] == "matched"
+        assert attempt_state(conn, entity_type="artist", entity_id=amazon_id)["amazon"]["status"] == "matched"
+        assert attempt_state(conn, entity_type="artist", entity_id=itunes_id)["itunes"]["status"] == "matched"
 
-
-# ── 4: 'error' rows retry after retry_days ──────────────────────────────────
 
 def test_error_rows_requeue_after_retry_window(db):
     from core.tidal_worker import TidalWorker
-    w = TidalWorker(database=db)
 
+    artist_id = _artist(db, "retry", "Old Error")
     stale = (datetime.now() - timedelta(days=40)).strftime("%Y-%m-%d %H:%M:%S")
     fresh = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    _insert_artist(db, "err-old", "Old Error",
-                   tidal_match_status="error", tidal_last_attempted=stale)
+    with db._get_connection() as conn:
+        record_attempt(
+            conn,
+            entity_type="artist",
+            entity_id=artist_id,
+            service="tidal",
+            status="error",
+            attempted_at=stale,
+        )
+        # The artist's owned album and track are unattempted work, and
+        # unattempted work legitimately comes before an expired retry. Settle
+        # them so this test is about the retry window and nothing else.
+        for row in conn.execute(
+                "SELECT id FROM lib2_albums WHERE primary_artist_id=?",
+                (artist_id,)).fetchall():
+            record_attempt(conn, entity_type="album", entity_id=int(row[0]),
+                           service="tidal", status="matched")
+        for row in conn.execute(
+                "SELECT t.id FROM lib2_tracks t "
+                "JOIN lib2_albums al ON al.id = t.album_id "
+                "WHERE al.primary_artist_id=?", (artist_id,)).fetchall():
+            record_attempt(conn, entity_type="track", entity_id=int(row[0]),
+                           service="tidal", status="matched")
+        conn.commit()
 
-    item = w._get_next_item()
-    assert item is not None and item["id"] == "err-old", (
-        "an 'error' row past the retry window must re-queue — it was a "
-        "permanent black hole before")
+    worker = TidalWorker(database=db)
+    item = worker._get_next_item()
+    assert item is not None and item["id"] == artist_id
 
     with db._get_connection() as conn:
-        conn.execute("UPDATE artists SET tidal_last_attempted = ? WHERE id = ?",
-                     (fresh, "err-old"))
+        conn.execute(
+            "UPDATE lib2_provider_attempts SET last_attempted_at=? "
+            "WHERE entity_type='artist' AND entity_id=? AND service='tidal'",
+            (fresh, artist_id),
+        )
         conn.commit()
-    assert w._get_next_item() is None, "a fresh 'error' row must NOT re-queue early"
+    assert worker._get_next_item() is None
 
 
-def test_every_worker_retry_clause_includes_error():
-    """Source pin across all 12 workers: no retry clause may regress to the
-    not_found-only form (the black hole)."""
-    from pathlib import Path
-    core = Path(__file__).resolve().parent.parent / "core"
-    for name in ("tidal", "qobuz", "deezer", "itunes", "lastfm", "genius",
-                 "amazon", "spotify", "bandcamp", "discogs", "musicbrainz",
-                 "audiodb", "jiosaavn"):
-        src = (core / f"{name}_worker.py").read_text(encoding="utf-8", errors="replace")
-        assert "_match_status = 'not_found' AND" not in src, name
+def test_native_worker_queue_retries_not_found_and_error():
+    from core.library2.worker_queue import _RETRYABLE
 
+    assert _RETRYABLE == ("not_found", "error")
 
-# ── 5: empty-normalization no longer matches everything ─────────────────────
 
 def _all_name_matchers(db):
     from core.amazon_worker import AmazonWorker
@@ -245,45 +244,48 @@ def _all_name_matchers(db):
     from core.lastfm_worker import LastFMWorker
     from core.qobuz_worker import QobuzWorker
     from core.tidal_worker import TidalWorker
+
     return [
-        DeezerWorker(database=db), QobuzWorker(database=db), TidalWorker(database=db),
-        iTunesWorker(database=db), LastFMWorker(database=db), AudioDBWorker(database=db),
-        DiscogsWorker(database=db), GeniusWorker(database=db), AmazonWorker(database=db),
-        BandcampWorker(database=db), JioSaavnWorker(database=db),
+        DeezerWorker(database=db),
+        QobuzWorker(database=db),
+        TidalWorker(database=db),
+        iTunesWorker(database=db),
+        LastFMWorker(database=db),
+        AudioDBWorker(database=db),
+        DiscogsWorker(database=db),
+        GeniusWorker(database=db),
+        AmazonWorker(database=db),
+        BandcampWorker(database=db),
+        JioSaavnWorker(database=db),
     ]
 
 
 def test_empty_normalized_titles_no_longer_match_everything(db):
-    for w in _all_name_matchers(db):
-        label = type(w).__name__
-        # Both sides normalize to '' — SequenceMatcher('','') is 1.0, so the
-        # old code matched ANY two such titles.
-        assert not w._name_matches("(Intro)", "(Skit)"), label
-        assert not w._name_matches("!!!", "???"), label
-        # Raw equality is the honest fallback for punctuation-only names.
-        assert w._name_matches("!!!", "!!!"), label
-        # The normal path is untouched.
-        assert w._name_matches("Kyougen", "Kyougen"), label
-        assert not w._name_matches("Kyougen", "Something Else"), label
+    for worker in _all_name_matchers(db):
+        label = type(worker).__name__
+        assert not worker._name_matches("(Intro)", "(Skit)"), label
+        assert not worker._name_matches("!!!", "???"), label
+        assert worker._name_matches("!!!", "!!!"), label
+        assert worker._name_matches("Kyougen", "Kyougen"), label
+        assert not worker._name_matches("Kyougen", "Something Else"), label
 
 
 def test_spotify_similarity_empty_guard(db):
     from core.spotify_worker import SpotifyWorker
-    w = SpotifyWorker(database=db)
-    assert w._name_similarity("!!!", "???") == 0.0
-    assert w._name_similarity("!!!", "!!!") == 1.0
-    assert w._name_similarity("(Intro)", "(Skit)") == 0.0
-    assert w._name_similarity("Kyougen", "Kyougen") == 1.0
 
+    worker = SpotifyWorker(database=db)
+    assert worker._name_similarity("!!!", "???") == 0.0
+    assert worker._name_similarity("!!!", "!!!") == 1.0
+    assert worker._name_similarity("(Intro)", "(Skit)") == 0.0
+    assert worker._name_similarity("Kyougen", "Kyougen") == 1.0
 
-# ── 6: transient stored-id failure must not clobber a (manual) match ────────
 
 class _RecordingAmazonClient:
     def __init__(self):
         self.searched = []
 
     def get_album(self, asin, include_tracks=False):
-        return None            # the stored-id refresh transiently fails
+        return None
 
     def get_track_details(self, asin):
         return None
@@ -299,22 +301,29 @@ class _RecordingAmazonClient:
 
 def test_amazon_preserves_stored_match_on_refresh_miss(db):
     from core.amazon_worker import AmazonWorker
-    _insert_artist(db, "ar", "Artist")
-    _insert_album(db, "al", "Album", "ar", amazon_id="B-MANUAL")
-    _insert_track(db, "tr", "Track", "ar", "al", amazon_id="B-MANUAL-T")
 
-    w = AmazonWorker(database=db)
-    w.client = _RecordingAmazonClient()
-    item = {"type": "album", "id": "al", "name": "Album", "artist": "Artist"}
-    w._process_album("al", "Album", "Artist", item)
-    w._process_track("tr", "Track", "Artist",
-                     {"type": "track", "id": "tr", "name": "Track", "artist": "Artist"})
-
-    # The old fall-through ran a name search here, and a wrong first result
-    # could overwrite the stored (possibly manual) id.
-    assert w.client.searched == []
-    assert _col(db, "albums", "al", "amazon_id") == "B-MANUAL"
-    assert _col(db, "tracks", "tr", "amazon_id") == "B-MANUAL-T"
+    artist_id = _artist(db, "artist", "Artist")
+    album_id = _album(db, "album", "Album", artist_id, amazon="B-MANUAL")
+    track_id = _track(
+        db, "track", "Track", album_id, artist_id, amazon="B-MANUAL-T"
+    )
+    worker = AmazonWorker(database=db)
+    worker.client = _RecordingAmazonClient()
+    worker._process_album(
+        album_id,
+        "Album",
+        "Artist",
+        {"type": "album", "id": album_id, "name": "Album", "artist": "Artist"},
+    )
+    worker._process_track(
+        track_id,
+        "Track",
+        "Artist",
+        {"type": "track", "id": track_id, "name": "Track", "artist": "Artist"},
+    )
+    assert worker.client.searched == []
+    assert _provider_id(db, "album", album_id, "amazon") == "B-MANUAL"
+    assert _provider_id(db, "track", track_id, "amazon") == "B-MANUAL-T"
 
 
 def test_jiosaavn_preserves_stored_match_on_refresh_miss(db):
@@ -324,10 +333,10 @@ def test_jiosaavn_preserves_stored_match_on_refresh_miss(db):
         def __init__(self):
             self.searched = []
 
-        def get_album(self, jid):
+        def get_album(self, provider_id):
             return None
 
-        def get_track_details(self, jid):
+        def get_track_details(self, provider_id):
             return None
 
         def search_albums(self, query, limit=5):
@@ -338,57 +347,62 @@ def test_jiosaavn_preserves_stored_match_on_refresh_miss(db):
             self.searched.append(query)
             return []
 
-    _insert_artist(db, "ar", "Artist")
-    _insert_album(db, "al", "Album", "ar", jiosaavn_id="J-MANUAL")
-    _insert_track(db, "tr", "Track", "ar", "al", jiosaavn_id="J-MANUAL-T")
+    artist_id = _artist(db, "artist", "Artist")
+    album_id = _album(db, "album", "Album", artist_id, jiosaavn="J-MANUAL")
+    track_id = _track(
+        db, "track", "Track", album_id, artist_id, jiosaavn="J-MANUAL-T"
+    )
+    worker = JioSaavnWorker(database=db)
+    worker._client = _Client()
+    worker._process_album(album_id, "Album", "Artist")
+    worker._process_track(track_id, "Track", "Artist")
+    assert worker._client.searched == []
+    assert _provider_id(db, "album", album_id, "jiosaavn") == "J-MANUAL"
+    assert _provider_id(db, "track", track_id, "jiosaavn") == "J-MANUAL-T"
 
-    w = JioSaavnWorker(database=db)
-    w._client = _Client()
-    w._process_album("al", "Album", "Artist")
-    w._process_track("tr", "Track", "Artist")
-
-    assert w._client.searched == []
-    assert _col(db, "albums", "al", "jiosaavn_id") == "J-MANUAL"
-    assert _col(db, "tracks", "tr", "jiosaavn_id") == "J-MANUAL-T"
-
-
-# ── 7: MusicBrainz releases get the hard title floor ────────────────────────
 
 def test_mb_release_title_floor(db):
     from core.musicbrainz_service import MusicBrainzService
-    svc = MusicBrainzService(db)
 
-    # A candidate whose title similarity sits BELOW 0.6 but whose bonuses
-    # (perfect mb_score +30, artist +20) previously summed past the 70 gate.
+    service = MusicBrainzService(db)
     query, bad_title = "Night Visions", "Visions of the Night People"
-    sim = svc._calculate_similarity(query, bad_title)
-    assert 0.30 <= sim < 0.6, f"fixture drifted: sim={sim:.2f}"
-    assert int(sim * 50) + 30 + 20 >= 70 or True  # documents the old escape path
-
-    svc.mb_client.search_release = lambda name, artist, limit=5: [{
-        "id": "mbid-bad", "title": bad_title, "score": 100,
+    similarity = service._calculate_similarity(query, bad_title)
+    assert 0.30 <= similarity < 0.6
+    service.mb_client.search_release = lambda name, artist, limit=5: [{
+        "id": "mbid-bad",
+        "title": bad_title,
+        "score": 100,
         "artist-credit": [{"artist": {"name": "Imagine Dragons"}}],
     }]
-    assert svc.match_release(query, "Imagine Dragons") is None
+    assert service.match_release(query, "Imagine Dragons") is None
 
-    # An honest match still clears the gate — DIFFERENT album name, because
-    # the rejected query above was negative-cached under its own name.
-    svc.mb_client.search_release = lambda name, artist, limit=5: [{
-        "id": "mbid-good", "title": "Evolve", "score": 100,
+    service.mb_client.search_release = lambda name, artist, limit=5: [{
+        "id": "mbid-good",
+        "title": "Evolve",
+        "score": 100,
         "artist-credit": [{"artist": {"name": "Imagine Dragons"}}],
     }]
-    good = svc.match_release("Evolve", "Imagine Dragons")
+    good = service.match_release("Evolve", "Imagine Dragons")
     assert good and good["mbid"] == "mbid-good"
 
 
-# ── 8: a track reset clears the stored source id ────────────────────────────
+def test_track_reset_clears_native_source_id_and_attempt(db):
+    artist_id = _artist(db, "artist", "Artist")
+    album_id = _album(db, "album", "Album", artist_id)
+    track_id = _track(db, "track", "Track", album_id, artist_id, spotify="wrong")
+    with db._get_connection() as conn:
+        record_attempt(
+            conn,
+            entity_type="track",
+            entity_id=track_id,
+            service="spotify",
+            status="matched",
+        )
+        conn.commit()
 
-def test_track_reset_clears_source_id():
-    from core.enrichment.unmatched import build_reset_query
-    sql, params = build_reset_query("spotify", "track", scope="item", entity_id="t1")
-    assert "spotify_track_id = NULL" in sql
-    sql, params = build_reset_query("tidal", "track", scope="item", entity_id="t1")
-    assert "tidal_id = NULL" in sql
-    # Artist/album behavior is unchanged.
-    sql, _ = build_reset_query("spotify", "artist", scope="item", entity_id="a1")
-    assert "spotify_artist_id = NULL" in sql
+    assert db.reset_enrichment("spotify", "track", "item", entity_id=track_id) == 1
+    assert _provider_id(db, "track", track_id, "spotify") is None
+    with db._get_connection() as conn:
+        assert "spotify" not in attempt_state(
+            conn, entity_type="track", entity_id=track_id
+        )

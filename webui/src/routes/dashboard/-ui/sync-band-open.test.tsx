@@ -61,8 +61,18 @@ describe('clicking a sync-band row', () => {
     const openPlaylist = vi.fn();
     window.openMirroredPlaylistModal = openPlaylist;
 
-    const { container } = render(<Row row={row()} busy={false} fading={false} live={null} onRun={vi.fn()}
-        onSyncAgain={vi.fn()} onListen={vi.fn()} onRemove={vi.fn()} />);
+    const { container } = render(
+      <Row
+        row={row()}
+        busy={false}
+        fading={false}
+        live={null}
+        onRun={vi.fn()}
+        onSyncAgain={vi.fn()}
+        onListen={vi.fn()}
+        onRemove={vi.fn()}
+      />,
+    );
     const el = container.querySelector('.syncband-row')!;
     expect(el.getAttribute('role')).toBe('button');
 
@@ -77,8 +87,16 @@ describe('clicking a sync-band row', () => {
     window.openMirroredPlaylistModal = openPlaylist;
 
     const { container } = render(
-      <Row row={row({ last: { id: 65 } as SyncBandRow['last'] })} busy={false} fading={false}
-        live={null} onRun={vi.fn()} onSyncAgain={vi.fn()} onListen={vi.fn()} onRemove={vi.fn()} />,
+      <Row
+        row={row({ last: { id: 65 } as SyncBandRow['last'] })}
+        busy={false}
+        fading={false}
+        live={null}
+        onRun={vi.fn()}
+        onSyncAgain={vi.fn()}
+        onListen={vi.fn()}
+        onRemove={vi.fn()}
+      />,
     );
     fireEvent.click(container.querySelector('.syncband-row')!);
 
@@ -88,8 +106,16 @@ describe('clicking a sync-band row', () => {
 
   it('is inert for a manual row with neither a run nor a playlist', () => {
     const { container } = render(
-      <Row row={row({ kind: 'manual', schedule: null })} busy={false} fading={false}
-        live={null} onRun={vi.fn()} onSyncAgain={vi.fn()} onListen={vi.fn()} onRemove={vi.fn()} />,
+      <Row
+        row={row({ kind: 'manual', schedule: null })}
+        busy={false}
+        fading={false}
+        live={null}
+        onRun={vi.fn()}
+        onSyncAgain={vi.fn()}
+        onListen={vi.fn()}
+        onRemove={vi.fn()}
+      />,
     );
     expect(container.querySelector('.syncband-row')!.getAttribute('role')).toBeNull();
   });

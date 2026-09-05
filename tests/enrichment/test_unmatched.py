@@ -51,8 +51,8 @@ def test_status_predicates():
     nf, _ = build_count_query('spotify', 'artist', 'not_found')
     pend, _ = build_count_query('spotify', 'artist', 'pending')
     un, _ = build_count_query('spotify', 'artist', 'unmatched')
-    assert "artists.spotify_match_status = 'not_found'" in nf
-    assert "artists.spotify_match_status IS NULL" in pend
+    assert "pa.status = 'not_found'" in nf
+    assert "pa.status IS NULL" in pend
     assert "IS NULL OR" in un and "= 'not_found'" in un
 
 
@@ -60,9 +60,9 @@ def test_track_query_qualifies_status_to_avoid_join_ambiguity():
     # tracks LEFT JOIN albums for artwork — both carry spotify_match_status,
     # so the predicate must be qualified or SQLite errors "ambiguous column".
     sql, _ = build_unmatched_query('spotify', 'track', 'not_found')
-    assert 'LEFT JOIN albums al' in sql
-    assert 'tracks.spotify_match_status' in sql
-    assert 'al.thumb_url AS image_url' in sql
+    assert 'LEFT JOIN lib2_albums al' in sql
+    assert 'pa.status' in sql
+    assert 'al.image_url AS image_url' in sql
 
 
 def test_search_adds_like_param():
@@ -87,14 +87,18 @@ def _seed(db: MusicDatabase):
     conn = db._get_connection()
     cur = conn.cursor()
     # 3 artists: matched / not_found / pending(NULL)
-    cur.execute("INSERT INTO artists (id, name, spotify_match_status) VALUES ('a1','Matched Artist','matched')")
-    cur.execute("INSERT INTO artists (id, name, spotify_match_status) VALUES ('a2','Failed Dragons','not_found')")
-    cur.execute("INSERT INTO artists (id, name) VALUES ('a3','Pending Person')")  # NULL status
+    cur.execute("INSERT INTO lib2_artists (id, name) VALUES (1,'Matched Artist')")
+    cur.execute("INSERT INTO lib2_artists (id, name, spotify_id) VALUES (2,'Failed Dragons','wrong-id')")
+    cur.execute("INSERT INTO lib2_artists (id, name) VALUES (3,'Pending Person')")
     # album + track to exercise the join-for-artwork path
-    cur.execute("INSERT INTO albums (id, artist_id, title, thumb_url, spotify_match_status) "
-                "VALUES ('al1','a2','Evolve','http://img/evolve.jpg','not_found')")
-    cur.execute("INSERT INTO tracks (id, album_id, artist_id, title, spotify_match_status) "
-                "VALUES ('t1','al1','a2','Believer','not_found')")
+    cur.execute("INSERT INTO lib2_albums (id, primary_artist_id, title, image_url) "
+                "VALUES (1,2,'Evolve','http://img/evolve.jpg')")
+    cur.execute("INSERT INTO lib2_tracks (id, album_id, title) VALUES (1,1,'Believer')")
+    cur.executemany(
+        "INSERT INTO lib2_provider_attempts(entity_type,entity_id,service,status) VALUES(?,?,?,?)",
+        [('artist', 1, 'spotify', 'matched'), ('artist', 2, 'spotify', 'not_found'),
+         ('album', 1, 'spotify', 'not_found'), ('track', 1, 'spotify', 'not_found')],
+    )
     conn.commit()
     conn.close()
 
@@ -180,53 +184,52 @@ def test_reset_builder_bad_scope():
         build_reset_query('spotify', 'artist', 'bogus', entity_id='x')
 
 
-def test_reset_builder_nulls_status_not_just_attempted():
-    sql, _ = build_reset_query('spotify', 'artist', 'failed')
-    assert 'spotify_match_status = NULL' in sql
-    assert 'spotify_last_attempted = NULL' in sql
-    assert "WHERE spotify_match_status = 'not_found'" in sql
+def test_reset_builder_selects_failed_attempts():
+    sql, params = build_reset_query('spotify', 'artist', 'failed')
+    assert 'lib2_provider_attempts' in sql
+    assert "pa.status='not_found'" in sql
+    assert params == ['artist', 'spotify']
 
 
-def test_reset_builder_also_clears_artist_source_id():
+def test_reset_builder_selects_native_artist():
     # #868: a re-match must forget the stored id so the worker actually
     # re-resolves (otherwise its existing-id short-circuit re-confirms the wrong
     # same-name artist).
-    for service, col in [('spotify', 'spotify_artist_id'), ('itunes', 'itunes_artist_id'),
-                         ('deezer', 'deezer_id'), ('musicbrainz', 'musicbrainz_id')]:
-        sql, _ = build_reset_query(service, 'artist', 'item', entity_id=5)
-        assert f'{col} = NULL' in sql, f'{service}: expected {col} cleared'
-        assert f'{service}_match_status = NULL' in sql
+    for service in ('spotify', 'itunes', 'deezer', 'musicbrainz'):
+        sql, params = build_reset_query(service, 'artist', 'item', entity_id=5)
+        assert sql == 'SELECT id FROM lib2_artists WHERE id = ?'
+        assert params == [5]
 
 
-def test_reset_builder_clears_track_id_too():
-    # The old pin here ("tracks have no source-id column") was wrong — tracks
-    # DO carry per-service id columns (core/source_ids), and leaving one in
-    # place made a track rematch an instant no-op re-confirmation of the old
-    # id (#868's track-shaped twin). Reset must forget it.
-    sql, _ = build_reset_query('spotify', 'track', 'item', entity_id=5)
-    assert 'spotify_match_status = NULL' in sql
-    assert 'spotify_track_id = NULL' in sql
+def test_reset_builder_selects_native_track():
+    # The builder only selects native ids. MusicDatabase.reset_enrichment owns
+    # clearing promoted ids, external_ids, provenance and the attempt ledger.
+    sql, params = build_reset_query('spotify', 'track', 'item', entity_id=5)
+    assert sql == 'SELECT id FROM lib2_tracks WHERE id = ?'
+    assert params == [5]
 
 
-def test_reset_builder_clears_bandcamp_url_and_id_on_album_and_track():
+def test_reset_builder_selects_bandcamp_album_and_track():
     # PR #968 review: reset must forget the Bandcamp match or the worker's
     # existing-url short-circuit re-confirms the old release. Bandcamp's
     # canonical handle (bandcamp_url) lives in a real column on BOTH albums and
     # tracks — unlike other sources, its track id must be cleared too — and the
     # supplementary bandcamp_id must also go so no stale id lingers.
     for entity in ('album', 'track'):
-        sql, _ = build_reset_query('bandcamp', entity, 'item', entity_id=5)
-        assert 'bandcamp_match_status = NULL' in sql
-        assert 'bandcamp_url = NULL' in sql, f'{entity}: bandcamp_url must be cleared'
-        assert 'bandcamp_id = NULL' in sql, f'{entity}: bandcamp_id must be cleared'
+        sql, params = build_reset_query('bandcamp', entity, 'item', entity_id=5)
+        assert sql == f'SELECT id FROM lib2_{entity}s WHERE id = ?'
+        assert params == [5]
 
 
 def test_reset_item_requeues_to_pending(db):
-    n = db.reset_enrichment('spotify', 'artist', 'item', entity_id='a2')  # was not_found
+    n = db.reset_enrichment('spotify', 'artist', 'item', entity_id=2)  # was not_found
     assert n == 1
     # not_found dropped by 1, pending gained 1
     bd = db.get_enrichment_breakdown('spotify', 'artist')
     assert bd == {'matched': 1, 'not_found': 0, 'pending': 2, 'total': 3}
+    conn = db._get_connection()
+    assert conn.execute("SELECT spotify_id FROM lib2_artists WHERE id=2").fetchone()[0] is None
+    conn.close()
 
 
 def test_reset_failed_requeues_all(db):
@@ -278,7 +281,7 @@ def test_route_breakdown(client):
 
 def test_route_retry_item(client):
     r = client.post('/api/enrichment/spotify/retry',
-                    json={'entity_type': 'artist', 'scope': 'item', 'entity_id': 'a2'})
+                    json={'entity_type': 'artist', 'scope': 'item', 'entity_id': 2})
     assert r.status_code == 200
     body = r.get_json()
     assert body['success'] is True and body['reset'] == 1
@@ -312,8 +315,10 @@ def test_bandcamp_supports_album_and_track_only():
 def test_bandcamp_breakdown_and_unmatched(db):
     conn = db._get_connection()
     cur = conn.cursor()
-    cur.execute("UPDATE albums SET bandcamp_match_status = 'matched' WHERE id = 'al1'")
-    cur.execute("UPDATE tracks SET bandcamp_match_status = 'not_found' WHERE id = 't1'")
+    cur.execute("INSERT INTO lib2_provider_attempts(entity_type,entity_id,service,status) "
+                "VALUES('album',1,'bandcamp','matched')")
+    cur.execute("INSERT INTO lib2_provider_attempts(entity_type,entity_id,service,status) "
+                "VALUES('track',1,'bandcamp','not_found')")
     conn.commit()
     conn.close()
 

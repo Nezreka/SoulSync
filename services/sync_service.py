@@ -595,6 +595,13 @@ class PlaylistSyncService:
                                 'timestamp': datetime.now().isoformat()
                             },
                             profile_id=getattr(self, '_active_profile_id', None) or 1,
+                            # SYNC-01: the chosen quality profile travels with
+                            # the source track and has to be handed on
+                            # explicitly. Without it the row persists the global
+                            # default, and no ordinary reconcile corrects it —
+                            # the wanted projection is already current, so the
+                            # mirror skips the row and the wrong profile drives
+                            # every later download decision for that track.
                             quality_profile_id=(
                                 original_track_data.get('quality_profile_id')
                                 if isinstance(original_track_data, dict)
@@ -741,7 +748,7 @@ class PlaylistSyncService:
                     sync needs (DB row for Jellyfin/Navidrome/SoulSync, Plex fetchItem)."""
                     if server_track_id is None:
                         return None
-                    dbt = cache_db.get_track_by_id(server_track_id)
+                    dbt = cache_db.get_track_by_server_id(server_track_id, active_server)
                     if not dbt:
                         return None
                     if server_type in ("jellyfin", "navidrome", "soulsync"):
