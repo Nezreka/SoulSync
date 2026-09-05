@@ -26,7 +26,7 @@ from utils.logging_config import get_logger
 logger = get_logger("personalized.daily_mixes")
 
 CURATED_KEY = "daily_mixes_v2"
-PAYLOAD_VERSION = 2
+PAYLOAD_VERSION = 3
 MAX_MIXES = 6
 MIX_SIZE = 40
 DISCOVERY_PER_MIX = 8
@@ -218,7 +218,7 @@ def _owned_tracks_for(database, artist_names: Sequence[str]) -> Dict[str, List[d
                 "artists": [{"name": r["artist"]}],
                 "album": {"name": r["album"] or "",
                           "images": [{"url": cover}] if cover else []},
-                "duration_ms": int((r["duration"] or 0) * 1000),
+                "duration_ms": int(r["duration"] or 0),  # tracks.duration is already milliseconds
                 "play_count": r.get("play_count") or 0,
                 "owned": True,
             }
@@ -340,7 +340,7 @@ def generate_daily_mixes(database, profile_id: int = 1, *,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "profile_id": profile_id,
         # payload version: bump to invalidate stored payloads whose SHAPE or
-        # content rules changed (v2 = browser-safe art urls)
+        # content rules changed (v3 = library durations stay in milliseconds)
         "v": PAYLOAD_VERSION,
     }
 

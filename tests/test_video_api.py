@@ -145,6 +145,7 @@ def test_blueprint_exposes_dashboard_route():
     assert "/api/video/detail/movie/<int:movie_id>" in rules
     assert "/api/video/detail/show/<int:show_id>/refresh-art" in rules
     assert "/api/video/detail/movie/<int:movie_id>/refresh-art" in rules
+    assert "/api/video/detail/movie/<int:movie_id>/sync" in rules
     assert "/api/video/detail/<kind>/<int:item_id>/extras" in rules
     assert "/api/video/search" in rules
     assert "/api/video/trending" in rules

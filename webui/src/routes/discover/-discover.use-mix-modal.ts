@@ -62,6 +62,14 @@ export interface MixModalController {
   clearSelection: () => void;
   /** The pure half of _downloadSelectedMixTracks; the caller acts on it. */
   downloadSelection: () => DownloadSelectionResult;
+  /**
+   * tracks for any mix key, fetching a lazy one if it hasn't loaded yet.
+   *
+   * the card's Play button needs the tracklist without opening the modal, and
+   * a decade or listenbrainz mix carries none until something asks. null means
+   * the key is unknown or its fetch failed.
+   */
+  loadTracks: (key: string) => Promise<unknown[] | null>;
 }
 
 export function useMixModal(
@@ -121,6 +129,28 @@ export function useMixModal(
   const selectAll = useCallback((indices: number[]) => setSelected(indices), []);
   const clearSelection = useCallback(() => setSelected([]), []);
 
+  const loadTracks = useCallback(
+    async (key: string): Promise<unknown[] | null> => {
+      const m = registry[key];
+      if (!m) return null;
+      if (m.tracks) return m.tracks;
+      const cached = lazy[key];
+      if (Array.isArray(cached)) return cached;
+      const source = extraLazy?.(m) ?? defaultLazySource(m);
+      if (!source) return [];
+      setLazy((prev) => ({ ...prev, [key]: 'loading' }));
+      try {
+        const fetched = (await source()) || [];
+        setLazy((prev) => ({ ...prev, [key]: fetched }));
+        return fetched;
+      } catch {
+        setLazy((prev) => ({ ...prev, [key]: 'error' }));
+        return null;
+      }
+    },
+    [registry, lazy, extraLazy],
+  );
+
   const downloadSelection = useCallback((): DownloadSelectionResult => {
     if (selected.length === 0) {
       return { kind: 'none-selected', toast: 'Select at least one track first', level: 'info' };
@@ -155,5 +185,6 @@ export function useMixModal(
     selectAll,
     clearSelection,
     downloadSelection,
+    loadTracks,
   };
 }

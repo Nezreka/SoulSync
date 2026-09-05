@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.3.2"
+_SOULSYNC_BASE_VERSION = "3.3.3"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -3472,6 +3472,20 @@ def handle_settings():
             if not new_settings:
                 return jsonify({"success": False, "error": "No data received."}), 400
 
+            # Validate connection settings before persisting any part of the form.
+            if 'musicbrainz' in new_settings:
+                from core.musicbrainz_client import validate_server_settings
+                mb_settings = new_settings['musicbrainz']
+                if not isinstance(mb_settings, dict):
+                    return jsonify({"success": False, "error": "MusicBrainz settings must be an object."}), 400
+                try:
+                    mb_url, mb_interval = validate_server_settings(
+                        mb_settings.get('base_url', config_manager.get('musicbrainz.base_url')),
+                        mb_settings.get('request_interval', config_manager.get('musicbrainz.request_interval')))
+                except ValueError as exc:
+                    return jsonify({"success": False, "error": str(exc)}), 400
+                mb_settings.update(base_url=mb_url, request_interval=mb_interval)
+
             # Anti-lockout: refuse to turn ON login mode until the admin account
             # has a password — otherwise enabling it would lock everyone out.
             _sec_in = new_settings.get('security') or {}
@@ -3531,7 +3545,7 @@ def handle_settings():
                     for key, value in _experimental_in.items():
                         config_manager.set(f'experimental.{key}', value)
 
-                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental', 'image_cache']:
+                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental', 'image_cache']:
                     if service in new_settings:
                         if service == 'experimental' and isinstance(_experimental_in, dict):
                             continue
@@ -3555,6 +3569,17 @@ def handle_settings():
                     reset_image_cache()
                 except Exception as _ic_err:
                     logger.debug("image cache reset after settings save failed: %s", _ic_err)
+
+            if 'concerts' in new_settings:
+                # Answers are cached for six hours. Without this, fixing a
+                # rejected API key would keep showing the failure it produced
+                # for the rest of the afternoon, which reads as "my key doesn't
+                # work" rather than "the old answer is still cached".
+                try:
+                    from core.concerts_client import clear_cache as _clear_concerts
+                    _clear_concerts()
+                except Exception as _cc_err:
+                    logger.debug("concert cache clear after settings save failed: %s", _cc_err)
 
             if any(s in new_settings for s in ('acoustid', 'lossy_copy', 'post_processing', 'import')):
                 try:
@@ -10708,6 +10733,17 @@ def redownload_search_sources(track_id):
         if not metadata.get('name'):
             return jsonify({"success": False, "error": "metadata with name required"}), 400
 
+        # The ladder that judges these candidates is the item's, not the app's.
+        # Every other lane resolves it (task_worker reads it off the track, the
+        # album bundle off the batch); this one reads it off the library row,
+        # because the UI sends only metadata and this path deletes the file it
+        # replaces. An explicit choice from the caller still wins.
+        from core.quality.selection import profile_id_for_library_track
+        quality_profile_id = profile_id_for_library_track(
+            get_database(), track_id,
+            explicit=parse_strict_int(data.get('quality_profile_id')),
+        )
+
         # Build a track-like object for query generation
         from core.itunes_client import Track as MetaTrack
         track_obj = MetaTrack(
@@ -10750,12 +10786,19 @@ def redownload_search_sources(track_id):
         def _search_one_source(source_name, client):
             """Search a single download source and return formatted candidates."""
             source_candidates = []
+            # These clients are searched directly rather than through the
+            # orchestrator, so nothing else would enter the item's profile
+            # context and quality_tier_for_source would ask each source for the
+            # tier the APP default wants.
+            from core.quality.source_map import quality_profile_context
             for _qi, q in enumerate(search_queries):
                 try:
-                    tracks_result, _ = run_async(client.search(q, timeout=20))
+                    with quality_profile_context(quality_profile_id):
+                        tracks_result, _ = run_async(client.search(q, timeout=20))
                     if not tracks_result:
                         continue
-                    valid = get_valid_candidates(tracks_result, track_obj, q)
+                    valid = get_valid_candidates(tracks_result, track_obj, q,
+                                                 quality_profile_id)
                     for candidate in valid:
                         is_bl = database.is_blacklisted(candidate.username, candidate.filename)
                         display_name = os.path.basename(candidate.filename.replace('\\', '/'))
@@ -20382,6 +20425,8 @@ def _hydrabase_reconnect_loop():
 # skip, only an all-or-nothing "does this broadcast have an audience".
 _connected_sids = set()
 _connected_sids_lock = threading.Lock()
+_log_live_sids = set()
+_log_live_sids_lock = threading.Lock()
 
 
 def _has_connected_clients() -> bool:
@@ -20688,6 +20733,8 @@ def handle_disconnect():
     try:
         with _activity_sids_lock:
             _activity_sids.discard(request.sid)
+        with _log_live_sids_lock:
+            _log_live_sids.discard(request.sid)
     except Exception:   # noqa: BLE001, S110 - cleanup only; a missing sid is fine
         pass
     with _connected_sids_lock:
@@ -21704,6 +21751,9 @@ def _emit_live_log_loop():
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(0.5)
         try:
+            with _log_live_sids_lock:
+                if not _log_live_sids:
+                    continue
             # Read which source clients want (stored by subscribe handler)
             source = getattr(_emit_live_log_loop, '_source', 'app')
             log_path = log_map.get(source, log_map['app'])
@@ -21747,11 +21797,15 @@ def handle_logs_subscribe(data):
     source = data.get('source', 'app')
     _emit_live_log_loop._source = source
     join_room('logs:live')
+    with _log_live_sids_lock:
+        _log_live_sids.add(request.sid)
 
 
 @socketio.on('logs:unsubscribe')
 def handle_logs_unsubscribe(data):
     leave_room('logs:live')
+    with _log_live_sids_lock:
+        _log_live_sids.discard(request.sid)
 
 
 def _playlist_room_allowed(raw_id, spid, is_admin) -> bool:
@@ -21960,9 +22014,12 @@ def _emit_discovery_progress_loop():
                 logger.debug(f"Error in {platform_name} discovery loop: {e}")
 
 def _emit_scan_status_loop():
-    """Push watchlist and media scan status every 2 seconds."""
+    """Push watchlist and media scan status every 2 seconds.
+    Skipped entirely while no client is connected."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
+        if not _has_connected_clients():
+            continue
         # Watchlist scan
         try:
             state = watchlist_scan_state.copy()

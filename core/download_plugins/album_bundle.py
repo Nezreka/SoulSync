@@ -21,14 +21,17 @@ folder scan.
 
 from __future__ import annotations
 
+import math
 import re
 import shutil
 import time
 import unicodedata
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
+from core.quality.release_format import release_revision
 from core.settings import config_manager
 from utils.logging_config import get_logger
 
@@ -49,10 +52,10 @@ ALBUM_PICK_MIN_BYTES = 40 * 1024 * 1024
 ALBUM_PICK_MAX_BYTES = 3 * 1024 * 1024 * 1024
 
 
-# Quality-score weights for the album-pick heuristic. Mirrors the
-# tier order in ``core/imports/file_ops.py``'s ``quality_tiers`` —
-# higher number = preferred.
-_QUALITY_SCORE = {'flac': 4, 'ogg': 3, 'aac': 2, 'mp3': 1}
+# The album-pick heuristic used to carry its own four-entry ladder
+# (flac/ogg/aac/mp3). ALAC, WAV, Opus and DSD were not in it and scored zero,
+# below MP3. Ranking now goes through ``AudioQuality.tier_score()`` like every
+# other stage, so there is one answer to "which of these is better audio".
 
 
 # Default poll cadence + timeout for the album-download poll loop.
@@ -91,14 +94,34 @@ def get_poll_timeout() -> float:
     return DEFAULT_POLL_TIMEOUT_SECONDS
 
 
-def quality_score(title: str, quality_guess) -> int:
-    """Map a release title's inferred quality to a sortable integer.
+def quality_score(title: str, quality_guess) -> float:
+    """Rank one release title on the shared quality ladder.
 
-    ``quality_guess`` is the function from each plugin that maps a
-    title string to a quality string ('flac' / 'mp3' / etc.) — passed
-    in so this module doesn't have to import either plugin and risk
-    a circular import."""
-    return _QUALITY_SCORE.get(quality_guess(title) or '', 0)
+    ``quality_guess`` is the function from each plugin that maps a title string
+    to a quality string ('flac' / 'mp3' / etc.) — passed in so this module
+    doesn't have to import either plugin and risk a circular import. It is the
+    FALLBACK: the shared parser reads the title first, and the plugin only
+    answers for a release whose title said nothing, so a plugin that knows
+    something extra can still place its result.
+    """
+    return release_quality_score(title, quality_guess)
+
+
+def release_quality_score(title: str, quality_guess=None,
+                          categories=None, file_names=None) -> float:
+    """``AudioQuality.tier_score()`` for a release, from whatever it exposes."""
+    from core.quality.release_format import audio_quality_from_release
+
+    quality = audio_quality_from_release(title or '', categories, file_names)
+    if quality.format == 'unknown' and quality_guess is not None:
+        try:
+            guessed = quality_guess(title or '')
+        except Exception as exc:  # noqa: BLE001 - a plugin hook must not decide the pick
+            logger.debug("quality_guess failed for %r: %s", title, exc)
+            guessed = None
+        if guessed:
+            quality.format = str(guessed).lower()
+    return quality.tier_score()
 
 
 def _normalize_release_text(text: str) -> str:
@@ -201,11 +224,109 @@ def profile_allowed_formats(quality_profile_id=None):
         return None
 
 
+def profile_quality_targets(quality_profile_id=None):
+    """Return ``(ranked targets, fallback_enabled)`` for an album grab.
+
+    ``profile_allowed_formats`` is intentionally only a strict format veto;
+    it cannot express MP3-first ladders or distinguish FLAC 16/44 from
+    FLAC 24/96.  Album release selection needs the complete target objects as
+    well.  Resolution fails open so a transient DB problem never disables an
+    otherwise usable download source.
+    """
+    try:
+        from core.quality.selection import load_profile_by_id, targets_from_profile
+        return targets_from_profile(load_profile_by_id(quality_profile_id))
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Could not resolve profile quality targets: %s", exc)
+        return [], True
+
+
+def _availability_bucket(candidate) -> float:
+    """Seeders (or usenet grabs) rounded to an order of magnitude.
+
+    Availability is a tiebreaker inside one quality bucket, and 41 against 38
+    seeders is not a statement about which release is better — compared raw it
+    outvoted every key after it, including the size that describes the encode.
+    Lidarr rounds to log10 for exactly this reason; ten times the swarm still
+    wins, a rounding difference no longer does.
+    """
+    raw = candidate.seeders if candidate.seeders is not None else (candidate.grabs or 0)
+    try:
+        value = int(raw or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return round(math.log10(value)) if value > 0 else 0.0
+
+
+# Prowlarr's indexer priority is 1 (highest) to 50 (lowest), default 25 — the
+# same scale Lidarr uses, and the same job: a tiebreaker between releases that
+# are otherwise equal. Negated because the picker takes a maximum.
+DEFAULT_INDEXER_PRIORITY = 25
+
+
+def _indexer_priority_rank(candidate) -> int:
+    raw = getattr(candidate, 'indexer_priority', None)
+    try:
+        priority = int(raw if raw is not None else DEFAULT_INDEXER_PRIORITY)
+    except (TypeError, ValueError):
+        priority = DEFAULT_INDEXER_PRIORITY
+    return -priority
+
+
+# An NZB whose indexer omitted the publish date sorts below every dated post.
+# A neutral 0.0 put it ABOVE everything older than a week, which is backwards:
+# on usenet the date is how you judge whether a post is still complete, so a
+# post that will not even say is the one we know least about, and there is
+# always a dated alternative to prefer.
+UNKNOWN_AGE_BUCKET = -99.0
+
+
+def _usenet_age_bucket(candidate) -> float:
+    """How fresh a Usenet post is, in Lidarr's buckets. 0 for anything else.
+
+    A torrent's health is its swarm, and a seeded release is alive whatever its
+    post date, so age must not sort torrents at all. That test is the
+    candidate's PROTOCOL, not its seeder count: an indexer omitting seeders is
+    common enough that the availability gate exempts it by name, and using the
+    missing count as "this is usenet" handed those torrents the freshness
+    bonus. A Usenet post has no swarm to read, and the older it is the likelier
+    it is to be incomplete or past a provider's retention.
+    """
+    protocol = str(getattr(candidate, 'protocol', '') or '').strip().lower()
+    if protocol and protocol != 'usenet':
+        return 0.0
+    if not protocol and candidate.seeders is not None:
+        # No protocol on the object at all: fall back to the old signal rather
+        # than treat every candidate as usenet.
+        return 0.0
+    published = getattr(candidate, 'publish_date', None)
+    if not published:
+        return UNKNOWN_AGE_BUCKET
+    try:
+        stamp = datetime.fromisoformat(str(published).replace('Z', '+00:00'))
+    except (TypeError, ValueError):
+        return UNKNOWN_AGE_BUCKET
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    age_hours = (datetime.now(timezone.utc) - stamp).total_seconds() / 3600
+    if age_hours < 1:
+        return 1000.0
+    if age_hours <= 24:
+        return 100.0
+    age_days = age_hours / 24
+    if age_days <= 7:
+        return 10.0
+    return -round(math.log10(age_days))
+
+
 def pick_best_album_release(candidates, quality_guess,
                             album_name: str = "",
                             min_seeders: int = 0,
                             allowed_formats=None,
-                            allow_mixed: bool = False) -> Optional[object]:
+                            allow_mixed: bool = False,
+                            quality_targets=None,
+                            fallback_enabled: bool = True,
+                            expected_duration_seconds=None) -> Optional[object]:
     """Pick the single best torrent / NZB for an album-bundle download.
 
     Heuristic, in priority order:
@@ -223,7 +344,15 @@ def pick_best_album_release(candidates, quality_guess,
        seeders no matter what the profile said — sorting cannot express "never
        this", only "prefer that". A release whose format cannot be determined
        is dropped too rather than assumed lossy and ranked.
-    0b. Availability gate (#1139): drop candidates whose indexer-reported
+    0b. SIZE gate: drop candidates whose bytes contradict the quality their
+       title claims — a 60 MB "FLAC" of a 45-minute album is a transcode, and
+       a release averaging far more than its stated lossy bitrate is not the
+       album that was searched for. Same mechanism as Lidarr's
+       AcceptableSizeSpecification (expected kbit/s x known duration), and the
+       same fail-open contract: without ``expected_duration_seconds`` there is
+       no opinion. Runs before availability so the log names the quality lie
+       rather than a dead swarm.
+    0c. Availability gate (#1139): drop candidates whose indexer-reported
        seeder count is BELOW ``min_seeders``. Sorting by seeders was never
        enough — with every candidate on zero, the sort still handed back a
        release nobody is serving, and the download then sat on "downloading
@@ -233,11 +362,13 @@ def pick_best_album_release(candidates, quality_guess,
        are dead. ``min_seeders=0`` disables it.
     1. Reasonable album-ish size (40 MB – 3 GB) — drops single-track
        releases that snuck in and quarantines suspicious giants.
-    2. Higher seeders > lower (dead torrents = dead downloads).
-       Usenet releases use ``grabs`` as a popularity proxy when
-       seeders is None.
-    3. Higher quality (FLAC > AAC > MP3) inferred from title.
-    4. Larger size as tiebreaker (often = higher bitrate).
+    2. When ranked targets are supplied, the best target any available
+       release satisfies wins. Exact bitrate / sample-rate / bit-depth
+       constraints are honored; with fallback disabled an unproven release is
+       refused before it reaches the client.
+    3. Within that quality bucket, higher measured quality wins, followed by
+       seeders (or Usenet grabs) and size. Without ranked targets the legacy
+       seeders-first heuristic is retained.
     """
     if not candidates:
         return None
@@ -270,6 +401,7 @@ def pick_best_album_release(candidates, quality_guess,
             ok, why = evaluate_release(
                 allowed_formats, c.title or '',
                 file_names=getattr(c, 'file_names', None),
+                categories=getattr(c, 'categories', None),
                 allow_mixed=allow_mixed,
             )
             if ok:
@@ -289,6 +421,42 @@ def pick_best_album_release(candidates, quality_guess,
             logger.info("[Album Bundle] Dropped %d candidate(s) failing the format profile",
                         len(candidates) - len(keeping))
         candidates = keeping
+
+    if expected_duration_seconds:
+        from core.quality.release_format import (
+            audio_quality_from_release,
+            size_contradicts_quality,
+        )
+
+        plausible = []
+        for c in candidates:
+            reason = size_contradicts_quality(
+                audio_quality_from_release(
+                    c.title or '',
+                    getattr(c, 'categories', None),
+                    getattr(c, 'file_names', None),
+                ),
+                getattr(c, 'size', None),
+                expected_duration_seconds,
+            )
+            if reason is None:
+                plausible.append(c)
+            else:
+                logger.debug("[Album Bundle] Rejected '%s': %s", c.title, reason)
+        if not plausible:
+            logger.warning(
+                "[Album Bundle] Every candidate for '%s' carries a size its own "
+                "quality claim cannot support (%d rejected) — refusing the "
+                "bundle so the caller falls back rather than queueing a "
+                "mislabelled release.",
+                album_name or '?', len(candidates),
+            )
+            return None
+        if len(plausible) != len(candidates):
+            logger.info("[Album Bundle] Dropped %d candidate(s) whose size "
+                        "contradicts their quality claim",
+                        len(candidates) - len(plausible))
+        candidates = plausible
 
     if min_seeders > 0:
         available = [c for c in candidates
@@ -312,9 +480,118 @@ def pick_best_album_release(candidates, quality_guess,
     if not pool:
         return None
 
+    # A profile ladder is an ordering, not merely a set of permitted codecs.
+    # The old hardcoded FLAC>AAC>MP3 score contradicted MP3-first profiles and
+    # could not distinguish any lossless resolution. Parse every remaining
+    # release into the same AudioQuality model used by Soulseek/streaming.
+    if quality_targets:
+        from core.quality.model import (
+            rank_candidate,
+            satisfies_a_target_on_stated_facts,
+        )
+        from core.quality.release_format import audio_quality_from_release
+
+        quality_rows = []
+        for candidate in pool:
+            # File list over title is decided inside audio_quality_from_release
+            # so this stage and the legacy sort below cannot disagree.
+            aq = audio_quality_from_release(
+                candidate.title or '',
+                getattr(candidate, 'categories', None),
+                getattr(candidate, 'file_names', None),
+            )
+            quality_rows.append((rank_candidate(aq, quality_targets), aq, candidate))
+
+        best_target = min(
+            (rank[0] for rank, _aq, _candidate in quality_rows),
+            default=len(quality_targets),
+        )
+        if best_target < len(quality_targets):
+            quality_rows = [
+                row for row in quality_rows if row[0][0] == best_target
+            ]
+        elif not fallback_enabled:
+            # Nothing matched outright, which is NOT the same as the profile
+            # refusing these releases. A prowlarr title almost never states a
+            # bitrate, and the stock MP3 target asks for 320, so judging a title
+            # by the probed-file rule refuses whole albums the per-track lane
+            # accepts from the same indexer. Keep the ones that only failed on a
+            # bitrate they never claimed, refuse the rest. The post-download
+            # probe is still the last word.
+            #
+            # A hi-res target is NOT relaxed the same way: asking for 24/96 is a
+            # narrow, deliberate request, and a bare [FLAC] must not be grabbed
+            # on the hope it happens to be hi-res. A whole album is too much
+            # bandwidth to spend on that guess.
+            provable = [
+                row for row in quality_rows
+                if satisfies_a_target_on_stated_facts(
+                    row[1], quality_targets, unproven_resolution_ok=False,
+                )
+            ]
+            if not provable:
+                logger.warning(
+                    "[Album Bundle] No candidate for '%s' can satisfy the "
+                    "profile's quality targets; refusing an unproven release",
+                    album_name or '?',
+                )
+                return None
+            if len(provable) != len(quality_rows):
+                logger.info(
+                    "[Album Bundle] Kept %d/%d candidate(s) whose stated "
+                    "quality the profile can still accept",
+                    len(provable), len(quality_rows),
+                )
+            quality_rows = provable
+
+        preferred_formats = {
+            str(target.format).lower()
+            for target in quality_targets
+            if getattr(target, 'format', None)
+        }
+
+        def _profile_score(row) -> tuple:
+            _rank, aq, candidate = row
+            availability = _availability_bucket(candidate)
+            # If no real target matched and fallback is enabled, formats the
+            # user named still outrank unrelated formats — same rule as
+            # filter_and_rank's fallback path.
+            preferred = (
+                True if best_target < len(quality_targets)
+                else aq.format.lower() in preferred_formats
+            )
+            # Lidarr's DownloadDecisionComparer order with one deliberate
+            # change: indexer priority sits BELOW availability. Lidarr can put
+            # it above peers because it has no seeder sort key at all, only a
+            # minimum-seeders rejection. We have both, and a preferred indexer
+            # is not worth a dead swarm, so priority decides inside one
+            # availability bucket rather than across buckets.
+            return (
+                preferred,
+                aq.tier_score(),
+                # Only ever a tiebreaker: a repack is the corrected copy of the
+                # SAME quality, never a reason to take a worse format.
+                release_revision(candidate.title or '').rank,
+                availability,
+                _indexer_priority_rank(candidate),
+                _usenet_age_bucket(candidate),
+                candidate.size or 0,
+            )
+
+        return max(quality_rows, key=_profile_score)[2]
+
     def _score(c) -> tuple:
         seeders = c.seeders if c.seeders is not None else (c.grabs or 0)
-        return (seeders, quality_score(c.title or '', quality_guess), c.size or 0)
+        return (
+            seeders,
+            release_quality_score(
+                c.title or '', quality_guess,
+                getattr(c, 'categories', None),
+                getattr(c, 'file_names', None),
+            ),
+            release_revision(c.title or '').rank,
+            c.size or 0,
+        )
 
     return max(pool, key=_score)
 

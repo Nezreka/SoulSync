@@ -28,7 +28,7 @@ class _Session:
         self.outcomes = list(outcomes)
         self.calls = []
 
-    def get(self, url, *, params=None, timeout=None):
+    def get(self, url, *, params=None, timeout=None, allow_redirects=False):
         self.calls.append({'url': url, 'params': params, 'timeout': timeout})
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
@@ -64,21 +64,21 @@ def test_musicbrainz_read_timeout_is_retried_with_global_pacing(monkeypatch):
     client = _client(session, retries=1)
     waits = []
     sleeps = []
-    monkeypatch.setattr('core.musicbrainz_client._wait_for_musicbrainz_slot', lambda: waits.append('slot'))
+    monkeypatch.setattr('core.musicbrainz_client._wait_for_musicbrainz_slot', lambda *args: waits.append('slot'))
     monkeypatch.setattr('core.musicbrainz_client.time.sleep', lambda seconds: sleeps.append(seconds))
 
     response = client._get('/artist', params={'query': 'artist:\"Fast Pussycats\"'})
 
     assert response.json()['artists'][0]['name'] == 'Fast Pussycats'
     assert len(session.calls) == 2
-    assert waits == ['slot']
+    assert waits == ['slot', 'slot']
     assert sleeps == [2.0]
 
 
 def test_musicbrainz_503_is_retried(monkeypatch):
     session = _Session([_Response(status_code=503), _Response({'releases': []})])
     client = _client(session, retries=1)
-    monkeypatch.setattr('core.musicbrainz_client._wait_for_musicbrainz_slot', lambda: None)
+    monkeypatch.setattr('core.musicbrainz_client._wait_for_musicbrainz_slot', lambda *args: None)
     monkeypatch.setattr('core.musicbrainz_client.time.sleep', lambda _seconds: None)
 
     response = client._get('/release', params={'query': 'release:\"Album\"'})

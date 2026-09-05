@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import atexit
 import concurrent.futures
+import contextvars
 from typing import Any, Callable, TypeVar
 
 
@@ -32,7 +33,12 @@ async def _run(
     # and there is no 50 ms latency floor on a fast worker. Not
     # loop.run_in_executor(None, ...) — that installs a loop-OWNED default
     # executor, which is exactly what these shared pools exist to avoid.
-    return await asyncio.wrap_future(executor.submit(func, *args, **kwargs))
+    # Executor threads do not inherit ContextVars. Copy request-local source
+    # quality intent (and any future request context) explicitly.
+    context = contextvars.copy_context()
+    return await asyncio.wrap_future(
+        executor.submit(context.run, func, *args, **kwargs)
+    )
 
 
 async def run_blocking(func: Callable[..., _T], /, *args: Any, **kwargs: Any) -> _T:

@@ -373,11 +373,61 @@ async function openCacheHealthModal() {
         const healthEmoji = healthScore === 'healthy' ? '&#10003;' : healthScore === 'fair' ? '&#9888;' : '&#10060;';
         const healthLabel = healthScore === 'healthy' ? 'Cache is healthy' : healthScore === 'fair' ? 'Minor issues detected' : 'Cleanup recommended';
 
+        // "Cleanup recommended" told you a verdict and nothing else: not what
+        // was wrong, not that a job already fixes it, not how to trigger it.
+        // Boulder: "it says cleanup recommeneded. but how lol."
+        //
+        // Every one of these IS handled automatically by the Cache Maintenance
+        // job (cache_evictor, every 6h by default) — it calls exactly the
+        // routines that clear the two numbers this verdict is computed from. So
+        // the honest answer is usually "nothing, it cleans itself" — unless the
+        // job is switched off, which is the one case worth shouting about.
+        let cleanupJob = null;
+        try {
+            const jr = await fetch('/api/repair/jobs');
+            if (jr.ok) {
+                const jobs = await jr.json();
+                const list = Array.isArray(jobs) ? jobs : (jobs.jobs || []);
+                cleanupJob = list.find(j => j.job_id === 'cache_evictor') || null;
+            }
+        } catch (_) { /* the panel still works without it */ }
+
+        const problems = [];
+        if (s.junk_entities > 0) {
+            problems.push(`<li><strong>${s.junk_entities.toLocaleString()} junk entries</strong> —
+                cached rows whose name came back empty or as a placeholder like
+                "Unknown Artist". They take up space and can never match anything.</li>`);
+        }
+        if (s.stale_mb_nulls > 0) {
+            problems.push(`<li><strong>${s.stale_mb_nulls.toLocaleString()} failed MusicBrainz lookups</strong> —
+                searches that found nothing, remembered so they are not retried
+                constantly. Ones older than 30 days are dropped so they get another chance.</li>`);
+        }
+
+        const jobOff = cleanupJob && cleanupJob.enabled === false;
+        const explain = healthScore === 'healthy' ? '' : `
+            <div class="cache-health-explain ${jobOff ? 'warn' : ''}">
+                <div class="cache-health-explain-title">What this means</div>
+                <ul class="cache-health-explain-list">${problems.join('')}</ul>
+                <div class="cache-health-explain-fix">
+                    ${jobOff
+                ? `<strong>Cache Maintenance is switched off</strong>, so nothing is clearing these.
+                       Turn it back on under Operations \u203A Jobs, or clean up once now.`
+                : `<strong>Cache Maintenance</strong> clears all of this automatically${
+                    cleanupJob && cleanupJob.interval_hours ? ` every ${cleanupJob.interval_hours}h` : ''}${
+                    cleanupJob && cleanupJob.last_run ? `, last run ${_cacheAgoText(cleanupJob.last_run)}` : ''}.
+                       Nothing is required from you \u2014 run it now if you would rather not wait.`}
+                </div>
+                <button class="watch-all-btn watch-all-btn-primary" id="cache-cleanup-now">Clean up now</button>
+                <div class="cache-health-explain-note" id="cache-cleanup-note"></div>
+            </div>`;
+
         body.innerHTML = `
             <div class="cache-health-status ${healthScore}">
                 <div class="cache-health-status-icon">${healthEmoji}</div>
                 <div class="cache-health-status-text">${healthLabel}</div>
             </div>
+            ${explain}
 
             <div class="cache-health-cards">
                 <div class="cache-health-card">
@@ -436,9 +486,48 @@ async function openCacheHealthModal() {
                 </div>
             </div>
         `;
+        const cleanupBtn = overlay.querySelector('#cache-cleanup-now');
+        if (cleanupBtn) {
+            cleanupBtn.addEventListener('click', async () => {
+                const note = overlay.querySelector('#cache-cleanup-note');
+                cleanupBtn.disabled = true;
+                cleanupBtn.textContent = 'Cleaning\u2026';
+                try {
+                    // respect_enabled is deliberately NOT sent: this is an
+                    // explicit click, and refusing it because the schedule is
+                    // off would be the least helpful possible answer.
+                    const r = await fetch('/api/repair/jobs/cache_evictor/run', { method: 'POST' });
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    cleanupBtn.textContent = 'Cleanup started';
+                    if (note) note.textContent = 'Running in the background. Reopen this panel in a moment to see the new numbers.';
+                } catch (e) {
+                    cleanupBtn.disabled = false;
+                    cleanupBtn.textContent = 'Clean up now';
+                    if (note) note.textContent = 'Could not start it: ' + e.message;
+                }
+            });
+        }
     } catch (error) {
         const body = overlay.querySelector('.cache-health-body');
         body.innerHTML = '<div class="cache-health-loading">Failed to load cache stats</div>';
+    }
+}
+
+/** "3 hours ago" for a job's last run. Bare timestamps make a reader do the
+ *  subtraction, which is the whole question they are asking. */
+function _cacheAgoText(value) {
+    try {
+        const then = new Date(String(value).replace(' ', 'T'));
+        const mins = Math.floor((Date.now() - then.getTime()) / 60000);
+        if (!isFinite(mins) || mins < 0) return 'recently';
+        if (mins < 2) return 'just now';
+        if (mins < 60) return mins + ' minutes ago';
+        const hrs = Math.floor(mins / 60);
+        if (hrs < 24) return hrs === 1 ? 'an hour ago' : hrs + ' hours ago';
+        const days = Math.floor(hrs / 24);
+        return days === 1 ? 'yesterday' : days + ' days ago';
+    } catch (_) {
+        return 'recently';
     }
 }
 

@@ -29,6 +29,7 @@ from core.download_engine import DownloadEngine
 from core.download_plugins.registry import DownloadPluginRegistry, build_default_registry
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
 from core.quality.selection import load_search_mode
+from core.quality.source_map import quality_profile_context
 
 logger = get_logger("download_orchestrator")
 
@@ -309,7 +310,8 @@ class DownloadOrchestrator:
         return chain
 
     async def search(self, query: str, timeout: int = None, progress_callback=None,
-                     exclude_sources=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
+                     exclude_sources=None, quality_profile_id=None
+                     ) -> Tuple[List[TrackResult], List[AlbumResult]]:
         """Search for tracks using configured source(s). Single-source
         modes route directly; hybrid mode delegates to
         ``engine.search_with_fallback`` which tries the chain in order.
@@ -332,7 +334,8 @@ class DownloadOrchestrator:
                 logger.error(f"{self.registry.display_name(self.mode)} client not available (failed to initialize)")
                 return [], []
             logger.info(f"Searching {self.registry.display_name(self.mode)}: {query}")
-            return await client.search(query, timeout, progress_callback)
+            with quality_profile_context(quality_profile_id):
+                return await client.search(query, timeout, progress_callback)
 
         chain = self._resolve_source_chain()
         if exclude_sources:
@@ -348,13 +351,20 @@ class DownloadOrchestrator:
         if not chain:
             logger.warning("Hybrid search exhausted: no eligible sources after exclusion filter")
             return [], []
-        if load_search_mode() == 'best_quality':
+        if load_search_mode(quality_profile_id) == 'best_quality':
             logger.info(f"Best-quality search ({' → '.join(chain)}): {query}")
-            return await self.engine.search_all_sources(
-                query, chain, timeout, progress_callback,
-            )
+            with quality_profile_context(quality_profile_id):
+                return await self.engine.search_all_sources(
+                    query, chain, timeout, progress_callback,
+                )
         logger.info(f"Hybrid search ({' → '.join(chain)}): {query}")
-        return await self.engine.search_with_fallback(query, chain, timeout, progress_callback)
+        with quality_profile_context(quality_profile_id):
+            return await self.engine.search_with_fallback(
+                query,
+                chain,
+                timeout,
+                progress_callback,
+            )
 
     async def search_and_download_best(self, query: str, expected_track=None) -> Optional[str]:
         """
@@ -495,7 +505,8 @@ class DownloadOrchestrator:
         # Use orchestrator's download method to route correctly
         return await self.download(best_result.username, best_result.filename, best_result.size)
 
-    async def download(self, username: str, filename: str, file_size: int = 0) -> Optional[str]:
+    async def download(self, username: str, filename: str, file_size: int = 0,
+                       *, quality_profile_id=None) -> Optional[str]:
         """
         Download a track using the appropriate client.
 
@@ -529,13 +540,22 @@ class DownloadOrchestrator:
             if not client:
                 raise RuntimeError(f"{spec.display_name} download client not available (failed to initialize)")
             logger.info(f"Downloading from {spec.display_name}: {filename}")
-            return await client.download(username, filename, file_size)
+            with quality_profile_context(quality_profile_id):
+                if spec.name in ('torrent', 'usenet'):
+                    return await client.download(
+                        username,
+                        filename,
+                        file_size,
+                        quality_profile_id=quality_profile_id,
+                    )
+                return await client.download(username, filename, file_size)
 
         soulseek = self.registry.get('soulseek')
         if not soulseek:
             raise RuntimeError("Soulseek client not available (failed to initialize)")
         logger.info(f"Downloading from Soulseek: {filename}")
-        return await soulseek.download(username, filename, file_size)
+        with quality_profile_context(quality_profile_id):
+            return await soulseek.download(username, filename, file_size)
 
     async def get_all_downloads(self) -> List[DownloadStatus]:
         """Aggregated view across every source. Delegates to the

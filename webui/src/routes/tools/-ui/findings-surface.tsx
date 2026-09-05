@@ -29,6 +29,7 @@
  * duplicate), so the backend refuses an action that spans more than one type.
  */
 
+import { FindingsAlbumGrid } from './findings-album-grid';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
@@ -123,6 +124,11 @@ const SORT_OPTIONS = [
   { value: 'newest', label: 'Newest first' },
   { value: 'oldest', label: 'Oldest first' },
   { value: 'severity', label: 'Severity' },
+  // Severity alone could never order an upgrade backlog - every below-profile
+  // track is 'info', so they all tied and fell back to scan order. These two
+  // sort on the audio itself.
+  { value: 'quality', label: 'Worst quality first' },
+  { value: 'quality_desc', label: 'Best quality first' },
   { value: 'path', label: 'File path' },
 ] as const;
 
@@ -167,6 +173,9 @@ export function FindingsSurface({
    *  single finding list, which is what lets every row feature survive
    *  unchanged instead of being rebuilt per group. */
   const [openType, setOpenType] = useState('');
+  // list | album | artist. Resets whenever a different type is opened, because
+  // a grouping that made sense for upgrades rarely does for the next type.
+  const [groupView, setGroupView] = useState<'list' | 'album' | 'artist'>('list');
 
   const [groups, setGroups] = useState<FindingGroup[]>([]);
   const [types, setTypes] = useState<FindingTypeInfo[]>([]);
@@ -950,7 +959,57 @@ export function FindingsSurface({
     </div>
   ) : null;
 
+  /* Opening a different type drops any grouping: "by album" made sense for an
+     upgrade backlog and rarely does for the next type along. */
+  useEffect(() => {
+    setGroupView('list');
+  }, [openType]);
+
+  /* The list/album/artist switch. Only offered inside an opened type - grouping
+     across every type at once would mix "192kbps" and "missing lyrics" into one
+     album card and mean nothing. */
+  const viewSwitch = openType ? (
+    <div className="repair-view-switch" role="group" aria-label="Group findings by">
+      {([
+        ['list', 'List'],
+        ['album', 'Albums'],
+        ['artist', 'Artists'],
+      ] as const).map(([value, label]) => (
+        <button
+          type="button"
+          key={value}
+          aria-pressed={groupView === value}
+          onClick={() => setGroupView(value)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  ) : null;
+
+  /* Drilling into a card reuses the search box, which already matches
+     details_json - so the album name filters straight to that album's rows and
+     every existing control (select all, bulk fix, sort) keeps working on it. */
+  const groupedView =
+    openType && groupView !== 'list' ? (
+      <FindingsAlbumGrid
+        groupBy={groupView}
+        status={statusFilter}
+        findingType={openType}
+        onOpen={(group) => {
+          const needle = groupView === 'artist' ? group.artist : group.album;
+          if (needle) setQuery(needle);
+          setGroupView('list');
+          setPage(0);
+        }}
+      />
+    ) : null;
+
   const findingList = (
+    <>
+      {viewSwitch ? <div className="repair-findings-toolbar">{viewSwitch}</div> : null}
+      {groupedView}
+      {groupedView ? null : (
     <>
       {bar.showBar ? (
         <div className="repair-findings-bulk" id="repair-findings-selection">
@@ -1092,6 +1151,8 @@ export function FindingsSurface({
           </>
         ) : null}
       </div>
+    </>
+      )}
     </>
   );
 

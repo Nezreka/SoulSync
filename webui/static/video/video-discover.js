@@ -23,7 +23,8 @@
         myProviders: [],   // saved streaming services -> 'On your streaming services' rail
         io: null,
         hero: { items: [], idx: 0, timer: null },
-        cat: { title: '', q: '', page: 1, paginates: true, busy: false, hasMore: false },
+        catGen: 0,   // bumped per query; a response paints only if it still matches
+        cat: { title: '', q: '', page: 1, paginates: true, busy: false, hasMore: false, gen: 0 },
         sel: { kind: 'movie', genre: '', decade: '', providers: '', lang: '', sort: 'popularity.desc' },   // Browse panel
     };
     var AUTO = (typeof IntersectionObserver !== 'undefined');   // infinite-scroll capable
@@ -212,24 +213,111 @@
     function hydrateGet(root) { if (window.VideoWatchlist) VideoWatchlist.hydrate(root); }
 
     // ── 'Not interested' + ignore-list management ─────────────────────────────
+    // Resolves to the payload on a real success, null otherwise. Callers must
+    // check it: this used to be fired and forgotten, and the card disappeared
+    // whether or not anything was saved.
     function postIgnore(payload) {
         return fetch('/api/video/discover/ignore', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
-        }).then(function (r) { return r.ok ? r.json() : null; });
+        }).then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) { return (d && d.success === true) ? d : null; })
+          .catch(function () { return null; });
     }
+    // Every tile for the same title, wherever it sits. Hiding only the one you
+    // clicked left the same movie sitting in three other rails.
+    function occurrencesOf(kind, id) {
+        var sel = '.vsr-notint[data-ig-kind="' + kind + '"][data-ig-id="' + id + '"]';
+        return Array.prototype.map.call(document.querySelectorAll(sel), function (b) {
+            var c = b.closest('.vsr-card');
+            // A Top-10 tile carries a huge rank numeral in its wrapper; hiding
+            // the card alone leaves the number floating on its own.
+            return c ? (c.closest('.vsr-ranked') || c) : null;
+        }).filter(Boolean);
+    }
+    function toast(msg, kind) { if (window.showToast) window.showToast(msg, kind || 'info'); }
+
+    // The Undo bar. A toast can't carry a button and this needs one: hiding a
+    // title is a taste decision, and "not tonight" must be reversible.
+    var _undoTimer = null;
+    function showUndoBar(title, onUndo) {
+        var ex = document.getElementById('vdsc-undo'); if (ex) ex.remove();
+        clearTimeout(_undoTimer);
+        var bar = document.createElement('div');
+        bar.id = 'vdsc-undo';
+        bar.className = 'vdsc-undo';
+        bar.setAttribute('role', 'status');
+        bar.innerHTML = '<span class="vdsc-undo-txt">Hidden ' + esc(title || 'that title') + '</span>' +
+            '<button class="vdsc-undo-btn" type="button">Undo</button>';
+        document.body.appendChild(bar);
+        var done = function () { clearTimeout(_undoTimer); if (bar.parentNode) bar.remove(); };
+        bar.querySelector('.vdsc-undo-btn').addEventListener('click', function () {
+            var button = this;
+            if (button.disabled) return;
+            clearTimeout(_undoTimer);
+            button.disabled = true; button.textContent = 'Restoring…';
+            Promise.resolve(onUndo()).then(function (saved) {
+                if (saved) { done(); return; }
+                button.disabled = false; button.textContent = 'Retry Undo';
+                // Keep failed Undo available instead of expiring its recovery path.
+                button.focus();
+            });
+        });
+        _undoTimer = setTimeout(function () { done(); onUndo.expire(); }, 9000);
+        return done;
+    }
+
     function wireNotInterested() {
         if (state._notIntWired) return; state._notIntWired = true;
         document.addEventListener('click', function (e) {
             var b = e.target.closest('.vsr-notint'); if (!b) return;
             e.preventDefault(); e.stopPropagation();
-            postIgnore({ action: 'add', kind: b.getAttribute('data-ig-kind'),
-                tmdb_id: parseInt(b.getAttribute('data-ig-id'), 10),
-                title: b.getAttribute('data-ig-title'),
+            if (b.disabled) return;
+            var kind = b.getAttribute('data-ig-kind');
+            var id = parseInt(b.getAttribute('data-ig-id'), 10);
+            var title = b.getAttribute('data-ig-title') || 'that title';
+            var cards = occurrencesOf(kind, id);
+            // Optimistic, but the cards stay in the DOM hidden until the save
+            // is acknowledged, so putting them back is exact rather than a
+            // guess at where they were.
+            b.disabled = true;
+            cards.forEach(function (c) { c.classList.add('vdsc-card-hiding'); });
+            postIgnore({ action: 'add', kind: kind, tmdb_id: id, title: title,
                 year: parseInt(b.getAttribute('data-ig-year'), 10) || null,
-                poster: b.getAttribute('data-ig-poster') || null });
-            var card = b.closest('.vsr-card');
-            if (card) { card.style.transition = 'opacity .2s, transform .2s'; card.style.opacity = '0'; card.style.transform = 'scale(.92)'; setTimeout(function () { card.remove(); }, 200); }
+                poster: b.getAttribute('data-ig-poster') || null })
+                .then(function (d) {
+                    if (!d) {
+                        // Put it back exactly where it was and say so. It used
+                        // to vanish whatever the server answered.
+                        cards.forEach(function (c) { c.classList.remove('vdsc-card-hiding'); });
+                        b.disabled = false;
+                        try { b.focus(); } catch (err) { /* not focusable, fine */ }
+                        toast('Couldn\'t hide ' + title + '. Try again.', 'error');
+                        return;
+                    }
+                    var undo = function () {
+                        return postIgnore({ action: 'remove', kind: kind, tmdb_id: id })
+                            .then(function (r) {
+                                if (!r) throw new Error('Undo not saved');
+                                cards.forEach(function (c) { c.classList.remove('vdsc-card-hiding'); });
+                                b.disabled = false;
+                                return true;
+                            })
+                            .catch(function () {
+                                toast('Couldn\'t un-hide ' + title + '. Try Undo again.', 'error');
+                                return false;
+                            });
+                    };
+                    // Nothing left to undo: drop the tiles for real.
+                    undo.expire = function () { cards.forEach(function (c) { c.remove(); }); };
+                    showUndoBar(title, undo);
+                })
+                .catch(function () {
+                    cards.forEach(function (c) { c.classList.remove('vdsc-card-hiding'); });
+                    b.disabled = false;
+                    try { b.focus(); } catch (err) { /* not focusable, fine */ }
+                    toast('Couldn\'t hide ' + title + '. Try again.', 'error');
+                });
         }, true);
     }
     function igRowHtml(it, btnLabel) {
@@ -307,15 +395,21 @@
             postIgnore({ action: 'add', kind: b.getAttribute('data-ig-kind'),
                 tmdb_id: parseInt(b.getAttribute('data-ig-id'), 10), title: b.getAttribute('data-ig-title'),
                 year: parseInt(b.getAttribute('data-ig-year'), 10) || null, poster: b.getAttribute('data-ig-poster') || null })
-                .then(function () { input.value = ''; resBox.innerHTML = ''; renderIgnoreList(ov); });
+                .then(function (d) {
+                    if (!d) { toast('Couldn\'t hide that title. Try again.', 'error'); return; }
+                    input.value = ''; resBox.innerHTML = ''; renderIgnoreList(ov);
+                });
         });
         ov.querySelector('[data-ig-list]').addEventListener('click', function (e) {
             var b = e.target.closest('.vdsc-ig-remove'); if (!b) return;
             var c = b.closest('.vdsc-ig-card');
             postIgnore({ action: 'remove', kind: c.getAttribute('data-ig-kind'),
                 tmdb_id: parseInt(c.getAttribute('data-ig-id'), 10) })
-                .then(function () { c.style.opacity = '0'; c.style.transform = 'scale(.9)';
-                    setTimeout(function () { renderIgnoreList(ov); }, 160); });
+                .then(function (d) {
+                    if (!d) { toast('Couldn\'t un-hide that title. Try again.', 'error'); return; }
+                    c.style.opacity = '0'; c.style.transform = 'scale(.9)';
+                    setTimeout(function () { renderIgnoreList(ov); }, 160);
+                });
         });
     }
 
@@ -697,7 +791,12 @@
     function openCategory(title, q, browse) {
         state.mode = 'grid';
         if (isHideOwned() && q.indexOf('hide_owned=') === -1) q += '&hide_owned=1';
+        // Every query gets its own generation. A response only paints if its
+        // generation is still the current one, so a slow first filter can no
+        // longer append its rows into the grid of the filter after it.
+        state.catGen = (state.catGen || 0) + 1;
         state.cat = { title: title, q: q, page: 1, nextPage: 2, browse: !!browse,
+                      gen: state.catGen,
                       paginates: !/key=trending/.test(q), busy: false, hasMore: false };
         $('[data-vdsc-shelves]').classList.add('hidden');
         var hero = $('[data-vdsc-hero]'); if (hero) hero.classList.add('hidden');
@@ -722,6 +821,7 @@
         var wrap = $('[data-vdsc-grid-wrap]'); wrap.classList.remove('hidden');
         var ttl = $('[data-vdsc-grid-title]'); if (ttl) ttl.textContent = title;
         $('[data-vdsc-grid]').innerHTML = '';
+        var gerr = $('[data-vdsc-grid-error]'); if (gerr) gerr.classList.add('hidden');
         try { wrap.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { /* ignore */ }
         loadGrid(true);
     }
@@ -743,6 +843,8 @@
 
     function closeCategory() {
         state.mode = 'shelves';
+        // Anything still in flight belongs to a grid nobody is looking at.
+        state.catGen = (state.catGen || 0) + 1;
         $('[data-vdsc-grid-wrap]').classList.add('hidden');
         $('[data-vdsc-shelves]').classList.remove('hidden');
         var strip = $('[data-vdsc-browse-strip]'); if (strip) strip.classList.remove('hidden');
@@ -755,33 +857,56 @@
         var c = state.cat;
         if (c.busy) return;
         c.busy = true;
-        var pageToLoad = reset ? 1 : c.nextPage;
+        var pageToLoad = reset ? 1 : (c.failedPage || c.nextPage);
+        c.failedPage = pageToLoad; // Retry this exact page until an accepted response succeeds.
         var more = $('[data-vdsc-more]'); if (more && !reset) { more.disabled = true; more.textContent = 'Loading…'; }
         var ld = reset ? $('[data-vdsc-grid-loading]') : $('[data-vdsc-more-loading]');
         if (ld) ld.classList.remove('hidden');
+        // This response belongs to THIS query. If the user changed a filter
+        // while it was out, everything below is discarded.
+        var mine = function () { return state.cat === c && c.gen === state.catGen; };
         cachedFetch(LIST_URL + '?' + c.q + '&page=' + pageToLoad)
             .then(function (d) {
                 c.busy = false;
+                if (!mine()) return;
                 if (ld) ld.classList.add('hidden');
-                var items = (d && d.items) || [];
-                var grid = $('[data-vdsc-grid]');
-                if (grid) { grid.insertAdjacentHTML('beforeend', items.map(card).join('')); hydrateGet(grid); }
+                // cachedFetch answers null for a non-OK response, so a 500 and
+                // an honestly empty page look identical here. Only an array of
+                // items is a real result; anything else is a failure to retry,
+                // not "Nothing found".
+                var failed = !d || !Array.isArray(d.items);
+                var items = failed ? [] : d.items;
+                if (!failed) {
+                    var grid = $('[data-vdsc-grid]');
+                    if (grid) { grid.insertAdjacentHTML('beforeend', items.map(card).join('')); hydrateGet(grid); }
+                }
                 var empty = $('[data-vdsc-grid-empty]');
-                if (empty) empty.classList.toggle('hidden', !(reset && !items.length));
+                if (empty) empty.classList.toggle('hidden', failed || !(pageToLoad === 1 && !items.length));
+                var err = $('[data-vdsc-grid-error]');
+                if (err) err.classList.toggle('hidden', !failed);
+                if (failed) {
+                    // Keep whatever is already on screen and let them retry
+                    // this page; do not advance the cursor past it.
+                    if (more) { more.textContent = 'Try again'; more.disabled = false; more.classList.remove('hidden'); }
+                    return;
+                }
                 // Honest pagination: the SERVER says whether more exists and which
                 // page it consumed up to (filtered fetches burn several TMDB pages
                 // per response). No more ≥18-items guessing — that stopped paging
                 // the moment filtering shrank a page.
-                c.hasMore = c.paginates && !!(d && d.has_more);
-                c.nextPage = (d && d.next_page) || (pageToLoad + 1);
+                c.failedPage = null;
+                c.hasMore = c.paginates && !!d.has_more;
+                c.nextPage = d.next_page || (pageToLoad + 1);
                 // Button is always the reliable control; the sentinel auto-loads on top.
                 if (more) { more.textContent = 'Load more'; more.disabled = false; more.classList.toggle('hidden', !c.hasMore); }
                 maybeAutoLoad();                                // keep filling while the sentinel stays in view
             })
             .catch(function () {
                 c.busy = false;
+                if (!mine()) return;
                 if (ld) ld.classList.add('hidden');
-                if (more) { more.textContent = 'Load more'; more.disabled = false; }
+                var errEl = $('[data-vdsc-grid-error]'); if (errEl) errEl.classList.remove('hidden');
+                if (more) { more.textContent = 'Try again'; more.disabled = false; more.classList.remove('hidden'); }
             });
     }
     // Self-correcting infinite scroll: if the sentinel is still on-screen after a
@@ -1101,17 +1226,30 @@
             }, { rootMargin: '600px 0px' }).observe(sentinel);
         }
 
-        // Hero keyboard nav (←/→) when Discover is the visible view.
-        document.addEventListener('keydown', function (e) {
-            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-            if (trailerEl || state.mode !== 'shelves' || !state.hero.items.length) return;
-            if (!page || page.offsetParent === null) return;                 // Discover not visible
-            var tag = e.target && e.target.tagName;
-            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-            e.preventDefault();
-            goHero(state.hero.idx + (e.key === 'ArrowRight' ? 1 : -1));
-            startHeroTimer();
-        });
+        // Hero keyboard nav (←/→), but only while focus is INSIDE the hero.
+        // It used to be a document handler that swallowed every arrow key on
+        // the page: a rail, a chip group, a slider, all of them moved the
+        // billboard instead of doing their own job.
+        var heroEl = $('[data-vdsc-hero]');
+        if (heroEl) {
+            heroEl.addEventListener('keydown', function (e) {
+                if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+                if (trailerEl || state.mode !== 'shelves' || !state.hero.items.length) return;
+                var t = e.target;
+                var tag = t && t.tagName;
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+                if (t && t.isContentEditable) return;
+                e.preventDefault();
+                goHero(state.hero.idx + (e.key === 'ArrowRight' ? 1 : -1));
+                startHeroTimer();
+            });
+            // Keyboard focus pauses the rotation, same as hover. Otherwise the
+            // slide under a focused button changes out from under it.
+            heroEl.addEventListener('focusin', stopHeroTimer);
+            heroEl.addEventListener('focusout', function (e) {
+                if (!heroEl.contains(e.relatedTarget)) startHeroTimer();
+            });
+        }
     }
 
     function loadMeta() {

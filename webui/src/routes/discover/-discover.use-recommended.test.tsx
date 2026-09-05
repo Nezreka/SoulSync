@@ -144,7 +144,7 @@ describe('useAdventurousness', () => {
     // test is the throttle and the save bodies — the refetch wiring is typed.
   });
 
-  it('drag saves are throttled at 450ms; the value always tracks', async () => {
+  it('drag only updates local state; persistence waits for commit', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_753_000_000_000);
     const { result } = renderHook(() => useAdventurousness(0.3), { wrapper: wrapper() });
@@ -152,10 +152,10 @@ describe('useAdventurousness', () => {
     act(() => result.current.change(0.5)); // inside the throttle window
     expect(result.current.value).toBe(0.5);
     await act(() => vi.advanceTimersByTimeAsync(10));
-    expect(advBodies).toEqual([{ value: 0.4 }]);
+    expect(advBodies).toEqual([]);
     vi.setSystemTime(1_753_000_000_500);
     act(() => result.current.change(0.6));
     await act(() => vi.advanceTimersByTimeAsync(10));
-    expect(advBodies).toEqual([{ value: 0.4 }, { value: 0.6 }]);
+    expect(advBodies).toEqual([]);
   });
 });

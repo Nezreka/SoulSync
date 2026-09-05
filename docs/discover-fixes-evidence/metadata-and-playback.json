@@ -1,0 +1,78 @@
+{
+  "mix": [
+    {
+      "text": "1\n▶\nAether\nVirtual Mage\nAether\n3:26"
+    },
+    {
+      "text": "2\n▶\nSeagulls\nA.L.I.S.O.N\nSeagulls\n3:21"
+    },
+    {
+      "text": "3\n▶\nWarp Drive\nTonebox\nNocturn\n6:43"
+    },
+    {
+      "text": "4\n▶\nSpores\nAbakus\nUtopi\n3:25"
+    },
+    {
+      "text": "5\n▶\nSilence\nUnfound\nSilence\n1:28"
+    }
+  ],
+  "download": {
+    "header": "\n                \n        \n            \n            \n                \n                    🎵\n                    \n                        Daily Mix 1 (40 selected)\n                        by SoulSync\n                        \n                            Playlist\n                            40 tracks\n                        \n                    \n                \n            \n            \n                \n                    40\n                    Total\n                \n                \n                    -\n                    Found\n                \n                \n                    -\n                    Missing\n                \n                \n                    0\n                    Downloaded\n                \n            \n        \n        \n            ×\n        \n    \n            ",
+    "rows": [
+      {
+        "artist": "Virtual Mage",
+        "duration": "3:26"
+      },
+      {
+        "artist": "A.L.I.S.O.N",
+        "duration": "3:21"
+      },
+      {
+        "artist": "Tonebox",
+        "duration": "6:43"
+      },
+      {
+        "artist": "Abakus",
+        "duration": "3:25"
+      },
+      {
+        "artist": "Unfound",
+        "duration": "1:28"
+      }
+    ]
+  },
+  "resolve": {
+    "elapsedMs": 5529,
+    "total": 40,
+    "matched": 32
+  },
+  "playback": [
+    {
+      "outcome": {
+        "status": "played"
+      },
+      "elapsedMs": 298,
+      "playingEventMs": 185,
+      "paused": false,
+      "readyState": 4
+    },
+    {
+      "outcome": {
+        "status": "played"
+      },
+      "elapsedMs": 75,
+      "playingEventMs": 74,
+      "paused": false,
+      "readyState": 4
+    },
+    {
+      "outcome": {
+        "status": "played"
+      },
+      "elapsedMs": 80,
+      "playingEventMs": 79,
+      "paused": false,
+      "readyState": 4
+    }
+  ]
+}

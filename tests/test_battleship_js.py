@@ -17,8 +17,6 @@ tests/test_chat_protocol_js.py.
 
 from __future__ import annotations
 
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -30,33 +28,10 @@ _SUITES = (
 )
 
 
-def _node_available() -> bool:
-    if not shutil.which("node"):
-        return False
-    try:
-        result = subprocess.run(
-            ["node", "--version"],
-            capture_output=True, text=True, timeout=10,
-        )
-    except (subprocess.SubprocessError, FileNotFoundError):
-        return False
-    if result.returncode != 0:
-        return False
-    raw = (result.stdout or "").strip().lstrip("v")
-    try:
-        major = int(raw.split(".")[0])
-    except (ValueError, IndexError):
-        return False
-    return major >= 22
+from tests._node_runner import assert_node_suite, node_available
 
 
-@pytest.mark.skipif(not _node_available(), reason="node >= 22 not available")
+@pytest.mark.skipif(not node_available(), reason="node >= 22 not available")
 @pytest.mark.parametrize("suite", _SUITES, ids=lambda p: p.stem)
 def test_js_suite(suite):
-    result = subprocess.run(
-        ["node", "--test", str(suite)],
-        capture_output=True, text=True, timeout=180, cwd=str(_REPO_ROOT),
-    )
-    assert result.returncode == 0, (
-        f"{suite.name} failed:\n{result.stdout}\n{result.stderr}"
-    )
+    assert_node_suite(suite, suite.stem, cwd=_REPO_ROOT)

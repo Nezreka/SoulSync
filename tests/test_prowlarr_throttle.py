@@ -258,15 +258,54 @@ class TestInteractiveSearchesAreBounded:
         assert called == [], "a refused search must not hit prowlarr anyway"
 
     def test_the_manual_video_endpoints_pass_a_bound(self):
+        """Every manual search path bounds its wait on the shared budget.
+
+        This used to count two bounded call sites, because the two endpoints
+        each called prowlarr_search themselves. They were consolidated into one
+        helper, so the count went to 1 and the test failed on a refactor that
+        did not lose the bound. What actually matters is that NO call is
+        unbounded and that both endpoints still reach a bounded one.
+        """
         with open("api/video/downloads.py", encoding="utf-8") as f:
             tree = ast.parse(f.read())
-        bounded = [
+
+        calls = [
             call for call in ast.walk(tree)
             if isinstance(call, ast.Call)
             and isinstance(call.func, ast.Name) and call.func.id == "prowlarr_search"
-            and any(kw.arg == "max_wait_seconds" for kw in call.keywords)
         ]
-        assert len(bounded) == 2, "both manual search paths must bound their wait"
+        assert calls, "the manual search lane no longer calls prowlarr_search"
+        unbounded = [
+            call.lineno for call in calls
+            if not any(kw.arg == "max_wait_seconds" for kw in call.keywords)
+        ]
+        assert not unbounded, (
+            f"unbounded manual prowlarr_search at line(s) {unbounded} — a person "
+            "is waiting on this response, it must not sit in the shared budget"
+        )
+
+        # And both manual endpoints still go through the bounded helper rather
+        # than growing their own unbounded lane somewhere else.
+        helper = next(
+            (node for node in ast.walk(tree)
+             if isinstance(node, ast.FunctionDef) and node.name == "_torrent_lane_hits"),
+            None,
+        )
+        assert helper is not None, "the bounded manual search helper is gone"
+        assert any(
+            isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+            and call.func.id == "prowlarr_search"
+            for call in ast.walk(helper)
+        ), "_torrent_lane_hits no longer performs the search"
+        callers = [
+            call for call in ast.walk(tree)
+            if isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+            and call.func.id == "_torrent_lane_hits"
+        ]
+        assert len(callers) >= 2, (
+            f"expected both manual endpoints to use the bounded helper, found "
+            f"{len(callers)} caller(s)"
+        )
 
     def test_the_background_drain_does_not_bound_it(self):
         """It should queue, not give up — dropping a wishlist search loses work."""

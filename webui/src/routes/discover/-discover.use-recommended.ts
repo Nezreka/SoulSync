@@ -3,7 +3,7 @@ import { useCallback, useRef, useState } from 'react';
 
 import type { RecommendedArtist } from './-discover.recommended';
 
-import { ADV_ENDPOINT, ADV_LIVE_THROTTLE_MS } from './-discover.adventurousness';
+import { ADV_ENDPOINT } from './-discover.adventurousness';
 import { watchingIdsFrom, watchlistCheckIds } from './-discover.recommended';
 import { watchlistRequest, watchlistToast } from './-discover.your-artists-actions';
 
@@ -16,12 +16,8 @@ import { watchlistRequest, watchlistToast } from './-discover.your-artists-actio
  * ONLY image-less cards are asked about, keyed by the response's source, and
  * the answers land as an id→url map the cards overlay.
  *
- * The dial, from `_advCommitNow` / `_advCommitLive` (112-139): a drag streams
- * throttled saves (450ms) so both rec columns re-rank in real time, and the
- * release commits unconditionally. Every commit then REFRESHES the two rec
- * queries — the vanilla bypasses its controller's load-coalesce for exactly
- * this ("the LATEST dial value always re-fetches"), which here is a
- * refetch-type invalidation, not a stale-marking one.
+ * The dial updates locally during interaction. Its settled commit is serialized
+ * with earlier saves; only the latest gesture refreshes recommendation shelves.
  */
 
 export type RecToast = { message: string; level: 'success' | 'info' | 'error' };
@@ -147,44 +143,50 @@ export interface AdventurousnessController {
 
 export function useAdventurousness(initial: number): AdventurousnessController {
   const [value, setValue] = useState(initial);
-  const lastLive = useRef(0);
+  const saveQueue = useRef(Promise.resolve());
+  const revision = useRef(0);
+  const savedValue = useRef(initial);
   const queryClient = useQueryClient();
 
-  const save = useCallback(
-    async (v: number) => {
-      try {
-        await fetch(ADV_ENDPOINT, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ value: v }),
-        });
-      } catch {
-        /* the vanilla logs and moves on (118) */
-      }
-      // refetch-type: the LATEST value must re-fetch, never coalesce (120-123).
-      await queryClient.refetchQueries({ queryKey: ['discover', 'listening-recs'] });
-      await queryClient.refetchQueries({ queryKey: ['discover', 'similar-artists'] });
-    },
-    [queryClient],
-  );
-
-  const change = useCallback(
-    (v: number) => {
-      setValue(v);
-      const now = Date.now();
-      if (now - lastLive.current < ADV_LIVE_THROTTLE_MS) return;
-      lastLive.current = now;
-      void save(v);
-    },
-    [save],
-  );
+  // Local input is immediate. Persistence is ordered and happens only on commit.
+  const change = useCallback((v: number) => {
+    revision.current += 1;
+    setValue(v);
+  }, []);
 
   const commit = useCallback(
-    async (v: number) => {
+    (v: number) => {
       setValue(v);
-      await save(v);
+      const mine = revision.current;
+      saveQueue.current = saveQueue.current.then(async () => {
+        if (mine !== revision.current) return;
+        try {
+          const response = await fetch(ADV_ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value: v }),
+          });
+          if (!response.ok) throw new Error('Preference not saved');
+          const data = await response.json();
+          if (data.success === false) throw new Error('Preference not saved');
+          savedValue.current = v;
+          if (mine !== revision.current) return;
+          await Promise.all([
+            queryClient.refetchQueries({ queryKey: ['discover', 'listening-recs'] }),
+            queryClient.refetchQueries({ queryKey: ['discover', 'similar-artists'] }),
+          ]);
+        } catch {
+          if (mine !== revision.current) return;
+          setValue(savedValue.current);
+          window.showToast?.(
+            'Could not save adventurousness. Your previous setting was restored.',
+            'error',
+          );
+        }
+      });
+      return saveQueue.current;
     },
-    [save],
+    [queryClient],
   );
 
   return { value, change, commit };

@@ -1,0 +1,376 @@
+{
+  "_comment": [
+    "One corpus, two validators. core/chat_codec.protocol_of (python) and",
+    "ChatProtocol.parseProtocol (chat-protocol.js) must agree on every case",
+    "here, because they gate the SAME bus from opposite ends: python decides",
+    "what a client is allowed to SEND and what it is handed on RECEIVE, and the",
+    "JS decides what the client acts on. A rule in one and not the other means",
+    "either a client builds a payload its own validator blessed and gets a 400,",
+    "or an inbound carrier silently never reaches the bus.",
+    "",
+    "That is not hypothetical: python capped number magnitude at 1e15 and the JS",
+    "only checked isFinite, so anything from 1e15 up disagreed. This file exists",
+    "so the next divergence fails a test instead of desyncing a room.",
+    "",
+    "Add a case here whenever either validator learns a new rule."
+  ],
+  "accept": [
+    {
+      "why": "the ordinary case",
+      "p": {
+        "k": "jbx.vote",
+        "o": "abc123"
+      }
+    },
+    {
+      "why": "dotted kind",
+      "p": {
+        "k": "poll.cast",
+        "o": "yes"
+      }
+    },
+    {
+      "why": "bare kind, no dot",
+      "p": {
+        "k": "ping"
+      }
+    },
+    {
+      "why": "kind at the 24 char limit",
+      "p": {
+        "k": "aaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "why": "digits are allowed after the first letter",
+      "p": {
+        "k": "c4.move2"
+      }
+    },
+    {
+      "why": "booleans and null are scalars",
+      "p": {
+        "k": "x",
+        "a": true,
+        "b": false,
+        "c": null
+      }
+    },
+    {
+      "why": "a millisecond timestamp is comfortably under the cap",
+      "p": {
+        "k": "x",
+        "ts": 1788468529000
+      }
+    },
+    {
+      "why": "negative numbers count by magnitude",
+      "p": {
+        "k": "x",
+        "n": -1000
+      }
+    },
+    {
+      "why": "floats are fine",
+      "p": {
+        "k": "x",
+        "n": 1.5
+      }
+    },
+    {
+      "why": "zero",
+      "p": {
+        "k": "x",
+        "n": 0
+      }
+    },
+    {
+      "why": "string at the 512 limit",
+      "p": {
+        "k": "x",
+        "s": "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901"
+      }
+    },
+    {
+      "why": "one level of array nesting",
+      "p": {
+        "k": "x",
+        "l": [
+          1,
+          2,
+          "three",
+          true,
+          null
+        ]
+      }
+    },
+    {
+      "why": "one level of dict nesting",
+      "p": {
+        "k": "x",
+        "d": {
+          "a": 1,
+          "b": "two"
+        }
+      }
+    },
+    {
+      "why": "empty containers",
+      "p": {
+        "k": "x",
+        "l": [],
+        "d": {}
+      }
+    },
+    {
+      "why": "sixteen fields exactly",
+      "p": {
+        "k": "x",
+        "a": 1,
+        "b": 2,
+        "c": 3,
+        "d": 4,
+        "e": 5,
+        "f": 6,
+        "g": 7,
+        "h": 8,
+        "i": 9,
+        "j": 10,
+        "l": 11,
+        "m": 12,
+        "n": 13,
+        "o": 14,
+        "q": 15
+      }
+    }
+  ],
+  "reject": [
+    {
+      "why": "no protocol object at all",
+      "p": null
+    },
+    {
+      "why": "a list is not a protocol object",
+      "p": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "why": "a string is not a protocol object",
+      "p": "jbx.vote"
+    },
+    {
+      "why": "missing kind",
+      "p": {
+        "o": "abc"
+      }
+    },
+    {
+      "why": "kind must be a string",
+      "p": {
+        "k": 7
+      }
+    },
+    {
+      "why": "kind over 24 chars",
+      "p": {
+        "k": "aaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "why": "kind cannot start with a digit",
+      "p": {
+        "k": "1bad"
+      }
+    },
+    {
+      "why": "kind cannot be upper case",
+      "p": {
+        "k": "Jbx.Vote"
+      }
+    },
+    {
+      "why": "kind cannot carry an underscore",
+      "p": {
+        "k": "jbx_vote"
+      }
+    },
+    {
+      "why": "kind cannot have two dots",
+      "p": {
+        "k": "a.b.c"
+      }
+    },
+    {
+      "why": "kind cannot end on a dot",
+      "p": {
+        "k": "jbx."
+      }
+    },
+    {
+      "why": "kind cannot be empty",
+      "p": {
+        "k": ""
+      }
+    },
+    {
+      "why": "seventeen fields",
+      "p": {
+        "k": "x",
+        "a": 1,
+        "b": 2,
+        "c": 3,
+        "d": 4,
+        "e": 5,
+        "f": 6,
+        "g": 7,
+        "h": 8,
+        "i": 9,
+        "j": 10,
+        "l": 11,
+        "m": 12,
+        "n": 13,
+        "o": 14,
+        "q": 15,
+        "r": 16
+      }
+    },
+    {
+      "why": "string over 512",
+      "p": {
+        "k": "x",
+        "s": "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901X"
+      }
+    },
+    {
+      "why": "a number at the magnitude cap",
+      "p": {
+        "k": "x",
+        "n": 1000000000000000
+      }
+    },
+    {
+      "why": "a number past the magnitude cap - the divergence this file was built for",
+      "p": {
+        "k": "x",
+        "n": 1e+20
+      }
+    },
+    {
+      "why": "a huge negative is just as bad",
+      "p": {
+        "k": "x",
+        "n": -1e+20
+      }
+    },
+    {
+      "why": "array over 32 entries",
+      "p": {
+        "k": "x",
+        "l": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33
+        ]
+      }
+    },
+    {
+      "why": "an oversized string inside an array",
+      "p": {
+        "k": "x",
+        "l": [
+          "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901X"
+        ]
+      }
+    },
+    {
+      "why": "an oversized number inside an array",
+      "p": {
+        "k": "x",
+        "l": [
+          1e+20
+        ]
+      }
+    },
+    {
+      "why": "two levels of nesting",
+      "p": {
+        "k": "x",
+        "d": {
+          "e": {
+            "f": 1
+          }
+        }
+      }
+    },
+    {
+      "why": "an array inside a nested dict is still too deep",
+      "p": {
+        "k": "x",
+        "d": {
+          "e": [
+            1,
+            2
+          ]
+        }
+      }
+    },
+    {
+      "why": "a nested dict with too many fields",
+      "p": {
+        "k": "x",
+        "d": {
+          "a": 1,
+          "b": 2,
+          "c": 3,
+          "d": 4,
+          "e": 5,
+          "f": 6,
+          "g": 7,
+          "h": 8,
+          "i": 9,
+          "j": 10,
+          "l": 11,
+          "m": 12,
+          "n": 13,
+          "o": 14,
+          "q": 15,
+          "r": 16,
+          "s": 17
+        }
+      }
+    }
+  ]
+}

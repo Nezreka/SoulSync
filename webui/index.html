@@ -328,7 +328,8 @@
 
     <div class="main-container">
         <!-- Mobile Navigation -->
-        <button class="hamburger-btn" id="hamburger-btn" aria-label="Toggle navigation">
+        <button class="hamburger-btn" id="hamburger-btn" aria-label="Open navigation"
+                aria-expanded="false" aria-controls="app-sidebar">
             <span class="hamburger-line"></span>
             <span class="hamburger-line"></span>
             <span class="hamburger-line"></span>
@@ -336,7 +337,7 @@
         <div class="mobile-overlay" id="mobile-overlay"></div>
 
         <!-- Sidebar - Always Visible -->
-        <div class="sidebar">
+        <div class="sidebar" id="app-sidebar">
             <!-- Header Section -->
             <div class="sidebar-header">
                 <div class="sidebar-brand">
@@ -922,6 +923,38 @@
                                 </button>
                             </div>
                         </div>
+                        <!-- Continue Watching — the resume rail.
+                             LEADS the page because "where was I" is the first
+                             question anyone brings to a media library, and it
+                             is the only half of this dashboard that is about
+                             WATCHING rather than owning.
+                             Hidden until it has rows: an empty resume rail on a
+                             fresh install is an advert for a feature you cannot
+                             use yet. video-dashboard.js unhides it. -->
+                        <section class="vcw" data-video-continue-section hidden>
+                            <div class="vcw-head">
+                                <h3 class="vcw-title">Continue watching</h3>
+                            </div>
+                            <div class="vcw-rail" data-video-continue-rail></div>
+                        </section>
+
+                        <!-- downloading now. the music dashboard shows live transfer
+                             rows, video only had three numbers in a stats card, so
+                             you could see THAT four things were downloading but not
+                             WHAT. a grid, not a list of full width rows, so a couple
+                             of downloads don't leave a band of mostly empty page.
+                             namespaced vdn-, because vdl- is the download modal's.
+                             hidden when nothing is in flight. -->
+                        <section class="vdn" data-video-dl-section hidden>
+                            <div class="vdn-head">
+                                <h3 class="vdn-title">Downloading now</h3>
+                                <!-- data-video-goto, not data-video-page. only .video-nav buttons get
+                                     the page attr wired, a plain link with it full reloads. -->
+                                <a class="vdn-all" href="/video-downloads" data-video-goto="video-downloads">All downloads &rsaquo;</a>
+                            </div>
+                            <div class="vdn-grid" data-video-dl-list></div>
+                        </section>
+
                         <div class="dash-grid">
 
                             <!-- Recently Added -->
@@ -1259,6 +1292,7 @@
                                     <input type="text" class="vsr-input" data-video-search-input
                                            placeholder="Search movies, shows, people&hellip;" autocomplete="off" spellcheck="false">
                                 </div>
+                                <div class="vsr-context" data-video-search-context hidden></div>
                             </div>
                             <div class="vsr-panel" data-vsr-panel="basic" id="vsr-basic-panel" role="tabpanel" hidden>
                                 <form class="vsr-basic" data-vsr-basic-form>
@@ -1467,6 +1501,13 @@
                                 <div class="vsr-state-ic">&#129300;</div>
                                 <div class="vsr-state-title">Nothing here</div>
                                 <div class="vsr-state-sub">Try a different genre, decade or sort.</div>
+                            </div>
+                            <!-- A failed request is not an empty result. This
+                                 used to show "Nothing here" for a 500. -->
+                            <div class="vsr-state hidden" data-vdsc-grid-error>
+                                <div class="vsr-state-ic">&#9888;&#65039;</div>
+                                <div class="vsr-state-title">Couldn't load these titles</div>
+                                <div class="vsr-state-sub">The metadata service didn't answer. Use Try again below.</div>
                             </div>
                             <div class="vdsc-sentinel" data-vdsc-sentinel aria-hidden="true"></div>
                             <div class="vsr-loading hidden" data-vdsc-more-loading><div class="loading-spinner"></div></div>
@@ -1849,6 +1890,8 @@
                             <div class="vd-bb-bg" data-vd-backdrop aria-hidden="true"></div>
                             <div class="vd-bb-fade" aria-hidden="true"></div>
                             <div class="vd-bb-content">
+                                <img class="vd-cover" data-vd-cover alt="" hidden />
+                                <div class="vd-copy">
                                 <img class="vd-logo" data-vd-logo alt="" hidden />
                                 <h1 class="vd-title" data-vd-title>—</h1>
                                 <div class="vd-tagline" data-vd-tagline hidden></div>
@@ -1860,11 +1903,13 @@
                                 <div class="vd-ratings" data-vd-ratings hidden></div>
                                 <div class="vd-awards" data-vd-awards hidden></div>
                                 <p class="vd-overview" data-vd-overview></p>
+                                <div class="vd-essentials" data-vd-essentials hidden></div>
                                 <!-- Action buttons reuse the exact artist-detail button styles. -->
                                 <div class="vd-actions artist-hero-actions" data-vd-actions></div>
                                 <div class="vd-health" data-vd-health hidden></div>
                                 <div class="vd-genres" data-vd-genres></div>
                                 <div class="vd-subs" data-vd-subs hidden></div>
+                                </div>
                             </div>
                             <!-- offscreen poster, only used to sample the accent color -->
                             <img data-vd-poster crossorigin="anonymous" alt="" style="display:none" />
@@ -1883,7 +1928,7 @@
                                  body on purpose: it was below the whole episode list and
                                  the cast, next to the history block, where nobody found it. -->
                             <div class="vd-acq-section" data-vd-acq-section hidden>
-                                <h2 class="vd-section-h">Acquisition</h2>
+                                <h2 class="vd-section-h">Needs attention</h2>
                                 <div class="vd-acq" data-vd-acq></div>
                             </div>
                             <div class="vd-ep-toolbar">
@@ -1964,6 +2009,8 @@
                             <div class="vd-bb-bg" data-vd-backdrop aria-hidden="true"></div>
                             <div class="vd-bb-fade" aria-hidden="true"></div>
                             <div class="vd-bb-content">
+                                <img class="vd-cover" data-vd-cover alt="" hidden />
+                                <div class="vd-copy">
                                 <img class="vd-logo" data-vd-logo alt="" hidden />
                                 <h1 class="vd-title" data-vd-title>—</h1>
                                 <div class="vd-tagline" data-vd-tagline hidden></div>
@@ -1973,10 +2020,12 @@
                                 <div class="vd-ratings" data-vd-ratings hidden></div>
                                 <div class="vd-awards" data-vd-awards hidden></div>
                                 <p class="vd-overview" data-vd-overview></p>
+                                <div class="vd-essentials" data-vd-essentials hidden></div>
                                 <div class="vd-actions artist-hero-actions" data-vd-actions></div>
                                 <div class="vd-health" data-vd-health hidden></div>
                                 <div class="vd-genres" data-vd-genres></div>
                                 <div class="vd-subs" data-vd-subs hidden></div>
+                                </div>
                             </div>
                             <img data-vd-poster crossorigin="anonymous" alt="" style="display:none" />
                         </div>
@@ -1993,11 +2042,11 @@
                             <!-- Where acquisition stands RIGHT NOW. First thing in the
                                  body on purpose: it was below the whole episode list and
                                  the cast, next to the history block, where nobody found it. -->
+                            <div class="vd-details" data-vd-details></div>
                             <div class="vd-acq-section" data-vd-acq-section hidden>
-                                <h2 class="vd-section-h">Acquisition</h2>
+                                <h2 class="vd-section-h">Needs attention</h2>
                                 <div class="vd-acq" data-vd-acq></div>
                             </div>
-                            <div class="vd-details" data-vd-details></div>
                             <div class="vd-cast-section" data-vd-cast-section hidden>
                                 <div class="vd-section-head">
                                     <h2 class="vd-section-h">Cast &amp; Crew</h2>
@@ -2554,7 +2603,7 @@
                                             • <strong>Spotify</strong> — official Spotify; connect your account in the Spotify section below.<br>
                                             • <strong>Spotify (no auth)</strong> — the same Spotify catalog with no account needed. It's unofficial and best-effort (may break if Spotify changes its site) and can't read your personal library or playlists.<br>
                                             • <strong>Deezer</strong> / <strong>iTunes</strong> — free, no account.<br>
-                                            • <strong>MusicBrainz</strong> — free, but limited to 1 request/sec.<br>
+                                            • <strong>MusicBrainz</strong> — free; the public server is limited to 1 request/sec. Configure a self-hosted server in the MusicBrainz section below.<br>
                                             • <strong>Discogs</strong> — needs a personal access token.<br>
                                             • <strong>JioSaavn</strong> — opt in under Advanced → Experimental. Strong for Indian and Bollywood catalogs.<br><br>
                                             Tip: if you pick <strong>Spotify (no auth)</strong> and later connect a real Spotify account, it uses the official account normally and only falls back to no-auth while Spotify is rate-limited — then switches back automatically.</div>
@@ -2809,6 +2858,38 @@
                                 </div>
 
                                 <!-- Last.fm Settings -->
+                                <!-- Concerts: two providers, two questions -->
+                                <div class="api-service-frame stg-service" data-service="concerts">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #00b4b3;"></span>
+                                        <h4 class="service-title">Concerts</h4>
+                                        <span class="stg-service-chevron">&rsaquo;</span>
+                                    </div>
+                                    <div class="stg-service-body">
+                                        <div class="setting-help-text">
+                                            Adds a <strong>Live</strong> section to artist pages. Both are optional and
+                                            independent &mdash; set up either, both, or neither.
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Ticketmaster API Key:</label>
+                                            <input type="text" id="concerts-ticketmaster-api-key" placeholder="Your Discovery API key">
+                                            <div class="setting-help-text">
+                                                Upcoming dates, venues and ticket links. Free self-service key from
+                                                developer.ticketmaster.com (5,000 calls a day).
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Setlist.fm API Key:</label>
+                                            <input type="text" id="concerts-setlistfm-api-key" placeholder="Your setlist.fm API key">
+                                            <div class="setting-help-text">
+                                                What the artist actually played at recent shows, song by song &mdash; and a
+                                                setlist can be played straight from your library. Free key from
+                                                setlist.fm/settings/api (non-commercial use).
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <div class="api-service-frame stg-service" data-service="lastfm">
                                     <div class="stg-service-header" onclick="toggleStgService(this)">
                                         <span class="stg-service-dot" style="color: #d51007;"></span>
@@ -2864,6 +2945,28 @@
                                                     style="color: #ffff64;">Genius API Clients</a></div>
                                             <div class="callback-help">Generate a "Client Access Token" — no OAuth flow needed.</div>
                                         </div>
+                                    </div>
+                                </div>
+
+                                <!-- MusicBrainz server (optional; public API requires no credentials) -->
+                                <div class="api-service-frame stg-service" id="musicbrainz-server-settings">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #ba478f;"></span>
+                                        <h4 class="service-title">MusicBrainz</h4>
+                                        <span class="stg-service-chevron">›</span>
+                                    </div>
+                                    <div class="stg-service-body">
+                                        <div class="form-group">
+                                            <label for="musicbrainz-base-url">MusicBrainz server URL</label>
+                                            <input type="url" id="musicbrainz-base-url" placeholder="https://musicbrainz.org" aria-describedby="musicbrainz-server-help">
+                                            <small class="settings-hint" id="musicbrainz-server-help">Optional: enter your self-hosted server address. Leave blank to use public MusicBrainz. Applies to search, matching and enrichment as soon as settings are saved.</small>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="musicbrainz-request-interval">MusicBrainz request interval (seconds)</label>
+                                            <input type="number" id="musicbrainz-request-interval" min="0" step="any" value="1.05" aria-describedby="musicbrainz-interval-help">
+                                            <small class="settings-hint" id="musicbrainz-interval-help">Use 0.1 for up to 10 requests/second on your server, or 0 for no delay. Public MusicBrainz always keeps its rate limit. Environment overrides take precedence over these fields. Your server needs search indexes; use its final URL without redirects.</small>
+                                        </div>
+
                                     </div>
                                 </div>
 
@@ -6881,6 +6984,18 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- overlay share picker. your templates rendered onto a poster
+                                 so you pick by sight, not off a list of names. -->
+                            <div class="chat-settings-overlay" data-chat-ovl-modal hidden>
+                                <div class="chat-settings-modal chat-ovl-modal">
+                                    <h3 class="chat-settings-title">&#9720; Share an overlay</h3>
+                                    <p class="chat-ovl-sub">Pick a template to post in the room. Anyone reading can add it to their own Overlay Studio in one click.</p>
+                                    <div class="chat-ovl-grid" data-chat-ovl-grid></div>
+                                    <div class="chat-settings-actions">
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-ovl-close>Close</button>
+                                    </div>
+                                </div>
+                            </div>
                             <!-- movie night picker: nominate a movie or an episode for
                                  the room's ballot (TMDB search via the video side) -->
                             <div class="chat-settings-overlay" data-chat-watch-modal hidden>
@@ -6974,6 +7089,10 @@
                                         <div class="chat-gif-pop chat-attach-pop" data-chat-attach-pop hidden>
                                             <div class="chat-attach-tabs">
                                                 <button type="button" class="chat-fmt-btn" data-chat-attach-upload>Upload a file</button>
+                                                <!-- Sits with Upload because it is the same gesture: hand
+                                                     somebody something they can take. It sends the DESIGN,
+                                                     not a link, so the reader adopts it in one click. -->
+                                                <button type="button" class="chat-fmt-btn" data-chat-attach-overlay>Share an overlay</button>
                                                 <span class="chat-attach-or">or share from your library:</span>
                                             </div>
                                             <input type="file" data-chat-attach-file hidden>
@@ -7015,6 +7134,15 @@
                                         <button type="button" class="chat-tbtn chat-tbtn--side chat-gif-btn" data-chat-gif-btn title="Send a GIF">GIF</button>
                                         <button class="chat-send-fab" type="submit" title="Send">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+                                    </div>
+                                    <!-- says who can actually read what you are about to
+                                         send. shown only in plain mode: the default needs
+                                         no explaining, the exception does. -->
+                                    <div class="chat-modehint" data-chat-mode-hint hidden>
+                                        <b>Plain text.</b> You're showing all messages, so you're sending
+                                        in plain text — every Soulseek client in the room can read it.
+                                        No formatting, replies or attachments. Switch to
+                                        <b>SoulSync only</b> for those.
                                     </div>
                                 </div>
                             </form>

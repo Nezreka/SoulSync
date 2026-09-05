@@ -590,6 +590,25 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_room_messages_room "
                            "ON chat_room_messages (room, timestamp)")
+            # Reactions. They travel as empty-text carriers, which the unwrap
+            # pulls OUT of the message list, so the message archive never saw
+            # them: a reaction lived exactly as long as slskd's room buffer and
+            # was gone after a restart. Reactions cannot be un-sent (there is no
+            # remove carrier), so storing them additively is the whole model —
+            # nothing here can resurrect something a user took back.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS chat_room_reactions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room TEXT NOT NULL,
+                    target_key TEXT NOT NULL,
+                    emoji TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(room, target_key, emoji, username) ON CONFLICT IGNORE
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_room_reactions_room "
+                           "ON chat_room_reactions (room, target_key)")
             # Arcade game carriers. Protocol carriers are normally ephemeral --
             # they are machine coordination and replaying a stale jukebox vote
             # would resurrect a dead queue -- but a GAME is durable state that
@@ -654,8 +673,12 @@ class MusicDatabase:
             # push loop archived DECODED dicts, and decoding is exactly the
             # step that strips the envelope, so the tags existed nowhere
             # the frontend could reach. Same tolerant-ALTER pattern.
+            # 'overlay' carries a shared template. It rides its own envelope key
+            # and a share has NO text, so before this the archive dropped the
+            # whole row (add_chat_messages requires a message) and a template
+            # shared into the room simply vanished on reload.
             for _chat_col in ('chan TEXT', 'thread TEXT', 'thread_name TEXT', 'av INTEGER',
-                              'edit_target TEXT'):
+                              'edit_target TEXT', 'overlay TEXT'):
                 try:
                     cursor.execute("ALTER TABLE chat_room_messages ADD COLUMN " + _chat_col)
                 except sqlite3.OperationalError:
@@ -2570,6 +2593,16 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE similar_artists ADD COLUMN similar_artist_musicbrainz_id TEXT")
                 logger.info("Added similar_artist_musicbrainz_id column to similar_artists table")
 
+            # which provider's namespace source_artist_id lives in. without it a
+            # deezer id and an itunes id are the same bare string, and two
+            # unrelated artists' edges cross-match on numeric equality.
+            # legacy rows stay NULL deliberately: their origin is not provable,
+            # and the readers treat an unprovable row as unusable rather than
+            # guessing (core/discovery/bylt.py::classify_edge).
+            if 'source_provider' not in similar_artists_columns:
+                cursor.execute("ALTER TABLE similar_artists ADD COLUMN source_provider TEXT")
+                logger.info("Added source_provider column to similar_artists table")
+
             # Migration: Add iTunes columns to recent_releases for dual-source discovery
             cursor.execute("PRAGMA table_info(recent_releases)")
             recent_releases_columns = [column[1] for column in cursor.fetchall()]
@@ -2690,6 +2723,7 @@ class MusicDatabase:
                                 similarity_rank INTEGER DEFAULT 1,
                                 occurrence_count INTEGER DEFAULT 1,
                                 last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                source_provider TEXT,
                                 UNIQUE(source_artist_id, similar_artist_name)
                             )
                         """)
@@ -2697,10 +2731,12 @@ class MusicDatabase:
                             INSERT OR IGNORE INTO similar_artists_new
                             (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
                              similar_artist_deezer_id, similar_artist_musicbrainz_id,
-                             similar_artist_name, similarity_rank, occurrence_count, last_updated)
+                             similar_artist_name, similarity_rank, occurrence_count, last_updated,
+                             source_provider)
                             SELECT source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
                                    similar_artist_deezer_id, similar_artist_musicbrainz_id,
-                                   similar_artist_name, similarity_rank, occurrence_count, last_updated
+                                   similar_artist_name, similarity_rank, occurrence_count, last_updated,
+                                   source_provider
                             FROM similar_artists
                         """)
                         migration_cursor.execute("DROP TABLE similar_artists")
@@ -4694,6 +4730,7 @@ class MusicDatabase:
                             metadata_updated_at TIMESTAMP,
                             last_featured TIMESTAMP,
                             profile_id INTEGER DEFAULT 1,
+                            source_provider TEXT,
                             UNIQUE(profile_id, source_artist_id, similar_artist_name)
                         )
                     """)
@@ -4703,7 +4740,8 @@ class MusicDatabase:
                                 'similar_artist_musicbrainz_id', 'similar_artist_name',
                                 'similarity_rank', 'occurrence_count',
                                 'last_updated', 'image_url', 'genres', 'popularity',
-                                'metadata_updated_at', 'last_featured', 'profile_id']
+                                'metadata_updated_at', 'last_featured', 'profile_id',
+                                'source_provider']
                     shared_cols = [c for c in new_cols if c in old_cols]
                     cols_str = ', '.join(shared_cols)
 
@@ -5659,23 +5697,59 @@ class MusicDatabase:
             return None
         return self._listening_overview(where)
 
-    def get_top_artists(self, time_range='all', limit=10):
-        """Get top artists by play count."""
+    def listening_history_scope(self) -> str:
+        """'profile' or 'shared' - who the listening history belongs to.
+
+        listening_history carries no profile column, so on every install today
+        the answer is 'shared': every profile's plays land in one table and any
+        feature built on it is personal to the INSTALL, not to the profile.
+        the recommendation payloads carry this string so the product can say so
+        instead of implying a personal history it does not have. the moment the
+        column exists the filter below engages and this reads 'profile'.
+        """
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(listening_history)")
+            return 'profile' if any(r[1] == 'profile_id' for r in cursor.fetchall()) else 'shared'
+        except Exception as e:
+            logger.debug(f"listening history scope probe failed: {e}")
+            return 'shared'
+        finally:
+            if conn:
+                conn.close()
+
+    def get_top_artists(self, time_range='all', limit=10, profile_id=None):
+        """Get top artists by play count.
+
+        profile_id scopes the read WHEN the history can be attributed (see
+        listening_history_scope). passing one on a shared history is not an
+        error and does not silently pretend to filter - the caller reports the
+        scope it actually got.
+        """
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             where = self._listening_time_filter(time_range)
+            params = []
+            scope_clause = ''
+            if profile_id is not None:
+                cursor.execute("PRAGMA table_info(listening_history)")
+                if any(r[1] == 'profile_id' for r in cursor.fetchall()):
+                    scope_clause = ' AND profile_id = ?'
+                    params.append(profile_id)
 
             cursor.execute(f"""
                 SELECT artist, COUNT(*) as play_count
                 FROM listening_history
                 {where}
-                AND artist IS NOT NULL AND artist != ''
+                AND artist IS NOT NULL AND artist != ''{scope_clause}
                 GROUP BY LOWER(artist)
                 ORDER BY play_count DESC
                 LIMIT ?
-            """, (limit,))
+            """, (*params, limit))
             return [{'name': row[0], 'play_count': row[1]} for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"Error getting top artists: {e}")
@@ -12150,7 +12224,18 @@ class MusicDatabase:
             user = str(m.get('username') or '').strip()[:64]
             msg = str(m.get('message') or '')[:4000]
             ts = str(m.get('timestamp') or '').strip()[:40]
-            if not user or not msg or not ts:
+            ovl = m.get('overlay')
+            ovl_json = None
+            if isinstance(ovl, dict) and ovl.get('n') and isinstance(ovl.get('d'), dict):
+                try:
+                    ovl_json = json.dumps({'n': str(ovl.get('n'))[:120], 'd': ovl.get('d')})
+                    if len(ovl_json) > 20000:      # matches the codec's own ceiling
+                        ovl_json = None
+                except (ValueError, TypeError):
+                    ovl_json = None
+            # An overlay share carries no text ON PURPOSE - the card is the
+            # message. Requiring one dropped every share from the archive.
+            if not user or not ts or (not msg and not ovl_json):
                 continue
             rep = m.get('reply')
             rep_json = None
@@ -12176,7 +12261,8 @@ class MusicDatabase:
                          str(_th)[:160] if _th else None,
                          str(_tn)[:80] if _tn else None,
                          _av,
-                         str(_ed)[:160] if _ed else None))
+                         str(_ed)[:160] if _ed else None,
+                         ovl_json))
         if not rows:
             return 0
         try:
@@ -12184,8 +12270,8 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 before = conn.total_changes
                 cursor.executemany(
-                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
                 inserted = conn.total_changes - before
                 if inserted:
                     cursor.execute(
@@ -12198,6 +12284,70 @@ class MusicDatabase:
         except Exception as e:
             logger.error("Error archiving chat messages: %s", e)
             return 0
+
+    _CHAT_REACTIONS_KEEP = 20000   # per room — rows are tiny, but still bounded
+
+    def add_chat_reactions(self, room: str, reactions) -> int:
+        """Archive the aggregated reaction map ({target_key: {emoji: [users]}}).
+
+        Idempotent on (room, target, emoji, user): the hydrate re-sends the same
+        map every time it runs, and a reaction has no id of its own. Reactions
+        cannot be un-sent, so there is nothing an additive store can wrongly
+        bring back."""
+        rows = []
+        for key, by_emoji in (reactions or {}).items():
+            k = str(key or '').strip()[:80]
+            if not k or not isinstance(by_emoji, dict):
+                continue
+            for emoji, users in by_emoji.items():
+                e = str(emoji or '').strip()[:8]
+                if not e or not isinstance(users, (list, tuple)):
+                    continue
+                for u in users:
+                    u = str(u or '').strip()[:64]
+                    if u:
+                        rows.append((str(room), k, e, u))
+        if not rows:
+            return 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                before = conn.total_changes
+                cursor.executemany(
+                    "INSERT INTO chat_room_reactions (room, target_key, emoji, username) "
+                    "VALUES (?, ?, ?, ?)", rows)
+                inserted = conn.total_changes - before
+                if inserted:
+                    cursor.execute(
+                        "DELETE FROM chat_room_reactions WHERE room = ? AND id NOT IN "
+                        "(SELECT id FROM chat_room_reactions WHERE room = ? "
+                        " ORDER BY id DESC LIMIT ?)",
+                        (str(room), str(room), self._CHAT_REACTIONS_KEEP))
+                conn.commit()
+                return inserted
+        except Exception as e:
+            logger.error("Error archiving chat reactions: %s", e)
+            return 0
+
+    def get_chat_reactions(self, room: str) -> Dict[str, Any]:
+        """The archived reactions for a room, in the same
+        {target_key: {emoji: [users]}} shape the live unwrap produces, so the
+        two can be merged without either side knowing about the other."""
+        out: Dict[str, Any] = {}
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(
+                    "SELECT target_key, emoji, username FROM chat_room_reactions "
+                    "WHERE room = ? ORDER BY id", (str(room),)).fetchall()
+            for r in rows:
+                by_emoji = out.setdefault(r['target_key'], {})
+                users = by_emoji.setdefault(r['emoji'], [])
+                if r['username'] not in users:
+                    users.append(r['username'])
+        except Exception as e:
+            logger.error("Error reading chat reactions: %s", e)
+            return {}
+        return out
 
     def add_chat_game_carriers(self, room: str, events) -> int:
         """Archive Arcade game carriers ({username, timestamp, p}). Only
@@ -12352,7 +12502,7 @@ class MusicDatabase:
         (ready to render). ``before`` pages backwards: only messages strictly
         older than that timestamp."""
         try:
-            q = ("SELECT username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target FROM chat_room_messages "
+            q = ("SELECT username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay FROM chat_room_messages "
                  "WHERE room = ?")
             args: list = [str(room)]
             if before:
@@ -12393,6 +12543,21 @@ class MusicDatabase:
                     r['ed'] = r.pop('edit_target')
                 else:
                     r.pop('edit_target', None)
+                # Rebuild the share card the live path hands the frontend:
+                # name, layer count and the asset refs it needs, so a reader
+                # can still adopt a template shared days ago.
+                if r.get('overlay'):
+                    try:
+                        _o = json.loads(r['overlay'])
+                        _d = _o.get('d') or {}
+                        from core import chat_codec as _cc
+                        r['overlay'] = {'n': _o.get('n'), 'd': _d,
+                                        'layers': len(_d.get('layers') or []),
+                                        'assets': _cc.overlay_assets(_d)}
+                    except (ValueError, TypeError, ImportError):
+                        r.pop('overlay', None)
+                else:
+                    r.pop('overlay', None)
             return rows
         except Exception as e:
             logger.error("Error reading chat archive: %s", e)
@@ -13671,8 +13836,15 @@ class MusicDatabase:
                                       genres: Optional[list] = None,
                                       popularity: int = 0,
                                       similar_artist_deezer_id: Optional[str] = None,
-                                      similar_artist_musicbrainz_id: Optional[str] = None) -> bool:
-        """Add or update a similar artist recommendation."""
+                                      similar_artist_musicbrainz_id: Optional[str] = None,
+                                      source_provider: Optional[str] = None) -> bool:
+        """Add or update a similar artist recommendation.
+
+        source_provider names the namespace source_artist_id belongs to
+        ('spotify' / 'itunes' / 'deezer' / 'discogs' / 'musicbrainz' /
+        'watchlist_row'). readers match the PAIR, so a deezer id can never
+        resolve as an itunes one. omitting it leaves the row unprovable and
+        the recommendation readers will not use it."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -13683,10 +13855,11 @@ class MusicDatabase:
                     (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
                      similar_artist_deezer_id, similar_artist_musicbrainz_id, similar_artist_name,
                      similarity_rank, occurrence_count, last_updated, profile_id,
-                     image_url, genres, popularity, metadata_updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                     image_url, genres, popularity, metadata_updated_at, source_provider)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
                     ON CONFLICT(profile_id, source_artist_id, similar_artist_name)
                     DO UPDATE SET
+                        source_provider = COALESCE(excluded.source_provider, source_provider),
                         similar_artist_spotify_id = COALESCE(excluded.similar_artist_spotify_id, similar_artist_spotify_id),
                         similar_artist_itunes_id = COALESCE(excluded.similar_artist_itunes_id, similar_artist_itunes_id),
                         similar_artist_deezer_id = COALESCE(excluded.similar_artist_deezer_id, similar_artist_deezer_id),
@@ -13700,7 +13873,8 @@ class MusicDatabase:
                         metadata_updated_at = CASE WHEN excluded.image_url IS NOT NULL THEN CURRENT_TIMESTAMP ELSE metadata_updated_at END
                 """, (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
                       similar_artist_deezer_id, similar_artist_musicbrainz_id, similar_artist_name,
-                      similarity_rank, profile_id, image_url, genres_json, popularity))
+                      similarity_rank, profile_id, image_url, genres_json, popularity,
+                      (str(source_provider).strip().lower() or None) if source_provider else None))
 
                 conn.commit()
                 return True
@@ -14439,33 +14613,149 @@ class MusicDatabase:
 
                 rows = cursor.fetchall()
                 row_keys = rows[0].keys() if rows else []
-
-                return [DiscoveryTrack(
-                    id=row['id'],
-                    spotify_track_id=row['spotify_track_id'],
-                    spotify_album_id=row['spotify_album_id'],
-                    spotify_artist_id=row['spotify_artist_id'],
-                    itunes_track_id=row['itunes_track_id'] if 'itunes_track_id' in row_keys else None,
-                    itunes_album_id=row['itunes_album_id'] if 'itunes_album_id' in row_keys else None,
-                    itunes_artist_id=row['itunes_artist_id'] if 'itunes_artist_id' in row_keys else None,
-                    deezer_track_id=row['deezer_track_id'] if 'deezer_track_id' in row_keys else None,
-                    deezer_album_id=row['deezer_album_id'] if 'deezer_album_id' in row_keys else None,
-                    deezer_artist_id=row['deezer_artist_id'] if 'deezer_artist_id' in row_keys else None,
-                    source=row['source'] if 'source' in row_keys else 'spotify',
-                    track_name=row['track_name'],
-                    artist_name=row['artist_name'],
-                    album_name=row['album_name'],
-                    album_cover_url=row['album_cover_url'],
-                    duration_ms=row['duration_ms'],
-                    popularity=row['popularity'],
-                    release_date=row['release_date'],
-                    is_new_release=bool(row['is_new_release']),
-                    track_data_json=row['track_data_json'],
-                    added_date=datetime.fromisoformat(row['added_date'])
-                ) for row in rows]
+                return [self._discovery_track_from_row(row, row_keys) for row in rows]
 
         except Exception as e:
             logger.error(f"Error getting discovery pool tracks: {e}")
+            return []
+
+    @staticmethod
+    def _discovery_track_from_row(row, row_keys) -> DiscoveryTrack:
+        """One discovery_pool row as a DiscoveryTrack. Shared by the windowed
+        read above and the exact-id read below so the two can never drift."""
+        return DiscoveryTrack(
+            id=row['id'],
+            spotify_track_id=row['spotify_track_id'],
+            spotify_album_id=row['spotify_album_id'],
+            spotify_artist_id=row['spotify_artist_id'],
+            itunes_track_id=row['itunes_track_id'] if 'itunes_track_id' in row_keys else None,
+            itunes_album_id=row['itunes_album_id'] if 'itunes_album_id' in row_keys else None,
+            itunes_artist_id=row['itunes_artist_id'] if 'itunes_artist_id' in row_keys else None,
+            deezer_track_id=row['deezer_track_id'] if 'deezer_track_id' in row_keys else None,
+            deezer_album_id=row['deezer_album_id'] if 'deezer_album_id' in row_keys else None,
+            deezer_artist_id=row['deezer_artist_id'] if 'deezer_artist_id' in row_keys else None,
+            source=row['source'] if 'source' in row_keys else 'spotify',
+            track_name=row['track_name'],
+            artist_name=row['artist_name'],
+            album_name=row['album_name'],
+            album_cover_url=row['album_cover_url'],
+            duration_ms=row['duration_ms'],
+            popularity=row['popularity'],
+            release_date=row['release_date'],
+            is_new_release=bool(row['is_new_release']),
+            track_data_json=row['track_data_json'],
+            added_date=datetime.fromisoformat(row['added_date'])
+        )
+
+    # the source-specific column each source stores its track id in
+    _POOL_ID_COLUMN = {'spotify': 'spotify_track_id', 'itunes': 'itunes_track_id',
+                       'deezer': 'deezer_track_id'}
+
+    def get_discovery_pool_tracks_by_ids(self, track_ids: List[str], source: str,
+                                         profile_id: int = 1) -> Dict[str, DiscoveryTrack]:
+        """Hydrate EXACTLY the requested pool ids, with no recency window.
+
+        the windowed read above answers "the newest N tracks", which is the
+        wrong question for a saved selection: a stored id that has fallen out
+        of the newest 5,000 rows silently disappears from the shelf. this asks
+        for the ids themselves, through the source's own id column, so a
+        missing row means the track really is gone and the caller can say so.
+
+        returns {track_id: DiscoveryTrack}; absent keys are the unavailable
+        ones. an unsupported source returns {} and the caller must report the
+        source rather than render a blank shelf.
+        """
+        column = self._POOL_ID_COLUMN.get(str(source or '').lower())
+        wanted = [str(t) for t in (track_ids or []) if str(t or '').strip()]
+        if not column or not wanted:
+            return {}
+        out: Dict[str, DiscoveryTrack] = {}
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                CHUNK = 400   # stay well under SQLite's placeholder ceiling
+                for i in range(0, len(wanted), CHUNK):
+                    chunk = wanted[i:i + CHUNK]
+                    ph = ','.join('?' * len(chunk))
+                    cursor.execute(f"""
+                        SELECT * FROM discovery_pool
+                        WHERE profile_id = ? AND source = ? AND {column} IN ({ph})
+                    """, [profile_id, str(source).lower(), *chunk])
+                    rows = cursor.fetchall()
+                    row_keys = rows[0].keys() if rows else []
+                    for row in rows:
+                        key = str(row[column])
+                        if key not in out:
+                            out[key] = self._discovery_track_from_row(row, row_keys)
+            return out
+        except Exception as e:
+            logger.error(f"Error hydrating discovery pool ids: {e}")
+            return {}
+
+    def get_artist_identity_rows(self, names: Optional[List[str]] = None) -> List[dict]:
+        """Library artists with every provider id they carry, plus genres.
+
+        the identity source for recommendations. it is the CATALOGUE, not the
+        watchlist: listening to an artist never implied watching it, and the
+        watchlist-only lookup is why two of the user's own top artists could
+        not resolve a single similarity edge.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                sql = ("SELECT name, spotify_artist_id, itunes_artist_id, deezer_id, "
+                       "musicbrainz_id, genres, thumb_url FROM artists "
+                       "WHERE name IS NOT NULL AND name != ''")
+                params: List = []
+                wanted = [n for n in (names or []) if str(n or '').strip()]
+                if wanted:
+                    ph = ','.join('?' * len(wanted))
+                    sql += f" AND LOWER(name) IN ({ph})"
+                    params = [str(n).strip().lower() for n in wanted]
+                cursor.execute(sql, params)
+                return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error reading artist identity rows: {e}")
+            return []
+
+    def get_similar_artist_edges(self, source_artist_ids: List[str],
+                                 profile_id: int = 1) -> List[dict]:
+        """RAW seed-to-candidate edges, one row per stored relationship.
+
+        get_top_similar_artists is an AGGREGATE recommendation query: it groups
+        by similar-artist name and takes MAX(source_artist_id), so every edge
+        but one is destroyed, and its global LIMIT is not a per-seed budget.
+        raising that limit cannot bring the lost edges back. this returns the
+        rows themselves, source_provider included, so the caller can match
+        (provider, id) pairs and keep each seed's evidence separate.
+        """
+        wanted = [str(i) for i in (source_artist_ids or []) if str(i or '').strip()]
+        if not wanted:
+            return []
+        cols = ('source_artist_id', 'source_provider', 'similar_artist_name',
+                'similarity_rank', 'occurrence_count', 'similar_artist_spotify_id',
+                'similar_artist_itunes_id', 'similar_artist_deezer_id',
+                'similar_artist_musicbrainz_id', 'image_url', 'genres', 'popularity')
+        out: List[dict] = []
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(similar_artists)")
+                have = {r[1] for r in cursor.fetchall()}
+                select = ', '.join(c if c in have else f"NULL AS {c}" for c in cols)
+                CHUNK = 400
+                for i in range(0, len(wanted), CHUNK):
+                    chunk = wanted[i:i + CHUNK]
+                    ph = ','.join('?' * len(chunk))
+                    cursor.execute(f"""
+                        SELECT {select} FROM similar_artists
+                        WHERE profile_id = ? AND source_artist_id IN ({ph})
+                        ORDER BY similarity_rank ASC
+                    """, [profile_id, *chunk])
+                    out.extend(dict(r) for r in cursor.fetchall())
+            return out
+        except Exception as e:
+            logger.error(f"Error reading similar-artist edges: {e}")
             return []
 
     def cache_discovery_recent_album(self, album_data: Dict[str, Any], source: str = 'spotify', profile_id: int = 1) -> bool:

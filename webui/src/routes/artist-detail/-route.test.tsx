@@ -167,4 +167,95 @@ describe('artist-detail route', () => {
       'SAW',
     );
   });
+
+  it('plays an owned album from the library instead of trying to download it', async () => {
+    // The metadata endpoint never returns a file_path, and the player reads a
+    // missing one as "download this first". Auto-download for queue tracks is
+    // OFF by default, so every row of an album owned in full used to fail with
+    // "Auto-download is disabled for missing queue tracks".
+    window.playTrackList = vi.fn();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        let body: unknown = { success: false, tracks: [] };
+        if (url.includes('/api/artist-detail/')) {
+          body = {
+            success: true,
+            artist: { id: 42, name: 'Aphex Twin', server_source: 'plex' },
+            discography: {
+              albums: [{ id: 1, title: 'SAW', owned: true, image_url: 'album.jpg' }],
+              source: 'spotify',
+            },
+          };
+        } else if (url.includes('/api/album/1/tracks')) {
+          body = { success: true, tracks: [{ id: 'sp-1', name: 'Xtal' }, { id: 'sp-2', name: 'Tha' }] };
+        } else if (url.includes('/api/library/check-tracks')) {
+          body = {
+            success: true,
+            owned_tracks: {
+              Xtal: { owned: true, file_path: '/music/xtal.flac', format: 'FLAC' },
+              Tha: { owned: true, file_path: '/music/tha.flac', format: 'FLAC' },
+            },
+          };
+        }
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+
+    renderArtistDetailRoute();
+    await screen.findByText('SAW');
+    fireEvent.click(document.querySelector('.release-card-play-btn')!);
+
+    await waitFor(() => expect(window.playTrackList).toHaveBeenCalledTimes(1));
+    expect(requestedUrls().some((u) => u.includes('/api/library/check-tracks'))).toBe(true);
+    const queued = (window.playTrackList as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(queued).toEqual([
+      expect.objectContaining({ title: 'Xtal', file_path: '/music/xtal.flac', is_library: true }),
+      expect.objectContaining({ title: 'Tha', file_path: '/music/tha.flac', is_library: true }),
+    ]);
+  });
+
+  it('still plays what it can when the ownership lookup fails', async () => {
+    // A dead check-tracks must not take the play button down with it: hand the
+    // queue over anyway and let the normal download path sort out the rest.
+    window.playTrackList = vi.fn();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.includes('/api/library/check-tracks')) throw new Error('boom');
+        let body: unknown = { success: false, tracks: [] };
+        if (url.includes('/api/artist-detail/')) {
+          body = {
+            success: true,
+            artist: { id: 42, name: 'Aphex Twin', server_source: 'plex' },
+            discography: {
+              albums: [{ id: 1, title: 'SAW', owned: true, image_url: 'album.jpg' }],
+              source: 'spotify',
+            },
+          };
+        } else if (url.includes('/api/album/1/tracks')) {
+          body = { success: true, tracks: [{ id: 'sp-1', name: 'Xtal' }] };
+        }
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+
+    renderArtistDetailRoute();
+    await screen.findByText('SAW');
+    fireEvent.click(document.querySelector('.release-card-play-btn')!);
+
+    await waitFor(() => expect(window.playTrackList).toHaveBeenCalledTimes(1));
+    expect(window.showToast).not.toHaveBeenCalledWith(
+      expect.stringContaining('Could not play'),
+      'error',
+    );
+  });
 });

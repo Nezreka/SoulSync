@@ -36556,6 +36556,10 @@ div.artist-hero-badge {
     overflow: hidden;
     margin-bottom: 40px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    /* Column, so the control strip at the foot is a real row the content sits
+       above rather than an absolute box parked on top of the CTAs. */
+    display: flex;
+    flex-direction: column;
 }
 
 .discover-hero-background {
@@ -36596,11 +36600,12 @@ div.artist-hero-badge {
 
 .discover-hero-content {
     position: relative;
-    height: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
     display: flex;
     align-items: flex-end;
     justify-content: space-between;
-    padding: 48px 56px;
+    padding: 48px 56px 20px;
     gap: 40px;
 }
 
@@ -36924,53 +36929,112 @@ div.artist-hero-badge {
     right: 20px;
 }
 
-/* Hero Slideshow Indicators */
-.discover-hero-indicators {
-    position: absolute;
-    bottom: 24px;
-    left: 50%;
-    transform: translateX(-50%);
+/* Hero control row: the dots and the bulk actions share ONE reserved strip
+   across the foot of the billboard. They were two absolutely positioned boxes
+   both anchored at bottom: 24px, one centred and one right-aligned, which is
+   why the dots painted over the Watch All pill on narrow desktop and on every
+   phone. Nothing here overlaps because nothing here is absolute except the
+   row itself. */
+.discover-hero-controls {
+    position: relative;
     z-index: 10;
+    padding: 0 24px 18px;
     display: flex;
-    gap: 10px;
-    padding: 12px 20px;
-    background: rgba(0, 0, 0, 0.3);
-    backdrop-filter: blur(10px);
-    border-radius: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    pointer-events: none;   /* the strip is layout; only its controls take clicks */
+}
+.discover-hero-controls > * { pointer-events: auto; }
+
+.discover-playback-pending {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    border: 1px solid rgba(var(--accent-rgb), .4);
+    border-radius: 12px;
+    background: rgba(var(--accent-rgb), .1);
+    font-size: 14px;
+}
+.discover-playback-pending button { flex-shrink: 0; }
+@media (max-width: 600px) {
+    .discover-playback-pending { align-items: flex-start; flex-direction: column; }
 }
 
+.discover-hero-indicators {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 100%;
+    box-sizing: border-box;
+    gap: 4px;
+    padding: 4px 10px;
+    background: rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(10px);
+    border-radius: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.discover-hero-indicators:empty {
+    display: none;
+}
+
+/* A small dot inside a finger-sized target, rather than a small button that a
+   generic min-height stretches into a lozenge. */
 .hero-indicator {
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
+    border-radius: 50%;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.hero-indicator-dot {
+    display: block;
     width: 8px;
     height: 8px;
     border-radius: 50%;
     background: rgba(255, 255, 255, 0.4);
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    transition: all 0.3s ease;
+    transition: background 0.3s ease, width 0.3s ease, border-radius 0.3s ease;
 }
 
-.hero-indicator:hover {
+.hero-indicator:hover .hero-indicator-dot {
     background: rgba(255, 255, 255, 0.7);
-    transform: scale(1.2);
 }
 
-.hero-indicator.active {
+.hero-indicator:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.9);
+    outline-offset: -2px;
+}
+
+.hero-indicator.active .hero-indicator-dot {
     background: rgb(var(--accent-rgb));
-    width: 24px;
+    width: 22px;
     border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hero-indicator-dot { transition: none; }
 }
 
 /* Hero Bottom Action Buttons */
 .discover-hero-bottom-actions {
-    position: absolute;
-    bottom: 24px;
-    right: 24px;
-    z-index: 10;
     display: flex;
     gap: 8px;
     align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    margin-left: auto;
 }
 
 .discover-hero-watch-all,
@@ -37475,8 +37539,20 @@ div.artist-hero-badge {
 
     .discover-hero-content {
         flex-direction: column;
-        padding: 40px 20px;
+        padding: 40px 20px 14px;
         text-align: center;
+    }
+
+    /* On a phone the strip wraps; centre it rather than pushing the actions
+       hard right under a row of dots. */
+    .discover-hero-controls {
+        padding: 0 14px 14px;
+        justify-content: center;
+    }
+
+    .discover-hero-bottom-actions {
+        margin-left: 0;
+        justify-content: center;
     }
 
     .discover-hero-title {
@@ -37569,6 +37645,21 @@ div.artist-hero-badge {
     border-color: rgba(var(--accent-rgb), 0.25);
     box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 24px rgba(var(--accent-rgb), 0.12);
 }
+/* The discover album card is a <button> (it has one action), so undo the
+   button chrome the browser adds and keep the tile shape. */
+.ya-card.discover-album-card {
+    display: block;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    -webkit-appearance: none;
+    appearance: none;
+}
+.ya-card.discover-album-card:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.9);
+    outline-offset: 2px;
+}
 .ya-card-img { position: absolute; inset: 0; }
 .ya-card-img img { width: 100%; height: 100%; object-fit: cover; }
 .ya-card-placeholder {
@@ -37638,6 +37729,7 @@ div.artist-hero-badge {
 .discover-mixes-grid::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 3px; }
 .discover-mixes-grid::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-rgb), 0.45); }
 .discover-mix-card {
+    position: relative;
     background: rgba(255,255,255,0.03);
     border: 1px solid rgba(255,255,255,0.06);
     border-radius: 14px;
@@ -37645,6 +37737,36 @@ div.artist-hero-badge {
     cursor: pointer;
     transition: transform 0.3s cubic-bezier(0.4,0,0.2,1), border-color 0.3s, box-shadow 0.3s, background 0.3s;
 }
+/* The card's open target. It is a real button now, and its ::after stretches
+   over the whole card so the cover is still clickable, while the Play button
+   sits above it on z-index. Nothing is nested inside anything. */
+.mix-card-open {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.mix-card-open::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    z-index: 1;
+}
+.mix-card-open:focus-visible {
+    outline: none;
+}
+.mix-card-open:focus-visible::after {
+    outline: 2px solid rgba(var(--accent-rgb), 0.9);
+    outline-offset: 2px;
+}
+/* display:contents so the injected cover markup stays a direct flex child. */
+.mix-card-cover-inner { display: contents; }
 .discover-mix-card:hover {
     transform: translateY(-5px);
     background: rgba(255,255,255,0.06);
@@ -37671,25 +37793,44 @@ div.artist-hero-badge {
     position: absolute;
     bottom: 10px; right: 10px;
     width: 44px; height: 44px;
+    border: 0;
     border-radius: 50%;
     background: var(--accent);
     color: #000;
     display: flex; align-items: center; justify-content: center;
     font-size: 15px; padding-left: 2px;
     box-shadow: 0 6px 16px rgba(0,0,0,0.45);
-    opacity: 0; transform: translateY(8px);
+    cursor: pointer;
+    /* Visible at rest, not hover-only. A touch device has no hover, so the
+       only way to play a mix used to be opening the modal first. */
+    opacity: 0.82;
     transition: opacity 0.25s, transform 0.25s;
-    z-index: 2;
+    z-index: 3;
 }
-.discover-mix-card:hover .mix-card-play {
-    opacity: 1; transform: translateY(0);
+.discover-mix-card:hover .mix-card-play,
+.mix-card-play:hover,
+.mix-card-play:focus-visible {
+    opacity: 1;
+}
+.mix-card-play:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+.mix-card-play[disabled] {
+    cursor: progress;
+    opacity: 0.6;
+}
+@media (prefers-reduced-motion: reduce) {
+    .mix-card-play { transition: none; }
 }
 .mix-card-name {
+    display: block;
     font-size: 14px; font-weight: 700; color: #fff;
     margin-top: 12px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .mix-card-meta {
+    display: block;
     font-size: 12px; color: rgba(255,255,255,0.5);
     margin-top: 3px;
 }
@@ -37890,6 +38031,33 @@ div.artist-hero-badge {
     font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.35);
     position: relative; z-index: 2;
 }
+/* The real control: a native range input stretched over the wave. Invisible,
+   because the orb is the handle you see, but it owns keyboard, touch and the
+   screen-reader value. The old dial had none of that. */
+.adv-wave-input {
+    position: absolute; inset: 0; z-index: 4;
+    width: 100%; height: 100%; margin: 0; padding: 0;
+    opacity: 0; cursor: grab;
+    -webkit-appearance: none; appearance: none; background: transparent;
+    touch-action: none;
+}
+.adv-wave-input:active { cursor: grabbing; }
+.adv-wave-input::-webkit-slider-thumb { -webkit-appearance: none; width: 30px; height: 100%; }
+.adv-wave-input::-moz-range-thumb { width: 30px; height: 100px; border: 0; }
+/* Focus lands on an invisible input, so the visible ring goes on the card. */
+.adv-wave:focus-within {
+    border-color: rgba(var(--accent-rgb), 0.55);
+    box-shadow: 0 10px 34px rgba(0,0,0,0.30), 0 0 0 2px rgba(var(--accent-rgb), 0.6);
+}
+.adv-wave-help {
+    position: relative; z-index: 2;
+    margin: 8px 0 0; font-size: 11.5px; line-height: 1.45;
+    color: rgba(255,255,255,0.42);
+}
+@media (prefers-reduced-motion: reduce) {
+    .adv-wave-orb::after { animation: none; }
+    .adv-wave-state { transition: none; }
+}
 
 /* Watchlist toggle on recommended-artist .ya-cards — corner pill, appears on hover,
    stays lit when already watching. Keeps the .recommended-card-watchlist-btn hook. */
@@ -38078,7 +38246,7 @@ div.artist-hero-badge {
         linear-gradient(90deg, rgba(0, 0, 0, 0.58) 0%, rgba(0, 0, 0, 0.18) 52%, transparent 100%);
 }
 .discover-command-hero .discover-hero-content {
-    padding: 28px 34px;
+    padding: 28px 34px 14px;
     gap: 22px;
 }
 .discover-command-hero .discover-hero-label {
@@ -38695,7 +38863,7 @@ div.artist-hero-badge {
         grid-template-columns: 1fr;
     }
     .discover-command-hero .discover-hero-content {
-        padding: 26px;
+        padding: 26px 26px 12px;
     }
     .discover-command-hero .discover-hero-image {
         display: none;
@@ -38723,11 +38891,15 @@ div.artist-hero-badge {
         margin-bottom: 24px;
     }
     .discover-command-hero .discover-hero {
-        height: 318px;
+        /* min-height, not height. A fixed 318px clipped the hero's own
+           actions off the bottom the moment a title wrapped, and the hero has
+           overflow: hidden so they vanished rather than spilling. */
+        height: auto;
+        min-height: 318px;
         border-radius: 12px;
     }
     .discover-command-hero .discover-hero-content {
-        padding: 24px;
+        padding: 24px 24px 10px;
     }
     .discover-command-hero .discover-hero-title,
     .discover-command-hero .discover-hero--empty .discover-hero-title {
@@ -58763,6 +58935,187 @@ tr.tag-diff-same {
 .cache-health-status-text { font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.8); }
 
 /* Stat cards */
+/* ── Cache health: what it means and what to do ──
+   The modal used to state a verdict ("Cleanup recommended") and stop, leaving
+   the reader to guess what was wrong and what would fix it. */
+/* ── Live: upcoming dates and past setlists on an artist page ── */
+.artist-concerts-section {
+    margin: 28px 0 8px;
+}
+.artist-concerts-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    margin: 0 0 14px;
+}
+.artist-concerts-block + .artist-concerts-block {
+    margin-top: 18px;
+}
+.artist-concerts-block-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.45);
+    margin-bottom: 8px;
+}
+.artist-concerts-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.artist-concert-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    font-size: 13px;
+}
+.artist-concert-row + .artist-concert-row {
+    margin-top: 6px;
+}
+/* Fixed width so the dates form a column instead of ragging with the venue. */
+.artist-concert-date {
+    flex: 0 0 118px;
+    color: rgb(var(--accent-rgb, 99, 102, 241));
+    font-weight: 600;
+}
+.artist-concert-where {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: rgba(255, 255, 255, 0.8);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.artist-concert-link {
+    flex: 0 0 auto;
+    color: rgba(255, 255, 255, 0.6);
+    text-decoration: none;
+    font-size: 12px;
+    font-weight: 600;
+}
+.artist-concert-link:hover {
+    color: #fff;
+}
+
+/* A setlist row opens, so it is a column with a header line. */
+.artist-setlist-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+}
+.artist-setlist-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.artist-setlist-toggle {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: none;
+    border: 0;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.artist-setlist-count {
+    flex: 0 0 auto;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 12px;
+}
+.artist-setlist-play {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgb(var(--accent-rgb, 99, 102, 241));
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+    transition: filter 0.15s ease;
+}
+.artist-setlist-play:hover:not(:disabled) {
+    filter: brightness(1.12);
+}
+.artist-setlist-play:disabled {
+    cursor: wait;
+    opacity: 0.6;
+}
+.artist-setlist-songs {
+    margin: 10px 0 2px;
+    padding-left: 26px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 12.5px;
+    line-height: 1.7;
+}
+
+@media (max-width: 640px) {
+    .artist-concert-date { flex-basis: 92px; }
+    .artist-concert-row { font-size: 12.5px; gap: 8px; }
+}
+
+.cache-health-explain {
+    margin: 14px 0 4px;
+    padding: 14px 16px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-left: 3px solid rgb(var(--accent-rgb, 99, 102, 241));
+    border-radius: 10px;
+}
+/* A disabled cleanup job is the one case that really does need the user. */
+.cache-health-explain.warn {
+    border-left-color: #f1c40f;
+    background: rgba(241, 196, 15, 0.06);
+}
+.cache-health-explain-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.55);
+    margin-bottom: 8px;
+}
+.cache-health-explain-list {
+    margin: 0 0 10px;
+    padding-left: 18px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.75);
+}
+.cache-health-explain-list li + li {
+    margin-top: 6px;
+}
+.cache-health-explain-list strong {
+    color: #fff;
+}
+.cache-health-explain-fix {
+    font-size: 13px;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.75);
+    margin-bottom: 12px;
+}
+.cache-health-explain-fix strong {
+    color: #fff;
+}
+.cache-health-explain-note {
+    margin-top: 8px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
 .cache-health-cards {
     display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px;
 }
@@ -58928,6 +59281,161 @@ tr.tag-diff-same {
 .mb-search-result-mbid { font-size: 9px; color: rgba(255,255,255,0.12); font-family: monospace; flex-shrink: 0; letter-spacing: 0.5px; }
 
 /* ── Findings Tab ── */
+/* ── Findings grouped by album / artist ──────────────────────────────────────
+   The upgrade backlog as things you can decide about, instead of one row per
+   track. Art comes off the finding, so the grid renders in one request. */
+.repair-album-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+    gap: 14px;
+    margin-bottom: 14px;
+}
+
+.repair-album-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    overflow: hidden;
+    cursor: pointer;
+    text-align: left;
+    color: inherit;
+    font: inherit;
+    transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+.repair-album-card:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(var(--accent-rgb, 99, 102, 241), 0.55);
+    transform: translateY(-2px);
+}
+.repair-album-card:focus-visible {
+    outline: 2px solid rgb(var(--accent-rgb, 99, 102, 241));
+    outline-offset: 2px;
+}
+
+.repair-album-art {
+    position: relative;
+    aspect-ratio: 1;
+    background: rgba(255, 255, 255, 0.05);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.repair-album-art img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+/* A letter tile rather than a broken-image icon: a grid full of those reads
+   as a broken page, not as "this album has no art". */
+.repair-album-art-fallback {
+    font-size: 34px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.25);
+}
+
+/* The count is the point of the card, so it sits ON the art where the eye
+   lands first rather than in the text block below. */
+.repair-album-count {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: 11px;
+    background: rgba(0, 0, 0, 0.72);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+}
+
+.repair-album-meta {
+    padding: 0 10px 12px;
+    min-width: 0;
+}
+.repair-album-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.repair-album-artist {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
+}
+/* The worst quality is why the card is here, so it gets the accent. */
+.repair-album-quality {
+    font-size: 11px;
+    color: rgb(var(--accent-rgb, 99, 102, 241));
+    font-weight: 600;
+    margin-top: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.repair-album-tracks {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+    margin-top: 2px;
+}
+
+.repair-album-grid-empty {
+    padding: 28px 14px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 13px;
+}
+
+/* The list/album/artist switch, sitting with the other findings controls. */
+.repair-view-switch {
+    display: inline-flex;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    overflow: hidden;
+}
+.repair-view-switch button {
+    background: rgba(255, 255, 255, 0.06);
+    border: 0;
+    color: rgba(255, 255, 255, 0.6);
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.repair-view-switch button + button {
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+.repair-view-switch button:hover {
+    color: #fff;
+}
+.repair-view-switch button[aria-pressed="true"] {
+    background: rgb(var(--accent-rgb, 99, 102, 241));
+    color: #fff;
+    font-weight: 600;
+}
+
+@media (max-width: 640px) {
+    .repair-album-grid {
+        grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+        gap: 10px;
+    }
+}
+
 .repair-findings-toolbar {
     display: flex;
     align-items: center;
@@ -67319,13 +67827,57 @@ body.max-performance #page-particles-canvas {
 }
 
 /* ── The maintenance surface: one scroll, four sections ──
-   The three tabs are gone. The hero itself is the scroll container so the
-   section nav can stick to the top of it — and so the page below (the tool
-   cards) stays reachable however much maintenance work is outstanding. */
+   It used to be its own capped scroll box (max-height + overflow:auto) so the
+   tool cards sitting below it on the page stayed reachable. That gave the page
+   two scrollbars doing different jobs. The tool cards are their own tab now, so
+   nothing needs capping: this scrolls with the page, and the section nav sticks
+   to the viewport instead of to a box. */
 .tools-maintenance-hero {
-    max-height: min(84vh, 1040px);
-    overflow: hidden auto;
+    overflow: visible;
     scroll-behavior: smooth;
+}
+
+/* The 3px accent line was clipped by the hero's own overflow:hidden; with that
+   gone it has to round its own top corners or it juts past them. */
+.tools-maintenance-hero::before {
+    border-radius: 16px 16px 0 0;
+}
+
+/* ── Tools / Operations tabs ── */
+.tools-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tools-tab {
+    appearance: none;
+    background: none;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    color: rgba(255, 255, 255, 0.5);
+    padding: 9px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.tools-tab:hover {
+    color: #fff;
+}
+
+.tools-tab[aria-selected="true"] {
+    color: #fff;
+    border-bottom-color: rgb(var(--accent-rgb, 99, 102, 241));
+}
+
+.tools-tab:focus-visible {
+    outline: 2px solid rgb(var(--accent-rgb, 99, 102, 241));
+    outline-offset: -2px;
+    border-radius: 4px;
 }
 
 .repair-section-nav {
@@ -70663,10 +71215,16 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     opacity: 1;
 }
 
+/* Bottom-left, NOT centred over the artwork. The card itself opens the album
+   detail modal; this button only plays. Centred, it sat exactly where someone
+   aims to click the cover, so "open this album" silently became "play this
+   album". 74px clears the 65px title strip with a gap, and 14px matches the
+   strip's own inset so the button lines up with the album name above it. The
+   library artist card has always done it this way. */
 .artist-detail-page .release-card-play-btn {
     position: absolute;
-    left: 50%;
-    top: 50%;
+    left: 14px;
+    bottom: 74px;
     z-index: 4;
     width: 48px;
     height: 48px;
@@ -70682,14 +71240,14 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     box-shadow: 0 10px 28px rgba(0, 0, 0, 0.48);
     cursor: pointer;
     opacity: 0;
-    transform: translate(-50%, -40%) scale(0.9);
+    transform: translateY(8px) scale(0.94);
     transition: opacity 0.2s ease, transform 0.2s ease, filter 0.2s ease;
 }
 
 .artist-detail-page .release-card.album-card:hover .release-card-play-btn,
 .artist-detail-page .release-card-play-btn:focus-visible {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+    transform: translateY(0) scale(1);
 }
 
 .artist-detail-page .release-card-play-btn:hover {
@@ -70707,7 +71265,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     }
     .artist-detail-page .release-card-play-btn {
         opacity: 1;
-        transform: translate(-50%, -50%) scale(1);
+        transform: translateY(0) scale(1);
     }
 }
 
@@ -80703,6 +81261,134 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-card-challenge-btns { display: flex; gap: 6px; flex-wrap: wrap; }
 
 /* ── chat file sharing (filepost.dev, chat P2) ── */
+/* the plain-text hint. the room filter picks the send format too: "all
+   messages" means you can see the vanilla soulseek users, so you send
+   something they can read. only the exception needs explaining. */
+.chat-modehint {
+    margin: 8px 2px 0;
+    padding: 7px 10px;
+    border-radius: 8px;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.55);
+    background: rgba(250, 204, 21, 0.07);
+    border: 1px solid rgba(250, 204, 21, 0.18);
+}
+.chat-modehint b { color: rgb(253, 224, 71); font-weight: 700; }
+
+/* overlay share picker. rendered previews, not a list of names. an overlay is
+   a visual thing, picking one by name is picking blind. */
+.chat-ovl-modal { max-width: 720px; width: 92vw; }
+.chat-ovl-sub {
+    margin: 0 0 14px;
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.55);
+    line-height: 1.5;
+}
+.chat-ovl-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    gap: 12px;
+    max-height: 54vh;
+    overflow-y: auto;
+    padding: 2px;
+}
+.chat-ovl-card {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 0;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    min-width: 0;
+}
+/* posters are 2:3. anything else crops the design you're trying to look at. */
+.chat-ovl-shot {
+    display: block;
+    position: relative;
+    aspect-ratio: 2 / 3;
+    border-radius: 9px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.chat-ovl-shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chat-ovl-shot.is-noshot::after {
+    content: 'no preview';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.3);
+}
+.chat-ovl-card:hover .chat-ovl-shot {
+    border-color: rgb(var(--accent-rgb, 99, 102, 241));
+    transform: translateY(-2px);
+}
+.chat-ovl-card:focus-visible .chat-ovl-shot {
+    outline: 2px solid rgb(var(--accent-rgb, 99, 102, 241));
+    outline-offset: 2px;
+}
+.chat-ovl-meta { display: block; min-width: 0; }
+.chat-ovl-cardname {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.chat-ovl-cardsub {
+    display: block;
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.42);
+}
+.chat-ovl-empty {
+    grid-column: 1 / -1;
+    padding: 28px 8px;
+    text-align: center;
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.45);
+    line-height: 1.6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .chat-ovl-shot { transition: none; }
+    .chat-ovl-card:hover .chat-ovl-shot { transform: none; }
+}
+
+/* A shared overlay template. Deliberately shaped like the file card beside it
+   — same footprint, same rhythm — because it IS the same gesture: someone
+   handed you something you can take. The accent stripe is what marks it as a
+   design rather than a download. */
+.chat-overlay-card {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 9px 12px; margin: 2px 0; max-width: 460px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-left: 3px solid rgb(var(--accent-rgb, 99, 102, 241));
+    border-radius: 11px;
+}
+.chat-overlay-icon { font-size: 18px; opacity: 0.85; }
+.chat-overlay-meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.chat-overlay-name {
+    font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-overlay-sub { font-size: 10.5px; color: rgba(255,255,255,0.4); }
+/* Amber, not red: missing art is a thing to know before you click, not a
+   failure. The template still imports and still renders everything else. */
+.chat-overlay-warn {
+    font-size: 10.5px; color: #f1c40f; margin-top: 2px;
+}
+
 .chat-file-card {
     display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
     padding: 9px 12px; margin: 2px 0; max-width: 460px;
@@ -82679,3 +83365,289 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 .explorer-tier{position:relative;z-index:1;display:flex;justify-content:center;flex-wrap:nowrap;gap:24px;padding:12px 0}.explorer-tier-root{margin-bottom:16px}.explorer-tier-artists{gap:28px;margin-bottom:6px}.explorer-artist-tiers{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center}.explorer-branch{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;animation:explorer-node-enter .42s cubic-bezier(.2,.85,.2,1) both;animation-delay:var(--enter-delay,0s)}.explorer-children{position:relative;z-index:1;display:flex;flex-wrap:wrap;justify-content:center;gap:16px;padding-top:24px}.explorer-children:empty{display:none}.explorer-node{position:relative;overflow:hidden;border:1px solid rgba(255,255,255,.1);background:rgba(9,11,16,.9);cursor:pointer;box-shadow:0 14px 34px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.055);transition:transform .22s ease,border-color .22s ease,box-shadow .22s ease,opacity .22s ease}.explorer-node:hover{transform:translateY(-2px) scale(1.045);border-color:rgba(var(--accent-rgb),.38);box-shadow:0 20px 48px rgba(0,0,0,.44),0 0 0 1px rgba(var(--accent-rgb),.13);z-index:10}.explorer-node.expanded{border-color:rgba(var(--accent-rgb),.68);box-shadow:0 0 0 4px rgba(var(--accent-rgb),.15),0 22px 48px rgba(0,0,0,.42)}.explorer-node-img,.explorer-node-img-placeholder{position:absolute;inset:0;width:100%;height:100%}.explorer-node-img{object-fit:cover}.explorer-node-img-placeholder{display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,rgba(var(--accent-rgb),.14),rgba(255,255,255,.035));color:rgba(255,255,255,.22);font-size:32px}.explorer-node-label{position:absolute;left:0;right:0;bottom:0;z-index:2;padding:10px 9px 8px;background:linear-gradient(to top,rgba(0,0,0,.92),rgba(0,0,0,.62) 58%,transparent);text-align:center}.explorer-node-label-sub{margin-bottom:2px;color:rgba(var(--accent-rgb),.92);font-size:8px;font-weight:900;letter-spacing:1.7px;text-transform:uppercase}.explorer-node-label-main{color:#fff;font-size:12px;font-weight:850;line-height:1.16;text-shadow:0 1px 4px rgba(0,0,0,.65);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.explorer-node-label-meta{margin-top:3px;color:rgba(255,255,255,.6);font-size:9px;font-weight:650}.explorer-node-root{width:172px;height:172px;border-radius:28px;border-color:rgba(var(--accent-rgb),.38)}.explorer-node-root .explorer-node-label{padding:16px 13px 13px;border-radius:0 0 26px 26px}.explorer-node-root .explorer-node-label-main{font-size:15px}.explorer-node-root .explorer-node-label-meta{font-size:10px}.explorer-node-glow{position:absolute;inset:-18px;z-index:0;background:radial-gradient(circle,rgba(var(--accent-rgb),.22),transparent 68%);animation:explorer-glow-pulse 3.5s ease-in-out infinite}@keyframes explorer-glow-pulse{0%,100%{opacity:.55;transform:scale(1)}50%{opacity:1;transform:scale(1.035)}}.explorer-node-artist{width:92px;height:92px;border-radius:50%}.explorer-node-artist:after{content:"";position:absolute;inset:-6px;border-radius:inherit;border:1px solid rgba(var(--accent-rgb),0);pointer-events:none;transition:inset .22s ease,border-color .22s ease}.explorer-node-artist:hover:after{inset:-10px;border-color:rgba(var(--accent-rgb),.25)}.explorer-node-artist .explorer-node-label-main{font-size:11px}.explorer-node-artist.has-selection{border-color:rgba(var(--accent-rgb),.62);box-shadow:0 0 0 4px rgba(var(--accent-rgb),.15),0 16px 34px rgba(var(--accent-rgb),.12)}.explorer-node-artist.has-selection:after{inset:-10px;border-color:rgba(var(--accent-rgb),.28);animation:explorer-selected-breathe 2.5s ease-in-out infinite}.explorer-node-artist.error{border-color:rgba(255,71,87,.35);opacity:.55;cursor:default}.explorer-node-expand-hint{position:absolute;left:50%;bottom:3px;z-index:5;width:18px;height:18px;border-radius:999px;display:flex;align-items:center;justify-content:center;transform:translateX(-50%);background:rgba(0,0,0,.55);color:rgba(255,255,255,.58);font-size:10px;line-height:1;transition:transform .2s ease,color .2s ease,background .2s ease}.explorer-node-artist:hover .explorer-node-expand-hint{background:rgba(var(--accent-rgb),.24);color:#fff}.explorer-node-artist.expanded .explorer-node-expand-hint{transform:translateX(-50%) rotate(180deg);background:rgba(var(--accent-rgb),.28);color:#fff}.explorer-node-error-ring{position:absolute;inset:5px;z-index:3;border:2px dashed rgba(255,71,87,.38);border-radius:50%}
 .explorer-node-album{width:108px;height:108px;border-radius:18px}.explorer-node-album .explorer-node-label{padding:8px 7px 7px;border-radius:0 0 16px 16px}.explorer-node-album .explorer-node-label-main{font-size:10px}.explorer-node-album .explorer-node-label-meta{font-size:8px}.explorer-node-album.selected{border-color:var(--accent);box-shadow:0 0 0 4px rgba(var(--accent-rgb),.22),0 18px 40px rgba(var(--accent-rgb),.16);animation:explorer-selected-breathe 2.5s ease-in-out infinite}@keyframes explorer-selected-breathe{0%,100%{box-shadow:0 0 0 3px rgba(var(--accent-rgb),.18),0 14px 32px rgba(var(--accent-rgb),.12)}50%{box-shadow:0 0 0 5px rgba(var(--accent-rgb),.3),0 18px 42px rgba(var(--accent-rgb),.18)}}.explorer-node-album.owned{opacity:.52}.explorer-node-album.added{border-color:rgba(74,222,128,.72);box-shadow:0 0 0 4px rgba(74,222,128,.16)}.explorer-node-select{position:absolute;top:7px;right:7px;z-index:5;width:24px;height:24px;border-radius:999px;display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,.34);background:rgba(0,0,0,.64);backdrop-filter:blur(6px);opacity:0;transition:opacity .18s ease,background .18s ease,border-color .18s ease}.explorer-node-album:hover .explorer-node-select,.explorer-node-select.active{opacity:1}.explorer-node-select.active{border-color:var(--accent);background:var(--accent);box-shadow:0 4px 12px rgba(var(--accent-rgb),.44)}.explorer-node-select svg{width:13px;height:13px;color:#fff;opacity:0}.explorer-node-select.active svg{opacity:1}.explorer-node-badge-float{position:absolute;z-index:5;left:50%;bottom:50%;transform:translateX(-50%);padding:3px 7px;border-radius:999px;color:#fff;font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}.explorer-node-badge-float.owned{background:rgba(34,197,94,.88)}.explorer-node-badge-float.playlist{top:7px;left:7px;bottom:auto;transform:none;padding:2px 6px;background:rgba(96,165,250,.9);font-size:10px}.explorer-node-track{width:auto;height:auto;min-width:156px;max-width:240px;overflow:visible;padding:8px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.075);background:rgba(255,255,255,.045);cursor:default;box-shadow:0 8px 20px rgba(0,0,0,.2)}.explorer-node-track:hover{transform:none;border-color:rgba(255,255,255,.13);box-shadow:0 8px 20px rgba(0,0,0,.2)}.explorer-node-track .explorer-node-label{position:static;padding:0;background:none;text-align:left}.explorer-node-track .explorer-node-label-main{color:rgba(255,255,255,.84);font-size:11px;font-weight:650;white-space:nowrap}.explorer-node-track .explorer-node-label-meta{color:rgba(255,255,255,.42);font-size:9px}.explorer-line{fill:none}.explorer-line-animated{animation:explorer-line-draw .58s cubic-bezier(.4,0,.2,1) forwards}@keyframes explorer-line-draw{to{stroke-dashoffset:0}}@keyframes explorer-node-enter{from{opacity:0;transform:translateY(18px) scale(.92)}to{opacity:1;transform:none}}
 @media (max-width:1100px){.explorer-picker-command{flex-direction:column;align-items:stretch}.explorer-picker-stats{justify-content:flex-start;max-width:none}.explorer-picker-scroll{grid-auto-columns:minmax(280px,330px)}}@media (max-width:900px){.explorer-container{padding:16px}.explorer-playlist-picker{padding:14px;border-radius:16px}.explorer-picker-top,.explorer-build-row,.explorer-action-bar{align-items:stretch;flex-direction:column}.explorer-picker-tabs,.explorer-controls,.explorer-mode-toggle,.explorer-action-buttons{width:100%}.explorer-picker-tabs,.explorer-mode-toggle{overflow-x:auto}.explorer-mode-btn,.explorer-picker-tab,.explorer-action-buttons .btn{flex:1;justify-content:center}.explorer-build-btn{width:100%}.explorer-viewport{min-height:520px;border-radius:16px}.explorer-tree{padding:34px 44px 76px}.explorer-node-root{width:140px;height:140px}.explorer-node-artist{width:76px;height:76px}.explorer-node-album{width:88px;height:88px}.explorer-tier,.explorer-tier-artists{gap:16px}}@media (max-width:600px){.explorer-container{padding:12px}.explorer-picker-command h3{font-size:19px}.explorer-picker-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.explorer-picker-stats span{justify-content:center}.explorer-picker-scroll{grid-auto-flow:row;grid-auto-columns:unset;grid-template-columns:1fr;overflow:visible;padding-bottom:0}.explorer-picker-card{grid-template-columns:78px minmax(0,1fr);min-height:112px}.explorer-picker-card-art{width:78px;min-height:92px}.explorer-picker-card-name{font-size:13px}.explorer-picker-card-meta{font-size:10px}.explorer-progress{flex-wrap:wrap}.explorer-progress-text{max-width:none;width:100%}.explorer-zoom-controls{flex-direction:row;top:10px}.explorer-tree{padding:30px 30px 70px}.explorer-empty{width:min(420px,calc(100vw - 40px));min-height:300px}.explorer-empty-icon{width:82px;height:82px}.explorer-empty-title{font-size:18px}.explorer-node-root{width:116px;height:116px;border-radius:22px}.explorer-node-artist{width:64px;height:64px}.explorer-node-album{width:72px;height:72px;border-radius:14px}.explorer-node-label{padding:8px 6px 6px}.explorer-node-label-main{font-size:10px}.explorer-node-label-meta{font-size:8px}}
+
+/* The route error boundary. It used to be an unstyled h2 + p that told the
+   user nothing and gave us nothing to debug from. */
+.app-error-boundary {
+    max-width: 780px;
+    margin: 40px auto;
+    padding: 24px 28px;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    border-radius: 14px;
+    background: rgba(239, 68, 68, 0.06);
+    color: rgba(255, 255, 255, 0.88);
+}
+.app-error-boundary h2 { margin: 0 0 8px; font-size: 20px; font-weight: 800; }
+.app-error-boundary p { margin: 0 0 14px; font-size: 14px; color: rgba(255, 255, 255, 0.62); }
+.app-error-boundary__detail {
+    max-height: 260px;
+    overflow: auto;
+    margin: 0 0 14px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.42);
+    color: rgba(255, 255, 255, 0.82);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.app-error-boundary__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+.app-error-boundary__hint { margin: 0; font-size: 12.5px; }
+
+/* ── Because You Listen To: a list, not ten identical squares ─────────────────
+   the shelf used to render ten album-sized tiles. with an album-heavy
+   selection that is ten copies of one cover, and it left no room for the album
+   or the length. rows show what a card could not. */
+.bylt-status,
+.bylt-history-note,
+.bylt-unavailable,
+.bylt-insufficient {
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.55);
+    margin: 6px 0 0;
+}
+
+.bylt-insufficient {
+    padding: 14px 16px;
+    border: 1px dashed rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+}
+
+.bylt-reason {
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.6);
+    margin: 4px 0 0;
+}
+
+.bylt-shelf-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.bylt-track-list {
+    list-style: none;
+    margin: 12px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.bylt-track {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    flex-wrap: wrap;
+}
+
+.bylt-track:nth-child(odd) {
+    background: rgba(255, 255, 255, 0.025);
+}
+
+.bylt-track-art {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 44px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.bylt-track-art img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.bylt-track-art .ya-card-placeholder {
+    position: absolute;
+    inset: 0;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.bylt-track-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1 1 220px;
+}
+
+/* long names stay readable, and the full one is on the title attribute */
+.bylt-track-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.92);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bylt-track-sub {
+    display: flex;
+    gap: 8px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+    min-width: 0;
+}
+
+.bylt-track-sub > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bylt-track-album::before {
+    content: '·';
+    margin-right: 8px;
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.bylt-track-why {
+    font-size: 11px;
+    color: rgba(var(--accent-rgb), 0.7);
+}
+
+.bylt-track-duration {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
+    font-variant-numeric: tabular-nums;
+    flex: 0 0 auto;
+}
+
+.bylt-track-owned {
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 999px;
+    padding: 2px 8px;
+    flex: 0 0 auto;
+}
+
+.bylt-track-actions {
+    display: flex;
+    gap: 6px;
+    flex: 0 0 auto;
+}
+
+.bylt-track-error {
+    flex: 1 0 100%;
+    font-size: 12px;
+    color: #ff9a9a;
+}
+
+/* every control is a real button, so focus has to be visible on all of them */
+.bylt-track-actions .btn:focus-visible,
+.bylt-shelf-actions .btn:focus-visible,
+.discover-station-actions .btn:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.9);
+    outline-offset: 2px;
+}
+
+/* ── stations: two named controls per card ──────────────────────────────── */
+.discover-stations-row {
+    grid-auto-columns: 196px;
+}
+
+/* the card is no longer a button, so it must not look like one */
+.discover-station-card {
+    cursor: default;
+}
+
+.discover-station-card:hover {
+    transform: none;
+}
+
+.discover-station-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    margin-top: auto;
+}
+
+.discover-station-actions .btn {
+    width: 100%;
+    /* comfortable on touch, where there is no hover to reveal anything */
+    min-height: 36px;
+}
+
+.discover-station-error {
+    font-size: 11.5px;
+    color: #ff9a9a;
+}
+
+.discover-stations-error {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 13px;
+    color: #ff9a9a;
+    margin-bottom: 12px;
+}
+
+.station-modal-note {
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.55);
+    margin: 0 20px 6px;
+}
+
+.station-modal-error {
+    font-size: 13px;
+    color: #ff9a9a;
+    margin: 0 20px 6px;
+}
+
+/* narrow screens and 200% zoom: the rows reflow instead of clipping */
+@media (max-width: 720px) {
+    .bylt-track {
+        align-items: flex-start;
+    }
+
+    .bylt-track-main {
+        flex: 1 1 100%;
+    }
+
+    .bylt-track-actions {
+        flex: 1 0 100%;
+        justify-content: flex-start;
+    }
+
+    .discover-stations-row {
+        grid-auto-columns: 78vw;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    .discover-station-card,
+    .discover-station-card--loading {
+        transition: none;
+        animation: none;
+    }
+}
+
+/* the station preview reuses the mix modal's shell; it only needs its own
+   width, because its rows carry three more controls than a mix's do */
+.station-modal {
+    max-width: 900px;
+}
+
+/* Discover previews stay compact; expansion is deliberate. */
+.bylt-section { max-width: 1120px; }
+.bylt-section .discover-section-header { gap: 16px; flex-wrap: wrap; }
+.bylt-section .bylt-track { padding: 6px 8px; }
+.bylt-expand { margin-top: 10px; }

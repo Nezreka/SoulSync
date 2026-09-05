@@ -436,15 +436,25 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 if len(first_word) > 1:
                     legacy_queries.append(f"{track_name} {first_word}".strip())
 
-        # Add track-only query
-        if track_name.strip():
+        # Add track-only query only when it is distinctive enough to broadcast.
+        # generate_download_queries() already enforces this guard; the legacy
+        # fallback must honor the same contract or short wishlist titles like
+        # "Vortex" still fan out to hundreds of noisy Soulseek responses.
+        if (
+            track_name.strip()
+            and deps.matching_engine._title_is_distinctive_enough_to_broadcast(track_name.strip())
+        ):
             legacy_queries.append(track_name.strip())
 
         # Add traditional cleaned queries
         cleaned_name = re.sub(r'\s*\([^)]*\)', '', track_name).strip()
         cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name).strip()
 
-        if cleaned_name and cleaned_name.lower() != track_name.lower():
+        if (
+            cleaned_name
+            and cleaned_name.lower() != track_name.lower()
+            and deps.matching_engine._title_is_distinctive_enough_to_broadcast(cleaned_name)
+        ):
             legacy_queries.append(cleaned_name.strip())
 
         # Combine enhanced queries with legacy fallbacks.
@@ -601,10 +611,20 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                         logger.debug("[Modal Worker] search ticker failed: %s", _tick_exc)
 
                 # Perform search with timeout
-                tracks_result, _ = deps.run_async(deps.download_orchestrator.search(
-                    query, timeout=30, exclude_sources=_exclude_sources or None,
-                    progress_callback=_search_progress,
-                ))
+                _search_kwargs = {
+                    'timeout': 30,
+                    'exclude_sources': _exclude_sources or None,
+                    'progress_callback': _search_progress,
+                }
+                # Preserve the old call shape for default-profile tasks (and
+                # light-weight test doubles), while ensuring an assigned item
+                # profile decides whether hybrid search stops at the first
+                # source or pools every source for best-quality selection.
+                if _profile_id is not None:
+                    _search_kwargs['quality_profile_id'] = _profile_id
+                tracks_result, _ = deps.run_async(
+                    deps.download_orchestrator.search(query, **_search_kwargs)
+                )
                 logger.debug(f"Search completed for task {task_id}, got {len(tracks_result) if tracks_result else 0} results")
 
                 # CRITICAL: Check cancellation immediately after search returns

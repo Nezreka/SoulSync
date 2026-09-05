@@ -39,6 +39,9 @@ export interface LastfmRadioSectionProps {
   onClear: () => void;
   onDismiss?: () => void;
   onOpenMix: (key: string) => void;
+  onPlayMix?: (key: string) => void;
+  /** which mix key is currently resolving against the library, if any. */
+  playingKey?: string | null;
 }
 
 export function LastfmRadioSection({
@@ -54,6 +57,8 @@ export function LastfmRadioSection({
   onClear,
   onDismiss,
   onOpenMix,
+  onPlayMix,
+  playingKey,
 }: LastfmRadioSectionProps) {
   // the vanilla closed the dropdown on any outside click (3387-3394); the
   // port only had Escape, leaving an open panel floating over the page
@@ -61,7 +66,8 @@ export function LastfmRadioSection({
   useEffect(() => {
     if (!dropdownOpen) return;
     const onPointerDown = (event: PointerEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) (onDismiss ?? onClear)();
+      if (wrapRef.current && !wrapRef.current.contains(event.target as Node))
+        (onDismiss ?? onClear)();
     };
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
@@ -131,7 +137,13 @@ export function LastfmRadioSection({
       ) : null}
       <div id="lastfm-radio-playlists" className="discover-mixes-grid">
         {mixes.map((mix) => (
-          <DiscoverMixCard key={mix.key} mix={mix} onOpen={onOpenMix} />
+          <DiscoverMixCard
+            key={mix.key}
+            mix={mix}
+            onOpen={onOpenMix}
+            onPlay={onPlayMix}
+            playing={playingKey === mix.key}
+          />
         ))}
       </div>
     </DiscoverSection>
@@ -190,6 +202,9 @@ export interface ListenBrainzSectionProps {
   /** The connect card's button opens the personal settings (3486). */
   onConnect: () => void;
   onOpenMix: (key: string) => void;
+  onPlayMix?: (key: string) => void;
+  /** which mix key is currently resolving against the library, if any. */
+  playingKey?: string | null;
 }
 
 export function ListenBrainzSection({
@@ -207,6 +222,8 @@ export function ListenBrainzSection({
   onRefresh,
   onConnect,
   onOpenMix,
+  onPlayMix,
+  playingKey,
 }: ListenBrainzSectionProps) {
   const liveTabs = LB_TABS.filter((tab) => hasData[tab.id]);
   const anyData = liveTabs.length > 0;
@@ -314,7 +331,13 @@ export function ListenBrainzSection({
             {/* A plain .discover-grid of mix cards (3634) — no bespoke grid. */}
             <div className="discover-grid">
               {mixes.map((mix) => (
-                <DiscoverMixCard key={mix.key} mix={mix} onOpen={onOpenMix} />
+                <DiscoverMixCard
+                  key={mix.key}
+                  mix={mix}
+                  onOpen={onOpenMix}
+                  onPlay={onPlayMix}
+                  playing={playingKey === mix.key}
+                />
               ))}
             </div>
           </>

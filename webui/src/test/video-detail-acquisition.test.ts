@@ -55,9 +55,10 @@ describe('the acquisition panel', () => {
     expect(panel(null).innerHTML).toBe('');
   });
 
-  it('drops the states that are zero instead of showing them greyed', () => {
+  it('stays quiet when the title is already complete', () => {
     const host = panel({ total: 2, counts: { ...ZERO, owned: 2 } });
-    expect(Object.keys(chips(host))).toEqual(['Owned']);
+    expect(Object.keys(chips(host))).toEqual([]);
+    expect(host.innerHTML).toBe('');
   });
 
   it('orders the chips the way you read them, not by count', () => {

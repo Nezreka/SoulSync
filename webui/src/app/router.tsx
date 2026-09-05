@@ -74,13 +74,63 @@ declare module '@tanstack/react-router' {
   }
 }
 
-export function DefaultErrorComponent() {
+/**
+ * What a page shows when it throws.
+ *
+ * It used to say "Something went wrong. Please refresh." and nothing else.
+ * The console is muted by default (see the ?debug=1 notice in index.html), so
+ * a user reporting this had literally nothing to send and we had nothing to
+ * act on. The router hands us the error; show it, and make it one click to
+ * copy.
+ */
+export function DefaultErrorComponent({ error }: { error?: unknown }) {
+  const detail = errorReport(error);
   return (
-    <div role="alert">
+    <div role="alert" className="app-error-boundary">
       <h2>Something went wrong</h2>
-      <p>Please refresh the page and try again.</p>
+      <p>This page failed to render. The rest of SoulSync still works.</p>
+      {detail ? (
+        <>
+          <pre className="app-error-boundary__detail">{detail}</pre>
+          <div className="app-error-boundary__actions">
+            <button
+              type="button"
+              className="btn btn--sm btn--secondary"
+              onClick={() => void navigator.clipboard?.writeText(detail)}
+            >
+              Copy error
+            </button>
+            <button
+              type="button"
+              className="btn btn--sm btn--primary"
+              onClick={() => window.location.reload()}
+            >
+              Reload
+            </button>
+          </div>
+          <p className="app-error-boundary__hint">Please include this text in a bug report.</p>
+        </>
+      ) : (
+        <p>Please refresh the page and try again.</p>
+      )}
     </div>
   );
+}
+
+/** The message plus a trimmed stack, or null when there is nothing to show. */
+export function errorReport(error: unknown, maxStackLines = 12): string | null {
+  if (error == null) return null;
+  if (error instanceof Error) {
+    const stack = (error.stack ?? '').split('\n').slice(0, maxStackLines).join('\n');
+    // A stack usually repeats the message on its first line; don't print twice.
+    return stack.includes(error.message) ? stack : `${error.message}\n${stack}`.trim();
+  }
+  if (typeof error === 'string') return error;
+  try {
+    return JSON.stringify(error, null, 2);
+  } catch {
+    return String(error);
+  }
 }
 
 export function DefaultNotFoundComponent() {

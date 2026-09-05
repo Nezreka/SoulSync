@@ -54,6 +54,32 @@ def _window_isolated(src: str) -> bool:
     return set(re.findall(r"window\.\w+", src)) <= _ALLOWED_WINDOW
 
 
+def _section_block(html: str, open_tag_re: str) -> str:
+    """The FULL <section>...</section> for a match, nested sections included.
+
+    ``_block`` stops at the first close tag, which is right for a flat block and
+    wrong the moment one nests. The video dashboard grew an inner <section> for
+    the continue-watching rail, so every assertion about markup after that point
+    started reading a truncated string and failing on cards that are still
+    there. Count depth instead of taking the first close.
+    """
+    match = re.search(open_tag_re, html)
+    assert match, f"could not find {open_tag_re!r}"
+    depth, cursor = 0, match.start()
+    while True:
+        nxt_open = html.find('<section', cursor + 1)
+        nxt_close = html.find('</section>', cursor + 1)
+        assert nxt_close != -1, f"unclosed section for {open_tag_re!r}"
+        if nxt_open != -1 and nxt_open < nxt_close:
+            depth += 1
+            cursor = nxt_open
+            continue
+        if depth == 0:
+            return html[match.start():nxt_close + len('</section>')]
+        depth -= 1
+        cursor = nxt_close
+
+
 def _block(html: str, open_tag_re: str, close_tag: str) -> str:
     """Return the substring from the first match of open_tag_re to the next close_tag."""
     m = re.search(open_tag_re, html)
@@ -109,8 +135,8 @@ def test_music_sidebar_nav_still_intact():
 # --- the video dashboard (first built page) -------------------------------
 
 def test_video_dashboard_subpage_present_with_expected_cards():
-    block = _block(
-        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"', "</section>")
+    block = _section_block(
+        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"')
     # The video landing page's own card set (redesigned Jul 2026: recently-added
     # hero, stats, library, upcoming, tools + the two admin studio cards).
     for card in ("recent", "stats", "library", "upcoming", "tools", "studios"):
@@ -125,8 +151,8 @@ def test_video_dashboard_subpage_present_with_expected_cards():
 
 
 def test_video_dashboard_header_matches_music_shape():
-    block = _block(
-        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"', "</section>")
+    block = _section_block(
+        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"')
     header = _block(block, r'<div class="dashboard-header">', "<div class=\"dash-grid\">")
     # Same shell as music: sweep band + icon title + subtitle.
     assert "dashboard-header-sweep" in header
@@ -211,8 +237,8 @@ def test_video_tools_page_has_three_scan_modes():
 
 
 def test_dashboard_library_card_has_refresh_and_deep_buttons():
-    block = _block(
-        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"', "</section>")
+    block = _section_block(
+        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"')
     assert 'data-video-scan-mode="full"' in block   # Refresh
     assert 'data-video-scan-mode="deep"' in block    # Deep Scan
     assert "library-status-actions" in block
@@ -272,8 +298,8 @@ def test_video_side_hides_music_api_config_and_shows_placeholders():
 
 
 def test_dashboard_enrichment_buttons_present():
-    block = _block(
-        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"', "</section>")
+    block = _section_block(
+        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"')
     assert 'data-video-enrich="tmdb"' in block and 'data-video-enrich="tvdb"' in block
     assert 'data-video-enrich="omdb"' in block       # OMDb is a full worker too
     assert "data-video-manage-workers" in block

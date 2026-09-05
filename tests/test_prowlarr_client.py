@@ -8,6 +8,7 @@ endpoint keeps building the repeated-key query Prowlarr expects.
 from __future__ import annotations
 
 import asyncio
+import time
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -221,3 +222,127 @@ def test_default_music_categories_match_newznab_tree() -> None:
     assert 3000 in DEFAULT_MUSIC_CATEGORIES   # Audio (parent)
     assert 3010 in DEFAULT_MUSIC_CATEGORIES   # MP3
     assert 3040 in DEFAULT_MUSIC_CATEGORIES   # Lossless
+
+
+# ---------------------------------------------------------------------------
+# Indexer priority
+# ---------------------------------------------------------------------------
+
+
+def test_parse_indexer_reads_priority() -> None:
+    client = _client_with_config()
+    indexer = client._parse_indexer({'id': 3, 'name': 'X', 'protocol': 'torrent',
+                                     'priority': 5})
+
+    assert indexer.priority == 5
+
+
+def test_parse_indexer_defaults_priority_to_prowlarrs_own_default() -> None:
+    """1 (highest) to 50 (lowest), 25 in the middle — an absent value is 25."""
+    client = _client_with_config()
+
+    assert client._parse_indexer({'id': 3, 'name': 'X'}).priority == 25
+
+
+def _priority_client(monkeypatch, listing):
+    from core import prowlarr_client as pc
+    monkeypatch.setattr(pc, '_INDEXER_PRIORITY_CACHE', None, raising=False)
+    monkeypatch.setattr(pc, '_INDEXER_PRIORITY_CACHED_AT', 0.0, raising=False)
+    client = _client_with_config()
+    monkeypatch.setattr(client, '_get_indexers_sync', listing)
+    return client
+
+
+def test_the_search_wrapper_stamps_each_result_with_its_indexers_priority(monkeypatch) -> None:
+    client = _priority_client(monkeypatch, lambda: [
+        ProwlarrIndexer(id=1, name='Fast', protocol='torrent', enable=True,
+                        privacy='public', priority=2),
+        ProwlarrIndexer(id=2, name='Slow', protocol='torrent', enable=True,
+                        privacy='public', priority=45),
+    ])
+    with patch.object(client, '_api_get', return_value=[
+        {'guid': 'a', 'title': 'A', 'indexerId': 1, 'protocol': 'torrent'},
+        {'guid': 'b', 'title': 'B', 'indexerId': 2, 'protocol': 'torrent'},
+        {'guid': 'c', 'title': 'C', 'indexerId': 99, 'protocol': 'torrent'},
+    ]):
+        results = _run(client.search('q', throttle=False))
+
+    # An indexer Prowlarr did not list keeps the neutral default rather than
+    # being sorted to the bottom.
+    assert [r.indexer_priority for r in results] == [2, 45, 25]
+
+
+def test_the_raw_search_never_pays_for_the_listing(monkeypatch) -> None:
+    """`_search_sync` runs inside the fan-out's per-task deadline.
+
+    A slow `/indexer` call there does not merely cost time, it can push an
+    already-finished search past the budget, and those results are discarded.
+    The video side also calls `_search_sync` directly per request and never
+    reads the priority at all.
+    """
+    listing = MagicMock(return_value=[])
+    client = _priority_client(monkeypatch, listing)
+    with patch.object(client, '_api_get', return_value=[
+        {'guid': 'a', 'title': 'A', 'indexerId': 1, 'protocol': 'torrent'},
+    ]):
+        results = client._search_sync('q', [3000], [], 100, throttle=False)
+
+    assert listing.call_count == 0
+    assert [r.indexer_priority for r in results] == [25]
+
+
+def test_a_broken_indexer_listing_never_fails_a_search(monkeypatch) -> None:
+    def _boom():
+        raise RuntimeError('down')
+
+    client = _priority_client(monkeypatch, _boom)
+    with patch.object(client, '_api_get', return_value=[
+        {'guid': 'a', 'title': 'A', 'indexerId': 1, 'protocol': 'torrent'},
+    ]):
+        results = _run(client.search('q', throttle=False))
+
+    assert [r.indexer_priority for r in results] == [25]
+
+
+def test_the_priority_map_is_shared_by_every_client(monkeypatch) -> None:
+    """The video side builds a fresh client per search; a per-instance cache
+    would never hit there, so every request paid for its own listing."""
+    listing = MagicMock(return_value=[
+        ProwlarrIndexer(id=1, name='Fast', protocol='torrent', enable=True,
+                        privacy='public', priority=2),
+    ])
+    first = _priority_client(monkeypatch, listing)
+    second = _client_with_config()
+    monkeypatch.setattr(second, '_get_indexers_sync', listing)
+
+    assert first.indexer_priorities() == {1: 2}
+    assert second.indexer_priorities() == {1: 2}
+    assert listing.call_count == 1
+
+
+def test_a_cold_cache_under_concurrency_lists_once(monkeypatch) -> None:
+    """Six searches starting together used to issue six listings."""
+    import threading
+
+    calls = []
+    ready = threading.Barrier(6)
+
+    def _slow_listing():
+        calls.append(1)
+        time.sleep(0.05)
+        return [ProwlarrIndexer(id=1, name='X', protocol='torrent', enable=True,
+                                privacy='public', priority=3)]
+
+    client = _priority_client(monkeypatch, _slow_listing)
+
+    def _worker():
+        ready.wait()
+        client.indexer_priorities()
+
+    threads = [threading.Thread(target=_worker) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(calls) == 1

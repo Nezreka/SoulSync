@@ -70,6 +70,11 @@ class _FakeMatchEngine:
     def generate_download_queries(self, track):
         return list(self._queries)
 
+    @staticmethod
+    def _title_is_distinctive_enough_to_broadcast(title):
+        from core.matching_engine import MusicMatchingEngine
+        return MusicMatchingEngine._title_is_distinctive_enough_to_broadcast(title)
+
 
 def _sync_run_async(coro):
     """Drain a coroutine on a fresh loop."""
@@ -827,8 +832,8 @@ def test_artist_starting_with_the_uses_second_word():
     assert any('Beatles' in q for q in queries)
 
 
-def test_track_with_parens_generates_cleaned_variant():
-    """`Money (Remastered)` → also tries `Money` as fallback query."""
+def test_track_with_short_parens_does_not_broadcast_cleaned_variant():
+    """`Money (Remastered)` must not fall back to title-only `Money`."""
     _seed_task(track_info={
         'id': 'sp1', 'name': 'Money (Remastered)', 'artists': ['Pink Floyd'],
         'album': 'DSOTM', 'duration_ms': 100000,
@@ -837,8 +842,23 @@ def test_track_with_parens_generates_cleaned_variant():
     deps, _ = _build_deps(soulseek=sk, matching=_FakeMatchEngine(queries=[]))
     tw.download_track_worker('t1', 'b1', deps)
     queries = [q for q, _ in sk.search_calls]
-    # Cleaned variant included
-    assert 'Money' in queries
+    assert 'Money' not in queries
+
+
+def test_short_title_does_not_readd_legacy_title_only_query():
+    _seed_task(track_info={
+        'id': 'sp1', 'name': 'Vortex', 'artists': ['Marshall James'],
+        'album': '', 'duration_ms': 360000,
+    })
+    sk = _FakeClient(results=[])
+    deps, _ = _build_deps(
+        soulseek=sk,
+        matching=_FakeMatchEngine(queries=['marshall james vortex']),
+    )
+    tw.download_track_worker('t1', 'b1', deps)
+    queries = [q for q, _ in sk.search_calls]
+    assert 'Vortex' not in queries
+    assert 'marshall james vortex' in queries
 
 
 def test_duplicate_queries_deduplicated_case_insensitive():

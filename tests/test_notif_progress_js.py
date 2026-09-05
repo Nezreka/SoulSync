@@ -22,36 +22,19 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _TEST_FILE = _REPO_ROOT / "tests" / "static" / "test_notif_progress.mjs"
 
 
-def _node_available() -> bool:
-    if not shutil.which("node"):
-        return False
-    try:
-        result = subprocess.run(
-            ["node", "--version"],
-            capture_output=True, text=True, timeout=10,
-        )
-    except (subprocess.SubprocessError, FileNotFoundError):
-        return False
-    if result.returncode != 0:
-        return False
-    raw = (result.stdout or "").strip().lstrip("v")
-    try:
-        major = int(raw.split(".")[0])
-    except (ValueError, IndexError):
-        return False
-    return major >= 22
+from tests._node_runner import NODE, node_available, node_path
 
 
 def test_notif_progress_js():
     """Pin the notification progress-bar maths via `node --test` (#1197)."""
-    if not _node_available():
+    if not node_available():
         pytest.skip("Node.js >= 22 required to run the JS notification-progress tests")
 
     if not _TEST_FILE.exists():
         pytest.skip(f"JS test file missing: {_TEST_FILE}")
 
     result = subprocess.run(
-        ["node", "--test", str(_TEST_FILE)],
+        [NODE, "--test", node_path(_TEST_FILE)],
         capture_output=True, text=True,
         cwd=str(_REPO_ROOT),
         timeout=60,

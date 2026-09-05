@@ -193,6 +193,58 @@ export async function fetchRepairFindings(query: FindingsQuery): Promise<RepairF
   return { items: data.items || [], total: data.total || 0, page: data.page || 0 };
 }
 
+export interface FindingAlbumGroup {
+  group_by: 'album' | 'artist';
+  key: string;
+  artist: string | null;
+  album: string | null;
+  count: number;
+  worst_score: number | null;
+  best_score: number | null;
+  worst_quality: string;
+  best_quality: string;
+  album_thumb_url: string | null;
+  artist_thumb_url: string | null;
+  artist_id: string | null;
+  first_seen: string | null;
+  last_seen: string | null;
+}
+
+export interface FindingAlbumQuery {
+  groupBy: 'album' | 'artist';
+  jobId?: string;
+  status?: string;
+  findingType?: string;
+  q?: string;
+  limit?: number;
+}
+
+/**
+ * Findings folded to one row per album or artist, worst audio first.
+ *
+ * Degrades to an empty list rather than throwing, the same way
+ * `fetchFindingGroups` does: a grouped view that cannot load should leave the
+ * flat list usable instead of taking the whole surface down with it.
+ */
+export async function fetchFindingAlbums(
+  query: FindingAlbumQuery,
+): Promise<FindingAlbumGroup[]> {
+  try {
+    const params = new URLSearchParams({ group_by: query.groupBy });
+    if (query.jobId) params.set('job_id', query.jobId);
+    if (query.status) params.set('status', query.status);
+    if (query.findingType) params.set('finding_type', query.findingType);
+    if (query.q) params.set('q', query.q);
+    if (query.limit) params.set('limit', String(query.limit));
+    const response = await fetch(`/api/repair/findings/albums?${params}`);
+    if (!response.ok) return [];
+    const data = (await response.json()) as { groups?: FindingAlbumGroup[] };
+    return data.groups || [];
+  } catch {
+    return [];
+  }
+}
+
 /** `loadRepairFindingsDashboard`. */
 export async function fetchFindingCounts(): Promise<RepairFindingCounts> {
   const response = await fetch('/api/repair/findings/counts');

@@ -153,3 +153,27 @@ def test_empty_listening_history_yields_no_mixes(tmp_path):
     d = MusicDatabase(str(tmp_path / 'empty.db'))
     payload = generate_daily_mixes(d)
     assert payload['mixes'] == []
+
+
+def test_owned_durations_remain_milliseconds(db):
+    from core.personalized.daily_mixes import _owned_tracks_for
+    conn = db._get_connection()
+    conn.execute("UPDATE tracks SET duration = 367725 WHERE artist_id = 1")
+    conn.commit()
+    conn.close()
+    tracks = _owned_tracks_for(db, ['Daft Punk'])['daft punk']
+    assert tracks
+    assert all(track['duration_ms'] == 367725 for track in tracks)
+
+
+def test_old_duration_payload_is_rebuilt(db):
+    from core.personalized.daily_mixes import CURATED_KEY, PAYLOAD_VERSION
+    from datetime import datetime, timezone
+    db.save_curated_playlist(CURATED_KEY, {
+        'v': PAYLOAD_VERSION - 1,
+        'generated_at': datetime.now(timezone.utc).isoformat(),
+        'mixes': [{'key': 'bad-cached-duration', 'tracks': [{'duration_ms': 367725000}]}],
+    }, 1)
+    result = get_or_build_daily_mixes(db)
+    assert result['v'] == PAYLOAD_VERSION
+    assert all(mix['key'] != 'bad-cached-duration' for mix in result['mixes'])

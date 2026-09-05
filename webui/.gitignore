@@ -3,6 +3,10 @@ node_modules
 static/dist
 test-results
 
+# Rendered by src/test/layout-fixtures.test.tsx before every offline layout
+# run, so committing it would only ever go stale.
+tests/layout/__fixtures__
+
 # Per-case oxlint config written by tests/test_vanilla_globals_resolve.py. It
 # has to live here (oxlint resolves -c against its own cwd and a Windows binary
 # cannot read a WSL /tmp path) and is unlinked on the way out — but a killed run

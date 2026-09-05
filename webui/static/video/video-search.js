@@ -25,6 +25,7 @@
     var lastChannel = null;    // resolved YouTube channel awaiting a Follow
     var lastPlaylist = null;   // resolved YouTube playlist awaiting Add-to-watchlist
     var mode = 'enhanced';
+    var queryContext = null;
 
     function $(sel) { return document.querySelector(sel); }
     function esc(s) {
@@ -33,6 +34,18 @@
             .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
     function show(sel, on) { var n = $(sel); if (n) n.classList.toggle('hidden', !on); }
+    function renderQueryContext() {
+        var el = $('[data-video-search-context]');
+        if (!el) return;
+        if (!queryContext || !queryContext.q) { el.hidden = true; el.innerHTML = ''; return; }
+        var kind = queryContext.kind === 'show' ? 'Shows' : 'Movies';
+        var label = queryContext.source === 'keyword' ? 'Keyword' : 'Search';
+        el.hidden = false;
+        el.innerHTML = '<span>' + esc(label) + '</span><strong>' + esc(queryContext.q) + '</strong>' +
+            '<em>' + esc(kind) + '</em>' +
+            '<button type="button" data-video-search-context-clear aria-label="Clear search context">&times;</button>';
+    }
+    function clearQueryContext() { queryContext = null; renderQueryContext(); }
     var BASIC_SEARCH_SOURCES = {
         soulseek: { label: 'slskd', kind: 'Soulseek', source: 'soulseek' },
         thepiratebay: { label: 'The Pirate Bay', kind: 'Prowlarr torrent indexer', source: 'torrent', indexer: 'thepiratebay' },
@@ -1358,6 +1371,7 @@
 
     function onInput(val) {
         var q = (val || '').trim();
+        if (queryContext && q !== queryContext.q) clearQueryContext();
         lastQuery = q;
         if (timer) clearTimeout(timer);
         if (!q) {
@@ -1462,6 +1476,16 @@
                 if (first) { e.preventDefault(); openCard(first); }
             });
         }
+
+        document.addEventListener('click', function (e) {
+            var clear = e.target.closest('[data-video-search-context-clear]');
+            if (!clear) return;
+            e.preventDefault();
+            clearQueryContext();
+            var input = $('[data-video-search-input]');
+            if (input) { input.value = ''; try { input.focus(); } catch (err) { /* ignore */ } }
+            onInput('');
+        });
 
         var results = $('[data-video-search-results]');
         if (results) {
@@ -1568,11 +1592,14 @@
         wire();
         var input = $('[data-video-search-input]');
         if (_pendingQuery && input) {   // a keyword chip navigated here (#1042)
-            input.value = _pendingQuery;
-            onInput(_pendingQuery);
+            input.value = _pendingQuery.q;
+            queryContext = _pendingQuery;
+            renderQueryContext();
+            onInput(_pendingQuery.q);
             _pendingQuery = null;
             return;
         }
+        renderQueryContext();
         if (input) { try { input.focus(); } catch (err) { /* ignore */ } }
         if (!lastQuery) loadTrending();               // fill the idle page
     }
@@ -1582,13 +1609,21 @@
     // it. Apply immediately too when we're already the active page.
     var _pendingQuery = null;
     document.addEventListener('soulsync:video-search-query', function (e) {
-        var qv = e && e.detail && (e.detail.q || e.detail);
+        var detail = e && e.detail;
+        var qv = detail && (detail.q || detail);
         if (typeof qv !== 'string' || !qv.trim()) return;
         setMode('enhanced');
-        _pendingQuery = qv.trim();
+        _pendingQuery = { q: qv.trim(), source: (detail && detail.source) || 'search',
+            kind: (detail && detail.kind) === 'show' ? 'show' : 'movie' };
         if (document.body.getAttribute('data-video-page') === PAGE_ID) {
             var input = $('[data-video-search-input]');
-            if (input) { input.value = _pendingQuery; onInput(_pendingQuery); _pendingQuery = null; }
+            if (input) {
+                input.value = _pendingQuery.q;
+                queryContext = _pendingQuery;
+                renderQueryContext();
+                onInput(_pendingQuery.q);
+                _pendingQuery = null;
+            }
         }
     });
 

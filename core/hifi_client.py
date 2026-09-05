@@ -199,21 +199,10 @@ def is_short_audio(actual_seconds: float, expected_seconds: float, threshold: fl
     return a < e * threshold
 
 
-def is_fake_lossless_bitrate(size_bytes, claimed_seconds, sample_rate, bits_per_sample,
-                             channels, min_ratio: float = 0.30) -> bool:
-    """True when a 'lossless' file's data is FAR too small for its claimed length — the
-    fingerprint of a ~30s preview whose STREAMINFO/container was faked to the full
-    duration (so every length header reads 'full' and only the bitrate gives it away).
-    Real FLAC is ~40-75% of raw PCM; a preview padded to full length implies single-digit
-    %. Conservative: 0 / bad inputs return False (never reject on unknowns)."""
-    try:
-        sz, secs = float(size_bytes or 0), float(claimed_seconds or 0)
-        sr, bits, ch = int(sample_rate or 0), int(bits_per_sample or 0), int(channels or 0)
-    except (TypeError, ValueError):
-        return False
-    if sz <= 0 or secs <= 0 or sr <= 0 or bits <= 0 or ch <= 0:
-        return False
-    return (sz * 8 / secs) < (sr * bits * ch) * min_ratio
+# The lossless-density predicate lives with the other file-level checks now, so
+# the shared import path and this client cannot drift apart. Re-exported here
+# because that is the name this module (and its tests) already use.
+from core.imports.file_integrity import is_fake_lossless_bitrate   # noqa: E402,F401
 
 
 def parse_ffmpeg_time(stderr_text) -> float:

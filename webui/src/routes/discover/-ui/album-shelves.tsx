@@ -34,6 +34,14 @@ export interface DiscoverAlbumCardProps {
   onOpen: () => void;
 }
 
+/**
+ * a real button, not a clickable div.
+ *
+ * the card has exactly one action, opening the album, so the card IS the
+ * button. keyboard and screen reader get it for free; the label spells out the
+ * album and artist because the visible text is two separate lines.
+ */
+
 export function DiscoverAlbumCard({
   cover,
   albumName,
@@ -44,7 +52,13 @@ export function DiscoverAlbumCard({
 }: DiscoverAlbumCardProps) {
   const [failed, setFailed] = useState(false);
   return (
-    <div className="ya-card discover-album-card" title={titleAttr} onClick={onOpen}>
+    <button
+      type="button"
+      className="ya-card discover-album-card"
+      title={titleAttr}
+      aria-label={`${albumName}${artistName ? ` by ${artistName}` : ''}`}
+      onClick={onOpen}
+    >
       <div className="ya-card-img">
         {!failed && (
           <img src={thumb(cover, 'grid')} alt="" loading="lazy" onError={() => setFailed(true)} />
@@ -63,7 +77,7 @@ export function DiscoverAlbumCard({
         <div className="ya-card-name">{albumName}</div>
         <div className="ya-card-sub">{artistName}</div>
       </div>
-    </div>
+    </button>
   );
 }
 

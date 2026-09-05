@@ -33,6 +33,11 @@ FLAC_ONLY = {'flac'}
     ('Artist - Album [M4A]', {'aac'}),
     ('Artist - Album [AAC]', {'aac'}),
     ('Artist - Album [OGG]', {'ogg'}),
+    ('Artist - Album [WAV 24-96]', {'wav'}),
+    ('Artist - Album [AIFF]', {'wav'}),
+    ('Artist - Album [DSF]', {'dsf'}),
+    ('Artist - Album [DFF]', {'dsf'}),
+    ('Artist - Album [DSD256]', {'dsf'}),
 ])
 def test_a_named_format_is_read_from_the_title(title, expected):
     assert formats_in_title(title) == expected
@@ -177,6 +182,42 @@ def test_an_unknown_release_is_rejected_rather_than_assumed_lossy():
     assert 'undetermined' in reason
 
 
+def test_exact_mp3_category_is_preserved_by_the_strict_gate():
+    ok, reason = evaluate_release(
+        {'mp3'},
+        'Artist - Album (2024)',
+        categories=[3000, 3010],
+    )
+
+    assert ok is True
+    assert 'mp3' in reason
+
+
+def test_a_named_codec_outranks_a_generic_mp3_category():
+    """3010 is Audio/MP3, and this used to read as a contradiction.
+
+    It was treated as codec evidence equal to the title, so a FLAC torrent
+    filed under 3010 became a mixed flac/mp3 release and a lossless-only
+    profile refused it. Plenty of indexers map their whole music category to
+    3010, so it says which bucket the indexer used, not what this release is.
+    The title names the release and wins; the category only fills a title that
+    said nothing.
+    """
+    assert evaluate_release({'flac'}, 'Artist - Album [FLAC]', categories=[3010])[0] is True
+    assert evaluate_release({'mp3'}, 'Artist - Album [FLAC]', categories=[3010])[0] is False
+    # A title that names nothing still takes the category's word for it.
+    assert evaluate_release({'mp3'}, 'Artist - Album (2019)', categories=[3010])[0] is True
+
+
+def test_lossless_category_disproves_a_lossy_title_without_inventing_flac():
+    assert evaluate_release(
+        {'mp3'}, 'Artist - Album [MP3 320]', categories=[3040]
+    )[0] is False
+    assert evaluate_release(
+        {'flac'}, 'Artist - Album (2024)', categories=[3040]
+    )[0] is False
+
+
 def test_a_permissive_profile_accepts_everything_including_unknown():
     """A strict torrent filter must not appear for users who never asked."""
     for title in ('Artist - Album [MP3]', 'Artist - Album (2024)', ''):
@@ -201,6 +242,23 @@ def test_the_file_list_rescues_a_release_whose_title_says_nothing():
 
     assert ok is True
     assert 'file list' in reason
+
+
+@pytest.mark.parametrize('file_name,allowed', [
+    ('01.wav', {'wav'}),
+    ('01.aiff', {'wav'}),
+    ('01.aifc', {'wav'}),
+    ('01.dsf', {'dsf'}),
+    ('01.dff', {'dsf'}),
+])
+def test_supported_lossless_files_use_profile_canonical_formats(file_name, allowed):
+    ok, reason = evaluate_release(
+        allowed,
+        'Artist - Album (2024)',
+        file_names=[file_name],
+    )
+
+    assert ok is True, reason
 
 
 def test_an_art_only_file_list_falls_back_to_the_title():
@@ -314,6 +372,18 @@ def test_a_profile_allowing_mp3_still_takes_mp3():
     assert picked is pool[0]
 
 
+def test_album_picker_honors_exact_mp3_category_for_a_bare_title():
+    release = _rel(
+        'Artist - Album (2024)',
+        seeders=50,
+        categories=[3000, 3010],
+    )
+
+    assert pick_best_album_release(
+        [release], _flac_or_bust, allowed_formats={'mp3'}
+    ) is release
+
+
 # ── the per-track path (#1149) ───────────────────────────────────────────────
 #
 # Declining here is the download engine's "try the next source" contract
@@ -331,9 +401,11 @@ from core.download_plugins.torrent import (  # noqa: E402
 )
 
 
-def _queued_filename(title):
+def _queued_filename(title, categories=None):
     token = get_candidate_store().put(
-        _encode_candidate('http://indexer/x.torrent', 'magnet:?xt=urn:btih:abc'))
+        _encode_candidate('http://indexer/x.torrent', 'magnet:?xt=urn:btih:abc'),
+        metadata={'categories': list(categories or [])},
+    )
     return f"{token}{_FILENAME_SEP}{title}"
 
 
@@ -343,13 +415,17 @@ def _plugin():
     return plugin
 
 
-def _download(plugin, title, allowed):
+def _download(plugin, title, allowed, categories=None):
     import asyncio
     with patch('core.download_plugins.torrent.profile_allowed_formats',
                return_value=allowed):
         with patch.object(plugin, '_download_thread', lambda *a, **k: None):
             return asyncio.new_event_loop().run_until_complete(
-                plugin.download('torrent', _queued_filename(title), 0))
+                plugin.download(
+                    'torrent',
+                    _queued_filename(title, categories=categories),
+                    0,
+                ))
 
 
 def test_a_lossy_track_is_declined_so_the_next_source_gets_a_turn():
@@ -362,6 +438,15 @@ def test_an_undetermined_track_is_declined_too():
 
 def test_a_flac_track_proceeds():
     assert _download(_plugin(), 'Artist - Album [FLAC]', {'flac'}) is not None
+
+
+def test_a_bare_category_identified_mp3_track_proceeds():
+    assert _download(
+        _plugin(),
+        'Artist - Album (2024)',
+        {'mp3'},
+        categories=[3010],
+    ) is not None
 
 
 def test_a_permissive_profile_changes_nothing_on_this_path():

@@ -1225,11 +1225,53 @@ class RepairWorker:
     # Sort keys the inbox offers. Severity-first is the triage default; a flat
     # newest-first list buries three corrupt files under four hundred missing
     # lyrics. Whitelisted rather than interpolated — this lands in ORDER BY.
+    # How bad a file actually is, as a number, straight off the finding.
+    #
+    # Severity cannot answer this: the quality scanner only ever emits
+    # 'warning' (broken audio) or 'info' (below profile), so EVERY upgradeable
+    # track tied at 'info' and the sort fell through to created_at. That is why
+    # sorting by severity handed back 320, then 192, then 256 - it was showing
+    # scan order and calling it severity.
+    #
+    # This is AudioQuality.tier_score() transcribed into SQL, branch for branch,
+    # and a test asserts the two order an identical set identically. tier_score
+    # has TWO branches and an earlier flat formula here matched neither: lossless
+    # (flac/wav) scores on sample rate and bit depth and ignores bitrate, while
+    # everything else scores on bitrate capped at 320kbps. Inventing a second
+    # definition of "better audio" put ALAC on the wrong side of FLAC and sent
+    # DSD to the top of the list.
+    #
+    # Computed from current_format/current_bitrate, which every quality finding
+    # has already stored, so old findings sort correctly without a rescan.
+    _QUALITY_SCORE_SQL = (
+        "(CASE WHEN lower(COALESCE(json_extract(details_json, '$.current_format'), '')) "
+        "        IN ('flac', 'alac', 'wav') THEN "
+        "   (CASE lower(json_extract(details_json, '$.current_format')) "
+        "      WHEN 'flac' THEN 100 WHEN 'alac' THEN 98 ELSE 95 END) "
+        "   + MIN(COALESCE(json_extract(details_json, '$.current_sample_rate'), 44100) "
+        "         / 192000.0, 1.0) * 20 "
+        "   + MAX(COALESCE(json_extract(details_json, '$.current_bit_depth'), 16) - 16, 0) "
+        "         / 8.0 * 10 "
+        "ELSE "
+        "   (CASE lower(COALESCE(json_extract(details_json, '$.current_format'), '')) "
+        "      WHEN 'dsf' THEN 102 WHEN 'ogg' THEN 70 "
+        "      WHEN 'opus' THEN 65 WHEN 'aac' THEN 60 WHEN 'mp3' THEN 50 "
+        "      WHEN 'wma' THEN 30 ELSE 10 END) "
+        "   + MIN(COALESCE(json_extract(details_json, '$.current_bitrate'), 0) / 320.0, 1.0) * 10 "
+        "END)"
+    )
+
     _FINDING_SORTS = {
         'newest': 'created_at DESC',
         'oldest': 'created_at ASC',
+        # Severity still leads - a broken file outranks a merely-lossy one - but
+        # within a band the worst quality now comes first instead of scan order.
         'severity': ("CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 "
-                     "ELSE 2 END, created_at DESC"),
+                     "ELSE 2 END, " + _QUALITY_SCORE_SQL + " ASC, created_at DESC"),
+        # Worst audio first, ignoring severity entirely. What someone working
+        # through an upgrade backlog actually wants: fix the 128s before the 320s.
+        'quality': (_QUALITY_SCORE_SQL + " ASC, created_at DESC"),
+        'quality_desc': (_QUALITY_SCORE_SQL + " DESC, created_at DESC"),
         'path': 'file_path IS NULL, file_path ASC, created_at DESC',
     }
 
@@ -1371,6 +1413,105 @@ class RepairWorker:
         finally:
             if conn:
                 conn.close()
+
+    # Which details field names the album / artist for a grouped view. Only
+    # the quality jobs write these today, so a type that has never heard of an
+    # album simply produces no groups rather than one giant "Unknown" bucket.
+    # Jobs did not agree on a spelling: 'artist' (34 uses), 'artist_name' (7)
+    # and 'expected_artist' (2); 'album' (29), 'album_title' (15), 'album_name'
+    # (1). Reading only the quality scanner's pair would have made this view
+    # quality-only by accident, when fourteen job types record the same thing.
+    _ARTIST_KEY = ("COALESCE(json_extract(details_json, '$.expected_artist'), "
+                   "json_extract(details_json, '$.artist'), "
+                   "json_extract(details_json, '$.artist_name'))")
+    _ALBUM_KEY = ("COALESCE(json_extract(details_json, '$.album_title'), "
+                  "json_extract(details_json, '$.album'), "
+                  "json_extract(details_json, '$.album_name'))")
+
+    _GROUP_KEYS = {
+        'album': (_ARTIST_KEY, _ALBUM_KEY),
+        'artist': (_ARTIST_KEY, "NULL"),
+    }
+
+    def get_finding_albums(self, group_by: str = 'album', job_id: str = None,
+                           status: str = 'pending', finding_type: str = None,
+                           q: str = None, limit: int = 200) -> List[dict]:
+        """Findings folded to one row per ALBUM (or per ARTIST), with artwork.
+
+        A flat list of 40,000 upgradeable tracks is not reviewable. Nobody
+        decides one track at a time whether to re-acquire it; they decide per
+        album ("re-rip this one properly") or per artist ("everything by them
+        is a bad rip"). This returns that unit, with the counts and the artwork
+        already on the finding, so the UI never has to fan out per row.
+
+        Ordered worst-audio-first: the album carrying the lowest-quality file
+        leads, because that is the one most worth fixing. Ties break on size,
+        so a 12-track 128kbps album outranks a single stray.
+
+        Rows with no album/artist recorded are dropped rather than collected
+        into an "Unknown" pile - they would be the biggest group on the page
+        and mean nothing.
+        """
+        artist_expr, album_expr = self._GROUP_KEYS.get(
+            group_by, self._GROUP_KEYS['album'])
+        where, params = self._findings_filter(
+            job_id=job_id, status=status, finding_type=finding_type, q=q)
+        # the group key itself must exist, or the row is not groupable
+        guard = f"{artist_expr} IS NOT NULL AND {artist_expr} <> ''"
+        if group_by == 'album':
+            guard += f" AND {album_expr} IS NOT NULL AND {album_expr} <> ''"
+        where = f"{where} AND {guard}" if where else f"WHERE {guard}"
+
+        score = self._QUALITY_SCORE_SQL
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            rows = conn.execute(f"""
+                SELECT {artist_expr}                        AS artist,
+                       {album_expr}                         AS album,
+                       COUNT(*)                             AS count,
+                       MIN({score})                         AS worst_score,
+                       MAX({score})                         AS best_score,
+                       MIN(printf('%012.4f', {score}) || '|' ||
+                           COALESCE(json_extract(details_json, '$.current_quality'), ''))
+                                                            AS _worst_label,
+                       MAX(printf('%012.4f', {score}) || '|' ||
+                           COALESCE(json_extract(details_json, '$.current_quality'), ''))
+                                                            AS _best_label,
+                       MAX(json_extract(details_json, '$.album_thumb_url'))  AS album_thumb_url,
+                       MAX(json_extract(details_json, '$.artist_thumb_url')) AS artist_thumb_url,
+                       MAX(json_extract(details_json, '$.artist_id'))        AS artist_id,
+                       MIN(created_at)                      AS first_seen,
+                       MAX(created_at)                      AS last_seen
+                FROM repair_findings
+                {where}
+                GROUP BY artist, album
+                ORDER BY worst_score ASC, count DESC, artist ASC
+                LIMIT ?
+            """, (*params, max(1, int(limit)))).fetchall()
+        except Exception as e:
+            logger.error("Error grouping findings by %s: %s", group_by, e, exc_info=True)
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+        out = []
+        for r in rows:
+            d = dict(r)
+            # The label the user reads comes from the worst member, resolved
+            # separately so the SQL stays a pure aggregate.
+            d['group_by'] = group_by
+            d['key'] = f"{d.get('artist') or ''}\u0000{d.get('album') or ''}"
+            # printf-padded so the string MIN/MAX above order numerically; the
+            # label rides along so the worst member names itself without a
+            # second query per group.
+            for src, dest in (('_worst_label', 'worst_quality'),
+                              ('_best_label', 'best_quality')):
+                raw_label = d.pop(src, None) or ''
+                d[dest] = raw_label.split('|', 1)[1] if '|' in raw_label else ''
+            out.append(d)
+        return out
 
     def get_finding_groups(self) -> List[dict]:
         """One row per finding TYPE — the unit the inbox works in.

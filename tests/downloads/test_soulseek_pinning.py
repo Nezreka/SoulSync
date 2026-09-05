@@ -828,3 +828,107 @@ def test_filter_results_by_quality_runs_quarantine_dedup_first(configured_client
     usernames = {r.username for r in kept}
     assert 'badpeer' not in usernames, "Quarantined source must be filtered before the quality picker"
     assert 'goodpeer' in usernames
+
+# ---------------------------------------------------------------------------
+# search()
+# ---------------------------------------------------------------------------
+
+
+def _search_ready_client():
+    client = SoulseekClient.__new__(SoulseekClient)
+    client.base_url = 'http://localhost:5030'
+    client.api_key = 'test-key'
+    client.download_path = Path('./test_downloads')
+    client.active_searches = {}
+    return client
+
+
+def _search_config_get(key, default=None):
+    values = {
+        'soulseek.min_peer_upload_speed': 0,
+        'soulseek.search_timeout_buffer': 0,
+    }
+    return values.get(key, default)
+
+
+def test_search_reads_wrapped_slskd_responses_payload():
+    """Regression: some slskd response endpoints return an object containing
+    the response list. Treating only raw lists as valid made SoulSync report
+    0 results even though slskd had peer responses."""
+    client = _search_ready_client()
+
+    async def fake_request(method, endpoint, **kwargs):
+        if method == 'POST' and endpoint == 'searches':
+            return {'id': 'search-1'}
+        if method == 'GET' and endpoint == 'searches/search-1/responses':
+            return {
+                'responses': [
+                    {
+                        'username': 'peer-a',
+                        'freeUploadSlots': 1,
+                        'uploadSpeed': 1_000_000,
+                        'queueLength': 0,
+                        'files': [
+                            {
+                                'filename': 'Marshall James - Vortex.mp3',
+                                'size': 12_900_000,
+                                'bitRate': 320,
+                            }
+                        ],
+                    }
+                ]
+            }
+        raise AssertionError((method, endpoint))
+
+    with patch('core.soulseek_client.config_manager.get', side_effect=_search_config_get), \
+         patch.object(client, '_wait_for_rate_limit', AsyncMock()), \
+         patch.object(client, '_make_request', side_effect=fake_request):
+        tracks, albums = _run_async(client.search('marshall james vortex', timeout=1))
+
+    assert albums == []
+    assert len(tracks) == 1
+    assert tracks[0].username == 'peer-a'
+    assert tracks[0].filename == 'Marshall James - Vortex.mp3'
+    assert tracks[0].quality == 'mp3'
+
+
+def test_search_does_not_skip_late_inserted_responses():
+    """Regression: slskd can return the current response set in a different
+    order from the previous poll. Index slicing skipped newly inserted earlier
+    responses, which could hide the only valid candidate."""
+    client = _search_ready_client()
+    snapshots = [
+        [
+            {
+                'username': 'peer-b',
+                'files': [{'filename': 'Noise Result.mp3', 'size': 1_000_000}],
+            }
+        ],
+        [
+            {
+                'username': 'peer-a',
+                'files': [{'filename': 'Marshall James - Vortex.flac', 'size': 40_000_000}],
+            },
+            {
+                'username': 'peer-b',
+                'files': [{'filename': 'Noise Result.mp3', 'size': 1_000_000}],
+            },
+        ],
+    ]
+
+    async def fake_request(method, endpoint, **kwargs):
+        if method == 'POST' and endpoint == 'searches':
+            return {'id': 'search-1'}
+        if method == 'GET' and endpoint == 'searches/search-1/responses':
+            return snapshots.pop(0) if snapshots else []
+        raise AssertionError((method, endpoint))
+
+    with patch('core.soulseek_client.config_manager.get', side_effect=_search_config_get), \
+         patch.object(client, '_wait_for_rate_limit', AsyncMock()), \
+         patch.object(client, '_make_request', side_effect=fake_request), \
+         patch('core.soulseek_client.asyncio.sleep', AsyncMock()):
+        tracks, albums = _run_async(client.search('marshall james vortex', timeout=2))
+
+    assert albums == []
+    assert {track.username for track in tracks} == {'peer-a', 'peer-b'}
+    assert any(track.filename == 'Marshall James - Vortex.flac' for track in tracks)

@@ -203,6 +203,13 @@
         transform: translateX(0);
     }
 
+    /* Set for one frame while the viewport crosses the breakpoint. Without it
+       the desktop -> mobile flip animates the drawer across the page, which is
+       what a resized desktop context caught mid-slide sitting on the content. */
+    .sidebar.sidebar-no-transition {
+        transition: none !important;
+    }
+
     /* init.js has always put this class on <body> when the drawer opens, but
        nothing ever consumed it, so the page behind the drawer stayed live and
        scrollable. `.main-content` is the real scroller on mobile, so locking
