@@ -183,6 +183,51 @@ def test_worker_processes_items_without_extra_delay(monkeypatch):
     assert sleeps == [10]  # Idle backoff is retained after both items complete.
 
 
+
+def _own_thread_clock(monkeypatch, clock, record=None):
+    """Patch mb.time for THIS thread only.
+
+    ``mb.time`` is the stdlib time module, so ``monkeypatch.setattr`` replaces
+    ``time.sleep`` for the whole process. Any background thread that sleeps
+    during the test then lands in the recorded list and shifts the fake clock.
+    That is the flake behind ``assert [2.0, 3, 4.0] == [2.0, 4.0]``: something
+    else in the suite slept 3 seconds mid-test. Other threads get the real
+    sleep so they keep their own timing instead of spinning.
+    """
+    caller = threading.current_thread()
+    real_sleep = mb.time.sleep
+
+    def sleep(delay):
+        if threading.current_thread() is not caller:
+            real_sleep(delay)
+            return
+        if record is not None:
+            record.append(delay)
+        clock[0] += delay
+
+    monkeypatch.setattr(mb.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(mb.time, 'sleep', sleep)
+
+def test_sleep_recorder_ignores_other_threads(monkeypatch):
+    """The retry-budget assertions must survive an unrelated sleeping thread.
+
+    CI failed with ``assert [2.0, 3, 4.0] == [2.0, 4.0]``: mb.time is the
+    stdlib time module, so patching sleep catches every thread in the process,
+    and something elsewhere in the suite slept 3 seconds mid-test.
+    """
+    clock = [100.0]
+    sleeps = []
+    _own_thread_clock(monkeypatch, clock, sleeps)
+
+    mb.time.sleep(2.0)                                    # the client's retry
+    noise = threading.Thread(target=lambda: mb.time.sleep(3))
+    noise.start()
+    noise.join()                                          # somebody else's
+    mb.time.sleep(4.0)                                    # the client's retry
+
+    assert sleeps == [2.0, 4.0]
+    assert clock[0] == 106.0
+
 @pytest.mark.parametrize('status,expected_calls', [(429, 3), (503, 3), (504, 3), (404, 1)])
 def test_http_failure_stays_on_mirror_and_respects_retry_budget(monkeypatch, server, status, expected_calls):
     url, calls, outcomes = server
@@ -190,11 +235,7 @@ def test_http_failure_stays_on_mirror_and_respects_retry_budget(monkeypatch, ser
     monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_REQUEST_INTERVAL', '0.2')
     clock = [100.0]
     sleeps = []
-    def sleep(delay):
-        sleeps.append(delay)
-        clock[0] += delay
-    monkeypatch.setattr(mb.time, 'monotonic', lambda: clock[0])
-    monkeypatch.setattr(mb.time, 'sleep', sleep)
+    _own_thread_clock(monkeypatch, clock, sleeps)
     outcomes.extend([(status, {})] * expected_calls)
     client = mb.MusicBrainzClient()
     client.session.trust_env = False
@@ -208,8 +249,9 @@ def test_http_failure_stays_on_mirror_and_respects_retry_budget(monkeypatch, ser
 def test_public_requests_are_paced_at_transport_boundary(monkeypatch):
     clock = [100.0]
     starts = []
-    monkeypatch.setattr(mb.time, 'monotonic', lambda: clock[0])
-    monkeypatch.setattr(mb.time, 'sleep', lambda delay: clock.__setitem__(0, clock[0] + delay))
+    # Same reason as the retry-budget test: a stray thread's sleep would move
+    # this clock and shift every asserted start time.
+    _own_thread_clock(monkeypatch, clock)
     client = mb.MusicBrainzClient()
     def get(*args, **kwargs):
         starts.append(clock[0])
