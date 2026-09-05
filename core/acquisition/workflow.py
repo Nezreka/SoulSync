@@ -231,6 +231,9 @@ def prepare_candidate_grab(
         acquisition_request_id=request.id,
         release_candidate_id=candidate.id,
         decision_run_id=run.id,
+        # ACQ-01: the grab belongs to this attempt of the request, so a later
+        # explicit retry is not served the previous attempt's terminal grab.
+        request_attempt=int(getattr(request, "attempts", 0) or 0),
         context={
             "acquisition_request_id": request.id,
             "release_candidate_id": candidate.id,

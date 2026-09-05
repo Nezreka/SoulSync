@@ -864,7 +864,8 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
             main_file_role = "derivative" if destructive_retention else "master"
 
             existing = conn.execute(
-                "SELECT id FROM lib2_track_files WHERE track_id=? AND path=?",
+                "SELECT id, COALESCE(file_state,'active') AS file_state"
+                "  FROM lib2_track_files WHERE track_id=? AND path=?",
                 (track_id, file_path),
             ).fetchone()
             if existing:
@@ -892,6 +893,29 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                      existing["id"]),
                 )
                 file_id = existing["id"]
+                # FI-02: a re-import onto a path whose row was retired (deleted
+                # by the file-delete flow, or marked missing by a scan) updated
+                # the quality columns and left the row retired. The bytes were
+                # at the destination, but the registration gate found no active
+                # file, `primary_file_row` did not read the row at all, and the
+                # library scan excluded it — while the exception recovery took
+                # the returned id as proof of success. `retire_replaced_files`
+                # skips the keep_path and the primary triggers only choose
+                # among live rows, so nothing else brings it back. The other
+                # writer (`media_server_sync._upsert_file`) has always
+                # reactivated here; this is the same rule for the writer every
+                # non-SoulSync install actually uses.
+                if str(existing["file_state"] or "active") != "active":
+                    from core.library2.track_files import set_file_state
+                    conn.execute(
+                        "UPDATE lib2_track_files"
+                        "   SET missing_since=NULL, missing_scan_count=0"
+                        " WHERE id=?", (file_id,))
+                    set_file_state(conn, int(file_id), "active")
+                    logger.info(
+                        "Library v2: reactivated file row %s for re-imported "
+                        "path %s (was %s)",
+                        file_id, file_path, existing["file_state"])
             else:
                 cur = conn.execute(
                     """INSERT INTO lib2_track_files(track_id, path, size, bitrate,
@@ -943,13 +967,21 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                 "WHERE id=? AND origin='discography'", (album_id,))
             # Heuristic auto-link can create a catalog track outside importer/
             # tracklist flows; materialize its wanted state before commit so
-            # projection consumers never silently miss the new row. No
-            # request context exists in this pipeline callback, so resolve
-            # the live default profile (G8) instead of hardcoding 1 (§1
-            # invariant) — same lookup already used above for new rows.
-            from core.library2.profile_lookup import default_quality_profile_id
+            # projection consumers never silently miss the new row.
+            #
+            # SYNC-04: `recompute_wanted`'s `profile_id` is the USER profile
+            # that owns the monitoring intent — `ADMIN_PROFILE_ID`, what every
+            # regular Library-v2 consumer reads. It was being handed the
+            # default QUALITY profile id, a different namespace entirely. With a
+            # default quality profile of anything but 1 the new track got its
+            # projection filed under a profile nobody queries: the admin status
+            # reported it missing, `track_wanted_states` raised "stale", and
+            # `list_cutoff_unmet` never saw an MP3 that needed upgrading. The
+            # quality profile stays where it belongs — in the quality cascade
+            # `effective_profile_id` resolves.
+            from core.library2 import ADMIN_PROFILE_ID
             from core.library2.wanted import recompute_wanted
-            recompute_wanted(conn, profile_id=default_quality_profile_id(conn),
+            recompute_wanted(conn, profile_id=ADMIN_PROFILE_ID,
                              track_ids=[track_id])
             conn.commit()
             # perf25-04: an artist/album born from a finished download is not

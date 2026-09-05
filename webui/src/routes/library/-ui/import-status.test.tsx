@@ -301,6 +301,77 @@ describe('automatic migration of an upgrading installation', () => {
     expect(described?.text).toContain('retries on its own');
   });
 
+  it('invalidates the catalogue when the automatic migration finishes', async () => {
+    // UI-01: the automatic migration reports itself as `bootstrap.running`,
+    // never as `importState.running` — that flag belongs to a manual import
+    // started from this browser. Watching only the manual flag meant the
+    // completion branch was never reached for a migration: the page kept
+    // whatever the first artist query returned (usually nothing) and went on
+    // offering "Import library" after the catalogue had finished importing.
+    let polls = 0;
+    server.use(
+      http.get('/api/library/v2/import/status', () => {
+        polls += 1;
+        return HttpResponse.json(
+          importState({
+            running: false,
+            stage: null,
+            bootstrap:
+              polls === 1
+                ? bootstrapState()
+                : bootstrapState({ status: 'done', current: 100, finished_at: 'now' }),
+          }),
+        );
+      }),
+    );
+    const queryClient = createTestQueryClient();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ImportButton hasArtists={false} pollIntervalMs={20} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['library-v2'] }));
+  });
+
+  it('keeps watching a failed migration the server is still retrying', async () => {
+    // UI-03: `failed` is not terminal — the server loop retries with backoff.
+    // Stopping the poll left the page on the failure forever (refetch-on-focus
+    // is globally off), showing "It retries on its own" next to a retry the
+    // user could not observe.
+    const { libraryV2ImportStatusQueryOptions } = await import('../-library-v2.api');
+    const options = libraryV2ImportStatusQueryOptions(1000);
+    const interval = options.refetchInterval as (query: {
+      state: { data: LibraryV2ImportState | undefined; dataUpdateCount: number };
+    }) => number | false;
+
+    const failed = importState({
+      running: false,
+      stage: null,
+      bootstrap: bootstrapState({ status: 'failed', last_error: 'disk full' }),
+    });
+    const next = interval({ state: { data: failed, dataUpdateCount: 1 } });
+    expect(next).not.toBe(false);
+    expect(typeof next).toBe('number');
+    expect(next).toBeGreaterThanOrEqual(5_000);
+    expect(next).toBeLessThanOrEqual(60_000);
+    // It backs off rather than hammering the endpoint at the live interval.
+    expect(interval({ state: { data: failed, dataUpdateCount: 8 } })).toBeGreaterThanOrEqual(
+      next as number,
+    );
+    // A genuinely finished migration still stops the timer.
+    expect(
+      interval({
+        state: {
+          data: importState({ running: false, bootstrap: bootstrapState({ status: 'done' }) }),
+          dataUpdateCount: 2,
+        },
+      }),
+    ).toBe(false);
+  });
+
   it('blocks the Import button while the background migration holds the lock', async () => {
     server.use(
       http.get('/api/library/v2/import/status', () =>

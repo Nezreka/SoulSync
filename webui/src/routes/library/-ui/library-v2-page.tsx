@@ -4564,6 +4564,29 @@ function ArtistIndexView() {
 
 // --- Library sections -------------------------------------------------------
 
+/** The search a section switch produces.
+ *
+ * UI-02: the two sections page independently, so a section switch has to reset
+ * paging. Only the Wanted button did. "Wanted page 2 → Artists" therefore asked
+ * for page 2 of a one-page artist list: the API returned no rows, the empty
+ * state read "Your library is empty / Import library", and the pagination that
+ * would have led back is hidden when there is only one page — reloading the URL
+ * did not help either. One function so both buttons cannot drift again.
+ */
+export function librarySectionSearch<T extends Record<string, unknown>>(
+  previous: T,
+  section: 'artists' | 'wanted',
+): T & { section: string; q: string; artist: undefined; album: undefined; page: number } {
+  return {
+    ...previous,
+    section,
+    q: '',
+    artist: undefined,
+    album: undefined,
+    page: 1,
+  };
+}
+
 function LibrarySectionTabs() {
   const navigate = useNavigate();
   const search = Route.useSearch();
@@ -4574,13 +4597,7 @@ function LibrarySectionTabs() {
         className={search.section === 'artists' ? styles.viewActive : ''}
         onClick={() =>
           void navigate({
-            search: (previous) => ({
-              ...previous,
-              section: 'artists',
-              q: '',
-              artist: undefined,
-              album: undefined,
-            }),
+            search: (previous) => librarySectionSearch(previous, 'artists'),
           })
         }
       >
@@ -4591,14 +4608,7 @@ function LibrarySectionTabs() {
         className={search.section === 'wanted' ? styles.viewActive : ''}
         onClick={() =>
           void navigate({
-            search: (previous) => ({
-              ...previous,
-              section: 'wanted',
-              q: '',
-              artist: undefined,
-              album: undefined,
-              page: 1,
-            }),
+            search: (previous) => librarySectionSearch(previous, 'wanted'),
           })
         }
       >
@@ -11600,7 +11610,16 @@ export function ImportButton({
 
   useEffect(() => {
     if (!importState) return;
-    if (importState.running) {
+    // UI-01: the AUTOMATIC migration reports itself as `bootstrap.running`,
+    // never as `importState.running` (that flag belongs to a manual import
+    // started from this browser). Watching only the manual flag meant the
+    // completion branch below was never reached for a migration: the page kept
+    // whatever the first artist query returned — usually nothing — and went on
+    // showing "Your library is empty / Import library" after the catalogue had
+    // finished importing. Nothing else brought it back either: the artist query
+    // does not poll and refetch-on-focus is off globally. Watch both.
+    const bootstrapRunning = importState.bootstrap?.status === 'running';
+    if (importState.running || bootstrapRunning) {
       observedRunning.current = true;
       return;
     }
@@ -11608,6 +11627,12 @@ export function ImportButton({
     observedRunning.current = false;
     if (importState.error || importState.stage === 'failed') {
       setMessage(`Failed: ${importState.error || 'Import failed'}`);
+      return;
+    }
+    if (importState.bootstrap?.status === 'failed') {
+      // The automatic migration reports its own failure through the migration
+      // banner and retries on its own; do not overwrite that with a
+      // manual-import completion message.
       return;
     }
     setMessage(describeLibraryV2ImportCompletion(importState));

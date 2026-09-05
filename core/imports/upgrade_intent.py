@@ -46,6 +46,28 @@ def attach_upgrade_intent(context: dict, intent: Any) -> bool:
     return True
 
 
+def carry_upgrade_intent(context: Any, task: dict) -> bool:
+    """Hand a resolved intent from an import context to the task that carries it.
+
+    ACQ-02: ``_pipeline_context`` seals the intent onto the top level of the
+    context, but the candidate dispatch and staging consumers read it off the
+    TASK. So the first pipeline call had it while the quarantine-retry task and
+    the after-restart rebuild did not — and the replacement import ran with no
+    track lock, no upgrade/profile snapshot and no comparison against the
+    existing primary file. A genuine FLAC→FLAC upgrade then met the ordinary
+    same-format overwrite guard, which treats an identical format as equivalent,
+    and was discarded.
+
+    This only moves an intent that is already sealed; it can no more mint one
+    than a client can.
+    """
+    intent = get_upgrade_intent(context)
+    if intent is None:
+        return False
+    task[CONTEXT_KEY] = intent
+    return True
+
+
 def get_upgrade_intent(context: Any) -> LibraryV2UpgradeIntent | None:
     if not isinstance(context, Mapping):
         return None
@@ -80,6 +102,7 @@ __all__ = [
     "CONTEXT_KEY",
     "LibraryV2UpgradeIntent",
     "attach_upgrade_intent",
+    "carry_upgrade_intent",
     "get_upgrade_intent",
     "is_upgrade_intent",
     "issue_upgrade_intent",

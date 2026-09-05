@@ -74,6 +74,11 @@ _TRACK_BY_TITLE_AND_ARTIST_SQL = """
      LIMIT 1
 """
 
+# INT-03: a play resolves on the TRACK's artist. Matching only the album's
+# primary artist meant a Muse track on a Various Artists compilation could not
+# be resolved from a listening event that correctly named Muse — the local file
+# was there and the stats view could not find it. The album artist stays as the
+# fallback it always was; it is simply no longer the only credit consulted.
 _PLAYABLE_TRACK_SQL = """
     SELECT t.id, t.title, f.path, f.bitrate, t.duration,
            ar.name, al.title, al.image_url,
@@ -82,10 +87,14 @@ _PLAYABLE_TRACK_SQL = """
       JOIN lib2_albums al ON al.id = t.album_id
       JOIN lib2_artists ar ON ar.id = al.primary_artist_id
       JOIN lib2_track_files f ON f.track_id = t.id
-     WHERE LOWER(t.title) = LOWER(?) AND ar.name_key = ?
+     WHERE LOWER(t.title) = LOWER(?)
+       AND (ar.name_key = ?
+            OR EXISTS (SELECT 1 FROM lib2_track_artists ta
+                        JOIN lib2_artists credit ON credit.id = ta.artist_id
+                       WHERE ta.track_id = t.id AND credit.name_key = ?))
        AND f.path IS NOT NULL AND f.path != ''
        AND COALESCE(f.file_state, 'active') = 'active'
-     ORDER BY f.is_primary DESC, f.id
+     ORDER BY (ar.name_key = ?) DESC, f.is_primary DESC, f.id
      LIMIT 1
 """
 
@@ -463,17 +472,19 @@ def get_listening_events(
                 ORDER BY lh.played_at DESC
                 LIMIT ?
             )
-            -- `db_track_id` names a Library-v2 row (docs §32.3.1): both
-            -- writers of this column — the media-server importer and the
-            -- Last.fm one — resolve against `lib2_tracks`, so the join follows
-            -- the catalogue and not the legacy `tracks`/`albums` pair this
-            -- arrived against. The id is INTEGER here, so it needs no CAST.
+            -- INT-02: `lib2_track_id` is the catalogue link. Both writers of
+            -- the catalogue id — the media-server importer and the Last.fm one
+            -- — fill that column; `db_track_id` is the media server's OWN id
+            -- namespace. Joining the catalogue on it left every chart detail
+            -- without cover, artist link and track link, and on a numeric
+            -- collision pointed at somebody else's row. `get_recent_tracks`
+            -- already reads the right column; this is the same contract.
             SELECT lh.title, lh.artist, lh.album, lh.played_at, lh.duration_ms,
                    lh.server_source, al.image_url,
                    COALESCE(ar.canonical_artist_id, ar.id), t.id AS db_track_id
             FROM picked
             JOIN listening_history lh ON lh.id = picked.id
-            LEFT JOIN lib2_tracks t ON t.id = lh.db_track_id
+            LEFT JOIN lib2_tracks t ON t.id = lh.lib2_track_id
             LEFT JOIN lib2_albums al ON al.id = t.album_id
             LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
             ORDER BY lh.played_at DESC
@@ -528,7 +539,10 @@ def resolve_track(database, image_url_fixer: ImageUrlFixer, title: str, artist: 
     conn = database._get_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute(_PLAYABLE_TRACK_SQL, (title.strip(), _name_key(artist)))
+        artist_key = _name_key(artist)
+        cursor.execute(
+            _PLAYABLE_TRACK_SQL,
+            (title.strip(), artist_key, artist_key, artist_key))
         row = cursor.fetchone()
     finally:
         conn.close()

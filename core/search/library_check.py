@@ -45,8 +45,35 @@ _OWNED_ALBUMS_SQL = """
                    AND f.file_state='active' AND TRIM(f.path)<>'')
 """
 
-_OWNED_TRACKS_SQL = """
-    SELECT t.title, ar.name,
+# INT-03: ownership is keyed on the TRACK's artist. Joining only
+# ``lib2_albums.primary_artist_id`` meant a Muse track sitting on a Various
+# Artists compilation was keyed (title, "Various Artists") and nothing else —
+# so a search for the Muse track reported the file we already own as missing,
+# and the user was one click from downloading it a second time. Every credit the
+# catalogue holds for the track is emitted as its own key: the per-track credit
+# text, each relational track artist, and the album artist as the fallback it
+# always was. ``name_rank`` keeps the album artist last so an existing key still
+# resolves to the row it used to.
+_TRACK_CREDIT_NAMES_SQL = """
+    SELECT ta.track_id AS track_id, ar.name AS name, 0 AS name_rank
+      FROM lib2_track_artists ta
+      JOIN lib2_artists ar ON ar.id = ta.artist_id
+     WHERE TRIM(COALESCE(ar.name, '')) <> ''
+    UNION ALL
+    SELECT t.id, t.track_artist, 1
+      FROM lib2_tracks t
+     WHERE TRIM(COALESCE(t.track_artist, '')) <> ''
+    UNION ALL
+    SELECT t.id, ar.name, 2
+      FROM lib2_tracks t
+      JOIN lib2_albums al ON al.id = t.album_id
+      JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+     WHERE TRIM(COALESCE(ar.name, '')) <> ''
+"""
+
+_OWNED_TRACKS_SQL = f"""
+    WITH track_credits AS ({_TRACK_CREDIT_NAMES_SQL})
+    SELECT t.title, credit.name,
            COALESCE((SELECT m.server_id FROM lib2_media_server_mappings m
                       WHERE m.entity_type='track' AND m.entity_id=t.id
                         AND m.server_source=? LIMIT 1),
@@ -66,7 +93,7 @@ _OWNED_TRACKS_SQL = """
              ORDER BY f.is_primary DESC, f.id LIMIT 1)
       FROM lib2_tracks t
       JOIN lib2_albums al ON al.id = t.album_id
-     JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+      JOIN track_credits credit ON credit.track_id = t.id
      WHERE EXISTS (SELECT 1 FROM lib2_track_files owned_f WHERE owned_f.track_id=t.id
                    AND owned_f.file_state='active' AND TRIM(owned_f.path)<>'')
      ORDER BY (EXISTS (SELECT 1 FROM lib2_media_server_mappings active_m
@@ -74,6 +101,7 @@ _OWNED_TRACKS_SQL = """
                           AND active_m.entity_id=t.id
                           AND active_m.server_source=?)
                OR t.server_source=?) DESC,
+              credit.name_rank,
               t.id
 """
 

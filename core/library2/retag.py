@@ -46,6 +46,7 @@ def _track_rows(conn, track_ids: List[int]) -> List[Any]:
                    al.title AS album_title, al.album_type, al.year, al.release_date, al.genres,
                    al.expected_track_count, al.track_count,
                    al.image_url AS album_image_url,
+                   al.primary_artist_id AS album_artist_id,
                    ar.name AS album_artist_name,
                    (SELECT tf.id FROM lib2_track_files tf
                      WHERE tf.track_id = t.id AND tf.path IS NOT NULL AND tf.path <> ''
@@ -87,10 +88,17 @@ def _genres_list(raw: Any) -> List[str]:
 
 
 def _credited_artists(conn, track_id: int) -> List[str]:
-    return [r["name"] for r in conn.execute(
-        """SELECT ar.name FROM lib2_track_artists ta
+    rows = conn.execute(
+        """SELECT ar.id, ar.name FROM lib2_track_artists ta
            JOIN lib2_artists ar ON ar.id = ta.artist_id
-          WHERE ta.track_id=? ORDER BY ta.position""", (track_id,))]
+          WHERE ta.track_id=? ORDER BY ta.position""", (track_id,)).fetchall()
+    # ARCH-04: a corrected artist name is an override on the artist, and the
+    # tags have to carry the same effective value the page shows — otherwise
+    # retag keeps proposing (and writing back) the old ARTIST credit.
+    from core.library2.metadata_overrides import effective_artist_names
+
+    names = effective_artist_names(conn, [r["id"] for r in rows])
+    return [n for n in (names.get(int(r["id"]), r["name"]) for r in rows) if n]
 
 
 def _album_cover_source(
@@ -177,10 +185,15 @@ def _apply_overrides(conn, row: Any, data: Dict[str, Any]) -> Dict[str, str]:
 def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
     """Shape a lib2 track row into the ``db_data`` dict core/tag_writer reads."""
     artists = _credited_artists(conn, row["id"])
-    track_artist = "; ".join(artists) if artists else (row["album_artist_name"] or "")
+    # ARCH-04: the ALBUMARTIST tag comes from the same effective projection.
+    from core.library2.metadata_overrides import effective_artist_name
+
+    album_artist_name = effective_artist_name(
+        conn, row["album_artist_id"], row["album_artist_name"])
+    track_artist = "; ".join(artists) if artists else (album_artist_name or "")
     data: Dict[str, Any] = {
         "title": row["title"],
-        "artist_name": row["album_artist_name"] or (artists[0] if artists else None),
+        "artist_name": album_artist_name or (artists[0] if artists else None),
         "track_artist": track_artist or None,
         "album_title": row["album_title"],
         "year": row["year"],

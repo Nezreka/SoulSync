@@ -44,6 +44,28 @@ def request_can_mutate(method: Any) -> bool:
     """Whether an HTTP method must be held behind the migration barrier."""
     return str(method or "").upper() not in SAFE_HTTP_METHODS
 
+
+def endpoint_is_blocked(endpoint: Any, blocked: Iterable[str]) -> bool:
+    """Whether a Flask endpoint name is on the migration barrier's list.
+
+    MIG-01: the list is written and maintained as *handler function names*,
+    but Flask reports a blueprint route as the qualified ``blueprint.function``.
+    Upstream keeps lifting route functions out of ``web_server.py`` into
+    blueprints, and every such move silently turned an entry into a dead
+    string — 77 of 105 by the time this was measured, including the backup
+    restore that can swap the database out from under a running import.
+
+    Matching the unqualified tail as well ties the barrier to the handler
+    rather than to wherever it happens to be registered today. The blast
+    radius of a tail collision is a mutation refused during a migration, which
+    is the direction this gate is supposed to fail in.
+    """
+    name = str(endpoint or "")
+    if not name:
+        return False
+    blocked = blocked if isinstance(blocked, (set, frozenset)) else frozenset(blocked)
+    return name in blocked or name.rpartition(".")[2] in blocked
+
 # In-process heavy work that is NOT a claimed bootstrap run: the deferred
 # convergence passes (iss32-M03). They deserve the same quiet as the import —
 # on an interrupted migration they are the same amount of writing — but they

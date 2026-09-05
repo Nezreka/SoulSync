@@ -207,3 +207,45 @@ def test_an_album_with_no_files_says_so(imported_conn):
     build, _seen = _recorder()
 
     assert _plan(conn, album_id, build)["status"] == "no_tracks"
+
+
+def test_disc_count_counts_discs_that_have_no_file_yet(imported_conn):
+    """ARCH-03: the disc count is a property of the ALBUM, but it was computed
+    after the tracks with no file had been filtered out.
+
+    A known two-disc album with only disc 1 downloaded therefore declared
+    itself single-disc — and `total_discs_declared=True` tells the shared path
+    builder to suppress its own disc detection, so disc 1 was moved OUT of
+    `Disc 1/`. The moment the first file of disc 2 landed, the same run moved
+    it straight back. That is the #1080 oscillation from the other direction."""
+    conn = imported_conn
+    _, album_id, track_ids = _seed(conn, tracks=(("A", 1, 1), ("B", 1, 2)))
+    # Disc 2's file has not arrived yet; its catalogue row still exists.
+    conn.execute("DELETE FROM lib2_track_files WHERE track_id=?", (track_ids[1],))
+    conn.commit()
+    build, seen = _recorder()
+
+    _plan(conn, album_id, build)
+
+    assert len(seen) == 1, "only the track that has a file is planned"
+    assert seen[0]["context"]["spotify_album"]["total_discs"] == 2
+
+
+def test_a_corrected_artist_name_reaches_the_path(imported_conn):
+    """ARCH-04: the artist edit dialog writes a `name` override that the page
+    honours. Reorganize read `lib2_artists.name` out of the join instead, so it
+    kept building folders under the old name."""
+    from core.library2.metadata_overrides import set_field_override
+
+    conn = imported_conn
+    artist_id, album_id, _ = _seed(conn)
+    set_field_override(conn, entity_type="artist", entity_id=artist_id,
+                       field_name="name", value="Corrected Artist")
+    conn.commit()
+    build, seen = _recorder()
+
+    plan = _plan(conn, album_id, build)
+
+    assert plan["artist"] == "Corrected Artist"
+    assert seen[0]["artist"]["name"] == "Corrected Artist"
+    assert seen[0]["context"]["track_info"]["artists"][0]["name"] == "Corrected Artist"

@@ -1878,9 +1878,17 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         # Same rule as the album list: only a track you still want counts as
         # missing, plus the slots the provider promised that have no row yet
         # (those have no monitored flag of their own — the album's answers).
+        #
+        # ARCH-02: the placeholders for those promised slots were appended to
+        # `tracks` above and inherit the album's monitored flag, so on a
+        # monitored album the sum already counted them and `total - known_count`
+        # counted them a second time — two expected tracks with no rows yet
+        # reported four missing, more missing than the album has. `id is None`
+        # is what makes a row a placeholder; only real rows belong in the sum.
         "tracks_missing": sum(
             1 for t in tracks
-            if t["file_status"] == "missing" and t.get("monitored")
+            if t.get("id") is not None
+            and t["file_status"] == "missing" and t.get("monitored")
         ) + max(0, total - known_count),
         # I8: disk-space roll-up — sum of each present track's primary file.
         "total_size_bytes": sum(

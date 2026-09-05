@@ -35,6 +35,7 @@ class _FakeDB:
         self.path = path
         self.added: list = []
         self.removed: list = []
+        self.removed_releases: list = []
         self.watchlist_removed: list = []
         self.watchlist_added: list = []
 
@@ -52,6 +53,12 @@ class _FakeDB:
 
     def remove_from_wishlist(self, track_id, profile_id, raise_on_error=False):
         self.removed.append(track_id)
+        return True
+
+    def remove_release_from_wishlist(self, track_id, album_id=None, profile_id=1,
+                                     raise_on_error=False):
+        self.removed.append(track_id)
+        self.removed_releases.append((track_id, album_id))
         return True
 
     def remove_artist_from_watchlist(self, ext, profile_id, raise_on_error=False):

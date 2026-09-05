@@ -283,6 +283,26 @@ def _legacy_projection(
     )
 
 
+LEGACY_SOURCE_REQUIREMENTS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("artists", ("id", "name")),
+    ("albums", ("id", "artist_id", "title")),
+    ("tracks", ("id", "album_id", "title")),
+)
+
+
+def _require_importable_legacy_source(cursor: Any) -> None:
+    """Fail before a destructive reset if there is nothing to import from.
+
+    The three walks each build their projection with ``_legacy_projection``,
+    which raises on a missing required column.  Doing that up front turns a
+    reset on a native installation into a refusal instead of a wipe whose
+    source turns out not to exist (MIG-03).
+    """
+    for table, required in LEGACY_SOURCE_REQUIREMENTS:
+        _legacy_projection(_existing_columns(cursor, table),
+                           required=required, optional=())
+
+
 def _legacy_rows(
     conn: Any,
     table: str,
@@ -722,13 +742,16 @@ class _ArtistResolver:
                     if not conflict:
                         existing, adopted = candidate, True
         if existing is not None:
-            row_ids = dict(ids)
-            if adopted:
-                # The adopted row may carry ids the legacy mirror lacks —
-                # keep them (never-overwrite semantics, like _merge_ids).
-                row_ids = self._stored_ids(existing)
-                for source, value in ids.items():
-                    row_ids.setdefault(source, value)
+            # MIG-05: never-overwrite semantics belong to EVERY upsert of this
+            # row, not just the one-time adoption branch. On a replay — a crash
+            # between a batch commit and its checkpoint, or a non-destructive
+            # reimport — the artist is already known by ``legacy_artist_id``, so
+            # ``adopted`` is False and the sparser legacy id map replaced exactly
+            # what the first run had deliberately preserved (a MusicBrainz id
+            # went back to NULL). Merging here means a replay can only ever add.
+            row_ids = self._stored_ids(existing)
+            for source, value in ids.items():
+                row_ids.setdefault(source, value)
             external_json = (json.dumps(row_ids, sort_keys=True, separators=(",", ":"))
                              if row_ids else "{}")
             self.cursor.execute(
@@ -875,6 +898,11 @@ def _reconcile_legacy_snapshot(cursor, run_id: str) -> Dict[str, int]:
         "reconciled_albums": 0,
         "reconciled_artists": 0,
     }
+    # MIG-04: "has a provider identity" has to mean every provider the importer
+    # itself writes, not just the two with dedicated columns. Deezer is the
+    # default source on a large share of installs.
+    from core.library2.provider_ids import external_provider_identity_sql
+    has_external_id = external_provider_identity_sql
 
     cursor.execute(
         """DELETE FROM lib2_track_files
@@ -898,6 +926,7 @@ def _reconcile_legacy_snapshot(cursor, run_id: str) -> Dict[str, int]:
                     NULLIF(t.spotify_id, '') IS NOT NULL
                     OR NULLIF(t.musicbrainz_id, '') IS NOT NULL
                     OR NULLIF(t.isrc, '') IS NOT NULL
+                    OR """ + has_external_id("t") + """
                     OR EXISTS (
                         SELECT 1 FROM lib2_track_files f
                          WHERE f.track_id=t.id AND f.legacy_track_id IS NULL
@@ -930,6 +959,7 @@ def _reconcile_legacy_snapshot(cursor, run_id: str) -> Dict[str, int]:
                 WHERE al.id=? AND (
                     NULLIF(al.spotify_id, '') IS NOT NULL
                     OR NULLIF(al.musicbrainz_id, '') IS NOT NULL
+                    OR """ + has_external_id("al") + """
                     OR EXISTS (SELECT 1 FROM lib2_tracks t WHERE t.album_id=al.id)
                 )""",
             (album_id,),
@@ -959,6 +989,7 @@ def _reconcile_legacy_snapshot(cursor, run_id: str) -> Dict[str, int]:
                 WHERE ar.id=? AND (
                     NULLIF(ar.spotify_id, '') IS NOT NULL
                     OR NULLIF(ar.musicbrainz_id, '') IS NOT NULL
+                    OR """ + has_external_id("ar") + """
                     OR EXISTS (SELECT 1 FROM lib2_albums al
                                 WHERE al.primary_artist_id=ar.id)
                     OR EXISTS (SELECT 1 FROM lib2_album_artists aa
@@ -1111,6 +1142,13 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             )
 
         if reset:
+            # MIG-03: validate the source BEFORE anything destructive.  The
+            # projections below raise when a legacy table is absent or has lost
+            # a required column — which is the normal shape of a native
+            # installation.  That check used to run after the wipe was already
+            # committed, so a reset on such an install emptied the catalogue and
+            # then failed with nothing left to import from.
+            _require_importable_legacy_source(cursor)
             # Local ids change across a destructive rebuild. Preserve deliberate
             # album intent by provider/stable identity, never by surrogate id.
             from core.library2.monitor_rules import (

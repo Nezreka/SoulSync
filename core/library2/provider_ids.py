@@ -199,6 +199,25 @@ def provider_id_sql(source: Any, *, alias: str = "") -> Optional[str]:
     return f"json_extract({prefix}external_ids, '$.{provider}')"
 
 
+def external_provider_identity_sql(alias: str = "") -> str:
+    """A SQL predicate: does this row carry a provider id in ``external_ids``?
+
+    "Is this row independently identified?" is asked wherever deleting it is on
+    the table, and the dedicated columns only cover Spotify and MusicBrainz. A
+    check written against those two alone silently treats a Deezer-, Tidal- or
+    Qobuz-identified row as legacy-owned scrap (MIG-04). ``isrc``/``upc``/
+    ``barcode`` are product codes rather than provider identities and are
+    excluded here; callers that count them do so with their own column.
+    """
+    prefix = f"{alias}." if alias else ""
+    excluded = ", ".join(f"'{key}'" for key in sorted(_NON_PROVIDER_KEYS))
+    return (
+        f"EXISTS (SELECT 1 FROM json_each({prefix}external_ids)"
+        f"         WHERE json_each.key NOT IN ({excluded})"
+        f"           AND NULLIF(TRIM(CAST(json_each.value AS TEXT)), '') IS NOT NULL)"
+    )
+
+
 def any_provider_id_sql(alias: str = "") -> str:
     """A SQL predicate: does this lib2 row carry a given id, from any provider?
 
@@ -225,6 +244,7 @@ __all__ = [
     "ANY_PROVIDER_ID_PARAMS",
     "ARTIST_IDS_SQL",
     "any_provider_id_sql",
+    "external_provider_identity_sql",
     "merge_provider_id",
     "normalize_provider_name",
     "parse_external_ids",

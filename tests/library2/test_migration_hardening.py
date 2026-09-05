@@ -549,3 +549,98 @@ class TestRecordingLookupUsesItsPartialIndex:
                 f"are load-bearing. Plan was: {naive}")
         finally:
             conn.close()
+
+
+class TestBarrierMatchesRealBlueprintEndpoints:
+    """MIG-01: the barrier's list is written in handler-function names, while
+    Flask names a blueprint route ``blueprint.function``. A pure equality check
+    let 77 of 105 protected mutations through — among them the backup restore,
+    which can replace the database while the import is reading it."""
+
+    def test_a_qualified_blueprint_endpoint_is_blocked(self):
+        blocked = frozenset({"restore_backup_endpoint", "auto_import_approve"})
+        assert migration_gate.endpoint_is_blocked(
+            "database_admin.restore_backup_endpoint", blocked) is True
+        assert migration_gate.endpoint_is_blocked(
+            "auto_import.auto_import_approve", blocked) is True
+
+    def test_an_already_qualified_entry_still_matches(self):
+        blocked = frozenset({"enrichment_api.enrichment_resume"})
+        assert migration_gate.endpoint_is_blocked(
+            "enrichment_api.enrichment_resume", blocked) is True
+
+    def test_an_unrelated_endpoint_is_not_blocked(self):
+        blocked = frozenset({"restore_backup_endpoint"})
+        assert migration_gate.endpoint_is_blocked("stats.get_overview", blocked) is False
+        assert migration_gate.endpoint_is_blocked(None, blocked) is False
+        assert migration_gate.endpoint_is_blocked("", blocked) is False
+
+    def test_every_listed_name_still_names_a_real_route(self):
+        """The list only protects what it can still resolve. Any entry that no
+        longer matches a registered route is a silent hole, so pin the whole
+        list against the routes actually decorated in the tree."""
+        import ast
+        import pathlib
+        import re
+
+        src = pathlib.Path("web_server.py").read_text()
+        match = re.search(
+            r"_MIGRATION_BLOCKED_ENDPOINTS\s*=\s*frozenset\((\{.*?\})\)", src, re.S)
+        assert match, "the barrier's endpoint list moved or changed shape"
+        listed = set(ast.literal_eval(match.group(1)))
+
+        handlers: set[str] = set()
+        roots = [pathlib.Path("web_server.py")]
+        roots += sorted(pathlib.Path("api").rglob("*.py"))
+        roots += sorted(pathlib.Path("core").rglob("*.py"))
+        for path in roots:
+            try:
+                tree = ast.parse(path.read_text())
+            except (SyntaxError, UnicodeDecodeError):  # pragma: no cover - defensive
+                continue
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                for dec in node.decorator_list:
+                    func = dec.func if isinstance(dec, ast.Call) else dec
+                    if getattr(func, "attr", "") in (
+                            "route", "get", "post", "put", "delete", "patch"):
+                        handlers.add(node.name)
+
+        orphans = sorted(n for n in listed if n.rpartition(".")[2] not in handlers)
+        assert orphans == [], (
+            f"{len(orphans)} barrier entries no longer name a route: {orphans}")
+
+
+class TestRestoreReArmsTheMigration:
+    """MIG-02: a restore that brings back a database with an empty native
+    catalogue has to put it through the migration lifecycle again. The startup
+    loop has already retired by then, so only the restore path can."""
+
+    def test_the_startup_loop_can_be_re_armed(self, monkeypatch):
+        import web_server
+
+        calls = []
+        monkeypatch.setattr(
+            web_server, "_autostart_library_v2_bootstrap_import", lambda: calls.append(1))
+        monkeypatch.setattr(web_server, "_lib2_bootstrap_autostart_thread", None)
+
+        assert web_server.start_library_v2_bootstrap_autostart() is True
+        thread = web_server._lib2_bootstrap_autostart_thread
+        thread.join(timeout=5)
+        assert calls == [1]
+
+    def test_a_live_loop_is_not_started_twice(self, monkeypatch):
+        import web_server
+
+        release = threading.Event()
+        monkeypatch.setattr(
+            web_server, "_autostart_library_v2_bootstrap_import",
+            lambda: release.wait(timeout=5))
+        monkeypatch.setattr(web_server, "_lib2_bootstrap_autostart_thread", None)
+        try:
+            assert web_server.start_library_v2_bootstrap_autostart() is True
+            assert web_server.start_library_v2_bootstrap_autostart() is False
+        finally:
+            release.set()
+            web_server._lib2_bootstrap_autostart_thread.join(timeout=5)

@@ -140,6 +140,48 @@ def _pipeline_context(
     return context
 
 
+PROVENANCE_SUFFIX = ".soulsync-acquisition.json"
+
+
+def _provenance_path(destination: Path) -> Path:
+    return destination.with_name(destination.name + PROVENANCE_SUFFIX)
+
+
+def _read_provenance(destination: Path) -> Dict[str, Any]:
+    marker = _provenance_path(destination)
+    try:
+        with marker.open("r", encoding="utf-8") as stream:
+            import json
+
+            data = json.load(stream)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_provenance(destination: Path, *, import_id: str, track_id: int) -> None:
+    import json
+
+    marker = _provenance_path(destination)
+    try:
+        with marker.open("w", encoding="utf-8") as stream:
+            json.dump({"import_id": str(import_id), "track_id": int(track_id)}, stream)
+    except OSError as exc:  # noqa: BLE001 - a missing marker only costs a retry
+        logger.warning("Could not record acquisition working-copy provenance: %s",
+                       redact_sensitive_text(exc))
+
+
+def _discard_working_copy(destination: Path) -> None:
+    for path in (destination, _provenance_path(destination)):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:  # noqa: BLE001
+            raise ValueError(
+                "stale acquisition working copy could not be replaced") from exc
+
+
 def _stage_working_copy(
     source: Path,
     *,
@@ -148,6 +190,21 @@ def _stage_working_copy(
     track_id: int,
     copier: Optional[Callable[[Path, Path], bool]] = None,
 ) -> str:
+    """Copy one bundle file to this import's deterministic working path.
+
+    FI-03: the pipeline TAGS this copy in place (and may downsample it), so
+    after a crash between tagging and the move it no longer matches the
+    untouched download original. The reuse check compared size + full SHA-256
+    against that original and nothing else, so every resumed dispatch raised
+    "existing acquisition working copy has different content" — forever, while
+    the complete original sat right there. The import stayed open and no retry
+    could ever get past this function.
+
+    A copy we made carries a provenance marker naming the import and track it
+    belongs to. Ours may therefore be discarded and re-staged from the
+    original; a file we did NOT write still collides loudly, because that is a
+    real conflict rather than our own half-finished work.
+    """
     from core.imports.paths import sanitize_filename
     if copier is None:
         from core.download_plugins.album_bundle import atomic_copy_to_staging
@@ -157,14 +214,79 @@ def _stage_working_copy(
     prefix = sanitize_filename(str(import_id)).replace(" ", "_")
     destination = destination_root / f"{prefix}_{track_id}_{source.name}"
     if destination.is_file():
-        if destination.stat().st_size == source.stat().st_size and _content_hash(
-            destination
-        ) == _content_hash(source):
+        unchanged = (
+            destination.stat().st_size == source.stat().st_size
+            and _content_hash(destination) == _content_hash(source)
+        )
+        if unchanged:
+            _write_provenance(destination, import_id=import_id, track_id=track_id)
             return str(destination)
-        raise ValueError("existing acquisition working copy has different content")
+        provenance = _read_provenance(destination)
+        ours = (
+            str(provenance.get("import_id") or "") == str(import_id)
+            and int(provenance.get("track_id") or 0) == int(track_id)
+        )
+        if not ours:
+            raise ValueError("existing acquisition working copy has different content")
+        logger.info(
+            "Replacing this import's own processed working copy for track %s "
+            "from the untouched download original", track_id)
+        _discard_working_copy(destination)
     if not copier(source, destination):
         raise ValueError("main-pipeline working copy could not be staged")
+    _write_provenance(destination, import_id=import_id, track_id=track_id)
     return str(destination)
+
+
+def _pipeline_published(
+    context: Mapping[str, Any], connection_factory: Callable[[], Any],
+) -> bool:
+    """Whether the shared pipeline actually published this file.
+
+    FI-01: ``_final_processed_path`` is written during path *planning* — before
+    the upgrade decision, before the move, before catalogue registration. Using
+    it as the success signal meant an import that was afterwards quarantined
+    (rejected upgrade) or failed to move was still journalled as permanently
+    completed: import row, acquisition request and retry state all ``completed``
+    and the file dropped from ``result.quarantined``, with nothing at the
+    destination. ``advance_import`` prefers that persisted completion over the
+    bridge's own ``waiting``, so no later import run or retry walk ever picked
+    it up again.
+
+    ``_pipeline_import_succeeded`` is the pipeline's own success contract — the
+    same flag auto-import checks — and it is set last, after the registration
+    gate. The catalogue lookup is the independent proof that the published file
+    is really owned by Library v2 rather than only reported as moved; it runs
+    through the caller's own connection, which in production is the same
+    database ``advance_import`` was handed.
+    """
+    if not context.get("_pipeline_import_succeeded"):
+        return False
+    if context.get("_upgrade_rejected") or context.get("_quarantine_entry_id"):
+        return False
+    final_path = context.get("_final_processed_path") or context.get("_final_path")
+    if not final_path:
+        return False
+    conn = None
+    try:
+        conn = connection_factory()
+        row = conn.execute(
+            "SELECT id FROM lib2_track_files WHERE path=?"
+            " AND COALESCE(file_state,'active')='active' LIMIT 1",
+            (str(final_path),),
+        ).fetchone()
+        return row is not None
+    except Exception as exc:  # noqa: BLE001 - never let the check invent success
+        logger.warning(
+            "Could not confirm Library v2 registration before completing an "
+            "acquisition import: %s", redact_sensitive_text(exc))
+        return False
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception as close_err:  # noqa: BLE001
+                logger.debug("registration probe close failed: %s", close_err)
 
 
 def _content_hash(path: Path) -> bytes:
@@ -240,16 +362,23 @@ def dispatch_import_to_main_pipeline(
                 track_id=int(match.get("track_id") or 0),
                 copier=copier,
             )
+            task = {
+                "id": task_id,
+                "status": "post_processing",
+                "track_info": dict(context["track_info"]),
+                "username": str(context["username"]),
+                "filename": staged_path,
+                "used_sources": set(),
+                "_user_manual_pick": bool(context["_acquisition_manual_pick"]),
+            }
+            # ACQ-02: the sealed upgrade intent lives on the context, but the
+            # candidate/staging consumers read it off the task. Without it a
+            # quarantine retry loses the track lock, the profile snapshot and
+            # the comparison against the existing primary file.
+            from core.imports.upgrade_intent import carry_upgrade_intent
+            carry_upgrade_intent(context, task)
             with tasks_lock:
-                download_tasks[task_id] = {
-                    "id": task_id,
-                    "status": "post_processing",
-                    "track_info": dict(context["track_info"]),
-                    "username": str(context["username"]),
-                    "filename": staged_path,
-                    "used_sources": set(),
-                    "_user_manual_pick": bool(context["_acquisition_manual_pick"]),
-                }
+                download_tasks[task_id] = task
             processor(
                 context_key,
                 context,
@@ -259,7 +388,7 @@ def dispatch_import_to_main_pipeline(
                 runtime,
             )
             from core.acquisition.pipeline_callback import notify_pipeline_import_success
-            if context.get("_final_processed_path") or context.get("_final_path"):
+            if _pipeline_published(context, connection_factory):
                 notify_pipeline_import_success(
                     context, connection_factory=connection_factory)
             with tasks_lock:

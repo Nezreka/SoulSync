@@ -701,10 +701,16 @@ def _expand_artist_discography(
                 release.artist_credits,
                 source,
             )
+            # ARCH-01: the row appended here is read back by _match_existing
+            # for every LATER release in the same run, so it has to carry the
+            # same field contract _existing_release_index loads — a missing key
+            # is a KeyError that aborts the run before its commit.
             index.setdefault(release_title_key(title), []).append({
                 "id": new_id, "title": title, "album_type": album_type,
                 "origin": "discography", "spotify_id": spotify_id,
-                "external_ids": external_ids, "monitored": 0, "track_rows": 0,
+                "external_ids": external_ids,
+                "musicbrainz_release_group_id": release_group_id,
+                "monitored": 0, "track_rows": 0,
                 "release_date": release_date, "year": year,
                 "expected_track_count": track_count, "track_count": track_count,
             })

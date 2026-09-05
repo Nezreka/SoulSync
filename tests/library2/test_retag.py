@@ -638,3 +638,22 @@ def test_a_released_numeric_field_keeps_its_type(
                      overwrite_manual=[(track_id, 'track_number')])
 
     assert written[0]['track_number'] == 1
+
+
+def test_a_hand_set_artist_name_is_what_gets_written(imported_conn):
+    """ARCH-04: the artist edit dialog writes a `name` override that every read
+    path through `project_metadata` honours. Retag read `lib2_artists.name`
+    straight out of its join instead, so a corrected name showed on the page
+    while retag went on proposing — and writing back — the old ARTIST and
+    ALBUMARTIST tags. The hand value was not even recognised as manual."""
+    conn = imported_conn
+    artist_id, _, track_id = _seed_album_with_files(conn)
+    _override(conn, entity_type='artist', entity_id=artist_id,
+              field_name='name', value='Corrected Artist')
+
+    row = retag._track_rows(conn, [track_id])[0]
+    data = retag._db_data_for_row(conn, row)
+
+    assert data['artist_name'] == 'Corrected Artist'
+    assert data['track_artist'] == 'Corrected Artist; Wizkid'
+    assert data['artists_list'] == ['Corrected Artist', 'Wizkid']

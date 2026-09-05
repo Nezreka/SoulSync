@@ -40,8 +40,18 @@ _drain_lock = threading.Lock()
 # ---------------------------------------------------------------------------
 
 
-def _legacy_wishlist_row_exists(conn, wishlist_id: Any, profile_id: int) -> bool:
-    """Whether the legacy Wishlist currently holds this track (dd28-41).
+def _legacy_wishlist_row_exists(conn, wishlist_id: Any, profile_id: int,
+                                album_id: Any = None) -> bool:
+    """Whether the legacy Wishlist currently holds this release (dd28-41).
+
+    SYNC-02 trigger A: the probe asked for the bare track id while the insert
+    had stored ``<track>::<album>``, so it never found the row and the mirror
+    skipped withdrawing a wish the library had already satisfied — leaving the
+    processor downloading a track that was fine.
+
+    A bare-keyed row still counts as this release under the same rule the
+    removal uses: it names this album, or it names none at all (pre-composite
+    rows, and rows written by writers outside Library v2).
 
     Best-effort: an install without the table (or mid-migration) reports False,
     which only means "nothing to withdraw".
@@ -52,17 +62,39 @@ def _legacy_wishlist_row_exists(conn, wishlist_id: Any, profile_id: int) -> bool
         }
         if not columns:
             return False
+        from core.wishlist.identity import wishlist_row_key
+
+        bare = str(wishlist_id or "").strip()
+        album = str(album_id or "").strip()
+        release_key = wishlist_row_key(bare, album)
+        candidates = [release_key] if release_key == bare else [release_key, bare]
+        marks = ",".join("?" for _ in candidates)
+        has_data = "spotify_data" in columns
+        select = "spotify_track_id, spotify_data" if has_data else "spotify_track_id, NULL"
         if "profile_id" in columns:
-            row = conn.execute(
-                "SELECT 1 FROM wishlist_tracks WHERE spotify_track_id=? AND profile_id=? LIMIT 1",
-                (wishlist_id, profile_id),
-            ).fetchone()
+            rows = conn.execute(
+                f"SELECT {select} FROM wishlist_tracks "
+                f"WHERE spotify_track_id IN ({marks}) AND profile_id=?",
+                (*candidates, profile_id),
+            ).fetchall()
         else:
-            row = conn.execute(
-                "SELECT 1 FROM wishlist_tracks WHERE spotify_track_id=? LIMIT 1",
-                (wishlist_id,),
-            ).fetchone()
-        return row is not None
+            rows = conn.execute(
+                f"SELECT {select} FROM wishlist_tracks "
+                f"WHERE spotify_track_id IN ({marks})",
+                tuple(candidates),
+            ).fetchall()
+        for row in rows:
+            key = str(row[0] or "")
+            if key == release_key:
+                return True
+            try:
+                stored = json.loads(row[1] or "{}")
+                stored_album = str((stored.get("album") or {}).get("id") or "").strip()
+            except Exception:  # noqa: BLE001
+                stored_album = ""
+            if stored_album in ("", album):
+                return True
+        return False
     except Exception as exc:  # noqa: BLE001
         logger.debug("wishlist presence check skipped for %s: %s", wishlist_id, exc)
         return False
@@ -90,10 +122,17 @@ def enqueue_tracks(conn, track_ids: List[int], monitored: bool, *,
         payload.pop("_source_album_id", "")
         source_info = payload.pop("_source_info", {})
         payload.pop("_has_file", None)
+        # SYNC-02/03: the wishlist stores a RELEASE of a recording. Derive that
+        # key once, here, so the add, the presence probe, the remove and the
+        # outbox's supersession all speak about the same row instead of three
+        # of them falling back to the bare track id.
+        from core.wishlist.identity import wishlist_key_from_payload
+        release_key = wishlist_key_from_payload(payload) or payload["id"]
         if monitored and should_queue:
             op = "wishlist_add"
             data = {"payload": payload, "source_type": stype,
                     "source_info": source_info,
+                    "key": release_key,
                     "quality_profile_id": payload.get("quality_profile_id")}
         elif monitored:
             # dd28-41: a monitored track with nothing to acquire right now (it
@@ -105,19 +144,35 @@ def enqueue_tracks(conn, track_ids: List[int], monitored: bool, *,
             # moment it becomes an upgrade candidate again the projection re-adds
             # it. Only emitted when a row actually exists, so the steady state
             # does not fill the outbox with no-op removes.
-            if not _legacy_wishlist_row_exists(conn, payload["id"], profile_id):
+            _album = payload.get("album")
+            if not _legacy_wishlist_row_exists(
+                conn, payload["id"], profile_id,
+                _album.get("id") if isinstance(_album, dict) else None,
+            ):
                 continue
             op = "wishlist_remove"
-            data = {"id": payload["id"]}
+            data = _remove_payload(payload, release_key)
         else:
             op = "wishlist_remove"
-            data = {"id": payload["id"]}
+            data = _remove_payload(payload, release_key)
         cur = conn.execute(
             "INSERT INTO lib2_mirror_outbox(op, payload, profile_id, user_initiated) "
             "VALUES(?,?,?,?)",
             (op, json.dumps(data), profile_id, 1 if user_initiated else 0))
         outbox_ids.append(cur.lastrowid)
     return outbox_ids
+
+
+def _remove_payload(payload: Dict[str, Any], release_key: str) -> Dict[str, Any]:
+    """The withdrawal op for exactly the release this payload describes.
+
+    ``id`` stays the bare track id so an older drain still understands the row;
+    ``album_id`` is what narrows the removal to this release, and ``key`` is
+    what supersession compares (SYNC-02/03).
+    """
+    album = payload.get("album")
+    album_id = album.get("id") if isinstance(album, dict) else None
+    return {"id": payload["id"], "album_id": album_id, "key": release_key}
 
 
 def enqueue_projected_tracks(
@@ -209,8 +264,16 @@ def _execute_op(db, op: str, data: Dict[str, Any], profile_id: int,
                            quality_profile_id=data.get("quality_profile_id"),
                            raise_on_error=True)
     elif op == "wishlist_remove":
-        db.remove_from_wishlist(data.get("id"), profile_id,
-                                raise_on_error=True)
+        # SYNC-02: rows queued with an album withdraw exactly that release.
+        # Rows without one (queued by an older build, or a track whose release
+        # has no identity) keep the original recording-wide removal.
+        if data.get("album_id"):
+            db.remove_release_from_wishlist(
+                data.get("id"), data.get("album_id"), profile_id,
+                raise_on_error=True)
+        else:
+            db.remove_from_wishlist(data.get("id"), profile_id,
+                                    raise_on_error=True)
     elif op == "watchlist_add":
         db.add_artist_to_watchlist(data.get("ext"), data.get("name"),
                                    profile_id, data.get("source"),
@@ -231,8 +294,16 @@ def _entity_key(op: str, data: Dict[str, Any]) -> Optional[tuple]:
     only the newest row describes the intended end state (dd28-13).
     """
     if op in ("wishlist_add", "wishlist_remove"):
-        target = (data.get("payload") or {}).get("id") if op == "wishlist_add" \
-            else data.get("id")
+        # SYNC-03: two wanted releases of one recording are two independent
+        # intents. Keying both on the bare track id made the second album look
+        # like a newer assertion about the first, and its add was dropped
+        # before it was ever persisted. ``key`` is the release key both ops now
+        # carry; the bare-id fallback keeps rows queued by an older build (they
+        # survive a restart in the outbox) working exactly as before.
+        target = data.get("key")
+        if target is None:
+            target = (data.get("payload") or {}).get("id") if op == "wishlist_add" \
+                else data.get("id")
         return ("wishlist", target) if target is not None else None
     if op in ("watchlist_add", "watchlist_remove"):
         target = data.get("ext")

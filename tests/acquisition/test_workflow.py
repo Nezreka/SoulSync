@@ -331,3 +331,49 @@ def test_blocklisted_failed_candidate_is_rejected_after_retry(conn):
     assert "candidate_blocklisted" in {
         reason.code for reason in failed_decision.rejections}
     assert retried.attempts == 2
+
+
+def test_a_retried_request_is_not_served_the_previous_attempts_failed_grab(conn):
+    """ACQ-01: idempotency belongs to the request ATTEMPT, not to the
+    request/candidate pair.
+
+    A download that failed before submission on a transient runtime problem
+    leaves a terminal `failed` grab. After the cause was fixed and the user
+    explicitly retried, the search found the same GUID again — and the grab
+    endpoint returned that old failed grab as an HTTP 200 success, submitting
+    nothing. Clicking again never helped."""
+    from core.acquisition.grabs import find_request_candidate_grab
+
+    request = _request(conn, key="attempt-scope")
+    candidate = _candidate(conn, request, guid="same-guid")
+    evaluate_request_candidates(
+        conn, request.id, catalog=CATALOG, runtime=RUNTIME,
+        policy=POLICY, automatic=False, now=1001.0)
+    prepare_candidate_grab(
+        conn, request.id, candidate.id, download_id="download-attempt-1",
+        catalog=CATALOG, runtime=RUNTIME, policy=POLICY, now=1002.0)
+    record_grab_outcome(
+        conn, "download-attempt-1", completed=False,
+        error="download client is not configured", failure_kind="runtime")
+
+    first_attempt = get_request(conn, request.id).attempts
+    # Within the SAME attempt the grab is still shared — that is what stops a
+    # double-click from submitting twice.
+    assert find_request_candidate_grab(
+        conn, request.id, candidate.id, request_attempt=first_attempt
+    )["download_id"] == "download-attempt-1"
+
+    retried = retry_acquisition_request(conn, request.id)
+    assert retried.attempts > first_attempt
+    evaluate_request_candidates(
+        conn, request.id, catalog=CATALOG, runtime=RUNTIME,
+        policy=POLICY, automatic=False, now=1004.0)
+
+    assert find_request_candidate_grab(
+        conn, request.id, candidate.id, request_attempt=retried.attempts) is None
+
+    prepared = prepare_candidate_grab(
+        conn, request.id, candidate.id, download_id="download-attempt-2",
+        catalog=CATALOG, runtime=RUNTIME, policy=POLICY, now=1005.0)
+    assert prepared.download_id == "download-attempt-2"
+    assert get_grab(conn, "download-attempt-2")["request_attempt"] == retried.attempts

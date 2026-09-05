@@ -33,7 +33,9 @@ def test_normalizes_lastfm_recent_track_payload():
         "played_at": "2023-11-14 22:13:20",
         "duration_ms": 0,
         "server_source": "lastfm",
-        "db_track_id": None,
+        # INT-01: this importer resolves against `lib2_tracks`, so the id it
+        # carries is a CATALOGUE id and belongs in the catalogue column.
+        "lib2_track_id": None,
     }
 
 
@@ -58,7 +60,7 @@ def test_lastfm_import_skips_probable_server_duplicates(tmp_path):
         "album": "Substance",
         "played_at": "2023-11-14 22:13:20",
         "duration_ms": 180000,
-        "db_track_id": None,
+        "lib2_track_id": None,
     }])
 
     assert inserted == 0
@@ -245,7 +247,7 @@ def test_lastfm_backfill_does_not_stop_after_duplicate_pages(tmp_path, monkeypat
                 "album": "Album",
                 "played_at": f"2023-11-14 22:{page:02d}:{i:02d}",
                 "duration_ms": 180000,
-                "db_track_id": None,
+                "lib2_track_id": None,
             }
             for i in range(2)
         ]
@@ -308,3 +310,94 @@ def test_lastfm_status_normalizes_false_complete_even_when_backfill_flag_was_set
     assert state["progress"] == 1
     assert state["last_success_at"] is None
 
+
+
+def test_lastfm_events_land_in_the_catalogue_column(tmp_path):
+    """INT-01: this importer resolves scrobbles against `lib2_tracks`, so what
+    it holds is a CATALOGUE id — but it stored it in `db_track_id`, which is the
+    media server's own id namespace. Every stats reader joins the catalogue on
+    `lib2_track_id`, so a Last.fm play showed with no cover, no artist link and
+    no genre; worse, the startup backfill reads `db_track_id` as a LEGACY track
+    id, so a numeric collision could link the play to a different track."""
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_artists(name, name_key) VALUES('New Order', 'new order')")
+    artist_id = conn.execute("SELECT id FROM lib2_artists").fetchone()[0]
+    conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Substance')",
+        (artist_id,))
+    album_id = conn.execute("SELECT id FROM lib2_albums").fetchone()[0]
+    conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?, 'Ceremony', 1)",
+        (album_id,))
+    track_id = conn.execute("SELECT id FROM lib2_tracks").fetchone()[0]
+    conn.commit()
+    conn.close()
+
+    worker = LastFMListeningImportWorker(db, _Config())
+    events = [{
+        "track_id": "lastfm-1",
+        "title": "Ceremony",
+        "artist": "New Order",
+        "album": "Substance",
+        "played_at": "2023-11-14 22:13:20",
+        "duration_ms": 180000,
+        "server_source": "lastfm",
+        "lib2_track_id": None,
+    }]
+    worker._resolve_db_track_ids(events)
+    assert events[0]["lib2_track_id"] == track_id
+    assert worker._insert_events_deduped(events) == 1
+
+    conn = db._get_connection()
+    row = conn.execute(
+        "SELECT db_track_id, lib2_track_id FROM listening_history").fetchone()
+    conn.close()
+    assert row["lib2_track_id"] == track_id
+    assert row["db_track_id"] is None
+
+
+def test_existing_misfiled_lastfm_rows_are_repaired(tmp_path):
+    """The rows already written the wrong way round get moved, source-specific
+    and only where the value really names a catalogue row."""
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_artists(name, name_key) VALUES('New Order', 'new order')")
+    artist_id = conn.execute("SELECT id FROM lib2_artists").fetchone()[0]
+    conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Substance')",
+        (artist_id,))
+    album_id = conn.execute("SELECT id FROM lib2_albums").fetchone()[0]
+    conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?, 'Ceremony', 1)",
+        (album_id,))
+    track_id = conn.execute("SELECT id FROM lib2_tracks").fetchone()[0]
+    conn.execute(
+        "INSERT INTO listening_history(track_id, title, artist, album, played_at,"
+        " duration_ms, server_source, db_track_id)"
+        " VALUES('lastfm-1','Ceremony','New Order','Substance',"
+        "        '2023-11-14 22:13:20', 180000, 'lastfm', ?)", (track_id,))
+    # A media-server row keeps its own id namespace untouched.
+    conn.execute(
+        "INSERT INTO listening_history(track_id, title, artist, album, played_at,"
+        " duration_ms, server_source, db_track_id)"
+        " VALUES('plex-1','Ceremony','New Order','Substance',"
+        "        '2023-11-15 22:13:20', 180000, 'plex', ?)", (track_id,))
+    conn.commit()
+    conn.close()
+
+    # The migration runs once per path per process, so drive it directly.
+    conn = db._get_connection()
+    db._add_listening_history_table(conn.cursor())
+    conn.commit()
+    conn.close()
+
+    conn = db._get_connection()
+    rows = {
+        r["server_source"]: (r["db_track_id"], r["lib2_track_id"])
+        for r in conn.execute(
+            "SELECT server_source, db_track_id, lib2_track_id FROM listening_history")
+    }
+    conn.close()
+    assert rows["lastfm"] == (None, track_id)
+    assert rows["plex"][0] == track_id

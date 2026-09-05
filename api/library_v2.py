@@ -648,8 +648,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             acquisition_request = get_request(prepare_conn, request_id)
             if acquisition_request is None or acquisition_request.profile_id != ADMIN_PROFILE_ID:
                 return jsonify({"success": False, "error": "Request not found"}), 404
+            # ACQ-01: scope idempotency to the request's CURRENT attempt. A
+            # repeated call inside one attempt still gets the same grab (so a
+            # double-click cannot submit twice); an explicitly retried request
+            # is no longer handed the previous attempt's failed grab as a
+            # success with nothing submitted.
             existing = find_request_candidate_grab(
-                prepare_conn, request_id, candidate_id)
+                prepare_conn, request_id, candidate_id,
+                request_attempt=int(acquisition_request.attempts or 0))
             if existing is not None:
                 return jsonify({
                     "success": True,
@@ -686,6 +692,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         from core.acquisition.submission import (
             SubmissionError,
             record_external_submission,
+            record_submission_started,
             record_uncertain_submission,
         )
         adapter = _acquisition_submission_adapter(prepared.candidate.source)
@@ -693,6 +700,21 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             submission_error = SubmissionError(
                 "No submission adapter is available for this candidate source")
         else:
+            # ACQ-03: durably record that the submission is being handed to the
+            # client BEFORE the network call. A crash inside `add_nzb` runs no
+            # exception handler, so without this the row looks identical to one
+            # that never left the process — and the restart cleanup declared it
+            # certainly failed while the transfer was still running.
+            started_conn = _conn()
+            try:
+                record_submission_started(started_conn, prepared)
+                started_conn.commit()
+            except Exception as exc:  # noqa: BLE001 - never block on the marker
+                started_conn.rollback()
+                logger.warning(
+                    "Could not record the start of an acquisition submission: %s", exc)
+            finally:
+                started_conn.close()
             try:
                 submission = _run_acquisition_async(adapter.submit(prepared))
                 submission_error = None

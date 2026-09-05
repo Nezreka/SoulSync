@@ -49,6 +49,12 @@ class FakeDB:
         self.wishlist_removes.append({"id": track_id, "profile_id": profile_id})
         return True
 
+    def remove_release_from_wishlist(self, track_id, album_id=None, profile_id=1,
+                                     raise_on_error=False):
+        self.wishlist_removes.append({"id": track_id, "album_id": album_id,
+                                      "profile_id": profile_id})
+        return True
+
     def add_artist_to_watchlist(self, ext_id, name, profile_id, source,
                                 quality_profile_id=None, raise_on_error=False):
         self.watchlist_adds.append({"ext_id": ext_id, "profile_id": profile_id,

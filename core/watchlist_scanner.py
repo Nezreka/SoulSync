@@ -2512,7 +2512,13 @@ class WatchlistScanner:
                     # #831: groups wishlist rows by the scan run that added them.
                     'scan_run_id': scan_run_id or '',
                 },
-                profile_id=getattr(watchlist_artist, 'profile_id', 1)
+                profile_id=getattr(watchlist_artist, 'profile_id', 1),
+                # SYNC-01: the watchlist artist's quality profile, not the
+                # global default. The user profile above says WHOSE intent this
+                # is; this says which quality bar the download has to clear.
+                quality_profile_id=getattr(
+                    watchlist_artist, 'quality_profile_id', None
+                ),
             )
             
             if success:

@@ -2371,3 +2371,124 @@ def test_the_mapping_backfill_is_idempotent_across_imports(migrated_legacy_db):
             "WHERE entity_type='artist' AND server_source='plex'").fetchone()[0] == 1
     finally:
         conn.close()
+
+
+def test_reconcile_preserves_a_deezer_only_identity(legacy_db):
+    """MIG-04: `external_ids` is where every provider that has no dedicated
+    column lives — Deezer is the default source on a large share of installs.
+    Checking only spotify_id/musicbrainz_id/isrc read those rows as legacy-owned
+    scrap and deleted the whole chain when the source row went away."""
+    import_legacy_library(legacy_db)
+    conn = legacy_db._get_connection()
+    conn.execute(
+        """UPDATE lib2_albums SET external_ids='{"deezer":"9001"}'
+            WHERE legacy_album_id=11""")
+    conn.execute(
+        """UPDATE lib2_tracks SET external_ids='{"deezer":"9002"}'
+            WHERE legacy_track_id=102""")
+    conn.execute("DELETE FROM tracks WHERE album_id=11")
+    conn.execute("DELETE FROM albums WHERE id=11")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db)
+
+    conn = legacy_db._get_connection()
+    album = conn.execute(
+        """SELECT legacy_album_id, origin FROM lib2_albums
+            WHERE external_ids='{"deezer":"9001"}'""").fetchone()
+    track = conn.execute(
+        """SELECT legacy_track_id FROM lib2_tracks
+            WHERE external_ids='{"deezer":"9002"}'""").fetchone()
+    conn.close()
+    assert album is not None, "a Deezer-identified album was deleted"
+    assert dict(album) == {"legacy_album_id": None, "origin": "discography"}
+    assert track is not None, "a Deezer-identified track was deleted"
+    assert track["legacy_track_id"] is None
+
+
+def test_reconcile_does_not_keep_a_row_for_an_empty_external_id(legacy_db):
+    """The other side of MIG-04: an empty or product-code-only `external_ids`
+    is not an identity, so those rows still reconcile away."""
+    import_legacy_library(legacy_db)
+    conn = legacy_db._get_connection()
+    conn.execute(
+        """UPDATE lib2_albums SET external_ids='{"deezer":"","upc":"123"}'
+            WHERE legacy_album_id=11""")
+    conn.execute("DELETE FROM tracks WHERE album_id=11")
+    conn.execute("DELETE FROM albums WHERE id=11")
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db)
+
+    conn = legacy_db._get_connection()
+    remaining = conn.execute(
+        """SELECT COUNT(*) c FROM lib2_albums
+            WHERE external_ids='{"deezer":"","upc":"123"}'""").fetchone()["c"]
+    conn.close()
+    assert remaining == 0
+
+
+def test_replaying_an_artist_upsert_cannot_lose_an_id(legacy_db):
+    """MIG-05: the first run adopts a native artist and deliberately keeps the
+    MusicBrainz id the legacy mirror never had. A replay — a crash between a
+    batch commit and its checkpoint, or a non-destructive reimport — then found
+    the row by `legacy_artist_id`, took the `adopted=False` branch and wrote the
+    sparser legacy map straight over it, setting musicbrainz_id back to NULL."""
+    from core.library2.importer import _ArtistResolver
+    from core.library2.profile_lookup import default_quality_profile_id
+    from core.library2.schema import ensure_library_v2_schema
+
+    conn = legacy_db._get_connection()
+    ensure_library_v2_schema(conn)
+    conn.execute(
+        """INSERT INTO lib2_artists(name, name_key, spotify_id, musicbrainz_id,
+               external_ids, quality_profile_id, monitored)
+           VALUES('Nova', 'nova', NULL, 'mb-nova',
+                  '{"deezer":"42","musicbrainz":"mb-nova"}', 1, 0)""")
+    conn.commit()
+
+    fields = {
+        "name": "Nova", "sort_name": "Nova", "image_url": None,
+        "genres": "[]", "summary": None, "style": None, "mood": None,
+        "label": None, "banner_url": None, "aliases": "[]", "soul_id": None,
+        "soul_id_path": None, "art_locked": 0, "server_source": None,
+        "server_id": None, "added_at": None,
+        "provider_ids": {"deezer": "42"},
+    }
+    for _ in range(2):
+        resolver = _ArtistResolver(conn.cursor(), default_quality_profile_id(conn))
+        resolver.seed_existing()
+        resolver.upsert_legacy(legacy_id=7, fields=dict(fields), run_id="run-1")
+        conn.commit()
+
+    row = conn.execute(
+        "SELECT musicbrainz_id, external_ids FROM lib2_artists WHERE name='Nova'"
+    ).fetchone()
+    conn.close()
+    assert row["musicbrainz_id"] == "mb-nova"
+    assert json.loads(row["external_ids"]) == {"deezer": "42", "musicbrainz": "mb-nova"}
+
+
+def test_a_reset_without_a_legacy_source_does_not_empty_the_catalogue(legacy_db):
+    """MIG-03: the reset committed the wipe and only then built the projections
+    that discover the legacy tables are gone — the shape of every native
+    installation. The catalogue was emptied for a source that did not exist."""
+    import_legacy_library(legacy_db)
+    conn = legacy_db._get_connection()
+    before = conn.execute("SELECT COUNT(*) c FROM lib2_tracks").fetchone()["c"]
+    conn.execute("DROP TABLE tracks")
+    conn.execute("DROP TABLE albums")
+    conn.execute("DROP TABLE artists")
+    conn.commit()
+    conn.close()
+    assert before > 0
+
+    with pytest.raises(RuntimeError, match="missing required columns"):
+        import_legacy_library(legacy_db, reset=True)
+
+    conn = legacy_db._get_connection()
+    after = conn.execute("SELECT COUNT(*) c FROM lib2_tracks").fetchone()["c"]
+    conn.close()
+    assert after == before, "the reset wiped the catalogue for a source it never had"

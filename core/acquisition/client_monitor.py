@@ -255,10 +255,15 @@ def reconcile_usenet_snapshot(
         and _category_key(job.category) == _category_key(snapshot.category)
         and _is_adoptable_job(job)
     ]
+    # ACQ-03: a grab whose submission had merely STARTED when the process died
+    # is exactly as adoptable as one whose call timed out — in both cases the
+    # client may be running the transfer under a job id we never stored.
+    from core.acquisition.submission import SUBMISSION_IN_FLIGHT_STATES
+
     unresolved = [
         grab for grab in all_open
         if not grab.get("external_job_id")
-        and grab.get("last_client_state") == "submission_unknown"
+        and grab.get("last_client_state") in SUBMISSION_IN_FLIGHT_STATES
         and _category_key(grab.get("category")) in {"", _category_key(snapshot.category)}
     ]
     adoption_pairs, ambiguous = _adoption_pairs(unresolved, unknown_jobs)
@@ -409,18 +414,24 @@ def fail_stale_local_submissions(
 ) -> Tuple[str, ...]:
     """Fail pre-process grabs that never reached the external client.
 
-    ``submission_unknown`` rows are excluded because the client may have
-    accepted them. Rows created by the current process are excluded by the
+    ACQ-03: every state in ``SUBMISSION_IN_FLIGHT_STATES`` is excluded, because
+    the client may already hold the grab. ``submission_unknown`` alone was not
+    enough — it is only ever written from an exception handler, which a process
+    that dies inside ``add_nzb`` never runs. ``submission_started`` is committed
+    before the network call, so what is left with no marker at all is what was
+    provably never sent. Rows created by the current process are excluded by the
     process-start timestamp, so a slow live ``add_nzb`` call cannot race this
     cleanup.
     """
+    from core.acquisition.submission import SUBMISSION_IN_FLIGHT_STATES
+
     failed = []
     for grab in open_grabs(conn, "usenet"):
         if (
             grab.get("acquisition_request_id")
             and grab["status"] == "submitting"
             and not grab.get("external_job_id")
-            and grab.get("last_client_state") != "submission_unknown"
+            and grab.get("last_client_state") not in SUBMISSION_IN_FLIGHT_STATES
             and str(grab.get("created_at") or "") < str(created_before)
         ):
             record_grab_outcome(

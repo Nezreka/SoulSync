@@ -78,6 +78,14 @@ def test_resume_rebuilds_walk_and_submits_worker(tmp_path):
     assert track_info["_acquisition_track_id"] == 101
     assert track_info["lib2_entity"]["track_id"] == 101
 
+    # ACQ-02: the resumed task carries the freshly issued, server-side upgrade
+    # intent. Without it the after-restart import silently became a
+    # non-upgrade — no track lock, no profile snapshot, and a genuine
+    # same-format upgrade discarded by the ordinary overwrite guard.
+    from core.imports.upgrade_intent import CONTEXT_KEY, is_upgrade_intent
+    assert is_upgrade_intent(task.get(CONTEXT_KEY))
+    assert task[CONTEXT_KEY].track_id == 101
+
     conn = factory()
     assert get_retry_state(conn, task_id).last_progress == "resumed after restart"
     conn.close()

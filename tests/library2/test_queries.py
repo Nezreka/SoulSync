@@ -757,6 +757,45 @@ def test_get_album_shows_expected_missing_track_rows(imported_conn):
     assert missing_rows[1]["metadata_gaps"] == []
 
 
+def test_a_monitored_album_counts_each_unmaterialized_slot_once(imported_conn):
+    """ARCH-02: the placeholders for promised-but-unmaterialized slots are
+    appended to `tracks` and inherit the album's monitored flag, so on a
+    MONITORED album the missing sum counted them and `total - known_count`
+    counted them again. Two expected tracks with no rows yet reported four
+    missing — more missing than the album has tracks at all."""
+    artist_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists LIMIT 1").fetchone()[0]
+    album_id = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, album_type, "
+        "monitored, expected_track_count) VALUES(?, 'Pending Tracklist', "
+        "'album', 1, 2)", (artist_id,)).lastrowid
+    imported_conn.commit()
+
+    album = Q.get_album(imported_conn, album_id)
+
+    assert album["track_count"] == 2
+    assert album["tracks_present"] == 0
+    assert album["tracks_missing"] == 2
+    assert album["tracks_missing"] <= album["track_count"]
+
+
+def test_an_unmonitored_album_still_reports_its_expected_slots(imported_conn):
+    """The intent the double count was hiding behind: expected slots are shown
+    on an unmonitored album too, and still exactly once."""
+    artist_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists LIMIT 1").fetchone()[0]
+    album_id = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, album_type, "
+        "monitored, expected_track_count) VALUES(?, 'Unwatched', 'album', 0, 3)",
+        (artist_id,)).lastrowid
+    imported_conn.commit()
+
+    album = Q.get_album(imported_conn, album_id)
+
+    assert album["tracks_missing"] == 3
+    assert len(album["tracks"]) == 3
+
+
 def test_get_album_preserves_unknown_present_file_quality(imported_conn):
     track_id = imported_conn.execute(
         "SELECT id FROM lib2_tracks WHERE legacy_track_id=100"

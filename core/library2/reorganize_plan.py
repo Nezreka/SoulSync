@@ -44,7 +44,7 @@ logger = get_logger("library2.reorganize_plan")
 def _album_row(conn, album_id: int):
     return conn.execute(
         """SELECT al.id, al.title, al.year, al.release_date, al.album_type,
-                  al.image_url, al.spotify_id,
+                  al.image_url, al.spotify_id, al.primary_artist_id,
                   ar.name AS artist_name
              FROM lib2_albums al
              LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
@@ -99,12 +99,17 @@ def _effective(conn, entity_type: str, entity_id: Any, fields: Dict[str, Any]) -
 
 def _credited_artists(conn, track_id: int) -> List[str]:
     rows = conn.execute(
-        """SELECT ar.name FROM lib2_track_artists ta
+        """SELECT ar.id, ar.name FROM lib2_track_artists ta
              JOIN lib2_artists ar ON ar.id = ta.artist_id
             WHERE ta.track_id = ? ORDER BY ta.position""",
         (int(track_id),),
     ).fetchall()
-    return [r["name"] for r in rows if r["name"]]
+    # ARCH-04: a corrected artist name is an override on the artist, and the
+    # path has to be built from the same effective value the page shows.
+    from core.library2.metadata_overrides import effective_artist_names
+
+    names = effective_artist_names(conn, [r["id"] for r in rows])
+    return [n for n in (names.get(int(r["id"]), r["name"]) for r in rows) if n]
 
 
 def _as_provider_album(album: Dict[str, Any], track_count: int,
@@ -156,30 +161,40 @@ def plan_album_reorganize(
     })
     album["spotify_id"] = album_row["spotify_id"]
     album_title = album.get("title") or "Unknown Album"
-    artist_name = album_row["artist_name"] or "Unknown Artist"
+    # ARCH-04: the same effective name the artist page shows, so a corrected
+    # name reaches the folder on disk instead of only the UI.
+    from core.library2.metadata_overrides import effective_artist_name
+    artist_name = effective_artist_name(
+        conn, album_row["primary_artist_id"], album_row["artist_name"]
+    ) or "Unknown Artist"
 
-    rows = [r for r in _track_rows(conn, album_id) if r["file_path"]]
+    all_rows = _track_rows(conn, album_id)
+    all_tracks = [
+        _effective(conn, "track", r["id"], {
+            "id": r["id"], "title": r["title"],
+            "track_number": r["track_number"], "disc_number": r["disc_number"],
+            "file_path": r["file_path"],
+        })
+        for r in all_rows
+    ]
+    tracks = [t for t in all_tracks if t["file_path"]]
     common = {
         "source": None,
         "album": album_title,
         "artist": artist_name,
         "transfer_dir": transfer_dir,
     }
-    if not rows:
+    if not tracks:
         return {"success": False, "status": "no_tracks", **common, "tracks": []}
 
-    tracks = [
-        _effective(conn, "track", r["id"], {
-            "id": r["id"], "title": r["title"],
-            "track_number": r["track_number"], "disc_number": r["disc_number"],
-            "file_path": r["file_path"],
-        })
-        for r in rows
-    ]
-    # The discs the catalogue actually holds. Read off a live tracklist this
-    # was the #1080 oscillation: a half-downloaded multi-disc album planned
-    # flat, then back into `Disc N/` once the rest arrived.
-    total_discs = max((int(t["disc_number"] or 1) for t in tracks), default=1)
+    # ARCH-03: the disc count is a property of the ALBUM, so it is read from
+    # every catalogue position — including tracks whose file has not arrived
+    # yet. Computing it after the file filter declared a known two-disc album
+    # single-disc while only disc 1 was downloaded (`total_discs_declared=True`
+    # suppresses the shared path builder's own disc detection), moved disc 1 out
+    # of `Disc 1/`, and moved it straight back the moment disc 2's first file
+    # landed — the #1080 oscillation from the other direction.
+    total_discs = max((int(t["disc_number"] or 1) for t in all_tracks), default=1)
 
     planned: List[Dict[str, Any]] = []
     for track in tracks:

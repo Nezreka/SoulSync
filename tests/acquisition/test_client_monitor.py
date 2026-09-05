@@ -236,6 +236,29 @@ def test_reconcile_adopts_exact_normalized_title(conn):
     assert events[-1].payload["strategy"] == "exact_title"
 
 
+def test_reconcile_adopts_a_grab_whose_submission_had_only_started(conn):
+    """The other half of ACQ-03: a grab that was still mid-`add_nzb` when the
+    process died is exactly as adoptable as one whose call timed out."""
+    _linked_grab(
+        conn,
+        "dl-started",
+        title="Artist - Album",
+        last_client_state="submission_started",
+    )
+    snapshot = UsenetClientSnapshot(
+        client="FakeUsenetAdapter",
+        category="soulsync",
+        jobs=(_job("job-started", name="Artist - Album.nzb"),),
+    )
+
+    result = reconcile_usenet_snapshot(conn, snapshot)
+
+    assert result.adopted == ("dl-started",)
+    grab = get_grab(conn, "dl-started")
+    assert grab["external_job_id"] == "job-started"
+    assert grab["adopted"] == 1
+
+
 def test_reconcile_adopts_only_remaining_one_to_one_category_job(conn):
     _linked_grab(
         conn,
@@ -450,6 +473,40 @@ def test_runtime_fails_only_certain_pre_restart_local_submission(tmp_path):
     assert get_request(verify, uncertain_request.id).status == "grabbing"
     assert get_grab(verify, "dl-uncertain")["status"] == "submitting"
     assert verify.execute("SELECT COUNT(*) FROM release_blocklist").fetchone()[0] == 0
+    verify.close()
+
+
+def test_a_crash_after_the_client_accepted_is_not_declared_locally_aborted(tmp_path):
+    """ACQ-03: `submission_unknown` is only ever written from an exception
+    handler. A process that dies inside `add_nzb` — or after it returned but
+    before the correlation is committed — runs no handler, so the row looked
+    exactly like one that never left the process: the restart cleanup failed the
+    grab and its request terminally, the grab left the open set, and the
+    adoption that would have re-attached the running transfer never saw it. The
+    download finished with nobody waiting for it, and a new request could start
+    the same transfer again.
+
+    `submission_started` is committed BEFORE the network call, so absence of a
+    marker is what proves nothing was sent."""
+    seed, factory = _runtime_database(tmp_path)
+    never_sent_request, _ = _linked_grab(seed, "dl-never-sent")
+    accepted_request, _ = _linked_grab(
+        seed, "dl-accepted", last_client_state="submission_started")
+    seed.commit()
+    seed.close()
+    monitor = UsenetAcquisitionMonitor(
+        factory,
+        adapter_getter=lambda: None,
+        process_started_at="9999-12-31 23:59:59",
+    )
+
+    result = monitor.run_once()
+
+    assert result.stale_submissions_failed == ("dl-never-sent",)
+    verify = factory()
+    assert get_request(verify, never_sent_request.id).status == "failed"
+    assert get_request(verify, accepted_request.id).status == "grabbing"
+    assert get_grab(verify, "dl-accepted")["status"] == "submitting"
     verify.close()
 
 

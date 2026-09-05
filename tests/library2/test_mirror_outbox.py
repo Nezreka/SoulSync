@@ -48,6 +48,12 @@ class FlakyDB:
         self.removes.append({"id": track_id, "profile_id": profile_id})
         return True
 
+    def remove_release_from_wishlist(self, track_id, album_id=None, profile_id=1,
+                                     raise_on_error=False):
+        self.removes.append({"id": track_id, "album_id": album_id,
+                             "profile_id": profile_id})
+        return True
+
     def add_artist_to_watchlist(self, ext, name, profile_id, source,
                                 quality_profile_id=None, raise_on_error=False):
         self.watchlist_adds.append({"ext": ext, "profile_id": profile_id,
@@ -217,7 +223,13 @@ def test_unmonitor_enqueues_remove_that_survives_row_deletion(db):
     conn.commit()
     result = MO.drain(flaky)
     assert (result["done"], result["failed"]) == (1, 0)
-    assert flaky.removes == [{"id": "sp-t", "profile_id": 3}]
+    assert len(flaky.removes) == 1
+    removed = flaky.removes[0]
+    assert removed["id"] == "sp-t"
+    assert removed["profile_id"] == 3
+    # SYNC-02: the withdrawal names the release it withdraws, so a sibling
+    # album of the same recording is not swept up with it.
+    assert removed["album_id"]
 
 
 def test_artist_watchlist_ops(db):
@@ -382,3 +394,124 @@ def test_replay_is_idempotent_when_marking_crashes(db):
     result = MO.drain(flaky)
     assert result["done"] == 1
     assert len(flaky.adds) == 2  # replayed — the real DB upserts in place
+
+
+def test_two_releases_of_one_recording_both_reach_the_wishlist(db):
+    """SYNC-03: two wanted releases that share a provider track id are two
+    independent intents. Supersession keyed both on the bare track id, so the
+    second album looked like a newer assertion about the first and that first
+    add was dropped before it was ever persisted — the album silently never
+    got queued."""
+    flaky, conn = db
+    cur = conn.cursor()
+    cur.execute("INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Other')",
+                (flaky.ids["artist"],))
+    other_album = cur.lastrowid
+    cur.execute("INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)",
+                (other_album, flaky.ids["artist"]))
+    # Same provider track id, different release.
+    cur.execute("INSERT INTO lib2_tracks(album_id, title, track_number, spotify_id) "
+                "VALUES(?, 'T', 1, 'sp-t')", (other_album,))
+    other_track = cur.lastrowid
+    cur.execute("INSERT INTO lib2_track_artists(track_id, artist_id) VALUES(?,?)",
+                (other_track, flaky.ids["artist"]))
+    conn.commit()
+
+    MO.enqueue_tracks(conn, [flaky.ids["track"], other_track], True, profile_id=1)
+    conn.commit()
+    result = MO.drain(flaky)
+
+    assert (result["done"], result["failed"]) == (2, 0)
+    assert [row["status"] for row in _outbox_rows(conn)] == ["done", "done"]
+    assert len(flaky.adds) == 2
+
+
+def test_a_later_op_for_the_same_release_still_supersedes(db):
+    """The other half of SYNC-03: narrowing the key must not disable
+    supersession for what really is the same release."""
+    flaky, conn = db
+    MO.enqueue_tracks(conn, [flaky.ids["track"]], True, profile_id=1)
+    MO.enqueue_tracks(conn, [flaky.ids["track"]], False, profile_id=1)
+    conn.commit()
+
+    MO.drain(flaky)
+
+    statuses = [row["status"] for row in _outbox_rows(conn)]
+    assert statuses == ["superseded", "done"]
+    assert flaky.adds == []
+
+
+class TestReleaseScopedWithdrawal:
+    """SYNC-02: the wishlist row is a RELEASE, and the mirror has to say which."""
+
+    def test_a_satisfied_release_is_withdrawn_despite_the_composite_key(self, db):
+        """Trigger A: the insert stores `<track>::<album>` while the mirror's
+        presence probe asked for the bare id, found nothing, and skipped the
+        withdrawal — leaving the processor re-downloading a satisfied track."""
+        flaky, conn = db
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS wishlist_tracks(
+                   id INTEGER PRIMARY KEY AUTOINCREMENT, spotify_track_id TEXT,
+                   spotify_data TEXT, source_type TEXT, source_info TEXT,
+                   profile_id INTEGER)""")
+        # A satisfying file makes the track monitored-but-not-queueable.
+        conn.execute(
+            "INSERT INTO lib2_track_files(track_id, path, format, file_state) "
+            "VALUES(?, '/m/t.flac', 'flac', 'active')", (flaky.ids["track"],))
+        conn.commit()
+        from core.library2.wishlist_mirror import track_wishlist_payload
+        payload = track_wishlist_payload(conn, flaky.ids["track"])
+        assert payload["_should_queue"] is False
+        composite = f"{payload['id']}::{payload['album']['id']}"
+        conn.execute(
+            "INSERT INTO wishlist_tracks(spotify_track_id, spotify_data, "
+            "source_type, profile_id) VALUES(?, '{}', 'album', 1)", (composite,))
+        conn.commit()
+
+        assert MO.enqueue_tracks(conn, [flaky.ids["track"]], True, profile_id=1)
+        conn.commit()
+        assert MO.drain(flaky)["done"] == 1
+        assert flaky.removes and flaky.removes[0]["id"] == payload["id"]
+
+    def test_unmonitoring_one_release_leaves_the_other_wanted(self, tmp_path):
+        """Trigger B: the mirror handed the bare track id to
+        `remove_from_wishlist`, whose job is to clear every `<track>::%` row.
+        Right for "this recording was downloaded", wrong here — it deleted a
+        second album of the same recording that was still wanted."""
+        from database.music_database import MusicDatabase
+
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        payload = {"id": "sp-t", "name": "T", "artists": [{"name": "A"}],
+                   "album": {"id": "alb-1", "name": "One"}}
+        other = dict(payload, album={"id": "alb-2", "name": "Two"})
+        assert db.add_to_wishlist(payload, source_type="album") is True
+        assert db.add_to_wishlist(other, source_type="album") is True
+        with db._get_connection() as conn:
+            keys = {r[0] for r in conn.execute(
+                "SELECT spotify_track_id FROM wishlist_tracks")}
+        assert keys == {"sp-t::alb-1", "sp-t::alb-2"}
+
+        assert db.remove_release_from_wishlist("sp-t", "alb-1") is True
+
+        with db._get_connection() as conn:
+            keys = {r[0] for r in conn.execute(
+                "SELECT spotify_track_id FROM wishlist_tracks")}
+        assert keys == {"sp-t::alb-2"}
+
+    def test_a_legacy_bare_row_is_still_withdrawable(self, tmp_path):
+        """Rows written before the composite key existed — and by writers
+        outside Library v2 — carry the bare id and no album. They stay
+        removable; only a row naming a DIFFERENT album is protected."""
+        from database.music_database import MusicDatabase
+
+        db = MusicDatabase(str(tmp_path / "music.db"))
+        with db._get_connection() as conn:
+            conn.execute(
+                "INSERT INTO wishlist_tracks(spotify_track_id, spotify_data, "
+                "source_type, profile_id) VALUES('sp-t', '{}', 'album', 1)")
+            conn.commit()
+
+        assert db.remove_release_from_wishlist("sp-t", "alb-1") is True
+        with db._get_connection() as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM wishlist_tracks").fetchone()[0] == 0

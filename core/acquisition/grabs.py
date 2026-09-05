@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS acquisition_grabs (
     acquisition_request_id TEXT,
     release_candidate_id TEXT,
     decision_run_id TEXT,
+    request_attempt INTEGER NOT NULL DEFAULT 0,  -- the request attempt this grab belongs to
     source TEXT NOT NULL,                 -- 'usenet'|'torrent'|...
     client TEXT,                          -- adapter identity ('SABnzbdAdapter'|...)
     external_job_id TEXT,                 -- the client's job id (nzo_id, ...)
@@ -91,6 +92,11 @@ _ADDED_COLUMNS = (
     ("decision_run_id",
      "ALTER TABLE acquisition_grabs ADD COLUMN decision_run_id TEXT "
      "REFERENCES candidate_decision_runs(id) ON DELETE SET NULL"),
+    # ACQ-01: which attempt of the request this grab belongs to. Existing rows
+    # default to 0, the attempt count a never-retried request has.
+    ("request_attempt",
+     "ALTER TABLE acquisition_grabs ADD COLUMN request_attempt INTEGER "
+     "NOT NULL DEFAULT 0"),
 )
 
 
@@ -116,6 +122,7 @@ def record_grab(conn: Any, download_id: str, source: str, *,
                 acquisition_request_id: Optional[str] = None,
                 release_candidate_id: Optional[str] = None,
                 decision_run_id: Optional[str] = None,
+                request_attempt: int = 0,
                 status: str = STATUS_SUBMITTING) -> None:
     """Insert the correlation row for a new grab. Does not commit.
 
@@ -125,13 +132,13 @@ def record_grab(conn: Any, download_id: str, source: str, *,
     conn.execute(
         """INSERT OR IGNORE INTO acquisition_grabs(
                download_id, acquisition_request_id, release_candidate_id,
-               decision_run_id, source, client, title, category, status,
-               context_json)
-           VALUES(?,?,?,?,?,?,?,?,?,?)""",
+               decision_run_id, request_attempt, source, client, title,
+               category, status, context_json)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
         (
             download_id, acquisition_request_id, release_candidate_id,
-            decision_run_id, source, client, title, category, status,
-            json.dumps(context or {}),
+            decision_run_id, int(request_attempt or 0), source, client, title,
+            category, status, json.dumps(context or {}),
         ))
 
 
@@ -207,7 +214,7 @@ def patch_grab_context(
 
 
 _COLUMNS = ("id", "download_id", "acquisition_request_id",
-            "release_candidate_id", "decision_run_id",
+            "release_candidate_id", "decision_run_id", "request_attempt",
             "source", "client", "external_job_id",
             "category", "title", "status", "last_client_state", "output_path",
             "error", "context_json", "adopted", "created_at", "updated_at")
@@ -229,15 +236,40 @@ def get_grab(conn: Any, download_id: str) -> Optional[Dict[str, Any]]:
 
 def find_request_candidate_grab(
     conn: Any, request_id: str, candidate_id: str,
+    request_attempt: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Find the latest persisted attempt for one exact request/candidate."""
+    """Find the persisted grab for one request/candidate in a given attempt.
+
+    ACQ-01: idempotency belongs to the *attempt*, not to the pair. A download
+    that failed before submission on a transient runtime problem (an
+    unconfigured client, a download reference that no longer resolves) leaves a
+    terminal `failed` grab behind. Once the user fixed the cause and explicitly
+    retried, a search that found the same GUID again handed this function the
+    same pair — and the endpoint returned that old failed grab as an HTTP 200
+    success without submitting anything. Clicking again never helped; only a
+    brand-new request or a different candidate got out of it.
+
+    Passing the request's current ``attempts`` scopes the lookup to the live
+    attempt, so repeated calls within one attempt still share their grab (which
+    is what stops a double-click from submitting twice) while a deliberately
+    restarted attempt is free to create a new one.
+    """
     ensure_acquisition_grabs_schema(conn)
-    row = conn.execute(
-        """SELECT download_id FROM acquisition_grabs
-            WHERE acquisition_request_id=? AND release_candidate_id=?
-            ORDER BY id DESC LIMIT 1""",
-        (str(request_id), str(candidate_id)),
-    ).fetchone()
+    if request_attempt is None:
+        row = conn.execute(
+            """SELECT download_id FROM acquisition_grabs
+                WHERE acquisition_request_id=? AND release_candidate_id=?
+                ORDER BY id DESC LIMIT 1""",
+            (str(request_id), str(candidate_id)),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """SELECT download_id FROM acquisition_grabs
+                WHERE acquisition_request_id=? AND release_candidate_id=?
+                  AND COALESCE(request_attempt, 0)=?
+                ORDER BY id DESC LIMIT 1""",
+            (str(request_id), str(candidate_id), int(request_attempt)),
+        ).fetchone()
     return get_grab(conn, row[0]) if row is not None else None
 
 

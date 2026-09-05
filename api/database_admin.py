@@ -60,6 +60,7 @@ SOULSYNC_VERSION = None
 _automatic_wishlist_cleanup_after_db_update = None
 _reconcile_after_scan = None
 _update_automation_progress = None
+_restart_library_v2_migration = None
 # rebindable worker fleet - injected as getters
 _amazon_worker = None
 _audiodb_worker = None
@@ -1022,11 +1023,31 @@ def restore_backup_endpoint(filename):
             cursor.execute("SELECT COUNT(*) FROM lib2_artists")
             artist_count = cursor.fetchone()[0]
 
+        # MIG-02: `get_database()` only creates the lib2 schema (DDL, no
+        # backfills). A backup taken before the catalogue cutover — or any
+        # backup whose lib2_* tables are empty — therefore lands as an EMPTY
+        # native catalogue, and the startup migration that would have filled it
+        # already retired. Left alone, the supervisor sees a required migration
+        # it will never run and pauses every catalogue worker indefinitely.
+        # Re-arm the same lifecycle startup uses so the restored database gets
+        # migrated instead of just being declared restored.
+        migration_restarted = False
+        try:
+            from core.library2.migration_gate import migration_required
+            if migration_required(db) and _restart_library_v2_migration is not None:
+                migration_restarted = bool(_restart_library_v2_migration())
+                logger.info(
+                    "Restore left the native catalogue unmigrated; migration "
+                    "re-armed (started=%s)", migration_restarted)
+        except Exception as e:
+            logger.warning("Could not re-arm the catalogue migration after restore: %s", e)
+
         result = {
             "success": True,
             "restored_from": filename,
             "safety_backup": safety_filename,
-            "artist_count": artist_count
+            "artist_count": artist_count,
+            "migration_restarted": migration_restarted,
         }
         if backup_version:
             result["backup_version"] = backup_version

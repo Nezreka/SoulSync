@@ -372,9 +372,10 @@ def _hold_catalogue_jobs_during_upgrade():
     # Every unsafe HTTP verb can mutate the catalogue.  The old POST-only
     # check left PATCH/PUT/DELETE live during the snapshot import, allowing a
     # user edit or delete to race with (and then be resurrected by) migration.
-    from core.library2.migration_gate import request_can_mutate
+    from core.library2.migration_gate import endpoint_is_blocked, request_can_mutate
     if (not request_can_mutate(request.method)
-            or (request.endpoint not in _MIGRATION_BLOCKED_ENDPOINTS and not lib2_write)):
+            or (not endpoint_is_blocked(request.endpoint, _MIGRATION_BLOCKED_ENDPOINTS)
+                and not lib2_write)):
         return None
     try:
         from core.library2.migration_gate import migration_required
@@ -17602,6 +17603,35 @@ from api.source_playlists import (  # noqa: E402
 )
 # --- Discover Download Snapshot System ---
 
+_lib2_bootstrap_autostart_lock = threading.Lock()
+_lib2_bootstrap_autostart_thread = None
+
+
+def start_library_v2_bootstrap_autostart() -> bool:
+    """(Re)arm the one-shot catalogue migration loop. Returns whether it started.
+
+    MIG-02: the loop retires for good as soon as it has nothing left to do —
+    ``already_done``, ``empty_source``, or one successful import. A backup
+    restore then swaps in a database whose ``lib2_*`` tables are empty *after*
+    that, so nobody is left to notice the catalogue needs migrating again. The
+    supervisor sees ``migration_required`` and does the only thing it can: it
+    pauses the workers, forever. Re-arming here puts a restored database
+    through the same coordinated lifecycle (deferred backfills, claim, import,
+    post-import, worker release) a startup would give it.
+    """
+    global _lib2_bootstrap_autostart_thread
+    with _lib2_bootstrap_autostart_lock:
+        running = _lib2_bootstrap_autostart_thread
+        if running is not None and running.is_alive():
+            return False
+        thread = threading.Thread(
+            target=_autostart_library_v2_bootstrap_import, daemon=True,
+            name='Lib2BootstrapImportAutostart')
+        _lib2_bootstrap_autostart_thread = thread
+        thread.start()
+        return True
+
+
 # ── discover endpoints live in api/discover_routes.py now ───────────────────
 
 # --- Artist Bubble Snapshot System ---
@@ -20961,6 +20991,7 @@ _cfg_dba(
     _automatic_wishlist_cleanup_after_db_update=_automatic_wishlist_cleanup_after_db_update,
     _reconcile_after_scan=_reconcile_after_scan,
     _update_automation_progress=_update_automation_progress,
+    _restart_library_v2_migration=start_library_v2_bootstrap_autostart,
     _amazon_worker=lambda: amazon_worker,
     _audiodb_worker=lambda: audiodb_worker,
     _bandcamp_worker=lambda: bandcamp_worker,
@@ -22174,8 +22205,7 @@ def start_runtime_services():
         # Existing-installation bootstrap: import legacy -> lib2_* on its own the
         # native catalogue bootstrap, no UI click required (§78).
         try:
-            threading.Thread(target=_autostart_library_v2_bootstrap_import, daemon=True,
-                             name='Lib2BootstrapImportAutostart').start()
+            start_library_v2_bootstrap_autostart()
         except Exception as _lib2_bootstrap_err:
             logger.debug(f"could not start lib2 bootstrap import autostart: {_lib2_bootstrap_err}")
 

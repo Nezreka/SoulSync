@@ -1531,6 +1531,46 @@ def test_a_musicbrainz_group_still_matches_its_row_on_the_next_sync(
     ).fetchone()["c"] == 1
 
 
+MB_GROUP_2 = "3a7bd3e2-360f-4e5c-9a1b-2c3d4e5f6071"
+
+
+def test_two_new_musicbrainz_groups_in_one_run(legacy_db, imported_conn, monkeypatch):
+    """ARCH-01: the index row appended for a freshly inserted release has to
+    carry the same fields the loaded rows do.  Leaving the group column out
+    made the NEXT release's id match raise KeyError, so the run never reached
+    its commit and a first expansion of any two-group catalog was lost."""
+    payload = {
+        "albums": [
+            {"id": MB_GROUP, "title": "Certified Lover Boy", "album_type": "album",
+             "release_date": "2021-09-03", "year": "2021", "track_count": 21,
+             "image_url": None, "release_group_id": MB_GROUP},
+            {"id": MB_GROUP_2, "title": "Scorpion", "album_type": "album",
+             "release_date": "2018-06-29", "year": "2018", "track_count": 25,
+             "image_url": None, "release_group_id": MB_GROUP_2},
+        ],
+        "eps": [], "singles": [], "success": True, "source": "musicbrainz",
+    }
+    monkeypatch.setattr(
+        "core.metadata.discography.get_artist_detail_discography",
+        lambda artist_id, artist_name="", options=None: payload)
+    monkeypatch.setattr(
+        "core.library2.provider_adapters.fetch_album_tracklist",
+        lambda *_args, **_kwargs: None)
+
+    stats = D.expand_artist_discography(legacy_db, _artist_id(imported_conn))
+    assert stats["added"] == 2
+    rows = imported_conn.execute(
+        "SELECT title, musicbrainz_release_group_id AS rg FROM lib2_albums "
+        "WHERE origin='discography' ORDER BY title").fetchall()
+    assert [(r["title"], r["rg"]) for r in rows] == [
+        ("Certified Lover Boy", MB_GROUP), ("Scorpion", MB_GROUP_2)]
+
+    # And the second run stays idempotent through the same index.
+    second = D.expand_artist_discography(legacy_db, _artist_id(imported_conn))
+    assert second["added"] == 0
+    assert second["enriched"] == 2
+
+
 def test_a_concrete_release_keeps_both_ids(legacy_db, imported_conn, monkeypatch):
     """The other MB shape — a release expanded out of its group — carries two
     different ids, and each belongs in its own place."""

@@ -171,6 +171,56 @@ def record_external_submission(
     return updated
 
 
+#: Client states that mean "the external client may already hold this grab".
+#: A restart may not declare these locally aborted: only a row with no such
+#: marker is provably still ours (ACQ-03).
+SUBMISSION_IN_FLIGHT_STATES = frozenset({"submission_started", "submission_unknown"})
+
+
+def record_submission_started(conn: Any, prepared: PreparedGrab) -> dict:
+    """Mark a grab as handed to the external client, BEFORE the network call.
+
+    ACQ-03: ``submission_unknown`` was only ever written from an exception
+    handler or a caught persistence failure. A process that dies inside
+    ``add_nzb`` — or after it returned but before ``record_external_submission``
+    commits — runs neither. The row was left ``submitting`` with no marker and
+    no ``external_job_id``, which on the next start is exactly the shape
+    ``fail_stale_local_submissions`` declares *certainly* aborted: the grab and
+    its request went terminally failed, the grab left the open set, and the
+    adoption that would have re-attached the running transfer never considered
+    it. The download completed with nobody waiting for it, and a fresh request
+    could start the same transfer a second time.
+
+    Committing this marker first inverts the default: absence of a marker is
+    what proves nothing was sent. Caller commits.
+    """
+    grab = get_grab(conn, prepared.download_id)
+    if grab is None or grab["status"] != STATUS_SUBMITTING:
+        raise ValueError("submission start requires a submitting grab")
+    if (
+        grab.get("acquisition_request_id") != prepared.request.id
+        or grab.get("release_candidate_id") != prepared.candidate.id
+    ):
+        raise ValueError("prepared grab correlation does not match persisted grab")
+    update_grab(
+        conn,
+        prepared.download_id,
+        last_client_state="submission_started",
+    )
+    record_history_event(
+        conn,
+        "grab_submission_started",
+        request_id=prepared.request.id,
+        candidate_id=prepared.candidate.id,
+        download_id=prepared.download_id,
+        reason_code="client_submission_started",
+    )
+    updated = get_grab(conn, prepared.download_id)
+    if updated is None:  # pragma: no cover
+        raise RuntimeError("acquisition grab disappeared while starting submission")
+    return updated
+
+
 def record_uncertain_submission(
     conn: Any,
     prepared: PreparedGrab,
@@ -212,6 +262,8 @@ __all__ = [
     "ExternalSubmission",
     "SubmissionError",
     "UsenetSubmissionAdapter",
+    "SUBMISSION_IN_FLIGHT_STATES",
     "record_external_submission",
+    "record_submission_started",
     "record_uncertain_submission",
 ]

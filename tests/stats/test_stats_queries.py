@@ -254,8 +254,14 @@ def test_get_listening_events_caches_repeated_image_normalization(db):
     album_id = _seed_album(db, artist_id, "Album", thumb='/library/metadata/1/thumb/1')
     track_new = _seed_track(db, album_id, artist_id, "Repeat New")
     track_old = _seed_track(db, album_id, artist_id, "Repeat Old")
-    _seed_history(db, "Repeat New", "Artist", "Album", "2026-08-23 16:30:00", db_track_id=track_new)
-    _seed_history(db, "Repeat Old", "Artist", "Album", "2026-08-23 16:00:00", db_track_id=track_old)
+    # INT-02: the catalogue link is `lib2_track_id`. Seeding a native id into
+    # `db_track_id` (the media server's own id namespace) is the shape the bug
+    # had, and pinning it here is what let the chart detail read the wrong
+    # column for as long as it did.
+    _seed_history(db, "Repeat New", "Artist", "Album", "2026-08-23 16:30:00",
+                  lib2_track_id=track_new)
+    _seed_history(db, "Repeat Old", "Artist", "Album", "2026-08-23 16:00:00",
+                  lib2_track_id=track_old)
     calls = []
 
     def fixer(url):
@@ -647,3 +653,35 @@ def test_trigger_listening_sync_swallows_worker_errors():
     # Counter not incremented because exception was raised before increment
     assert _BrokenWorker.stats['polls_completed'] == 0
 
+
+
+def test_resolve_track_finds_a_compilation_track_by_its_own_artist(db):
+    """INT-03, stats half: the local-playback resolution matched only the
+    album's primary artist, so a listening event that correctly named Muse
+    could not resolve a Muse track sitting on a Various Artists compilation —
+    the file was right there."""
+    va = _seed_artist(db, "Various Artists")
+    muse = _seed_artist(db, "Muse")
+    album_id = _seed_album(db, va, "Compilation")
+    track_id = _seed_track(db, album_id, va, "Uprising")
+    conn = db._get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO lib2_track_artists(track_id, artist_id, position)"
+            " VALUES(?,?,0)", (track_id, muse))
+        conn.execute(
+            "INSERT INTO lib2_track_files(track_id, path, is_primary, file_state)"
+            " VALUES(?, '/music/uprising.flac', 1, 'active')", (track_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    resolved = queries.resolve_track(db, None, "Uprising", "Muse")
+
+    assert resolved is not None
+    assert resolved["file_path"] == "/music/uprising.flac"
+
+    # The album artist stays a valid key.
+    assert queries.resolve_track(db, None, "Uprising", "Various Artists") is not None
+    # And an unrelated artist still does not match.
+    assert queries.resolve_track(db, None, "Uprising", "Def Leppard") is None

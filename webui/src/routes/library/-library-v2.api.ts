@@ -1818,6 +1818,11 @@ export async function fetchLibraryV2ImportStatus(): Promise<LibraryV2ImportState
   return readJson<LibraryV2ImportState>(apiClient.get('library/v2/import/status'));
 }
 
+/** UI-03: the slowest and fastest we watch a migration that reported `failed`
+ * but is still being retried by the server. */
+export const MIGRATION_RETRY_MIN_POLL_MS = 5_000;
+export const MIGRATION_RETRY_MAX_POLL_MS = 60_000;
+
 export function libraryV2ImportStatusQueryOptions(refetchIntervalMs = 1000) {
   return queryOptions({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'import-status'],
@@ -1832,13 +1837,42 @@ export function libraryV2ImportStatusQueryOptions(refetchIntervalMs = 1000) {
      * now never happen (`refetchOnWindowFocus` is globally false). The page sat
      * on the same percentage for the entire migration.
      */
-    refetchInterval: (query) =>
-      query.state.data?.running ||
-      query.state.data?.artwork_cache.running ||
-      query.state.data?.bootstrap?.status === 'running' ||
-      query.state.data?.bootstrap?.status === 'pending'
-        ? refetchIntervalMs
-        : false,
+    refetchInterval: (query) => {
+      const state = query.state.data;
+      if (!state) return false;
+      if (
+        state.running ||
+        state.artwork_cache.running ||
+        state.bootstrap?.status === 'running' ||
+        state.bootstrap?.status === 'pending'
+      ) {
+        return refetchIntervalMs;
+      }
+      /**
+       * UI-03: `failed` is NOT terminal for the automatic migration. The
+       * server loop keeps retrying it with backoff, but returning `false` here
+       * stopped the timer — and with `refetchOnWindowFocus` globally off,
+       * nothing was ever going to fetch again. The page sat on the failure
+       * forever while the server migrated (or finished) behind it, showing
+       * "It retries on its own" next to a retry the user could not observe,
+       * which invites a manual import while the automatic one holds the lock.
+       *
+       * Keep watching, slowly: the retry is on a 30s-to-30min backoff, so a
+       * one-second poll would be pure noise. This backs off in the same
+       * direction the server does, and the first `running`/`done` answer puts
+       * the query back on the live interval above.
+       */
+      if (state.bootstrap?.status === 'failed') {
+        return Math.min(
+          MIGRATION_RETRY_MAX_POLL_MS,
+          Math.max(
+            MIGRATION_RETRY_MIN_POLL_MS,
+            refetchIntervalMs * 2 ** Math.min(query.state.dataUpdateCount, 8),
+          ),
+        );
+      }
+      return false;
+    },
   });
 }
 

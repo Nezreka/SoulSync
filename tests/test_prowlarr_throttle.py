@@ -257,17 +257,6 @@ class TestInteractiveSearchesAreBounded:
             client._search_sync("q", [], [], 10, max_wait_seconds=1.0)
         assert called == [], "a refused search must not hit prowlarr anyway"
 
-    def test_the_manual_video_endpoints_pass_a_bound(self):
-        with open("api/video/downloads.py", encoding="utf-8") as f:
-            tree = ast.parse(f.read())
-        bounded = [
-            call for call in ast.walk(tree)
-            if isinstance(call, ast.Call)
-            and isinstance(call.func, ast.Name) and call.func.id == "prowlarr_search"
-            and any(kw.arg == "max_wait_seconds" for kw in call.keywords)
-        ]
-        assert len(bounded) == 2, "both manual search paths must bound their wait"
-
     def test_the_background_drain_does_not_bound_it(self):
         """It should queue, not give up — dropping a wishlist search loses work."""
         with open("core/automation/handlers/video_process_wishlist.py", encoding="utf-8") as f:

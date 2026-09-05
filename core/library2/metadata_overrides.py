@@ -453,6 +453,47 @@ __all__ = [
     "get_field_overrides",
     "get_field_overrides_many",
     "project_metadata",
+    "effective_artist_name",
+    "effective_artist_names",
     "project_metadata_many",
     "set_field_override",
 ]
+
+
+def effective_artist_names(conn: Any, artist_ids: Any) -> Dict[int, str]:
+    """The names to USE for a set of artists — hand-set value first.
+
+    ARCH-04: the artist edit dialog writes a `name` override and every read
+    path that goes through `project_metadata` honours it. Retag and reorganize
+    did not: they read `lib2_artists.name` straight out of the join, so a
+    corrected artist name showed in the UI while retag went on proposing (and
+    writing) the old ARTIST/ALBUMARTIST tags and reorganize kept building
+    folders under the old name. One projection for display, tags and paths is
+    what makes those three agree.
+    """
+    ids = [int(value) for value in artist_ids if value]
+    if not ids:
+        return {}
+    marks = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        f"SELECT id, name FROM lib2_artists WHERE id IN ({marks})", ids).fetchall()
+    provider = {int(row[0]): {"name": row[1]} for row in rows}
+    try:
+        projected = project_metadata_many(
+            conn, entity_type="artist", provider_fields=provider)
+    except Exception as exc:  # noqa: BLE001 - never fail a plan on the override layer
+        from utils.logging_config import get_logger
+        get_logger("library2.metadata_overrides").debug(
+            "artist name projection skipped: %s", exc)
+        return {entity_id: fields["name"] for entity_id, fields in provider.items()}
+    return {
+        entity_id: (effective.get("name") or provider[entity_id]["name"])
+        for entity_id, (effective, _overrides) in projected.items()
+    }
+
+
+def effective_artist_name(conn: Any, artist_id: Any, fallback: Any = None) -> Any:
+    """:func:`effective_artist_names` for one artist."""
+    if not artist_id:
+        return fallback
+    return effective_artist_names(conn, [artist_id]).get(int(artist_id), fallback)

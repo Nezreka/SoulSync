@@ -392,3 +392,78 @@ def test_a_natively_imported_track_still_carries_an_identity(db):
 
     assert result['tracks'][0]['in_library'] is True
     assert result['tracks'][0]['track_id'] == lib2_id
+
+
+def test_a_compilation_track_is_found_by_its_own_artist(db):
+    """INT-03: ownership was keyed on the ALBUM's primary artist alone. A Muse
+    track on a Various Artists compilation was therefore only ever keyed
+    (title, "Various Artists"), so a search that correctly named Muse reported
+    a file we already own as missing — one click from downloading it twice."""
+    from core.library2.importer import normalize_name
+
+    va = _seed_artist(db, 'Various Artists')
+    muse = _seed_artist(db, 'Muse')
+    album = _seed_album(db, va, 'Now Thats What I Call Music', origin='library')
+    track = _seed_track(db, album, va, 'Uprising')
+    _lib2(db,
+          "UPDATE lib2_tracks SET track_artist='Muse' WHERE legacy_track_id=?",
+          (track,))
+    _lib2(db,
+          "INSERT INTO lib2_track_artists(track_id, artist_id, position) "
+          "SELECT t.id, ar.id, 0 FROM lib2_tracks t, lib2_artists ar "
+          " WHERE t.legacy_track_id=? AND ar.legacy_artist_id=?",
+          (track, muse))
+    assert normalize_name('Muse')  # the key both sides fold through
+
+    out = library_check.check_library_presence(
+        db, _NoServerPlexClient(), _FakeConfigManager(), 1,
+        albums=[],
+        tracks=[{'name': 'Uprising', 'artist': 'Muse'}],
+    )
+
+    assert out['tracks'][0]['in_library'] is True
+    assert out['tracks'][0]['file_path']
+
+
+def test_the_album_artist_key_still_resolves(db):
+    """The album artist stays a valid key — it is a fallback now, not the only
+    credit consulted."""
+    va = _seed_artist(db, 'Various Artists')
+    muse = _seed_artist(db, 'Muse')
+    album = _seed_album(db, va, 'Compilation Two', origin='library')
+    track = _seed_track(db, album, va, 'Starlight')
+    _lib2(db,
+          "INSERT INTO lib2_track_artists(track_id, artist_id, position) "
+          "SELECT t.id, ar.id, 0 FROM lib2_tracks t, lib2_artists ar "
+          " WHERE t.legacy_track_id=? AND ar.legacy_artist_id=?",
+          (track, muse))
+
+    out = library_check.check_library_presence(
+        db, _NoServerPlexClient(), _FakeConfigManager(), 1,
+        albums=[],
+        tracks=[{'name': 'Starlight', 'artist': 'Various Artists'},
+                {'name': 'Starlight', 'artist': 'Muse'}],
+    )
+
+    assert [t['in_library'] for t in out['tracks']] == [True, True]
+
+
+def test_an_unrelated_artist_is_still_not_a_match(db):
+    """Widening the key must not make everything match everything."""
+    va = _seed_artist(db, 'Various Artists')
+    muse = _seed_artist(db, 'Muse')
+    album = _seed_album(db, va, 'Compilation Three', origin='library')
+    track = _seed_track(db, album, va, 'Hysteria')
+    _lib2(db,
+          "INSERT INTO lib2_track_artists(track_id, artist_id, position) "
+          "SELECT t.id, ar.id, 0 FROM lib2_tracks t, lib2_artists ar "
+          " WHERE t.legacy_track_id=? AND ar.legacy_artist_id=?",
+          (track, muse))
+
+    out = library_check.check_library_presence(
+        db, _NoServerPlexClient(), _FakeConfigManager(), 1,
+        albums=[],
+        tracks=[{'name': 'Hysteria', 'artist': 'Def Leppard'}],
+    )
+
+    assert out['tracks'][0]['in_library'] is False

@@ -263,7 +263,13 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 download_id = grab["download_id"]
                 job_id = grab.get("external_job_id")
                 if not job_id:
-                    if grab.get("last_client_state") == "submission_unknown":
+                    # ACQ-03: `submission_started` means the same thing here —
+                    # the call was already handed to the client, so this grab
+                    # may be running under a job id we never got to store.
+                    from core.acquisition.submission import (
+                        SUBMISSION_IN_FLIGHT_STATES,
+                    )
+                    if grab.get("last_client_state") in SUBMISSION_IN_FLIGHT_STATES:
                         logger.warning(
                             "Usenet grab %s has an uncertain client submission; "
                             "leaving it open to prevent a duplicate retry",

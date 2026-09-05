@@ -109,6 +109,11 @@ def _rebuild_task(conn: Any, state: RetryState):
     }
     if state.query_count > 0:
         task["query_count"] = int(state.query_count)
+    # ACQ-02: the rebuilt context carries a freshly issued, server-side upgrade
+    # intent; the task that actually reaches the candidate walk has to carry it
+    # too, or the resumed import silently becomes a non-upgrade.
+    from core.imports.upgrade_intent import carry_upgrade_intent
+    carry_upgrade_intent(context, task)
     return task, None
 
 

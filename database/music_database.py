@@ -4414,6 +4414,26 @@ class MusicDatabase:
                 """)
             except Exception as e:
                 logger.debug("listening_history catalogue backfill skipped: %s", e)
+            # INT-01 repair: the Last.fm importer resolved against `lib2_tracks`
+            # but stored the result in `db_track_id`, the media server's own id
+            # namespace. Those rows lost their cover/artist/genre links, and the
+            # backfill above would read the same value as a LEGACY track id — a
+            # numeric collision then links the play to a different track. Move
+            # them source-specifically: only `lastfm` rows, only where the value
+            # really names a catalogue row, and only while `lib2_track_id` is
+            # still empty, so it is idempotent and touches nothing else.
+            try:
+                cursor.execute("""
+                    UPDATE listening_history
+                       SET lib2_track_id = db_track_id, db_track_id = NULL
+                     WHERE server_source = 'lastfm'
+                       AND lib2_track_id IS NULL
+                       AND db_track_id IS NOT NULL
+                       AND EXISTS (SELECT 1 FROM lib2_tracks t
+                                    WHERE t.id = listening_history.db_track_id)
+                """)
+            except Exception as e:
+                logger.debug("last.fm listening id repair skipped: %s", e)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_listening_lib2_track ON listening_history (lib2_track_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_listening_played_at ON listening_history (played_at)")
             cursor.execute("""
@@ -11005,11 +11025,11 @@ class MusicDatabase:
                 # deriving it from "does the bare id already exist" made a second
                 # add of the SAME album look like a different one (bare row has
                 # no album in its key), creating base + composite duplicates.
+                from core.wishlist.identity import wishlist_row_key
                 album_obj = spotify_track_data.get('album', {})
                 album_id = album_obj.get('id', '') if isinstance(album_obj, dict) else ''
-                insert_track_id = track_id
-                if allow_duplicates and album_id:
-                    insert_track_id = f"{track_id}::{album_id}"
+                insert_track_id = wishlist_row_key(
+                    track_id, album_id, allow_duplicates=allow_duplicates) or track_id
 
                 existing = cursor.execute(
                     "SELECT id, source_type FROM wishlist_tracks "
@@ -11064,33 +11084,11 @@ class MusicDatabase:
                     # back to see its own write (R2-09).
                     return self._wishlist_outcome("updated", insert_track_id)
 
-                if existing is not None:
-                    # Idempotent upsert (P1-10): the same intent refreshes the
-                    # waiting row's pipeline context instead of being dropped —
-                    # a later quality-profile change in Library v2 must reach
-                    # the entry that is actually queued. Payload follows the
-                    # newest request; manual provenance is never downgraded by
-                    # an automatic re-add; retry state / date_added stay put.
-                    updates = ["spotify_data = ?"]
-                    params: List[Any] = [spotify_json]
-                    if quality_profile_id is not None and resolved_qp_id is not None:
-                        updates.append("quality_profile_id = ?")
-                        params.append(resolved_qp_id)
-                    if source_info:
-                        updates.append("source_info = ?")
-                        params.append(source_json)
-                    if source_type == 'manual' or existing['source_type'] != 'manual':
-                        updates.append("source_type = ?")
-                        params.append(source_type)
-                    params.append(existing['id'])
-                    cursor.execute(
-                        f"UPDATE wishlist_tracks SET {', '.join(updates)} WHERE id = ?",
-                        params)
-                    conn.commit()
-                    logger.debug(f"Wishlist entry already present — refreshed context for '{track_name}' "
-                                 f"(key: {insert_track_id})")
-                    return False
-
+                # (The second `if existing is not None:` block that used to sit
+                # here was unreachable — the branch above returns under the
+                # identical condition and nothing in between rebinds `existing`
+                # — and it returned a bare False into a function that returns an
+                # outcome dict. Removed with the 2026-09-05 review.)
                 # Insert the track
                 cursor.execute("""
                     INSERT OR REPLACE INTO wishlist_tracks
@@ -11135,6 +11133,65 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error removing track from wishlist: {e}")
+            if raise_on_error:
+                raise
+            return False
+
+    def remove_release_from_wishlist(self, spotify_track_id: str,
+                                     album_id: Optional[str] = None,
+                                     profile_id: int = 1,
+                                     raise_on_error: bool = False) -> bool:
+        """Remove ONE release's wishlist row, never a sibling release.
+
+        SYNC-02: :meth:`remove_from_wishlist` clears every ``<track>::%`` row.
+        That is right for "this recording was downloaded" and wrong for "the
+        user unmonitored this release" — it also deleted a second album of the
+        same recording that was still wanted.
+
+        A bare-keyed row counts as this release when it says so (the first
+        album was stored under the bare track id before the composite key
+        existed) or when it carries no album at all, which is how rows written
+        by writers outside Library v2 look. Anything that names a *different*
+        album is left alone.
+        """
+        try:
+            from core.wishlist.identity import wishlist_row_key
+
+            track = str(spotify_track_id or "").strip()
+            if not track:
+                return False
+            album = str(album_id or "").strip()
+            release_key = wishlist_row_key(track, album)
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                doomed = [release_key]
+                if release_key != track:
+                    row = cursor.execute(
+                        "SELECT id, spotify_data FROM wishlist_tracks "
+                        "WHERE spotify_track_id=? AND profile_id=?",
+                        (track, profile_id)).fetchone()
+                    if row is not None:
+                        try:
+                            stored = json.loads(row['spotify_data'] or '{}')
+                            stored_album = str(
+                                (stored.get('album') or {}).get('id') or '').strip()
+                        except Exception:
+                            stored_album = ''
+                        if stored_album in ('', album):
+                            doomed.append(track)
+                marks = ",".join("?" for _ in doomed)
+                cursor.execute(
+                    f"DELETE FROM wishlist_tracks WHERE profile_id=? "
+                    f"AND spotify_track_id IN ({marks})",
+                    (profile_id, *doomed))
+                conn.commit()
+                if cursor.rowcount > 0:
+                    logger.info("Removed wishlist release: %s", release_key)
+                    return True
+                logger.debug("Wishlist release not found: %s", release_key)
+                return False
+        except Exception as e:
+            logger.error(f"Error removing wishlist release: {e}")
             if raise_on_error:
                 raise
             return False

@@ -548,12 +548,18 @@ def test_new_autolink_artist_uses_live_default_profile(lib2_enabled, imported_co
     assert profile_id == 2
 
 
-def test_autolink_projects_wanted_state_under_the_live_default_profile(
+def test_autolink_projects_wanted_state_under_the_admin_user_profile(
         lib2_enabled, imported_conn):
-    """G8: the pipeline has no request-scoped profile, so recompute_wanted
-    must resolve the live default profile the same way artist/album/track
-    creation already does — never hardcode profile_id=1 (§1 invariant),
-    which would silently orphan the wanted row once profile 1 is deleted."""
+    """SYNC-04: `recompute_wanted`'s `profile_id` is the USER profile that owns
+    the monitoring intent, not the quality profile.
+
+    This test used to assert the opposite — that a default *quality* profile of
+    2 should file the wanted row under profile 2 — and so pinned the namespace
+    confusion as the contract. With the two ids distinct, that row lands under a
+    profile no Library-v2 consumer reads: `track_wanted_states` raises "stale",
+    the admin status reports the track missing, and `list_cutoff_unmet` never
+    offers the upgrade. The quality profile still governs quality, through the
+    track's own `quality_profile_id` cascade."""
     conn = lib2_enabled._get_connection()
     try:
         conn.execute("UPDATE quality_profiles SET is_default=0")
@@ -569,11 +575,21 @@ def test_autolink_projects_wanted_state_under_the_live_default_profile(
     assert file_id is not None
 
     row = imported_conn.execute(
-        """SELECT wt.profile_id FROM lib2_wanted_tracks wt
+        """SELECT wt.profile_id, wt.track_id FROM lib2_wanted_tracks wt
              JOIN lib2_track_files tf ON tf.track_id = wt.track_id
             WHERE tf.id = ?""", (file_id,),
     ).fetchone()
-    assert row["profile_id"] == 2
+    from core.library2 import ADMIN_PROFILE_ID
+    assert row["profile_id"] == ADMIN_PROFILE_ID
+    # ...and the consumer that reads the admin scope can actually see it.
+    from core.library2.wanted import track_wanted_states
+    assert track_wanted_states(
+        imported_conn, [row["track_id"]], profile_id=ADMIN_PROFILE_ID
+    ).keys() == {row["track_id"]}
+    # The quality profile is still the live default; it just is not the owner
+    # of the monitoring intent.
+    from core.library2.profile_lookup import default_quality_profile_id
+    assert default_quality_profile_id(imported_conn) == 2
 
 
 def test_attaches_file_to_materialized_missing_track(lib2_enabled, imported_conn):
@@ -1322,3 +1338,53 @@ def test_rows_without_a_key_are_still_matched(tmp_path):
         assert A._find_or_create_artist(conn, "любэ", create=False) is not None
     finally:
         conn.close()
+
+
+def test_reimport_onto_a_deleted_path_reactivates_its_row(lib2_enabled, imported_conn):
+    """FI-02: delete a file from the library, download the same track again.
+
+    The delete keeps the row as history (`file_state='deleted'`, ADR-03) and the
+    re-import lands on the very same path, so autolink takes its UPDATE branch —
+    which refreshed the quality columns and left the row retired. The bytes were
+    at the destination but the catalogue said the file was gone: the
+    registration gate found no active row, `primary_file_row` skipped it and the
+    library scan excluded it, while the exception recovery still read the
+    returned id as success. `retire_replaced_files` deliberately skips the
+    keep_path, so nothing downstream brought it back either."""
+    from core.library2.track_files import set_file_state
+
+    file_id = A.link_download_into_library_v2(_context())
+    assert file_id is not None
+    set_file_state(imported_conn, int(file_id), "deleted")
+    imported_conn.execute(
+        "UPDATE lib2_track_files SET missing_since=CURRENT_TIMESTAMP,"
+        " missing_scan_count=3 WHERE id=?", (file_id,))
+    imported_conn.commit()
+
+    again = A.link_download_into_library_v2(_context())
+    assert again == file_id
+
+    row = imported_conn.execute(
+        "SELECT file_state, missing_since, missing_scan_count, is_primary"
+        "  FROM lib2_track_files WHERE id=?", (file_id,)).fetchone()
+    assert row["file_state"] == "active"
+    assert row["missing_since"] is None
+    assert row["missing_scan_count"] == 0
+    assert row["is_primary"] == 1
+
+
+def test_reimport_onto_an_active_path_leaves_its_state_alone(
+        lib2_enabled, imported_conn):
+    """The reactivation must not become a blanket state write: an already
+    active row keeps everything the normal update path gives it."""
+    file_id = A.link_download_into_library_v2(_context())
+    before = imported_conn.execute(
+        "SELECT file_state, is_primary FROM lib2_track_files WHERE id=?",
+        (file_id,)).fetchone()
+
+    assert A.link_download_into_library_v2(_context()) == file_id
+
+    after = imported_conn.execute(
+        "SELECT file_state, is_primary FROM lib2_track_files WHERE id=?",
+        (file_id,)).fetchone()
+    assert dict(after) == dict(before)
