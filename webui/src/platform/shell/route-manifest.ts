@@ -19,6 +19,7 @@ export const shellPageIds = [
   'help',
   'hydrabase',
   'chat',
+  'podcasts',
 ] as const;
 
 export type ShellPageId = (typeof shellPageIds)[number];
@@ -51,6 +52,7 @@ export const shellRouteManifest: readonly ShellRouteDefinition[] = [
   { pageId: 'help', path: '/help', kind: 'legacy' },
   { pageId: 'hydrabase', path: '/hydrabase', kind: 'legacy' },
   { pageId: 'chat', path: '/chat', kind: 'legacy' },
+  { pageId: 'podcasts', path: '/podcasts', kind: 'react' },
 ] as const;
 
 const routeByPageId = new Map(shellRouteManifest.map((route) => [route.pageId, route]));

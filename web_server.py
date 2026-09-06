@@ -854,6 +854,7 @@ VALID_PAGE_IDS = {
     'help',
     'hydrabase',
     'issues',
+    'podcasts',
     # Video side — per-profile page toggles (admin-only surfaces are gated separately,
     # not via allowed_pages: overlay studio, video-import, video-settings, video-automations).
     'video-dashboard',

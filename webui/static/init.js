@@ -2013,6 +2013,7 @@ const PROFILE_PAGE_LABELS = {
     tools: 'Tools',
     hydrabase: 'Hydrabase',
     issues: 'Issues',
+    podcasts: 'Podcasts',
     help: 'Help & Docs',
     settings: 'Settings',
     'artist-detail': 'Artist Detail',
@@ -2716,7 +2717,7 @@ function showSelfEditForm() {
     const pageLabels = {
         dashboard: 'Dashboard', sync: 'Sync', search: 'Search', discover: 'Discover',
         automations: 'Automations', library: 'Library', stats: 'Listening Stats',
-        'playlist-explorer': 'Playlist Explorer', import: 'Import', help: 'Help & Docs'
+        'playlist-explorer': 'Playlist Explorer', import: 'Import', podcasts: 'Podcasts', help: 'Help & Docs'
     };
 
     const form = document.createElement('div');
@@ -3019,7 +3020,7 @@ const _DEEPLINK_VALID_PAGES = new Set([
     'dashboard', 'sync', 'search', 'discover', 'automations',
     'library', 'import', 'settings', 'help', 'issues', 'stats', 'watchlist',
     'wishlist', 'active-downloads', 'artist-detail', 'playlist-explorer',
-    'hydrabase', 'tools', 'chat'
+    'hydrabase', 'tools', 'chat', 'podcasts'
 ]);
 
 function _getPageFromPath() {
