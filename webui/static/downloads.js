@@ -1,3 +1,32 @@
+// Shared lifecycle for every download-missing modal, including re-opened active jobs.
+function installDownloadModalScrollLock() {
+    const selector = '.download-missing-modal';
+    const sync = () => {
+        const open = [...document.querySelectorAll(selector)].some(modal =>
+            !modal.hidden && getComputedStyle(modal).display !== 'none');
+        document.documentElement.classList.toggle('download-modal-open', open);
+    };
+    const containsModal = node => node.nodeType === 1 &&
+        (node.matches(selector) || node.querySelector(selector));
+    const observer = new MutationObserver(records => {
+        if (records.some(record => record.type === 'attributes'
+            ? record.target.matches(selector)
+            : [...record.addedNodes, ...record.removedNodes].some(containsModal))) sync();
+    });
+    observer.observe(document.body, {childList: true, subtree: true, attributes: true,
+                                    attributeFilter: ['style', 'class', 'hidden']});
+    sync();
+    return () => {
+        observer.disconnect();
+        document.documentElement.classList.remove('download-modal-open');
+    };
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', installDownloadModalScrollLock, {once: true});
+} else {
+    installDownloadModalScrollLock();
+}
+
 // WING IT — Download without metadata discovery
 // ==================================================================================
 
