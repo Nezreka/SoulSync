@@ -2882,7 +2882,7 @@ async function checkAdminPinRequired() {
 // localhost).
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js', { scope: '/' })
+        navigator.serviceWorker.register(window.SoulSyncURL?.resolve('/sw.js') || '/sw.js', { scope: window.SoulSyncURL?.resolve('/') || '/' })
             .catch((err) => console.warn('[SW] registration failed:', err));
     });
 }
@@ -3024,10 +3024,10 @@ const _DEEPLINK_VALID_PAGES = new Set([
 
 function _getPageFromPath() {
     const router = getWebRouter();
-    const resolved = router?.resolvePageId?.(window.location.pathname);
+    const resolved = router?.resolvePageId?.((window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname));
     if (resolved) return resolved;
 
-    const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
+    const path = (window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname).replace(/^\/+|\/+$/g, '');
     if (!path) return 'dashboard';
     const segs = path.split('/');
     const basePage = segs[0];
@@ -3057,7 +3057,7 @@ function buildArtistDetailPath(artistId, source = null, name = null) {
     return path;
 }
 
-function parseArtistDetailPath(pathname = window.location.pathname) {
+function parseArtistDetailPath(pathname = (window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname)) {
     const segs = String(pathname || '').split('/').filter(Boolean);
     if (segs[0] !== 'artist-detail' || segs.length < 3) return null;
 
@@ -3278,7 +3278,7 @@ function toggleNavSection(label) {
 function restoreNavSections() {
     let saved = {};
     try { saved = JSON.parse(localStorage.getItem('navSections') || '{}'); } catch (e) { saved = {}; }
-    const path = window.location.pathname;
+    const path = (window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname);
     document.querySelectorAll('.nav-section-label').forEach(label => {
         // Expanded by default; collapsed only when the user explicitly collapsed it.
         let collapsed = saved[label.dataset.section] === true;
@@ -3517,7 +3517,7 @@ function navigateToPage(pageId, options = {}) {
             : (pageId === 'artist-detail' && options.artistId) ? buildArtistDetailPath(options.artistId, options.artistSource, options.artistName)
             : (pageId === 'label-detail' && options.labelId) ? buildLabelDetailPath(options.labelId, options.labelName)
             : '/' + pageId;
-        if (window.location.pathname !== urlPath) {
+        if ((window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname) !== urlPath) {
             if (options.replace === true) {
                 history.replaceState({ page: pageId }, '', urlPath);
             } else {
@@ -3815,7 +3815,7 @@ async function loadPageData(pageId) {
  */
 async function loadInitialData() {
     try {
-        const initialPath = window.location.pathname;
+        const initialPath = (window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname);
         const initialNavigationEpoch = navigationEpoch;
 
         // Snapshot hydration is best-effort chrome — bubbles and the discover
@@ -3863,7 +3863,7 @@ async function loadInitialData() {
         // was blank until you navigated by hand. Desktop wins that race and
         // never sees it; a phone is slow enough to lose it. A redirect only
         // answers the question startup was already asking, so adopt it.
-        if (window.location.pathname !== initialPath) {
+        if ((window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname) !== initialPath) {
             const redirectedPage = _getPageFromPath();
             if (redirectedPage && isPageAllowed(redirectedPage)) {
                 targetPage = redirectedPage;

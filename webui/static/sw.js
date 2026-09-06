@@ -25,9 +25,11 @@
  * doesn't match the current version, so old entries don't accumulate.
  */
 
-const CACHE_VERSION = 'v1';
-const IMAGE_CACHE = `soulsync-images-${CACHE_VERSION}`;
-const STATIC_CACHE = `soulsync-static-${CACHE_VERSION}`;
+const CACHE_VERSION = 'v2';
+const URL_BASE = new URL(self.registration.scope).pathname.replace(/\/$/, '');
+const CACHE_NAMESPACE = `soulsync-${encodeURIComponent(URL_BASE || 'root')}-`;
+const IMAGE_CACHE = `${CACHE_NAMESPACE}images-${CACHE_VERSION}`;
+const STATIC_CACHE = `${CACHE_NAMESPACE}static-${CACHE_VERSION}`;
 const VALID_CACHES = new Set([IMAGE_CACHE, STATIC_CACHE]);
 
 // Image hosts we cache. Local /api/image-proxy is treated as an image
@@ -50,7 +52,7 @@ function _isImageRequest(request) {
     if (request.method !== 'GET') return false;
     const url = new URL(request.url);
     // Local image proxy
-    if (url.pathname.startsWith('/api/image-proxy')) return true;
+    if (url.origin === self.location.origin && url.pathname.startsWith(URL_BASE + '/api/image-proxy')) return true;
     // Known CDN hosts
     if (IMAGE_HOSTS.includes(url.hostname)) return true;
     // Last-resort: file extension hint (covers misc CDNs we missed)
@@ -66,7 +68,7 @@ function _isStaticAsset(request) {
     if (request.method !== 'GET') return false;
     const url = new URL(request.url);
     if (url.origin !== self.location.origin) return false;
-    return url.pathname.startsWith('/static/');
+    return url.pathname.startsWith(URL_BASE + '/static/');
 }
 
 self.addEventListener('install', (event) => {
@@ -83,7 +85,7 @@ self.addEventListener('activate', (event) => {
     // navigation).
     event.waitUntil(
         caches.keys().then((names) => Promise.all(
-            names.map((name) => VALID_CACHES.has(name) ? null : caches.delete(name))
+            names.map((name) => name.startsWith(CACHE_NAMESPACE) && !VALID_CACHES.has(name) ? caches.delete(name) : null)
         )).then(() => self.clients.claim())
     );
 });

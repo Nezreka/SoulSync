@@ -5,6 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     <title>SoulSync - Music Sync & Manager</title>
+    <meta name="soulsync-url-base" content="{{ request.script_root }}">
+    <script src="{{ url_for('static', filename='url-base.js', v=static_v) }}"></script>
     <!-- Collapsed sidebar (#1155). Has to run HERE, before the stylesheet
          resolves --sidebar-w, or the sidebar renders full width and snaps to the
          icon width after paint — a visible jump of the whole page on every

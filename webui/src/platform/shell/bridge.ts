@@ -1,3 +1,4 @@
+import { appURL } from '@/platform/url-base';
 import type { AnyRouter } from '@tanstack/react-router';
 
 import type { ShellStatusPayload } from './status';
@@ -119,7 +120,7 @@ export function bindWindowWebRouter(router: AnyRouter) {
         }
       }
 
-      await router.navigate({ href, replace: options?.replace === true });
+      await router.navigate({ href: appURL(href), replace: options?.replace === true });
       return true;
     },
   };

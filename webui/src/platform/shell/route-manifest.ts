@@ -60,6 +60,8 @@ export const reactShellRoutes = shellRouteManifest.filter((route) => route.kind 
 export const legacyShellRoutes = shellRouteManifest.filter((route) => route.kind === 'legacy');
 
 export function normalizeShellPath(pathname: string): string {
+  const base = document.querySelector<HTMLMetaElement>('meta[name="soulsync-url-base"]')?.content || '';
+  if (base && (pathname === base || pathname.startsWith(base + '/'))) pathname = pathname.slice(base.length) || '/';
   if (!pathname) return '/';
   if (pathname === '/') return '/';
   const normalized = pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;

@@ -783,7 +783,7 @@ async function _pollPlaylistExport(jobId, playlistId, mode, name) {
             const sum = job.summary || {};
             const cov = `${sum.included || 0}/${sum.total || 0} matched${sum.skipped ? ` · ${sum.skipped} unmatched` : ''}`;
             if (mode === 'download') {
-                window.location = `/api/playlists/export/download/${jobId}`;
+                window.location = window.SoulSyncURL?.resolve(`/api/playlists/export/download/${jobId}`) || `/api/playlists/export/download/${jobId}`;
                 _setExportStatus(playlistId, `<span style="color:#22c55e;">Downloaded · ${cov}</span>`, 8000);
             } else {
                 const url = (job.push && job.push.playlist_url) || '';

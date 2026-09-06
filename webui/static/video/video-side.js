@@ -19,7 +19,7 @@
     // Captured at SCRIPT-EVAL time — before music's router boots (on
     // DOMContentLoaded) and may rewrite an unknown /video-detail/... URL to
     // /dashboard. This is the real path the user reloaded/deep-linked.
-    var BOOT_PATH = window.location.pathname;
+    var BOOT_PATH = (window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname);
 
     var SIDE_KEY = 'soulsync_side';
     var MUSIC_SUBTITLE = 'Music Sync & Manager';
@@ -123,7 +123,7 @@
     }
 
     function onPopState() {
-        var path = window.location.pathname;
+        var path = (window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname);
         var r = parseDetailPath(path);
         if (r) {
             // Synced to the layer depth stamped on the history entry (handles both
@@ -318,7 +318,7 @@
         if (DETAIL_PAGES[pageId] || mode === 'restore') return;
         var path = buildPagePath(pageId);
         try {
-            if (mode === 'replace' || window.location.pathname === path) {
+            if (mode === 'replace' || (window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname) === path) {
                 history.replaceState({ videoPage: pageId }, '', path);
             } else {
                 history.pushState({ videoPage: pageId }, '', path);
@@ -354,7 +354,7 @@
             // Land on the last-active video page and give it a real URL.
             var active = document.querySelector('.video-nav .nav-button.active');
             navigate(active ? active.getAttribute('data-video-page') : DEFAULT_VIDEO_PAGE);
-        } else if (parseDetailPath(window.location.pathname) || parsePagePath(window.location.pathname)) {
+        } else if (parseDetailPath((window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname)) || parsePagePath((window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname))) {
             // Back to music from a video URL → drop it so a reload stays on music.
             try { history.replaceState(null, '', '/'); } catch (e) { /* ignore */ }
         }
@@ -437,7 +437,7 @@
                 var state = { videoDetail: { kind: d.kind, id: d.id, source: d.source || 'library',
                                              layer: _backStack.length } };
                 var path = buildDetailPath(d.source, d.kind, d.id);
-                if (window.location.pathname !== path) history.pushState(state, '', path);
+                if ((window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname) !== path) history.pushState(state, '', path);
                 else history.replaceState(state, '', path);
             }
             updateBackLabels();
@@ -483,7 +483,7 @@
             var reassertPage = function () {
                 if (bootPage && document.body.getAttribute('data-side') === 'video' &&
                     !DETAIL_PAGES[document.body.getAttribute('data-video-page')] &&
-                    window.location.pathname !== pagePath) {
+                    (window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname) !== pagePath) {
                     try { history.replaceState({ videoPage: initialPage }, '', pagePath); } catch (e) { /* ignore */ }
                 }
             };
@@ -506,7 +506,7 @@
                 // late async music redirect can't strand us on /dashboard) — never
                 // fights real navigation away.
                 if (DETAIL_PAGES[document.body.getAttribute('data-video-page')] &&
-                    window.location.pathname !== bootPath) {
+                    (window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname) !== bootPath) {
                     try { history.replaceState({ videoDetail: bootDetail }, '', bootPath); } catch (e) { /* ignore */ }
                 }
             };

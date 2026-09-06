@@ -35,6 +35,8 @@ EXPECTED_VIDEO_PAGES = {
 # rather than banning the substring outright (which wrongly flags window.confirm,
 # window.VideoGet, window.addEventListener, …).
 _ALLOWED_WINDOW = {
+    # Shared deployment URL utility; independent of music UI state.
+    "window.SoulSyncURL",
     # sibling video-side module namespaces (each published by its own IIFE)
     "window.VideoGet", "window.VideoWatchlist", "window.VideoYoutube", "window.VideoDownload",
     "window.VideoGrab", "window.VideoManage", "window.VideoPoster", "window.VideoIssues",

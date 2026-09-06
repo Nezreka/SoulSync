@@ -1,3 +1,4 @@
+import { appURL } from '@/platform/url-base';
 /**
  * The export job controller — _startPlaylistExport / _pollPlaylistExport /
  * _setExportStatus (stats-automations.js 731-819) as one hook.
@@ -113,7 +114,7 @@ export function useExportJobs(): ExportController {
         const outcome = exportPollOutcome(data.job || {}, mode, jobId);
         // The .jspf hand-off goes FIRST — the vanilla navigates before it
         // paints the "Downloaded" line (784-785).
-        if (outcome.downloadUrl) window.location.href = outcome.downloadUrl;
+        if (outcome.downloadUrl) window.location.href = appURL(outcome.downloadUrl);
         if (outcome.status) paint(playlistId, outcome.status);
         if (outcome.toast) window.showToast?.(outcome.toast.message, outcome.toast.type);
         if (outcome.terminal) return;
