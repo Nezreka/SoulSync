@@ -83651,3 +83651,29 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 .bylt-section .discover-section-header { gap: 16px; flex-wrap: wrap; }
 .bylt-section .bylt-track { padding: 6px 8px; }
 .bylt-expand { margin-top: 10px; }
+
+/* Queue actions remain available to keyboard and touch users. */
+.np-queue-item-play { border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; padding: 4px; min-width: 0; }
+.np-queue-item-play > span { display: block; }
+.np-queue-item-move { min-width: 36px; min-height: 36px; border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+.np-queue-item-move:disabled { opacity: .3; cursor: default; }
+.np-queue-item-play:focus-visible, .np-queue-item-move:focus-visible, .np-queue-item-remove:focus-visible { outline: 2px solid var(--accent, #a78bfa); outline-offset: 2px; }
+.np-queue-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* Keep queue metadata and actions in explicit slots; the arrows must not create
+   implicit grid rows in the original four-column queue layout. */
+.np-queue-item { grid-template-columns: 44px minmax(0, 1fr) auto auto !important; }
+.np-queue-item-meta { min-width: 0; text-align: right; }
+.np-queue-item-actions { display: flex; align-items: center; gap: 2px; }
+.np-queue-item-actions > button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 36px; width: 36px; height: 36px; padding: 0; margin: 0; }
+.np-queue-item-actions .np-queue-item-remove { opacity: 1; color: rgba(255,255,255,.65); }
+.np-queue-item-actions > button:hover:not(:disabled),
+.np-queue-item-actions > button:focus-visible { background: rgba(255,255,255,.08); opacity: 1; }
+@media (max-width: 600px) {
+    .np-queue-item { grid-template-columns: 36px minmax(0, 1fr) auto !important; gap: 2px 8px !important; }
+    .np-queue-item-art { width: 36px; height: 36px; grid-column: 1; grid-row: 1 / span 2; }
+    .np-queue-item-info { grid-column: 2; grid-row: 1; }
+    .np-queue-item-meta { grid-column: 2; grid-row: 2; text-align: left; padding-left: 4px; }
+    .np-queue-item-actions { grid-column: 3; grid-row: 1 / span 2; }
+    .np-queue-item-status { display: block; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+}
