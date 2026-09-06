@@ -20019,6 +20019,7 @@ _init_redownload(
     resolve_library_file_path_fn=_resolve_library_file_path,
     attempt_download_with_candidates_fn=_attempt_download_with_candidates,
     executor=missing_download_executor,
+    monitor=download_monitor,
 )
 
 _init_debug_info(
