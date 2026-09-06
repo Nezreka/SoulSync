@@ -235,3 +235,19 @@ def test_an_ordinary_stall_still_gets_its_retries():
     tick = src[src.index("def _tick("):]
     assert "allow_retry=not _at_completion" in tick
     assert "allow_retry=False" not in tick, "never unconditionally off"
+
+
+def test_monitor_clock_is_utc_even_when_server_local_time_is_seven_hours_behind(monkeypatch):
+    """A fresh Pacific-time grab used to become 420 minutes old on its next poll."""
+    import time
+    from core.video import download_monitor as monitor
+    epoch = 1788624000.0
+    utc = time.gmtime(epoch)
+    local = time.gmtime(epoch - 7 * 3600)
+    real_strftime = time.strftime
+    monkeypatch.setattr(monitor.time, "gmtime", lambda: utc)
+    monkeypatch.setattr(monitor.time, "strftime",
+                        lambda fmt, value=None: real_strftime(fmt, local if value is None else value))
+    stored = monitor._now()
+    assert classify(0, 0, stored, epoch + 5) == (WAITING, 5.0)
+    assert classify(0, 0, stored, epoch + 1801)[0] == STALLED

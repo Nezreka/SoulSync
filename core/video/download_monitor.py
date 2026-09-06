@@ -371,7 +371,7 @@ _requerying: set = set()  # download ids with a requery thread in flight
 
 
 def _now():
-    return time.strftime("%Y-%m-%d %H:%M:%S")
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
 
 
 # ── auto-retry ────────────────────────────────────────────────────────────────
