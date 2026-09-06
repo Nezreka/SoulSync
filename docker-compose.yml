@@ -15,6 +15,11 @@ services:
       - UMASK=022
       # Web server configuration
       - PYTHONPATH=/app
+      # Optional: ONLY when your reverse proxy hosts SoulSync under a subpath,
+      # e.g. https://media.example.com/soulsync/. Leave commented for normal setups.
+      # Configure the proxy for the same path; see docs/REVERSE_PROXY_SUBPATH.md.
+      # After changing this setting, recreate the container to apply it.
+      # - SOULSYNC_URL_BASE=/soulsync
       # Optional: Configure through environment variables
       - SOULSYNC_CONFIG_PATH=/app/config/config.json
       # Set timezone (change to your timezone)
