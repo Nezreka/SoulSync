@@ -7,11 +7,8 @@
  * closes over THAT span element. Here the statuses are state keyed by playlist
  * id and the tab renders them; the auto-hide is a timer that clears the entry.
  *
- * That reproduces the vanilla's timer semantics exactly, including the sharp
- * edge: a pending auto-hide is NOT cancelled when a newer status is painted,
- * because the vanilla's timer removes the shared span whatever is now inside
- * it. A 12s "Exported to Spotify" therefore still wipes anything painted after
- * it — kept, because changing it would change what the page does.
+ * Status timers and responses belong to a revision. Superseded jobs cannot
+ * erase newer progress, download a stale result or emit a stale success toast.
  *
  * DECLARED DIVERGENCE: in the vanilla, refreshing the list re-renders the cards
  * and destroys the span, so 'Update list' silently wipes a live export status.
@@ -51,6 +48,8 @@ export function useExportJobs(): ExportController {
   // second for its whole run.
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const alive = useRef(true);
+  const operations = useRef<Record<number, number>>({});
+  const paints = useRef<Record<number, number>>({});
 
   useEffect(() => {
     alive.current = true;
@@ -59,6 +58,7 @@ export function useExportJobs(): ExportController {
       alive.current = false;
       pending.forEach(clearTimeout);
       pending.clear();
+      operations.current = {};
     };
   }, []);
 
@@ -81,10 +81,12 @@ export function useExportJobs(): ExportController {
 
   const paint = useCallback(
     (playlistId: number, status: ExportStatusLine) => {
+      const revision = (paints.current[playlistId] ?? 0) + 1;
+      paints.current[playlistId] = revision;
       setStatuses((current) => ({ ...current, [playlistId]: status }));
       if (status.autoHideMs) {
         later(() => {
-          if (alive.current) clear(playlistId);
+          if (alive.current && paints.current[playlistId] === revision) clear(playlistId);
         }, status.autoHideMs);
       }
     },
@@ -98,10 +100,16 @@ export function useExportJobs(): ExportController {
    * this out of the render pass entirely.
    */
   const poll = useCallback(
-    async function tick(jobId: string, playlistId: number, mode: ExportMode): Promise<void> {
+    async function tick(
+      jobId: string,
+      playlistId: number,
+      mode: ExportMode,
+      operation: number,
+    ): Promise<void> {
+      if (!alive.current || operations.current[playlistId] !== operation) return;
       try {
         const data = await fetchPlaylistExportStatus(jobId);
-        if (!alive.current) return;
+        if (!alive.current || operations.current[playlistId] !== operation) return;
         const outcome = exportPollOutcome(data.job || {}, mode, jobId);
         // The .jspf hand-off goes FIRST — the vanilla navigates before it
         // paints the "Downloaded" line (784-785).
@@ -109,11 +117,12 @@ export function useExportJobs(): ExportController {
         if (outcome.status) paint(playlistId, outcome.status);
         if (outcome.toast) window.showToast?.(outcome.toast.message, outcome.toast.type);
         if (outcome.terminal) return;
-        later(() => void tick(jobId, playlistId, mode), EXPORT_POLL_MS);
+        later(() => void tick(jobId, playlistId, mode, operation), EXPORT_POLL_MS);
       } catch {
-        // A failed tick paints nothing and simply slows down (805).
-        if (!alive.current) return;
-        later(() => void tick(jobId, playlistId, mode), EXPORT_POLL_RETRY_MS);
+        // Connectivity trouble is distinct from an export failure.
+        if (!alive.current || operations.current[playlistId] !== operation) return;
+        paint(playlistId, { text: 'Reconnecting to export status...', color: '#f59e0b' });
+        later(() => void tick(jobId, playlistId, mode, operation), EXPORT_POLL_RETRY_MS);
       }
     },
     [paint, later],
@@ -121,17 +130,19 @@ export function useExportJobs(): ExportController {
 
   const start = useCallback(
     async (playlistId: number, mode: ExportMode, backfill: boolean) => {
+      const operation = (operations.current[playlistId] ?? 0) + 1;
+      operations.current[playlistId] = operation;
       paint(playlistId, EXPORT_STARTING_STATUS);
       try {
         const data = await startPlaylistExport(playlistId, mode, backfill);
-        if (!alive.current) return;
+        if (!alive.current || operations.current[playlistId] !== operation) return;
         const outcome = exportStartOutcome(data);
         if (outcome.status) paint(playlistId, outcome.status);
         // Fire-and-forget, as the vanilla does (750) — the poll owns its own
         // errors, and awaiting it would keep `start` pending for the whole job.
-        if (outcome.jobId) void poll(outcome.jobId, playlistId, mode);
+        if (outcome.jobId) void poll(outcome.jobId, playlistId, mode, operation);
       } catch {
-        if (!alive.current) return;
+        if (!alive.current || operations.current[playlistId] !== operation) return;
         paint(playlistId, EXPORT_START_ERROR_STATUS);
       }
     },

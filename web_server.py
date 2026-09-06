@@ -3912,7 +3912,7 @@ def setup_status_endpoint():
     setup_done = config_manager.get('setup.completed', False)
     download_mode = config_manager.get('download_source.mode', '')
     # Either the explicit flag or a user-configured download source means setup is done
-    has_user_config = bool(setup_done) or bool(download_mode)
+    has_user_config = bool(setup_done) or (bool(download_mode) and not config_manager.get('setup.in_progress', False))
     return jsonify({
         "setup_complete": has_user_config,
     })
@@ -3921,6 +3921,7 @@ def setup_status_endpoint():
 def setup_complete_endpoint():
     """Mark first-run setup as completed."""
     config_manager.set('setup.completed', True)
+    config_manager.set('setup.in_progress', False)
     return jsonify({"success": True})
 
 @app.route('/api/test-connection', methods=['POST'])
