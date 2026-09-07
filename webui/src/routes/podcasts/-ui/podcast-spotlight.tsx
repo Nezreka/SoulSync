@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import type { PodcastShowSummary } from '../-podcasts.types';
+import { usePodcastContext } from './podcast-context';
 
 import styles from './podcasts-page.module.css';
 
@@ -13,6 +14,8 @@ export function PodcastSpotlight({ shows, onSelectShow }: PodcastSpotlightProps)
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const { isWatchingShow, toggleWatchlist, isWatchlistBusy } = usePodcastContext();
 
   const totalShows = Math.min(shows.length, 5);
   const activeShow = shows[currentIndex] || shows[0];
@@ -127,11 +130,69 @@ export function PodcastSpotlight({ shows, onSelectShow }: PodcastSpotlightProps)
         </p>
 
         <div className={styles.spotlightActions}>
-          <button type="button" className={styles.spotlightListenBtn}>
+          <button
+            type="button"
+            className={styles.spotlightListenBtn}
+            onClick={() => onSelectShow(activeShow)}
+          >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
               <polygon points="5 3 19 12 5 21 5 3" />
             </svg>
             <span>Explore Episodes</span>
+          </button>
+
+          <button
+            type="button"
+            className={`${styles.spotlightWatchlistBtn} ${
+              isWatchingShow(activeShow) ? styles.spotlightWatchlistBtnActive : ''
+            } ${isWatchlistBusy(activeShow) ? styles.spotlightWatchlistBtnBusy : ''}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              void toggleWatchlist(activeShow);
+            }}
+            disabled={isWatchlistBusy(activeShow)}
+            aria-label={
+              isWatchingShow(activeShow)
+                ? `Remove "${activeShow.title}" from Watchlist`
+                : `Add "${activeShow.title}" to Watchlist`
+            }
+          >
+            {isWatchingShow(activeShow) ? (
+              <>
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" fill="currentColor" />
+                </svg>
+                <span>Watching</span>
+                <span className={styles.spotlightWatchlistCheck}>✓</span>
+              </>
+            ) : (
+              <>
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+                <span>Add to Watchlist</span>
+              </>
+            )}
           </button>
         </div>
       </div>

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 
 import type { PodcastShowSummary } from '../-podcasts.types';
+import { usePodcastContext } from './podcast-context';
 
 import styles from './podcasts-page.module.css';
 
@@ -15,6 +16,7 @@ type SortOption = 'default' | 'alpha' | 'episodes';
 
 export function PodcastGrid({ title, shows, isLoading, onSelectShow }: PodcastGridProps) {
   const [sortBy, setSortBy] = useState<SortOption>('default');
+  const { isWatchingShow, toggleWatchlist, isWatchlistBusy } = usePodcastContext();
 
   const sortedShows = useMemo(() => {
     if (!shows.length) return [];
@@ -61,12 +63,44 @@ export function PodcastGrid({ title, shows, isLoading, onSelectShow }: PodcastGr
     );
   }
 
+  const isSearch = title.startsWith('Search Results for ');
+  let searchWord = '';
+  if (isSearch) {
+    searchWord = title.replace('Search Results for ', '').replace(/^["']|["']$/g, '');
+  }
+
   return (
     <div>
       <div className={styles.sectionHeaderRow}>
         <div className={styles.sectionTitleGroup}>
-          <h2 className={styles.sectionTitle}>{title}</h2>
+          <h2 className={styles.sectionTitle}>
+            {isSearch ? (
+              <>
+                <svg
+                  className={styles.searchTitleIcon}
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <span>Search Results for </span>
+                <span className={styles.sectionTitleHighlight}>"{searchWord}"</span>
+              </>
+            ) : (
+              title
+            )}
+          </h2>
           <span className={styles.sectionCount}>{shows.length} shows</span>
+          {isSearch && (
+            <p className={styles.searchSubtitle}>Showing top matches from the global podcast directory</p>
+          )}
         </div>
 
         {shows.length > 5 && (
@@ -102,11 +136,14 @@ export function PodcastGrid({ title, shows, isLoading, onSelectShow }: PodcastGr
         {sortedShows.map((show, idx) => {
           const key = show.itunes_id ?? show.feed_url ?? `${show.title}-${idx}`;
           const cat = show.categories?.[0] || '';
+          const isWatching = isWatchingShow(show);
+          const isBusy = isWatchlistBusy(show);
 
           return (
             <div
               key={key}
               className={styles.showCard}
+              style={{ animationDelay: `${Math.min(idx * 30, 450)}ms` }}
               onClick={() => onSelectShow(show)}
               role="button"
               tabIndex={0}
@@ -128,6 +165,58 @@ export function PodcastGrid({ title, shows, isLoading, onSelectShow }: PodcastGr
                 ) : (
                   <div className={styles.showArtPlaceholder}>🎙️</div>
                 )}
+
+                {/* Floating Quick Action Eye Button (Apple/Meta-style Frosted Material) */}
+                <button
+                  type="button"
+                  className={`${styles.cardWatchlistEyeBtn} ${
+                    isWatching ? styles.cardWatchlistEyeBtnActive : ''
+                  } ${isBusy ? styles.cardWatchlistEyeBtnBusy : ''}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void toggleWatchlist(show);
+                  }}
+                  title={
+                    isWatching
+                      ? `Remove "${show.title}" from Watchlist`
+                      : `Add "${show.title}" to Watchlist`
+                  }
+                  aria-label={
+                    isWatching
+                      ? `Remove "${show.title}" from Watchlist`
+                      : `Add "${show.title}" to Watchlist`
+                  }
+                >
+                  {isWatching ? (
+                    <svg
+                      width="15"
+                      height="15"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                      <circle cx="12" cy="12" r="3" fill="currentColor" />
+                    </svg>
+                  ) : (
+                    <svg
+                      width="15"
+                      height="15"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  )}
+                </button>
 
                 <div className={styles.showArtHoverOverlay}>
                   <div className={styles.gridPlayBtn} aria-hidden="true">

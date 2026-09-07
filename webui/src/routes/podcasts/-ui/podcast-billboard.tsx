@@ -1,12 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 
 import type { PodcastEpisodeItem, PodcastShowDetail } from '../-podcasts.types';
-import {
-  addPodcastToWatchlist,
-  checkPodcastWatchlist,
-  removePodcastFromWatchlist,
-} from '../-podcasts.api';
+import { usePodcastContext } from './podcast-context';
 
 import styles from './podcasts-page.module.css';
 
@@ -15,69 +11,39 @@ interface PodcastBillboardProps {
   onPlayEpisode: (ep: PodcastEpisodeItem) => void;
 }
 
+function cleanDescription(text?: string | null): string {
+  if (!text) return '';
+  return text
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<\/p>/gi, ' ')
+    .replace(/<\/?[^>]+(>|$)/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function PodcastBillboard({ show, onPlayEpisode }: PodcastBillboardProps) {
   const navigate = useNavigate();
   const [isExpanded, setIsExpanded] = useState(false);
   const [copiedFeed, setCopiedFeed] = useState(false);
-  const [isWatching, setIsWatching] = useState(false);
-  const [isWatchlistBusy, setIsWatchlistBusy] = useState(false);
+  const { isWatchingShow, toggleWatchlist, isWatchlistBusy } = usePodcastContext();
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!show.feed_url && !show.itunes_id) return;
+  const isWatching = isWatchingShow(show);
+  const isBusy = isWatchlistBusy(show);
 
-    checkPodcastWatchlist(show.feed_url, show.itunes_id)
-      .then((res) => {
-        if (!cancelled) {
-          setIsWatching(res.isWatching);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setIsWatching(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [show.feed_url, show.itunes_id]);
-
-  const handleToggleWatchlist = async () => {
-    if (isWatchlistBusy) return;
-    setIsWatchlistBusy(true);
-
-    try {
-      if (isWatching) {
-        const res = await removePodcastFromWatchlist(show.feed_url, show.itunes_id);
-        if (res.success || !res.isWatching) {
-          setIsWatching(false);
-          window.showToast?.(`Removed "${show.title}" from Watchlist`, 'info');
-        } else {
-          window.showToast?.('Could not remove from Watchlist', 'error');
-        }
-      } else {
-        const res = await addPodcastToWatchlist(show);
-        if (res.success || res.isWatching) {
-          setIsWatching(true);
-          window.showToast?.(`Added "${show.title}" to Watchlist`, 'success');
-        } else {
-          window.showToast?.('Could not add to Watchlist', 'error');
-        }
-      }
-      try {
-        window.updateWatchlistButtonCount?.();
-      } catch {
-        /* non-fatal */
-      }
-    } catch {
-      window.showToast?.('Failed to update Watchlist', 'error');
-    } finally {
-      setIsWatchlistBusy(false);
-    }
+  const handleToggleWatchlist = () => {
+    void toggleWatchlist(show);
   };
 
   const episodes = show.episodes || [];
   const latestEp = episodes[0];
-  const isLongDesc = (show.description || '').length > 280;
+  const cleanDesc = cleanDescription(show.description);
+  const isLongDesc = cleanDesc.length > 280;
 
   const handleCopyFeed = async () => {
     if (!show.feed_url) return;
@@ -112,6 +78,13 @@ export function PodcastBillboard({ show, onPlayEpisode }: PodcastBillboardProps)
       </button>
 
       <div className={styles.billboardCard}>
+        {show.artwork_url && (
+          <div
+            className={styles.billboardAmbientBackdrop}
+            style={{ backgroundImage: `url(${show.artwork_url})` }}
+            aria-hidden="true"
+          />
+        )}
         <div className={styles.billboardBackdropGlow} />
 
         <div className={styles.billboardCoverWrapper}>
@@ -195,13 +168,13 @@ export function PodcastBillboard({ show, onPlayEpisode }: PodcastBillboardProps)
               type="button"
               className={`library-artist-watchlist-btn${isWatching ? ' watching' : ''}`}
               id="podcast-watchlist-btn"
-              disabled={isWatchlistBusy}
+              disabled={isBusy}
               onClick={() => void handleToggleWatchlist()}
               title={isWatching ? 'Remove from Watchlist' : 'Add to Watchlist'}
             >
               <span className="watchlist-icon">👁️</span>
               <span className="watchlist-text">
-                {isWatchlistBusy ? 'Loading...' : isWatching ? 'Watching...' : 'Add to Watchlist'}
+                {isBusy ? 'Updating…' : isWatching ? 'Watching' : 'Add to Watchlist'}
               </span>
             </button>
 
@@ -275,9 +248,9 @@ export function PodcastBillboard({ show, onPlayEpisode }: PodcastBillboardProps)
             )}
           </div>
 
-          {show.description && (
+          {cleanDesc && (
             <div className={styles.billboardDesc}>
-              {isLongDesc && !isExpanded ? `${show.description.slice(0, 260)}…` : show.description}
+              {isLongDesc && !isExpanded ? `${cleanDesc.slice(0, 260)}…` : cleanDesc}
               {isLongDesc && (
                 <button
                   type="button"

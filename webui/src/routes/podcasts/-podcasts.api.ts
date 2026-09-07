@@ -251,3 +251,16 @@ export async function updatePodcastWatchlistSettings(
   }
 }
 
+export async function fetchWatchlistPodcasts(): Promise<any[]> {
+  try {
+    const data = await readJson<{ success: boolean; podcasts: any[] }>(
+      apiClient.get('podcasts/watchlist'),
+    );
+    return data?.success && Array.isArray(data.podcasts) ? data.podcasts : [];
+  } catch (err) {
+    console.warn('Failed to fetch watchlist podcasts:', err);
+    return [];
+  }
+}
+
+

@@ -1,14 +1,26 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 
 import {
+  addPodcastToWatchlist,
   downloadPodcastEpisode,
   fetchPodcastDownloads,
+  fetchWatchlistPodcasts,
+  removePodcastFromWatchlist,
 } from '../-podcasts.api';
 import type {
   ActivePlaybackState,
   PodcastDownloadItem,
   PodcastEpisodeItem,
   PodcastShowDetail,
+  PodcastShowSummary,
 } from '../-podcasts.types';
 
 export interface PodcastContextValue {
@@ -23,6 +35,13 @@ export interface PodcastContextValue {
   downloads: Record<string, PodcastDownloadItem>;
   handleDownloadEpisode: (ep: PodcastEpisodeItem, showTitle: string, showArtwork?: string | null) => void;
   downloadsCount: number;
+
+  // Watchlist
+  isWatchingShow: (show: { feed_url?: string | null; itunes_id?: number | null }) => boolean;
+  toggleWatchlist: (show: PodcastShowSummary | PodcastShowDetail) => Promise<boolean>;
+  isWatchlistBusy: (show: { feed_url?: string | null; itunes_id?: number | null }) => boolean;
+  watchlistPodcasts: any[];
+  refreshWatchlist: () => Promise<void>;
 }
 
 const PodcastContext = createContext<PodcastContextValue | null>(null);
@@ -36,6 +55,121 @@ export function usePodcastContext(): PodcastContextValue {
 export function PodcastProvider({ children }: { children: ReactNode }) {
   const [activePlayback, setActivePlayback] = useState<ActivePlaybackState | null>(null);
   const [downloads, setDownloads] = useState<Record<string, PodcastDownloadItem>>({});
+  const [watchlist, setWatchlist] = useState<any[]>([]);
+  const [watchlistBusyMap, setWatchlistBusyMap] = useState<Record<string, boolean>>({});
+
+  const refreshWatchlist = useCallback(async () => {
+    try {
+      const items = await fetchWatchlistPodcasts();
+      setWatchlist(items);
+    } catch {
+      // non-fatal
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshWatchlist();
+  }, [refreshWatchlist]);
+
+  const watchlistKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of watchlist) {
+      if (item.feed_url) set.add(item.feed_url.trim().toLowerCase());
+      if (item.itunes_id) set.add(String(item.itunes_id));
+    }
+    return set;
+  }, [watchlist]);
+
+  const getShowKey = (item: { feed_url?: string | null; itunes_id?: number | null }): string => {
+    return (item.feed_url && item.feed_url.trim()) || (item.itunes_id ? String(item.itunes_id) : '');
+  };
+
+  const isWatchingShow = useCallback(
+    (show: { feed_url?: string | null; itunes_id?: number | null }): boolean => {
+      if (show.feed_url && watchlistKeys.has(show.feed_url.trim().toLowerCase())) return true;
+      if (show.itunes_id && watchlistKeys.has(String(show.itunes_id))) return true;
+      return false;
+    },
+    [watchlistKeys],
+  );
+
+  const isShowWatchlistBusy = useCallback(
+    (show: { feed_url?: string | null; itunes_id?: number | null }): boolean => {
+      const key = getShowKey(show);
+      return Boolean(key && watchlistBusyMap[key]);
+    },
+    [watchlistBusyMap],
+  );
+
+  const toggleWatchlist = useCallback(
+    async (show: PodcastShowSummary | PodcastShowDetail): Promise<boolean> => {
+      const key = getShowKey(show);
+      if (!key || watchlistBusyMap[key]) return false;
+
+      setWatchlistBusyMap((prev) => ({ ...prev, [key]: true }));
+      const currentlyWatching = isWatchingShow(show);
+
+      try {
+        if (currentlyWatching) {
+          setWatchlist((prev) =>
+            prev.filter((p) => {
+              const feedMatch =
+                show.feed_url &&
+                p.feed_url &&
+                p.feed_url.trim().toLowerCase() === show.feed_url.trim().toLowerCase();
+              const idMatch = show.itunes_id && String(p.itunes_id) === String(show.itunes_id);
+              return !feedMatch && !idMatch;
+            }),
+          );
+          const res = await removePodcastFromWatchlist(show.feed_url, show.itunes_id);
+          if (res.success || !res.isWatching) {
+            window.showToast?.(`Removed "${show.title}" from Watchlist`, 'info');
+          } else {
+            await refreshWatchlist();
+            window.showToast?.('Could not remove from Watchlist', 'error');
+          }
+        } else {
+          setWatchlist((prev) => [
+            ...prev,
+            {
+              feed_url: show.feed_url,
+              itunes_id: show.itunes_id,
+              title: show.title,
+              artwork_url: show.artwork_url,
+              author: show.author,
+              description: show.description,
+              episode_count: show.episode_count,
+            },
+          ]);
+          const res = await addPodcastToWatchlist(show);
+          if (res.success || res.isWatching) {
+            window.showToast?.(`Added "${show.title}" to Watchlist`, 'success');
+          } else {
+            await refreshWatchlist();
+            window.showToast?.('Could not add to Watchlist', 'error');
+          }
+        }
+
+        try {
+          window.updateWatchlistButtonCount?.();
+        } catch {
+          // non-fatal
+        }
+        return true;
+      } catch {
+        await refreshWatchlist();
+        window.showToast?.('Failed to update Watchlist', 'error');
+        return false;
+      } finally {
+        setWatchlistBusyMap((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+      }
+    },
+    [isWatchingShow, refreshWatchlist, watchlistBusyMap],
+  );
 
   // Poll downloads if any are active
   useEffect(() => {
@@ -164,6 +298,11 @@ export function PodcastProvider({ children }: { children: ReactNode }) {
         downloads,
         handleDownloadEpisode,
         downloadsCount,
+        isWatchingShow,
+        toggleWatchlist,
+        isWatchlistBusy: isShowWatchlistBusy,
+        watchlistPodcasts: watchlist,
+        refreshWatchlist,
       }}
     >
       {children}
