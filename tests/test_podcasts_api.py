@@ -163,12 +163,162 @@ def test_download_episode_queues_task(client):
                 "enclosure_url": "https://example.com/ep1.mp3",
                 "title": "Episode 1",
                 "show_title": "Test Show",
+                "author": "Host A",
+                "enclosure_type": "audio/mpeg",
+                "enclosure_length": 10485760,
             },
         )
         assert res.status_code == 200
         data = res.get_json()
         assert data["success"] is True
         assert "download_id" in data
+        assert "task_id" in data
+
+        from core.runtime_state import download_batches, download_tasks
+        task_id = data["task_id"]
+        assert task_id in download_tasks
+        assert download_tasks[task_id]["download_source"] == "Podcast"
+        assert download_tasks[task_id]["playlist_id"] == "podcasts"
+        assert "podcasts" in download_batches
+        assert task_id in download_batches["podcasts"]["queue"]
+
+
+def test_download_episode_records_history_and_completes(client):
+    import time
+    from core.runtime_state import download_tasks
+
+    mock_db = MagicMock()
+    mock_db.add_library_history_entry.return_value = 999
+
+    with patch("api.podcasts._get_download_client") as mock_get_dl, \
+         patch("api.podcasts._db", return_value=mock_db):
+
+        def fake_download(ep, progress_callback=None, show_title=None, author=None, is_cancelled=None):
+            if progress_callback:
+                progress_callback(5242880, 10485760)
+            return "/downloads/ep_test.mp3"
+
+        mock_dl = MagicMock()
+        mock_dl.download_episode.side_effect = fake_download
+        mock_get_dl.return_value = mock_dl
+
+        res = client.post(
+            "/api/podcasts/download",
+            json={
+                "enclosure_url": "https://example.com/ep_test.mp3",
+                "title": "Episode Test",
+                "show_title": "Show Test",
+                "author": "Host Test",
+            },
+        )
+        assert res.status_code == 200
+        task_id = res.get_json()["task_id"]
+
+        # Wait briefly for worker thread to complete
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            task = download_tasks.get(task_id, {})
+            if task.get("status") in ("completed", "failed"):
+                break
+            time.sleep(0.02)
+
+        task = download_tasks.get(task_id, {})
+        assert task.get("status") == "completed"
+        assert task.get("history_id") == 999
+        assert task.get("final_file_path") == "/downloads/ep_test.mp3"
+
+        # Verify add_library_history_entry was called with event_type="podcast"
+        mock_db.add_library_history_entry.assert_called_once()
+        kws = mock_db.add_library_history_entry.call_args.kwargs
+        assert kws["event_type"] == "podcast"
+        assert kws["title"] == "Episode Test"
+        assert kws["download_source"] == "Podcast"
+
+
+def test_download_episode_cancellation_marks_task_cancelled(client):
+    import time
+    from core.runtime_state import download_tasks
+
+    with patch("api.podcasts._get_download_client") as mock_get_dl:
+        def fake_download_cancel(ep, progress_callback=None, show_title=None, author=None, is_cancelled=None):
+            # simulate cancellation check triggering
+            raise InterruptedError("Cancelled")
+
+        mock_dl = MagicMock()
+        mock_dl.download_episode.side_effect = fake_download_cancel
+        mock_get_dl.return_value = mock_dl
+
+        res = client.post(
+            "/api/podcasts/download",
+            json={
+                "enclosure_url": "https://example.com/ep_cancel.mp3",
+                "title": "Episode Cancel",
+                "show_title": "Show Cancel",
+            },
+        )
+        assert res.status_code == 200
+        task_id = res.get_json()["task_id"]
+
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            task = download_tasks.get(task_id, {})
+            if task.get("status") in ("cancelled", "failed"):
+                break
+            time.sleep(0.02)
+
+        task = download_tasks.get(task_id, {})
+        assert task.get("status") == "cancelled"
+
+
+def test_podcast_task_in_unified_downloads_response():
+    from core.downloads.status import build_unified_downloads_response
+    from core.runtime_state import download_batches, download_tasks
+    from unittest.mock import MagicMock
+
+    deps = MagicMock()
+    deps.get_recent_completed_tasks = MagicMock(return_value=[])
+    deps.get_persistent_download_history = MagicMock(return_value=[])
+    deps.get_slskd_downloads = MagicMock(return_value=[])
+
+    download_batches["podcasts"] = {
+        "playlist_id": "podcasts",
+        "playlist_name": "Podcasts",
+        "phase": "downloading",
+        "queue": ["podcast_task_123"],
+    }
+    download_tasks["podcast_task_123"] = {
+        "status": "downloading",
+        "track_index": 1,
+        "playlist_id": "podcasts",
+        "batch_id": "podcasts",
+        "download_source": "Podcast",
+        "quality": "audio/mpeg",
+        "progress": 45.0,
+        "speed": 1048576.0,
+        "bytes_transferred": 4500000,
+        "size": 10000000,
+        "track_info": {
+            "title": "My Podcast Episode",
+            "artist": "Podcast Host",
+            "album": "The Great Show",
+        },
+        "status_change_time": 100.0,
+    }
+
+    resp = build_unified_downloads_response(100, deps)
+    downloads = resp.get("downloads", [])
+    podcast_row = next((d for d in downloads if d.get("task_id") == "podcast_task_123"), None)
+    assert podcast_row is not None
+    assert podcast_row["title"] == "My Podcast Episode"
+    assert podcast_row["artist"] == "Podcast Host"
+    assert podcast_row["album"] == "The Great Show"
+    assert podcast_row["download_source"] == "Podcast"
+    assert podcast_row["status"] == "downloading"
+    assert podcast_row["progress"] == 45.0
+    assert podcast_row["live_detail"] is not None
+    assert podcast_row["live_detail"]["speed"] == 1048576.0
+    assert podcast_row["live_detail"]["bytes"] == 4500000
+    assert podcast_row["live_detail"]["size"] == 10000000
 
 
 def test_get_downloads(client):

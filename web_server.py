@@ -6978,7 +6978,7 @@ def get_task_detail(task_id):
             want_title = _norm_track_key(ti.get('name', ''))
             if want_title:
                 db = get_database()
-                entries, _ = db.get_library_history(event_type='download', page=1, limit=100)
+                entries, _ = db.get_library_history(event_type=('download', 'podcast'), page=1, limit=100)
                 for e in entries:
                     if _norm_track_key(e.get('title', '')) == want_title:
                         history = e
@@ -7719,7 +7719,9 @@ def get_library_history():
     """Get persistent library history (downloads and server imports)."""
     try:
         event_type = request.args.get('type', None)
-        if event_type and event_type not in ('download', 'import'):
+        if event_type == 'podcasts':
+            event_type = 'podcast'
+        if event_type and event_type not in ('download', 'import', 'podcast'):
             event_type = None
         page = max(1, int(request.args.get('page', 1)))
         limit = min(200, max(1, int(request.args.get('limit', 50))))
@@ -15200,7 +15202,7 @@ def _build_status_deps():
         run_async=run_async,
         on_download_completed=_on_download_completed,
         get_persistent_download_history=lambda limit: get_database().get_library_history(
-            event_type='download',
+            event_type=('download', 'podcast'),
             page=1,
             limit=limit,
             # the acoustid scanner's synthetic review rows carry

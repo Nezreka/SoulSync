@@ -288,6 +288,7 @@ class PodcastDownloadClient:
         progress_callback: Optional[Callable[[int, int], None]] = None,
         show_title: Optional[str] = None,
         author: Optional[str] = None,
+        is_cancelled: Optional[Callable[[], bool]] = None,
     ) -> Optional[str]:
         """Download an episode enclosure to disk and return the final file path.
 
@@ -302,6 +303,8 @@ class PodcastDownloadClient:
                                a download.
             show_title:        Optional show title override for templating.
             author:            Optional show author override for templating.
+            is_cancelled:      Optional callable returning True if the download was
+                               cancelled and should abort immediately.
 
         Returns:
             Absolute path string of the saved file, or None on failure.
@@ -324,9 +327,13 @@ class PodcastDownloadClient:
             from core.settings import config_manager
             if config_manager:
                 org_enabled = config_manager.get("file_organization.enabled", True)
-                template = config_manager.get("file_organization.templates.podcast_path") or "$show/Season $season/$title"
-        except Exception as cfg_err:
-            logger.debug("Config read error for podcast template: %s", cfg_err)
+                template = (
+                    config_manager.get("file_organization.templates.podcast_path")
+                    or config_manager.get("podcasts.folder_template")
+                    or "$show/Season $season/$title"
+                )
+        except Exception:
+            pass
 
         if org_enabled and template:
             try:
@@ -382,6 +389,9 @@ class PodcastDownloadClient:
         try:
             with open(filepath, "wb") as fh:
                 for chunk in resp.iter_content(chunk_size=_CHUNK_SIZE):
+                    if is_cancelled and is_cancelled():
+                        logger.info("Download cancelled for episode %r", episode.title)
+                        raise InterruptedError("Download cancelled")
                     if not chunk:
                         continue
                     fh.write(chunk)
@@ -391,6 +401,14 @@ class PodcastDownloadClient:
                             progress_callback(downloaded, total)
                         except Exception as cb_exc:
                             logger.debug("Progress callback error: %s", cb_exc)
+        except InterruptedError:
+            if filepath.exists():
+                try:
+                    filepath.unlink()
+                except OSError:
+                    pass
+            _prune_empty_parents(filepath)
+            return None
         except Exception as exc:
             logger.error("Write failed for episode %r: %s", episode.title, exc)
             # Remove the partial file — a half-written file is worse than none.

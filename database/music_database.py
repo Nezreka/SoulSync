@@ -18412,7 +18412,7 @@ class MusicDatabase:
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM library_history WHERE event_type = 'download'")
+            cursor.execute("DELETE FROM library_history WHERE event_type IN ('download', 'podcast')")
             conn.commit()
             return cursor.rowcount
         except Exception as e:
@@ -18456,8 +18456,13 @@ class MusicDatabase:
             clauses = []
             params = []
             if event_type:
-                clauses.append("event_type = ?")
-                params.append(event_type)
+                if isinstance(event_type, (list, tuple, set)):
+                    placeholders = ','.join('?' for _ in event_type)
+                    clauses.append(f"event_type IN ({placeholders})")
+                    params.extend(list(event_type))
+                else:
+                    clauses.append("event_type = ?")
+                    params.append(event_type)
             for src in (exclude_download_sources or ()):
                 clauses.append("COALESCE(download_source, '') != ?")
                 params.append(src)
@@ -18808,19 +18813,21 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT event_type, COUNT(*) as cnt FROM library_history GROUP BY event_type")
-            stats = {'downloads': 0, 'imports': 0}
+            stats = {'downloads': 0, 'imports': 0, 'podcasts': 0}
             for row in cursor.fetchall():
                 if row['event_type'] == 'download':
                     stats['downloads'] = row['cnt']
                 elif row['event_type'] == 'import':
                     stats['imports'] = row['cnt']
+                elif row['event_type'] == 'podcast':
+                    stats['podcasts'] = row['cnt']
 
-            # Per-source breakdown for downloads
+            # Per-source breakdown for downloads and podcasts
             source_counts = {}
             try:
                 cursor.execute("""
                     SELECT download_source, COUNT(*) as cnt FROM library_history
-                    WHERE event_type = 'download' AND download_source IS NOT NULL AND download_source != ''
+                    WHERE event_type IN ('download', 'podcast') AND download_source IS NOT NULL AND download_source != ''
                     GROUP BY download_source ORDER BY cnt DESC
                 """)
                 for row in cursor.fetchall():
@@ -18832,7 +18839,7 @@ class MusicDatabase:
             return stats
         except Exception as e:
             logger.debug(f"Error getting library history stats: {e}")
-            return {'downloads': 0, 'imports': 0, 'source_counts': {}}
+            return {'downloads': 0, 'imports': 0, 'podcasts': 0, 'source_counts': {}}
 
     # ── Sync History ──────────────────────────────────────────────
 

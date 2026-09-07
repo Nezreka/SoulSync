@@ -11763,6 +11763,12 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     border: 1px solid rgba(120, 160, 230, 0.2);
 }
 
+.library-history-badge.podcast {
+    color: #c084fc;
+    background: rgba(192, 132, 252, 0.1);
+    border: 1px solid rgba(192, 132, 252, 0.25);
+}
+
 .history-source-bar {
     display: flex;
     flex-wrap: wrap;
