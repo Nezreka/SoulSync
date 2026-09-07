@@ -21466,6 +21466,10 @@ app.register_blueprint(_bp_sp())
 from api.video import create_video_blueprint as _create_video_blueprint
 app.register_blueprint(_create_video_blueprint(), url_prefix='/api/video')
 
+# Podcasts API (isolated: public discovery, RSS parsing, episode downloads)
+from api.podcasts import create_podcasts_blueprint as _create_podcasts_blueprint
+app.register_blueprint(_create_podcasts_blueprint())
+
 # Resume video downloads at boot: without this the monitor only starts on a grab or
 # when the Downloads page opens, so in-flight downloads (and orphaned 'searching' rows)
 # after a restart would sit untracked until the user happened to visit the page.
