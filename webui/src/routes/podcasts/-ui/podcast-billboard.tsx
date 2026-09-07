@@ -1,7 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 
 import type { PodcastEpisodeItem, PodcastShowDetail } from '../-podcasts.types';
+import {
+  addPodcastToWatchlist,
+  checkPodcastWatchlist,
+  removePodcastFromWatchlist,
+} from '../-podcasts.api';
 
 import styles from './podcasts-page.module.css';
 
@@ -14,6 +19,61 @@ export function PodcastBillboard({ show, onPlayEpisode }: PodcastBillboardProps)
   const navigate = useNavigate();
   const [isExpanded, setIsExpanded] = useState(false);
   const [copiedFeed, setCopiedFeed] = useState(false);
+  const [isWatching, setIsWatching] = useState(false);
+  const [isWatchlistBusy, setIsWatchlistBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!show.feed_url && !show.itunes_id) return;
+
+    checkPodcastWatchlist(show.feed_url, show.itunes_id)
+      .then((res) => {
+        if (!cancelled) {
+          setIsWatching(res.isWatching);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setIsWatching(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [show.feed_url, show.itunes_id]);
+
+  const handleToggleWatchlist = async () => {
+    if (isWatchlistBusy) return;
+    setIsWatchlistBusy(true);
+
+    try {
+      if (isWatching) {
+        const res = await removePodcastFromWatchlist(show.feed_url, show.itunes_id);
+        if (res.success || !res.isWatching) {
+          setIsWatching(false);
+          window.showToast?.(`Removed "${show.title}" from Watchlist`, 'info');
+        } else {
+          window.showToast?.('Could not remove from Watchlist', 'error');
+        }
+      } else {
+        const res = await addPodcastToWatchlist(show);
+        if (res.success || res.isWatching) {
+          setIsWatching(true);
+          window.showToast?.(`Added "${show.title}" to Watchlist`, 'success');
+        } else {
+          window.showToast?.('Could not add to Watchlist', 'error');
+        }
+      }
+      try {
+        window.updateWatchlistButtonCount?.();
+      } catch {
+        /* non-fatal */
+      }
+    } catch {
+      window.showToast?.('Failed to update Watchlist', 'error');
+    } finally {
+      setIsWatchlistBusy(false);
+    }
+  };
 
   const episodes = show.episodes || [];
   const latestEp = episodes[0];
@@ -131,17 +191,18 @@ export function PodcastBillboard({ show, onPlayEpisode }: PodcastBillboardProps)
               </button>
             )}
 
-            {/* Non-functional watchlist button — same styling as artist-detail */}
             <button
               type="button"
-              className="library-artist-watchlist-btn"
+              className={`library-artist-watchlist-btn${isWatching ? ' watching' : ''}`}
               id="podcast-watchlist-btn"
-              onClick={() => {
-                /* Watchlist functionality will be wired in a future update */
-              }}
+              disabled={isWatchlistBusy}
+              onClick={() => void handleToggleWatchlist()}
+              title={isWatching ? 'Remove from Watchlist' : 'Add to Watchlist'}
             >
               <span className="watchlist-icon">👁️</span>
-              <span className="watchlist-text">Add to Watchlist</span>
+              <span className="watchlist-text">
+                {isWatchlistBusy ? 'Loading...' : isWatching ? 'Watching...' : 'Add to Watchlist'}
+              </span>
             </button>
 
             {show.feed_url && (

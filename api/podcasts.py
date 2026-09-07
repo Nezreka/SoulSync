@@ -48,6 +48,14 @@ _CACHE_TTL = 3600.0  # 1 hour in seconds
 _SHOW_CACHE_TTL = 900.0  # 15 minutes in seconds
 
 
+def _db():
+    try:
+        from database.music_database import get_database
+        return get_database()
+    except Exception:
+        return None
+
+
 def _get_download_client() -> PodcastDownloadClient:
     global _download_client
     if _download_client is None:
@@ -370,5 +378,172 @@ def create_podcasts_blueprint() -> Blueprint:
         except Exception as exc:
             logger.warning("Audio proxy error for %s: %s", target_url, exc)
             return jsonify({"error": f"Failed to stream audio: {exc}"}), 502
+
+    # -----------------------------------------------------------------------
+    # Watchlist endpoints (parity with artists and labels)
+    # -----------------------------------------------------------------------
+
+    @bp.route("/watchlist", methods=["GET"])
+    def podcasts_watchlist_list():
+        """List all watchlisted podcasts."""
+        db = _db()
+        if db is None:
+            return jsonify({"success": True, "podcasts": []})
+        try:
+            profile_id = int(request.args.get("profile_id", 1))
+        except (ValueError, TypeError):
+            profile_id = 1
+        try:
+            items = db.get_watchlist_podcasts(profile_id=profile_id)
+            return jsonify({"success": True, "podcasts": items})
+        except Exception as exc:
+            logger.exception("podcasts_watchlist_list failed: %s", exc)
+            return jsonify({"success": True, "podcasts": []})
+
+    @bp.route("/watchlist/check", methods=["POST"])
+    def podcasts_watchlist_check():
+        """Check if a podcast is currently in the watchlist."""
+        body = request.get_json(silent=True) or {}
+        feed_url = str(body.get("feed_url") or "").strip()
+        itunes_id = body.get("itunes_id")
+        try:
+            itunes_id = int(itunes_id) if itunes_id is not None else None
+        except (ValueError, TypeError):
+            itunes_id = None
+
+        db = _db()
+        if db is None or (not feed_url and itunes_id is None):
+            return jsonify({"success": True, "is_watching": False, "podcast": None})
+
+        try:
+            pod = db.get_watchlist_podcast(feed_url=feed_url or None, itunes_id=itunes_id)
+            is_watching = pod is not None
+            return jsonify({"success": True, "is_watching": is_watching, "podcast": pod})
+        except Exception as exc:
+            logger.exception("podcasts_watchlist_check failed: %s", exc)
+            return jsonify({"success": False, "is_watching": False, "podcast": None})
+
+    @bp.route("/watchlist/add", methods=["POST"])
+    def podcasts_watchlist_add():
+        """Add or update a podcast in the watchlist."""
+        body = request.get_json(silent=True) or {}
+        feed_url = str(body.get("feed_url") or "").strip()
+        title = str(body.get("title") or body.get("name") or "").strip()
+        if not feed_url or not title:
+            return jsonify({"success": False, "error": "feed_url and title are required"}), 400
+
+        itunes_id = body.get("itunes_id")
+        try:
+            itunes_id = int(itunes_id) if itunes_id is not None else None
+        except (ValueError, TypeError):
+            itunes_id = None
+
+        retention_days = body.get("retention_days", 14)
+        try:
+            retention_days = max(0, int(retention_days))
+        except (ValueError, TypeError):
+            retention_days = 14
+
+        auto_download = bool(body.get("auto_download", True))
+        author = str(body.get("author") or "").strip() or None
+        description = str(body.get("description") or "").strip() or None
+        artwork_url = str(body.get("artwork_url") or "").strip() or None
+        website = str(body.get("website") or "").strip() or None
+
+        episode_count = body.get("episode_count")
+        try:
+            episode_count = int(episode_count) if episode_count is not None else None
+        except (ValueError, TypeError):
+            episode_count = None
+
+        profile_id = body.get("profile_id", 1)
+        try:
+            profile_id = int(profile_id)
+        except (ValueError, TypeError):
+            profile_id = 1
+
+        db = _db()
+        if db is None:
+            return jsonify({"success": False, "error": "database unavailable"}), 500
+
+        try:
+            ok = db.add_watchlist_podcast(
+                feed_url,
+                title,
+                itunes_id=itunes_id,
+                author=author,
+                description=description,
+                artwork_url=artwork_url,
+                website=website,
+                auto_download=auto_download,
+                retention_days=retention_days,
+                episode_count=episode_count,
+                profile_id=profile_id,
+            )
+            pod = db.get_watchlist_podcast(feed_url=feed_url)
+            return jsonify({"success": bool(ok), "is_watching": True, "podcast": pod})
+        except Exception as exc:
+            logger.exception("podcasts_watchlist_add failed for %s: %s", title, exc)
+            return jsonify({"success": False, "error": f"Failed to add to watchlist: {exc}"}), 500
+
+    @bp.route("/watchlist/remove", methods=["POST"])
+    def podcasts_watchlist_remove():
+        """Remove a podcast from the watchlist."""
+        body = request.get_json(silent=True) or {}
+        feed_url = str(body.get("feed_url") or "").strip()
+        itunes_id = body.get("itunes_id")
+        try:
+            itunes_id = int(itunes_id) if itunes_id is not None else None
+        except (ValueError, TypeError):
+            itunes_id = None
+
+        if not feed_url and itunes_id is None:
+            return jsonify({"success": False, "error": "feed_url or itunes_id required"}), 400
+
+        db = _db()
+        if db is None:
+            return jsonify({"success": False, "error": "database unavailable"}), 500
+
+        try:
+            ok = db.remove_watchlist_podcast(feed_url=feed_url or None, itunes_id=itunes_id)
+            return jsonify({"success": bool(ok), "is_watching": False})
+        except Exception as exc:
+            logger.exception("podcasts_watchlist_remove failed: %s", exc)
+            return jsonify({"success": False, "error": f"Failed to remove: {exc}"}), 500
+
+    @bp.route("/watchlist/settings", methods=["POST"])
+    def podcasts_watchlist_settings():
+        """Update settings (auto_download, retention_days) for a watchlisted podcast."""
+        body = request.get_json(silent=True) or {}
+        feed_url = str(body.get("feed_url") or "").strip()
+        if not feed_url:
+            return jsonify({"success": False, "error": "feed_url is required"}), 400
+
+        auto_download = body.get("auto_download")
+        if auto_download is not None:
+            auto_download = bool(auto_download)
+
+        retention_days = body.get("retention_days")
+        if retention_days is not None:
+            try:
+                retention_days = max(0, int(retention_days))
+            except (ValueError, TypeError):
+                retention_days = None
+
+        db = _db()
+        if db is None:
+            return jsonify({"success": False, "error": "database unavailable"}), 500
+
+        try:
+            ok = db.update_watchlist_podcast_settings(
+                feed_url,
+                auto_download=auto_download,
+                retention_days=retention_days,
+            )
+            pod = db.get_watchlist_podcast(feed_url=feed_url)
+            return jsonify({"success": bool(ok), "podcast": pod})
+        except Exception as exc:
+            logger.exception("podcasts_watchlist_settings failed for %s: %s", feed_url, exc)
+            return jsonify({"success": False, "error": f"Failed to update settings: {exc}"}), 500
 
     return bp

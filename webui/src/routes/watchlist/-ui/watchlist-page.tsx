@@ -19,6 +19,7 @@ import {
   watchlistCountQueryOptions,
   watchlistGlobalConfigQueryOptions,
   watchlistLabelsQueryOptions,
+  watchlistPodcastsQueryOptions,
   watchlistRecentReleasesQueryOptions,
   watchlistScanStatusQueryOptions,
 } from '../-watchlist.api';
@@ -49,6 +50,7 @@ import { WatchlistArtistConfigModal } from './watchlist-artist-config-modal';
 import { WatchlistArtistDetail } from './watchlist-artist-detail';
 import { WatchlistGlobalSettingsModal } from './watchlist-global-settings-modal';
 import { WatchlistLabelsTab } from './watchlist-labels-tab';
+import { WatchlistPodcastsTab } from './watchlist-podcasts-tab';
 import styles from './watchlist-page.module.css';
 import { WatchlistScanDeck } from './watchlist-scan-deck';
 
@@ -213,18 +215,25 @@ export function WatchlistPage() {
 
   const globalOverrideActive = Boolean(globalConfigQuery.data?.global_override_enabled);
   const isLabelsTab = search.tab === 'labels';
+  const isPodcastsTab = search.tab === 'podcasts';
 
-  // The header chip counts labels while the Labels tab is open, exactly as the
-  // vanilla `switchWatchlistTab` rewrote it. `enabled` keeps the artists tab
-  // from paying for the labels round trip; the tab body shares this cache entry.
+  // The header chip counts labels or podcasts while their tab is open.
+  // `enabled` keeps inactive tabs from paying for unnecessary round trips.
   const labelsQuery = useQuery({
     ...watchlistLabelsQueryOptions(profileId),
     enabled: isLabelsTab,
   });
+  const podcastsQuery = useQuery({
+    ...watchlistPodcastsQueryOptions(profileId),
+    enabled: isPodcastsTab,
+  });
   const labelCount = labelsQuery.data?.length ?? 0;
+  const podcastCount = podcastsQuery.data?.length ?? 0;
   const headerCount = isLabelsTab
     ? `${labelCount} label${labelCount !== 1 ? 's' : ''}`
-    : formatArtistCount(count);
+    : isPodcastsTab
+      ? `${podcastCount} podcast${podcastCount !== 1 ? 's' : ''}`
+      : formatArtistCount(count);
 
   const selection = useMemo(
     () => batchSelectionState(visibleArtists, selectedIds),
@@ -632,17 +641,24 @@ export function WatchlistPage() {
       <div className={styles.tabs}>
         <button
           type="button"
-          className={`${styles.tab} ${!isLabelsTab ? styles.tabActive : ''}`}
+          className={`${styles.tab} ${search.tab === 'artists' ? styles.tabActive : ''}`}
           onClick={() => void navigate({ search: (prev) => ({ ...prev, tab: 'artists' }) })}
         >
           Artists
         </button>
         <button
           type="button"
-          className={`${styles.tab} ${isLabelsTab ? styles.tabActive : ''}`}
+          className={`${styles.tab} ${search.tab === 'labels' ? styles.tabActive : ''}`}
           onClick={() => void navigate({ search: (prev) => ({ ...prev, tab: 'labels' }) })}
         >
           Labels
+        </button>
+        <button
+          type="button"
+          className={`${styles.tab} ${search.tab === 'podcasts' ? styles.tabActive : ''}`}
+          onClick={() => void navigate({ search: (prev) => ({ ...prev, tab: 'podcasts' }) })}
+        >
+          Podcasts
         </button>
       </div>
 
@@ -650,6 +666,8 @@ export function WatchlistPage() {
 
       {isLabelsTab ? (
         <WatchlistLabelsTab profileId={profileId} />
+      ) : isPodcastsTab ? (
+        <WatchlistPodcastsTab profileId={profileId} searchFilter={search.q} />
       ) : (
         <>
           {lastScanText ? (

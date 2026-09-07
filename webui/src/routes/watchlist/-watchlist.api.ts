@@ -12,6 +12,8 @@ import type {
   WatchlistGlobalConfigResponse,
   WatchlistLabel,
   WatchlistLabelsResponse,
+  WatchlistPodcast,
+  WatchlistPodcastsResponse,
   WatchlistRecentReleaseRow,
   WatchlistRecentReleasesResponse,
   WatchlistScanStatusResponse,
@@ -66,6 +68,13 @@ export function watchlistLabelsQueryOptions(profileId: number) {
   return queryOptions({
     queryKey: [...WATCHLIST_QUERY_KEY, 'labels', profileId] as const,
     queryFn: () => fetchWatchlistLabels(),
+  });
+}
+
+export function watchlistPodcastsQueryOptions(profileId: number) {
+  return queryOptions({
+    queryKey: [...WATCHLIST_QUERY_KEY, 'podcasts', profileId] as const,
+    queryFn: () => fetchWatchlistPodcasts(),
   });
 }
 
@@ -132,6 +141,14 @@ export async function fetchWatchlistLabels(): Promise<WatchlistLabel[]> {
   // errors, so there is nothing to check beyond the shape.
   const payload = await readJson<WatchlistLabelsResponse>(apiClient.get('labels/watchlist'));
   return payload.labels ?? [];
+}
+
+export async function fetchWatchlistPodcasts(): Promise<WatchlistPodcast[]> {
+  const payload = await readJson<WatchlistPodcastsResponse>(apiClient.get('podcasts/watchlist'));
+  if (!payload.success) {
+    throw new Error(payload.error || 'Failed to load watchlist podcasts');
+  }
+  return payload.podcasts ?? [];
 }
 
 export async function fetchWatchlistRecentReleases(
@@ -340,4 +357,34 @@ export async function removeWatchlistLabel(mbid: string): Promise<void> {
     apiClient.post('labels/watchlist/remove', { json: { musicbrainz_label_id: mbid } }),
   );
   assertSuccess(payload, 'Failed to unfollow label');
+}
+
+export async function removeWatchlistPodcast(
+  feedUrl: string,
+  itunesId?: number | null,
+): Promise<void> {
+  const payload = await readJson<SuccessResponse>(
+    apiClient.post('podcasts/watchlist/remove', {
+      json: { feed_url: feedUrl, itunes_id: itunesId },
+    }),
+  );
+  assertSuccess(payload, 'Failed to remove podcast from watchlist');
+}
+
+export async function updateWatchlistPodcastSettings(
+  feedUrl: string,
+  itunesId: number | null | undefined,
+  settings: { auto_download?: boolean; retention_days?: number },
+): Promise<void> {
+  const payload = await readJson<SuccessResponse>(
+    apiClient.post('podcasts/watchlist/settings', {
+      json: {
+        feed_url: feedUrl,
+        itunes_id: itunesId,
+        auto_download: settings.auto_download,
+        retention_days: settings.retention_days,
+      },
+    }),
+  );
+  assertSuccess(payload, 'Failed to update podcast settings');
 }

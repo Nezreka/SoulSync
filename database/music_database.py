@@ -727,6 +727,33 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_labels_mbid "
                            "ON watchlist_labels (musicbrainz_label_id)")
 
+            # Podcast watchlist (podcasts feature) — follow podcast shows to monitor
+            # their new episodes, mirroring artists and labels. Purely ADDITIVE.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS watchlist_podcasts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    feed_url TEXT UNIQUE NOT NULL,
+                    itunes_id INTEGER,
+                    title TEXT NOT NULL,
+                    author TEXT,
+                    description TEXT,
+                    artwork_url TEXT,
+                    website TEXT,
+                    auto_download INTEGER NOT NULL DEFAULT 1,
+                    retention_days INTEGER NOT NULL DEFAULT 14,
+                    episode_count INTEGER,
+                    date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_scan_timestamp TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    profile_id INTEGER DEFAULT 1
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_podcasts_feed "
+                           "ON watchlist_podcasts (feed_url)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_podcasts_itunes "
+                           "ON watchlist_podcasts (itunes_id)")
+
             # Create indexes for performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_artist_id ON albums (artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks (album_id)")
@@ -13258,6 +13285,237 @@ class MusicDatabase:
                 conn.commit()
         except Exception as e:
             logger.debug("mark_watchlist_label_scanned failed: %s", e)
+
+    # ── Podcast watchlist (podcasts feature) ─────────────────────────────────
+    # Self-contained CRUD on watchlist_podcasts. Additive: no existing method
+    # touches this table, and these touch nothing else.
+
+    def add_watchlist_podcast(
+        self,
+        feed_url: str,
+        title: str,
+        *,
+        itunes_id: Optional[int] = None,
+        author: Optional[str] = None,
+        description: Optional[str] = None,
+        artwork_url: Optional[str] = None,
+        website: Optional[str] = None,
+        auto_download: bool = True,
+        retention_days: int = 14,
+        episode_count: Optional[int] = None,
+        profile_id: int = 1,
+    ) -> bool:
+        """Follow a podcast. Idempotent on feed_url."""
+        feed_url = str(feed_url or '').strip()
+        title = str(title or '').strip()
+        if not feed_url or not title:
+            return False
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "INSERT INTO watchlist_podcasts ("
+                    "feed_url, itunes_id, title, author, description, artwork_url, website, "
+                    "auto_download, retention_days, episode_count, profile_id"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(feed_url) DO UPDATE SET "
+                    "itunes_id=COALESCE(excluded.itunes_id, watchlist_podcasts.itunes_id), "
+                    "title=excluded.title, "
+                    "author=COALESCE(excluded.author, watchlist_podcasts.author), "
+                    "description=COALESCE(excluded.description, watchlist_podcasts.description), "
+                    "artwork_url=COALESCE(excluded.artwork_url, watchlist_podcasts.artwork_url), "
+                    "website=COALESCE(excluded.website, watchlist_podcasts.website), "
+                    "episode_count=COALESCE(excluded.episode_count, watchlist_podcasts.episode_count), "
+                    "updated_at=CURRENT_TIMESTAMP",
+                    (
+                        feed_url,
+                        itunes_id,
+                        title,
+                        author,
+                        description,
+                        artwork_url,
+                        website,
+                        1 if auto_download else 0,
+                        max(0, int(retention_days or 14)),
+                        episode_count,
+                        profile_id,
+                    ),
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error("add_watchlist_podcast failed: %s", e)
+            return False
+
+    def remove_watchlist_podcast(
+        self,
+        feed_url: Optional[str] = None,
+        itunes_id: Optional[int] = None,
+        podcast_id: Optional[int] = None,
+    ) -> bool:
+        """Unfollow a podcast by feed_url, itunes_id, or database id."""
+        try:
+            with self._get_connection() as conn:
+                if feed_url:
+                    cur = conn.execute(
+                        "DELETE FROM watchlist_podcasts WHERE feed_url = ?",
+                        (str(feed_url).strip(),),
+                    )
+                elif itunes_id:
+                    cur = conn.execute(
+                        "DELETE FROM watchlist_podcasts WHERE itunes_id = ?",
+                        (int(itunes_id),),
+                    )
+                elif podcast_id:
+                    cur = conn.execute(
+                        "DELETE FROM watchlist_podcasts WHERE id = ?",
+                        (int(podcast_id),),
+                    )
+                else:
+                    return False
+                conn.commit()
+                return cur.rowcount > 0
+        except Exception as e:
+            logger.error("remove_watchlist_podcast failed: %s", e)
+            return False
+
+    def is_podcast_in_watchlist(
+        self,
+        feed_url: Optional[str] = None,
+        itunes_id: Optional[int] = None,
+    ) -> bool:
+        """Check if a podcast is followed by feed_url or itunes_id."""
+        try:
+            with self._get_connection() as conn:
+                if feed_url:
+                    row = conn.execute(
+                        "SELECT 1 FROM watchlist_podcasts WHERE feed_url = ?",
+                        (str(feed_url).strip(),),
+                    ).fetchone()
+                    if row:
+                        return True
+                if itunes_id:
+                    row = conn.execute(
+                        "SELECT 1 FROM watchlist_podcasts WHERE itunes_id = ?",
+                        (int(itunes_id),),
+                    ).fetchone()
+                    if row:
+                        return True
+                return False
+        except Exception:
+            return False
+
+    def get_watchlist_podcasts(self, profile_id: int = 1) -> List[Dict[str, Any]]:
+        """List all watchlisted podcasts."""
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(
+                    "SELECT id, feed_url, itunes_id, title, author, description, artwork_url, website, "
+                    "auto_download, retention_days, episode_count, date_added, last_scan_timestamp "
+                    "FROM watchlist_podcasts WHERE profile_id = ? "
+                    "ORDER BY title COLLATE NOCASE",
+                    (profile_id,),
+                ).fetchall()
+                out = []
+                for r in rows:
+                    d = dict(r)
+                    d["auto_download"] = bool(d.get("auto_download", 0))
+                    d["retention_days"] = int(d.get("retention_days") or 14)
+                    out.append(d)
+                return out
+        except Exception as e:
+            logger.error("get_watchlist_podcasts failed: %s", e)
+            return []
+
+    def get_watchlist_podcast(
+        self,
+        feed_url: Optional[str] = None,
+        itunes_id: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Get a single watchlisted podcast record by feed_url or itunes_id."""
+        try:
+            with self._get_connection() as conn:
+                row = None
+                if feed_url:
+                    row = conn.execute(
+                        "SELECT id, feed_url, itunes_id, title, author, description, artwork_url, website, "
+                        "auto_download, retention_days, episode_count, date_added, last_scan_timestamp "
+                        "FROM watchlist_podcasts WHERE feed_url = ?",
+                        (str(feed_url).strip(),),
+                    ).fetchone()
+                if not row and itunes_id:
+                    row = conn.execute(
+                        "SELECT id, feed_url, itunes_id, title, author, description, artwork_url, website, "
+                        "auto_download, retention_days, episode_count, date_added, last_scan_timestamp "
+                        "FROM watchlist_podcasts WHERE itunes_id = ?",
+                        (int(itunes_id),),
+                    ).fetchone()
+                if row:
+                    d = dict(row)
+                    d["auto_download"] = bool(d.get("auto_download", 0))
+                    d["retention_days"] = int(d.get("retention_days") or 14)
+                    return d
+                return None
+        except Exception as e:
+            logger.debug("get_watchlist_podcast failed: %s", e)
+            return None
+
+    def update_watchlist_podcast_settings(
+        self,
+        feed_url: str,
+        *,
+        auto_download: Optional[bool] = None,
+        retention_days: Optional[int] = None,
+    ) -> bool:
+        """Update auto_download or retention_days settings for a followed podcast."""
+        feed_url = str(feed_url or '').strip()
+        if not feed_url:
+            return False
+        clauses = []
+        params = []
+        if auto_download is not None:
+            clauses.append("auto_download = ?")
+            params.append(1 if auto_download else 0)
+        if retention_days is not None:
+            clauses.append("retention_days = ?")
+            params.append(max(0, int(retention_days)))
+        if not clauses:
+            return True
+        clauses.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(feed_url)
+        try:
+            with self._get_connection() as conn:
+                cur = conn.execute(
+                    f"UPDATE watchlist_podcasts SET {', '.join(clauses)} WHERE feed_url = ?",
+                    params,
+                )
+                conn.commit()
+                return cur.rowcount > 0
+        except Exception as e:
+            logger.error("update_watchlist_podcast_settings failed: %s", e)
+            return False
+
+    def mark_watchlist_podcast_scanned(self, feed_url: str) -> None:
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "UPDATE watchlist_podcasts SET last_scan_timestamp = CURRENT_TIMESTAMP "
+                    "WHERE feed_url = ?",
+                    (str(feed_url or '').strip(),),
+                )
+                conn.commit()
+        except Exception as e:
+            logger.debug("mark_watchlist_podcast_scanned failed: %s", e)
+
+    def get_watchlist_podcasts_count(self, profile_id: int = 1) -> int:
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) as count FROM watchlist_podcasts WHERE profile_id = ?",
+                    (profile_id,),
+                ).fetchone()
+                return row["count"] if row else 0
+        except Exception:
+            return 0
 
     def get_watchlist_artists(self, profile_id: int = 1) -> List[WatchlistArtist]:
         """Get all artists in the watchlist for the given profile"""
