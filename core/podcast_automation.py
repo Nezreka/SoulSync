@@ -138,6 +138,10 @@ def scan_and_auto_download_podcasts(profile_id: int = 1) -> Dict[str, Any]:
                             "author": show.author or author,
                             "pub_date": latest_ep.pub_date.isoformat() if latest_ep.pub_date else None,
                             "artwork_url": latest_ep.artwork_url or show.artwork_url or pod.get("artwork_url") or "",
+                            "show_artwork_url": show.artwork_url or pod.get("artwork_url") or "",
+                            "show_description": show.description or pod.get("description") or "",
+                            "description": latest_ep.description or "",
+                            "show_notes": latest_ep.show_notes or latest_ep.description or "",
                             "duration_seconds": latest_ep.duration_seconds,
                             "enclosure_type": latest_ep.enclosure_type or "audio/mpeg",
                             "enclosure_length": latest_ep.enclosure_length,
@@ -145,6 +149,9 @@ def scan_and_auto_download_podcasts(profile_id: int = 1) -> Dict[str, Any]:
                             "season": latest_ep.season,
                             "episode_number": latest_ep.episode_number,
                             "episode_type": latest_ep.episode_type,
+                            "itunes_id": show.itunes_id or pod.get("itunes_id"),
+                            "website": show.website or pod.get("website") or "",
+                            "categories": show.categories or [],
                         }
                         res = queue_podcast_download(dl_payload)
                         if res.get("success"):

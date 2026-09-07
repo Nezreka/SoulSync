@@ -110,6 +110,8 @@ export async function downloadPodcastEpisode(
           guid: episode.guid,
           show_title: showTitle,
           artwork_url: episode.artwork_url,
+          description: episode.description,
+          pub_date: episode.pub_date,
           duration_seconds: episode.duration_seconds,
           season: episode.season,
           episode_number: episode.episode_number,

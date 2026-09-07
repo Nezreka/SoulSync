@@ -880,7 +880,12 @@ class ConfigManager:
                 "materialize_mode": "symlink"
             },
             "podcasts": {
-                "download_path": default_podcast_path
+                "download_path": default_podcast_path,
+                "embed_metadata": True,
+                "embed_artwork": True,
+                "save_artwork": True,
+                "write_nfo": True,
+                "write_json": True,
             },
             "youtube": {
                 "cookies_browser": "",      # "", "chrome", "firefox", "edge", "brave", "opera", "safari"

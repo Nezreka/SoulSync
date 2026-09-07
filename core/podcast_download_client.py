@@ -289,6 +289,7 @@ class PodcastDownloadClient:
         show_title: Optional[str] = None,
         author: Optional[str] = None,
         is_cancelled: Optional[Callable[[], bool]] = None,
+        show_metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """Download an episode enclosure to disk and return the final file path.
 
@@ -432,4 +433,17 @@ class PodcastDownloadClient:
             return None
 
         logger.info("Episode saved: %s (%d bytes)", filepath, downloaded)
+
+        # Best-effort post-processing: in-file tagging and media server sidecars
+        try:
+            from core.podcast_post_processor import post_process_podcast_episode
+            post_process_podcast_episode(
+                audio_path=filepath,
+                episode=episode,
+                show_meta=show_metadata,
+                dest_root=dest,
+            )
+        except Exception as pp_exc:
+            logger.warning("Podcast post-processing failed for %s: %s", filepath, pp_exc)
+
         return str(filepath)

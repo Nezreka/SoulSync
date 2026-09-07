@@ -302,6 +302,17 @@ def queue_podcast_download(data: Dict[str, Any]) -> Dict[str, Any]:
 
         try:
             dl_client = _get_download_client()
+            show_metadata = {
+                "title": show_title,
+                "author": author,
+                "description": data.get("show_description") or "",
+                "artwork_url": data.get("show_artwork_url") or artwork_url,
+                "feed_url": feed_url,
+                "itunes_id": data.get("itunes_id"),
+                "website": data.get("website") or "",
+                "categories": data.get("categories") or [],
+            }
+
             ep = PodcastEpisode(
                 guid=guid,
                 title=title,
@@ -310,24 +321,37 @@ def queue_podcast_download(data: Dict[str, Any]) -> Dict[str, Any]:
                 enclosure_length=data.get("enclosure_length"),
                 pub_date=pub_date,
                 duration_seconds=duration_seconds,
-                description="",
-                show_notes="",
+                description=data.get("description") or "",
+                show_notes=data.get("show_notes") or data.get("description") or "",
                 season=data.get("season"),
                 episode_number=data.get("episode_number"),
                 episode_type=data.get("episode_type", "full"),
                 artwork_url=artwork_url,
-                chapter_url=None,
-                transcript_url=None,
+                chapter_url=data.get("chapter_url"),
+                transcript_url=data.get("transcript_url"),
                 show_title=show_title,
                 author=author,
             )
-            file_path = dl_client.download_episode(
-                ep,
-                progress_callback=_progress,
-                show_title=show_title,
-                author=author,
-                is_cancelled=_is_cancelled,
-            )
+            try:
+                file_path = dl_client.download_episode(
+                    ep,
+                    progress_callback=_progress,
+                    show_title=show_title,
+                    author=author,
+                    is_cancelled=_is_cancelled,
+                    show_metadata=show_metadata,
+                )
+            except TypeError as te:
+                if "show_metadata" in str(te):
+                    file_path = dl_client.download_episode(
+                        ep,
+                        progress_callback=_progress,
+                        show_title=show_title,
+                        author=author,
+                        is_cancelled=_is_cancelled,
+                    )
+                else:
+                    raise
 
             if _is_cancelled():
                 raise InterruptedError("Podcast download cancelled by user")
