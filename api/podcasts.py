@@ -213,9 +213,16 @@ def queue_podcast_download(data: Dict[str, Any]) -> Dict[str, Any]:
                 "playlist_id": "podcasts",
                 "playlist_name": "Podcasts",
                 "source_page": "Podcasts",
+                "batch_type": "podcast",
+                "is_music": False,
+                "managed_externally": True,
                 "phase": "downloading",
             }
         batch = download_batches["podcasts"]
+        batch["is_music"] = False
+        batch["managed_externally"] = True
+        batch["batch_type"] = "podcast"
+        batch["source_page"] = "Podcasts"
         if task_id not in batch["queue"]:
             batch["queue"].append(task_id)
         batch["phase"] = "downloading"

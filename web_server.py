@@ -1729,6 +1729,7 @@ import core.downloads.monitor as _download_monitor_module
 # the post_processing stuck window, defined once in lifecycle where the rescue
 # itself lives. healing only decides WHEN to ask; lifecycle decides what to do.
 from core.downloads.lifecycle import _POST_PROCESSING_STUCK_TIMEOUT
+from core.downloads import lifecycle as _downloads_lifecycle
 
 # Global download monitor instance
 download_monitor = WebUIDownloadMonitor()
@@ -1756,6 +1757,9 @@ def validate_and_heal_batch_states():
                 active_count = batch_data.get('active_count', 0)
                 queue = batch_data.get('queue', [])
                 phase = batch_data.get('phase', 'unknown')
+
+                if not _downloads_lifecycle.is_music_batch(batch_id, batch_data):
+                    continue
 
                 # AUTO-CLEANUP: Remove terminal batches after 5 minutes to prevent stale state.
                 # 'failed' (e.g. an album-bundle hard failure) was missing here, so a failed
@@ -1887,7 +1891,9 @@ def validate_and_heal_batch_states():
                 _global_max = None
             if _global_max is not None:
                 _total_active = sum(
-                    b.get('active_count', 0) for b in download_batches.values()
+                    b.get('active_count', 0)
+                    for _k, b in download_batches.items()
+                    if _downloads_lifecycle.is_music_batch(_k, b)
                 )
                 # AT MOST ONE BATCH PER FREE SLOT. Queueing every held batch
                 # would have each acquire two locks only to find the limit full
@@ -1905,6 +1911,8 @@ def validate_and_heal_batch_states():
                         if _free_slots <= 0:
                             break
                         if _bid in batches_needing_workers:
+                            continue
+                        if not _downloads_lifecycle.is_music_batch(_bid, _bdata):
                             continue
                         if _bdata.get('phase') in ('complete', 'error', 'cancelled', 'failed'):
                             continue

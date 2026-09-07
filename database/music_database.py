@@ -501,6 +501,19 @@ class MusicDatabase:
                 )
             """)
 
+            # Purge any podcast items that erroneously leaked into wishlist_tracks
+            try:
+                cursor.execute("""
+                    DELETE FROM wishlist_tracks
+                    WHERE source_type = 'podcast'
+                       OR spotify_track_id LIKE 'podcast-%'
+                       OR source_info LIKE '%"source_page": "Podcasts"%'
+                       OR source_info LIKE '%"download_source": "Podcast"%'
+                       OR source_info LIKE '%"playlist_id": "podcasts"%'
+                """)
+            except Exception:
+                pass
+
             # Wishlist ignore-list (#874): a TTL'd skip-gate. When a user
             # removes a track from the wishlist or cancels an in-flight
             # wishlist download, the track is recorded here so the automatic
@@ -11788,6 +11801,28 @@ class MusicDatabase:
                     logger.error("Cannot add track to wishlist: missing track ID")
                     return self._wishlist_outcome("rejected", reason="missing track id")
 
+                # Podcast guard: podcast items are not eligible for the music wishlist
+                _is_podcast = False
+                if source_type == 'podcast' or str(track_id).startswith('podcast-'):
+                    _is_podcast = True
+                elif isinstance(source_info, dict):
+                    if (
+                        source_info.get('source_page') == 'Podcasts'
+                        or source_info.get('download_source') == 'Podcast'
+                        or source_info.get('playlist_id') == 'podcasts'
+                    ):
+                        _is_podcast = True
+                elif isinstance(source_info, str) and (
+                    '"source_page": "Podcasts"' in source_info
+                    or '"download_source": "Podcast"' in source_info
+                    or '"playlist_id": "podcasts"' in source_info
+                ):
+                    _is_podcast = True
+
+                if _is_podcast:
+                    logger.info("Skipping wishlist add — podcast items are not eligible for music wishlist: '%s'", track_id)
+                    return self._wishlist_outcome("rejected", track_id, reason="podcast_not_eligible")
+
                 # Blocklist guard (Phase 1): every auto-acquisition path funnels
                 # through here, so one check blocks a banned artist/album/track
                 # (with artist→album→track cascade) before it can be queued.
@@ -12024,6 +12059,30 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error removing track from wishlist: {e}")
             return False
+
+    def purge_podcast_tracks_from_wishlist(self) -> int:
+        """Purge any podcast tracks that leaked into wishlist_tracks."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    DELETE FROM wishlist_tracks
+                    WHERE source_type = 'podcast'
+                       OR spotify_track_id LIKE 'podcast-%'
+                       OR source_info LIKE '%"source_page": "Podcasts"%'
+                       OR source_info LIKE '%"download_source": "Podcast"%'
+                       OR source_info LIKE '%"playlist_id": "podcasts"%'
+                    """
+                )
+                conn.commit()
+                purged = cursor.rowcount
+                if purged > 0:
+                    logger.info("Purged %d podcast tracks from wishlist_tracks", purged)
+                return purged
+        except Exception as e:
+            logger.error("Failed to purge podcast tracks from wishlist: %s", e)
+            return 0
 
     # ── Wishlist ignore-list (#874) ──────────────────────────────────────
     # A TTL'd skip-gate consulted by add_to_wishlist so user-removed /
