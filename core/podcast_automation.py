@@ -172,8 +172,8 @@ def scan_and_auto_download_podcasts(profile_id: int = 1) -> Dict[str, Any]:
                             try:
                                 dt = datetime.fromisoformat(str(dl_time_str).replace("Z", "+00:00"))
                                 rec_ts = dt.timestamp()
-                            except Exception:
-                                pass
+                            except Exception as parse_err:
+                                logger.debug("Failed to parse podcast downloaded_at %r: %s", dl_time_str, parse_err)
 
                         # If record age exceeds retention_days, prune file
                         if rec_ts and (now_ts - rec_ts) >= prune_cutoff_seconds:
@@ -244,8 +244,8 @@ def _automation_loop():
             if config_manager:
                 mins = config_manager.get("podcasts.auto_download_interval_minutes", 30)
                 interval_seconds = max(60, int(mins) * 60)
-        except Exception:
-            pass
+        except Exception as cfg_err:
+            logger.debug("Could not read podcast interval config, using default: %s", cfg_err)
 
         if _stop_event.wait(interval_seconds):
             break

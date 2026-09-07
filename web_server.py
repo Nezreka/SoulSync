@@ -5113,8 +5113,6 @@ def spotify_callback():
         token_info = auth_manager.get_access_token(auth_code)
 
         if token_info:
-            # CRITICAL: update the GLOBAL spotify_client, not a local variable
-            global spotify_client
             clear_cached_metadata_client("spotify")
             spotify_client = get_spotify_client()
             if spotify_client.is_spotify_authenticated():

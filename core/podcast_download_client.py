@@ -332,8 +332,8 @@ class PodcastDownloadClient:
                     or config_manager.get("podcasts.folder_template")
                     or "$show/Season $season/$title"
                 )
-        except Exception:
-            pass
+        except Exception as cfg_err:
+            logger.debug("Failed to load podcast template config, using default: %s", cfg_err)
 
         if org_enabled and template:
             try:
