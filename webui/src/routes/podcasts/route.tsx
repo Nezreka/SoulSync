@@ -1,12 +1,21 @@
-﻿import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 
 import { guardPageAccess } from '@/platform/shell/route-guard';
 
-import { PodcastsPage } from './-ui/podcasts-page';
+import { PodcastProvider } from './-ui/podcast-context';
+import { PodcastsLayout } from './-ui/podcasts-layout';
 
 export const Route = createFileRoute('/podcasts')({
   beforeLoad: ({ context }) => {
     guardPageAccess(context.shell.bridge, 'podcasts');
   },
-  component: PodcastsPage,
+  component: PodcastsRouteComponent,
 });
+
+function PodcastsRouteComponent() {
+  return (
+    <PodcastProvider>
+      <PodcastsLayout />
+    </PodcastProvider>
+  );
+}

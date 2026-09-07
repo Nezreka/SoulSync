@@ -954,11 +954,118 @@
 .billboardActions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
   margin-top: 8px;
 }
 
+/* ── Billboard Action Buttons (Aligned with .library-artist-watchlist-btn) ── */
+
+.actionBtn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 7px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  outline: none;
+  font-family: inherit;
+  overflow: hidden;
+  text-decoration: none;
+  border: 1px solid transparent;
+  line-height: 1.4;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.actionBtn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.actionBtn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.actionBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.actionBtnIcon {
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.25s ease;
+  position: relative;
+  z-index: 1;
+}
+
+.actionBtn:hover:not(:disabled) .actionBtnIcon {
+  transform: scale(1.12);
+}
+
+.actionBtnText {
+  position: relative;
+  z-index: 1;
+}
+
+/* 1. Play Latest Episode: Vibrant Violet / Purple (matches .library-artist-radio-btn) */
+.playActionBtn {
+  color: rgb(196, 181, 253);
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.16) 0%, rgba(139, 92, 246, 0.06) 100%);
+  border-color: rgba(139, 92, 246, 0.32);
+}
+
+.playActionBtn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.26) 0%, rgba(139, 92, 246, 0.12) 100%);
+  border-color: rgba(139, 92, 246, 0.52);
+  box-shadow: 0 4px 16px rgba(139, 92, 246, 0.25);
+}
+
+/* 2. RSS Feed: Warm Amber / Orange (standard RSS feed accent) */
+.rssActionBtn {
+  color: rgb(253, 186, 116);
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.16) 0%, rgba(249, 115, 22, 0.06) 100%);
+  border-color: rgba(249, 115, 22, 0.32);
+}
+
+.rssActionBtn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.26) 0%, rgba(249, 115, 22, 0.12) 100%);
+  border-color: rgba(249, 115, 22, 0.52);
+  box-shadow: 0 4px 16px rgba(249, 115, 22, 0.25);
+}
+
+.rssActionBtn.rssCopied {
+  color: #34d399;
+  background: linear-gradient(135deg, rgba(52, 211, 153, 0.25) 0%, rgba(52, 211, 153, 0.1) 100%);
+  border-color: rgba(52, 211, 153, 0.45);
+  box-shadow: 0 4px 16px rgba(52, 211, 153, 0.2);
+}
+
+/* 3. Visit Site: Electric Sky Blue / Cyan (matches .library-artist-enhance-btn) */
+.siteActionBtn {
+  color: rgb(129, 212, 250);
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.16) 0%, rgba(56, 189, 248, 0.06) 100%);
+  border-color: rgba(56, 189, 248, 0.32);
+}
+
+.siteActionBtn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.26) 0%, rgba(56, 189, 248, 0.12) 100%);
+  border-color: rgba(56, 189, 248, 0.52);
+  box-shadow: 0 4px 16px rgba(56, 189, 248, 0.25);
+}
+
+/* Legacy button classes kept for backwards compatibility */
 .primaryActionBtn {
   display: inline-flex;
   align-items: center;
@@ -3050,18 +3157,15 @@
     gap: 8px;
   }
 
-  .primaryActionBtn {
-    width: 100%;
-    justify-content: center;
-    padding: 10px 18px;
-    font-size: 13px;
-  }
-
+  .billboardActions :global(.library-artist-watchlist-btn),
+  .actionBtn,
+  .primaryActionBtn,
   .secondaryActionBtn {
     width: 100%;
     justify-content: center;
-    padding: 10px 16px;
+    padding: 8px 16px;
     font-size: 12px;
+    box-sizing: border-box;
   }
 
   .billboardShowcasePanel {

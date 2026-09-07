@@ -26,7 +26,9 @@ import { Route as DashboardRouteRouteImport } from './routes/dashboard/route'
 import { Route as AutomationsRouteRouteImport } from './routes/automations/route'
 import { Route as ActiveDownloadsRouteRouteImport } from './routes/active-downloads/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as PodcastsIndexRouteImport } from './routes/podcasts/index'
 import { Route as ImportIndexRouteImport } from './routes/import/index'
+import { Route as PodcastsPodcastIdRouteImport } from './routes/podcasts/$podcastId'
 import { Route as LabelDetailIdRouteImport } from './routes/label-detail/$id'
 import { Route as ImportSinglesRouteImport } from './routes/import/singles'
 import { Route as ImportAutoRouteImport } from './routes/import/auto'
@@ -118,10 +120,20 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PodcastsIndexRoute = PodcastsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => PodcastsRouteRoute,
+} as any)
 const ImportIndexRoute = ImportIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => ImportRouteRoute,
+} as any)
+const PodcastsPodcastIdRoute = PodcastsPodcastIdRouteImport.update({
+  id: '/$podcastId',
+  path: '/$podcastId',
+  getParentRoute: () => PodcastsRouteRoute,
 } as any)
 const LabelDetailIdRoute = LabelDetailIdRouteImport.update({
   id: '/label-detail/$id',
@@ -159,7 +171,7 @@ export interface FileRoutesByFullPath {
   '/issues': typeof IssuesRouteRoute
   '/library': typeof LibraryRouteRoute
   '/playlist-explorer': typeof PlaylistExplorerRouteRoute
-  '/podcasts': typeof PodcastsRouteRoute
+  '/podcasts': typeof PodcastsRouteRouteWithChildren
   '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
   '/sync': typeof SyncRouteRoute
@@ -171,7 +183,9 @@ export interface FileRoutesByFullPath {
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
   '/label-detail/$id': typeof LabelDetailIdRoute
+  '/podcasts/$podcastId': typeof PodcastsPodcastIdRoute
   '/import/': typeof ImportIndexRoute
+  '/podcasts/': typeof PodcastsIndexRoute
   '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
 }
 export interface FileRoutesByTo {
@@ -183,7 +197,6 @@ export interface FileRoutesByTo {
   '/issues': typeof IssuesRouteRoute
   '/library': typeof LibraryRouteRoute
   '/playlist-explorer': typeof PlaylistExplorerRouteRoute
-  '/podcasts': typeof PodcastsRouteRoute
   '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
   '/sync': typeof SyncRouteRoute
@@ -195,7 +208,9 @@ export interface FileRoutesByTo {
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
   '/label-detail/$id': typeof LabelDetailIdRoute
+  '/podcasts/$podcastId': typeof PodcastsPodcastIdRoute
   '/import': typeof ImportIndexRoute
+  '/podcasts': typeof PodcastsIndexRoute
   '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
 }
 export interface FileRoutesById {
@@ -209,7 +224,7 @@ export interface FileRoutesById {
   '/issues': typeof IssuesRouteRoute
   '/library': typeof LibraryRouteRoute
   '/playlist-explorer': typeof PlaylistExplorerRouteRoute
-  '/podcasts': typeof PodcastsRouteRoute
+  '/podcasts': typeof PodcastsRouteRouteWithChildren
   '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
   '/sync': typeof SyncRouteRoute
@@ -221,7 +236,9 @@ export interface FileRoutesById {
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
   '/label-detail/$id': typeof LabelDetailIdRoute
+  '/podcasts/$podcastId': typeof PodcastsPodcastIdRoute
   '/import/': typeof ImportIndexRoute
+  '/podcasts/': typeof PodcastsIndexRoute
   '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
 }
 export interface FileRouteTypes {
@@ -248,7 +265,9 @@ export interface FileRouteTypes {
     | '/import/auto'
     | '/import/singles'
     | '/label-detail/$id'
+    | '/podcasts/$podcastId'
     | '/import/'
+    | '/podcasts/'
     | '/artist-detail/$source/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -260,7 +279,6 @@ export interface FileRouteTypes {
     | '/issues'
     | '/library'
     | '/playlist-explorer'
-    | '/podcasts'
     | '/search'
     | '/stats'
     | '/sync'
@@ -272,7 +290,9 @@ export interface FileRouteTypes {
     | '/import/auto'
     | '/import/singles'
     | '/label-detail/$id'
+    | '/podcasts/$podcastId'
     | '/import'
+    | '/podcasts'
     | '/artist-detail/$source/$id'
   id:
     | '__root__'
@@ -297,7 +317,9 @@ export interface FileRouteTypes {
     | '/import/auto'
     | '/import/singles'
     | '/label-detail/$id'
+    | '/podcasts/$podcastId'
     | '/import/'
+    | '/podcasts/'
     | '/artist-detail/$source/$id'
   fileRoutesById: FileRoutesById
 }
@@ -311,7 +333,7 @@ export interface RootRouteChildren {
   IssuesRouteRoute: typeof IssuesRouteRoute
   LibraryRouteRoute: typeof LibraryRouteRoute
   PlaylistExplorerRouteRoute: typeof PlaylistExplorerRouteRoute
-  PodcastsRouteRoute: typeof PodcastsRouteRoute
+  PodcastsRouteRoute: typeof PodcastsRouteRouteWithChildren
   SearchRouteRoute: typeof SearchRouteRoute
   StatsRouteRoute: typeof StatsRouteRoute
   SyncRouteRoute: typeof SyncRouteRoute
@@ -444,12 +466,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/podcasts/': {
+      id: '/podcasts/'
+      path: '/'
+      fullPath: '/podcasts/'
+      preLoaderRoute: typeof PodcastsIndexRouteImport
+      parentRoute: typeof PodcastsRouteRoute
+    }
     '/import/': {
       id: '/import/'
       path: '/'
       fullPath: '/import/'
       preLoaderRoute: typeof ImportIndexRouteImport
       parentRoute: typeof ImportRouteRoute
+    }
+    '/podcasts/$podcastId': {
+      id: '/podcasts/$podcastId'
+      path: '/$podcastId'
+      fullPath: '/podcasts/$podcastId'
+      preLoaderRoute: typeof PodcastsPodcastIdRouteImport
+      parentRoute: typeof PodcastsRouteRoute
     }
     '/label-detail/$id': {
       id: '/label-detail/$id'
@@ -507,6 +543,20 @@ const ImportRouteRouteWithChildren = ImportRouteRoute._addFileChildren(
   ImportRouteRouteChildren,
 )
 
+interface PodcastsRouteRouteChildren {
+  PodcastsPodcastIdRoute: typeof PodcastsPodcastIdRoute
+  PodcastsIndexRoute: typeof PodcastsIndexRoute
+}
+
+const PodcastsRouteRouteChildren: PodcastsRouteRouteChildren = {
+  PodcastsPodcastIdRoute: PodcastsPodcastIdRoute,
+  PodcastsIndexRoute: PodcastsIndexRoute,
+}
+
+const PodcastsRouteRouteWithChildren = PodcastsRouteRoute._addFileChildren(
+  PodcastsRouteRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ActiveDownloadsRouteRoute: ActiveDownloadsRouteRoute,
@@ -517,7 +567,7 @@ const rootRouteChildren: RootRouteChildren = {
   IssuesRouteRoute: IssuesRouteRoute,
   LibraryRouteRoute: LibraryRouteRoute,
   PlaylistExplorerRouteRoute: PlaylistExplorerRouteRoute,
-  PodcastsRouteRoute: PodcastsRouteRoute,
+  PodcastsRouteRoute: PodcastsRouteRouteWithChildren,
   SearchRouteRoute: SearchRouteRoute,
   StatsRouteRoute: StatsRouteRoute,
   SyncRouteRoute: SyncRouteRoute,

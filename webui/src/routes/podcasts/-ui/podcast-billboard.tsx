@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 
 import type { PodcastEpisodeItem, PodcastShowDetail } from '../-podcasts.types';
 
@@ -6,11 +7,11 @@ import styles from './podcasts-page.module.css';
 
 interface PodcastBillboardProps {
   show: PodcastShowDetail;
-  onBack: () => void;
   onPlayEpisode: (ep: PodcastEpisodeItem) => void;
 }
 
-export function PodcastBillboard({ show, onBack, onPlayEpisode }: PodcastBillboardProps) {
+export function PodcastBillboard({ show, onPlayEpisode }: PodcastBillboardProps) {
+  const navigate = useNavigate();
   const [isExpanded, setIsExpanded] = useState(false);
   const [copiedFeed, setCopiedFeed] = useState(false);
 
@@ -33,7 +34,7 @@ export function PodcastBillboard({ show, onBack, onPlayEpisode }: PodcastBillboa
 
   return (
     <div className={styles.detailContainer}>
-      <button type="button" className={styles.backBtn} onClick={onBack}>
+      <button type="button" className={styles.backBtn} onClick={() => void navigate({ to: '/podcasts' })}>
         <svg
           width="16"
           height="16"
@@ -118,38 +119,70 @@ export function PodcastBillboard({ show, onBack, onPlayEpisode }: PodcastBillboa
             {latestEp && (
               <button
                 type="button"
-                className={styles.primaryActionBtn}
+                className={`${styles.actionBtn} ${styles.playActionBtn}`}
                 onClick={() => onPlayEpisode(latestEp)}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                  <polygon points="5 3 19 12 5 21 5 3" />
-                </svg>
-                <span>Play Latest Episode</span>
+                <span className={styles.actionBtnIcon}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                    <polygon points="5 3 19 12 5 21 5 3" />
+                  </svg>
+                </span>
+                <span className={styles.actionBtnText}>Play Latest Episode</span>
               </button>
             )}
+
+            {/* Non-functional watchlist button — same styling as artist-detail */}
+            <button
+              type="button"
+              className="library-artist-watchlist-btn"
+              id="podcast-watchlist-btn"
+              onClick={() => {
+                /* Watchlist functionality will be wired in a future update */
+              }}
+            >
+              <span className="watchlist-icon">👁️</span>
+              <span className="watchlist-text">Add to Watchlist</span>
+            </button>
 
             {show.feed_url && (
               <button
                 type="button"
-                className={styles.secondaryActionBtn}
+                className={`${styles.actionBtn} ${styles.rssActionBtn}${copiedFeed ? ` ${styles.rssCopied}` : ''}`}
                 onClick={handleCopyFeed}
                 title="Copy RSS Feed URL to clipboard"
               >
-                <svg
-                  width="15"
-                  height="15"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M4 11a9 9 0 0 1 9 9" />
-                  <path d="M4 4a16 16 0 0 1 16 16" />
-                  <circle cx="5" cy="19" r="1" />
-                </svg>
-                <span>{copiedFeed ? '✓ Feed URL Copied' : 'RSS Feed'}</span>
+                <span className={styles.actionBtnIcon}>
+                  {copiedFeed ? (
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  ) : (
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M4 11a9 9 0 0 1 9 9" />
+                      <path d="M4 4a16 16 0 0 1 16 16" />
+                      <circle cx="5" cy="19" r="1" />
+                    </svg>
+                  )}
+                </span>
+                <span className={styles.actionBtnText}>{copiedFeed ? 'Feed URL Copied' : 'RSS Feed'}</span>
               </button>
             )}
 
@@ -158,9 +191,25 @@ export function PodcastBillboard({ show, onBack, onPlayEpisode }: PodcastBillboa
                 href={show.website}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={styles.secondaryActionBtn}
+                className={`${styles.actionBtn} ${styles.siteActionBtn}`}
               >
-                <span>Visit Site ↗</span>
+                <span className={styles.actionBtnIcon}>
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                    <polyline points="15 3 21 3 21 9" />
+                    <line x1="10" y1="14" x2="21" y2="3" />
+                  </svg>
+                </span>
+                <span className={styles.actionBtnText}>Visit Site ↗</span>
               </a>
             )}
           </div>
