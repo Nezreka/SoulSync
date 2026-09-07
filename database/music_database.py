@@ -754,6 +754,26 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_podcasts_itunes "
                            "ON watchlist_podcasts (itunes_id)")
 
+            # Downloaded podcast episodes tracker (for auto-download deduplication and retention pruning)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS downloaded_podcast_episodes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    feed_url TEXT NOT NULL,
+                    guid TEXT,
+                    enclosure_url TEXT NOT NULL,
+                    title TEXT,
+                    pub_date TIMESTAMP,
+                    file_path TEXT,
+                    downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    pruned_at TIMESTAMP,
+                    UNIQUE(feed_url, enclosure_url)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_downloaded_podcasts_feed "
+                           "ON downloaded_podcast_episodes (feed_url)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_downloaded_podcasts_guid "
+                           "ON downloaded_podcast_episodes (guid)")
+
             # Create indexes for performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_artist_id ON albums (artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks (album_id)")
@@ -13494,14 +13514,21 @@ class MusicDatabase:
             logger.error("update_watchlist_podcast_settings failed: %s", e)
             return False
 
-    def mark_watchlist_podcast_scanned(self, feed_url: str) -> None:
+    def mark_watchlist_podcast_scanned(self, feed_url: str, episode_count: Optional[int] = None) -> None:
         try:
             with self._get_connection() as conn:
-                conn.execute(
-                    "UPDATE watchlist_podcasts SET last_scan_timestamp = CURRENT_TIMESTAMP "
-                    "WHERE feed_url = ?",
-                    (str(feed_url or '').strip(),),
-                )
+                if episode_count is not None:
+                    conn.execute(
+                        "UPDATE watchlist_podcasts SET last_scan_timestamp = CURRENT_TIMESTAMP, "
+                        "episode_count = COALESCE(?, episode_count) WHERE feed_url = ?",
+                        (episode_count, str(feed_url or '').strip()),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE watchlist_podcasts SET last_scan_timestamp = CURRENT_TIMESTAMP "
+                        "WHERE feed_url = ?",
+                        (str(feed_url or '').strip(),),
+                    )
                 conn.commit()
         except Exception as e:
             logger.debug("mark_watchlist_podcast_scanned failed: %s", e)
@@ -13516,6 +13543,151 @@ class MusicDatabase:
                 return row["count"] if row else 0
         except Exception:
             return 0
+
+    def record_downloaded_podcast_episode(
+        self,
+        feed_url: str,
+        enclosure_url: str,
+        guid: Optional[str] = None,
+        title: Optional[str] = None,
+        pub_date: Optional[Any] = None,
+        file_path: Optional[str] = None,
+    ) -> bool:
+        """Record a downloaded podcast episode so it is never re-downloaded."""
+        if not feed_url or not enclosure_url:
+            return False
+        try:
+            pub_date_str = pub_date.isoformat() if hasattr(pub_date, "isoformat") else (str(pub_date) if pub_date else None)
+            with self._get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO downloaded_podcast_episodes
+                        (feed_url, guid, enclosure_url, title, pub_date, file_path, downloaded_at)
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(feed_url, enclosure_url) DO UPDATE SET
+                        guid = COALESCE(excluded.guid, downloaded_podcast_episodes.guid),
+                        title = COALESCE(excluded.title, downloaded_podcast_episodes.title),
+                        pub_date = COALESCE(excluded.pub_date, downloaded_podcast_episodes.pub_date),
+                        file_path = COALESCE(excluded.file_path, downloaded_podcast_episodes.file_path)
+                    """,
+                    (str(feed_url).strip(), str(guid).strip() if guid else None,
+                     str(enclosure_url).strip(), str(title).strip() if title else None,
+                     pub_date_str, str(file_path).strip() if file_path else None),
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error("record_downloaded_podcast_episode failed: %s", e)
+            return False
+
+    def is_podcast_episode_downloaded(
+        self,
+        feed_url: str,
+        enclosure_url: Optional[str] = None,
+        guid: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> bool:
+        """Check if an episode has already been downloaded (or pruned)."""
+        feed_url = str(feed_url or "").strip()
+        enc = str(enclosure_url or "").strip()
+        g = str(guid or "").strip()
+        t = str(title or "").strip()
+        if not feed_url and not enc and not g and not t:
+            return False
+        try:
+            with self._get_connection() as conn:
+                # 1. Check downloaded_podcast_episodes table
+                if enc and g:
+                    row = conn.execute(
+                        "SELECT 1 FROM downloaded_podcast_episodes "
+                        "WHERE (feed_url = ? AND enclosure_url = ?) OR (guid = ?)",
+                        (feed_url, enc, g),
+                    ).fetchone()
+                elif enc:
+                    row = conn.execute(
+                        "SELECT 1 FROM downloaded_podcast_episodes "
+                        "WHERE feed_url = ? AND enclosure_url = ?",
+                        (feed_url, enc),
+                    ).fetchone()
+                elif g:
+                    row = conn.execute(
+                        "SELECT 1 FROM downloaded_podcast_episodes WHERE guid = ?",
+                        (g,),
+                    ).fetchone()
+                else:
+                    row = None
+
+                if row:
+                    return True
+
+                # 2. Check library_history table fallback
+                target_ids = [x for x in (g, enc) if x]
+                if target_ids:
+                    placeholders = ",".join("?" * len(target_ids))
+                    row = conn.execute(
+                        f"SELECT 1 FROM library_history WHERE event_type = 'podcast' "
+                        f"AND source_track_id IN ({placeholders})",
+                        target_ids,
+                    ).fetchone()
+                    if row:
+                        return True
+
+                if t:
+                    row = conn.execute(
+                        "SELECT 1 FROM library_history WHERE event_type = 'podcast' "
+                        "AND title = ?",
+                        (t,),
+                    ).fetchone()
+                    if row:
+                        return True
+
+                return False
+        except Exception as e:
+            logger.debug("is_podcast_episode_downloaded check failed: %s", e)
+            return False
+
+    def get_downloaded_podcast_episodes(
+        self,
+        feed_url: Optional[str] = None,
+        unpruned_only: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Return list of downloaded podcast episode records."""
+        try:
+            with self._get_connection() as conn:
+                clauses = []
+                params = []
+                if feed_url:
+                    clauses.append("feed_url = ?")
+                    params.append(str(feed_url).strip())
+                if unpruned_only:
+                    clauses.append("pruned_at IS NULL")
+                where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+                cursor = conn.execute(
+                    f"SELECT id, feed_url, guid, enclosure_url, title, pub_date, "
+                    f"file_path, downloaded_at, pruned_at "
+                    f"FROM downloaded_podcast_episodes {where} ORDER BY downloaded_at DESC",
+                    params,
+                )
+                return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error("get_downloaded_podcast_episodes failed: %s", e)
+            return []
+
+    def mark_podcast_episode_pruned(self, episode_id: int, pruned_at: Optional[str] = None) -> bool:
+        """Flag a downloaded episode as retention-pruned (file deleted on disk)."""
+        try:
+            with self._get_connection() as conn:
+                stamp = pruned_at or datetime.now().isoformat()
+                cur = conn.execute(
+                    "UPDATE downloaded_podcast_episodes SET pruned_at = ? "
+                    "WHERE id = ? AND pruned_at IS NULL",
+                    (stamp, int(episode_id)),
+                )
+                conn.commit()
+                return cur.rowcount > 0
+        except Exception as e:
+            logger.error("mark_podcast_episode_pruned failed: %s", e)
+            return False
 
     def get_watchlist_artists(self, profile_id: int = 1) -> List[WatchlistArtist]:
         """Get all artists in the watchlist for the given profile"""

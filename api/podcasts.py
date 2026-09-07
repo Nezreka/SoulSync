@@ -129,6 +129,319 @@ def show_to_dict(show: PodcastShow, include_episodes: bool = True) -> Dict[str, 
 
 
 # ---------------------------------------------------------------------------
+# Background Download Queuing
+# ---------------------------------------------------------------------------
+
+def queue_podcast_download(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Queue background download of a podcast episode and register it in download_tasks."""
+    enclosure_url = (data.get("enclosure_url") or "").strip()
+    title = (data.get("title") or "Episode").strip()
+    guid = (data.get("guid") or enclosure_url).strip()
+    show_title = (data.get("show_title") or "Podcasts").strip()
+    author = (data.get("author") or "").strip()
+    pub_date_raw = data.get("pub_date")
+    pub_date = None
+    if pub_date_raw:
+        try:
+            pub_date = datetime.fromisoformat(str(pub_date_raw).replace("Z", "+00:00"))
+        except Exception:
+            pub_date = None
+    artwork_url = (data.get("artwork_url") or "").strip()
+    duration_seconds = data.get("duration_seconds")
+    feed_url = (data.get("feed_url") or "").strip()
+
+    if not enclosure_url:
+        return {"success": False, "error": "enclosure_url is required"}
+
+    download_id = _make_download_id(enclosure_url, guid)
+    task_id = f"podcast_{download_id}"
+    track_index = _next_podcast_track_index()
+
+    with _download_lock:
+        existing = _downloads.get(download_id)
+        if existing and existing.get("status") in ("downloading", "queued"):
+            return {
+                "success": True,
+                "download_id": download_id,
+                "task_id": existing.get("task_id", task_id),
+                "track_index": existing.get("track_index", track_index),
+                "status": existing["status"],
+            }
+
+        record = {
+            "download_id": download_id,
+            "task_id": task_id,
+            "track_index": track_index,
+            "title": title,
+            "show_title": show_title,
+            "author": author,
+            "artwork_url": artwork_url,
+            "enclosure_url": enclosure_url,
+            "duration_seconds": duration_seconds,
+            "status": "queued",
+            "progress_bytes": 0,
+            "total_bytes": 0,
+            "percent": 0.0,
+            "file_path": None,
+            "error": None,
+            "started_at": time.time(),
+            "completed_at": None,
+        }
+        _downloads[download_id] = record
+
+    # Pre-emptively record into downloaded_podcast_episodes if feed_url is known
+    db = _db()
+    if db and feed_url:
+        try:
+            db.record_downloaded_podcast_episode(
+                feed_url=feed_url,
+                enclosure_url=enclosure_url,
+                guid=guid,
+                title=title,
+                pub_date=pub_date,
+            )
+        except Exception as pre_err:
+            logger.debug("Pre-recording downloaded podcast episode: %s", pre_err)
+
+    with tasks_lock:
+        if "podcasts" not in download_batches:
+            download_batches["podcasts"] = {
+                "queue": [],
+                "active_count": 0,
+                "max_concurrent": 3,
+                "queue_index": 0,
+                "playlist_id": "podcasts",
+                "playlist_name": "Podcasts",
+                "source_page": "Podcasts",
+                "phase": "downloading",
+            }
+        batch = download_batches["podcasts"]
+        if task_id not in batch["queue"]:
+            batch["queue"].append(task_id)
+        batch["phase"] = "downloading"
+
+        download_tasks[task_id] = {
+            "status": "queued",
+            "track_info": {
+                "title": title,
+                "name": title,
+                "track_name": title,
+                "artist": author or show_title,
+                "artist_name": author or show_title,
+                "album": show_title,
+                "album_name": show_title,
+                "artwork_url": artwork_url,
+            },
+            "playlist_id": "podcasts",
+            "batch_id": "podcasts",
+            "track_index": track_index,
+            "download_source": "Podcast",
+            "quality": data.get("enclosure_type") or "audio/mpeg",
+            "progress": 0.0,
+            "speed": 0.0,
+            "bytes_transferred": 0,
+            "size": data.get("enclosure_length") or 0,
+            "status_change_time": time.time(),
+            "cancel_requested": False,
+            "error_message": None,
+        }
+
+    # Run background worker thread
+    def _worker():
+        with tasks_lock:
+            if "podcasts" in download_batches:
+                download_batches["podcasts"]["active_count"] = (
+                    download_batches["podcasts"].get("active_count", 0) + 1
+                )
+            if task_id in download_tasks:
+                download_tasks[task_id]["status"] = "downloading"
+                download_tasks[task_id]["status_change_time"] = time.time()
+
+        with _download_lock:
+            if download_id in _downloads:
+                _downloads[download_id]["status"] = "downloading"
+
+        _last_bytes = 0
+        _last_time = time.time()
+
+        def _progress(downloaded: int, total: int):
+            nonlocal _last_bytes, _last_time
+            now = time.time()
+            elapsed = max(0.001, now - _last_time)
+            speed = max(0.0, (downloaded - _last_bytes) / elapsed) if downloaded > _last_bytes else 0.0
+            _last_bytes = downloaded
+            _last_time = now
+
+            pct = (downloaded / total * 100.0) if total else 0.0
+            with _download_lock:
+                rec = _downloads.get(download_id)
+                if rec:
+                    rec["progress_bytes"] = downloaded
+                    rec["total_bytes"] = total
+                    rec["percent"] = round(pct, 1)
+
+            with tasks_lock:
+                task = download_tasks.get(task_id)
+                if task:
+                    task["progress"] = pct
+                    task["bytes_transferred"] = downloaded
+                    task["speed"] = speed
+                    if total and not task.get("size"):
+                        task["size"] = total
+
+        def _is_cancelled() -> bool:
+            with tasks_lock:
+                t = download_tasks.get(task_id)
+                if t and (t.get("cancel_requested") or t.get("status") == "cancelled"):
+                    return True
+            with _download_lock:
+                rec = _downloads.get(download_id)
+                if rec and rec.get("status") == "cancelled":
+                    return True
+            return False
+
+        try:
+            dl_client = _get_download_client()
+            ep = PodcastEpisode(
+                guid=guid,
+                title=title,
+                enclosure_url=enclosure_url,
+                enclosure_type=data.get("enclosure_type", "audio/mpeg"),
+                enclosure_length=data.get("enclosure_length"),
+                pub_date=pub_date,
+                duration_seconds=duration_seconds,
+                description="",
+                show_notes="",
+                season=data.get("season"),
+                episode_number=data.get("episode_number"),
+                episode_type=data.get("episode_type", "full"),
+                artwork_url=artwork_url,
+                chapter_url=None,
+                transcript_url=None,
+                show_title=show_title,
+                author=author,
+            )
+            file_path = dl_client.download_episode(
+                ep,
+                progress_callback=_progress,
+                show_title=show_title,
+                author=author,
+                is_cancelled=_is_cancelled,
+            )
+
+            if _is_cancelled():
+                raise InterruptedError("Podcast download cancelled by user")
+
+            if not file_path:
+                raise RuntimeError("Download failed or file was invalid")
+
+            # Record in library history
+            db_conn = _db()
+            history_id = None
+            if db_conn:
+                try:
+                    fn = os.path.basename(file_path) if file_path else ""
+                    history_id = db_conn.add_library_history_entry(
+                        event_type="podcast",
+                        title=title,
+                        artist_name=author or show_title,
+                        album_name=show_title,
+                        quality=data.get("enclosure_type") or "audio/mpeg",
+                        file_path=file_path,
+                        thumb_url=artwork_url,
+                        download_source="Podcast",
+                        source_filename=fn,
+                        source_track_id=guid or enclosure_url,
+                        origin="podcast",
+                        origin_context=show_title,
+                        verification_status="verified",
+                    )
+                except Exception as db_err:
+                    logger.error("Failed to record library history for podcast download: %s", db_err)
+
+                try:
+                    db_conn.record_downloaded_podcast_episode(
+                        feed_url=feed_url,
+                        enclosure_url=enclosure_url,
+                        guid=guid,
+                        title=title,
+                        pub_date=pub_date,
+                        file_path=file_path,
+                    )
+                except Exception as rec_err:
+                    logger.error("Failed to record downloaded podcast episode: %s", rec_err)
+
+            with tasks_lock:
+                task = download_tasks.get(task_id)
+                if task:
+                    task["status"] = "completed"
+                    task["progress"] = 100.0
+                    task["final_file_path"] = file_path
+                    task["history_id"] = history_id
+                    task["status_change_time"] = time.time()
+
+            with _download_lock:
+                rec = _downloads.get(download_id)
+                if rec:
+                    rec["status"] = "completed"
+                    rec["file_path"] = file_path
+                    rec["percent"] = 100.0
+                    rec["completed_at"] = time.time()
+
+        except (InterruptedError, KeyboardInterrupt):
+            logger.info("Podcast download cancelled: %s", title)
+            with tasks_lock:
+                task = download_tasks.get(task_id)
+                if task:
+                    task["status"] = "cancelled"
+                    task["error_message"] = "Download cancelled"
+                    task["status_change_time"] = time.time()
+            with _download_lock:
+                rec = _downloads.get(download_id)
+                if rec:
+                    rec["status"] = "cancelled"
+                    rec["error"] = "Download cancelled"
+
+        except Exception as exc:
+            logger.error("Podcast download failed for %s: %s", title, exc)
+            with tasks_lock:
+                task = download_tasks.get(task_id)
+                if task:
+                    task["status"] = "failed"
+                    task["error_message"] = str(exc)
+                    task["status_change_time"] = time.time()
+            with _download_lock:
+                rec = _downloads.get(download_id)
+                if rec:
+                    rec["status"] = "error"
+                    rec["error"] = str(exc)
+
+        finally:
+            with tasks_lock:
+                if "podcasts" in download_batches:
+                    b = download_batches["podcasts"]
+                    b["active_count"] = max(0, b.get("active_count", 1) - 1)
+                    queue = b.get("queue", [])
+                    all_done = all(
+                        download_tasks.get(tid, {}).get("status") in ("completed", "failed", "cancelled")
+                        for tid in queue if tid in download_tasks
+                    )
+                    if all_done:
+                        b["phase"] = "complete"
+
+    thread = threading.Thread(target=_worker, daemon=True, name=f"podcast-dl-{download_id}")
+    thread.start()
+
+    return {
+        "success": True,
+        "download_id": download_id,
+        "task_id": task_id,
+        "track_index": track_index,
+        "status": "queued",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Blueprint Factory
 # ---------------------------------------------------------------------------
 
@@ -241,284 +554,10 @@ def create_podcasts_blueprint() -> Blueprint:
     def download_episode():
         """Trigger background download of a podcast episode."""
         data = request.get_json(silent=True) or {}
-        enclosure_url = data.get("enclosure_url", "").strip()
-        title = data.get("title", "Episode").strip()
-        guid = data.get("guid", enclosure_url).strip()
-        show_title = data.get("show_title", "Podcasts").strip()
-        author = data.get("author", "").strip()
-        pub_date_raw = data.get("pub_date")
-        pub_date = None
-        if pub_date_raw:
-            try:
-                pub_date = datetime.fromisoformat(str(pub_date_raw).replace("Z", "+00:00"))
-            except Exception:
-                pub_date = None
-        artwork_url = data.get("artwork_url", "").strip()
-        duration_seconds = data.get("duration_seconds")
-
-        if not enclosure_url:
+        if not (data.get("enclosure_url") or "").strip():
             return jsonify({"success": False, "error": "enclosure_url is required"}), 400
-
-        download_id = _make_download_id(enclosure_url, guid)
-        task_id = f"podcast_{download_id}"
-        track_index = _next_podcast_track_index()
-
-        with _download_lock:
-            existing = _downloads.get(download_id)
-            if existing and existing.get("status") in ("downloading", "queued"):
-                return jsonify({
-                    "success": True,
-                    "download_id": download_id,
-                    "task_id": existing.get("task_id", task_id),
-                    "status": existing["status"],
-                })
-
-            record = {
-                "download_id": download_id,
-                "task_id": task_id,
-                "track_index": track_index,
-                "title": title,
-                "show_title": show_title,
-                "author": author,
-                "artwork_url": artwork_url,
-                "enclosure_url": enclosure_url,
-                "duration_seconds": duration_seconds,
-                "status": "queued",
-                "progress_bytes": 0,
-                "total_bytes": 0,
-                "percent": 0.0,
-                "file_path": None,
-                "error": None,
-                "started_at": time.time(),
-                "completed_at": None,
-            }
-            _downloads[download_id] = record
-
-        with tasks_lock:
-            if "podcasts" not in download_batches:
-                download_batches["podcasts"] = {
-                    "queue": [],
-                    "active_count": 0,
-                    "max_concurrent": 3,
-                    "queue_index": 0,
-                    "playlist_id": "podcasts",
-                    "playlist_name": "Podcasts",
-                    "source_page": "Podcasts",
-                    "phase": "downloading",
-                }
-            batch = download_batches["podcasts"]
-            if task_id not in batch["queue"]:
-                batch["queue"].append(task_id)
-            batch["phase"] = "downloading"
-
-            download_tasks[task_id] = {
-                "status": "queued",
-                "track_info": {
-                    "title": title,
-                    "name": title,
-                    "track_name": title,
-                    "artist": author or show_title,
-                    "artist_name": author or show_title,
-                    "album": show_title,
-                    "album_name": show_title,
-                    "artwork_url": artwork_url,
-                },
-                "playlist_id": "podcasts",
-                "batch_id": "podcasts",
-                "track_index": track_index,
-                "download_source": "Podcast",
-                "quality": data.get("enclosure_type") or "audio/mpeg",
-                "progress": 0.0,
-                "speed": 0.0,
-                "bytes_transferred": 0,
-                "size": data.get("enclosure_length") or 0,
-                "status_change_time": time.time(),
-                "cancel_requested": False,
-                "error_message": None,
-            }
-
-        # Run background worker thread
-        def _worker():
-            with tasks_lock:
-                if "podcasts" in download_batches:
-                    download_batches["podcasts"]["active_count"] = (
-                        download_batches["podcasts"].get("active_count", 0) + 1
-                    )
-                if task_id in download_tasks:
-                    download_tasks[task_id]["status"] = "downloading"
-                    download_tasks[task_id]["status_change_time"] = time.time()
-
-            with _download_lock:
-                if download_id in _downloads:
-                    _downloads[download_id]["status"] = "downloading"
-
-            _last_bytes = 0
-            _last_time = time.time()
-
-            def _progress(downloaded: int, total: int):
-                nonlocal _last_bytes, _last_time
-                now = time.time()
-                dt = now - _last_time
-                speed = 0.0
-                if dt >= 0.25:
-                    db = downloaded - _last_bytes
-                    if db > 0 and dt > 0:
-                        speed = db / dt
-                    _last_bytes = downloaded
-                    _last_time = now
-
-                with _download_lock:
-                    rec = _downloads.get(download_id)
-                    if rec:
-                        rec["progress_bytes"] = downloaded
-                        rec["total_bytes"] = total
-                        if total > 0:
-                            rec["percent"] = round((downloaded / total) * 100.0, 1)
-
-                with tasks_lock:
-                    task = download_tasks.get(task_id)
-                    if task and not task.get("cancel_requested"):
-                        pct = round((downloaded / total) * 100.0, 1) if total > 0 else 0.0
-                        task["progress"] = pct
-                        task["bytes"] = downloaded
-                        task["bytes_transferred"] = downloaded
-                        task["size"] = total
-                        if speed > 0:
-                            task["speed"] = speed
-
-            def _is_cancelled() -> bool:
-                with tasks_lock:
-                    task = download_tasks.get(task_id)
-                    if task and (task.get("cancel_requested") or task.get("status") == "cancelled"):
-                        return True
-                return False
-
-            try:
-                dl_client = _get_download_client()
-                ep = PodcastEpisode(
-                    guid=guid,
-                    title=title,
-                    enclosure_url=enclosure_url,
-                    enclosure_type=data.get("enclosure_type", "audio/mpeg"),
-                    enclosure_length=data.get("enclosure_length"),
-                    pub_date=pub_date,
-                    duration_seconds=duration_seconds,
-                    description="",
-                    show_notes="",
-                    season=data.get("season"),
-                    episode_number=data.get("episode_number"),
-                    episode_type=data.get("episode_type", "full"),
-                    artwork_url=artwork_url,
-                    chapter_url=None,
-                    transcript_url=None,
-                    show_title=show_title,
-                    author=author,
-                )
-                file_path = dl_client.download_episode(
-                    ep,
-                    progress_callback=_progress,
-                    show_title=show_title,
-                    author=author,
-                    is_cancelled=_is_cancelled,
-                )
-
-                if _is_cancelled():
-                    raise InterruptedError("Podcast download cancelled by user")
-
-                if not file_path:
-                    raise RuntimeError("Download failed or file was invalid")
-
-                # Record in library history
-                db = _db()
-                history_id = None
-                if db:
-                    try:
-                        filename = os.path.basename(file_path) if file_path else ""
-                        history_id = db.add_library_history_entry(
-                            event_type="podcast",
-                            title=title,
-                            artist_name=author or show_title,
-                            album_name=show_title,
-                            quality=data.get("enclosure_type") or "audio/mpeg",
-                            file_path=file_path,
-                            thumb_url=artwork_url,
-                            download_source="Podcast",
-                            source_filename=filename,
-                            origin="podcast",
-                            origin_context=show_title,
-                            verification_status="verified",
-                        )
-                    except Exception as db_err:
-                        logger.error("Failed to record library history for podcast download: %s", db_err)
-
-                with tasks_lock:
-                    task = download_tasks.get(task_id)
-                    if task:
-                        task["status"] = "completed"
-                        task["progress"] = 100.0
-                        task["final_file_path"] = file_path
-                        task["history_id"] = history_id
-                        task["status_change_time"] = time.time()
-
-                with _download_lock:
-                    rec = _downloads.get(download_id)
-                    if rec:
-                        rec["status"] = "completed"
-                        rec["file_path"] = file_path
-                        rec["percent"] = 100.0
-                        rec["completed_at"] = time.time()
-
-            except (InterruptedError, KeyboardInterrupt):
-                logger.info("Podcast download cancelled: %s", title)
-                with tasks_lock:
-                    task = download_tasks.get(task_id)
-                    if task:
-                        task["status"] = "cancelled"
-                        task["error_message"] = "Download cancelled"
-                        task["status_change_time"] = time.time()
-                with _download_lock:
-                    rec = _downloads.get(download_id)
-                    if rec:
-                        rec["status"] = "cancelled"
-                        rec["error"] = "Download cancelled"
-
-            except Exception as exc:
-                logger.error("Podcast download failed for %s: %s", title, exc)
-                with tasks_lock:
-                    task = download_tasks.get(task_id)
-                    if task:
-                        task["status"] = "failed"
-                        task["error_message"] = str(exc)
-                        task["status_change_time"] = time.time()
-                with _download_lock:
-                    rec = _downloads.get(download_id)
-                    if rec:
-                        rec["status"] = "error"
-                        rec["error"] = str(exc)
-
-            finally:
-                with tasks_lock:
-                    if "podcasts" in download_batches:
-                        b = download_batches["podcasts"]
-                        b["active_count"] = max(0, b.get("active_count", 1) - 1)
-                        queue = b.get("queue", [])
-                        all_done = all(
-                            download_tasks.get(tid, {}).get("status") in ("completed", "failed", "cancelled")
-                            for tid in queue if tid in download_tasks
-                        )
-                        if all_done:
-                            b["phase"] = "complete"
-
-        thread = threading.Thread(target=_worker, daemon=True, name=f"podcast-dl-{download_id}")
-        thread.start()
-
-        return jsonify({
-            "success": True,
-            "download_id": download_id,
-            "task_id": task_id,
-            "track_index": track_index,
-            "status": "queued",
-        })
+        res = queue_podcast_download(data)
+        return jsonify(res), 200
 
     @bp.route("/downloads", methods=["GET"])
     def get_downloads():
@@ -727,5 +766,48 @@ def create_podcasts_blueprint() -> Blueprint:
         except Exception as exc:
             logger.exception("podcasts_watchlist_settings failed for %s: %s", feed_url, exc)
             return jsonify({"success": False, "error": f"Failed to update settings: {exc}"}), 500
+
+    @bp.route("/watchlist/scan-now", methods=["POST"])
+    def podcasts_watchlist_scan_now():
+        """Trigger an immediate scan of all watchlisted podcast feeds."""
+        try:
+            from core.podcast_automation import scan_and_auto_download_podcasts
+            res = scan_and_auto_download_podcasts()
+            return jsonify(res), 200
+        except Exception as exc:
+            logger.exception("Failed to run podcast scan: %s", exc)
+            return jsonify({"success": False, "error": str(exc)}), 500
+
+    @bp.route("/watchlist/scan-status", methods=["GET"])
+    def podcasts_watchlist_scan_status():
+        """Return status and metrics from the podcast automation scanner."""
+        try:
+            from core.podcast_automation import get_scan_status
+            return jsonify({"success": True, "status": get_scan_status()}), 200
+        except Exception as exc:
+            return jsonify({"success": False, "error": str(exc)}), 500
+
+    @bp.route("/downloads/cancel-queued", methods=["POST"])
+    def cancel_queued_downloads():
+        """Cancel all pending/queued podcast downloads in memory."""
+        cancelled_count = 0
+        with tasks_lock:
+            batch = download_batches.get("podcasts", {})
+            queue = batch.get("queue", [])
+            for tid in list(queue):
+                task = download_tasks.get(tid)
+                if task and task.get("status") == "queued":
+                    task["status"] = "cancelled"
+                    task["error_message"] = "Cancelled by user"
+                    task["status_change_time"] = time.time()
+                    cancelled_count += 1
+
+        with _download_lock:
+            for rec in _downloads.values():
+                if rec.get("status") == "queued":
+                    rec["status"] = "cancelled"
+                    rec["error"] = "Cancelled by user"
+
+        return jsonify({"success": True, "cancelled_count": cancelled_count}), 200
 
     return bp

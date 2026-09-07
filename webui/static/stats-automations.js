@@ -2531,6 +2531,7 @@ const _autoIcons = {
     watchlist_new_release: '\uD83D\uDD14', playlist_synced: '\uD83D\uDD04',
     playlist_changed: '\u270F\uFE0F',
     process_wishlist: '\uD83D\uDCCB', scan_watchlist: '\uD83D\uDC41\uFE0F',
+    scan_watchlist_podcasts: '\uD83C\uDF99\uFE0F',
     scan_library: '\uD83D\uDD04', refresh_mirrored: '\uD83D\uDCC2', sync_playlist: '\uD83D\uDD01',
     discover_playlist: '\uD83D\uDD0D', discovery_completed: '\uD83D\uDD0D',
     notify_only: '\uD83D\uDD14', discord_webhook: '\uD83D\uDCAC', pushbullet: '\uD83D\uDD14', telegram: '\u2709\uFE0F', webhook: '\uD83C\uDF10',
@@ -4194,6 +4195,7 @@ function _autoFormatTrigger(type, config) {
 function _autoFormatAction(type) {
     const labels = {
         process_wishlist: 'Process Wishlist', scan_watchlist: 'Scan Watchlist',
+        scan_watchlist_podcasts: 'Scan Watchlist Podcasts',
         scan_library: 'Scan Library', refresh_mirrored: 'Refresh Mirrored',
         sync_playlist: 'Sync Playlist', discover_playlist: 'Discover Playlist',
         notify_only: 'Notify Only',

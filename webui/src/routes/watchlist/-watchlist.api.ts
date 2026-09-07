@@ -388,3 +388,20 @@ export async function updateWatchlistPodcastSettings(
   );
   assertSuccess(payload, 'Failed to update podcast settings');
 }
+
+export async function scanWatchlistPodcasts(): Promise<{
+  success: boolean;
+  podcasts_checked?: number;
+  episodes_queued?: number;
+  episodes_pruned?: number;
+}> {
+  const payload = await readJson<{
+    success: boolean;
+    podcasts_checked?: number;
+    episodes_queued?: number;
+    episodes_pruned?: number;
+  }>(apiClient.post('podcasts/watchlist/scan-now'));
+  assertSuccess(payload, 'Failed to scan podcasts');
+  return payload;
+}
+

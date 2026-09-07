@@ -327,3 +327,82 @@ def test_get_downloads(client):
     data = res.get_json()
     assert data["success"] is True
     assert isinstance(data["downloads"], list)
+
+
+def test_cancel_queued_downloads(client):
+    from core.runtime_state import download_batches, download_tasks
+    import api.podcasts as pod_api
+
+    download_batches["podcasts"] = {
+        "queue": ["podcast_q1", "podcast_q2"],
+        "playlist_id": "podcasts",
+    }
+    download_tasks["podcast_q1"] = {"status": "queued", "playlist_id": "podcasts"}
+    download_tasks["podcast_q2"] = {"status": "downloading", "playlist_id": "podcasts"}
+
+    with pod_api._download_lock:
+        pod_api._downloads["q1"] = {"status": "queued"}
+
+    res = client.post("/api/podcasts/downloads/cancel-queued")
+    assert res.status_code == 200
+    assert res.get_json()["cancelled_count"] == 1
+
+    assert download_tasks["podcast_q1"]["status"] == "cancelled"
+    assert download_tasks["podcast_q2"]["status"] == "downloading"
+    with pod_api._download_lock:
+        assert pod_api._downloads["q1"]["status"] == "cancelled"
+
+
+def test_library_history_podcast_tab_and_stats(tmp_path):
+    from database.music_database import MusicDatabase
+
+    db = MusicDatabase(database_path=tmp_path / "test.db")
+    # Add download, import, and podcast entries
+    id_dl = db.add_library_history_entry(
+        event_type="download",
+        title="Music Track",
+        artist_name="Music Artist",
+        download_source="Soulseek",
+    )
+    id_imp = db.add_library_history_entry(
+        event_type="import",
+        title="Imported Track",
+        artist_name="Import Artist",
+        server_source="plex",
+    )
+    id_pod = db.add_library_history_entry(
+        event_type="podcast",
+        title="Podcast Episode",
+        artist_name="Podcast Host",
+        album_name="Podcast Show",
+        download_source="Podcast",
+        file_path="/downloads/podcasts/episode.mp3",
+    )
+
+    stats = db.get_library_history_stats()
+    assert stats["downloads"] == 1
+    assert stats["imports"] == 1
+    assert stats["podcasts"] == 1
+    assert stats["source_counts"].get("Podcast") == 1
+
+    # Query podcast history
+    entries, total = db.get_library_history(event_type="podcast", limit=10, page=1)
+    assert total == 1
+    assert len(entries) == 1
+    assert entries[0]["id"] == id_pod
+    assert entries[0]["title"] == "Podcast Episode"
+    assert entries[0]["event_type"] == "podcast"
+    assert entries[0]["download_source"] == "Podcast"
+
+    # Query download history (should not include podcast)
+    entries_dl, total_dl = db.get_library_history(event_type="download", limit=10, page=1)
+    assert total_dl == 1
+    assert entries_dl[0]["id"] == id_dl
+
+    # Query both download and podcast (used by clear/purge and persistent history)
+    entries_both, total_both = db.get_library_history(event_type=("download", "podcast"), limit=10, page=1)
+    assert total_both == 2
+    types = {e["event_type"] for e in entries_both}
+    assert types == {"download", "podcast"}
+
+

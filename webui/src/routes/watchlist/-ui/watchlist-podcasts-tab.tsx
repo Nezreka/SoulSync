@@ -6,6 +6,7 @@ import type { WatchlistPodcast } from '../-watchlist.types';
 
 import {
   removeWatchlistPodcast,
+  scanWatchlistPodcasts,
   watchlistPodcastsQueryOptions,
 } from '../-watchlist.api';
 import { formatRelativeScanTime } from '../-watchlist.helpers';
@@ -53,6 +54,24 @@ export function WatchlistPodcastsTab({ profileId, searchFilter = '' }: Watchlist
         pod.description?.toLowerCase().includes(q),
     );
   }, [podcasts, searchFilter]);
+
+  const scanMutation = useMutation({
+    mutationFn: () => scanWatchlistPodcasts(),
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({
+        queryKey: watchlistPodcastsQueryOptions(profileId).queryKey,
+      });
+      const queued = data.episodes_queued || 0;
+      const pruned = data.episodes_pruned || 0;
+      let msg = 'Podcast scan complete';
+      if (queued > 0) msg += ` • ${queued} new ${queued === 1 ? 'episode' : 'episodes'} queued`;
+      if (pruned > 0) msg += ` • ${pruned} pruned`;
+      window.showToast?.(msg, 'success');
+    },
+    onError: (err: Error) => {
+      window.showToast?.(err.message || 'Could not scan podcasts', 'error');
+    },
+  });
 
   const removeMutation = useMutation({
     mutationFn: ({ feedUrl, itunesId }: { feedUrl: string; itunesId?: number | null }) =>
@@ -112,7 +131,7 @@ export function WatchlistPodcastsTab({ profileId, searchFilter = '' }: Watchlist
           </svg>
         </div>
         <h3>No podcasts in watchlist</h3>
-        <p>Browse or search podcasts, then click "Add to Watchlist" to follow new episodes and manage downloads.</p>
+        <p>Browse or search podcasts, then click &quot;Add to Watchlist&quot; to follow new episodes and manage downloads.</p>
         <button
           className="btn btn--primary"
           type="button"

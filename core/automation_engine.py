@@ -89,6 +89,13 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'scan_watchlist',
         'initial_delay': 300,  # 5 minutes after startup
     },
+    {
+        'name': 'Auto-Scan Podcasts',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 6, 'unit': 'hours'},
+        'action_type': 'scan_watchlist_podcasts',
+        'initial_delay': 180,  # 3 minutes after startup
+    },
     # Event-based system automations (no initial_delay/next_run needed)
     {
         'name': 'Auto-Scan After Downloads',

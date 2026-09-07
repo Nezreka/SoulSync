@@ -126,6 +126,18 @@ const ACTION_SENTENCES: Record<string, Sentence> = {
     else parts.push('nothing new');
     return parts.join(', ');
   },
+  // podcasts_checked / episodes_queued / episodes_pruned
+  scan_watchlist_podcasts: (r) => {
+    const podcasts = num(r.podcasts_checked);
+    const queued = num(r.episodes_queued);
+    const pruned = num(r.episodes_pruned);
+    if (!podcasts && !queued && !pruned) return null;
+    const parts = [`Checked ${plural(podcasts, 'podcast')}`];
+    if (queued) parts.push(`queued ${plural(queued, 'episode')}`);
+    if (pruned) parts.push(`pruned ${plural(pruned, 'episode')}`);
+    if (!queued && !pruned) parts.push('up to date');
+    return parts.join(', ');
+  },
   // files_scanned / duplicates_found / files_deleted / space_freed_mb
   run_duplicate_cleaner: (r) => {
     const scanned = num(r.files_scanned);
@@ -265,6 +277,7 @@ export function formatTrigger(
 const ACTION_LABELS: Record<string, string> = {
   process_wishlist: 'Process Wishlist',
   scan_watchlist: 'Scan Watchlist',
+  scan_watchlist_podcasts: 'Scan Watchlist Podcasts',
   scan_library: 'Scan Library',
   refresh_mirrored: 'Refresh Mirrored',
   sync_playlist: 'Sync Playlist',
