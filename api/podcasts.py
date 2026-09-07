@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import threading
 import time
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -80,6 +81,8 @@ def episode_to_dict(ep: PodcastEpisode) -> Dict[str, Any]:
         "artwork_url": ep.artwork_url,
         "chapter_url": ep.chapter_url,
         "transcript_url": ep.transcript_url,
+        "show_title": getattr(ep, "show_title", None),
+        "author": getattr(ep, "author", None),
     }
 
 
@@ -221,6 +224,14 @@ def create_podcasts_blueprint() -> Blueprint:
         title = data.get("title", "Episode").strip()
         guid = data.get("guid", enclosure_url).strip()
         show_title = data.get("show_title", "Podcasts").strip()
+        author = data.get("author", "").strip()
+        pub_date_raw = data.get("pub_date")
+        pub_date = None
+        if pub_date_raw:
+            try:
+                pub_date = datetime.fromisoformat(str(pub_date_raw).replace("Z", "+00:00"))
+            except Exception:
+                pub_date = None
         artwork_url = data.get("artwork_url", "").strip()
         duration_seconds = data.get("duration_seconds")
 
@@ -238,6 +249,7 @@ def create_podcasts_blueprint() -> Blueprint:
                 "download_id": download_id,
                 "title": title,
                 "show_title": show_title,
+                "author": author,
                 "artwork_url": artwork_url,
                 "enclosure_url": enclosure_url,
                 "duration_seconds": duration_seconds,
@@ -275,7 +287,7 @@ def create_podcasts_blueprint() -> Blueprint:
                     enclosure_url=enclosure_url,
                     enclosure_type=data.get("enclosure_type", "audio/mpeg"),
                     enclosure_length=data.get("enclosure_length"),
-                    pub_date=None,
+                    pub_date=pub_date,
                     duration_seconds=duration_seconds,
                     description="",
                     show_notes="",
@@ -285,8 +297,15 @@ def create_podcasts_blueprint() -> Blueprint:
                     artwork_url=artwork_url,
                     chapter_url=None,
                     transcript_url=None,
+                    show_title=show_title,
+                    author=author,
                 )
-                file_path = dl_client.download_episode(ep, progress_callback=_progress)
+                file_path = dl_client.download_episode(
+                    ep,
+                    progress_callback=_progress,
+                    show_title=show_title,
+                    author=author,
+                )
                 with _download_lock:
                     rec = _downloads.get(download_id)
                     if rec:

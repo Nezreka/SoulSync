@@ -486,13 +486,15 @@ function resetFileOrganizationTemplates() {
         album: '$albumartist/$albumartist - $album/$track - $title',
         single: '$artist/$artist - $title/$title',
         playlist: '$playlist/$artist - $title',
-        video: '$artist/$title-video'
+        video: '$artist/$title-video',
+        podcast: '$show/Season $season/$title'
     };
 
     document.getElementById('template-album-path').value = defaults.album;
     document.getElementById('template-single-path').value = defaults.single;
     document.getElementById('template-playlist-path').value = defaults.playlist;
     document.getElementById('template-video-path').value = defaults.video;
+    document.getElementById('template-podcast-path').value = defaults.podcast;
 
     debouncedAutoSaveSettings();
 }
@@ -505,13 +507,15 @@ function validateFileOrganizationTemplates() {
         album: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$track', '$disc', '$discnum', '$cdnum', '$year', '$quality'],
         single: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$track', '$year', '$quality'],
         playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality'],
-        video: ['$artist', '$artistletter', '$title', '$year']
+        video: ['$artist', '$artistletter', '$title', '$year'],
+        podcast: ['$show', '$podcast', '$author', '$artist', '$title', '$season', '$seasonnum', '$episode', '$episodenum', '$year', '$date', '$type']
     };
 
     // Get template values
     const albumPath = document.getElementById('template-album-path').value.trim();
     const singlePath = document.getElementById('template-single-path').value.trim();
     const playlistPath = document.getElementById('template-playlist-path').value.trim();
+    const podcastPath = document.getElementById('template-podcast-path').value.trim();
 
     // Validate album template
     if (albumPath) {
@@ -594,6 +598,31 @@ function validateFileOrganizationTemplates() {
             if (!isValid) {
                 errors.push(`Invalid variable "${normalized}" in playlist template. Valid: ${validVars.playlist.join(', ')}`);
             } else if (normalized !== lowerVar && validVars.playlist.includes(lowerVar)) {
+                errors.push(`Variable "${normalized}" should be lowercase: "${lowerVar}"`);
+            }
+        });
+    }
+
+    // Validate podcast template
+    if (podcastPath) {
+        if (podcastPath.endsWith('/')) {
+            errors.push('Podcast template cannot end with /');
+        }
+        if (podcastPath.startsWith('/')) {
+            errors.push('Podcast template cannot start with /');
+        }
+        if (podcastPath.includes('//')) {
+            errors.push('Podcast template cannot have consecutive slashes //');
+        }
+        const podcastVarPattern = /\$\{([a-zA-Z]+)\}|\$([a-zA-Z]+)/g;
+        const foundVars = podcastPath.match(podcastVarPattern) || [];
+        foundVars.forEach(v => {
+            const normalized = v.startsWith('${') ? '$' + v.slice(2, -1) : v;
+            const lowerVar = normalized.toLowerCase();
+            const isValid = validVars.podcast.some(validVar => validVar.toLowerCase() === lowerVar);
+            if (!isValid) {
+                errors.push(`Invalid variable "${normalized}" in podcast template. Valid: ${validVars.podcast.join(', ')}`);
+            } else if (normalized !== lowerVar && validVars.podcast.includes(lowerVar)) {
                 errors.push(`Variable "${normalized}" should be lowercase: "${lowerVar}"`);
             }
         });
@@ -1567,6 +1596,18 @@ async function loadSettingsData() {
         applyPathsEnvironment(settings);
         document.getElementById('staging-path').value = settings.import?.staging_path || './Staging';
         document.getElementById('music-videos-path').value = settings.library?.music_videos_path || './MusicVideos';
+        const isDocker = !!(settings._environment && settings._environment.docker) ||
+                         (settings.soulseek?.transfer_path || '').startsWith('/app/') ||
+                         (settings.soulseek?.download_path || '').startsWith('/app/');
+        const defaultPodcastPath = isDocker ? '/app/podcasts' : './podcasts';
+        const podcastsEl = document.getElementById('podcasts-path');
+        if (podcastsEl) {
+            podcastsEl.placeholder = defaultPodcastPath;
+            const currentPodcastsVal = settings.podcasts?.download_path || settings.library?.podcasts_path;
+            podcastsEl.value = (isDocker && (!currentPodcastsVal || currentPodcastsVal === './podcasts'))
+                ? defaultPodcastPath
+                : (currentPodcastsVal || defaultPodcastPath);
+        }
         document.getElementById('playlists-materialize-path').value = settings.playlists?.materialize_path || './Playlists';
         document.getElementById('playlists-materialize-mode').value = settings.playlists?.materialize_mode || 'symlink';
 
@@ -1753,6 +1794,7 @@ async function loadSettingsData() {
         document.getElementById('template-playlist-path').value = settings.file_organization?.templates?.playlist_path || '$playlist/$artist - $title';
         document.getElementById('template-playlist-item').value = settings.file_organization?.templates?.playlist_item || '';
         document.getElementById('template-video-path').value = settings.file_organization?.templates?.video_path || '$artist/$title-video';
+        document.getElementById('template-podcast-path').value = settings.file_organization?.templates?.podcast_path || '$show/Season $season/$title';
         document.getElementById('disc-label').value = settings.file_organization?.disc_label || 'Disc';
         document.getElementById('collab-artist-mode').value = settings.file_organization?.collab_artist_mode || 'first';
         document.getElementById('artistletter-symbol-fallback').checked = settings.file_organization?.artistletter_symbol_fallback === true;
@@ -4700,7 +4742,8 @@ async function saveSettings(quiet = false) {
                 single_path: document.getElementById('template-single-path').value,
                 playlist_path: document.getElementById('template-playlist-path').value,
                 playlist_item: document.getElementById('template-playlist-item').value,
-                video_path: document.getElementById('template-video-path').value
+                video_path: document.getElementById('template-video-path').value,
+                podcast_path: document.getElementById('template-podcast-path').value
             }
         },
         wishlist: {
@@ -4733,7 +4776,11 @@ async function saveSettings(quiet = false) {
         library: {
             music_paths: collectMusicPaths(),
             music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos',
+            podcasts_path: document.getElementById('podcasts-path')?.value || './podcasts',
             reorganize_preserve_casing: document.getElementById('reorganize-preserve-casing')?.checked !== false
+        },
+        podcasts: {
+            download_path: document.getElementById('podcasts-path')?.value || './podcasts',
         },
         import: {
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,
@@ -6309,6 +6356,7 @@ async function logoutQobuz() {
 const PATH_INPUT_IDS = {
     download: 'download-path',
     transfer: 'transfer-path',
+    podcasts: 'podcasts-path',
     staging: 'staging-path',
     'music-videos': 'music-videos-path',
     'playlists-materialize': 'playlists-materialize-path',
@@ -6334,16 +6382,19 @@ function applyPathsEnvironment(settings) {
 }
 
 function togglePathLock(pathType, btn) {
-    const input = document.getElementById(PATH_INPUT_IDS[pathType]);
+    const inputId = PATH_INPUT_IDS[pathType] || (pathType.endsWith('-path') ? pathType : pathType + '-path');
+    const input = document.getElementById(inputId);
     if (!input) return;
-    const isLocked = input.hasAttribute('readonly');
+    const isLocked = input.hasAttribute('readonly') || input.readOnly;
     if (isLocked) {
         input.removeAttribute('readonly');
+        input.readOnly = false;
         input.focus();
         btn.textContent = 'Lock';
         btn.classList.remove('locked');
     } else {
         input.setAttribute('readonly', '');
+        input.readOnly = true;
         btn.textContent = 'Unlock';
         btn.classList.add('locked');
     }

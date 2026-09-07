@@ -136,6 +136,106 @@ def _collision_safe_path(filepath: Path) -> Path:
         counter += 1
 
 
+_COLLAPSIBLE_PODCAST_SEGMENT_RE = re.compile(
+    r"^(season|series|episodes?|vol|volume)\s*[.\-\u2013\u2014:]?\s*$", re.IGNORECASE
+)
+
+
+def render_podcast_path_template(
+    template: str,
+    episode: PodcastEpisode,
+    show_title: Optional[str] = None,
+    author: Optional[str] = None,
+) -> tuple[list[str], str]:
+    """Render a podcast path template into (folder_segments, filename_base).
+
+    Supported variables:
+        $show / $podcast: Show title
+        $author / $artist: Show author/creator
+        $title: Episode title
+        $season: Zero-padded season (e.g. '01') or empty if omitted
+        $seasonnum: Unpadded season (e.g. '1') or empty if omitted
+        $episode: Zero-padded episode (e.g. '01') or empty if omitted
+        $episodenum: Unpadded episode (e.g. '1') or empty if omitted
+        $year: 4-digit release year or empty
+        $date: YYYY-MM-DD release date or empty
+        $type: Episode type ('full', 'bonus', 'trailer')
+    """
+    show_val = (show_title or getattr(episode, "show_title", None) or "").strip()
+    author_val = (author or getattr(episode, "author", None) or "").strip()
+    title_val = (episode.title or "Episode").strip()
+
+    season_raw = getattr(episode, "season", None)
+    season_str = f"{season_raw:02d}" if season_raw is not None else ""
+    seasonnum_str = str(season_raw) if season_raw is not None else ""
+
+    ep_raw = getattr(episode, "episode_number", None)
+    episode_str = f"{ep_raw:02d}" if ep_raw is not None else ""
+    episodenum_str = str(ep_raw) if ep_raw is not None else ""
+
+    pub_date = getattr(episode, "pub_date", None)
+    year_str = str(pub_date.year) if pub_date else ""
+    date_str = pub_date.strftime("%Y-%m-%d") if pub_date else ""
+
+    type_str = (getattr(episode, "episode_type", None) or "full").strip()
+
+    var_map = [
+        ("seasonnum", seasonnum_str),
+        ("season", season_str),
+        ("episodenum", episodenum_str),
+        ("episode", episode_str),
+        ("podcast", show_val),
+        ("show", show_val),
+        ("artist", author_val),
+        ("author", author_val),
+        ("title", title_val),
+        ("year", year_str),
+        ("date", date_str),
+        ("type", type_str),
+    ]
+
+    effective_template = template or "$show/Season $season/$title"
+    result = effective_template
+    for var_name, val in var_map:
+        result = result.replace("${" + var_name + "}", val)
+        result = result.replace("$" + var_name, val)
+
+    parts = result.replace("\\", "/").split("/")
+    folder_parts = parts[:-1]
+    filename_part = parts[-1]
+
+    cleaned_folders: list[str] = []
+    had_season_var = any(token in effective_template for token in ("$season", "$seasonnum", "${season", "${seasonnum"))
+    had_episode_var = any(token in effective_template for token in ("$episode", "$episodenum", "${episode", "${episodenum"))
+    for part in folder_parts:
+        part = re.sub(r"\s*\[\s*\]", "", part)
+        part = re.sub(r"\s*\(\s*\)", "", part)
+        part = re.sub(r"\s*\{\s*\}", "", part)
+        part = re.sub(r"\s*-\s*$", "", part)
+        part = re.sub(r"^\s*-\s*", "", part)
+        part = re.sub(r"\s+", " ", part).strip()
+        # Collapse dangling season/series/episode segment if variable was empty
+        if had_season_var and not seasonnum_str and _COLLAPSIBLE_PODCAST_SEGMENT_RE.match(part):
+            continue
+        if had_episode_var and not episodenum_str and _COLLAPSIBLE_PODCAST_SEGMENT_RE.match(part):
+            continue
+        if part:
+            sanitized = sanitize_filename(part)
+            if sanitized:
+                cleaned_folders.append(sanitized)
+
+    filename_part = re.sub(r"\s*\[\s*\]", "", filename_part)
+    filename_part = re.sub(r"\s*\(\s*\)", "", filename_part)
+    filename_part = re.sub(r"\s*\{\s*\}", "", filename_part)
+    filename_part = re.sub(r"\s*-\s*$", "", filename_part)
+    filename_part = re.sub(r"^\s*-\s*", "", filename_part)
+    filename_part = re.sub(r"\s+", " ", filename_part).strip()
+
+    final_filename = sanitize_filename(filename_part) or sanitize_filename(episode.title) or "Episode"
+
+    return cleaned_folders, final_filename
+
+
 # ---------------------------------------------------------------------------
 # Client
 # ---------------------------------------------------------------------------
@@ -147,9 +247,9 @@ class PodcastDownloadClient:
     """
 
     def __init__(self, download_path: Optional[str] = None) -> None:
+        self._explicit_path = download_path is not None
         if download_path is None:
-            from core.settings import config_manager
-            download_path = config_manager.get("soulseek.download_path", "./downloads")
+            download_path = self._resolve_default_path()
         self.download_path = Path(download_path)
         try:
             self.download_path.mkdir(parents=True, exist_ok=True)
@@ -158,6 +258,20 @@ class PodcastDownloadClient:
 
         self._session = requests.Session()
         self._session.headers.update(_HEADERS)
+
+    @staticmethod
+    def _resolve_default_path() -> str:
+        try:
+            from core.settings import config_manager
+            from core.imports.paths import docker_resolve_path
+            raw = (
+                config_manager.get("podcasts.download_path")
+                or config_manager.get("library.podcasts_path")
+                or "./podcasts"
+            )
+            return docker_resolve_path(raw)
+        except Exception:
+            return "./podcasts"
 
     # ------------------------------------------------------------------
     # Public interface
@@ -172,6 +286,8 @@ class PodcastDownloadClient:
         episode: PodcastEpisode,
         dest_dir: Optional[str] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None,
+        show_title: Optional[str] = None,
+        author: Optional[str] = None,
     ) -> Optional[str]:
         """Download an episode enclosure to disk and return the final file path.
 
@@ -184,22 +300,69 @@ class PodcastDownloadClient:
                                Content-Length. Errors in the callback are logged
                                and swallowed — a broken callback must never abort
                                a download.
+            show_title:        Optional show title override for templating.
+            author:            Optional show author override for templating.
 
         Returns:
             Absolute path string of the saved file, or None on failure.
         """
-        dest = Path(dest_dir) if dest_dir else self.download_path
-        try:
-            dest.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            logger.error("Cannot create destination directory %s: %s", dest, exc)
-            return None
+        if dest_dir:
+            dest = Path(dest_dir)
+        elif not self._explicit_path:
+            dest = Path(self._resolve_default_path())
+        else:
+            dest = self.download_path
 
         ext = detect_extension(episode.enclosure_url, episode.enclosure_type)
-        filename = sanitize_filename(episode.title) + ext
-        filepath = _collision_safe_path(dest / filename)
+
+        folders: list[str] = []
+        filename = sanitize_filename(episode.title)
+
+        org_enabled = True
+        template = "$show/Season $season/$title"
+        try:
+            from core.settings import config_manager
+            if config_manager:
+                org_enabled = config_manager.get("file_organization.enabled", True)
+                template = config_manager.get("file_organization.templates.podcast_path") or "$show/Season $season/$title"
+        except Exception as cfg_err:
+            logger.debug("Config read error for podcast template: %s", cfg_err)
+
+        if org_enabled and template:
+            try:
+                folders, filename = render_podcast_path_template(
+                    template,
+                    episode,
+                    show_title=show_title,
+                    author=author,
+                )
+            except Exception as tmpl_exc:
+                logger.warning("Error rendering podcast template %r: %s", template, tmpl_exc)
+                folders = []
+                filename = sanitize_filename(episode.title)
+
+        target_dir = dest
+        for f in folders:
+            target_dir = target_dir / f
+
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.error("Cannot create destination directory %s: %s", target_dir, exc)
+            return None
+
+        filepath = _collision_safe_path(target_dir / (filename + ext))
 
         logger.info("Downloading episode %r -> %s", episode.title, filepath)
+
+        def _prune_empty_parents(path: Path):
+            p = path.parent
+            while p != dest and p.is_relative_to(dest):
+                try:
+                    p.rmdir()
+                    p = p.parent
+                except OSError:
+                    break
 
         try:
             resp = self._session.get(
@@ -210,6 +373,7 @@ class PodcastDownloadClient:
             resp.raise_for_status()
         except Exception as exc:
             logger.error("Request failed for episode %r: %s", episode.title, exc)
+            _prune_empty_parents(filepath)
             return None
 
         total = int(resp.headers.get("content-length", 0))
@@ -235,6 +399,7 @@ class PodcastDownloadClient:
                     filepath.unlink()
                 except OSError:
                     pass
+            _prune_empty_parents(filepath)
             return None
 
         final_size = filepath.stat().st_size
@@ -245,6 +410,7 @@ class PodcastDownloadClient:
                 final_size,
             )
             filepath.unlink(missing_ok=True)
+            _prune_empty_parents(filepath)
             return None
 
         logger.info("Episode saved: %s (%d bytes)", filepath, downloaded)

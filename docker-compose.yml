@@ -51,6 +51,12 @@ services:
 
       # - ./Transfer:/app/Transfer
 
+      # ─── Podcast library (OUTPUT) — optional: uncomment + set your path ───
+      # Downloaded podcast episodes are saved here. UNCOMMENT the line below, point
+      # the host side (left of the colon) at your podcasts folder, then set
+      # Settings → Library → Podcasts Folder to /app/podcasts:
+      # - ./podcasts:/app/podcasts
+
       - ./Staging:/app/Staging
       - ./MusicVideos:/app/MusicVideos
       - ./scripts:/app/scripts

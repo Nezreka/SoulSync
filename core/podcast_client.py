@@ -226,6 +226,8 @@ class PodcastEpisode:
     artwork_url: Optional[str]       # episode-level <itunes:image> if present
     chapter_url: Optional[str]       # <podcast:chapters> href (PodcastIndex namespace)
     transcript_url: Optional[str]    # <podcast:transcript> url (PodcastIndex namespace)
+    show_title: Optional[str] = None # show/podcast title
+    author: Optional[str] = None     # show author / podcast host
 
 
 @dataclass
@@ -461,7 +463,7 @@ class PodcastClient:
 
         episodes = []
         for item_el in channel.findall("item"):
-            ep = self._parse_item(item_el)
+            ep = self._parse_item(item_el, show_title=title, author=author)
             if ep is not None:
                 episodes.append(ep)
 
@@ -480,7 +482,12 @@ class PodcastClient:
             episodes=episodes,
         )
 
-    def _parse_item(self, item: ET.Element) -> Optional[PodcastEpisode]:
+    def _parse_item(
+        self,
+        item: ET.Element,
+        show_title: Optional[str] = None,
+        author: Optional[str] = None,
+    ) -> Optional[PodcastEpisode]:
         """Parse one RSS <item> element into a PodcastEpisode.
 
         Returns None when the item has no downloadable enclosure — items without
@@ -563,6 +570,8 @@ class PodcastClient:
             artwork_url=ep_art,
             chapter_url=chapter_url,
             transcript_url=transcript_url,
+            show_title=show_title,
+            author=author,
         )
 
 

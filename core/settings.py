@@ -473,6 +473,8 @@ class ConfigManager:
 
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration"""
+        is_docker = os.path.exists("/.dockerenv") or os.environ.get("SOULSYNC_IN_DOCKER", "").lower() in ("1", "true", "yes")
+        default_podcast_path = "/app/podcasts" if is_docker else "./podcasts"
         return {
             "active_media_server": "plex",
             "spotify": {
@@ -806,6 +808,7 @@ class ConfigManager:
             "library": {
                 "music_paths": [],
                 "music_videos_path": "",
+                "podcasts_path": default_podcast_path,
                 # Library Organize: when the tool re-resolves a track from the
                 # metadata source, the source's title/album CASING often differs
                 # from a file the user already curated (Spotify capitalizing
@@ -814,6 +817,17 @@ class ConfigManager:
                 # alone — no cosmetic rename churn on already-organized files.
                 # Turn off to canonicalize casing to the metadata source.
                 "reorganize_preserve_casing": True,
+            },
+            "file_organization": {
+                "enabled": True,
+                "templates": {
+                    "album_path": "$albumartist/$albumartist - $album/$track - $title",
+                    "single_path": "$albumartist/$albumartist - $title/$title",
+                    "compilation_path": "Compilations/$album/$track - $artist - $title",
+                    "playlist_path": "$playlist/$artist - $title",
+                    "video_path": "$artist/$title-video",
+                    "podcast_path": "$show/Season $season/$title",
+                }
             },
             "wishlist": {
                 # When discovery finds no catalogue match for a track it stores a
@@ -864,6 +878,9 @@ class ConfigManager:
                 # duplicates for FAT/USB/DAPs that can't follow links). Symlink
                 # auto-falls back to copy when the filesystem can't link.
                 "materialize_mode": "symlink"
+            },
+            "podcasts": {
+                "download_path": default_podcast_path
             },
             "youtube": {
                 "cookies_browser": "",      # "", "chrome", "firefox", "edge", "brave", "opera", "safari"

@@ -775,3 +775,79 @@ class TestCollisionSafePath:
         (tmp_path / "episode (1).mp3").write_bytes(b"2")
         result = _collision_safe_path(base)
         assert result == tmp_path / "episode (2).mp3"
+
+
+# ---------------------------------------------------------------------------
+# render_podcast_path_template
+# ---------------------------------------------------------------------------
+
+class TestRenderPodcastPathTemplate:
+    def test_default_template_with_show_and_title(self):
+        from core.podcast_download_client import render_podcast_path_template
+        # Default is $show/Season $season/$title; without season it collapses cleanly
+        ep = _make_episode(title="Episode 1: The Beginning")
+        folders, filename = render_podcast_path_template(
+            None,
+            ep,
+            show_title="Dan Carlin's Hardcore History",
+        )
+        assert folders == ["Dan Carlin's Hardcore History"]
+        assert filename == "Episode 1_ The Beginning"
+
+        # With season populated, default template includes Season folder
+        ep_with_season = _make_episode(title="Episode 2: The Return", season=1)
+        folders, filename = render_podcast_path_template(
+            None,
+            ep_with_season,
+            show_title="Dan Carlin's Hardcore History",
+        )
+        assert folders == ["Dan Carlin's Hardcore History", "Season 01"]
+        assert filename == "Episode 2_ The Return"
+
+    def test_season_and_episode_populated(self):
+        from core.podcast_download_client import render_podcast_path_template
+        ep = _make_episode(title="Chapter One", season=2, episode_number=7)
+        folders, filename = render_podcast_path_template(
+            "$show/Season $season/$episode - $title",
+            ep,
+            show_title="Serial",
+        )
+        assert folders == ["Serial", "Season 02"]
+        assert filename == "07 - Chapter One"
+
+    def test_season_folder_collapses_when_season_empty(self):
+        from core.podcast_download_client import render_podcast_path_template
+        ep = _make_episode(title="Breaking News", season=None, episode_number=42)
+        folders, filename = render_podcast_path_template(
+            "$show/Season $season/$episode - $title",
+            ep,
+            show_title="The Daily",
+        )
+        # Empty "Season " segment should collapse cleanly
+        assert folders == ["The Daily"]
+        assert filename == "42 - Breaking News"
+
+    def test_date_and_year_formatting(self):
+        from datetime import datetime, timezone
+        from core.podcast_download_client import render_podcast_path_template
+        pub = datetime(2025, 4, 18, 12, 0, tzinfo=timezone.utc)
+        ep = _make_episode(title="Tax Season", pub_date=pub)
+        folders, filename = render_podcast_path_template(
+            "$show/$year/$date - $title",
+            ep,
+            show_title="Planet Money",
+        )
+        assert folders == ["Planet Money", "2025"]
+        assert filename == "2025-04-18 - Tax Season"
+
+    def test_flat_template_no_folders(self):
+        from core.podcast_download_client import render_podcast_path_template
+        ep = _make_episode(title="Solo Episode")
+        folders, filename = render_podcast_path_template(
+            "$show - $title",
+            ep,
+            show_title="Quick Takes",
+        )
+        assert folders == []
+        assert filename == "Quick Takes - Solo Episode"
+
