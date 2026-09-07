@@ -193,17 +193,19 @@ export function PodcastPlayerBar({
           {speed}x
         </button>
 
-        <span style={{ color: 'rgba(255, 255, 255, 0.5)', fontSize: 14 }}>🔊</span>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.05}
-          value={volume}
-          onChange={(e) => setVolume(Number(e.target.value))}
-          className={styles.volumeSlider}
-          title={`Volume: ${Math.round(volume * 100)}%`}
-        />
+        <div className={styles.volumeWrapper}>
+          <span className={styles.volumeIcon}>🔊</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={volume}
+            onChange={(e) => setVolume(Number(e.target.value))}
+            className={styles.volumeSlider}
+            title={`Volume: ${Math.round(volume * 100)}%`}
+          />
+        </div>
 
         <button
           type="button"

@@ -1801,6 +1801,18 @@
   color: #ffffff;
 }
 
+.volumeWrapper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.volumeIcon {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 13px;
+  user-select: none;
+}
+
 .volumeSlider {
   width: 70px;
   height: 4px;
@@ -2510,46 +2522,836 @@
   margin: 0;
   line-height: 1.45;
 }
-@media (max-width: 1100px) {
+/* ── Responsive System: Multi-Tiered Architecture ────────────────────────── */
+
+/* Tier 1: Small Laptops & Compact Desktops (1024px – 1200px) */
+@media (max-width: 1200px) {
+  .podcastsContainer {
+    padding: 20px 24px 80px;
+  }
+
+  .podcastsContainerWithTopPlayer {
+    padding-top: 105px !important;
+  }
+
+  .playerBar {
+    left: calc(var(--sidebar-w, 240px) + 16px);
+    right: 16px;
+    gap: 14px;
+    padding: 10px 18px;
+  }
+
+  .playerTrackInfo {
+    width: 200px;
+    gap: 10px;
+  }
+
+  .playerRightControls {
+    width: 170px;
+    gap: 8px;
+  }
+
+  .volumeSlider {
+    width: 55px;
+  }
+
+  .spotlightCard {
+    padding: 28px 32px;
+    gap: 32px;
+    min-height: 290px;
+  }
+
+  .spotlightArtWrapper {
+    width: 200px;
+    height: 200px;
+    min-width: 200px;
+    min-height: 200px;
+  }
+
+  .spotlightTitle {
+    font-size: 28px;
+  }
+
   .spotlightMetaPanel {
-    display: none;
+    min-width: 210px;
+    padding: 16px 18px;
+    gap: 10px;
+  }
+
+  .billboardCard {
+    padding: 24px 30px;
+    gap: 24px;
+  }
+
+  .billboardArtWrapper {
+    width: 190px;
+    height: 190px;
+    min-width: 190px;
+    min-height: 190px;
+  }
+
+  .billboardTitle {
+    font-size: 26px;
+  }
+
+  .billboardShowcasePanel {
+    min-width: 260px;
+    max-width: 290px;
+  }
+
+  .showsGrid {
+    grid-template-columns: repeat(auto-fill, minmax(185px, 1fr));
+    gap: 18px;
+  }
+
+  .episodeRow {
+    padding: 18px 22px;
+    gap: 16px;
+  }
+
+  .episodeThumbWrapper {
+    width: 66px;
+    height: 66px;
+  }
+
+  .showNotesDrawer {
+    max-width: 580px;
   }
 }
 
-@media (max-width: 900px) {
+/* Tier 2: Tablets Landscape & Netbooks (768px – 1024px) */
+@media (max-width: 1024px) {
+  .podcastsContainer {
+    padding: 18px 20px 80px;
+  }
+
+  .podcastsContainerWithTopPlayer {
+    padding-top: 110px !important;
+  }
+
+  .playerBar {
+    left: calc(var(--sidebar-w, 68px) + 16px);
+    right: 16px;
+    gap: 12px;
+    padding: 10px 16px;
+  }
+
+  .playerTrackInfo {
+    width: 175px;
+  }
+
+  .playerRightControls {
+    width: auto;
+    gap: 8px;
+  }
+
+  .volumeWrapper {
+    display: none;
+  }
+
+  .scrubRow {
+    max-width: 100%;
+  }
+
+  .spotlightMetaPanel {
+    display: none;
+  }
+
+  .spotlightCard {
+    padding: 24px 28px;
+    gap: 24px;
+    min-height: 250px;
+  }
+
+  .spotlightArtWrapper {
+    width: 175px;
+    height: 175px;
+    min-width: 175px;
+    min-height: 175px;
+  }
+
+  .spotlightTitle {
+    font-size: 24px;
+  }
+
+  .spotlightDesc {
+    font-size: 13.5px;
+    -webkit-line-clamp: 3;
+  }
+
   .billboardCard {
-    flex-direction: column;
+    flex-wrap: wrap;
+    padding: 22px 24px;
+    gap: 20px;
+  }
+
+  .billboardShowcasePanel {
+    min-width: 100%;
+    max-width: 100%;
+    width: 100%;
+    order: 3;
+    margin-top: 4px;
+  }
+
+  .billboardLatestCard {
+    flex-direction: row;
     align-items: center;
-    text-align: center;
+    justify-content: space-between;
   }
-  .billboardEssentials,
-  .billboardActions {
-    justify-content: center;
+
+  .billboardArtWrapper {
+    width: 165px;
+    height: 165px;
+    min-width: 165px;
+    min-height: 165px;
   }
+
+  .billboardTitle {
+    font-size: 24px;
+  }
+
+  .episodeFilterBar {
+    gap: 12px;
+  }
+
+  .seasonTabs {
+    flex: 1 1 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .seasonTabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .seasonTab {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .episodeControlsRight {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .episodeSearchInput {
+    flex: 1;
+    max-width: 280px;
+  }
+
+  .showsGrid {
+    grid-template-columns: repeat(auto-fill, minmax(165px, 1fr));
+    gap: 16px;
+  }
+
+  .episodeRow {
+    padding: 16px 18px;
+    gap: 14px;
+  }
+
+  .categoryModalDialog {
+    max-width: 720px;
+  }
+
+  .categoryGrid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+
+  .showNotesDrawer {
+    max-width: 500px;
+  }
+}
+
+/* Tier 3: Tablets Portrait & Mobile Devices (≤ 768px) */
+@media (max-width: 768px) {
+  .podcastsContainer {
+    padding: 72px 14px 84px;
+  }
+
+  .podcastsContainerWithTopPlayer {
+    padding-top: 185px !important;
+  }
+
+  /* Fixed Top Player Bar docked cleanly under hamburger button row */
+  .playerBar {
+    position: fixed;
+    top: 66px;
+    left: 12px;
+    right: 12px;
+    padding: 10px 14px 8px;
+    border-radius: 16px;
+    gap: 8px 10px;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow:
+      0 16px 40px rgba(0, 0, 0, 0.8),
+      0 0 20px rgba(var(--accent-rgb), 0.15);
+  }
+
+  .playerTrackInfo {
+    order: 1;
+    width: auto;
+    max-width: calc(100% - 180px);
+    flex: 1 1 auto;
+    gap: 10px;
+  }
+
+  .playerThumb {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+    border-radius: 8px;
+  }
+
+  .playerTrackTitle {
+    font-size: 12px;
+  }
+
+  .playerTrackAuthor {
+    font-size: 10.5px;
+  }
+
+  /* Expose children directly to .playerBar flex flow */
+  .playerCenterControls {
+    display: contents;
+  }
+
+  .playerButtonsRow {
+    order: 2;
+    flex: 0 0 auto;
+    gap: 10px;
+  }
+
+  .controlBtn {
+    transform: scale(0.95);
+  }
+
+  .playerPlayPauseBtn {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+  }
+
+  .playerRightControls {
+    order: 3;
+    width: auto;
+    flex: 0 0 auto;
+    gap: 8px;
+  }
+
+  .volumeWrapper {
+    display: none !important;
+  }
+
+  .speedToggleBtn {
+    padding: 3px 6px;
+    font-size: 10.5px;
+  }
+
+  .closePlayerBtn {
+    font-size: 16px;
+    padding: 2px;
+  }
+
+  .scrubRow {
+    order: 4;
+    width: 100%;
+    max-width: 100%;
+    flex: 1 0 100%;
+    margin-top: 4px;
+    gap: 8px;
+  }
+
+  .timeLabel {
+    font-size: 10px;
+    width: 34px;
+  }
+
+  /* Header & Search */
+  .heroHeader {
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .heroHeaderTitleRow {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .pageTitle {
+    font-size: 22px;
+    gap: 8px;
+  }
+
+  .pageSubtitle {
+    font-size: 12.5px;
+  }
+
+  .downloadsBadge {
+    padding: 5px 11px;
+    font-size: 11px;
+  }
+
+  .searchInput {
+    height: 42px;
+    font-size: 14px;
+    padding: 0 38px 0 40px;
+  }
+
+  /* Category Pills */
+  .categoryPills {
+    margin: 4px 0 18px 0;
+    min-height: 44px;
+    height: 44px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .categoryPill {
+    height: 34px;
+    min-height: 34px;
+    padding: 0 14px;
+    font-size: 12px;
+    line-height: 32px;
+  }
+
+  /* Spotlight Hero Card */
   .spotlightCard {
     flex-direction: column;
     align-items: center;
     text-align: center;
-    gap: 20px;
-    padding: 24px 20px;
+    gap: 18px;
+    padding: 22px 18px 48px;
     min-height: auto;
+    border-radius: 18px;
   }
+
   .spotlightArtWrapper {
-    width: 160px;
-    height: 160px;
-    min-width: 160px;
-    min-height: 160px;
+    width: 150px;
+    height: 150px;
+    min-width: 150px;
+    min-height: 150px;
+    margin: 0 auto;
+    border-radius: 16px;
   }
-  .spotlightBadgeRow,
-  .spotlightActions {
+
+  .spotlightBadgeRow {
     justify-content: center;
   }
-  .playerBar {
-    left: 16px;
-    right: 16px;
-    flex-wrap: wrap;
+
+  .spotlightTitle {
+    font-size: 20px;
+    line-height: 1.22;
+    text-align: center;
   }
-  .playerRightControls {
+
+  .spotlightAuthor {
+    font-size: 13px;
+    text-align: center;
+  }
+
+  .spotlightDesc {
+    font-size: 12.5px;
+    -webkit-line-clamp: 2;
+    text-align: center;
+    line-height: 1.5;
+    margin: 4px 0 8px;
+  }
+
+  .spotlightActions {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .spotlightListenBtn {
+    width: 100%;
+    max-width: 260px;
+    justify-content: center;
+    padding: 10px 20px;
+    font-size: 13px;
+  }
+
+  .spotlightCarouselControls {
+    bottom: 12px;
+    right: 50%;
+    transform: translateX(50%);
+  }
+
+  /* Show Billboard (Detail View) */
+  .billboardCard {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 20px 16px;
+    gap: 16px;
+    border-radius: 20px;
+  }
+
+  .billboardArtWrapper {
+    width: 150px;
+    height: 150px;
+    min-width: 150px;
+    min-height: 150px;
+    margin: 0 auto;
+    border-radius: 16px;
+  }
+
+  .billboardTitle {
+    font-size: 21px;
+    line-height: 1.2;
+    text-align: center;
+  }
+
+  .billboardAuthor {
+    font-size: 13px;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .billboardEssentials {
+    justify-content: center;
+  }
+
+  .billboardDesc {
+    font-size: 13px;
+    text-align: left;
+    -webkit-line-clamp: 3;
+  }
+
+  .billboardActions {
+    flex-direction: column;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .primaryActionBtn {
+    width: 100%;
+    justify-content: center;
+    padding: 10px 18px;
+    font-size: 13px;
+  }
+
+  .secondaryActionBtn {
+    width: 100%;
+    justify-content: center;
+    padding: 10px 16px;
+    font-size: 12px;
+  }
+
+  .billboardShowcasePanel {
+    width: 100%;
+    min-width: 100%;
+    max-width: 100%;
+    order: 3;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 14px;
+    box-sizing: border-box;
+  }
+
+  .billboardLatestCard {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .billboardLatestPlayBtn {
+    width: 100%;
+  }
+
+  .billboardStatsRow {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+
+  .billboardStatPill {
+    padding: 6px 4px;
+    font-size: 10px;
+    text-align: center;
+  }
+
+  /* Season Tabs & Episode Filter */
+  .episodeFilterBar {
+    padding: 10px 14px;
+    gap: 10px;
+    border-radius: 12px;
+  }
+
+  .seasonTabs {
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .seasonTabs::-webkit-scrollbar {
     display: none;
+  }
+
+  .seasonTab {
+    flex-shrink: 0;
+    padding: 5px 12px;
+    font-size: 12px;
+  }
+
+  .episodeControlsRight {
+    width: 100%;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .episodeSearchInput {
+    flex: 1;
+    min-width: 0;
+    height: 32px;
+    font-size: 12px;
+  }
+
+  .sortBtn {
+    height: 32px;
+    padding: 0 10px;
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+
+  /* Episode List */
+  .episodeRow {
+    padding: 14px 14px;
+    gap: 12px;
+    border-radius: 14px;
+  }
+
+  .episodeThumbWrapper {
+    width: 52px;
+    height: 52px;
+    min-width: 52px;
+    min-height: 52px;
+    border-radius: 10px;
+  }
+
+  .episodeTitle {
+    font-size: 14px;
+    line-height: 1.3;
+  }
+
+  .episodeSnippet {
+    font-size: 12px;
+    line-height: 1.45;
+    -webkit-line-clamp: 2;
+  }
+
+  .episodeActionsBar {
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+  }
+
+  .episodePlayPill {
+    padding: 5px 12px;
+    font-size: 11px;
+  }
+
+  .downloadBtn {
+    padding: 5px 12px;
+    font-size: 11px;
+  }
+
+  .notesDrawerBtn {
+    padding: 4px 12px;
+    font-size: 11px;
+  }
+
+  .episodeAccordion {
+    padding: 0 12px 14px 12px;
+    font-size: 12px;
+  }
+
+  /* Full Screen Show Notes Modal */
+  .showNotesOverlay {
+    padding: 0;
+  }
+
+  .showNotesDrawer {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    border-left: none;
+    border-radius: 0;
+  }
+
+  .showNotesHeader {
+    padding: 16px 18px 14px;
+  }
+
+  .showNotesArtThumb {
+    width: 56px;
+    height: 56px;
+    min-width: 56px;
+    min-height: 56px;
+    border-radius: 10px;
+  }
+
+  .showNotesTitle {
+    font-size: 16px;
+  }
+
+  .showNotesBody {
+    padding: 16px 18px 36px;
+  }
+
+  .showNotesActions {
+    flex-direction: column;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .showNotesPlayBtn,
+  .showNotesDownloadBtn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Category Explorer Modal */
+  .categoryModalOverlay {
+    padding: 10px;
+  }
+
+  .categoryModalDialog {
+    max-height: 90vh;
+    border-radius: 18px;
+  }
+
+  .categoryModalHeader {
+    padding: 16px 18px 12px;
+  }
+
+  .categoryModalTitle {
+    font-size: 20px;
+  }
+
+  .categoryGridContainer {
+    padding: 14px 16px 24px;
+  }
+
+  .categoryGrid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 10px;
+  }
+
+  .categoryCard {
+    padding: 12px;
+    border-radius: 12px;
+  }
+
+  .categoryCardIcon {
+    font-size: 22px;
+  }
+
+  .categoryCardName {
+    font-size: 13px;
+  }
+
+  .categoryCardDesc {
+    font-size: 11px;
+    -webkit-line-clamp: 2;
+  }
+}
+
+/* Tier 4: Small Mobile Phones (≤ 480px) */
+@media (max-width: 480px) {
+  .showsGrid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 28px;
+  }
+
+  .showCard {
+    padding: 10px;
+    border-radius: 14px;
+    gap: 8px;
+  }
+
+  .showCardTitle {
+    font-size: 13px;
+    line-height: 1.3;
+    min-height: 2.6em;
+  }
+
+  .showCardAuthor {
+    font-size: 11px;
+  }
+
+  .showCardEpisodes,
+  .showCardCategory {
+    font-size: 10px;
+  }
+
+  .gridPlayBtn {
+    width: 38px;
+    height: 38px;
+  }
+
+  .spotlightCard {
+    padding: 18px 14px 44px;
+  }
+
+  .spotlightArtWrapper {
+    width: 130px;
+    height: 130px;
+    min-width: 130px;
+    min-height: 130px;
+  }
+
+  .spotlightTitle {
+    font-size: 18px;
+  }
+
+  .billboardCard {
+    padding: 16px 12px;
+  }
+
+  .billboardArtWrapper {
+    width: 130px;
+    height: 130px;
+    min-width: 130px;
+    min-height: 130px;
+  }
+
+  .billboardTitle {
+    font-size: 19px;
+  }
+
+  .playerBar {
+    left: 8px;
+    right: 8px;
+    padding: 8px 12px 6px;
+  }
+
+  .playerTrackInfo {
+    max-width: calc(100% - 150px);
+  }
+
+  .playerThumb {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+  }
+
+  .controlBtn {
+    transform: scale(0.88);
+  }
+
+  .playerPlayPauseBtn {
+    width: 30px;
+    height: 30px;
+    min-width: 30px;
+  }
+
+  .podcastsContainerWithTopPlayer {
+    padding-top: 180px !important;
   }
 }
