@@ -286,7 +286,23 @@ export function PodcastsPage() {
   const downloadsCount = Object.values(downloads).filter((d) => d.status === 'completed').length;
 
   return (
-    <div className={`page-shell ${styles.podcastsContainer}`}>
+    <div
+      className={`page-shell ${styles.podcastsContainer} ${activePlayback ? styles.podcastsContainerWithTopPlayer : ''}`}
+    >
+      {/* Top Floating Audio Player Bar */}
+      {activePlayback && (
+        <PodcastPlayerBar
+          playback={activePlayback}
+          onTogglePlay={handleTogglePlay}
+          onClose={() => setActivePlayback(null)}
+          onUpdateProgress={(cur, dur) => {
+            setActivePlayback((prev) =>
+              prev ? { ...prev, currentTime: cur, duration: dur } : null,
+            );
+          }}
+        />
+      )}
+
       {/* Top Search & Navigation */}
       <PodcastSearchBar
         value={searchQuery}
@@ -373,20 +389,6 @@ export function PodcastsPage() {
             />
           )}
         </>
-      )}
-
-      {/* Floating Audio Player Bar */}
-      {activePlayback && (
-        <PodcastPlayerBar
-          playback={activePlayback}
-          onTogglePlay={handleTogglePlay}
-          onClose={() => setActivePlayback(null)}
-          onUpdateProgress={(cur, dur) => {
-            setActivePlayback((prev) =>
-              prev ? { ...prev, currentTime: cur, duration: dur } : null,
-            );
-          }}
-        />
       )}
 
       {/* Show Notes & Transcript Drawer */}

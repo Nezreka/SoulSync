@@ -12,6 +12,11 @@
   color: #ffffff;
   position: relative;
   font-family: inherit;
+  transition: padding-top 0.25s ease;
+}
+
+.podcastsContainerWithTopPlayer {
+  padding-top: 110px !important;
 }
 
 .podcastsContainer > * {
@@ -1594,27 +1599,41 @@
   color: #ffffff;
 }
 
-/* ── Bottom Floating Audio Player Bar ───────────────────────────────────── */
+/* ── Top Floating Audio Player Bar ──────────────────────────────────────── */
 
 .playerBar {
   position: fixed;
-  bottom: 16px;
+  top: 18px;
+  bottom: auto;
   left: calc(var(--sidebar-w, 240px) + 24px);
   right: 24px;
-  z-index: 1000;
-  background: rgba(18, 18, 22, 0.88);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 16px;
+  z-index: 10000;
+  background: rgba(16, 16, 24, 0.94);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-top: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 18px;
   box-shadow:
-    0 16px 40px rgba(0, 0, 0, 0.6),
-    0 0 20px rgba(var(--accent-rgb), 0.12);
-  padding: 12px 20px;
+    0 20px 48px rgba(0, 0, 0, 0.75),
+    0 0 28px rgba(var(--accent-rgb), 0.18);
+  padding: 12px 24px;
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 22px;
   box-sizing: border-box;
+  animation: slideInFromTop 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideInFromTop {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .playerTrackInfo {
