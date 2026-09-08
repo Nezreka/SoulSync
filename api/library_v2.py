@@ -5033,10 +5033,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         """Read-only live download-queue status for this scope's tracks.
 
         ``{"tracks": {track_id: {"status", "progress_pct"}}, "albums":
-        {album_id: active_track_count}}`` sourced from the in-flight
-        ``download_tasks``/``matched_downloads_context`` state (docs §73) —
-        terminal/idle tracks are simply absent, there is no persisted "last
-        outcome" here.
+        {album_id: {"active", <bucket counts>, "progress_pct"}}}`` sourced
+        from the in-flight ``download_tasks``/``matched_downloads_context``
+        state (docs §73) — terminal/idle tracks are simply absent, there is
+        no persisted "last outcome" here.
         """
         guard = _guard()
         if guard:
