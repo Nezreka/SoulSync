@@ -14362,8 +14362,7 @@ def _get_batch_lock(batch_id):
             batch_locks[batch_id] = threading.Lock()
         return batch_locks[batch_id]
 
-# Batch lifecycle logic lives in core/downloads/lifecycle.py.
-from core.downloads import lifecycle as _downloads_lifecycle
+# Batch lifecycle logic lives in core/downloads/lifecycle.py (imported above as _downloads_lifecycle).
 
 
 def _build_lifecycle_deps():

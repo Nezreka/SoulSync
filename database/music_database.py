@@ -511,8 +511,8 @@ class MusicDatabase:
                        OR source_info LIKE '%"download_source": "Podcast"%'
                        OR source_info LIKE '%"playlist_id": "podcasts"%'
                 """)
-            except Exception:
-                pass
+            except Exception as purge_err:
+                logger.debug("Initial podcast wishlist purge skipped or failed: %s", purge_err)
 
             # Wishlist ignore-list (#874): a TTL'd skip-gate. When a user
             # removes a track from the wishlist or cancels an in-flight

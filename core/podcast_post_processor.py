@@ -385,8 +385,8 @@ def embed_podcast_tags(
             tags.delall("PCST")
             try:
                 tags.add(PCST())
-            except Exception:
-                pass
+            except Exception as pcst_err:
+                logger.debug("Failed adding PCST frame: %s", pcst_err)
 
             if feed_url:
                 tags.delall("WFED")
@@ -708,8 +708,8 @@ def post_process_podcast_episode(
                 cfg["save_artwork"] = config_manager.get("podcasts.save_artwork", True)
                 cfg["write_nfo"] = config_manager.get("podcasts.write_nfo", True)
                 cfg["write_json"] = config_manager.get("podcasts.write_json", True)
-        except Exception:
-            pass
+        except Exception as cfg_err:
+            logger.debug("Could not read podcast config defaults: %s", cfg_err)
 
     meta = dict(show_meta or {})
     if not meta.get("title") and episode.show_title:
