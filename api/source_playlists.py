@@ -4657,7 +4657,7 @@ def get_ytmusic_playlists():
     from core.ytmusic_library import fetch_library_playlists, fetch_liked_music_row, library_playlists_to_rows
     auth = _ytmusic_auth_headers()
     if not auth:
-        return jsonify({"error": "YouTube Music not authenticated. Settings → Downloads → Download Source: YouTube Only → Paste cookies.txt → Save."}), 401
+        return jsonify({"error": "YouTube Music not authenticated. Settings → Connections → YouTube → Paste cookies.txt → Save."}), 401
     try:
         rows = library_playlists_to_rows(fetch_library_playlists(auth))
         liked_row = fetch_liked_music_row(auth)

@@ -1799,17 +1799,16 @@ def test_docs_mention_youtube_reencode_default():
     assert 'Re-encode YouTube audio' in youtube_docs
     assert 'MP3 320' in youtube_docs
     assert 'Re-encode to MP3 320 (on by default)' in youtube_help
-    assert 'Netscape cookies.txt' in youtube_help
     assert 'Premium audio' in youtube_help
-    assert 'Paste cookies.txt' in youtube_docs
-    assert 'Netscape' in youtube_docs
+    assert 'Netscape/Mozilla' in index and 'cookies.txt' in index
+    assert 'Netscape' in docs and 'cookies.txt' in docs
     assert 'Premium audio qualities' in index
     assert 'Opus or AAC' in transcode_help
     assert 'quality list' in transcode_help
     assert 'minimum confidence threshold' not in youtube_docs.lower()
-    search_yt = _slice_between(docs, 'YouTube settings', 'Downloading Music')
+    search_yt = _slice_between(docs, 'Youtube cookies', 'Downloading Music')
     assert 'minimum confidence threshold' not in search_yt.lower()
-    assert 'Re-encode' in search_yt or 'MP3 320' in search_yt
+    assert 'Premium audio' in search_yt or 'bot detection' in search_yt
 
 
 def test_quality_profile_help_covers_youtube():
