@@ -3020,7 +3020,7 @@ const _DEEPLINK_VALID_PAGES = new Set([
     'dashboard', 'sync', 'search', 'discover', 'automations',
     'library', 'import', 'settings', 'help', 'issues', 'stats', 'watchlist',
     'wishlist', 'active-downloads', 'artist-detail', 'playlist-explorer',
-    'hydrabase', 'tools', 'chat', 'podcasts'
+    'hydrabase', 'tools', 'chat', 'podcasts', 'audiobooks'
 ]);
 
 function _getPageFromPath() {

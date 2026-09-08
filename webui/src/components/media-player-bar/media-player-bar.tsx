@@ -1,138 +1,162 @@
 import { useEffect, useRef, useState } from 'react';
 
-import type { ActivePlaybackState } from '../-podcasts.types';
+import styles from './media-player-bar.module.css';
 
-import styles from './podcasts-page.module.css';
-
-interface PodcastPlayerBarProps {
-  playback: ActivePlaybackState;
+export interface MediaPlayerBarProps {
+  /** What is playing. */
+  title: string;
+  /** Who it is by — the show for an episode, the author for a book. */
+  subtitle?: string;
+  artworkUrl?: string | null;
+  /** The audio to play. Changing it loads the new source and resets the scrubber. */
+  src: string;
+  isPlaying: boolean;
+  /** Known length, used until the file reports its own. */
+  durationHint?: number | null;
+  /** Shown when there is no artwork. */
+  fallbackIcon?: string;
+  ariaLabel?: string;
   onTogglePlay: () => void;
   onClose: () => void;
-  onUpdateProgress: (currentTime: number, duration: number) => void;
+  onProgress?: (currentTime: number, duration: number) => void;
 }
 
+const SPEEDS = [1, 1.25, 1.5, 2];
+
 function formatTime(seconds: number): string {
-  if (isNaN(seconds) || seconds < 0) return '0:00';
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-export function PodcastPlayerBar({
-  playback,
+/**
+ * The floating transport shared by the podcast and audiobook pages.
+ *
+ * Both play one audio file with a title, a subtitle and a piece of artwork, so
+ * they share this rather than each growing their own — the second one started
+ * out as a thinner copy with no skip buttons, no speed control and no volume,
+ * which is exactly the kind of drift a shared component prevents.
+ *
+ * Presentational: it owns the audio element and its own transport state, and
+ * tells the caller nothing except progress. Whether playback continues across
+ * navigation is the caller's business, not this component's.
+ */
+export function MediaPlayerBar({
+  title,
+  subtitle,
+  artworkUrl,
+  src,
+  isPlaying,
+  durationHint,
+  fallbackIcon = '🎧',
+  ariaLabel = 'Audio player',
   onTogglePlay,
   onClose,
-  onUpdateProgress,
-}: PodcastPlayerBarProps) {
+  onProgress,
+}: MediaPlayerBarProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [volume, setVolume] = useState(1);
   const [speed, setSpeed] = useState(1);
-  const [currentTime, setCurrentTime] = useState(playback.currentTime || 0);
-  const [duration, setDuration] = useState(playback.duration || 0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
 
-  const { episode, showTitle, showArtwork, isPlaying } = playback;
-  const artwork = episode.artwork_url || showArtwork;
-
-  // Initialize and sync audio element
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    if (audio.src !== episode.enclosure_url) {
-      audio.src = episode.enclosure_url;
+    // Compared against the attribute rather than audio.src: the browser
+    // resolves the property to an absolute URL, so a relative src would look
+    // like a change on every render and restart playback constantly.
+    if (audio.getAttribute('data-src') !== src) {
+      audio.setAttribute('data-src', src);
+      audio.src = src;
       audio.load();
+      setCurrentTime(0);
+      setDuration(0);
     }
 
     if (isPlaying) {
       audio.play().catch((err) => {
-        console.warn('Playback error or blocked by autoplay policy:', err);
+        console.warn('Playback failed or was blocked by the autoplay policy:', err);
       });
     } else {
       audio.pause();
     }
-  }, [episode.enclosure_url, isPlaying]);
+  }, [src, isPlaying]);
 
   useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.playbackRate = speed;
-    }
+    if (audioRef.current) audioRef.current.playbackRate = speed;
   }, [speed]);
 
   useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = volume;
-    }
+    if (audioRef.current) audioRef.current.volume = volume;
   }, [volume]);
 
   const handleTimeUpdate = () => {
-    if (!audioRef.current) return;
-    const cur = audioRef.current.currentTime;
-    const dur = audioRef.current.duration || 0;
+    const audio = audioRef.current;
+    if (!audio) return;
+    const cur = audio.currentTime;
+    const dur = audio.duration || 0;
     setCurrentTime(cur);
     setDuration(dur);
-    onUpdateProgress(cur, dur);
+    onProgress?.(cur, dur);
   };
 
-  const handleSeek = (val: number) => {
-    if (audioRef.current) {
-      audioRef.current.currentTime = val;
-      setCurrentTime(val);
-    }
+  const seek = (value: number) => {
+    if (!audioRef.current) return;
+    audioRef.current.currentTime = value;
+    setCurrentTime(value);
   };
 
-  const handleSkip = (seconds: number) => {
-    if (audioRef.current) {
-      audioRef.current.currentTime = Math.max(
-        0,
-        Math.min(audioRef.current.duration || 0, audioRef.current.currentTime + seconds),
-      );
-    }
+  const skip = (seconds: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = Math.max(0, Math.min(audio.duration || 0, audio.currentTime + seconds));
   };
 
-  const handleCycleSpeed = () => {
-    const speeds = [1, 1.25, 1.5, 2];
-    const nextIdx = (speeds.indexOf(speed) + 1) % speeds.length;
-    setSpeed(speeds[nextIdx]);
-  };
+  const cycleSpeed = () => setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]);
+
+  const total = duration || durationHint || 0;
 
   return (
-    <div className={styles.playerBar} role="region" aria-label="Podcast Audio Player">
+    <div className={styles.playerBar} role="region" aria-label={ariaLabel}>
       <audio
         ref={audioRef}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleTimeUpdate}
-        onEnded={() => onTogglePlay()}
+        onEnded={onTogglePlay}
       />
 
-      {/* Left: Info */}
       <div className={styles.playerTrackInfo}>
-        {artwork ? (
-          <img src={artwork} alt="" className={styles.playerThumb} />
+        {artworkUrl ? (
+          <img src={artworkUrl} alt="" className={styles.playerThumb} />
         ) : (
           <div
             className={styles.playerThumb}
             style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           >
-            🎙️
+            {fallbackIcon}
           </div>
         )}
         <div className={styles.playerTrackMeta}>
-          <h5 className={styles.playerTrackTitle} title={episode.title}>
-            {episode.title}
+          <h5 className={styles.playerTrackTitle} title={title}>
+            {title}
           </h5>
-          <span className={styles.playerTrackAuthor} title={showTitle}>
-            {showTitle}
-          </span>
+          {subtitle && (
+            <span className={styles.playerTrackAuthor} title={subtitle}>
+              {subtitle}
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Center: Controls & Scrubber */}
       <div className={styles.playerCenterControls}>
         <div className={styles.playerButtonsRow}>
           <button
             type="button"
             className={styles.controlBtn}
-            onClick={() => handleSkip(-15)}
+            onClick={() => skip(-15)}
             title="Rewind 15 seconds"
           >
             <span style={{ fontSize: 13, fontWeight: 700 }}>↺ 15</span>
@@ -159,7 +183,7 @@ export function PodcastPlayerBar({
           <button
             type="button"
             className={styles.controlBtn}
-            onClick={() => handleSkip(30)}
+            onClick={() => skip(30)}
             title="Forward 30 seconds"
           >
             <span style={{ fontSize: 13, fontWeight: 700 }}>30 ↻</span>
@@ -171,23 +195,23 @@ export function PodcastPlayerBar({
           <input
             type="range"
             min={0}
-            max={duration || episode.duration_seconds || 100}
+            max={total || 100}
             value={currentTime}
-            onChange={(e) => handleSeek(Number(e.target.value))}
+            onChange={(event) => seek(Number(event.target.value))}
             className={styles.scrubSlider}
+            aria-label="Seek"
           />
           <span className={`${styles.timeLabel} ${styles.timeLabelRight}`}>
-            {formatTime(duration || episode.duration_seconds || 0)}
+            {formatTime(total)}
           </span>
         </div>
       </div>
 
-      {/* Right: Controls & Dismiss */}
       <div className={styles.playerRightControls}>
         <button
           type="button"
           className={styles.speedToggleBtn}
-          onClick={handleCycleSpeed}
+          onClick={cycleSpeed}
           title="Change playback speed"
         >
           {speed}x
@@ -201,9 +225,10 @@ export function PodcastPlayerBar({
             max={1}
             step={0.05}
             value={volume}
-            onChange={(e) => setVolume(Number(e.target.value))}
+            onChange={(event) => setVolume(Number(event.target.value))}
             className={styles.volumeSlider}
             title={`Volume: ${Math.round(volume * 100)}%`}
+            aria-label="Volume"
           />
         </div>
 

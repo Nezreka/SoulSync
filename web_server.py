@@ -855,6 +855,7 @@ VALID_PAGE_IDS = {
     'hydrabase',
     'issues',
     'podcasts',
+    'audiobooks',
     # Video side — per-profile page toggles (admin-only surfaces are gated separately,
     # not via allowed_pages: overlay studio, video-import, video-settings, video-automations).
     'video-dashboard',
@@ -21476,6 +21477,25 @@ app.register_blueprint(_create_video_blueprint(), url_prefix='/api/video')
 # Podcasts API (isolated: public discovery, RSS parsing, episode downloads)
 from api.podcasts import create_podcasts_blueprint as _create_podcasts_blueprint
 app.register_blueprint(_create_podcasts_blueprint())
+
+# Audiobooks API (isolated: its own database file, its own download category,
+# never touches the music worker pool, wishlist or batches)
+from api.audiobooks import create_audiobooks_blueprint as _create_audiobooks_blueprint
+app.register_blueprint(_create_audiobooks_blueprint())
+
+# NOTE: the audiobook wishlist is NOT started here. It is drained by the shared
+# automation engine as the 'audiobook_process_wishlist' system automation, the same
+# way music and video drain theirs — so it can be paused, rescheduled or run by hand
+# from the Automations page instead of being a thread nobody can see.
+
+# Follow grabbed audiobooks to completion and file them into the library. Without this
+# a grab is fire-and-forget: the download client fetches something the app never
+# notices finishing.
+try:
+    from core.audiobook_download_monitor import ensure_started as _ensure_audiobook_downloads
+    _ensure_audiobook_downloads()
+except Exception as _ab_monitor_err:  # noqa: BLE001
+    logger.warning(f"Audiobook download monitor did not start: {_ab_monitor_err}")
 
 # Resume video downloads at boot: without this the monitor only starts on a grab or
 # when the Downloads page opens, so in-flight downloads (and orphaned 'searching' rows)

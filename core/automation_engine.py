@@ -96,6 +96,18 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'scan_watchlist_podcasts',
         'initial_delay': 180,  # 3 minutes after startup
     },
+    # Audiobooks drain their wishlist through the engine like every other side.
+    # Hourly rather than the music wishlist's 30 minutes: each BOOK also carries
+    # its own multi-hour backoff, so a shorter interval would only re-walk rows
+    # that are not due yet. No owned_by — the podcast scan has none either, so
+    # audio-side automations sit on the same page as music.
+    {
+        'name': 'Auto-Process Audiobook Wishlist',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'audiobook_process_wishlist',
+        'initial_delay': 240,  # 4 minutes after startup, after the podcast scan
+    },
     # Event-based system automations (no initial_delay/next_run needed)
     {
         'name': 'Auto-Scan After Downloads',

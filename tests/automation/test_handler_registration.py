@@ -34,6 +34,7 @@ EXPECTED_ACTION_NAMES = frozenset({
     'process_wishlist',
     'scan_watchlist',
     'scan_watchlist_podcasts',
+    'audiobook_process_wishlist',
     'scan_library',
     'refresh_mirrored',
     'sync_playlist',

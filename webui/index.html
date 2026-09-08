@@ -419,6 +419,10 @@
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg></span>
                     <span class="nav-text">Podcasts</span>
                 </a>
+                <a class="nav-button" data-page="audiobooks" href="/audiobooks">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H18a1 1 0 0 1 1 1v9"/><path d="M6.5 16H18"/><path d="M4 5.5V19a2 2 0 0 0 2 2h12"/><circle cx="12" cy="10" r="1.6"/><path d="M9.6 12.4a3.4 3.4 0 0 1 0-4.8m4.8 0a3.4 3.4 0 0 1 0 4.8"/></svg></span>
+                    <span class="nav-text">Audiobooks</span>
+                </a>
                 <button type="button" class="nav-section-label" data-section="music" onclick="toggleNavSection(this)">
                     <span class="nav-section-title">Manage</span>
                     <svg class="nav-section-chevron" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
@@ -5350,6 +5354,15 @@
                                     <small class="settings-hint">Where downloaded podcast episodes are saved and organized.</small>
                                 </div>
 
+                                <div class="form-group" data-music-only>
+                                    <label>Audiobooks Folder (output):</label>
+                                    <div class="path-input-group">
+                                        <input type="text" id="audiobooks-path" placeholder="./audiobooks" readonly>
+                                        <button class="browse-button locked" onclick="typeof togglePathLock==='function'?togglePathLock('audiobooks', this):((function(b){const i=document.getElementById('audiobooks-path');if(!i)return;const l=i.hasAttribute('readonly')||i.readOnly;if(l){i.removeAttribute('readonly');i.readOnly=false;i.focus();b.textContent='Lock';b.classList.remove('locked');}else{i.setAttribute('readonly','');i.readOnly=true;b.textContent='Unlock';b.classList.add('locked');}})(this))">Unlock</button>
+                                    </div>
+                                    <small class="settings-hint">Where downloaded audiobooks are saved and organized. Keep this separate from your music library so a media server does not index chapter files as albums.</small>
+                                </div>
+
                                 <div class="form-group">
                                     <label>Minimum free disk space (GB):</label>
                                     <input type="number" id="min-free-disk-gb" min="0" step="0.5" placeholder="5">
@@ -5499,6 +5512,14 @@
                                     </select>
                                     <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                     <small class="settings-hint setting-help-body" hidden>Choose which formats to store in your podcast folders. <strong>Audio Only</strong> keeps standard audio files with embedded tags. <strong>Video Only</strong> remuxes the audio into an MP4 video container with a static high-res episode artwork frame and Apple/iTunes TV metadata tags so Plex, Jellyfin, and Emby can catalog them as TV Shows with seasons, episode posters, and playback resume. <strong>Audio &amp; Video</strong> keeps both formats side-by-side in the same folder with shared NFO sidecars so both Music and TV media libraries can index the same folder simultaneously.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Audiobook Path Template:</label>
+                                    <input type="text" id="template-audiobook-path"
+                                        placeholder="$author/$series/$seriespos - $title">
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Variables: <code>$author</code>, <code>$authorletter</code>, <code>$narrator</code>, <code>$title</code>, <code>$series</code>, <code>$seriespos</code> (01), <code>$year</code>, <code>$asin</code>. Default: <code>$author/$series/$seriespos - $title</code>. Books with no series collapse the series folder and its number cleanly, the same way podcast season folders do. Use <code>${var}</code> to append text.</small>
                                 </div>
 
                                 <div class="form-group">

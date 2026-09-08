@@ -1,0 +1,394 @@
+import { apiClient, readJson } from '@/app/api-client';
+
+import type {
+  AudiobookCategory,
+  AudiobookDownload,
+  AudiobookNarratorMode,
+  AudiobookHome,
+  AudiobookItem,
+  AudiobookSearchResult,
+  AudiobookPersonProfile,
+  AudiobookRole,
+  AudiobookReleaseCandidate,
+  AudiobookSearchType,
+  AudiobookSource,
+  AudiobookWishlistCounts,
+  AudiobookWishlistEntry,
+  AudiobookWishlistSummary,
+} from './-audiobooks.types';
+
+/**
+ * Every call here fails soft and returns an empty result on error.
+ *
+ * The browse page is built from six independent shelves plus a hero; one of
+ * them failing must leave the rest of the page standing, exactly as the server
+ * side does it.
+ */
+
+interface ListResponse {
+  success?: boolean;
+  results?: AudiobookItem[];
+  source?: AudiobookSource;
+  error?: string;
+}
+
+interface DetailResponse {
+  success?: boolean;
+  book?: AudiobookItem;
+  error?: string;
+}
+
+interface HomeResponse {
+  success?: boolean;
+  hero?: AudiobookItem | null;
+  shelves?: AudiobookHome['shelves'];
+  error?: string;
+}
+
+interface CategoriesResponse {
+  success?: boolean;
+  categories?: AudiobookCategory[];
+  error?: string;
+}
+
+function listOf(data: ListResponse | null | undefined): AudiobookItem[] {
+  return data?.success && Array.isArray(data.results) ? data.results : [];
+}
+
+export async function searchAudiobooks(
+  query: string,
+  searchType: AudiobookSearchType = 'keywords',
+  limit = 24,
+): Promise<AudiobookSearchResult> {
+  const trimmed = query.trim();
+  if (!trimmed) return { results: [], source: 'audible' };
+
+  try {
+    const data = await readJson<ListResponse>(
+      apiClient.get('audiobooks/search', {
+        searchParams: { q: trimmed, type: searchType, limit },
+      }),
+    );
+    return { results: listOf(data), source: data?.source || 'audible' };
+  } catch (err) {
+    console.error('Failed to search audiobooks:', err);
+    return { results: [], source: 'audible' };
+  }
+}
+
+export async function fetchAudiobookHome(limit = 20): Promise<AudiobookHome> {
+  try {
+    const data = await readJson<HomeResponse>(
+      apiClient.get('audiobooks/home', { searchParams: { limit } }),
+    );
+    if (!data?.success) return { hero: null, shelves: [] };
+    return { hero: data.hero ?? null, shelves: Array.isArray(data.shelves) ? data.shelves : [] };
+  } catch (err) {
+    console.error('Failed to load the audiobooks home shelves:', err);
+    return { hero: null, shelves: [] };
+  }
+}
+
+export async function fetchAudiobook(asin: string): Promise<AudiobookItem | null> {
+  if (!asin) return null;
+  try {
+    const data = await readJson<DetailResponse>(
+      apiClient.get(`audiobooks/book/${encodeURIComponent(asin)}`),
+    );
+    return data?.success && data.book ? data.book : null;
+  } catch (err) {
+    console.error(`Failed to load audiobook ${asin}:`, err);
+    return null;
+  }
+}
+
+export async function fetchSimilarAudiobooks(asin: string, limit = 12): Promise<AudiobookItem[]> {
+  if (!asin) return [];
+  try {
+    return listOf(
+      await readJson<ListResponse>(
+        apiClient.get(`audiobooks/similar/${encodeURIComponent(asin)}`, {
+          searchParams: { limit },
+        }),
+      ),
+    );
+  } catch (err) {
+    console.error('Failed to load similar audiobooks:', err);
+    return [];
+  }
+}
+
+export async function fetchSeries(
+  name: string,
+  seriesAsin?: string | null,
+  limit = 50,
+): Promise<AudiobookItem[]> {
+  if (!name) return [];
+  try {
+    const searchParams: Record<string, string | number> = { name, limit };
+    if (seriesAsin) searchParams.asin = seriesAsin;
+    return listOf(
+      await readJson<ListResponse>(apiClient.get('audiobooks/series', { searchParams })),
+    );
+  } catch (err) {
+    console.error('Failed to load the series:', err);
+    return [];
+  }
+}
+
+export async function fetchByAuthor(name: string, limit = 20): Promise<AudiobookItem[]> {
+  if (!name) return [];
+  try {
+    return listOf(
+      await readJson<ListResponse>(
+        apiClient.get('audiobooks/author', { searchParams: { name, limit } }),
+      ),
+    );
+  } catch (err) {
+    console.error('Failed to load the author bibliography:', err);
+    return [];
+  }
+}
+
+export async function fetchByNarrator(name: string, limit = 20): Promise<AudiobookItem[]> {
+  if (!name) return [];
+  try {
+    return listOf(
+      await readJson<ListResponse>(
+        apiClient.get('audiobooks/narrator', { searchParams: { name, limit } }),
+      ),
+    );
+  } catch (err) {
+    console.error('Failed to load the narrator performances:', err);
+    return [];
+  }
+}
+
+export async function fetchBrowse(
+  categoryName: string,
+  sort: 'bestsellers' | 'newest' = 'bestsellers',
+  limit = 20,
+): Promise<AudiobookItem[]> {
+  try {
+    const searchParams: Record<string, string | number> = { sort, limit };
+    if (categoryName) searchParams.category = categoryName;
+    return listOf(
+      await readJson<ListResponse>(apiClient.get('audiobooks/browse', { searchParams })),
+    );
+  } catch (err) {
+    console.error('Failed to browse audiobooks:', err);
+    return [];
+  }
+}
+
+interface PersonResponse {
+  success?: boolean;
+  profile?: AudiobookPersonProfile;
+  error?: string;
+}
+
+/**
+ * The grouped bibliography behind an author or narrator page.
+ *
+ * Keyed on the name because Audible's own author ASIN is not usable as a
+ * filter — it is accepted and then ignored, returning the whole storefront.
+ */
+export async function fetchPersonProfile(
+  name: string,
+  role: AudiobookRole,
+): Promise<AudiobookPersonProfile | null> {
+  if (!name) return null;
+  try {
+    const data = await readJson<PersonResponse>(
+      apiClient.get('audiobooks/person', { searchParams: { name, role } }),
+    );
+    return data?.success && data.profile ? data.profile : null;
+  } catch (err) {
+    console.error(`Failed to load the ${role} profile for ${name}:`, err);
+    return null;
+  }
+}
+
+export async function fetchCategories(): Promise<AudiobookCategory[]> {
+  try {
+    const data = await readJson<CategoriesResponse>(apiClient.get('audiobooks/categories'));
+    return data?.success && Array.isArray(data.categories) ? data.categories : [];
+  } catch (err) {
+    console.error('Failed to load the audiobook genre tree:', err);
+    return [];
+  }
+}
+
+/**
+ * Route a sample through the server so it plays without a CORS failure.
+ *
+ * The CDNs that host previews do not send CORS headers, so an <audio> element
+ * pointed straight at one can refuse to play. The proxy also forwards Range,
+ * which is what makes seeking inside a preview work.
+ */
+export function sampleStreamUrl(sampleUrl: string): string {
+  return `/api/audiobooks/sample-proxy?url=${encodeURIComponent(sampleUrl)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Wishlist
+// ---------------------------------------------------------------------------
+
+interface WishlistResponse {
+  success?: boolean;
+  items?: AudiobookWishlistEntry[];
+  counts?: AudiobookWishlistCounts;
+  worker?: AudiobookWishlistSummary;
+  error?: string;
+}
+
+interface MutationResponse {
+  success?: boolean;
+  wishlisted?: boolean;
+  error?: string;
+}
+
+interface ReleasesResponse {
+  success?: boolean;
+  releases?: AudiobookReleaseCandidate[];
+  error?: string;
+}
+
+export interface AudiobookWishlistView {
+  items: AudiobookWishlistEntry[];
+  counts: AudiobookWishlistCounts;
+  worker: AudiobookWishlistSummary | null;
+}
+
+const EMPTY_COUNTS: AudiobookWishlistCounts = {
+  wanted: 0,
+  searching: 0,
+  grabbed: 0,
+  done: 0,
+  failed: 0,
+  total: 0,
+};
+
+export async function fetchWishlist(): Promise<AudiobookWishlistView> {
+  try {
+    const data = await readJson<WishlistResponse>(apiClient.get('audiobooks/wishlist'));
+    if (!data?.success) return { items: [], counts: EMPTY_COUNTS, worker: null };
+    return {
+      items: Array.isArray(data.items) ? data.items : [],
+      counts: data.counts ?? EMPTY_COUNTS,
+      worker: data.worker ?? null,
+    };
+  } catch (err) {
+    console.error('Failed to load the audiobook wishlist:', err);
+    return { items: [], counts: EMPTY_COUNTS, worker: null };
+  }
+}
+
+/**
+ * Want a book, in one narrator's reading or any.
+ *
+ * `exact` holds the download to the reading this ASIN actually is — on Audible
+ * the narrator is baked into the ASIN, so choosing the book already chose a
+ * performance. `any` accepts another narrator's edition. Never both: a book is
+ * always exactly one narrator.
+ */
+export async function addToWishlist(
+  asin: string,
+  narratorMode: AudiobookNarratorMode = 'exact',
+): Promise<boolean> {
+  if (!asin) return false;
+  try {
+    const data = await readJson<MutationResponse>(
+      apiClient.post('audiobooks/wishlist', { json: { asin, narrator_mode: narratorMode } }),
+    );
+    return Boolean(data?.success);
+  } catch (err) {
+    console.error(`Failed to wishlist ${asin}:`, err);
+    return false;
+  }
+}
+
+export async function removeFromWishlist(asin: string): Promise<boolean> {
+  if (!asin) return false;
+  try {
+    const data = await readJson<MutationResponse>(
+      apiClient.delete(`audiobooks/wishlist/${encodeURIComponent(asin)}`),
+    );
+    return Boolean(data?.success);
+  } catch (err) {
+    console.error(`Failed to un-wishlist ${asin}:`, err);
+    return false;
+  }
+}
+
+/** Run a wishlist pass now instead of waiting for the timer. */
+export async function runWishlistPass(): Promise<Record<string, number> | null> {
+  try {
+    const data = await readJson<{ success?: boolean; summary?: Record<string, number> }>(
+      apiClient.post('audiobooks/wishlist/search', { json: {} }),
+    );
+    return data?.success ? (data.summary ?? null) : null;
+  } catch (err) {
+    console.error('Failed to run a wishlist pass:', err);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Releases
+// ---------------------------------------------------------------------------
+
+/**
+ * Ask the indexers what is actually downloadable for a book.
+ *
+ * Slow by nature — it is a real search fanning out to every configured
+ * indexer — so the UI must show it working rather than assume it is instant.
+ */
+export async function fetchReleases(asin: string): Promise<AudiobookReleaseCandidate[]> {
+  if (!asin) return [];
+  try {
+    const data = await readJson<ReleasesResponse>(
+      apiClient.get(`audiobooks/releases/${encodeURIComponent(asin)}`, { timeout: 120000 }),
+    );
+    return data?.success && Array.isArray(data.releases) ? data.releases : [];
+  } catch (err) {
+    console.error(`Failed to find releases for ${asin}:`, err);
+    return [];
+  }
+}
+
+export async function grabRelease(
+  asin: string,
+  release: AudiobookReleaseCandidate,
+): Promise<{ ok: boolean; error: string }> {
+  try {
+    const data = await readJson<{ success?: boolean; error?: string }>(
+      apiClient.post('audiobooks/grab', { json: { asin, release } }),
+    );
+    return { ok: Boolean(data?.success), error: data?.error || '' };
+  } catch (err) {
+    console.error('Failed to grab the release:', err);
+    return { ok: false, error: 'Request failed' };
+  }
+}
+
+/**
+ * What has been grabbed and where it has got to.
+ *
+ * Separate from the music Downloads page on purpose: an audiobook is one
+ * release that becomes a folder of chapters, which a per-track view has nowhere
+ * sensible to put.
+ */
+export async function fetchDownloads(activeOnly = false): Promise<AudiobookDownload[]> {
+  try {
+    const data = await readJson<{ success?: boolean; downloads?: AudiobookDownload[] }>(
+      apiClient.get('audiobooks/downloads', {
+        searchParams: activeOnly ? { active: 1 } : {},
+      }),
+    );
+    return data?.success && Array.isArray(data.downloads) ? data.downloads : [];
+  } catch (err) {
+    console.error('Failed to load audiobook downloads:', err);
+    return [];
+  }
+}

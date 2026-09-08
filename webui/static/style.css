@@ -22990,6 +22990,49 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     margin-bottom: 4px;
 }
 
+/* ── Wishlist media tabs: music vs audiobooks ────────────────────────── */
+/* Two isolated lists sharing one page, the way the video side keeps movies,
+   shows and channels apart. A segmented control rather than chips because
+   this switches WHAT you are looking at, while the chips below it filter
+   the thing you already chose. */
+
+.wl-media-tabs {
+    display: inline-flex;
+    gap: 3px;
+    padding: 4px;
+    margin: 4px 0 20px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-top-color: rgba(255, 255, 255, 0.14);
+}
+
+.wl-media-tab {
+    padding: 9px 22px;
+    border: none;
+    border-radius: 11px;
+    background: none;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 13px;
+    font-weight: 620;
+    letter-spacing: 0.01em;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.wl-media-tab:hover {
+    color: #ffffff;
+}
+
+.wl-media-tab.active {
+    background: linear-gradient(135deg,
+            rgba(var(--accent-rgb), 0.95) 0%,
+            rgba(var(--accent-rgb), 0.75) 100%);
+    color: #ffffff;
+    box-shadow: 0 6px 18px rgba(var(--accent-rgb), 0.32);
+}
+
 /* ── #831 round 3: watchlist action chips (artist-page button language) ── */
 
 .wl-chip {

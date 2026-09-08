@@ -487,7 +487,8 @@ function resetFileOrganizationTemplates() {
         single: '$artist/$artist - $title/$title',
         playlist: '$playlist/$artist - $title',
         video: '$artist/$title-video',
-        podcast: '$show/Season $season/$title'
+        podcast: '$show/Season $season/$title',
+        audiobook: '$author/$series/$seriespos - $title'
     };
 
     document.getElementById('template-album-path').value = defaults.album;
@@ -495,6 +496,7 @@ function resetFileOrganizationTemplates() {
     document.getElementById('template-playlist-path').value = defaults.playlist;
     document.getElementById('template-video-path').value = defaults.video;
     document.getElementById('template-podcast-path').value = defaults.podcast;
+    document.getElementById('template-audiobook-path').value = defaults.audiobook;
 
     debouncedAutoSaveSettings();
 }
@@ -508,7 +510,8 @@ function validateFileOrganizationTemplates() {
         single: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$track', '$year', '$quality'],
         playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality'],
         video: ['$artist', '$artistletter', '$title', '$year'],
-        podcast: ['$show', '$podcast', '$author', '$artist', '$title', '$season', '$seasonnum', '$episode', '$episodenum', '$year', '$date', '$type']
+        podcast: ['$show', '$podcast', '$author', '$artist', '$title', '$season', '$seasonnum', '$episode', '$episodenum', '$year', '$date', '$type'],
+        audiobook: ['$author', '$authorletter', '$narrator', '$title', '$series', '$seriespos', '$year', '$asin']
     };
 
     // Get template values
@@ -1608,6 +1611,15 @@ async function loadSettingsData() {
                 ? defaultPodcastPath
                 : (currentPodcastsVal || defaultPodcastPath);
         }
+        const defaultAudiobookPath = isDocker ? '/app/audiobooks' : './audiobooks';
+        const audiobooksEl = document.getElementById('audiobooks-path');
+        if (audiobooksEl) {
+            audiobooksEl.placeholder = defaultAudiobookPath;
+            const currentAudiobooksVal = settings.audiobooks?.download_path || settings.library?.audiobooks_path;
+            audiobooksEl.value = (isDocker && (!currentAudiobooksVal || currentAudiobooksVal === './audiobooks'))
+                ? defaultAudiobookPath
+                : (currentAudiobooksVal || defaultAudiobookPath);
+        }
         document.getElementById('playlists-materialize-path').value = settings.playlists?.materialize_path || './Playlists';
         document.getElementById('playlists-materialize-mode').value = settings.playlists?.materialize_mode || 'symlink';
 
@@ -1795,6 +1807,7 @@ async function loadSettingsData() {
         document.getElementById('template-playlist-item').value = settings.file_organization?.templates?.playlist_item || '';
         document.getElementById('template-video-path').value = settings.file_organization?.templates?.video_path || '$artist/$title-video';
         document.getElementById('template-podcast-path').value = settings.file_organization?.templates?.podcast_path || '$show/Season $season/$title';
+        document.getElementById('template-audiobook-path').value = settings.file_organization?.templates?.audiobook_path || '$author/$series/$seriespos - $title';
         const podcastFormatEl = document.getElementById('podcast-media-format');
         if (podcastFormatEl) {
             podcastFormatEl.value = settings.podcasts?.media_format || 'audio';
@@ -4747,7 +4760,8 @@ async function saveSettings(quiet = false) {
                 playlist_path: document.getElementById('template-playlist-path').value,
                 playlist_item: document.getElementById('template-playlist-item').value,
                 video_path: document.getElementById('template-video-path').value,
-                podcast_path: document.getElementById('template-podcast-path').value
+                podcast_path: document.getElementById('template-podcast-path').value,
+                audiobook_path: document.getElementById('template-audiobook-path').value
             }
         },
         wishlist: {
@@ -4781,11 +4795,15 @@ async function saveSettings(quiet = false) {
             music_paths: collectMusicPaths(),
             music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos',
             podcasts_path: document.getElementById('podcasts-path')?.value || './podcasts',
+            audiobooks_path: document.getElementById('audiobooks-path')?.value || './audiobooks',
             reorganize_preserve_casing: document.getElementById('reorganize-preserve-casing')?.checked !== false
         },
         podcasts: {
             download_path: document.getElementById('podcasts-path')?.value || './podcasts',
             media_format: document.getElementById('podcast-media-format')?.value || 'audio',
+        },
+        audiobooks: {
+            download_path: document.getElementById('audiobooks-path')?.value || './audiobooks',
         },
         import: {
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,
@@ -6362,6 +6380,7 @@ const PATH_INPUT_IDS = {
     download: 'download-path',
     transfer: 'transfer-path',
     podcasts: 'podcasts-path',
+    audiobooks: 'audiobooks-path',
     staging: 'staging-path',
     'music-videos': 'music-videos-path',
     'playlists-materialize': 'playlists-materialize-path',

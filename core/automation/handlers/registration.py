@@ -10,6 +10,7 @@ from __future__ import annotations
 from core.automation.deps import AutomationDeps
 from core.automation.handlers.process_wishlist import auto_process_wishlist
 from core.automation.handlers.scan_watchlist import auto_scan_watchlist
+from core.automation.handlers.audiobook_process_wishlist import auto_process_audiobook_wishlist
 from core.automation.handlers.scan_watchlist_podcasts import auto_scan_watchlist_podcasts
 from core.automation.handlers.scan_library import auto_scan_library
 from core.automation.handlers.refresh_mirrored import auto_refresh_mirrored
@@ -97,6 +98,10 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'scan_watchlist_podcasts',
         lambda config: auto_scan_watchlist_podcasts(config, deps),
+    )
+    engine.register_action_handler(
+        'audiobook_process_wishlist',
+        lambda config: auto_process_audiobook_wishlist(config, deps),
     )
     # NOTE: labels are NOT a separate automation kind — the 'scan_watchlist'
     # action (and the manual scan) run a label phase after the artist scan via

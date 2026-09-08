@@ -475,6 +475,7 @@ class ConfigManager:
         """Get default configuration"""
         is_docker = os.path.exists("/.dockerenv") or os.environ.get("SOULSYNC_IN_DOCKER", "").lower() in ("1", "true", "yes")
         default_podcast_path = "/app/podcasts" if is_docker else "./podcasts"
+        default_audiobook_path = "/app/audiobooks" if is_docker else "./audiobooks"
         return {
             "active_media_server": "plex",
             "spotify": {
@@ -809,6 +810,7 @@ class ConfigManager:
                 "music_paths": [],
                 "music_videos_path": "",
                 "podcasts_path": default_podcast_path,
+                "audiobooks_path": default_audiobook_path,
                 # Library Organize: when the tool re-resolves a track from the
                 # metadata source, the source's title/album CASING often differs
                 # from a file the user already curated (Spotify capitalizing
@@ -827,6 +829,10 @@ class ConfigManager:
                     "playlist_path": "$playlist/$artist - $title",
                     "video_path": "$artist/$title-video",
                     "podcast_path": "$show/Season $season/$title",
+                    # Author/Series/Book N - Title, the layout Audiobookshelf and
+                    # Plex both read. Series segments collapse when a book has no
+                    # series, exactly as the podcast season folder does.
+                    "audiobook_path": "$author/$series/$seriespos - $title",
                 }
             },
             "wishlist": {
@@ -878,6 +884,34 @@ class ConfigManager:
                 # duplicates for FAT/USB/DAPs that can't follow links). Symlink
                 # auto-falls back to copy when the filesystem can't link.
                 "materialize_mode": "symlink"
+            },
+            "audiobooks": {
+                "download_path": default_audiobook_path,
+                # Audiobooks get their OWN source chain rather than inheriting
+                # music's. Five of music's sources (tidal, qobuz, hifi, deezer,
+                # amazon) are music-streaming services with no audiobooks in
+                # them at all, so every book search on the music chain would
+                # burn an attempt on each before it could succeed. The download
+                # ENGINE is shared — an audiobook is structurally an album, a
+                # directory of ordered chapter files with shared metadata, which
+                # is the shape core.download_plugins.album_bundle already
+                # handles — only the ordering of sources differs.
+                "download_source": {
+                    "mode": "hybrid",     # "soulseek", "torrent", "usenet", "hybrid"
+                    "hybrid_order": ["torrent", "usenet", "soulseek"],
+                },
+                # Newznab audiobook category. core/prowlarr_client.py already
+                # defines this as MUSIC_CATEGORY_AUDIOBOOK and deliberately
+                # keeps it OUT of music searches, so passing it here costs
+                # music nothing and reuses the shared Prowlarr throttle.
+                "prowlarr_categories": [3030],
+                "embed_metadata": True,
+                "embed_artwork": True,
+                "save_artwork": True,
+                "write_nfo": True,
+                # Chapter files arrive named however the uploader left them.
+                # On by default: a book whose files sort wrong plays wrong.
+                "renumber_chapters": True,
             },
             "podcasts": {
                 "download_path": default_podcast_path,

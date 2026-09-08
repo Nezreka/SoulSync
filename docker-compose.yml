@@ -56,6 +56,13 @@ services:
       # the host side (left of the colon) at your podcasts folder, then set
       # Settings → Library → Podcasts Folder to /app/podcasts:
       # - ./podcasts:/app/podcasts
+      # ─── Audiobook library (OUTPUT) — optional: uncomment + set your path ───
+      # Finished audiobooks are filed here as Author/Series/Book folders. UNCOMMENT
+      # the line below, point the host side (left of the colon) at your audiobook
+      # folder, then set Settings → Library → Audiobooks Folder to /app/audiobooks.
+      # Keep this OUT of your music library: a book is a folder of chapter files,
+      # and a music scanner will happily index it as an album of 300 tracks.
+      # - ./audiobooks:/app/audiobooks
 
       - ./Staging:/app/Staging
       - ./MusicVideos:/app/MusicVideos
