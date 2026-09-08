@@ -265,4 +265,100 @@ export async function fetchWatchlistPodcasts(): Promise<any[]> {
   }
 }
 
+export interface OpmlFeedItem {
+  title: string;
+  feed_url: string;
+  description?: string;
+  html_url?: string;
+}
+
+export interface OpmlImportPreviewResponse {
+  success?: boolean;
+  action?: string;
+  count?: number;
+  feeds?: OpmlFeedItem[];
+  error?: string;
+}
+
+export interface OpmlImportSubscribeResponse {
+  success?: boolean;
+  action?: string;
+  total_feeds?: number;
+  imported_count?: number;
+  errors?: number;
+  error?: string;
+}
+
+export async function parseOpmlFile(file: File): Promise<{
+  success: boolean;
+  count: number;
+  feeds: OpmlFeedItem[];
+  error?: string;
+}> {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const data = await readJson<OpmlImportPreviewResponse>(
+      apiClient.post('podcasts/opml/import', {
+        searchParams: { action: 'preview' },
+        body: formData,
+      }),
+    );
+
+    return {
+      success: Boolean(data?.success),
+      count: data?.count || 0,
+      feeds: Array.isArray(data?.feeds) ? data.feeds : [],
+      error: data?.error,
+    };
+  } catch (err: any) {
+    console.error('Failed to parse OPML file:', err);
+    return {
+      success: false,
+      count: 0,
+      feeds: [],
+      error: err?.message || 'Failed to parse OPML file',
+    };
+  }
+}
+
+export async function subscribeOpmlFeeds(
+  shows: Array<{ title: string; feed_url: string }>,
+): Promise<{
+  success: boolean;
+  imported_count: number;
+  total_feeds: number;
+  error?: string;
+}> {
+  try {
+    const data = await readJson<OpmlImportSubscribeResponse>(
+      apiClient.post('podcasts/opml/import', {
+        searchParams: { action: 'subscribe' },
+        json: { shows },
+      }),
+    );
+
+    return {
+      success: Boolean(data?.success),
+      imported_count: data?.imported_count || 0,
+      total_feeds: data?.total_feeds || shows.length,
+      error: data?.error,
+    };
+  } catch (err: any) {
+    console.error('Failed to subscribe OPML feeds:', err);
+    return {
+      success: false,
+      imported_count: 0,
+      total_feeds: shows.length,
+      error: err?.message || 'Failed to subscribe OPML feeds',
+    };
+  }
+}
+
+export function getOpmlExportUrl(profileId: number = 1): string {
+  return `/api/podcasts/opml/export?profile_id=${profileId}`;
+}
+
+
 

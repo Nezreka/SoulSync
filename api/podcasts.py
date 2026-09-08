@@ -15,11 +15,14 @@ Self-contained and purely additive. Does not modify any existing tables or route
 from __future__ import annotations
 
 import hashlib
+import html
 import os
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
+from email.utils import format_datetime
 from typing import Any, Dict, List, Optional
+import xml.etree.ElementTree as ET
 
 import requests
 from flask import Blueprint, Response, jsonify, request
@@ -126,6 +129,124 @@ def show_to_dict(show: PodcastShow, include_episodes: bool = True) -> Dict[str, 
     else:
         d["episodes"] = []
     return d
+
+
+# ---------------------------------------------------------------------------
+# OPML Helpers
+# ---------------------------------------------------------------------------
+
+def parse_opml_content(content: str | bytes) -> List[Dict[str, str]]:
+    """Parse an OPML XML string or bytes and extract podcast RSS feeds.
+
+    Handles outline hierarchies (nested categories/folders as exported by
+    Pocket Casts, Overcast, Apple Podcasts, AntennaPod).
+    """
+    if not content:
+        return []
+
+    try:
+        if isinstance(content, str):
+            content_bytes = content.strip().encode("utf-8")
+        else:
+            content_bytes = content
+
+        root = ET.fromstring(content_bytes)
+    except Exception as exc:
+        logger.warning("Failed to parse OPML XML: %s", exc)
+        return []
+
+    feeds: List[Dict[str, str]] = []
+    seen_urls = set()
+
+    for outline in root.iter("outline"):
+        xml_url = (
+            outline.get("xmlUrl")
+            or outline.get("xmlurl")
+            or outline.get("url")
+            or ""
+        ).strip()
+        if not xml_url:
+            continue
+
+        # Normalize pseudo-schemes common in Apple Podcasts & Overcast exports
+        if xml_url.startswith("feed://https://"):
+            xml_url = xml_url[7:]
+        elif xml_url.startswith("feed://http://"):
+            xml_url = xml_url[7:]
+        elif xml_url.startswith("feed://"):
+            xml_url = "http://" + xml_url[7:]
+        elif xml_url.startswith("itpc://"):
+            xml_url = "https://" + xml_url[7:]
+        elif xml_url.startswith("pcast://"):
+            xml_url = "https://" + xml_url[8:]
+
+        normalized = xml_url.lower()
+        if normalized in seen_urls:
+            continue
+        seen_urls.add(normalized)
+
+        title = (
+            outline.get("text")
+            or outline.get("title")
+            or outline.get("description")
+            or ""
+        ).strip()
+        description = (outline.get("description") or "").strip()
+        html_url = (outline.get("htmlUrl") or outline.get("htmlurl") or "").strip()
+
+        feeds.append({
+            "title": title or xml_url,
+            "feed_url": xml_url,
+            "description": description,
+            "html_url": html_url,
+        })
+
+    return feeds
+
+
+def generate_opml_content(shows: List[Dict[str, Any]]) -> str:
+    """Generate OPML 2.0 XML from a list of podcast shows."""
+    now_str = format_datetime(datetime.now(timezone.utc))
+    outlines: List[str] = []
+
+    for s in shows:
+        title = str(s.get("title") or s.get("name") or "").strip()
+        feed_url = str(s.get("feed_url") or "").strip()
+        html_url = str(s.get("website") or "").strip()
+        desc = str(s.get("description") or "").strip()
+
+        if not feed_url:
+            continue
+
+        clean_title = " ".join(title.split()) if title else feed_url
+        clean_desc = " ".join(desc.split())[:300] if desc else ""
+
+        attr_parts = [
+            f'text="{html.escape(clean_title, quote=True)}"',
+            f'title="{html.escape(clean_title, quote=True)}"',
+            'type="rss"',
+            f'xmlUrl="{html.escape(feed_url, quote=True)}"',
+        ]
+        if html_url:
+            attr_parts.append(f'htmlUrl="{html.escape(html_url, quote=True)}"')
+        if clean_desc:
+            attr_parts.append(f'description="{html.escape(clean_desc, quote=True)}"')
+
+        outlines.append(f'    <outline {" ".join(attr_parts)} />')
+
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<opml version="2.0">',
+        '  <head>',
+        '    <title>SoulSync Podcast Subscriptions</title>',
+        f'    <dateCreated>{now_str}</dateCreated>',
+        '  </head>',
+        '  <body>',
+        *outlines,
+        '  </body>',
+        '</opml>',
+    ]
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -840,5 +961,116 @@ def create_podcasts_blueprint() -> Blueprint:
                     rec["error"] = "Cancelled by user"
 
         return jsonify({"success": True, "cancelled_count": cancelled_count}), 200
+
+    # -----------------------------------------------------------------------
+    # OPML Import & Export
+    # -----------------------------------------------------------------------
+
+    @bp.route("/opml/import", methods=["POST"])
+    def opml_import():
+        """Import podcast subscriptions from an OPML file or XML payload.
+
+        Supports two workflows:
+          - Preview (action="preview"): parses the OPML and returns discovered feeds.
+          - Subscribe (action="subscribe"): adds provided or discovered feeds to the watchlist.
+        """
+        action = request.args.get("action", "").lower().strip()
+        body_json = request.get_json(silent=True) or {}
+        if not action and body_json.get("action"):
+            action = str(body_json["action"]).lower().strip()
+
+        explicit_shows = body_json.get("shows")
+        feeds: List[Dict[str, str]] = []
+
+        if explicit_shows and isinstance(explicit_shows, list):
+            feeds = explicit_shows
+            action = "subscribe"
+        elif "file" in request.files:
+            uploaded = request.files["file"]
+            raw_content = uploaded.read()
+            feeds = parse_opml_content(raw_content)
+        else:
+            content = body_json.get("opml_text") or body_json.get("xml") or ""
+            if content:
+                feeds = parse_opml_content(content)
+            else:
+                return jsonify({"success": False, "error": "No OPML file, XML text, or shows list provided"}), 400
+
+        if not action or action == "preview":
+            return jsonify({
+                "success": True,
+                "action": "preview",
+                "count": len(feeds),
+                "feeds": feeds,
+            })
+
+        db = _db()
+        if db is None:
+            return jsonify({"success": False, "error": "Database unavailable"}), 500
+
+        profile_id = 1
+        try:
+            profile_id = int(request.args.get("profile_id") or body_json.get("profile_id") or 1)
+        except (ValueError, TypeError):
+            profile_id = 1
+
+        imported_count = 0
+        errors = 0
+        for f in feeds:
+            feed_url = str(f.get("feed_url") or "").strip()
+            title = str(f.get("title") or "").strip() or feed_url
+            if not feed_url:
+                continue
+
+            try:
+                ok = db.add_watchlist_podcast(
+                    feed_url=feed_url,
+                    title=title,
+                    description=f.get("description"),
+                    website=f.get("html_url") or f.get("website"),
+                    auto_download=True,
+                    retention_days=14,
+                    profile_id=profile_id,
+                )
+                if ok:
+                    imported_count += 1
+            except Exception as sub_err:
+                logger.debug("Failed adding OPML feed %s to watchlist: %s", feed_url, sub_err)
+                errors += 1
+
+        return jsonify({
+            "success": True,
+            "action": "subscribe",
+            "total_feeds": len(feeds),
+            "imported_count": imported_count,
+            "errors": errors,
+        })
+
+    @bp.route("/opml/export", methods=["GET"])
+    def opml_export():
+        """Export all watchlisted podcasts as an OPML 2.0 XML file."""
+        db = _db()
+        if db is None:
+            return jsonify({"success": False, "error": "Database unavailable"}), 500
+
+        try:
+            profile_id = int(request.args.get("profile_id", 1))
+        except (ValueError, TypeError):
+            profile_id = 1
+
+        try:
+            shows = db.get_watchlist_podcasts(profile_id=profile_id)
+            xml_text = generate_opml_content(shows)
+            return Response(
+                xml_text,
+                mimetype="application/xml",
+                headers={
+                    "Content-Disposition": "attachment; filename=soulsync-podcasts.opml",
+                    "Content-Type": "application/xml; charset=utf-8",
+                },
+            )
+        except Exception as exc:
+            logger.exception("opml_export failed: %s", exc)
+            return jsonify({"success": False, "error": str(exc)}), 500
 
     return bp

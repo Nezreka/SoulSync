@@ -7,6 +7,9 @@ interface PodcastSearchBarProps {
   isSearching?: boolean;
   downloadsCount?: number;
   onOpenDownloads?: () => void;
+  onOpenRssModal?: () => void;
+  onOpenOpmlModal?: () => void;
+  onSelectFeedUrl?: (url: string) => void;
 }
 
 export function PodcastSearchBar({
@@ -16,6 +19,9 @@ export function PodcastSearchBar({
   isSearching,
   downloadsCount = 0,
   onOpenDownloads,
+  onOpenRssModal,
+  onOpenOpmlModal,
+  onSelectFeedUrl,
 }: PodcastSearchBarProps) {
   return (
     <div className={styles.heroHeader}>
@@ -42,30 +48,80 @@ export function PodcastSearchBar({
           <p className={styles.pageSubtitle}>Discover, search, and download podcast episodes</p>
         </div>
 
-        {downloadsCount > 0 && onOpenDownloads && (
-          <button
-            type="button"
-            className={styles.downloadsBadge}
-            onClick={onOpenDownloads}
-            title="View downloaded podcast episodes"
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+        <div className={styles.headerButtonGroup}>
+          {onOpenRssModal && (
+            <button
+              type="button"
+              className={styles.headerActionBtn}
+              onClick={onOpenRssModal}
+              title="Add custom or private podcast RSS feed URL"
             >
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-            <span>{downloadsCount} Downloads</span>
-          </button>
-        )}
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+              </svg>
+              <span>Add RSS</span>
+            </button>
+          )}
+
+          {onOpenOpmlModal && (
+            <button
+              type="button"
+              className={styles.headerActionBtn}
+              onClick={onOpenOpmlModal}
+              title="Import or export subscriptions via OPML"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+              </svg>
+              <span>OPML</span>
+            </button>
+          )}
+
+          {downloadsCount > 0 && onOpenDownloads && (
+            <button
+              type="button"
+              className={styles.downloadsBadge}
+              onClick={onOpenDownloads}
+              title="View downloaded podcast episodes"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span>{downloadsCount} Downloads</span>
+            </button>
+          )}
+        </div>
       </div>
 
       <div className={styles.searchBarWrapper}>
@@ -92,9 +148,18 @@ export function PodcastSearchBar({
         <input
           type="text"
           className={styles.searchInput}
-          placeholder="Search podcasts by title, topic, or host (e.g. Huberman, NPR, Tech)..."
+          placeholder="Search podcasts or paste RSS URL (e.g. Huberman, NPR, https://...)"
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              const trimmed = value.trim();
+              if ((trimmed.startsWith('http://') || trimmed.startsWith('https://')) && onSelectFeedUrl) {
+                e.preventDefault();
+                onSelectFeedUrl(trimmed);
+              }
+            }
+          }}
           autoComplete="off"
           spellCheck={false}
         />

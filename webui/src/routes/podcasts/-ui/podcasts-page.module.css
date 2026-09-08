@@ -3874,3 +3874,531 @@
     padding-top: 180px !important;
   }
 }
+
+/* -------------------------------------------------------------------------- */
+/* Header Action Buttons (Add RSS, OPML)                                     */
+/* -------------------------------------------------------------------------- */
+
+.headerButtonGroup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.headerActionBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: 9999px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #e2e8f0;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+
+.headerActionBtn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.headerActionBtn:active {
+  transform: translateY(0);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Modals: Common Backdrop & Dialog                                           */
+/* -------------------------------------------------------------------------- */
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(8px);
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: modalFadeIn 0.2s ease;
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modalDialog {
+  width: 100%;
+  background: #181926;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 90vh;
+  animation: modalSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modalSlideUp {
+  from {
+    transform: translateY(16px) scale(0.98);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+.modalHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.modalTitleGroup {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.modalIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+  flex-shrink: 0;
+}
+
+.modalTitle {
+  font-size: 17px;
+  font-weight: 600;
+  color: #f8fafc;
+  margin: 0 0 4px 0;
+}
+
+.modalSubtitle {
+  font-size: 13px;
+  color: #94a3b8;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.modalCloseButton {
+  background: transparent;
+  border: none;
+  font-size: 24px;
+  line-height: 1;
+  color: #64748b;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  transition: color 0.15s ease;
+}
+
+.modalCloseButton:hover {
+  color: #f1f5f9;
+}
+
+.modalBody {
+  padding: 20px 24px;
+  overflow-y: auto;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Modal Inputs & Actions                                                     */
+/* -------------------------------------------------------------------------- */
+
+.inputGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inputLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: #cbd5e1;
+}
+
+.modalInput {
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+  font-size: 14px;
+  outline: none;
+  transition: all 0.18s ease;
+  box-sizing: border-box;
+}
+
+.modalInput:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.inputHint {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.inputError {
+  font-size: 12px;
+  color: #f87171;
+}
+
+.modalActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.cancelButton {
+  padding: 9px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cancelButton:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.confirmButton {
+  padding: 9px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
+  transition: all 0.18s ease;
+}
+
+.confirmButton:hover:not(:disabled) {
+  background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.45);
+}
+
+.confirmButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* -------------------------------------------------------------------------- */
+/* OPML Modal Specifics (Tabs, Dropzone, Feed Checklist)                     */
+/* -------------------------------------------------------------------------- */
+
+.modalTabRow {
+  display: flex;
+  gap: 4px;
+  padding: 0 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.modalTabBtn {
+  padding: 11px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #94a3b8;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.modalTabBtn:hover {
+  color: #f1f5f9;
+}
+
+.modalTabActive {
+  color: #818cf8 !important;
+  border-bottom-color: #6366f1 !important;
+  font-weight: 600;
+}
+
+.opmlDropzone {
+  border: 2px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  padding: 36px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.opmlDropzone:hover,
+.opmlDropzoneActive {
+  border-color: #6366f1;
+  background: rgba(99, 102, 241, 0.06);
+}
+
+.opmlDropzoneIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+  color: #818cf8;
+}
+
+.opmlDropzoneTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: #f8fafc;
+  margin: 0 0 6px 0;
+}
+
+.opmlDropzoneText {
+  font-size: 12px;
+  color: #64748b;
+  margin: 0;
+  max-width: 380px;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.4;
+}
+
+.opmlPreviewContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.opmlPreviewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.opmlFoundCount {
+  font-size: 13px;
+  color: #e2e8f0;
+}
+
+.opmlSelectedCount {
+  font-size: 12px;
+  color: #818cf8;
+  margin-left: 6px;
+  font-weight: 500;
+}
+
+.opmlSelectButtons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.opmlTextBtn {
+  background: transparent;
+  border: none;
+  font-size: 12px;
+  color: #818cf8;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s ease;
+}
+
+.opmlTextBtn:hover {
+  color: #a5b4fc;
+  text-decoration: underline;
+}
+
+.opmlBtnSep {
+  color: #475569;
+  font-size: 12px;
+}
+
+.opmlFeedList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.opmlFeedRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.opmlFeedRow:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.opmlFeedRowSelected {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.28);
+}
+
+.opmlCheckbox {
+  margin-top: 3px;
+  cursor: pointer;
+  accent-color: #6366f1;
+}
+
+.opmlFeedInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.opmlFeedTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f1f5f9;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.opmlFeedUrl {
+  font-size: 11px;
+  color: #64748b;
+  font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.opmlFeedDesc {
+  font-size: 11px;
+  color: #94a3b8;
+  margin: 4px 0 0 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.35;
+}
+
+.opmlPreviewActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.opmlErrorBanner {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+  font-size: 13px;
+}
+
+.opmlSuccessBanner {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  color: #86efac;
+  font-size: 13px;
+}
+
+.opmlExportContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 30px 20px;
+}
+
+.opmlExportIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: rgba(99, 102, 241, 0.12);
+  color: #818cf8;
+  margin-bottom: 16px;
+}
+
+.opmlExportTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: #f8fafc;
+  margin: 0 0 8px 0;
+}
+
+.opmlExportText {
+  font-size: 13px;
+  color: #94a3b8;
+  max-width: 440px;
+  line-height: 1.5;
+  margin: 0 0 24px 0;
+}
+
+.opmlDownloadBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 22px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  text-decoration: none;
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
+  transition: all 0.18s ease;
+}
+
+.opmlDownloadBtn:hover {
+  background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
+}
+

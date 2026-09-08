@@ -13,6 +13,8 @@ import { PodcastCategoryPills } from './podcast-category-pills';
 import { PodcastGrid } from './podcast-grid';
 import { PodcastSearchBar } from './podcast-search-bar';
 import { PodcastSpotlight } from './podcast-spotlight';
+import { PodcastRssModal } from './podcast-rss-modal';
+import { PodcastOpmlModal } from './podcast-opml-modal';
 
 /**
  * Browse view for /podcasts (the index route).
@@ -22,7 +24,7 @@ import { PodcastSpotlight } from './podcast-spotlight';
  */
 export function PodcastsBrowsePage() {
   const navigate = useNavigate();
-  const { downloadsCount } = usePodcastContext();
+  const { downloadsCount, refreshWatchlist } = usePodcastContext();
 
   // Search & Category state
   const [searchQuery, setSearchQuery] = useState('');
@@ -33,6 +35,8 @@ export function PodcastsBrowsePage() {
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingFeatured, setIsLoadingFeatured] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [isRssModalOpen, setIsRssModalOpen] = useState(false);
+  const [isOpmlModalOpen, setIsOpmlModalOpen] = useState(false);
 
   // Debounce search input
   useEffect(() => {
@@ -106,6 +110,15 @@ export function PodcastsBrowsePage() {
     void navigate({ to: '/podcasts/$podcastId', params: { podcastId: id } });
   };
 
+  const handleSelectFeedUrl = (feedUrl: string) => {
+    if (!feedUrl) return;
+    setIsRssModalOpen(false);
+    void navigate({
+      to: '/podcasts/$podcastId',
+      params: { podcastId: encodeURIComponent(feedUrl) },
+    });
+  };
+
   return (
     <>
       {/* Top Search & Navigation */}
@@ -116,6 +129,9 @@ export function PodcastsBrowsePage() {
         isSearching={isSearching}
         downloadsCount={downloadsCount}
         onOpenDownloads={() => {}}
+        onOpenRssModal={() => setIsRssModalOpen(true)}
+        onOpenOpmlModal={() => setIsOpmlModalOpen(true)}
+        onSelectFeedUrl={handleSelectFeedUrl}
       />
 
       {/* Browse / Search View */}
@@ -155,6 +171,22 @@ export function PodcastsBrowsePage() {
           onClose={() => setIsCategoryModalOpen(false)}
         />
       )}
+
+      {/* Custom RSS Feed Modal */}
+      <PodcastRssModal
+        isOpen={isRssModalOpen}
+        onClose={() => setIsRssModalOpen(false)}
+        onSubmitUrl={handleSelectFeedUrl}
+      />
+
+      {/* OPML Import / Export Modal */}
+      <PodcastOpmlModal
+        isOpen={isOpmlModalOpen}
+        onClose={() => setIsOpmlModalOpen(false)}
+        onSubscriptionsImported={() => {
+          void refreshWatchlist();
+        }}
+      />
     </>
   );
 }
