@@ -3269,6 +3269,67 @@ def test_discovery_materialize_creates_the_artist_once(api):
     assert row["spotify_id"] == "sp-new"
 
 
+def test_discovery_artist_monitor_is_the_first_write_and_records_intent(api):
+    client, db, _ids = api
+
+    result = client.post(
+        "/api/library/v2/discovery/artist",
+        json={"source": "spotify", "provider_id": "sp-monitor",
+              "name": "Monitor Me", "monitored": True},
+    ).get_json()
+
+    conn = _conn(db)
+    try:
+        row = conn.execute(
+            "SELECT monitored FROM lib2_artists WHERE id=?", (result["artist_id"],)
+        ).fetchone()
+        rule = conn.execute(
+            "SELECT monitored, provenance FROM lib2_monitor_rules "
+            "WHERE entity_type='artist' AND entity_id=?", (result["artist_id"],)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert result["monitored"] is True
+    assert row["monitored"] == 1
+    assert (rule["monitored"], rule["provenance"]) == (1, "user_explicit")
+
+
+def test_discovery_album_monitor_materializes_only_after_explicit_action(
+        api, monkeypatch):
+    client, db, _ids = api
+    monkeypatch.setattr("core.library2.completeness.resolve_tracklist",
+                        lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("core.library2.discography.expand_artist_discography",
+                        lambda *_args, **_kwargs: {})
+
+    result = client.post(
+        "/api/library/v2/discovery/album",
+        json={
+            "source": "spotify", "artist_source": "spotify",
+            "artist_provider_id": "sp-fresh",
+            "artist_name": "Fresh Artist", "album_provider_id": "sp-album",
+            "album_name": "Fresh Album", "album_type": "album",
+            "release_date": "2026-01-02", "track_count": 9,
+            "image_url": "https://cdn.example/fresh.jpg",
+        },
+    ).get_json()
+
+    conn = _conn(db)
+    try:
+        artist = conn.execute(
+            "SELECT monitored FROM lib2_artists WHERE id=?", (result["artist_id"],)
+        ).fetchone()
+        album = conn.execute(
+            "SELECT monitored, origin, expected_track_count FROM lib2_albums WHERE id=?",
+            (result["album_id"],),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert artist["monitored"] == 0
+    assert (album["monitored"], album["origin"], album["expected_track_count"]) == (
+        1, "discography", 9)
+
+
 def test_discovery_never_writes_a_legacy_id_into_a_provider_column(api):
     """`library` ids are opaque legacy keys, not provider identities."""
     client, db, ids = api
@@ -3465,6 +3526,50 @@ def test_discovery_track_never_monitors_the_whole_album(api, monkeypatch):
         conn.close()
     assert album["monitored"] == 0
     assert track["monitored"] == 0
+
+
+def test_discovery_track_monitor_commits_only_that_track_atomically(api, monkeypatch):
+    client, db, _ids = api
+    from core.library2 import native_enrich
+
+    monkeypatch.setattr(native_enrich, "schedule_native_entity_enrich",
+                        lambda *_a, **_k: None)
+    body = client.post("/api/library/v2/discovery/track", json={
+        "source": "deezer", "artist_source": "spotify",
+        "artist_name": "Radiohead",
+        "artist_provider_id": "4Z8W4fKeB5YxbusRsdQVPb",
+        "album_title": "Preview Album", "album_provider_id": "654321",
+        "track_title": "Preview Song", "track_provider_id": "987654",
+        "track_number": 3, "disc_number": 1, "monitored": True,
+    }).get_json()
+
+    with _conn(db) as conn:
+        artist = conn.execute(
+            "SELECT monitored, spotify_id FROM lib2_artists WHERE id=?",
+            (body["artist_id"],)).fetchone()
+        album = conn.execute(
+            "SELECT monitored, external_ids FROM lib2_albums WHERE id=?",
+            (body["album_id"],)).fetchone()
+        track = conn.execute(
+            "SELECT monitored, track_number, external_ids FROM lib2_tracks WHERE id=?",
+            (body["track_id"],)).fetchone()
+        rule = conn.execute(
+            "SELECT monitored, provenance FROM lib2_monitor_rules "
+            "WHERE entity_type='track' AND entity_id=?", (body["track_id"],)
+        ).fetchone()
+        wanted = conn.execute(
+            "SELECT wanted FROM lib2_wanted_tracks WHERE track_id=?",
+            (body["track_id"],)).fetchone()
+
+    assert body["monitored"] is True
+    assert (artist["monitored"], artist["spotify_id"]) == (
+        0, "4Z8W4fKeB5YxbusRsdQVPb")
+    assert album["monitored"] == 0 and "654321" in album["external_ids"]
+    assert (track["monitored"], track["track_number"]) == (1, 3)
+    assert "987654" in track["external_ids"]
+    assert (rule["monitored"], rule["provenance"]) == (1, "user_explicit")
+    assert wanted["wanted"] == 1
+    assert db.wishlist_adds[-1]["user_initiated"] is True
 
 
 def test_discovery_track_resolves_new_rows_against_every_provider(api, monkeypatch):

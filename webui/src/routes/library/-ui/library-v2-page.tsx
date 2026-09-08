@@ -26,11 +26,15 @@ import {
   fetchArtistHeroStats,
   fetchArtistTopTracks,
   fetchLibraryV2DiscoveryTrackStatus,
+  fetchProviderAlbumDetail,
   fetchProviderArtistDetail,
-  materializeLibraryV2DiscoveryArtist,
-  materializeLibraryV2DiscoveryTrack,
+  monitorLibraryV2DiscoveryTrack,
+  monitorLibraryV2DiscoveryAlbum,
+  monitorLibraryV2DiscoveryArtist,
   resolveLibraryV2DiscoveryArtist,
   type ArtistTopTrack,
+  type ProviderAlbumDetail,
+  type ProviderAlbumTrack,
   type ProviderRelease,
   bulkMonitorLibraryV2Releases,
   clearLibraryV2EntityMatch,
@@ -124,6 +128,7 @@ import {
   type LibraryV2ManualSkip,
   type LibraryV2MatchService,
   type LibraryV2QualityProfileSource,
+  type LibraryV2QueueStatusAlbum,
   type LibraryV2QueueStatusEntry,
   type LibraryV2Track,
   type LibraryV2TrackFile,
@@ -4359,6 +4364,14 @@ export function LibraryV2Page() {
           name: search.discoverName ?? '',
         }
       : null;
+  const discoverAlbumSplit = search.discoverAlbum ? search.discoverAlbum.indexOf(':') : -1;
+  const discoverAlbum =
+    search.discoverAlbum && discoverAlbumSplit > 0
+      ? {
+          source: search.discoverAlbum.slice(0, discoverAlbumSplit),
+          providerId: search.discoverAlbum.slice(discoverAlbumSplit + 1),
+        }
+      : null;
 
   const canWrite = enabledQuery.data?.canWrite === true;
 
@@ -4372,6 +4385,18 @@ export function LibraryV2Page() {
       ) : null}
       {search.album ? (
         <AlbumDetailView albumId={search.album} />
+      ) : discoverAlbum && discover ? (
+        <DiscoveryAlbumView
+          source={discoverAlbum.source}
+          providerId={discoverAlbum.providerId}
+          name={search.discoverAlbumName ?? ''}
+          albumType={search.discoverAlbumType ?? 'album'}
+          imageUrl={search.discoverAlbumImage ?? ''}
+          releaseDate={search.discoverAlbumDate ?? ''}
+          artistSource={discover.source}
+          artistProviderId={discover.providerId}
+          artistName={discover.name}
+        />
       ) : discover && !search.artist ? (
         <DiscoveryArtistView
           source={discover.source}
@@ -4996,7 +5021,9 @@ export function ArtistCard({
           </span>
         ) : null}
         <span className={styles.artistInfo}>
-          <span className={styles.artistName}>{artist.name}</span>
+          <span className={styles.artistName} title={artist.name}>
+            {artist.name}
+          </span>
           <span className={styles.artistMeta}>
             {artist.album_count} albums · {artist.single_count} singles
           </span>
@@ -5153,7 +5180,7 @@ function ArtistTable({
                     thumb
                   />
                   <span className={styles.artistTableIdentity}>
-                    <span>{artist.name}</span>
+                    <span title={artist.name}>{artist.name}</span>
                     <span className={styles.artistTableFacts}>
                       {orderedKeys
                         .filter((key) => columns[key])
@@ -5281,7 +5308,9 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
                   monitored={album.monitored}
                   prominent
                 />
-                <h1 className={styles.title}>{album.title}</h1>
+                <h1 className={styles.title} title={album.title}>
+                  {album.title}
+                </h1>
                 <AlbumOverflowMenu
                   album={{
                     id: album.id,
@@ -5640,6 +5669,7 @@ interface DiscographyCard {
   key: string;
   /** Only a catalogue release has one; a provider-only release does not. */
   albumId?: number;
+  providerId?: string;
   monitored: boolean;
   /** #1067: set only on a "+ Other sources" card — the source that lists it. */
   gapSource?: string;
@@ -5652,6 +5682,7 @@ interface DiscographyCard {
   owned: boolean | null;
   ownedTracks: number;
   totalTracks: number;
+  releaseDate?: string | null;
 }
 
 function catalogueCard(album: LibraryV2AlbumSummary): DiscographyCard {
@@ -5676,6 +5707,7 @@ function providerCard(release: ProviderRelease): DiscographyCard {
   const completion = release.track_completion ?? null;
   return {
     key: `provider-${release.id}`,
+    providerId: String(release.id),
     monitored: false,
     title: release.title || release.name || '',
     albumType: release.album_type || 'album',
@@ -5685,7 +5717,37 @@ function providerCard(release: ProviderRelease): DiscographyCard {
     owned: release.owned ?? null,
     ownedTracks: completion?.owned_tracks ?? 0,
     totalTracks: completion?.total_tracks ?? 0,
+    releaseDate: release.release_date,
   };
+}
+
+function ProviderMonitorButton({
+  monitored,
+  busy,
+  onClick,
+}: {
+  monitored: boolean;
+  busy: boolean;
+  onClick: () => void;
+}) {
+  const canWrite = useLibraryV2CanWrite();
+  return (
+    <div className={styles.cardMonitor} onClick={(event) => event.stopPropagation()}>
+      <button
+        type="button"
+        className={`${styles.monitorBtn} ${monitored ? styles.monitorOn : ''}`}
+        aria-label={monitored ? 'Monitored' : busy ? 'Starting monitoring' : 'Start monitoring'}
+        aria-pressed={monitored}
+        title={monitored ? 'Monitored' : 'Monitor this release'}
+        disabled={!canWrite || busy || monitored}
+        onClick={onClick}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d={BOOKMARK_PATH} strokeLinejoin="round" />
+        </svg>
+      </button>
+    </div>
+  );
 }
 
 /** The completion badge pinned to a card's corner (`library.js:2181-2220`). */
@@ -5713,14 +5775,19 @@ function ReleaseCardGrid({
   onOpen,
   openTitle,
   showOwnership = true,
+  onProviderMonitor,
+  monitoringProviderId,
+  monitoredProviderIds,
 }: {
   cards: DiscographyCard[];
   onOpen?: (card: DiscographyCard) => void;
   openTitle?: string;
-  /** Off for a provider artist: there is no library to compare against, so
-   *  legacy omitted the completion badge entirely rather than claim every
-   *  release is "Checking…" forever (`library.js:2178`). */
+  /** Off for a provider artist: there is no library to compare against, so legacy omitted the
+   *  badge rather than claim every release is "Checking…" forever (`library.js:2178`). */
   showOwnership?: boolean;
+  onProviderMonitor?: (card: DiscographyCard) => void;
+  monitoringProviderId?: string | null;
+  monitoredProviderIds?: ReadonlySet<string>;
 }) {
   const gridRef = useRef<HTMLDivElement>(null);
   useLazyBackgrounds(gridRef, cards.map((c) => c.key).join('|'));
@@ -5750,6 +5817,12 @@ function ReleaseCardGrid({
               <div className={styles.cardMonitor} onClick={(e) => e.stopPropagation()}>
                 <MonitorToggle entity="albums" id={card.albumId} monitored={card.monitored} />
               </div>
+            ) : card.providerId && onProviderMonitor ? (
+              <ProviderMonitorButton
+                monitored={monitoredProviderIds?.has(card.providerId) === true}
+                busy={monitoringProviderId === card.providerId}
+                onClick={() => onProviderMonitor(card)}
+              />
             ) : null}
             {overlay ? (
               <div
@@ -5988,7 +6061,7 @@ function TopTracksSidebar({
   async function bookmark(track: ArtistTopTrack) {
     setBookmarked((s) => ({ ...s, [track.name]: { status: 'busy' } }));
     try {
-      const trackId = await materializeLibraryV2DiscoveryTrack({
+      await monitorLibraryV2DiscoveryTrack({
         source: trackSource,
         artistName,
         artistProviderId: trackArtistId,
@@ -5997,12 +6070,10 @@ function TopTracksSidebar({
         albumTitle: track.album?.name ?? null,
         albumProviderId: track.album?.id ?? null,
       });
-      await setLibraryV2Monitored('tracks', trackId, true);
       setBookmarked((s) => ({ ...s, [track.name]: { status: 'done' } }));
-      // Not awaited: refreshing the whole Library V2 cache is a page-wide
-      // refetch, and blocking the tick on it made bookmarking a top-ten list
-      // feel like ten page loads. The rows are independent, so the next
-      // bookmark can start immediately.
+      // Not awaited: refreshing the whole Library V2 cache is a page-wide refetch, and blocking
+      // the tick on it made bookmarking a top-ten list feel like ten page loads. The rows are
+      // independent, so the next bookmark can start immediately.
       void invalidateLibraryV2(queryClient);
     } catch (error) {
       setBookmarked((s) => ({
@@ -6372,10 +6443,231 @@ function visibleCards(cards: DiscographyCard[], filters: DiscographyFilterState)
   );
 }
 
-/** ldp-01/ldp-02: an artist with no catalogue row at all, rendered from
- *  provider data alone. Read-only by decision (issues §28.6 question 1): the
- *  catalogue row is created the moment the user bookmarks the artist or opens
- *  one of its releases, never just for looking. */
+const providerTrackTitle = (track: ProviderAlbumTrack) => track.name || track.title || '';
+const providerTrackKey = (track: ProviderAlbumTrack, index: number) =>
+  String(track.id || `${track.disc_number || 1}:${track.track_number || index + 1}`);
+
+/** Provider release detail that remains read-only until Monitor is pressed. */
+function DiscoveryAlbumView({
+  source,
+  providerId,
+  name,
+  albumType,
+  imageUrl,
+  releaseDate,
+  artistSource,
+  artistProviderId,
+  artistName,
+}: {
+  source: string;
+  providerId: string;
+  name: string;
+  albumType: string;
+  imageUrl: string;
+  releaseDate: string;
+  artistSource: string;
+  artistProviderId: string;
+  artistName: string;
+}) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
+  const [monitoring, setMonitoring] = useState(false);
+  const [monitored, setMonitored] = useState(false);
+  const [monitoringTrack, setMonitoringTrack] = useState<string | null>(null);
+  const [monitoredTracks, setMonitoredTracks] = useState<Set<string>>(() => new Set());
+  const [error, setError] = useState<string | null>(null);
+  const detail = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'provider-album', source, providerId, name, artistName],
+    queryFn: () => fetchProviderAlbumDetail({ source, providerId, name, artistName }),
+    staleTime: 5 * 60_000,
+  });
+  const album: ProviderAlbumDetail | undefined = detail.data;
+  const tracks = album?.tracks ?? [];
+  const title = album?.name || album?.title || name;
+  const cover = album?.images?.[0]?.url || imageUrl;
+  const trackTitles = tracks.map(providerTrackTitle).filter(Boolean);
+  const trackStatus = useQuery({
+    queryKey: [
+      ...LIBRARY_V2_QUERY_KEY,
+      'provider-album-track-status',
+      artistSource,
+      artistProviderId,
+      artistName,
+      trackTitles,
+    ],
+    queryFn: () =>
+      fetchLibraryV2DiscoveryTrackStatus({
+        source: artistSource,
+        artistName,
+        artistProviderId,
+        titles: trackTitles,
+      }),
+    enabled: trackTitles.length > 0,
+  });
+
+  const goBack = () =>
+    navigate({
+      search: (p) => ({
+        ...p,
+        discoverAlbum: undefined,
+        discoverAlbumName: undefined,
+        discoverAlbumType: undefined,
+        discoverAlbumImage: undefined,
+        discoverAlbumDate: undefined,
+      }),
+    });
+
+  async function monitor() {
+    if (monitoring || monitored) return;
+    setMonitoring(true);
+    setError(null);
+    try {
+      await monitorLibraryV2DiscoveryAlbum({
+        source,
+        artistSource,
+        artistProviderId,
+        artistName,
+        albumProviderId: providerId,
+        albumName: title,
+        albumType: album?.album_type || albumType,
+        releaseDate: album?.release_date || releaseDate,
+        imageUrl: cover,
+        trackCount: album?.total_tracks ?? tracks.length,
+      });
+      setMonitored(true);
+      setMonitoredTracks(new Set(tracks.map(providerTrackKey)));
+    } catch (e) {
+      setError(mutationErrorMessage(e, 'Could not monitor this release'));
+    } finally {
+      setMonitoring(false);
+    }
+  }
+
+  async function monitorTrack(track: ProviderAlbumTrack, index: number) {
+    const trackTitle = providerTrackTitle(track);
+    const key = providerTrackKey(track, index);
+    if (!trackTitle || monitoringTrack || monitoredTracks.has(key)) return;
+    setMonitoringTrack(key);
+    setError(null);
+    try {
+      await monitorLibraryV2DiscoveryTrack({
+        source,
+        artistSource,
+        artistName,
+        artistProviderId,
+        albumTitle: title,
+        albumProviderId: providerId,
+        albumType: album?.album_type || albumType,
+        trackTitle,
+        trackProviderId: track.id,
+        trackNumber: track.track_number,
+        discNumber: track.disc_number,
+      });
+      setMonitoredTracks((current) => new Set(current).add(key));
+      void invalidateLibraryV2(queryClient);
+    } catch (e) {
+      setError(mutationErrorMessage(e, 'Could not monitor this track'));
+    } finally {
+      setMonitoringTrack(null);
+    }
+  }
+
+  return (
+    <div className={styles.page}>
+      <BackLink onClick={() => void goBack()}>← {artistName || 'Artist'}</BackLink>
+      {error ? <div className={`${styles.grabBanner} ${styles.grab_err}`}>{error}</div> : null}
+      {detail.isError ? (
+        <div className={styles.emptyState}>
+          {mutationErrorMessage(detail.error, 'Could not load this release')}
+        </div>
+      ) : detail.isLoading || !album ? (
+        <div className={styles.loading}>Loading…</div>
+      ) : (
+        <>
+          <header className={styles.detailHeader}>
+            <Artwork src={cover} alt={title} className={styles.detailThumb} />
+            <div className={styles.detailMeta}>
+              <div className={styles.detailTitleRow}>
+                <ActionButton
+                  icon="monitor"
+                  label={monitored ? 'Monitored' : monitoring ? 'Adding…' : 'Monitor'}
+                  title="Monitor this release"
+                  busy={monitoring}
+                  disabled={monitored}
+                  onClick={() => void monitor()}
+                />
+                <h1 className={styles.title}>{title}</h1>
+              </div>
+              <p className={styles.subtitle}>
+                {[artistName, album.album_type || albumType, album.release_date || releaseDate]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </p>
+            </div>
+          </header>
+          <div className={styles.libraryTableResponsive}>
+            <table className={styles.trackTable}>
+              <thead>
+                <tr>
+                  <th className={styles.colMonitor} aria-label="Monitoring" />
+                  <th className={styles.colNum}>#</th>
+                  <th>Title</th>
+                  <th>Artist</th>
+                  <th>Duration</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tracks.map((track, index) => {
+                  const trackTitle = providerTrackTitle(track);
+                  const key = providerTrackKey(track, index);
+                  const trackMonitored =
+                    monitored ||
+                    monitoredTracks.has(key) ||
+                    trackStatus.data?.[trackTitle]?.monitored === true;
+                  return (
+                    <tr key={key}>
+                      <td className={styles.colMonitor}>
+                        {trackTitle ? (
+                          <button
+                            type="button"
+                            className={`${styles.monitorBtn} ${trackMonitored ? styles.monitorOn : ''}`}
+                            aria-label={
+                              trackMonitored ? `${trackTitle} is monitored` : `Monitor ${trackTitle}`
+                            }
+                            aria-pressed={trackMonitored}
+                            title={trackMonitored ? 'Monitored' : 'Monitor this track'}
+                            disabled={!canWrite || Boolean(monitoringTrack) || trackMonitored}
+                            onClick={() => void monitorTrack(track, index)}
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <path d={BOOKMARK_PATH} strokeLinejoin="round" />
+                            </svg>
+                          </button>
+                        ) : null}
+                      </td>
+                      <td className={styles.colNum}>{track.track_number ?? index + 1}</td>
+                      <td>{trackTitle || 'Unknown track'}</td>
+                      <td>
+                        {track.artists?.map((entry) => entry.name).filter(Boolean).join(', ') ||
+                          artistName}
+                      </td>
+                      <td>{formatDuration(track.duration_ms)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {tracks.length === 0 ? <div className={styles.emptyState}>No tracks available.</div> : null}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** ldp-01/ldp-02: an artist with no catalogue row at all, rendered from provider data alone.
+ *  Browsing is read-only; only an explicit Monitor action materializes catalogue rows. */
 type GroupLabel = 'Albums' | 'EPs' | 'Singles';
 
 function DiscoveryArtistView({
@@ -6390,6 +6682,8 @@ function DiscoveryArtistView({
   const navigate = useNavigate();
   const { filters, setFilters } = useDiscographyFilters();
   const [adopting, setAdopting] = useState(false);
+  const [monitoringAlbum, setMonitoringAlbum] = useState<string | null>(null);
+  const [monitoredAlbums, setMonitoredAlbums] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
   const otherSources = useOtherSources({
     providerId,
@@ -6426,21 +6720,12 @@ function DiscoveryArtistView({
     });
   }, [knownArtistId, navigate]);
 
-  /** The one write this view can perform: adopt the artist into the catalogue
-   *  and continue on the normal page, where every V2 action already works.
-   *  `monitor` separates the two reasons to adopt — Bookmark states intent and
-   *  monitors (ldp-06), opening a release only needs the entity to exist. */
-  async function adopt({ monitor }: { monitor: boolean }) {
+  async function monitorArtist() {
     if (adopting) return;
     setAdopting(true);
     setError(null);
     try {
-      const artistId = await materializeLibraryV2DiscoveryArtist({
-        source,
-        providerId,
-        name,
-      });
-      if (monitor) await setLibraryV2Monitored('artists', artistId, true);
+      const artistId = await monitorLibraryV2DiscoveryArtist({ source, providerId, name });
       await navigate({
         search: (p) => ({
           ...p,
@@ -6454,6 +6739,31 @@ function DiscoveryArtistView({
     } catch (e) {
       setError(mutationErrorMessage(e, 'Could not add this artist'));
       setAdopting(false);
+    }
+  }
+
+  async function monitorAlbum(card: DiscographyCard) {
+    if (!card.providerId || monitoringAlbum) return;
+    setMonitoringAlbum(card.providerId);
+    setError(null);
+    try {
+      await monitorLibraryV2DiscoveryAlbum({
+        source: card.gapSource || source,
+        artistSource: source,
+        artistProviderId: providerId,
+        artistName: artist.name || name,
+        albumProviderId: card.providerId,
+        albumName: card.title,
+        albumType: card.albumType,
+        releaseDate: card.releaseDate,
+        imageUrl: card.imageUrl,
+        trackCount: card.totalTracks,
+      });
+      setMonitoredAlbums((current) => new Set(current).add(card.providerId!));
+    } catch (e) {
+      setError(mutationErrorMessage(e, 'Could not monitor this release'));
+    } finally {
+      setMonitoringAlbum(null);
     }
   }
 
@@ -6539,10 +6849,10 @@ function DiscoveryArtistView({
         actions={
           <ActionButton
             icon="monitor"
-            label={adopting ? 'Adding…' : 'Bookmark artist'}
-            title="Add this artist to your library and monitor them"
+            label={adopting ? 'Adding…' : 'Monitor artist'}
+            title="Monitor this artist"
             busy={adopting}
-            onClick={() => void adopt({ monitor: true })}
+            onClick={() => void monitorArtist()}
           />
         }
       />
@@ -6573,8 +6883,22 @@ function DiscoveryArtistView({
               <ReleaseCardGrid
                 cards={cards}
                 showOwnership={false}
-                openTitle={`Add ${artist.name || name} to your library to manage this release`}
-                onOpen={() => void adopt({ monitor: false })}
+                openTitle="Open release"
+                monitoringProviderId={monitoringAlbum}
+                monitoredProviderIds={monitoredAlbums}
+                onProviderMonitor={(card) => void monitorAlbum(card)}
+                onOpen={(card) =>
+                  void navigate({
+                    search: (p) => ({
+                      ...p,
+                      discoverAlbum: `${card.gapSource || source}:${card.providerId}`,
+                      discoverAlbumName: card.title,
+                      discoverAlbumType: card.albumType,
+                      discoverAlbumImage: card.imageUrl || undefined,
+                      discoverAlbumDate: card.releaseDate || undefined,
+                    }),
+                  })
+                }
               />
             </DiscographySection>
           );
@@ -6935,7 +7259,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                     monitored={artist.monitored}
                     prominent
                   />
-                  <h1 className={styles.title}>{artist.name}</h1>
+                  <h1 className={styles.title} title={artist.name}>
+                    {artist.name}
+                  </h1>
                   {headerToggle}
                 </div>
                 <p className={styles.subtitle}>
@@ -6961,6 +7287,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                     </span>
                   ) : null}
                   <MediaServerRecognitionBadge sources={artist.media_server_sources} />
+                  <ArtistQueueSummary tracks={queueStatusQuery.data?.tracks ?? {}} />
                 </div>
                 {artist.genres.length > 0 ? (
                   <p className={styles.genres}>{artist.genres.join(', ')}</p>
@@ -7127,6 +7454,15 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
                 queueStatusTracks={queueStatusQuery.data?.tracks ?? {}}
                 onAction={handleAction}
+              />
+              <ReleasesEmptyState
+                hidden={
+                  releasesOf(artist.albums, 'albums').length > 0 ||
+                  releasesOf(artist.eps ?? [], 'eps').length > 0 ||
+                  releasesOf(artist.singles, 'singles').length > 0
+                }
+                mode={releasesMode}
+                onShowAll={() => setReleasesMode('all')}
               />
             </>
           )}
@@ -7413,6 +7749,47 @@ export function SectionBulkMonitorButton({
   );
 }
 
+/** Shown when every release group renders nothing. An artist with no releases used to leave the
+ *  area below the tabs blank — no explanation, no next step. The two ways out differ by which tab
+ *  you are on, so the copy does too: on My Library the catalogue may still have releases to adopt,
+ *  while on All Releases an empty result means the discography was never fetched (or filtered out). */
+function ReleasesEmptyState({
+  hidden,
+  mode,
+  onShowAll,
+}: {
+  hidden: boolean;
+  mode: 'library' | 'all';
+  onShowAll: () => void;
+}) {
+  if (hidden) return null;
+
+  return (
+    <section className={styles.releasesEmpty}>
+      {mode === 'library' ? (
+        <>
+          <p className={styles.releasesEmptyTitle}>No releases in your library yet</p>
+          <p className={styles.releasesEmptyBody}>
+            Nothing here is owned or monitored. Check the full discography to pick releases
+            to monitor, or run Refresh &amp; Scan if the files are already on disk.
+          </p>
+          <button type="button" className={styles.releasesEmptyAction} onClick={onShowAll}>
+            Show all releases
+          </button>
+        </>
+      ) : (
+        <>
+          <p className={styles.releasesEmptyTitle}>No releases match</p>
+          <p className={styles.releasesEmptyBody}>
+            The discography is either empty for this artist or every release is filtered out.
+            Clear the release-type filters, or run Refresh &amp; Scan to fetch it again.
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
 function AlbumGroup({
   title,
   albums,
@@ -7428,7 +7805,7 @@ function AlbumGroup({
   artistId: number;
   artistName: string;
   scope: 'albums' | 'eps' | 'singles';
-  queueStatusByAlbum: Record<number, number>;
+  queueStatusByAlbum: Record<number, LibraryV2QueueStatusAlbum>;
   queueStatusTracks: Record<number, LibraryV2QueueStatusEntry>;
   onAction: ActionHandler;
 }) {
@@ -7453,7 +7830,7 @@ function AlbumGroup({
             key={album.id}
             album={album}
             artistName={artistName}
-            activeDownloads={queueStatusByAlbum[album.id] ?? 0}
+            queueRollup={queueStatusByAlbum[album.id]}
             queueStatusTracks={queueStatusTracks}
             onAction={onAction}
           />
@@ -7466,7 +7843,7 @@ function AlbumGroup({
 function AlbumBlock({
   album,
   artistName,
-  activeDownloads,
+  queueRollup,
   onAction,
   queueStatusTracks,
 }: {
@@ -7474,16 +7851,16 @@ function AlbumBlock({
   /** Who the album is filed under today — the reassign modal says so, and the
    *  summary row itself has no artist on it. */
   artistName: string;
-  activeDownloads: number;
+  /** Undefined when nothing of this album is in flight. */
+  queueRollup: LibraryV2QueueStatusAlbum | undefined;
   onAction: ActionHandler;
   queueStatusTracks: Record<number, LibraryV2QueueStatusEntry>;
 }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  // Browser `dblclick` can span changing descendants (title, cover, empty row
-  // space) and its click counter can carry surprising state across rerenders.
-  // A timestamp owned by THIS album makes the intent local and deterministic:
-  // only two clicks on the same album within this window open its detail page.
+  // Browser `dblclick` can span changing descendants (title, cover, empty row space) and its click
+  // counter carries surprising state across rerenders. A timestamp owned by THIS album makes the
+  // intent local and deterministic: only two clicks on the same album within this window.
   const lastAlbumClickAt = useRef<number | null>(null);
   const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
   const profileName =
@@ -7535,15 +7912,7 @@ function AlbumBlock({
           >
             {album.title}
           </button>
-          {activeDownloads > 0 ? (
-            <span
-              className={styles.queueStatusPill}
-              title={`${activeDownloads} track(s) currently in the download pipeline`}
-            >
-              <SvgIcon name="download" />
-              {activeDownloads} downloading
-            </span>
-          ) : null}
+          <AlbumQueuePill rollup={queueRollup} />
           <div className={styles.albumHeadFacts}>
             <AlbumSizeBadge bytes={album.total_size_bytes} />
             <span className={styles.albumDateBadge} title="Release date">
@@ -10439,24 +10808,148 @@ const QUEUE_STATUS_LABELS: Record<LibraryV2QueueStatusEntry['status'], string> =
   processing: 'Processing',
 };
 
+/** Pipeline order, so a mixed album reads "1 downloading · 3 queued" the same
+ *  way every time instead of in whatever order the buckets happened to fill. */
+const QUEUE_STATUS_ORDER: LibraryV2QueueStatusEntry['status'][] = [
+  'downloading',
+  'processing',
+  'searching',
+  'queued',
+];
+
 function QueueStatusBadge({ status }: { status: LibraryV2QueueStatusEntry | undefined }) {
   if (!status) return null;
   const label = QUEUE_STATUS_LABELS[status.status];
-  const text = status.status === 'downloading' ? `${label} ${status.progress_pct}%` : label;
+  const downloading = status.status === 'downloading';
+  const text = downloading ? `${label} ${status.progress_pct}%` : label;
   return (
     <span className={styles.queueStatusBadge} title={text}>
       <SvgIcon name="download" />
       {text}
+      {/* Only the downloading bucket has a percentage that means anything —
+          'queued' is always 0 and 'processing' is a flat 95, so a bar there
+          would animate to nothing and read as progress that isn't. */}
+      {downloading ? (
+        <span
+          className={styles.queueStatusBar}
+          role="progressbar"
+          aria-valuenow={status.progress_pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
+          <span
+            className={styles.queueStatusBarFill}
+            style={{ width: `${Math.min(100, Math.max(0, status.progress_pct))}%` }}
+          />
+        </span>
+      ) : null}
     </span>
   );
 }
 
-/** Per-track details, consolidated behind one button: Quality profile (the
- *  default/first tab — the most common reason to open this), Metadata edit,
- *  and Info (source/download history). Keeps the row from getting crowded
- *  with a separate icon per action. ``openTab``/``onOpenTab`` are lifted to
- *  the row so the LR badge (deep-dive B3) can jump straight to the Lyrics
- *  tab of the SAME modal instead of opening a second one. */
+/** One live-activity pill, shared by the album row and the artist header. Names every bucket it
+ *  actually has rather than calling all of them "downloading": an album can be searching for one
+ *  track while three others wait, and those are different problems to the person reading the row.
+ *  Each segment is its own element so the pill can wrap instead of running off the side — four
+ *  segments measure 316 px, which does not fit a 390 px phone on one line. */
+function QueuePill({
+  counts,
+  progressPct,
+  title,
+}: {
+  counts: Partial<Record<LibraryV2QueueStatusEntry['status'], number>>;
+  progressPct: number;
+  title: string;
+}) {
+  const parts = QUEUE_STATUS_ORDER.filter((kind) => (counts[kind] ?? 0) > 0).map(
+    (kind) => `${counts[kind]} ${QUEUE_STATUS_LABELS[kind].toLowerCase()}`,
+  );
+  if (parts.length === 0) return null;
+
+  // Amber says "in flight", green says "bytes are moving" — a queue parked
+  // behind a busy client should not read as progress.
+  const moving = (counts.downloading ?? 0) > 0;
+  const clamped = Math.min(100, Math.max(0, progressPct));
+
+  return (
+    <span
+      className={styles.queueStatusPill}
+      data-moving={moving ? 'true' : undefined}
+      title={title}
+    >
+      <SvgIcon name="download" />
+      {parts.map((part, index) => (
+        <span key={part} className={styles.queuePillPart}>
+          {part}
+          {/* The separator is a child of the segment it FOLLOWS, so a wrapped
+              line can never open with a stray "·". A CSS sibling rule cannot
+              do this reliably — the progress bar below is a sibling span too,
+              so :last-of-type would leave a dot on the final segment. */}
+          {index < parts.length - 1 ? <span className={styles.queuePillSep}>·</span> : null}
+        </span>
+      ))}
+      {moving ? (
+        <span
+          className={styles.queueStatusBar}
+          role="progressbar"
+          aria-valuenow={clamped}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
+          <span className={styles.queueStatusBarFill} style={{ width: `${clamped}%` }} />
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/** Artist-wide activity, in the detail header's facts row. Without it the only sign that anything
+ *  is happening lives on an album row, and album rows collapse — so an artist with a full queue
+ *  behind a closed release looked completely idle. Built from the `tracks` map the header already
+ *  polls, so it costs no extra request. */
+function ArtistQueueSummary({
+  tracks,
+}: {
+  tracks: Record<number, LibraryV2QueueStatusEntry>;
+}) {
+  const entries = Object.values(tracks);
+  if (entries.length === 0) return null;
+
+  const counts = entries.reduce<Partial<Record<LibraryV2QueueStatusEntry['status'], number>>>(
+    (acc, entry) => {
+      acc[entry.status] = (acc[entry.status] ?? 0) + 1;
+      return acc;
+    },
+    {},
+  );
+  const progress = Math.round(
+    entries.reduce((sum, entry) => sum + entry.progress_pct, 0) / entries.length,
+  );
+
+  return (
+    <QueuePill
+      counts={counts}
+      progressPct={progress}
+      title={`${entries.length} track(s) in this artist's download pipeline`}
+    />
+  );
+}
+
+function AlbumQueuePill({ rollup }: { rollup: LibraryV2QueueStatusAlbum | undefined }) {
+  if (!rollup || rollup.active <= 0) return null;
+  return (
+    <QueuePill
+      counts={rollup}
+      progressPct={rollup.progress_pct}
+      title={`${rollup.progress_pct}% across ${rollup.active} active track(s)`}
+    />
+  );
+}
+
+/** Per-track details behind one button: Quality profile (the default tab — the most common reason
+ *  to open this), Metadata edit, and Info (source/download history). Keeps the row from getting an
+ *  icon per action. ``openTab``/``onOpenTab`` are lifted to the row so the LR badge (B3) can jump
+ *  straight to the Lyrics tab of the SAME modal instead of opening a second one. */
 function TrackDetailButton({
   track,
   albumTitle,

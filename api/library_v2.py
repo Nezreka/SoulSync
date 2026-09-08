@@ -1492,13 +1492,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if not provider_id and not name:
             return jsonify({"success": False,
                             "error": "provider_id or name is required"}), 400
-        # `library` is the legacy media-server namespace, not a metadata
-        # provider: its ids are opaque legacy `artists.id` values and must
-        # never be written into a provider id column (guide §5).
+        # `library` is the legacy media-server namespace, not a metadata provider: its ids are opaque
+        # legacy `artists.id` values and must never be written into a provider id column (guide §5).
         legacy = source in ("", "library")
         create = request.method == "POST"
+        monitor = create and bool(body.get("monitored", False))
         from core.library2.autolink import find_or_create_artist
-        conn = _conn()
+        db = get_database()
+        conn = db._get_connection()
+        outbox_ids = []
         try:
             artist_id = None
             if legacy and provider_id:
@@ -1513,10 +1515,24 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     spotify_id=None if legacy else (provider_id or None),
                     source=None if legacy else (source or None),
                     create=create)
+            if monitor and artist_id is not None:
+                conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (artist_id,))
+                from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+                record_rule(conn, "artist", artist_id, True, PROVENANCE_USER,
+                            profile_id=_profile())
+                from core.library2.wanted import recompute_wanted_for_entity
+                recompute_wanted_for_entity(conn, "artists", artist_id,
+                                            profile_id=_profile())
+                from core.library2.mirror_outbox import enqueue_artist_watchlist
+                outbox_ids = enqueue_artist_watchlist(
+                    conn, artist_id, True, profile_id=_profile())
             if create:
                 conn.commit()
         finally:
             conn.close()
+        if outbox_ids:
+            from core.library2.mirror_outbox import drain
+            drain(db)
         if create and artist_id is not None and not known:
             # Adopted from one provider's search result — resolve the rest so
             # the artist arrives matched, not matched-to-one.
@@ -1528,7 +1544,100 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if create and artist_id is None:
             return jsonify({"success": False,
                             "error": "Could not materialize this artist"}), 400
-        return jsonify({"success": True, "artist_id": artist_id})
+        return jsonify({"success": True, "artist_id": artist_id,
+                        "monitored": monitor})
+
+    @app.route("/api/library/v2/discovery/album", methods=["POST"])
+    def lib2_discovery_album():
+        """Materialize and monitor one provider release; browsing never calls this."""
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.get_json(silent=True) or {}
+        source = str(body.get("source") or "").strip().lower()
+        artist_source = str(body.get("artist_source") or source).strip().lower()
+        artist_name = str(body.get("artist_name") or "").strip()
+        album_name = str(body.get("album_name") or "").strip()
+        artist_provider_id = str(body.get("artist_provider_id") or "").strip()
+        album_provider_id = str(body.get("album_provider_id") or "").strip()
+        if not artist_name or not album_name:
+            return jsonify({"success": False,
+                            "error": "artist_name and album_name are required"}), 400
+        try:
+            track_count = max(0, int(body.get("track_count") or 0))
+        except (TypeError, ValueError):
+            track_count = 0
+        release_date = str(body.get("release_date") or "").strip() or None
+        year = int(release_date[:4]) if release_date and release_date[:4].isdigit() else None
+        album_type = str(body.get("album_type") or "album").strip().lower()
+        if album_type not in {"album", "single", "ep", "compilation", "live"}:
+            album_type = "album"
+        db = get_database()
+        conn = db._get_connection()
+        outbox_ids = []
+        try:
+            from core.library2.autolink import find_or_create_album, find_or_create_artist
+            artist_id = find_or_create_artist(
+                conn, artist_name, spotify_id=artist_provider_id or None,
+                source=artist_source or None)
+            known_album_ids = {r[0] for r in conn.execute(
+                "SELECT id FROM lib2_albums WHERE primary_artist_id=?", (artist_id,))}
+            album_id = find_or_create_album(
+                conn, artist_id, album_name,
+                album_type=album_type,
+                spotify_album_id=album_provider_id or None,
+                source=source or None, monitored=0)
+            created = album_id not in known_album_ids
+            conn.execute(
+                """UPDATE lib2_albums SET monitored=1,
+                       origin=CASE WHEN ? THEN 'discography' ELSE origin END,
+                       release_date=COALESCE(release_date, ?),
+                       year=COALESCE(year, ?), image_url=COALESCE(image_url, ?),
+                       expected_track_count=MAX(COALESCE(expected_track_count, 0), ?),
+                       updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                (1 if created else 0, release_date, year,
+                 str(body.get("image_url") or "").strip() or None,
+                 track_count, album_id))
+            from core.library2.monitor_rules import (
+                PROVENANCE_CASCADE, PROVENANCE_USER, record_rule, record_rules)
+            record_rule(conn, "album", album_id, True, PROVENANCE_USER,
+                        profile_id=_profile())
+            track_ids = [r[0] for r in conn.execute(
+                "SELECT id FROM lib2_tracks WHERE album_id=?", (album_id,))]
+            if track_ids:
+                conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE album_id=?", (album_id,))
+                record_rules(conn, "track", track_ids, True, PROVENANCE_CASCADE,
+                             profile_id=_profile())
+            from core.library2.wanted import recompute_wanted_for_entity
+            recompute_wanted_for_entity(conn, "albums", album_id,
+                                        profile_id=_profile())
+            if track_ids:
+                from core.library2.mirror_outbox import enqueue_projected_tracks
+                outbox_ids = enqueue_projected_tracks(
+                    conn, track_ids, profile_id=_profile(), user_initiated=False)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        if outbox_ids:
+            from core.library2.mirror_outbox import drain
+            drain(db)
+        if not track_ids:
+            _schedule_tracklist_resolve(album_id)
+
+        def _expand_catalogue():
+            try:
+                from core.library2.discography import expand_artist_discography
+                expand_artist_discography(db, artist_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("discovery discography expansion failed (%s): %s", artist_id, exc)
+
+        threading.Thread(target=_expand_catalogue,
+                         name=f"lib2-discovery-{artist_id}", daemon=True).start()
+        return jsonify({"success": True, "artist_id": artist_id,
+                        "album_id": album_id, "monitored": True})
 
     @app.route("/api/library/v2/discovery/track-status")
     def lib2_discovery_track_status():
@@ -1601,9 +1710,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         """ldp-06: give a provider track (a Top Track row) the catalogue rows
         it needs so the normal ``/tracks/<id>/monitor`` Bookmark can act on it.
 
-        Creation only — monitoring stays the caller's separate, already proven
-        call, so there is exactly one code path that turns Bookmark into a
-        wanted row plus wishlist mirror.
+        With ``monitored=true`` creation and user intent commit atomically, so
+        a failed follow-up request cannot leave provider-only ghost rows.
         """
         guard = _guard()
         if guard:
@@ -1615,29 +1723,35 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return jsonify({"success": False,
                             "error": "artist_name and track_title are required"}), 400
         source = str(body.get("source") or "").strip().lower() or None
+        artist_source = str(body.get("artist_source") or source or "").strip().lower() or None
+        monitor = bool(body.get("monitored", False))
+        try:
+            track_number = int(body["track_number"]) if body.get("track_number") else None
+            disc_number = int(body["disc_number"]) if body.get("disc_number") else None
+        except (TypeError, ValueError):
+            return jsonify({"success": False,
+                            "error": "track_number and disc_number must be integers"}), 400
         from core.library2.autolink import (
             find_or_create_album, find_or_create_artist, find_or_create_track,
         )
         db = get_database()
         conn = _conn()
+        outbox_ids = []
         try:
             artist_id = find_or_create_artist(
                 conn, artist_name,
                 spotify_id=str(body.get("artist_provider_id") or "").strip() or None,
-                source=source)
+                source=artist_source)
             if artist_id is None:
                 return jsonify({"success": False,
                                 "error": "Could not resolve this artist"}), 400
             known_albums = {
                 int(r["id"]) for r in conn.execute(
                     "SELECT id FROM lib2_albums WHERE primary_artist_id=?", (artist_id,))}
-            # monitored=0 on BOTH rows. `find_or_create_*` defaults new rows to
-            # monitored — right for the post-download autolink it was written
-            # for, wrong here: bookmarking one track must never hand the user a
-            # fully monitored album they did not ask for. The single track's
-            # intent is applied afterwards by the caller through the normal
-            # monitor endpoint, so it arrives with its rule and wishlist mirror
-            # instead of a bare flag (guide §2.2).
+            # monitored=0 on BOTH rows. `find_or_create_*` defaults new rows to monitored — right for
+            # the post-download autolink it was written for, wrong here: bookmarking one track must
+            # never hand the user a fully monitored album. The single track's intent is applied
+            # afterwards through the normal monitor endpoint, with its rule and mirror (guide §2.2).
             album_id = find_or_create_album(
                 conn, artist_id, str(body.get("album_title") or "").strip() or track_title,
                 album_type=str(body.get("album_type") or "album"),
@@ -1647,37 +1761,48 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 int(r["id"]) for r in conn.execute(
                     "SELECT id FROM lib2_tracks WHERE album_id=?", (album_id,))}
             track_id = find_or_create_track(
-                conn, album_id, artist_id, track_title, track_number=None,
+                conn, album_id, artist_id, track_title, track_number=track_number,
                 spotify_track_id=str(body.get("track_provider_id") or "").strip() or None,
-                source=source, monitored=0)
+                disc_number=disc_number, source=source, monitored=0)
             created = [("album", album_id)] if album_id not in known_albums else []
             if track_id not in known_tracks:
                 created.append(("track", track_id))
             if created and created[0][0] == "album":
-                # `find_or_create_album` defaults new rows to origin='library'
-                # ("has/had files", schema comment) because it was written for
-                # the post-download path. A release the user bookmarked one
-                # track of has no files at all — calling it a library release
-                # made the UI treat it as complete and never fetch the rest of
-                # its tracklist. It stays visible under "My Library" through
-                # its monitored track (guide §5).
+                # `find_or_create_album` defaults new rows to origin='library' ("has/had files") because
+                # it was written for the post-download path. A release the user bookmarked one track of
+                # has no files at all — calling it a library release made the UI treat it as complete and
+                # never fetch the rest of its tracklist. It stays under "My Library" via its monitored track.
                 conn.execute("UPDATE lib2_albums SET origin='discography' WHERE id=?",
                              (album_id,))
+            if monitor:
+                conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE id=?", (track_id,))
+                from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+                record_rule(conn, "track", track_id, True, PROVENANCE_USER,
+                            profile_id=_profile())
+                from core.library2.wanted import recompute_wanted_for_entity
+                recompute_wanted_for_entity(conn, "tracks", track_id,
+                                            profile_id=_profile())
+                from core.library2.mirror_outbox import enqueue_projected_tracks
+                outbox_ids = enqueue_projected_tracks(
+                    conn, [track_id], profile_id=_profile(), user_initiated=True)
             conn.commit()
         finally:
             conn.close()
+        if outbox_ids:
+            from core.library2.mirror_outbox import drain
+            drain(db)
         if created:
-            # A row created from one provider's payload knows one provider.
-            # Everything downstream — tracklist resolution, artwork, matching —
-            # walks the stored ids, so resolve the rest in the background
-            # rather than leaving the release effectively unmatched.
+            # A row created from one provider's payload knows one provider. Everything downstream —
+            # tracklist resolution, artwork, matching — walks the stored ids, so resolve the rest in
+            # the background rather than leaving the release effectively unmatched.
             from core.library2.native_enrich import schedule_native_entity_enrich
             schedule_native_entity_enrich(
                 db, created,
                 services=(configured_match_services_getter()
                           if configured_match_services_getter else None))
         return jsonify({"success": True, "artist_id": artist_id,
-                        "album_id": album_id, "track_id": track_id})
+                        "album_id": album_id, "track_id": track_id,
+                        "monitored": monitor})
 
     @app.route("/api/library/v2/artists/<int:artist_id>")
     def lib2_get_artist(artist_id):

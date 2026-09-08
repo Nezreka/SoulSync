@@ -43,13 +43,18 @@ export const libraryV2SearchSchema = z.object({
   /** Show owned releases or the full provider discography. */
   releases: z.enum(['library', 'all']).default('library').catch('library'),
   wantedKind: z.enum(LIBRARY_V2_WANTED_KINDS).default('missing').catch('missing'),
-  /** ldp-01/ldp-02 discovery mode: `<source>:<provider id>` of an artist that
-   *  has no catalogue row (yet). Set by every search/provider entry point so
-   *  nobody ever lands on the legacy artist page again. */
+  /** ldp-01/ldp-02 discovery mode: `<source>:<provider id>` of an artist that has no catalogue row
+   *  (yet). Set by every search/provider entry point so nobody lands on the legacy artist page. */
   discover: coercedString.optional().catch(undefined),
   /** The artist's display name — some sources (Bandcamp) have no id lookup at
    *  all, so the name has to travel in the URL. */
   discoverName: coercedString.optional().catch(undefined),
+  /** Read-only provider release opened from a discovery artist. */
+  discoverAlbum: coercedString.optional().catch(undefined),
+  discoverAlbumName: coercedString.optional().catch(undefined),
+  discoverAlbumType: coercedString.optional().catch(undefined),
+  discoverAlbumImage: coercedString.optional().catch(undefined),
+  discoverAlbumDate: coercedString.optional().catch(undefined),
   /** ldp-03: `All Releases` renders as the V2 table or as the legacy card grid. */
   releaseView: z.enum(['table', 'cards']).default('table').catch('table'),
   /** ldp-05: compact V2 artist header vs. the rich legacy hero. */
@@ -296,10 +301,19 @@ export interface LibraryV2QueueStatusEntry {
   progress_pct: number;
 }
 
+/** Per-album roll-up of the entries above. The bucket counts are what let a row say "3 queued"
+ *  instead of claiming three tracks are downloading when they are only waiting; `progress_pct` is the
+ *  mean across every active track, so queued siblings hold the bar down rather than being ignored. */
+export interface LibraryV2QueueStatusAlbum extends Record<LibraryV2QueueStatusKind, number> {
+  /** Tracks in any non-terminal bucket — the sum of the four counts. */
+  active: number;
+  progress_pct: number;
+}
+
 export interface LibraryV2QueueStatusResponse {
   tracks: Record<number, LibraryV2QueueStatusEntry>;
-  /** album_id -> count of that album's tracks currently active. */
-  albums: Record<number, number>;
+  /** album_id -> that album's live roll-up. */
+  albums: Record<number, LibraryV2QueueStatusAlbum>;
 }
 
 /** One provider's match state for an entity (legacy Enhanced-View match chips). */

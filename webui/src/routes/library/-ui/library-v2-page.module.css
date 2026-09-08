@@ -723,16 +723,67 @@ button.featureTag:disabled {
   font-weight: 600;
   border-radius: 6px;
   padding: 1px 7px;
-  white-space: nowrap;
-  flex: 0 0 auto;
+  /* Wraps rather than nowraps: "1 downloading · 1 processing · 2 searching · 3 queued" measures 316px,
+   * which runs off a 390px phone. Segments below keep their own words intact, so it breaks between
+   * states, never inside one. Same treatment the Interactive Search quality badges get. */
+  flex-wrap: wrap;
+  white-space: normal;
+  max-width: 100%;
+  flex: 0 1 auto;
+  min-width: 0;
   background: rgba(245, 158, 11, 0.16);
   color: rgb(252, 211, 77);
   border: 1px solid rgba(245, 158, 11, 0.4);
 }
 
+.queuePillPart {
+  white-space: nowrap;
+}
+
+.queuePillSep {
+  margin-left: 4px;
+  opacity: 0.6;
+}
+
 .queueStatusPill svg {
   width: 11px;
   height: 11px;
+}
+
+/* Amber is "something is in flight"; green is "bytes are actually moving".
+ * A queue parked behind a busy client should not look like progress. */
+.queueStatusPill[data-moving='true'] {
+  background: rgba(34, 197, 94, 0.16);
+  color: rgb(134, 239, 172);
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+/* Shared by the album/artist pill and the per-track badge. Sized in ch so it
+ * keeps its proportion when the surrounding label wraps at narrow widths. */
+.queueStatusBar {
+  display: inline-block;
+  position: relative;
+  width: 5ch;
+  min-width: 28px;
+  height: 3px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.18);
+  flex: 0 0 auto;
+}
+
+.queueStatusBarFill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: currentColor;
+  transition: width 0.4s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .queueStatusBarFill {
+    transition: none;
+  }
 }
 
 .albumProgress {
@@ -3752,6 +3803,14 @@ button.statusWarn:disabled {
   height: 10px;
 }
 
+/* The track badge sits inline with the title, so its bar has to stay small
+ * enough not to push the title into a second line at 390 px. */
+.queueStatusBadge .queueStatusBar {
+  width: 4ch;
+  min-width: 22px;
+  height: 2px;
+}
+
 /* --- auto-grab status banner --- */
 .grabBanner {
   display: flex;
@@ -4965,6 +5024,13 @@ textarea.searchInput {
 .detailTitleRow > h1 {
   overflow-wrap: anywhere;
   min-width: 0;
+  /* A 106-character artist name ran to six lines and 192px of title at 390px, pushing the header-size
+   * switch onto a line of its own — the audit's rule is that the switch stays beside the title. Three
+   * lines is enough to recognise the artist; the full name is on the title attribute. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .pageToolbar {
@@ -6514,4 +6580,51 @@ textarea.searchInput {
 }
 .searchResultsTable .qualityDisplay {
   flex-wrap: wrap;
+}
+
+/* --- empty release list -----------------------------------------------------
+ * An artist with nothing in the library left the area below the tabs blank. Sized and centred like
+ * the other in-page placeholders rather than as a full-height hero — it sits under a populated
+ * header, not on its own page. */
+.releasesEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  /* The generous bottom padding keeps the action clear of the fixed
+   * activity/notification orbs — on a short page like an empty artist there
+   * is nothing to scroll, so an overlapped button is simply unreachable. */
+  padding: 40px 20px 104px;
+  text-align: center;
+}
+
+.releasesEmptyTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.releasesEmptyBody {
+  margin: 0;
+  max-width: 46ch;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.releasesEmptyAction {
+  margin-top: 4px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.releasesEmptyAction:hover {
+  background: rgba(255, 255, 255, 0.12);
 }

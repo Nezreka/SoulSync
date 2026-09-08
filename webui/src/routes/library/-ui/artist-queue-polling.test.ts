@@ -25,7 +25,10 @@ describe('artist queue-status polling', () => {
   });
 
   it('distributes the artist-scope response as props', () => {
-    expect(pageSource).toContain('activeDownloads={queueStatusByAlbum[album.id] ?? 0}');
+    // The album row takes the whole per-album roll-up, not a bare active
+    // count — that is what lets it say "3 queued" instead of claiming three
+    // tracks are downloading when they are only waiting for a slot.
+    expect(pageSource).toContain('queueRollup={queueStatusByAlbum[album.id]}');
     expect(pageSource).toContain('queueStatusTracks={queueStatusQuery.data?.tracks ?? {}}');
   });
 
