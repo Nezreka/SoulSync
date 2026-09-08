@@ -59,3 +59,5 @@ Stream/
 
 # Config backups. `config/config.json.bak` was committed with a real LAN IP in it.
 *.bak
+tools/ffmpeg.exe
+tools/ffprobe.exe
