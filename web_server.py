@@ -21463,33 +21463,6 @@ def _library_v2_profile_page_allowed(page_id):
     return allowed_pages is None or page_id in allowed_pages
 
 
-# --- dev-only synthetic queue fixtures -------------------------------------
-# Off unless SOULSYNC_DEV_FIXTURES=1; register_dev_fixture_routes() no-ops and returns False
-# otherwise, so the production path below stays byte-identical.
-from api.dev_fixtures import register_dev_fixture_routes as _register_dev_fixtures
-
-_dev_transfer_overrides: dict = {}
-
-
-def _transfer_data_with_dev_fixtures():
-    """get_cached_transfer_data() with the injected fixtures merged over it."""
-    data = get_cached_transfer_data() or {}
-    if not _dev_transfer_overrides:
-        return data
-    return {**data, **_dev_transfer_overrides}
-
-
-_dev_fixtures_enabled = _register_dev_fixtures(
-    app,
-    make_context_key=_make_context_key,
-    transfer_overrides=_dev_transfer_overrides,
-)
-if _dev_fixtures_enabled:
-    logger.warning(
-        "SOULSYNC_DEV_FIXTURES is set — /api/dev/fixtures/* is live. "
-        "Development only; never enable this on a real install."
-    )
-
 _register_library_v2_routes(
     app,
     get_database=get_database,
@@ -21504,10 +21477,7 @@ _register_library_v2_routes(
     configured_match_services_getter=_library_v2_configured_match_services,
     live_artist_stats_getter=_library_v2_live_artist_stats,
     make_context_key=_make_context_key,
-    get_cached_transfer_data=(
-        _transfer_data_with_dev_fixtures if _dev_fixtures_enabled
-        else get_cached_transfer_data
-    ),
+    get_cached_transfer_data=get_cached_transfer_data,
     acquisition_reconciliation_runner=(
         _run_persistent_acquisition_reconciliation
     ),
