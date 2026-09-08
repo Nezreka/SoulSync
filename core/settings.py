@@ -881,6 +881,7 @@ class ConfigManager:
             },
             "podcasts": {
                 "download_path": default_podcast_path,
+                "media_format": "audio",  # "audio", "video", "both"
                 "embed_metadata": True,
                 "embed_artwork": True,
                 "save_artwork": True,

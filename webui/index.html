@@ -5491,6 +5491,17 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label>Podcast Media Format:</label>
+                                    <select id="podcast-media-format" class="form-select">
+                                        <option value="audio">Audio Only (MP3 / M4A) — Default</option>
+                                        <option value="video">Video Only (MP4 with static artwork for TV media servers)</option>
+                                        <option value="both">Audio &amp; Video (Both formats side-by-side)</option>
+                                    </select>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Choose which formats to store in your podcast folders. <strong>Audio Only</strong> keeps standard audio files with embedded tags. <strong>Video Only</strong> remuxes the audio into an MP4 video container with a static high-res episode artwork frame and Apple/iTunes TV metadata tags so Plex, Jellyfin, and Emby can catalog them as TV Shows with seasons, episode posters, and playback resume. <strong>Audio &amp; Video</strong> keeps both formats side-by-side in the same folder with shared NFO sidecars so both Music and TV media libraries can index the same folder simultaneously.</small>
+                                </div>
+
+                                <div class="form-group">
                                     <label>Multi-Disc Folder Label:</label>
                                     <select id="disc-label">
                                         <option value="Disc">Disc (e.g., Disc 1/)</option>

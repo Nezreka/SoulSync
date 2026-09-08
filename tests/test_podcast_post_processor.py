@@ -552,3 +552,208 @@ def test_post_process_error_resilience(tmp_path: Path):
     )
     assert res["success"] is True
     assert res["tags_embedded"] is False
+
+
+# ---------------------------------------------------------------------------
+# Unit Tests: Static MP4 Video Remux (TV Media Server Support)
+# ---------------------------------------------------------------------------
+
+def test_find_ffmpeg_binary():
+    from core.podcast_post_processor import find_ffmpeg_binary
+    # Should return either a path string or None, without raising exceptions
+    bin_path = find_ffmpeg_binary()
+    assert bin_path is None or isinstance(bin_path, str)
+
+
+def test_convert_audio_to_static_mp4_no_ffmpeg(tmp_path: Path):
+    from core.podcast_post_processor import convert_audio_to_static_mp4
+    audio = tmp_path / "ep.mp3"
+    audio.write_bytes(b"dummy audio")
+    out_mp4 = tmp_path / "ep.mp4"
+
+    # With invalid ffmpeg path, should return False gracefully
+    ok = convert_audio_to_static_mp4(
+        audio_path=audio,
+        output_mp4_path=out_mp4,
+        ffmpeg_bin=str(tmp_path / "non_existent_ffmpeg"),
+    )
+    assert ok is False
+    assert not out_mp4.exists()
+
+
+def test_convert_audio_to_static_mp4_mocked_ffmpeg(tmp_path: Path, monkeypatch):
+    import subprocess
+    from mutagen.mp4 import MP4
+    from core.podcast_post_processor import convert_audio_to_static_mp4
+
+    audio = tmp_path / "ep.mp3"
+    audio.write_bytes(b"audio data")
+    out_mp4 = tmp_path / "ep.mp4"
+    img = tmp_path / "ep.jpg"
+    img.write_bytes(b"image data")
+
+    ep = PodcastEpisode(
+        guid="ep-101",
+        title="Deep Space",
+        enclosure_url="https://example.com/ep.mp3",
+        enclosure_type="audio/mpeg",
+        enclosure_length=1000,
+        pub_date=None,
+        duration_seconds=120,
+        description="Exploring the cosmos",
+        show_notes="",
+        season=2,
+        episode_number=7,
+        episode_type="full",
+        artwork_url=None,
+        chapter_url=None,
+        transcript_url=None,
+    )
+    meta = {"title": "Space Podcast", "author": "Astronomer"}
+
+    def fake_run(cmd, *args, **kwargs):
+        # Create a valid minimal MP4 file using Mutagen or writing bytes
+        out_mp4.write_bytes(b"\x00\x00\x00 ftypisom\x00\x00\x02\x00isomiso2mp41\x00\x00\x00\x08free")
+        return subprocess.CompletedProcess(cmd, returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    ok = convert_audio_to_static_mp4(
+        audio_path=audio,
+        output_mp4_path=out_mp4,
+        image_path=img,
+        episode=ep,
+        show_meta=meta,
+        ffmpeg_bin="mock_ffmpeg",
+    )
+    assert ok is True
+    assert out_mp4.is_file()
+
+
+def test_post_process_media_format_audio_mode(tmp_path: Path):
+    audio_file = tmp_path / "Ep1.mp3"
+    audio_file.write_bytes(b"audio content")
+
+    ep = PodcastEpisode(
+        guid="ep-1",
+        title="Audio Ep",
+        enclosure_url="https://example.com/audio.mp3",
+        enclosure_type="audio/mpeg",
+        enclosure_length=10,
+        pub_date=None,
+        duration_seconds=60,
+        description="Audio only",
+        show_notes="",
+        season=1,
+        episode_number=1,
+        episode_type="full",
+        artwork_url=None,
+        chapter_url=None,
+        transcript_url=None,
+    )
+
+    res = post_process_podcast_episode(
+        audio_path=audio_file,
+        episode=ep,
+        show_meta={"title": "Test Show"},
+        settings={"media_format": "audio", "embed_metadata": False, "save_artwork": False},
+        dest_root=tmp_path,
+    )
+    assert res["audio_path"] == str(audio_file)
+    assert res["video_path"] is None
+    assert res["converted_to_video"] is False
+    assert audio_file.is_file()
+    assert not (tmp_path / "Ep1.mp4").exists()
+
+
+def test_post_process_media_format_video_mode(tmp_path: Path, monkeypatch):
+    audio_file = tmp_path / "Ep2.mp3"
+    audio_file.write_bytes(b"audio content")
+    mp4_file = tmp_path / "Ep2.mp4"
+
+    ep = PodcastEpisode(
+        guid="ep-2",
+        title="Video Ep",
+        enclosure_url="https://example.com/video.mp3",
+        enclosure_type="audio/mpeg",
+        enclosure_length=10,
+        pub_date=None,
+        duration_seconds=60,
+        description="Video only",
+        show_notes="",
+        season=1,
+        episode_number=2,
+        episode_type="full",
+        artwork_url=None,
+        chapter_url=None,
+        transcript_url=None,
+    )
+
+    def mock_convert(*args, **kwargs):
+        mp4_file.write_bytes(b"dummy mp4 video")
+        return True
+
+    from core import podcast_post_processor
+    monkeypatch.setattr(podcast_post_processor, "convert_audio_to_static_mp4", mock_convert)
+
+    res = post_process_podcast_episode(
+        audio_path=audio_file,
+        episode=ep,
+        show_meta={"title": "Test Show"},
+        settings={"media_format": "video", "embed_metadata": False, "save_artwork": False},
+        dest_root=tmp_path,
+    )
+
+    # In "video" mode, original audio is replaced and deleted
+    assert res["converted_to_video"] is True
+    assert res["audio_path"] == str(mp4_file)
+    assert res["video_path"] == str(mp4_file)
+    assert mp4_file.is_file()
+    assert not audio_file.exists()
+
+
+def test_post_process_media_format_both_mode(tmp_path: Path, monkeypatch):
+    audio_file = tmp_path / "Ep3.mp3"
+    audio_file.write_bytes(b"audio content")
+    mp4_file = tmp_path / "Ep3.mp4"
+
+    ep = PodcastEpisode(
+        guid="ep-3",
+        title="Both Formats Ep",
+        enclosure_url="https://example.com/both.mp3",
+        enclosure_type="audio/mpeg",
+        enclosure_length=10,
+        pub_date=None,
+        duration_seconds=60,
+        description="Both audio and video",
+        show_notes="",
+        season=1,
+        episode_number=3,
+        episode_type="full",
+        artwork_url=None,
+        chapter_url=None,
+        transcript_url=None,
+    )
+
+    def mock_convert(*args, **kwargs):
+        mp4_file.write_bytes(b"dummy mp4 video")
+        return True
+
+    from core import podcast_post_processor
+    monkeypatch.setattr(podcast_post_processor, "convert_audio_to_static_mp4", mock_convert)
+
+    res = post_process_podcast_episode(
+        audio_path=audio_file,
+        episode=ep,
+        show_meta={"title": "Test Show"},
+        settings={"media_format": "both", "embed_metadata": False, "save_artwork": False},
+        dest_root=tmp_path,
+    )
+
+    # In "both" mode, both files must exist side-by-side
+    assert res["converted_to_video"] is True
+    assert res["audio_path"] == str(audio_file)
+    assert res["video_path"] == str(mp4_file)
+    assert audio_file.is_file()
+    assert mp4_file.is_file()
+

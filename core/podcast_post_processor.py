@@ -25,6 +25,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from xml.sax.saxutils import escape
@@ -45,6 +46,7 @@ _REQUEST_HEADERS = {
 }
 
 _DEFAULT_SETTINGS = {
+    "media_format": "audio",
     "embed_metadata": True,
     "embed_artwork": True,
     "save_artwork": True,
@@ -417,10 +419,18 @@ def embed_podcast_tags(
             audio["\xa9ART"] = [author]
             audio["aART"] = [show_title]
 
-            if episode.episode_number is not None:
-                audio["trkn"] = [(episode.episode_number, 0)]
+            # TV Show atoms for Plex, Jellyfin, Apple TV, Infuse
+            audio["tvsh"] = [show_title]
             if episode.season is not None:
+                audio["tvsn"] = [episode.season]
                 audio["disk"] = [(episode.season, 0)]
+            if episode.episode_number is not None:
+                audio["tves"] = [episode.episode_number]
+                audio["trkn"] = [(episode.episode_number, 0)]
+                s_num = episode.season or 1
+                audio["tven"] = [f"S{s_num:02d}E{episode.episode_number:02d}"]
+            audio["stik"] = [10]  # TV Show kind (enables media servers to index into TV libraries)
+
             if date_str:
                 audio["\xa9day"] = [date_str]
             if genre:
@@ -670,6 +680,157 @@ def write_podcast_episode_sidecars(
 
 
 # ---------------------------------------------------------------------------
+# Video Remux for TV Media Servers (Plex / Jellyfin / Emby)
+# ---------------------------------------------------------------------------
+
+def find_ffmpeg_binary() -> Optional[str]:
+    """Locate the ffmpeg executable on PATH or in standard tools directories."""
+    which_bin = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
+    if which_bin:
+        return which_bin
+
+    cwd = Path.cwd()
+    candidates = [
+        cwd / "tools" / "ffmpeg.exe",
+        cwd / "tools" / "ffmpeg",
+        Path(__file__).resolve().parent.parent / "tools" / "ffmpeg.exe",
+        Path(__file__).resolve().parent.parent / "tools" / "ffmpeg",
+        Path("/usr/bin/ffmpeg"),
+        Path("/usr/local/bin/ffmpeg"),
+    ]
+    for cand in candidates:
+        if cand.is_file() and os.access(str(cand), os.X_OK):
+            return str(cand)
+
+    return None
+
+
+def convert_audio_to_static_mp4(
+    audio_path: Path,
+    output_mp4_path: Path,
+    image_path: Optional[Path] = None,
+    episode: Optional[PodcastEpisode] = None,
+    show_meta: Optional[Dict[str, Any]] = None,
+    art_bytes: Optional[bytes] = None,
+    art_mime: Optional[str] = None,
+    ffmpeg_bin: Optional[str] = None,
+) -> bool:
+    """Convert an audio file into a video MP4 with a static artwork image and Apple/TV metadata.
+
+    Plex, Jellyfin, and Emby can catalog the resulting .mp4 into TV Show libraries,
+    giving users seasons, episodic progress tracking, and unplayed badges.
+
+    Uses stream-copying for fast, lossless conversion when compatible, falling back
+    to AAC re-encoding if needed. Embeds TV Show atom tags (tvsh, tvsn, tves, etc.).
+    """
+    bin_path = ffmpeg_bin or find_ffmpeg_binary()
+    if not bin_path:
+        logger.warning("ffmpeg binary not found; skipping static MP4 video creation for %s", audio_path.name)
+        return False
+
+    audio_path = Path(audio_path).resolve()
+    output_mp4_path = Path(output_mp4_path).resolve()
+
+    if audio_path == output_mp4_path:
+        return True
+
+    temp_img_created = False
+    temp_img_path: Optional[Path] = None
+    input_args: List[str] = []
+
+    if image_path and Path(image_path).is_file():
+        input_args = ["-loop", "1", "-framerate", "1", "-i", str(image_path)]
+    elif art_bytes:
+        ext = ".png" if (art_mime and "png" in art_mime) else ".jpg"
+        temp_img_path = output_mp4_path.parent / f".tmp_{output_mp4_path.stem}_art{ext}"
+        try:
+            temp_img_path.write_bytes(art_bytes)
+            temp_img_created = True
+            input_args = ["-loop", "1", "-framerate", "1", "-i", str(temp_img_path)]
+        except OSError as write_err:
+            logger.debug("Failed writing temp image for ffmpeg: %s", write_err)
+            input_args = ["-f", "lavfi", "-i", "color=c=0x1a1a2e:s=1920x1080:r=1"]
+    else:
+        input_args = ["-f", "lavfi", "-i", "color=c=0x1a1a2e:s=1920x1080:r=1"]
+
+    scale_filter = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+
+    try:
+        # First attempt: stream-copy audio (-c:a copy) for lossless speed
+        cmd_copy = [
+            bin_path,
+            "-y",
+            *input_args,
+            "-i", str(audio_path),
+            "-vf", scale_filter,
+            "-c:v", "libx264",
+            "-tune", "stillimage",
+            "-preset", "ultrafast",
+            "-c:a", "copy",
+            "-pix_fmt", "yuv420p",
+            "-shortest",
+            str(output_mp4_path),
+        ]
+        res = subprocess.run(cmd_copy, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180)
+
+        if res.returncode != 0 or not output_mp4_path.is_file() or output_mp4_path.stat().st_size == 0:
+            logger.debug(
+                "ffmpeg stream-copy failed for %s (code %d); retrying with AAC re-encode",
+                audio_path.name,
+                res.returncode,
+            )
+            # Second attempt: re-encode audio to AAC 192k
+            cmd_aac = [
+                bin_path,
+                "-y",
+                *input_args,
+                "-i", str(audio_path),
+                "-vf", scale_filter,
+                "-c:v", "libx264",
+                "-tune", "stillimage",
+                "-preset", "ultrafast",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-pix_fmt", "yuv420p",
+                "-shortest",
+                str(output_mp4_path),
+            ]
+            res_aac = subprocess.run(cmd_aac, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180)
+            if res_aac.returncode != 0 or not output_mp4_path.is_file() or output_mp4_path.stat().st_size == 0:
+                logger.warning(
+                    "ffmpeg MP4 generation failed for %s: %s",
+                    audio_path.name,
+                    res_aac.stderr.decode("utf-8", errors="replace")[:300],
+                )
+                output_mp4_path.unlink(missing_ok=True)
+                return False
+
+        # Tag the generated MP4 with metadata, TV atoms, and artwork
+        if episode:
+            try:
+                embed_podcast_tags(
+                    audio_path=output_mp4_path,
+                    episode=episode,
+                    show_meta=show_meta,
+                    embed_artwork=True,
+                    art_bytes=art_bytes,
+                    art_mime=art_mime,
+                )
+            except Exception as tag_err:
+                logger.debug("Failed embedding MP4 tags into %s: %s", output_mp4_path.name, tag_err)
+
+        return True
+
+    except Exception as exc:
+        logger.warning("Error running ffmpeg for %s: %s", audio_path.name, exc)
+        output_mp4_path.unlink(missing_ok=True)
+        return False
+    finally:
+        if temp_img_created and temp_img_path:
+            temp_img_path.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
 # Top-Level Coordinator
 # ---------------------------------------------------------------------------
 
@@ -684,13 +845,14 @@ def post_process_podcast_episode(
 
     Coordinates:
       1. Configuration resolution
-      2. Artwork fetching (cached in memory for tags + sidecars)
+      2. Artwork fetching (cached in memory for tags + sidecars + video frame)
       3. Audio tag and artwork embedding via Mutagen
       4. Show-level asset seeding (cover.jpg, tvshow.nfo, show.info.json)
       5. Episode-level sidecar generation (<name>.nfo, <name>.info.json, thumbnails)
+      6. Static MP4 video conversion when media_format is "video" or "both"
 
     Returns:
-      Summary dict with success status, embedded tags, and created sidecars.
+      Summary dict with success status, media paths, embedded tags, and created sidecars.
     """
     path = Path(audio_path).resolve()
     dest = Path(dest_root).resolve() if dest_root else None
@@ -703,6 +865,7 @@ def post_process_podcast_episode(
         try:
             from core.settings import config_manager
             if config_manager:
+                cfg["media_format"] = config_manager.get("podcasts.media_format", "audio")
                 cfg["embed_metadata"] = config_manager.get("podcasts.embed_metadata", True)
                 cfg["embed_artwork"] = config_manager.get("podcasts.embed_artwork", True)
                 cfg["save_artwork"] = config_manager.get("podcasts.save_artwork", True)
@@ -719,18 +882,20 @@ def post_process_podcast_episode(
     if not meta.get("artwork_url") and episode.artwork_url:
         meta["artwork_url"] = episode.artwork_url
 
-    result = {
+    result: Dict[str, Any] = {
         "success": True,
         "audio_path": str(path),
+        "video_path": None,
         "tags_embedded": False,
         "show_assets": [],
         "episode_sidecars": [],
+        "converted_to_video": False,
     }
 
     # Fetch artwork once in memory if any feature requests art
     art_bytes: Optional[bytes] = None
     art_mime: Optional[str] = None
-    if cfg.get("embed_artwork") or cfg.get("save_artwork"):
+    if cfg.get("embed_artwork") or cfg.get("save_artwork") or cfg.get("media_format") in ("video", "both"):
         art_url = episode.artwork_url or meta.get("artwork_url")
         if art_url:
             fetched = fetch_artwork_bytes(art_url)
@@ -776,11 +941,56 @@ def post_process_podcast_episode(
     except Exception as ep_exc:
         logger.warning("Episode sidecars generation failed for %s: %s", path.name, ep_exc)
 
+    # 4. Static MP4 video conversion (for TV media servers)
+    media_fmt = str(cfg.get("media_format", "audio")).lower().strip()
+    if media_fmt in ("video", "both"):
+        try:
+            if path.suffix.lower() in (".mp4", ".m4v"):
+                result["video_path"] = str(path)
+                result["converted_to_video"] = True
+            else:
+                mp4_path = path.with_suffix(".mp4")
+                # Look for episode artwork written during sidecars step
+                img_path: Optional[Path] = None
+                for ext in (".jpg", ".jpeg", ".png"):
+                    candidate = path.parent / f"{path.stem}{ext}"
+                    if candidate.is_file():
+                        img_path = candidate
+                        break
+                if not img_path:
+                    show_cover = show_dir / "cover.jpg"
+                    if show_cover.is_file():
+                        img_path = show_cover
+
+                conv_ok = convert_audio_to_static_mp4(
+                    audio_path=path,
+                    output_mp4_path=mp4_path,
+                    image_path=img_path,
+                    episode=episode,
+                    show_meta=meta,
+                    art_bytes=art_bytes,
+                    art_mime=art_mime,
+                )
+                if conv_ok and mp4_path.is_file():
+                    result["video_path"] = str(mp4_path)
+                    result["converted_to_video"] = True
+                    if media_fmt == "video":
+                        try:
+                            path.unlink()
+                            result["audio_path"] = str(mp4_path)
+                        except OSError as del_err:
+                            logger.debug("Could not remove intermediate audio file %s: %s", path, del_err)
+                else:
+                    logger.warning("Static MP4 video conversion failed for %s; audio retained", path.name)
+        except Exception as vid_exc:
+            logger.warning("Static MP4 video generation failed for %s: %s", path.name, vid_exc)
+
     logger.info(
-        "Post-processed podcast %s: tags=%s, show_assets=%s, sidecars=%s",
+        "Post-processed podcast %s: tags=%s, show_assets=%s, sidecars=%s, video=%s",
         path.name,
         result["tags_embedded"],
         len(result["show_assets"]),
         len(result["episode_sidecars"]),
+        result["converted_to_video"],
     )
     return result

@@ -437,12 +437,16 @@ class PodcastDownloadClient:
         # Best-effort post-processing: in-file tagging and media server sidecars
         try:
             from core.podcast_post_processor import post_process_podcast_episode
-            post_process_podcast_episode(
+            pp_res = post_process_podcast_episode(
                 audio_path=filepath,
                 episode=episode,
                 show_meta=show_metadata,
                 dest_root=dest,
             )
+            if isinstance(pp_res, dict) and pp_res.get("audio_path"):
+                final_path = Path(pp_res["audio_path"])
+                if final_path.exists():
+                    filepath = final_path
         except Exception as pp_exc:
             logger.warning("Podcast post-processing failed for %s: %s", filepath, pp_exc)
 

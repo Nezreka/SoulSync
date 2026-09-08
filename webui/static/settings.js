@@ -1795,6 +1795,10 @@ async function loadSettingsData() {
         document.getElementById('template-playlist-item').value = settings.file_organization?.templates?.playlist_item || '';
         document.getElementById('template-video-path').value = settings.file_organization?.templates?.video_path || '$artist/$title-video';
         document.getElementById('template-podcast-path').value = settings.file_organization?.templates?.podcast_path || '$show/Season $season/$title';
+        const podcastFormatEl = document.getElementById('podcast-media-format');
+        if (podcastFormatEl) {
+            podcastFormatEl.value = settings.podcasts?.media_format || 'audio';
+        }
         document.getElementById('disc-label').value = settings.file_organization?.disc_label || 'Disc';
         document.getElementById('collab-artist-mode').value = settings.file_organization?.collab_artist_mode || 'first';
         document.getElementById('artistletter-symbol-fallback').checked = settings.file_organization?.artistletter_symbol_fallback === true;
@@ -4781,6 +4785,7 @@ async function saveSettings(quiet = false) {
         },
         podcasts: {
             download_path: document.getElementById('podcasts-path')?.value || './podcasts',
+            media_format: document.getElementById('podcast-media-format')?.value || 'audio',
         },
         import: {
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,
