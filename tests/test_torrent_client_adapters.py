@@ -72,8 +72,18 @@ def test_qbittorrent_state_mapping() -> None:
     assert qbit_map('pausedDL') == 'paused'
     assert qbit_map('error') == 'error'
     assert qbit_map('missingFiles') == 'error'
-    # Unknown native value → error rather than swallowing silently.
-    assert qbit_map('not-a-real-state') == 'error'
+    # qBittorrent 5.0's rename (#1228). Both spellings, because 5.x can be
+    # configured to keep the old ones and 4.x is still widely run.
+    assert qbit_map('stoppedUP') == 'completed'
+    assert qbit_map('stoppedDL') == 'paused'
+    # Unknown native value → 'stalled', NOT 'error'. This assertion used to
+    # expect 'error', and that is what made the 5.0 rename destructive: a
+    # state nobody had mapped yet cancelled healthy transfers and wrote them
+    # into history as failures. 'stalled' still counts toward the stall clock
+    # (STALLABLE_STATES), so an unknown state is bounded rather than hanging
+    # forever - it just is not destroyed on the way. The states that
+    # genuinely ARE errors are mapped explicitly above.
+    assert qbit_map('not-a-real-state') == 'stalled'
 
 
 def test_transmission_state_mapping() -> None:
@@ -494,3 +504,112 @@ def test_pause_reports_failure_when_both_fail():
     a, calls = _qbit_with_call({})   # both 404
     assert a._pause_sync('HASH') is False
     assert calls == ['/api/v2/torrents/stop', '/api/v2/torrents/pause']
+
+
+# ---------------------------------------------------------------------------
+# qBittorrent 5.x renamed its stopped states (#1228)
+# ---------------------------------------------------------------------------
+
+def test_a_completed_torrent_on_qbittorrent_5_is_not_an_error():
+    """qBittorrent 5.0 renamed pausedUP to stoppedUP.
+
+    With only the old name mapped, a finished torrent fell through to the
+    "error" default: every completed grab on 5.x was recorded as failed and
+    the transfer cancelled.
+    """
+    from core.torrent_clients.qbittorrent import _map_state
+
+    assert _map_state("stoppedUP") == "completed"
+    assert _map_state("stoppedDL") == "paused"
+
+
+def test_the_qbittorrent_4_names_still_work():
+    # 5.x can be configured to keep the old names, and 4.x is still widely run.
+    from core.torrent_clients.qbittorrent import _map_state
+
+    assert _map_state("pausedUP") == "completed"
+    assert _map_state("pausedDL") == "paused"
+
+
+def test_an_unknown_qbittorrent_state_is_not_treated_as_an_error():
+    """The deeper bug: the next rename would break it again.
+
+    Defaulting unknown to "error" cancels healthy downloads and corrupts the
+    history. Waiting is recoverable; destroying the transfer is not.
+    """
+    from core.torrent_clients.qbittorrent import _map_state
+
+    assert _map_state("someStateFromQbit6") == "stalled"
+    assert _map_state("") == "stalled"
+
+
+def test_the_real_error_states_are_still_errors():
+    # Nothing is softened: these are mapped explicitly.
+    from core.torrent_clients.qbittorrent import _map_state
+
+    assert _map_state("error") == "error"
+    assert _map_state("missingFiles") == "error"
+
+
+def test_every_qbittorrent_state_maps_to_a_known_word():
+    # The adapter's vocabulary is fixed; a typo in the map would produce a
+    # state nothing downstream handles.
+    from core.torrent_clients.qbittorrent import _QBIT_STATE_MAP
+
+    allowed = {"queued", "downloading", "seeding", "paused", "stalled",
+               "error", "completed"}
+    assert set(_QBIT_STATE_MAP.values()) <= allowed
+
+
+# ---------------------------------------------------------------------------
+# The configured category actually reaches the client (#1228, secondary)
+# ---------------------------------------------------------------------------
+
+def test_add_torrent_smart_defaults_to_the_configured_category():
+    """It hardcoded "soulsync", which beat the user's own setting.
+
+    Every adapter resolves `category or self._category`, so a literal default
+    here always won and a configured category was silently ignored for music
+    grabs. None lets it fall through.
+    """
+    import inspect
+
+    from core.torrent_clients.base import add_torrent_smart
+
+    default = inspect.signature(add_torrent_smart).parameters["category"].default
+    assert default is None
+
+
+def test_an_explicit_category_still_wins():
+    # Video and audiobooks pass their own and must keep it.
+    import asyncio
+
+    from core.torrent_clients.base import add_torrent_smart
+
+    seen = {}
+
+    class _Adapter:
+        async def add_torrent(self, url, category=None, save_path=None):
+            seen["category"] = category
+            return "hash-1"
+
+    asyncio.run(add_torrent_smart(_Adapter(), "magnet:?xt=urn:btih:abc",
+                                  category="audiobooks"))
+    assert seen["category"] == "audiobooks"
+
+
+def test_no_category_reaches_the_adapter_as_none():
+    # So the adapter can apply the configured one.
+    import asyncio
+
+    from core.torrent_clients.base import add_torrent_smart
+
+    seen = {}
+
+    class _Adapter:
+        async def add_torrent(self, url, category=None, save_path=None):
+            seen["category"] = category
+            return "hash-1"
+
+    asyncio.run(add_torrent_smart(_Adapter(), "magnet:?xt=urn:btih:abc"))
+    assert seen["category"] is None

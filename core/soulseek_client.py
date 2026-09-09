@@ -845,9 +845,51 @@ class SoulseekClient(DownloadSourcePlugin):
             logger.error(f"Error starting download: {e}")
             return None
     
+    @staticmethod
+    def _looks_like_transfer_id(value: str) -> bool:
+        """Whether this is a slskd transfer UUID rather than a filename.
+
+        ``download()`` returns the FILENAME when an enqueue response carries no
+        id, which slskd 0.26 does. Putting a filename in
+        ``transfers/downloads/{id}`` makes slskd answer 400/405, the monitor
+        read that as a failure, and a perfectly good transfer was cancelled
+        seconds after starting (#1229). A filename always contains a path
+        separator or a dot; a UUID contains neither.
+        """
+        text = str(value or "").strip()
+        if not text:
+            return False
+        return not any(ch in text for ch in ("\\", "/", "."))
+
+    async def _status_from_listing(
+        self, *, transfer_id: str = "", filename: str = "", username: str = ""
+    ) -> Optional[DownloadStatus]:
+        """Find one transfer in the grouped listing.
+
+        slskd groups downloads username -> directories -> files, and every file
+        carries its real id. That listing is the only place a filename can be
+        turned back into a transfer, so it is what a filename-keyed lookup uses.
+        """
+        wanted_name = str(filename or "").replace("\\", "/").split("/")[-1].lower()
+        for status in await self.get_all_downloads():
+            if transfer_id and str(status.id) == str(transfer_id):
+                return status
+            if wanted_name:
+                if username and str(status.username) != str(username):
+                    continue
+                have = str(status.filename or "").replace("\\", "/").split("/")[-1].lower()
+                if have == wanted_name:
+                    return status
+        return None
+
     async def get_download_status(self, download_id: str) -> Optional[DownloadStatus]:
         if not self.base_url:
             return None
+
+        # A filename-keyed id can only be resolved through the listing; asking
+        # for it as a path segment is what slskd rejects.
+        if not self._looks_like_transfer_id(download_id):
+            return await self._status_from_listing(filename=download_id)
         
         try:
             response = await self._make_request('GET', f'transfers/downloads/{download_id}')

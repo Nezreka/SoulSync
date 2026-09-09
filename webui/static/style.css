@@ -49710,7 +49710,10 @@ body.downloads-disabled [onclick*="downloadAlbum"],
 body.downloads-disabled [onclick*="startDownload"],
 body.downloads-disabled [onclick*="startMissingTracksProcess"],
 body.downloads-disabled [onclick*="startWishlistMissingTracksProcess"],
-body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]) {
+body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]),
+/* the react pages hash their class names, so podcast and audiobook
+   download buttons carry this attribute instead of a class */
+body.downloads-disabled [data-download-action] {
     display: none !important;
 }
 

@@ -552,6 +552,7 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
                       <button
                         type="button"
                         className={styles.releaseGrab}
+                        data-download-action=""
                         onClick={() => void grab(release)}
                         disabled={Boolean(grabbing)}
                       >

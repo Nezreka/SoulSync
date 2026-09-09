@@ -221,6 +221,7 @@ export function PodcastEpisodeList({
                   <button
                     type="button"
                     className={`${styles.downloadBtn} ${isDownloaded ? styles.downloadBtnCompleted : ''} ${isDownloading ? styles.downloadBtnLoading : ''}`}
+                    data-download-action=""
                     onClick={() => {
                       if (!isDownloaded && !isDownloading && ep.enclosure_url) {
                         onDownloadEpisode(ep);

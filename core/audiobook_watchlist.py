@@ -150,7 +150,19 @@ def run_scan(db: Any = None, limit: Optional[int] = None) -> Dict[str, int]:
     summary = {"authors": 0, "found": 0, "wishlisted": 0, "errors": 0}
 
     try:
-        due = database.get_watchlist_due(limit=limit or DEFAULT_BATCH)
+        # Every profile that follows anyone. Without this a second person's
+        # followed authors were never checked, so their new releases never
+        # reached their wishlist.
+        try:
+            profiles = database.profiles_with_rows()
+        except Exception as exc:                            # noqa: BLE001
+            logger.debug("Could not list audiobook profiles: %s", exc)
+            profiles = [1]
+
+        due = []
+        for profile_id in profiles:
+            due.extend(database.get_watchlist_due(
+                profile_id=profile_id, limit=limit or DEFAULT_BATCH))
     except Exception as exc:                                # noqa: BLE001
         logger.warning("Could not read the audiobook watchlist: %s", exc)
         return summary

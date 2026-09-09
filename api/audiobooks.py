@@ -101,6 +101,34 @@ def _sort(default: str = "relevance") -> str:
     return value if value in SORT_ORDERS else default
 
 
+def _profile() -> int:
+    """Whose audiobooks these are.
+
+    Wishlists, followed authors and the blocklist are per profile — two people
+    on one install do not share a reading list. The LIBRARY and the download
+    queue deliberately are not: there is one filesystem and one download
+    client, so a book on disk is on disk for everybody.
+
+    Every call used to take the default of 1, which meant every profile shared
+    profile 1's wishlist and watchlist.
+    """
+    from .helpers import parse_profile_id
+
+    return parse_profile_id(request)
+
+
+def _download_denied():
+    """A 403 when this profile may not download, otherwise ``None``.
+
+    The library and the download client are shared, so the answer does not
+    depend on whose wishlist a book came from — only on whether the person
+    pressing the button is allowed to spend the download client at all.
+    """
+    from .helpers import download_permission_error
+
+    return download_permission_error(_profile())
+
+
 def _owned_asins() -> set:
     """Every asin already on disk, in one read.
 
@@ -341,7 +369,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         watching = False
         if role == "author":
             try:
-                watching = bool(get_audiobook_db().is_following(name))
+                watching = bool(get_audiobook_db().is_following(name, _profile()))
             except Exception as exc:                        # noqa: BLE001
                 logger.debug("Could not read the follow state for %s: %s", name, exc)
         profile["watching"] = watching
@@ -488,8 +516,8 @@ def create_audiobooks_blueprint() -> Blueprint:
         db = get_audiobook_db()
         payload = {
             "success": True,
-            "items": db.get_wishlist(),
-            "counts": db.wishlist_counts(),
+            "items": db.get_wishlist(_profile()),
+            "counts": db.wishlist_counts(_profile()),
         }
         try:
             from core.audiobook_wishlist_worker import schedule_status
@@ -526,7 +554,7 @@ def create_audiobooks_blueprint() -> Blueprint:
             return jsonify({"success": False, "error": f"No audiobook found for {asin}"}), 404
 
         added = get_audiobook_db().add_to_wishlist(
-            book.to_dict(), narrator_mode=narrator_mode,
+            book.to_dict(), narrator_mode=narrator_mode, profile_id=_profile(),
         )
         # Already on the list is a success from the caller's point of view: the
         # book is wanted either way, and a 409 would make the button look broken.
@@ -550,7 +578,7 @@ def create_audiobooks_blueprint() -> Blueprint:
                 "success": False, "error": "narrator_mode must be 'exact' or 'any'",
             }), 400
 
-        changed = get_audiobook_db().set_narrator_mode(asin, narrator_mode)
+        changed = get_audiobook_db().set_narrator_mode(asin, narrator_mode, _profile())
         if not changed:
             return jsonify({"success": False, "error": f"{asin} is not on the wishlist"}), 404
         return jsonify({"success": True, "narrator_mode": narrator_mode})
@@ -558,7 +586,7 @@ def create_audiobooks_blueprint() -> Blueprint:
     @bp.route("/wishlist/<asin>", methods=["DELETE"])
     def wishlist_remove(asin: str):
         """Stop wanting a book."""
-        removed = get_audiobook_db().remove_from_wishlist(asin)
+        removed = get_audiobook_db().remove_from_wishlist(asin, _profile())
         return jsonify({"success": True, "removed": removed, "wishlisted": False})
 
     @bp.route("/wishlist/search", methods=["POST"])
@@ -571,6 +599,11 @@ def create_audiobooks_blueprint() -> Blueprint:
         is what stops it becoming a way to hammer the indexers by hand.
         """
         from core.audiobook_wishlist_worker import run_pass
+
+        # A pass grabs what it finds, so it is a download action.
+        denied = _download_denied()
+        if denied is not None:
+            return denied
 
         try:
             summary = run_pass()
@@ -586,7 +619,8 @@ def create_audiobooks_blueprint() -> Blueprint:
     @bp.route("/watchlist", methods=["GET"])
     def watchlist():
         """Authors being followed, newest release counts included."""
-        return jsonify({"success": True, "authors": get_audiobook_db().get_watchlist()})
+        return jsonify({"success": True,
+                        "authors": get_audiobook_db().get_watchlist(_profile())})
 
     @bp.route("/watchlist", methods=["POST"])
     def watchlist_follow():
@@ -603,6 +637,7 @@ def create_audiobooks_blueprint() -> Blueprint:
 
         followed = get_audiobook_db().follow_author(
             name,
+            profile_id=_profile(),
             cover_url=str(body.get("cover_url") or ""),
             since_date=str(body.get("since") or ""),
         )
@@ -617,12 +652,13 @@ def create_audiobooks_blueprint() -> Blueprint:
         if not fields:
             return jsonify({"success": False, "error": "nothing to change"}), 400
 
-        changed = get_audiobook_db().update_watchlist_author(name, **fields)
+        changed = get_audiobook_db().update_watchlist_author(
+            name, profile_id=_profile(), **fields)
         return jsonify({"success": True, "changed": changed})
 
     @bp.route("/watchlist/<path:name>", methods=["DELETE"])
     def watchlist_unfollow(name: str):
-        removed = get_audiobook_db().unfollow_author(name)
+        removed = get_audiobook_db().unfollow_author(name, _profile())
         return jsonify({"success": True, "removed": removed, "watching": False})
 
     @bp.route("/watchlist/scan", methods=["POST"])
@@ -687,7 +723,8 @@ def create_audiobooks_blueprint() -> Blueprint:
         if requested in ("exact", "any"):
             return requested
         stored = next(
-            (row for row in get_audiobook_db().get_wishlist() if row["asin"] == asin),
+            (row for row in get_audiobook_db().get_wishlist(_profile())
+             if row["asin"] == asin),
             None,
         )
         return (stored or {}).get("narrator_mode") or "exact"
@@ -850,7 +887,8 @@ def create_audiobooks_blueprint() -> Blueprint:
     @bp.route("/blocklist", methods=["GET"])
     def blocklist():
         """Releases that will never be offered or grabbed again."""
-        return jsonify({"success": True, "blocked": get_audiobook_db().get_blocklist()})
+        return jsonify({"success": True,
+                        "blocked": get_audiobook_db().get_blocklist(_profile())})
 
     @bp.route("/blocklist", methods=["POST"])
     def blocklist_add():
@@ -869,17 +907,19 @@ def create_audiobooks_blueprint() -> Blueprint:
             asin=str(body.get("asin") or ""),
             book_title=str(body.get("book_title") or ""),
             reason=str(body.get("reason") or "Blocked by hand"),
+            profile_id=_profile(),
         )
         return jsonify({"success": True, "blocked": blocked})
 
     @bp.route("/blocklist/<path:key>", methods=["DELETE"])
     def blocklist_remove(key: str):
         return jsonify({"success": True,
-                        "removed": get_audiobook_db().unblock_release(key)})
+                        "removed": get_audiobook_db().unblock_release(key, _profile())})
 
     @bp.route("/blocklist", methods=["DELETE"])
     def blocklist_clear():
-        return jsonify({"success": True, "removed": get_audiobook_db().clear_blocklist()})
+        return jsonify({"success": True,
+                        "removed": get_audiobook_db().clear_blocklist(_profile())})
 
     @bp.route("/grab", methods=["POST"])
     def grab():
@@ -890,6 +930,13 @@ def create_audiobooks_blueprint() -> Blueprint:
         against the indexer and could grab something else entirely.
         """
         from core.audiobook_grab import grab_release
+
+        # Same switch music and video answer to. A profile with downloads off
+        # could reach this route and spend the download client, because nothing
+        # here had ever asked.
+        denied = _download_denied()
+        if denied is not None:
+            return denied
 
         body = request.get_json(silent=True) or {}
         release = body.get("release")

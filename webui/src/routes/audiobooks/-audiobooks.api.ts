@@ -1,4 +1,28 @@
 import { apiClient, readJson } from '@/app/api-client';
+import { getShellProfileContext } from '@/platform/shell/bridge';
+
+/**
+ * Every audiobook request, tagged with whose it is.
+ *
+ * Wishlists, followed authors and the blocklist are per profile — two people
+ * on one install do not share a reading list — and the server reads
+ * X-Profile-Id to tell them apart. Without this header every profile wrote
+ * into profile 1's lists.
+ *
+ * A CLIENT OF ITS OWN rather than a hook on the shared apiClient: that client
+ * is used by music and video too, and this must not change a single request
+ * they make.
+ */
+const audiobookClient = apiClient.extend({
+  hooks: {
+    beforeRequest: [
+      ({ request }) => {
+        const profileId = getShellProfileContext()?.profileId ?? 1;
+        request.headers.set('X-Profile-Id', String(profileId || 1));
+      },
+    ],
+  },
+});
 
 import type {
   AudiobookBlockedRelease,
@@ -69,7 +93,7 @@ export async function searchAudiobooks(
 
   try {
     const data = await readJson<ListResponse>(
-      apiClient.get('audiobooks/search', {
+      audiobookClient.get('audiobooks/search', {
         searchParams: { q: trimmed, type: searchType, limit },
       }),
     );
@@ -83,7 +107,7 @@ export async function searchAudiobooks(
 export async function fetchAudiobookHome(limit = 20): Promise<AudiobookHome> {
   try {
     const data = await readJson<HomeResponse>(
-      apiClient.get('audiobooks/home', { searchParams: { limit } }),
+      audiobookClient.get('audiobooks/home', { searchParams: { limit } }),
     );
     if (!data?.success) return { hero: null, shelves: [] };
     return { hero: data.hero ?? null, shelves: Array.isArray(data.shelves) ? data.shelves : [] };
@@ -97,7 +121,7 @@ export async function fetchAudiobook(asin: string): Promise<AudiobookItem | null
   if (!asin) return null;
   try {
     const data = await readJson<DetailResponse>(
-      apiClient.get(`audiobooks/book/${encodeURIComponent(asin)}`),
+      audiobookClient.get(`audiobooks/book/${encodeURIComponent(asin)}`),
     );
     return data?.success && data.book ? data.book : null;
   } catch (err) {
@@ -111,7 +135,7 @@ export async function fetchSimilarAudiobooks(asin: string, limit = 12): Promise<
   try {
     return listOf(
       await readJson<ListResponse>(
-        apiClient.get(`audiobooks/similar/${encodeURIComponent(asin)}`, {
+        audiobookClient.get(`audiobooks/similar/${encodeURIComponent(asin)}`, {
           searchParams: { limit },
         }),
       ),
@@ -132,7 +156,7 @@ export async function fetchSeries(
     const searchParams: Record<string, string | number> = { name, limit };
     if (seriesAsin) searchParams.asin = seriesAsin;
     return listOf(
-      await readJson<ListResponse>(apiClient.get('audiobooks/series', { searchParams })),
+      await readJson<ListResponse>(audiobookClient.get('audiobooks/series', { searchParams })),
     );
   } catch (err) {
     console.error('Failed to load the series:', err);
@@ -145,7 +169,7 @@ export async function fetchByAuthor(name: string, limit = 20): Promise<Audiobook
   try {
     return listOf(
       await readJson<ListResponse>(
-        apiClient.get('audiobooks/author', { searchParams: { name, limit } }),
+        audiobookClient.get('audiobooks/author', { searchParams: { name, limit } }),
       ),
     );
   } catch (err) {
@@ -159,7 +183,7 @@ export async function fetchByNarrator(name: string, limit = 20): Promise<Audiobo
   try {
     return listOf(
       await readJson<ListResponse>(
-        apiClient.get('audiobooks/narrator', { searchParams: { name, limit } }),
+        audiobookClient.get('audiobooks/narrator', { searchParams: { name, limit } }),
       ),
     );
   } catch (err) {
@@ -177,7 +201,7 @@ export async function fetchBrowse(
     const searchParams: Record<string, string | number> = { sort, limit };
     if (categoryName) searchParams.category = categoryName;
     return listOf(
-      await readJson<ListResponse>(apiClient.get('audiobooks/browse', { searchParams })),
+      await readJson<ListResponse>(audiobookClient.get('audiobooks/browse', { searchParams })),
     );
   } catch (err) {
     console.error('Failed to browse audiobooks:', err);
@@ -204,7 +228,7 @@ export async function fetchPersonProfile(
   if (!name) return null;
   try {
     const data = await readJson<PersonResponse>(
-      apiClient.get('audiobooks/person', { searchParams: { name, role } }),
+      audiobookClient.get('audiobooks/person', { searchParams: { name, role } }),
     );
     return data?.success && data.profile ? data.profile : null;
   } catch (err) {
@@ -215,7 +239,7 @@ export async function fetchPersonProfile(
 
 export async function fetchCategories(): Promise<AudiobookCategory[]> {
   try {
-    const data = await readJson<CategoriesResponse>(apiClient.get('audiobooks/categories'));
+    const data = await readJson<CategoriesResponse>(audiobookClient.get('audiobooks/categories'));
     return data?.success && Array.isArray(data.categories) ? data.categories : [];
   } catch (err) {
     console.error('Failed to load the audiobook genre tree:', err);
@@ -275,7 +299,7 @@ const EMPTY_COUNTS: AudiobookWishlistCounts = {
 
 export async function fetchWishlist(): Promise<AudiobookWishlistView> {
   try {
-    const data = await readJson<WishlistResponse>(apiClient.get('audiobooks/wishlist'));
+    const data = await readJson<WishlistResponse>(audiobookClient.get('audiobooks/wishlist'));
     if (!data?.success) return { items: [], counts: EMPTY_COUNTS, worker: null };
     return {
       items: Array.isArray(data.items) ? data.items : [],
@@ -303,7 +327,7 @@ export async function addToWishlist(
   if (!asin) return false;
   try {
     const data = await readJson<MutationResponse>(
-      apiClient.post('audiobooks/wishlist', { json: { asin, narrator_mode: narratorMode } }),
+      audiobookClient.post('audiobooks/wishlist', { json: { asin, narrator_mode: narratorMode } }),
     );
     return Boolean(data?.success);
   } catch (err) {
@@ -316,7 +340,7 @@ export async function removeFromWishlist(asin: string): Promise<boolean> {
   if (!asin) return false;
   try {
     const data = await readJson<MutationResponse>(
-      apiClient.delete(`audiobooks/wishlist/${encodeURIComponent(asin)}`),
+      audiobookClient.delete(`audiobooks/wishlist/${encodeURIComponent(asin)}`),
     );
     return Boolean(data?.success);
   } catch (err) {
@@ -339,7 +363,7 @@ export async function setNarratorMode(
   if (!asin) return false;
   try {
     const data = await readJson<MutationResponse>(
-      apiClient.patch(`audiobooks/wishlist/${encodeURIComponent(asin)}`, {
+      audiobookClient.patch(`audiobooks/wishlist/${encodeURIComponent(asin)}`, {
         json: { narrator_mode: narratorMode },
       }),
     );
@@ -354,7 +378,7 @@ export async function setNarratorMode(
 export async function runWishlistPass(): Promise<Record<string, number> | null> {
   try {
     const data = await readJson<{ success?: boolean; summary?: Record<string, number> }>(
-      apiClient.post('audiobooks/wishlist/search', { json: {} }),
+      audiobookClient.post('audiobooks/wishlist/search', { json: {} }),
     );
     return data?.success ? (data.summary ?? null) : null;
   } catch (err) {
@@ -377,7 +401,7 @@ export async function fetchReleases(asin: string): Promise<AudiobookReleaseCandi
   if (!asin) return [];
   try {
     const data = await readJson<ReleasesResponse>(
-      apiClient.get(`audiobooks/releases/${encodeURIComponent(asin)}`, { timeout: 120000 }),
+      audiobookClient.get(`audiobooks/releases/${encodeURIComponent(asin)}`, { timeout: 120000 }),
     );
     return data?.success && Array.isArray(data.releases) ? data.releases : [];
   } catch (err) {
@@ -393,7 +417,7 @@ export async function startReleaseSearch(
   if (!asin) return null;
   try {
     const data = await readJson<{ success?: boolean; id?: string; poll_ms?: number }>(
-      apiClient.post(`audiobooks/releases/${encodeURIComponent(asin)}/start`),
+      audiobookClient.post(`audiobooks/releases/${encodeURIComponent(asin)}/start`),
     );
     if (!data?.success || !data.id) return null;
     return { id: data.id, pollMs: data.poll_ms || 1200 };
@@ -427,7 +451,7 @@ export async function pollReleaseSearch(id: string): Promise<{
       complete?: boolean;
       error?: string;
       expired?: boolean;
-    }>(apiClient.get(`audiobooks/releases/poll?id=${encodeURIComponent(id)}`));
+    }>(audiobookClient.get(`audiobooks/releases/poll?id=${encodeURIComponent(id)}`));
     if (!data?.success)
       return { releases: [], stage: '', complete: true, error: '', expired: true };
     return {
@@ -448,7 +472,7 @@ export async function pollReleaseSearch(id: string): Promise<{
 export async function cancelReleaseSearch(id: string): Promise<void> {
   if (!id) return;
   try {
-    await apiClient.delete(`audiobooks/releases/poll?id=${encodeURIComponent(id)}`);
+    await audiobookClient.delete(`audiobooks/releases/poll?id=${encodeURIComponent(id)}`);
   } catch {
     // Best effort — the job expires on its own.
   }
@@ -480,7 +504,7 @@ export async function fetchReleaseContents(
 ): Promise<AudiobookReleaseContents | null> {
   try {
     const data = await readJson<{ success?: boolean } & AudiobookReleaseContents>(
-      apiClient.post('audiobooks/releases/contents', { json: { release }, timeout: 40000 }),
+      audiobookClient.post('audiobooks/releases/contents', { json: { release }, timeout: 40000 }),
     );
     if (!data?.success) return null;
     return {
@@ -507,7 +531,7 @@ export async function fetchLibrary(): Promise<{
       success?: boolean;
       books?: AudiobookLibraryEntry[];
       total_bytes?: number;
-    }>(apiClient.get('audiobooks/library'));
+    }>(audiobookClient.get('audiobooks/library'));
     return {
       books: data?.success && Array.isArray(data.books) ? data.books : [],
       totalBytes: data?.total_bytes || 0,
@@ -529,7 +553,7 @@ export async function deleteLibraryBook(
 ): Promise<{ ok: boolean; recycled: boolean; error: string }> {
   try {
     const data = await readJson<{ success?: boolean; recycled?: boolean; error?: string }>(
-      apiClient.delete(`audiobooks/library/${encodeURIComponent(asin)}`),
+      audiobookClient.delete(`audiobooks/library/${encodeURIComponent(asin)}`),
     );
     return {
       ok: Boolean(data?.success),
@@ -555,7 +579,7 @@ export async function fetchRecycleBin(): Promise<{
       success?: boolean;
       entries?: AudiobookRecycledBook[];
       keep_days?: number;
-    }>(apiClient.get('audiobooks/library/recycle'));
+    }>(audiobookClient.get('audiobooks/library/recycle'));
     return {
       entries: data?.success && Array.isArray(data.entries) ? data.entries : [],
       keepDays: data?.keep_days ?? 7,
@@ -570,7 +594,7 @@ export async function fetchRecycleBin(): Promise<{
 export async function restoreRecycledBook(name: string): Promise<{ ok: boolean; error: string }> {
   try {
     const data = await readJson<{ success?: boolean; error?: string }>(
-      apiClient.post(`audiobooks/library/recycle/${encodeURIComponent(name)}`),
+      audiobookClient.post(`audiobooks/library/recycle/${encodeURIComponent(name)}`),
     );
     return { ok: Boolean(data?.success), error: data?.error || '' };
   } catch (err) {
@@ -583,7 +607,7 @@ export async function restoreRecycledBook(name: string): Promise<{ ok: boolean; 
 export async function purgeRecycledBook(name: string): Promise<boolean> {
   try {
     const data = await readJson<{ success?: boolean }>(
-      apiClient.delete(`audiobooks/library/recycle/${encodeURIComponent(name)}`),
+      audiobookClient.delete(`audiobooks/library/recycle/${encodeURIComponent(name)}`),
     );
     return Boolean(data?.success);
   } catch (err) {
@@ -595,7 +619,7 @@ export async function purgeRecycledBook(name: string): Promise<boolean> {
 export async function emptyRecycleBin(): Promise<boolean> {
   try {
     const data = await readJson<{ success?: boolean }>(
-      apiClient.delete('audiobooks/library/recycle'),
+      audiobookClient.delete('audiobooks/library/recycle'),
     );
     return Boolean(data?.success);
   } catch (err) {
@@ -611,7 +635,7 @@ export async function emptyRecycleBin(): Promise<boolean> {
 export async function fetchBlocklist(): Promise<AudiobookBlockedRelease[]> {
   try {
     const data = await readJson<{ success?: boolean; blocked?: AudiobookBlockedRelease[] }>(
-      apiClient.get('audiobooks/blocklist'),
+      audiobookClient.get('audiobooks/blocklist'),
     );
     return data?.success && Array.isArray(data.blocked) ? data.blocked : [];
   } catch (err) {
@@ -629,7 +653,7 @@ export async function blockRelease(
 ): Promise<boolean> {
   try {
     const data = await readJson<{ success?: boolean }>(
-      apiClient.post('audiobooks/blocklist', {
+      audiobookClient.post('audiobooks/blocklist', {
         json: { release, asin, book_title: bookTitle, reason },
       }),
     );
@@ -643,7 +667,7 @@ export async function blockRelease(
 export async function unblockRelease(key: string): Promise<boolean> {
   try {
     const data = await readJson<{ success?: boolean }>(
-      apiClient.delete(`audiobooks/blocklist/${encodeURIComponent(key)}`),
+      audiobookClient.delete(`audiobooks/blocklist/${encodeURIComponent(key)}`),
     );
     return Boolean(data?.success);
   } catch (err) {
@@ -654,7 +678,9 @@ export async function unblockRelease(key: string): Promise<boolean> {
 
 export async function clearBlocklist(): Promise<boolean> {
   try {
-    const data = await readJson<{ success?: boolean }>(apiClient.delete('audiobooks/blocklist'));
+    const data = await readJson<{ success?: boolean }>(
+      audiobookClient.delete('audiobooks/blocklist'),
+    );
     return Boolean(data?.success);
   } catch (err) {
     console.error('Failed to clear the blocklist:', err);
@@ -668,7 +694,7 @@ export async function grabRelease(
 ): Promise<{ ok: boolean; error: string; ref: string }> {
   try {
     const data = await readJson<{ success?: boolean; error?: string; ref?: string }>(
-      apiClient.post('audiobooks/grab', { json: { asin, release } }),
+      audiobookClient.post('audiobooks/grab', { json: { asin, release } }),
     );
     // The ref is how the row that was clicked follows its own download.
     return { ok: Boolean(data?.success), error: data?.error || '', ref: data?.ref || '' };
@@ -688,7 +714,7 @@ export async function grabRelease(
 export async function fetchDownloads(activeOnly = false): Promise<AudiobookDownload[]> {
   try {
     const data = await readJson<{ success?: boolean; downloads?: AudiobookDownload[] }>(
-      apiClient.get('audiobooks/downloads', {
+      audiobookClient.get('audiobooks/downloads', {
         searchParams: activeOnly ? { active: 1 } : {},
       }),
     );
@@ -706,7 +732,7 @@ export async function fetchDownloads(activeOnly = false): Promise<AudiobookDownl
 export async function fetchFollowedAuthors(): Promise<AudiobookFollowedAuthor[]> {
   try {
     const data = await readJson<{ success?: boolean; authors?: AudiobookFollowedAuthor[] }>(
-      apiClient.get('audiobooks/watchlist'),
+      audiobookClient.get('audiobooks/watchlist'),
     );
     return data?.success && Array.isArray(data.authors) ? data.authors : [];
   } catch (err) {
@@ -725,7 +751,7 @@ export async function followAuthor(name: string, coverUrl = ''): Promise<boolean
   if (!name) return false;
   try {
     const data = await readJson<{ success?: boolean }>(
-      apiClient.post('audiobooks/watchlist', { json: { name, cover_url: coverUrl } }),
+      audiobookClient.post('audiobooks/watchlist', { json: { name, cover_url: coverUrl } }),
     );
     return Boolean(data?.success);
   } catch (err) {
@@ -738,7 +764,7 @@ export async function unfollowAuthor(name: string): Promise<boolean> {
   if (!name) return false;
   try {
     const data = await readJson<{ success?: boolean }>(
-      apiClient.delete(`audiobooks/watchlist/${encodeURIComponent(name)}`),
+      audiobookClient.delete(`audiobooks/watchlist/${encodeURIComponent(name)}`),
     );
     return Boolean(data?.success);
   } catch (err) {
@@ -755,7 +781,7 @@ export async function updateFollowedAuthor(
 ): Promise<boolean> {
   try {
     const data = await readJson<{ success?: boolean }>(
-      apiClient.patch(`audiobooks/watchlist/${encodeURIComponent(name)}`, { json: fields }),
+      audiobookClient.patch(`audiobooks/watchlist/${encodeURIComponent(name)}`, { json: fields }),
     );
     return Boolean(data?.success);
   } catch (err) {
@@ -767,7 +793,7 @@ export async function updateFollowedAuthor(
 export async function runAuthorScan(): Promise<Record<string, number> | null> {
   try {
     const data = await readJson<{ success?: boolean; summary?: Record<string, number> }>(
-      apiClient.post('audiobooks/watchlist/scan', { json: {} }),
+      audiobookClient.post('audiobooks/watchlist/scan', { json: {} }),
     );
     return data?.success ? (data.summary ?? null) : null;
   } catch (err) {

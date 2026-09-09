@@ -2014,6 +2014,7 @@ const PROFILE_PAGE_LABELS = {
     hydrabase: 'Hydrabase',
     issues: 'Issues',
     podcasts: 'Podcasts',
+    audiobooks: 'Audiobooks',
     help: 'Help & Docs',
     settings: 'Settings',
     'artist-detail': 'Artist Detail',
@@ -2629,7 +2630,7 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
         canDlCheckbox.type = 'checkbox';
         canDlCheckbox.checked = profileSettings.can_download !== false;
         dlLabel.appendChild(canDlCheckbox);
-        dlLabel.appendChild(document.createTextNode(' Can download music'));
+        dlLabel.appendChild(document.createTextNode(' Can download (music, podcasts, audiobooks & video)'));
         form.appendChild(dlLabel);
     }
 

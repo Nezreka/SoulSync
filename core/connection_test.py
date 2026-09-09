@@ -123,7 +123,13 @@ def run_service_test(service, test_config):
                     server_name = temp_client.server_info.get('ServerName', 'Unknown Server')
                 return True, f"Successfully connected to Jellyfin server: {server_name}"
             else:
-                return False, "Could not connect to Jellyfin. Check URL and API Key."
+                # Say what actually happened. The same generic line for a
+                # 401, a 404 and an unreachable host is why a server that had
+                # simply stopped accepting the old auth header looked like a
+                # mistyped URL (#1232).
+                detail = getattr(temp_client, 'last_error', '') or ''
+                base = "Could not connect to Jellyfin. Check URL and API Key."
+                return False, f"{base} ({detail})" if detail else base
         elif service == "navidrome":
             # Test Navidrome connection using Subsonic API
             base_url = test_config.get('base_url', '')

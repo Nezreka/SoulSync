@@ -72,3 +72,37 @@ def parse_profile_id(request, default: int = 1) -> int:
     except (ValueError, TypeError):
         pass
     return default
+
+
+def download_permission_error(profile_id: int = 1):
+    """A 403 response when this profile may not download, otherwise ``None``.
+
+    "Can download" is one switch per profile, not one per media type, so
+    podcasts and audiobooks answer to the same checkbox music and video
+    already answer to. Profile 1 is the admin and is always allowed.
+
+    Mirrors the music side's ``check_download_permission`` so callers read the
+    same: ``err = download_permission_error(pid)`` then ``if err: return err``.
+    It lives here rather than in web_server so the isolated blueprints can use
+    it without importing the app.
+    """
+    try:
+        pid = int(profile_id or 1)
+    except (TypeError, ValueError):
+        pid = 1
+    if pid == 1:
+        return None
+    try:
+        from database.music_database import get_database
+
+        profile = get_database().get_profile(pid)
+    except Exception:
+        # a check that cannot read the profile row must not lock somebody out
+        # of their own downloads. fail open, same as the music side.
+        return None
+    if profile and not profile.get("can_download", True):
+        return jsonify({
+            "success": False,
+            "error": "Downloads are disabled for this profile.",
+        }), 403
+    return None

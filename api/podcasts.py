@@ -597,6 +597,20 @@ def queue_podcast_download(data: Dict[str, Any]) -> Dict[str, Any]:
 # Blueprint Factory
 # ---------------------------------------------------------------------------
 
+def _profile() -> int:
+    """Whose podcasts these are.
+
+    Falls back to the X-Profile-Id header every other profile-aware endpoint
+    already accepts, rather than to a literal 1 — a caller that forgets the
+    query parameter used to silently read and write profile 1's watchlist.
+    An explicit parameter still wins, so nothing that already passes one
+    changes behaviour.
+    """
+    from .helpers import parse_profile_id
+
+    return parse_profile_id(request)
+
+
 def create_podcasts_blueprint() -> Blueprint:
     bp = Blueprint("podcasts_api", __name__, url_prefix="/api/podcasts")
 
@@ -705,6 +719,14 @@ def create_podcasts_blueprint() -> Blueprint:
     @bp.route("/download", methods=["POST"])
     def download_episode():
         """Trigger background download of a podcast episode."""
+        # Same switch music and video answer to. Nothing here had ever asked,
+        # so a profile with downloads off could still fill the podcast folder.
+        from .helpers import download_permission_error
+
+        denied = download_permission_error(_profile())
+        if denied is not None:
+            return denied
+
         data = request.get_json(silent=True) or {}
         if not (data.get("enclosure_url") or "").strip():
             return jsonify({"success": False, "error": "enclosure_url is required"}), 400
@@ -763,9 +785,9 @@ def create_podcasts_blueprint() -> Blueprint:
         if db is None:
             return jsonify({"success": True, "podcasts": []})
         try:
-            profile_id = int(request.args.get("profile_id", 1))
+            profile_id = int(request.args.get("profile_id") or _profile())
         except (ValueError, TypeError):
-            profile_id = 1
+            profile_id = _profile()
         try:
             items = db.get_watchlist_podcasts(profile_id=profile_id)
             return jsonify({"success": True, "podcasts": items})
@@ -829,11 +851,11 @@ def create_podcasts_blueprint() -> Blueprint:
         except (ValueError, TypeError):
             episode_count = None
 
-        profile_id = body.get("profile_id", 1)
+        profile_id = body.get("profile_id") or _profile()
         try:
             profile_id = int(profile_id)
         except (ValueError, TypeError):
-            profile_id = 1
+            profile_id = _profile()
 
         db = _db()
         if db is None:
@@ -1008,11 +1030,11 @@ def create_podcasts_blueprint() -> Blueprint:
         if db is None:
             return jsonify({"success": False, "error": "Database unavailable"}), 500
 
-        profile_id = 1
         try:
-            profile_id = int(request.args.get("profile_id") or body_json.get("profile_id") or 1)
+            profile_id = int(request.args.get("profile_id")
+                             or body_json.get("profile_id") or _profile())
         except (ValueError, TypeError):
-            profile_id = 1
+            profile_id = _profile()
 
         imported_count = 0
         errors = 0
@@ -1054,9 +1076,9 @@ def create_podcasts_blueprint() -> Blueprint:
             return jsonify({"success": False, "error": "Database unavailable"}), 500
 
         try:
-            profile_id = int(request.args.get("profile_id", 1))
+            profile_id = int(request.args.get("profile_id") or _profile())
         except (ValueError, TypeError):
-            profile_id = 1
+            profile_id = _profile()
 
         try:
             shows = db.get_watchlist_podcasts(profile_id=profile_id)

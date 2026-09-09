@@ -239,14 +239,29 @@ def run_pass(db: Any = None, limit: Optional[int] = None) -> Dict[str, Any]:
     except Exception as exc:                                # noqa: BLE001
         logger.debug("Could not free stale searching rows: %s", exc)
 
+    # Every profile, not just the first. There is no request behind a timed
+    # pass, so the profile has to come from the rows — and sweeping only
+    # profile 1 meant a second person's wishlist was never searched at all.
+    #
+    # The batch size is PER PROFILE deliberately: it exists to pace indexer
+    # load per pass, and one busy profile must not starve another of its turn.
     try:
-        due = database.get_wishlist_due(
-            retry_after_seconds=retry_after_seconds(),
-            limit=limit if limit is not None else batch_size(),
-        )
+        profiles = database.profiles_with_rows()
     except Exception as exc:                                # noqa: BLE001
-        logger.warning("Could not read the audiobook wishlist: %s", exc)
-        return summary
+        logger.debug("Could not list audiobook profiles: %s", exc)
+        profiles = [1]
+
+    due = []
+    for profile_id in profiles:
+        try:
+            due.extend(database.get_wishlist_due(
+                profile_id=profile_id,
+                retry_after_seconds=retry_after_seconds(),
+                limit=limit if limit is not None else batch_size(),
+            ))
+        except Exception as exc:                            # noqa: BLE001
+            logger.warning("Could not read profile %s's audiobook wishlist: %s",
+                           profile_id, exc)
 
     for row in due:
         result = process_one(row, db=database)

@@ -787,6 +787,31 @@ class AudiobookDatabase:
             logger.warning("Could not update the followed author %s: %s", name, exc)
             return False
 
+    def profiles_with_rows(self) -> List[int]:
+        """Every profile that has wishlisted or followed anything.
+
+        The automations run on a timer with no request behind them, so there is
+        no current profile to read. Sweeping only profile 1 meant a second
+        person's wishlist was never searched and their followed authors never
+        checked — their lists simply sat there.
+
+        Derived from the rows themselves rather than the profiles table: this
+        database does not own profiles, and a profile with nothing in it needs
+        no pass anyway.
+        """
+        conn = self._connect()
+        try:
+            found = {
+                int(row[0]) for row in conn.execute(
+                    "SELECT DISTINCT profile_id FROM audiobook_wishlist "
+                    "UNION SELECT DISTINCT profile_id FROM audiobook_watchlist"
+                ) if row[0] is not None
+            }
+        except sqlite3.Error as exc:
+            logger.warning("Could not list audiobook profiles: %s", exc)
+            return [1]
+        return sorted(found) or [1]
+
     def get_watchlist_due(self, profile_id: int = 1,
                           rescan_after_seconds: float = 20 * 3600,
                           limit: int = 25) -> List[Dict[str, Any]]:
