@@ -1860,20 +1860,25 @@ class YouTubeClient(DownloadSourcePlugin):
                             # cookies are usually fine — so this is a fallback
                             # worth trying, not a cure.
                             logger.info(
-                                "Retry %s/%s without cookies (keeping the format selector)",
+                                "Retry %s/%s without cookies, relaxed format",
                                 attempt + 1, max_retries,
                             )
                             download_opts.pop('cookiefile', None)
                             download_opts.pop('cookiesfrombrowser', None)
                             download_opts.pop('extractor_args', None)
                         else:
-                            # Nothing to drop, so this is the format fallback it
-                            # always was: there were never cookies in play.
-                            download_opts['format'] = 'best'
                             logger.info(
-                                "Retry %s/%s with 'best' format",
+                                "Retry %s/%s with a relaxed format",
                                 attempt + 1, max_retries,
                             )
+                        # 'best' meant "take anything" when muxed streams were
+                        # normal. YouTube has all but stopped serving them, so
+                        # on a modern extract it is the NARROWEST selector there
+                        # is and fails with "Requested format is not available"
+                        # — measured on a real video with a current yt-dlp,
+                        # where 'best' failed and 'bestaudio/best' downloaded.
+                        # Same last-ditch intent, a selector that still matches.
+                        download_opts['format'] = 'bestaudio/best'
 
 
                     # Perform download. Ranking already probed itags; fetch

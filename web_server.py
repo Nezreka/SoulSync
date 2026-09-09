@@ -189,6 +189,7 @@ from core.metadata.source import (
     mb_release_detail_cache_lock,
     normalize_album_cache_key,
 )
+from core import direct_download_state
 from core import runtime_state as _rt_state
 from core.runtime_state import (
     activity_feed,
@@ -5833,8 +5834,22 @@ def download_music_video():
             _music_video_downloads[video_id]['artist'] = artist_name
             _music_video_downloads[video_id]['title'] = track_title
 
+            # Also put it on the Downloads page. This path keeps its own private
+            # dict and its own status endpoint, so until now a music video was
+            # downloading with nothing to show for it on the page whose whole
+            # job is showing downloads. Registered as managed_externally: this
+            # thread runs and files it, the music engine must not adopt it.
+            _mv_card = direct_download_state.register(
+                direct_download_state.MUSIC_VIDEO_BATCH, video_id,
+                title=track_title, artist=artist_name, album='Music Videos',
+                artwork_url=data.get('thumbnail') or '',
+                source_label='Music Video (YouTube)',
+            )
+
             def _progress(pct):
                 _music_video_downloads[video_id]['progress'] = round(pct, 1)
+                if _mv_card:
+                    direct_download_state.update_progress(video_id, percent=pct)
 
             final_path = download_orchestrator.client("youtube").download_music_video(video_url, output_path, progress_callback=_progress)
 
@@ -5842,16 +5857,24 @@ def download_music_video():
                 _music_video_downloads[video_id]['status'] = 'completed'
                 _music_video_downloads[video_id]['progress'] = 100
                 _music_video_downloads[video_id]['path'] = final_path
+                if _mv_card:
+                    direct_download_state.mark_status(video_id, 'completed', file_path=final_path)
                 logger.info(f"[Music Video] Downloaded: {artist_name} - {track_title} → {final_path}")
                 add_activity_item("", "Music Video Downloaded", f"{artist_name} - {track_title}", "Now")
             else:
                 _music_video_downloads[video_id]['status'] = 'error'
                 _music_video_downloads[video_id]['error'] = 'Download failed — file not found'
+                if _mv_card:
+                    direct_download_state.mark_status(video_id, 'failed',
+                                                     error='Download failed — file not found')
                 logger.error(f"[Music Video] Download failed for: {artist_name} - {track_title}")
 
         except Exception as e:
             _music_video_downloads[video_id]['status'] = 'error'
             _music_video_downloads[video_id]['error'] = str(e)
+            # A card left saying 'downloading' after the thread died is worse
+            # than no card: the page would show it running forever.
+            direct_download_state.mark_status(video_id, 'failed', error=str(e))
             logger.error(f"[Music Video] {e}")
 
     # Run in background thread
@@ -6141,6 +6164,89 @@ def playback_queue_prefetch_status():
         return jsonify({'success': False, 'error': str(exc)}), 500
 
 
+# States a plugin reports when there is nothing left to wait for. Soulseek and
+# the torrent adapters spell success differently, so match on substrings.
+_QUICK_DONE = ('succeeded', 'completed', 'complete')
+_QUICK_DEAD = ('errored', 'error', 'failed', 'rejected', 'cancelled', 'canceled', 'aborted')
+
+
+def _track_quick_download(download_id, title, artist='', size_bytes=0, source_label=''):
+    """Put a basic-search download on the Downloads page and keep it moving.
+
+    This path hands the file to the orchestrator and returns, so there is no
+    batch and nothing writes a task row — which is why these downloads ran
+    invisibly. Registering a card is only half of it: a card nothing updates
+    would sit at "downloading" forever, which is worse than no card at all. So
+    a small poller follows this one download until it reaches a terminal state.
+
+    A thread per download matches what the music-video path already does, and
+    these are user-initiated one at a time. It is a daemon thread and every
+    exit path marks the card, including the give-up.
+    """
+    download_id = str(download_id or '').strip()
+    if not download_id or not direct_download_state.register(
+            direct_download_state.QUICK_BATCH, download_id, title=title,
+            artist=artist, album='Quick Downloads', size_bytes=size_bytes,
+            source_label=source_label or 'Search'):
+        return
+
+    def _poll():
+        import time as _t
+        misses = 0
+        # ~30 minutes at 2s. A download the client has forgotten stops being
+        # our problem long before that, but a slow Soulseek peer is normal.
+        for _ in range(900):
+            _t.sleep(2)
+            if direct_download_state.is_cancelled(download_id):
+                direct_download_state.mark_status(download_id, 'cancelled')
+                return
+            try:
+                st = run_async(download_orchestrator.get_download_status(download_id),
+                               timeout=20)
+            except Exception as poll_err:      # noqa: BLE001 - a status poll must not kill the thread
+                logger.debug("quick download poll failed for %s: %s", download_id, poll_err)
+                st = None
+            if st is None:
+                misses += 1
+                # Gone from the client: finished and reaped, or never started.
+                if misses >= 15:
+                    direct_download_state.mark_status(
+                        download_id, 'failed',
+                        error='The download client stopped reporting this transfer.')
+                    return
+                continue
+            misses = 0
+
+            size = int(getattr(st, 'size', 0) or 0)
+            done = int(getattr(st, 'transferred', 0) or 0)
+            # progress is 0-1 on some plugins and 0-100 on others; bytes are
+            # unambiguous, so prefer them and only fall back to the field.
+            if size > 0:
+                percent = (done / size) * 100.0
+            else:
+                raw = float(getattr(st, 'progress', 0) or 0)
+                percent = raw * 100.0 if raw <= 1.0 else raw
+            direct_download_state.update_progress(
+                download_id, percent=percent, bytes_done=done, bytes_total=size)
+
+            state = str(getattr(st, 'state', '') or '').lower()
+            if any(w in state for w in _QUICK_DEAD):
+                direct_download_state.mark_status(download_id, 'failed', error=state)
+                return
+            if any(w in state for w in _QUICK_DONE):
+                direct_download_state.mark_status(
+                    download_id, 'completed',
+                    file_path=str(getattr(st, 'file_path', '') or ''))
+                return
+
+        direct_download_state.mark_status(
+            download_id, 'failed', error='Timed out waiting for the download to finish.')
+
+    import threading as _threading
+    _threading.Thread(target=_poll, daemon=True,
+                      name=f'quick-dl-{download_id[:12]}').start()
+
+
 @app.route('/api/download', methods=['POST'])
 def start_download():
     """Simple download route"""
@@ -6189,6 +6295,13 @@ def start_download():
                                 'spotify_album': None,
                                 'track_info': None
                             }
+                        _track_quick_download(
+                            download_id,
+                            title=track_data.get('title') or filename,
+                            artist=track_data.get('artist') or '',
+                            size_bytes=file_size,
+                            source_label='Album download',
+                        )
                         started_downloads += 1
                 except Exception as e:
                     logger.error(f"Failed to start track download: {e}")
@@ -6269,6 +6382,13 @@ def start_download():
 
                 # Extract track name from filename for activity
                 track_name = filename.split('/')[-1] if '/' in filename else filename.split('\\')[-1] if '\\' in filename else filename
+                _track_quick_download(
+                    download_id,
+                    title=data.get('title') or track_name,
+                    artist=data.get('artist') or username or '',
+                    size_bytes=file_size,
+                    source_label=source_label or 'Search',
+                )
                 logger.info(f"Starting simple track download: '{track_name}'")
                 add_activity_item("", "Track Download Started", f"'{track_name}'", "Now")
                 return jsonify({"success": True, "message": "Download started"})

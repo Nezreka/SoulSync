@@ -2134,7 +2134,13 @@ def test_download_sync_third_retry_uses_muxed_best(tmp_path, monkeypatch):
     assert len(seen) == 3
     assert 'opus' in seen[0]
     assert 'opus' in seen[1]  # retry 2 still prefers opus; keeps cookies
-    assert seen[2] == 'best'
+    # Was 'best'. That meant "take anything" when muxed streams were normal;
+    # YouTube has all but stopped serving them, so it is now the NARROWEST
+    # selector available and fails with "Requested format is not available".
+    # Measured on a real video with a current yt-dlp: 'best' failed,
+    # 'bestaudio/best' downloaded. Same last-ditch intent, a selector that
+    # still matches something.
+    assert seen[2] == 'bestaudio/best'
     assert cookie_keys[0] == (True, False)
     assert cookie_keys[1] == (True, False)
     assert cookie_keys[2] == (False, False)  # last ditch: expired cookies must not poison 'best'

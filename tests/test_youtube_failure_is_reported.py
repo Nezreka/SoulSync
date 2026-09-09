@@ -551,13 +551,24 @@ def test_the_cookie_dropping_retry_keeps_its_format():
         "the cookie-dropping retry changes the format again"
 
 
-def test_the_format_fallback_survives_when_there_are_no_cookies():
-    """With nothing to drop it is still the format fallback it always was."""
+def test_the_last_ditch_selector_actually_matches_something():
+    """'best' means "one file with video AND audio". That was "take anything"
+    when muxed streams were normal; YouTube has all but stopped serving them, so
+    it is now the NARROWEST selector available. Measured on a real video with a
+    current yt-dlp: 'best' failed with "Requested format is not available" and
+    'bestaudio/best' downloaded — so the last-ditch attempt was the one least
+    likely to work.
+
+    Both paths get it: dropping cookies and relaxing the format are independent
+    fixes, and the earlier version applied the relaxation only where it hurt.
+    """
     src = (__import__("pathlib").Path(__file__).resolve().parents[1]
            / "core/youtube_client.py").read_text(encoding="utf-8", errors="ignore")
     chain = src.split("elif attempt >= 2:", 1)[1].split("break", 1)[0]
-    no_cookie_path = chain.split("else:", 1)[1]
-    assert "download_opts['format'] = 'best'" in no_cookie_path
+    assert "download_opts['format'] = 'bestaudio/best'" in chain
+    assert "download_opts['format'] = 'best'" not in chain
+    # applied once, after the branch, so neither path can miss it
+    assert chain.count("download_opts['format']") == 1
 
 
 def test_the_403_advice_still_names_ytdlp_when_cookies_exist():
