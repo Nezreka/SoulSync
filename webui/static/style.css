@@ -83779,11 +83779,41 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
    Deliberately the same vocabulary as .hybrid-source-item on the Downloads tab
    — same radii, same surface alphas, same status-dot colours — so the two
    views read as one page. */
-.src-tile-grid {
+/* Two labelled groups, not one long ragged wrap. Eleven tiles in a single
+   auto-fill grid landed 7-then-4 and read as an accident rather than a layout. */
+.src-tile-grid { margin-top: 14px; }
+.src-group + .src-group { margin-top: 26px; }
+.src-group-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.src-group-label {
+    font-size: 0.74em;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.6);
+}
+.src-group-count {
+    font-size: 0.66em;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.07);
+    color: rgba(255, 255, 255, 0.5);
+}
+.src-group-hint {
+    font-size: 0.74em;
+    color: rgba(255, 255, 255, 0.32);
+}
+.src-tile-row {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(164px, 1fr));
+    /* auto-fit + a max keeps tiles a sane size instead of stretching four of
+       them across the whole page when a group is small. */
+    grid-template-columns: repeat(auto-fit, minmax(150px, 190px));
     gap: 14px;
-    margin-top: 14px;
 }
 .src-tile {
     position: relative;
@@ -83949,8 +83979,41 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 .src-modal-body .src-config-panel { display: block; }
 body.src-modal-open { overflow: hidden; }
 
+/* Test button + its answer, in the modal header. */
+.src-modal-test {
+    flex-shrink: 0;
+    padding: 7px 14px;
+    border: 1px solid rgba(var(--accent-rgb), 0.35);
+    border-radius: 8px;
+    background: rgba(var(--accent-rgb), 0.12);
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 0.8em;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.18s, border-color 0.18s;
+}
+.src-modal-test:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.22); }
+.src-modal-test:disabled { opacity: 0.6; cursor: default; }
+.src-modal-result {
+    padding: 0 18px;
+    font-size: 0.82em;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.55);
+}
+.src-modal-result:empty { display: none; }
+.src-modal-result:not(:empty) {
+    padding: 12px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.src-modal-result.is-ok      { color: #7fe0a8; background: rgba(52, 210, 123, 0.07); }
+.src-modal-result.is-warn    { color: #fbcd7a; background: rgba(240, 180, 41, 0.08); }
+.src-modal-result.is-fail    { color: #ff9b95; background: rgba(255, 95, 87, 0.08); }
+.src-modal-result.is-testing { color: rgba(255, 255, 255, 0.6); }
+.src-modal-result.is-na      { color: rgba(255, 255, 255, 0.42); }
+
 @media (max-width: 620px) {
-    .src-tile-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+    .src-tile-row { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
     .src-modal { max-height: 92vh; }
     .src-modal-overlay { padding: 10px; }
 }

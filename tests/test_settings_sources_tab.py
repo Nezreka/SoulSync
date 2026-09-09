@@ -122,7 +122,8 @@ def test_every_source_has_a_tile(js):
     fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
     assert "HYBRID_SOURCES.filter" in fn
     assert "SOURCE_CONFIG_ID_BY_SRC" in fn
-    assert "src-tile-name" in fn and "src-tile-art" in fn
+    markup = js.split("function _srcTileMarkup(", 1)[1].split("\n}", 1)[0]
+    assert "src-tile-name" in markup and "src-tile-art" in markup
 
 
 def test_the_panel_is_moved_not_cloned(js):
@@ -287,3 +288,68 @@ def test_sources_gets_the_full_width_like_logs():
     # A grid uses width by fitting more tiles; a form just stretches its inputs.
     css = _strip_comments(_read("webui/static/style.css"))
     assert 'data-stg="sources"' in css.split(":has(", 1)[1][:4000] or 'data-stg="sources"' in css
+
+
+# ---------------------------------------------------------------------------
+# Layout and the per-source test
+# ---------------------------------------------------------------------------
+
+def test_the_tiles_are_grouped_not_one_ragged_wrap(js):
+    """Eleven tiles in a single auto-fill grid wrapped 7-then-4 and read as an
+    accident. Two labelled groups make the same wrap look deliberate."""
+    fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
+    assert "In your chain" in fn and "Available" in fn
+    assert "src-group" in fn
+
+
+def test_the_chain_group_is_in_chain_order(js):
+    """Registry order put #4 before #2, which makes the numbers on the chips
+    look wrong even though they are right."""
+    fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
+    assert "order.indexOf(a.id) - order.indexOf(b.id)" in fn
+
+
+def test_a_small_group_does_not_stretch_across_the_page():
+    css = _strip_comments(_read("webui/static/style.css"))
+    row = css.split(".src-tile-row {", 1)[1].split("}", 1)[0]
+    assert "auto-fit" in row
+    # a max on the track, or four tiles span the whole width of the page
+    assert "190px" in row or "px)" in row.split("minmax(", 1)[1]
+
+
+def test_there_is_a_per_source_test_button(index, js):
+    """The summary toast gave a count and the dot gave a colour. Neither told
+    you WHAT was wrong with a source you could see was unhappy."""
+    assert 'id="src-modal-test"' in index
+    assert 'id="src-modal-result"' in index
+    assert "function testOneSource(" in js
+
+
+def test_the_test_shows_what_the_server_said(js):
+    fn = js.split("async function testOneSource(", 1)[1].split("\nwindow.", 1)[0]
+    assert "_ssLastTestMessage[srcId]" in fn
+    assert "out.textContent" in fn
+
+
+def test_the_test_updates_the_dot_and_the_tiles(js):
+    fn = js.split("async function testOneSource(", 1)[1].split("\nwindow.", 1)[0]
+    assert "_hybridSourceStatus[srcId] = state" in fn
+    assert "buildSourceTiles()" in fn
+
+
+def test_a_source_with_no_probe_says_so_rather_than_failing(js):
+    """YouTube used to be `() => Promise.resolve(true)`; a source with nothing
+    to test must not read as a source that failed a test."""
+    fn = js.split("async function testOneSource(", 1)[1].split("\nwindow.", 1)[0]
+    assert "no connection test" in fn.lower()
+
+
+def test_opening_a_source_carries_its_last_result_in(js):
+    # An amber tile should still explain itself once you are inside.
+    fn = js.split("function openSourceModal(", 1)[1].split("\nwindow.", 1)[0]
+    assert "src-modal-result" in fn
+
+
+def test_the_result_line_is_announced(index):
+    block = index.split('id="src-modal-result"', 1)[0][-160:]
+    assert 'role="status"' in index.split('id="src-modal-result"', 1)[1][:120] or 'role="status"' in block

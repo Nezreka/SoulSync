@@ -1015,38 +1015,60 @@ window.toggleSourceCard = toggleSourceCard;
 // One tile per source: logo, name under it, and the state that matters at a
 // glance. Rendered from HYBRID_SOURCES so the tiles and the chain rows on the
 // Downloads tab cannot disagree about a name or a logo.
+function _srcTileMarkup(src, order) {
+    const pos = order.indexOf(src.id);
+    const inChain = pos !== -1;
+    const state = (_hybridSourceStatus && _hybridSourceStatus[src.id]) || 'unknown';
+    const unready = _hybridSourceUnready && _hybridSourceUnready[src.id];
+    const said = _ssLastTestMessage[src.id];
+    const dotLabel = { unknown: 'Not tested yet', testing: 'Testing…', ok: 'Connected',
+                       warn: said || 'Working, but needs attention',
+                       fail: said || 'Connection failed',
+                       na: 'No connection test for this source' }[state];
+    const art = src.icon
+        ? `<img src="${src.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${src.emoji}</span>'">`
+        : `<span class="emoji-icon">${src.emoji}</span>`;
+    const chip = (unready || state === 'warn')
+        ? '<span class="src-tile-chip src-tile-chip--warn">needs setup</span>'
+        : inChain
+            ? `<span class="src-tile-chip src-tile-chip--on">#${pos + 1}</span>`
+            : '<span class="src-tile-chip">not in chain</span>';
+    return `<button type="button" class="src-tile${inChain ? ' is-active' : ''}" `
+         + `data-source-id="${src.id}" onclick="openSourceModal('${src.id}')" `
+         + `title="Configure ${escapeHtml(src.name)}">`
+         + `<span class="src-tile-dot hss-${state}" title="${escapeHtml(String(dotLabel))}"></span>`
+         + `<span class="src-tile-art">${art}</span>`
+         + `<span class="src-tile-name">${escapeHtml(src.name)}</span>`
+         + chip
+         + '</button>';
+}
+
+// Two groups rather than one long ragged wrap: what is actually downloading for
+// you, in the order it is tried, then everything else. Eleven tiles in a single
+// auto-fill grid wrapped 7-then-4 and read as an accident, and registry order
+// put "#4" before "#2", which made the chain numbers look wrong.
 function buildSourceTiles() {
     const grid = document.getElementById('source-tile-grid');
     if (!grid) return;
     const order = (typeof getHybridOrder === 'function' ? getHybridOrder() : []) || [];
+    const configurable = HYBRID_SOURCES.filter(src => SOURCE_CONFIG_ID_BY_SRC[src.id]);
 
-    grid.innerHTML = HYBRID_SOURCES.filter(src => SOURCE_CONFIG_ID_BY_SRC[src.id])
-        .map(src => {
-            const pos = order.indexOf(src.id);
-            const inChain = pos !== -1;
-            const state = (_hybridSourceStatus && _hybridSourceStatus[src.id]) || 'unknown';
-            const unready = _hybridSourceUnready && _hybridSourceUnready[src.id];
-            const dotLabel = { unknown: 'Not tested yet', testing: 'Testing…', ok: 'Connected',
-                               warn: _ssLastTestMessage[src.id] || 'Working, but needs attention',
-                               fail: _ssLastTestMessage[src.id] || 'Connection failed',
-                               na: 'No connection test for this source' }[state];
-            const art = src.icon
-                ? `<img src="${src.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${src.emoji}</span>'">`
-                : `<span class="emoji-icon">${src.emoji}</span>`;
-            const chip = (unready || state === 'warn')
-                ? '<span class="src-tile-chip src-tile-chip--warn">needs setup</span>'
-                : inChain
-                    ? `<span class="src-tile-chip src-tile-chip--on">#${pos + 1} in chain</span>`
-                    : '<span class="src-tile-chip">not in chain</span>';
-            return `<button type="button" class="src-tile${inChain ? ' is-active' : ''}" `
-                 + `data-source-id="${src.id}" onclick="openSourceModal('${src.id}')" `
-                 + `title="Configure ${escapeHtml(src.name)}">`
-                 + `<span class="src-tile-dot hss-${state}" title="${dotLabel}"></span>`
-                 + `<span class="src-tile-art">${art}</span>`
-                 + `<span class="src-tile-name">${escapeHtml(src.name)}</span>`
-                 + chip
-                 + '</button>';
-        }).join('');
+    const inChain = configurable
+        .filter(src => order.includes(src.id))
+        .sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+    const available = configurable.filter(src => !order.includes(src.id));
+
+    const section = (label, hint, list) => list.length
+        ? `<div class="src-group"><div class="src-group-head">`
+          + `<span class="src-group-label">${label}</span>`
+          + `<span class="src-group-count">${list.length}</span>`
+          + `<span class="src-group-hint">${hint}</span></div>`
+          + `<div class="src-tile-row">${list.map(src => _srcTileMarkup(src, order)).join('')}</div></div>`
+        : '';
+
+    grid.innerHTML =
+        section('In your chain', 'tried in this order', inChain) +
+        section('Available', 'configure now, add to the chain when you want it', available);
 }
 window.buildSourceTiles = buildSourceTiles;
 
@@ -1072,6 +1094,44 @@ let _openSourceModalId = null;
 // second element with the same id in the document, and every getElementById in
 // saveSettings would then read whichever one the browser handed back first —
 // silently saving the copy the user never typed into.
+// Test one source from its own modal and SHOW what the server said. The
+// summary toast only ever gave a count, and the tile dot only a colour, so a
+// source that was amber for a reason you could act on had no way of telling
+// you what the reason was.
+async function testOneSource(srcId) {
+    const btn = document.getElementById('src-modal-test');
+    const out = document.getElementById('src-modal-result');
+    const probe = HYBRID_SOURCE_PROBE[srcId];
+    if (!out) return;
+    if (!probe) {
+        out.className = 'src-modal-result is-na';
+        out.textContent = 'This source has no connection test.';
+        return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Testing…'; }
+    _hybridSourceStatus[srcId] = 'testing';
+    out.className = 'src-modal-result is-testing';
+    out.textContent = 'Testing…';
+    let good = false;
+    try {
+        good = await probe();
+    } catch (e) {
+        good = false;
+        _ssLastTestMessage[srcId] = String((e && e.message) || e || 'Test failed');
+    }
+    const warned = !!_ssLastTestWarned[srcId];
+    const state = good ? (warned ? 'warn' : 'ok') : 'fail';
+    _hybridSourceStatus[srcId] = state;
+    const said = _ssLastTestMessage[srcId];
+    out.className = `src-modal-result is-${state}`;
+    out.textContent = said || (good ? 'Connected.' : 'Connection failed.');
+    document.getElementById('src-modal-meta').innerHTML =
+        `<span class="src-tile-dot hss-${state}"></span>`;
+    if (btn) { btn.disabled = false; btn.textContent = 'Test'; }
+    buildSourceTiles();
+}
+window.testOneSource = testOneSource;
+
 function openSourceModal(srcId) {
     const containerId = SOURCE_CONFIG_ID_BY_SRC[srcId];
     const overlay = document.getElementById('source-config-modal');
@@ -1088,6 +1148,27 @@ function openSourceModal(srcId) {
         : `<span class="emoji-icon">${src.emoji}</span>`;
     const state = (_hybridSourceStatus && _hybridSourceStatus[srcId]) || 'unknown';
     document.getElementById('src-modal-meta').innerHTML = `<span class="src-tile-dot hss-${state}"></span>`;
+
+    const testBtn = document.getElementById('src-modal-test');
+    if (testBtn) {
+        testBtn.disabled = false;
+        testBtn.textContent = 'Test';
+        testBtn.style.display = HYBRID_SOURCE_PROBE[srcId] ? '' : 'none';
+        testBtn.onclick = () => testOneSource(srcId);
+    }
+    // Carry the last result in rather than showing a blank slate: an amber dot
+    // on the tile should still explain itself once you are inside.
+    const out = document.getElementById('src-modal-result');
+    if (out) {
+        const said = _ssLastTestMessage[srcId];
+        if (said && state !== 'unknown') {
+            out.className = `src-modal-result is-${state}`;
+            out.textContent = said;
+        } else {
+            out.className = 'src-modal-result';
+            out.textContent = '';
+        }
+    }
 
     body.appendChild(panel);
     overlay.hidden = false;
