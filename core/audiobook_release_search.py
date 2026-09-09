@@ -64,6 +64,20 @@ _FORMAT_SCORES: Dict[str, float] = {
     "ogg": 5.0,
 }
 
+def _quality_format_scores() -> Dict[str, float]:
+    """Format scores from the quality profile, falling back to the defaults.
+
+    Wrapped so a profile that cannot be read never stops a search: taste is
+    not allowed to break ranking.
+    """
+    try:
+        from core.audiobook_quality import format_scores
+        return format_scores()
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("Could not read the quality profile, using defaults: %s", exc)
+        return dict(_FORMAT_SCORES)
+
+
 _FORMAT_PATTERNS = (
     ("m4b", re.compile(r"(?i)\bm4b\b")),
     ("m4a", re.compile(r"(?i)\bm4a\b")),
@@ -747,7 +761,9 @@ def score_release(
     # both — assigning to short_warning in turn hid whichever came first.
     release.short_warning = " ".join(warnings)
 
-    format_bonus = _FORMAT_SCORES.get(release.audio_format, 0.0)
+    # The user's order when they have set one; the table above is the default
+    # it is built from.
+    format_bonus = _quality_format_scores().get(release.audio_format, 0.0)
     if format_bonus:
         score += format_bonus
         reasons.append(f"{release.audio_format} +{format_bonus:g}")
@@ -848,6 +864,30 @@ def rank_releases(
     # catalogue names the edition AND the release names its own, and most
     # releases name nothing.
     keep = [r for r in keep if r.abridgement_verdict != "mismatch"]
+    # Releases the user has blocked, or that failed badly enough to be blocked
+    # automatically. Without this the wishlist re-grabs the same broken posting
+    # forever: it fails, returns to the wishlist, and is found again next pass.
+    try:
+        from core.audiobook_database import get_audiobook_db
+        blocked = get_audiobook_db().blocked_keys()
+        if blocked:
+            from core.audiobook_database import AudiobookDatabase
+            keep = [r for r in keep
+                    if AudiobookDatabase.release_key(r.to_dict()) not in blocked]
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("Could not read the blocklist: %s", exc)
+
+    # What the user's quality profile refuses. Kept apart from the checks
+    # above: those are facts about a release, this is taste, and a taste
+    # setting must never be the reason a search looks broken — a profile that
+    # cannot be read rejects nothing.
+    try:
+        from core.audiobook_quality import profile as quality_profile, rejection
+        prof = quality_profile()
+        keep = [r for r in keep if not rejection(r, prof)]
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("Could not apply the quality profile: %s", exc)
+
     # Too small to be the whole book, at any bitrate a real audiobook uses.
     # Dropped rather than ranked low for the same reason as the wrong edition:
     # it is not a worse copy of what was asked for, it is not the thing.

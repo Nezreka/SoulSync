@@ -215,7 +215,17 @@ def test_only_the_acquisition_routes_write_anything():
                        # for a query string. It reads a .torrent or NZB into
                        # memory and returns the file list; nothing is enqueued
                        # and nothing is stored. Pinned below.
-                       "/api/audiobooks/releases/contents"}
+                       "/api/audiobooks/releases/contents",
+                       # Blocking a release is acquisition: it is how the
+                       # wishlist is told to stop fetching one.
+                       "/api/audiobooks/blocklist",
+                       "/api/audiobooks/blocklist/<path:key>",
+                       # Deleting a book and putting one back are the two
+                       # library writes. Both move files, neither touches a
+                       # music path.
+                       "/api/audiobooks/library/<asin>",
+                       "/api/audiobooks/library/recycle/<path:name>",
+                       "/api/audiobooks/library/recycle"}
     for rule in _blueprint_app().url_map.iter_rules():
         if rule.endpoint == "static":
             continue

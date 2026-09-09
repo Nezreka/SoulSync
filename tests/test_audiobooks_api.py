@@ -1024,3 +1024,41 @@ def test_a_failed_read_never_blocks_the_grab(client, catalog, wishlist_db):
                            json={"release": {"protocol": "torrent"}}).get_json()
     assert body["success"] is True
     assert body["files"] == [] and body["note"]
+
+
+# ---------------------------------------------------------------------------
+# Library
+# ---------------------------------------------------------------------------
+
+def test_the_library_lists_what_is_on_disk(client, catalog, wishlist_db):
+    wishlist_db.add_to_library({"asin": "B1", "title": "PHM", "author_names": ["Andy Weir"]},
+                               "/books/PHM", file_count=3, size_bytes=1000)
+    body = client.get("/api/audiobooks/library").get_json()
+    assert body["success"] is True
+    assert body["books"][0]["asin"] == "B1"
+    assert body["total_bytes"] == 1000
+
+
+def test_deleting_a_book_recycles_it_and_forgets_it(client, catalog, wishlist_db):
+    wishlist_db.add_to_library({"asin": "B1", "title": "PHM"}, "/books/PHM")
+    with patch("core.audiobook_recycle.discard",
+               return_value={"ok": True, "permanent": False, "error": ""}) as discard:
+        body = client.delete("/api/audiobooks/library/B1").get_json()
+
+    assert body["success"] is True and body["recycled"] is True
+    discard.assert_called_once()
+    # The row goes either way: leaving it would put an Owned badge on a book
+    # that is no longer there.
+    assert wishlist_db.is_owned("B1") is False
+
+
+def test_deleting_a_book_that_is_not_in_the_library_is_a_404(client, catalog, wishlist_db):
+    assert client.delete("/api/audiobooks/library/NOPE").status_code == 404
+
+
+def test_the_recycle_bin_reports_what_is_recoverable(client, catalog, wishlist_db):
+    with patch("core.audiobook_recycle.list_bin", return_value=[{"name": "x", "age_days": 1}]), \
+         patch("core.audiobook_recycle.keep_days", return_value=7):
+        body = client.get("/api/audiobooks/library/recycle").get_json()
+    assert body["entries"][0]["name"] == "x"
+    assert body["keep_days"] == 7

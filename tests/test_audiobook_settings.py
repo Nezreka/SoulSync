@@ -186,6 +186,12 @@ def test_a_short_book_is_staged_not_dropped(defaults):
 # database by hand, which is how the first ten of these spent a week invisible.
 _EXPOSED = {
     "download_source.mode": "audiobook-download-mode",
+    "quality.format_order": "audiobook-format-first",
+    "quality.min_bitrate_kbps": "audiobook-min-bitrate",
+    "quality.max_bitrate_kbps": "audiobook-max-bitrate",
+    "quality.allow_dramatized": "audiobook-allow-dramatized",
+    "recycle_deletes": "audiobook-recycle-deletes",
+    "recycle_keep_days": "audiobook-recycle-keep-days",
     "torrent_category": "audiobook-torrent-category",
     "prowlarr_categories": "audiobook-prowlarr-categories",
     "completeness_tolerance": "audiobook-completeness-tolerance",
@@ -603,3 +609,32 @@ def test_polling_stops_once_everything_settles():
     modal = _read("webui/src/routes/audiobooks/-ui/audiobook-releases-modal.tsx")
     assert "const settled = refs.every(" in modal
     assert "if (!settled)" in modal
+
+
+def test_the_quality_profile_is_one_for_the_whole_side():
+    """Not one per followed author.
+
+    A listener's idea of an acceptable file does not change between authors,
+    and the per-author card already carries the two settings that genuinely do
+    differ there — whether to auto-queue, and which narrator.
+    """
+    modal = _read("webui/src/routes/watchlist/-ui/audiobook-author-settings-modal.tsx")
+    for absent in ("format_order", "min_bitrate", "max_bitrate", "allow_dramatized"):
+        assert absent not in modal, absent
+
+
+def test_the_preferred_format_choice_keeps_the_others_behind_it():
+    # Picking MP3 must not silently discard every other format.
+    js = _read("webui/static/settings.js")
+    block = js.split("format_order: (function", 1)[1].split("})()", 1)[0]
+    assert "filter(f => f !== first)" in block
+    assert "[first, ...rest]" in block
+
+
+def test_the_quality_floor_is_separate_from_the_completeness_floor():
+    # They answer different questions: could this be the whole book at all,
+    # versus do I want it. Sharing one number would conflate fact with taste.
+    index = _read("webui/index.html")
+    assert 'id="audiobook-min-bitrate"' in index
+    assert 'id="audiobook-completeness-tolerance"' in index
+    assert "min_complete_kbps" not in index

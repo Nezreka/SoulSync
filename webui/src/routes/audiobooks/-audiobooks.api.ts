@@ -1,15 +1,18 @@
 import { apiClient, readJson } from '@/app/api-client';
 
 import type {
+  AudiobookBlockedRelease,
   AudiobookCategory,
   AudiobookDownload,
   AudiobookFollowedAuthor,
   AudiobookNarratorMode,
   AudiobookHome,
   AudiobookItem,
+  AudiobookLibraryEntry,
   AudiobookSearchResult,
   AudiobookPersonProfile,
   AudiobookRole,
+  AudiobookRecycledBook,
   AudiobookReleaseCandidate,
   AudiobookSearchType,
   AudiobookSource,
@@ -491,6 +494,174 @@ export async function fetchReleaseContents(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Library — what is actually on disk
+// ---------------------------------------------------------------------------
+
+export async function fetchLibrary(): Promise<{
+  books: AudiobookLibraryEntry[];
+  totalBytes: number;
+}> {
+  try {
+    const data = await readJson<{
+      success?: boolean;
+      books?: AudiobookLibraryEntry[];
+      total_bytes?: number;
+    }>(apiClient.get('audiobooks/library'));
+    return {
+      books: data?.success && Array.isArray(data.books) ? data.books : [],
+      totalBytes: data?.total_bytes || 0,
+    };
+  } catch (err) {
+    console.error('Failed to load the audiobook library:', err);
+    return { books: [], totalBytes: 0 };
+  }
+}
+
+/**
+ * Remove one book from disk and from the record.
+ *
+ * Goes to the recycle bin rather than being unlinked, so a mistake is
+ * recoverable for as long as the keep window allows.
+ */
+export async function deleteLibraryBook(
+  asin: string,
+): Promise<{ ok: boolean; recycled: boolean; error: string }> {
+  try {
+    const data = await readJson<{ success?: boolean; recycled?: boolean; error?: string }>(
+      apiClient.delete(`audiobooks/library/${encodeURIComponent(asin)}`),
+    );
+    return {
+      ok: Boolean(data?.success),
+      recycled: Boolean(data?.recycled),
+      error: data?.error || '',
+    };
+  } catch (err) {
+    console.error('Failed to delete the book:', err);
+    return { ok: false, recycled: false, error: 'Request failed' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Recycle bin — deleted books, still recoverable
+// ---------------------------------------------------------------------------
+
+export async function fetchRecycleBin(): Promise<{
+  entries: AudiobookRecycledBook[];
+  keepDays: number;
+}> {
+  try {
+    const data = await readJson<{
+      success?: boolean;
+      entries?: AudiobookRecycledBook[];
+      keep_days?: number;
+    }>(apiClient.get('audiobooks/library/recycle'));
+    return {
+      entries: data?.success && Array.isArray(data.entries) ? data.entries : [],
+      keepDays: data?.keep_days ?? 7,
+    };
+  } catch (err) {
+    console.error('Failed to read the recycle bin:', err);
+    return { entries: [], keepDays: 7 };
+  }
+}
+
+/** Put one book back exactly where it came from. */
+export async function restoreRecycledBook(name: string): Promise<{ ok: boolean; error: string }> {
+  try {
+    const data = await readJson<{ success?: boolean; error?: string }>(
+      apiClient.post(`audiobooks/library/recycle/${encodeURIComponent(name)}`),
+    );
+    return { ok: Boolean(data?.success), error: data?.error || '' };
+  } catch (err) {
+    console.error('Failed to restore the book:', err);
+    return { ok: false, error: 'Request failed' };
+  }
+}
+
+/** Erase one now, without waiting for the keep window. */
+export async function purgeRecycledBook(name: string): Promise<boolean> {
+  try {
+    const data = await readJson<{ success?: boolean }>(
+      apiClient.delete(`audiobooks/library/recycle/${encodeURIComponent(name)}`),
+    );
+    return Boolean(data?.success);
+  } catch (err) {
+    console.error('Failed to purge the book:', err);
+    return false;
+  }
+}
+
+export async function emptyRecycleBin(): Promise<boolean> {
+  try {
+    const data = await readJson<{ success?: boolean }>(
+      apiClient.delete('audiobooks/library/recycle'),
+    );
+    return Boolean(data?.success);
+  } catch (err) {
+    console.error('Failed to empty the recycle bin:', err);
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Blocklist — releases never to offer or grab again
+// ---------------------------------------------------------------------------
+
+export async function fetchBlocklist(): Promise<AudiobookBlockedRelease[]> {
+  try {
+    const data = await readJson<{ success?: boolean; blocked?: AudiobookBlockedRelease[] }>(
+      apiClient.get('audiobooks/blocklist'),
+    );
+    return data?.success && Array.isArray(data.blocked) ? data.blocked : [];
+  } catch (err) {
+    console.error('Failed to load the audiobook blocklist:', err);
+    return [];
+  }
+}
+
+/** Block one release. The RELEASE, never the book — the book stays wanted. */
+export async function blockRelease(
+  release: AudiobookReleaseCandidate,
+  asin = '',
+  bookTitle = '',
+  reason = 'Blocked by hand',
+): Promise<boolean> {
+  try {
+    const data = await readJson<{ success?: boolean }>(
+      apiClient.post('audiobooks/blocklist', {
+        json: { release, asin, book_title: bookTitle, reason },
+      }),
+    );
+    return Boolean(data?.success);
+  } catch (err) {
+    console.error('Failed to block the release:', err);
+    return false;
+  }
+}
+
+export async function unblockRelease(key: string): Promise<boolean> {
+  try {
+    const data = await readJson<{ success?: boolean }>(
+      apiClient.delete(`audiobooks/blocklist/${encodeURIComponent(key)}`),
+    );
+    return Boolean(data?.success);
+  } catch (err) {
+    console.error('Failed to unblock the release:', err);
+    return false;
+  }
+}
+
+export async function clearBlocklist(): Promise<boolean> {
+  try {
+    const data = await readJson<{ success?: boolean }>(apiClient.delete('audiobooks/blocklist'));
+    return Boolean(data?.success);
+  } catch (err) {
+    console.error('Failed to clear the blocklist:', err);
+    return false;
+  }
+}
+
 export async function grabRelease(
   asin: string,
   release: AudiobookReleaseCandidate,
@@ -577,6 +748,22 @@ export async function unfollowAuthor(name: string): Promise<boolean> {
 }
 
 /** Check followed authors now instead of waiting for the daily automation. */
+/** Change one followed author's settings from their card. */
+export async function updateFollowedAuthor(
+  name: string,
+  fields: { auto_wishlist?: number; narrator_mode?: string; since_date?: string },
+): Promise<boolean> {
+  try {
+    const data = await readJson<{ success?: boolean }>(
+      apiClient.patch(`audiobooks/watchlist/${encodeURIComponent(name)}`, { json: fields }),
+    );
+    return Boolean(data?.success);
+  } catch (err) {
+    console.error(`Failed to update the followed author ${name}:`, err);
+    return false;
+  }
+}
+
 export async function runAuthorScan(): Promise<Record<string, number> | null> {
   try {
     const data = await readJson<{ success?: boolean; summary?: Record<string, number> }>(

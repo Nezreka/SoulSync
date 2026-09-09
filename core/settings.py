@@ -919,6 +919,29 @@ class ConfigManager:
                 # so it is hidden from the results. It is a piece of the book,
                 # a shorter edition, or the wrong title.
                 "min_complete_kbps": 24,
+                # Deleting a book moves it to the hidden <library>/.deleted
+                # unlinking it, and the daily purge empties what has sat there
+                # this long. Off, deletes are permanent immediately.
+                "recycle_deletes": True,
+                "recycle_keep_days": 7,
+                # What "good" means, for the whole audiobook side. ONE profile,
+                # not one per followed author: a listener's idea of an
+                # acceptable file does not change between authors.
+                "quality": {
+                    # Best first. m4b leads because it is the only format built
+                    # for the job — chapters, bookmarks, and one file instead
+                    # of ninety.
+                    "format_order": ["m4b", "m4a", "mp3", "opus", "ogg", "flac"],
+                    # 0 means no opinion. These REJECT rather than rank, so they
+                    # are separate from min_complete_kbps above, which asks the
+                    # different question of whether a release could be the whole
+                    # book at all.
+                    "min_bitrate_kbps": 0,
+                    "max_bitrate_kbps": 0,
+                    # GraphicAudio and the like. On by default because they are
+                    # already shown-but-outranked; turning this off removes them.
+                    "allow_dramatized": True,
+                },
                 # How long a short book is kept staged before giving up. Torrents
                 # finish late and uploaders repair releases, so patience is right;
                 # forever means one broken release holds a wishlist row for good.

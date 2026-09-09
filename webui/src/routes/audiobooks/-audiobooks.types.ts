@@ -265,6 +265,46 @@ export interface AudiobookDownload {
   completeness?: string;
 }
 
+/** One book on disk. */
+export interface AudiobookLibraryEntry {
+  asin: string;
+  title: string;
+  author: string;
+  narrator: string;
+  series_title: string;
+  series_sequence: string;
+  path: string;
+  file_count: number;
+  size_bytes: number;
+  audio_format: string;
+  runtime_minutes: number;
+  imported_at: number;
+}
+
+/** One book sitting in the recycle bin, still recoverable. */
+export interface AudiobookRecycledBook {
+  name: string;
+  path: string;
+  /** The folder name it had before it was recycled. */
+  original: string;
+  /** Where it goes back to — not the same thing as the name. */
+  original_path: string;
+  reason: string;
+  age_days: number;
+}
+
+/** A release that will never be offered or grabbed again. */
+export interface AudiobookBlockedRelease {
+  key: string;
+  asin: string;
+  book_title: string;
+  release_title: string;
+  indexer: string;
+  protocol: string;
+  reason: string;
+  blocked_at: number;
+}
+
 /** An author being followed for new releases. */
 export interface AudiobookFollowedAuthor {
   name: string;
@@ -276,4 +316,10 @@ export interface AudiobookFollowedAuthor {
   found_total: number;
   last_error: string;
   added_at: number;
+  /** 1 = queue their new releases, 0 = record them without downloading. */
+  auto_wishlist?: number;
+  /** Which narrator rule an auto-wishlisted book is queued under. Answered
+   *  once when the author is followed, because nobody sees the book before it
+   *  is queued — there is no modal to ask. */
+  narrator_mode?: string;
 }

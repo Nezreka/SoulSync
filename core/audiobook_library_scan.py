@@ -114,7 +114,15 @@ def iter_book_folders(root: Path, max_depth: int = MAX_DEPTH):
             continue
 
         try:
-            children = [child for child in folder.iterdir() if child.is_dir()]
+            children = [
+                child for child in folder.iterdir()
+                # Hidden folders are somebody's business, not the library's.
+                # The recycle bin is the one that matters: without this, a book
+                # deleted yesterday is found in .deleted, read from its own
+                # sidecar, and adopted straight back into the library — the
+                # delete would silently undo itself on the next daily scan.
+                if child.is_dir() and not child.name.startswith(".")
+            ]
         except OSError as exc:
             logger.debug("Could not list %s: %s", folder, exc)
             continue

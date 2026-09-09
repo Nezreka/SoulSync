@@ -1904,6 +1904,21 @@ async function loadSettingsData() {
         abChecked(document.getElementById('audiobook-embed-artwork'), ab.embed_artwork);
         abChecked(document.getElementById('audiobook-save-artwork'), ab.save_artwork);
         abChecked(document.getElementById('audiobook-write-nfo'), ab.write_nfo);
+
+        // Quality profile. The stored order is a list, best first; the page
+        // only edits which format leads, and the rest keep their order behind
+        // it — a full drag-to-reorder list is more UI than the choice needs.
+        const abq = ab.quality || {};
+        const abOrder = Array.isArray(abq.format_order) && abq.format_order.length
+            ? abq.format_order
+            : ['m4b', 'm4a', 'mp3', 'opus', 'ogg', 'flac'];
+        abVal(document.getElementById('audiobook-format-first'), abOrder[0] || 'm4b');
+        abVal(document.getElementById('audiobook-min-bitrate'), abq.min_bitrate_kbps ?? 0);
+        abVal(document.getElementById('audiobook-max-bitrate'), abq.max_bitrate_kbps ?? 0);
+        abChecked(document.getElementById('audiobook-allow-dramatized'),
+            abq.allow_dramatized);
+        abChecked(document.getElementById('audiobook-recycle-deletes'), ab.recycle_deletes);
+        abVal(document.getElementById('audiobook-recycle-keep-days'), ab.recycle_keep_days ?? 7);
         document.getElementById('disc-label').value = settings.file_organization?.disc_label || 'Disc';
         document.getElementById('collab-artist-mode').value = settings.file_organization?.collab_artist_mode || 'first';
         document.getElementById('artistletter-symbol-fallback').checked = settings.file_organization?.artistletter_symbol_fallback === true;
@@ -4922,6 +4937,27 @@ async function saveSettings(quiet = false) {
             embed_artwork: document.getElementById('audiobook-embed-artwork')?.checked !== false,
             save_artwork: document.getElementById('audiobook-save-artwork')?.checked !== false,
             write_nfo: document.getElementById('audiobook-write-nfo')?.checked !== false,
+            quality: {
+                // The chosen format leads; the default order follows behind it, so
+                // picking MP3 does not silently discard every other format.
+                format_order: (function () {
+                    const first = document.getElementById('audiobook-format-first')?.value || 'm4b';
+                    const rest = ['m4b', 'm4a', 'mp3', 'opus', 'ogg', 'flac']
+                        .filter(f => f !== first);
+                    return [first, ...rest];
+                })(),
+                min_bitrate_kbps: Math.max(0,
+                    parseInt(document.getElementById('audiobook-min-bitrate')?.value, 10) || 0),
+                max_bitrate_kbps: Math.max(0,
+                    parseInt(document.getElementById('audiobook-max-bitrate')?.value, 10) || 0),
+                allow_dramatized:
+                    document.getElementById('audiobook-allow-dramatized')?.checked !== false,
+            },
+            recycle_deletes:
+                document.getElementById('audiobook-recycle-deletes')?.checked !== false,
+            // 0 turns the bin off; it never means "erase everything now".
+            recycle_keep_days: Math.min(365, Math.max(0,
+                parseInt(document.getElementById('audiobook-recycle-keep-days')?.value, 10) || 0)),
         },
         import: {
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,

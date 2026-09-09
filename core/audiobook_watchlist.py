@@ -110,12 +110,29 @@ def scan_author(row: Dict[str, Any], db: Any = None, client: Any = None) -> Dict
     fresh = new_books_for(books, row.get("since_date"), is_known)
     outcome["found"] = len(fresh)
 
+    # Following without auto-wishlist is "tell me, do not fetch". The releases
+    # are still counted and reported, so the card can say what turned up.
+    if not row.get("auto_wishlist", 1):
+        outcome["wishlisted"] = 0
+        database.mark_author_scanned(name, found=outcome["found"])
+        if outcome["found"]:
+            logger.info("Followed author %s: %d new, not wishlisted (auto-wishlist off)",
+                        name, outcome["found"])
+        return outcome
+
+    # The narrator rule was answered once, when the author was followed: an
+    # auto-wishlisted book is never seen by anyone before it is queued, so
+    # there is no modal to ask. Defaults to `exact`, the standard every other
+    # route into the wishlist uses.
+    narrator_mode = str(row.get("narrator_mode") or "exact").strip().lower()
+    if narrator_mode not in ("exact", "any"):
+        narrator_mode = "exact"
+
     for payload in fresh:
-        # `exact` on the book's own narrator — the standard every other route
-        # into the wishlist uses.
-        if database.add_to_wishlist(payload):
+        if database.add_to_wishlist(payload, narrator_mode=narrator_mode):
             outcome["wishlisted"] += 1
-            logger.info("Followed author %s: wishlisted %s", name, payload.get("title"))
+            logger.info("Followed author %s: wishlisted %s (%s narrator)",
+                        name, payload.get("title"), narrator_mode)
 
     database.mark_author_scanned(name, found=outcome["wishlisted"])
     return outcome

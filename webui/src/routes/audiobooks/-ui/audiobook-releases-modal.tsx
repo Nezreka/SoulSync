@@ -7,6 +7,7 @@ import type { AudiobookReleaseCandidate } from '../-audiobooks.types';
 
 import {
   addToWishlist,
+  blockRelease,
   cancelReleaseSearch,
   fetchDownloads,
   fetchReleaseContents,
@@ -77,6 +78,7 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
   const [readingRow, setReadingRow] = useState('');
   // Which release each grab produced, so the row that was clicked can show
   // what happened to it instead of pointing at another page.
+  const [blocked, setBlocked] = useState<Set<string>>(new Set());
   const [grabbedRefs, setGrabbedRefs] = useState<Record<string, string>>({});
   const [downloads, setDownloads] = useState<Record<string, AudiobookDownload>>({});
   const jobRef = useRef('');
@@ -239,6 +241,15 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
       bestKeys: new Set(bests.map(rowKey)),
     };
   }, [releases]);
+
+  /**
+   * Refuse this release from now on. The RELEASE, not the book — the book
+   * stays wanted, and the wishlist simply stops being offered this copy.
+   */
+  const block = async (release: AudiobookReleaseCandidate, key: string) => {
+    setBlocked((prev) => new Set(prev).add(key));
+    await blockRelease(release, asin, title, 'Blocked by hand');
+  };
 
   const toggleContents = async (release: AudiobookReleaseCandidate, key: string) => {
     if (openRow === key) {
@@ -439,14 +450,28 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
                         <span className={styles.releaseReasons}>{release.reasons.join(' · ')}</span>
                       )}
 
-                      <button
-                        type="button"
-                        className={styles.contentsToggle}
-                        onClick={() => void toggleContents(release, key)}
-                        aria-expanded={openRow === key}
-                      >
-                        {openRow === key ? '▾' : '▸'} What's inside
-                      </button>
+                      <div className={styles.releaseRowActions}>
+                        <button
+                          type="button"
+                          className={styles.contentsToggle}
+                          onClick={() => void toggleContents(release, key)}
+                          aria-expanded={openRow === key}
+                        >
+                          {openRow === key ? '▾' : '▸'} What's inside
+                        </button>
+
+                        {/* A bad copy you never want offered again. The book
+                            stays wanted; only this posting is refused. */}
+                        <button
+                          type="button"
+                          className={styles.blockBtn}
+                          onClick={() => void block(release, key)}
+                          disabled={blocked.has(key)}
+                          title="Never offer this release again. The book stays on your wishlist."
+                        >
+                          {blocked.has(key) ? 'Blocked' : 'Block'}
+                        </button>
+                      </div>
 
                       {openRow === key && (
                         <div className={styles.contents}>

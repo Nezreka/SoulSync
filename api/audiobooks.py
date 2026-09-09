@@ -608,6 +608,18 @@ def create_audiobooks_blueprint() -> Blueprint:
         )
         return jsonify({"success": True, "followed": followed, "watching": True})
 
+    @bp.route("/watchlist/<path:name>", methods=["PATCH"])
+    def watchlist_update(name: str):
+        """Change one followed author's settings from their card."""
+        body = request.get_json(silent=True) or {}
+        fields = {k: v for k, v in body.items()
+                  if k in ("auto_wishlist", "narrator_mode", "since_date")}
+        if not fields:
+            return jsonify({"success": False, "error": "nothing to change"}), 400
+
+        changed = get_audiobook_db().update_watchlist_author(name, **fields)
+        return jsonify({"success": True, "changed": changed})
+
     @bp.route("/watchlist/<path:name>", methods=["DELETE"])
     def watchlist_unfollow(name: str):
         removed = get_audiobook_db().unfollow_author(name)
@@ -757,6 +769,118 @@ def create_audiobooks_blueprint() -> Blueprint:
                             "note": "Could not read this release."})
         return jsonify({"success": True, **found})
 
+    # ------------------------------------------------------------------
+    # Library
+    # ------------------------------------------------------------------
+
+    @bp.route("/library", methods=["GET"])
+    def library():
+        """Everything imported, newest first."""
+        rows = get_audiobook_db().get_library()
+        return jsonify({
+            "success": True,
+            "books": rows,
+            "total_bytes": sum(int(r.get("size_bytes") or 0) for r in rows),
+        })
+
+    @bp.route("/library/<asin>", methods=["DELETE"])
+    def library_delete(asin: str):
+        """Remove one book from disk and from the record.
+
+        The folder goes to the recycle bin rather than being unlinked, so a
+        mistake is recoverable for as long as the keep window allows. The row
+        is dropped either way: leaving it would put an Owned badge on a book
+        that is no longer there.
+        """
+        db = get_audiobook_db()
+        row = next((r for r in db.get_library() if r.get("asin") == asin), None)
+        if row is None:
+            return jsonify({"success": False, "error": "Not in your library"}), 404
+
+        from core.audiobook_recycle import discard
+
+        outcome = discard(str(row.get("path") or ""), reason="deleted from the library")
+        db.remove_from_library(asin)
+        return jsonify({
+            "success": True,
+            "recycled": bool(outcome.get("ok") and not outcome.get("permanent")),
+            "permanent": bool(outcome.get("permanent")),
+            "error": outcome.get("error", ""),
+        })
+
+    @bp.route("/library/recycle", methods=["GET"])
+    def library_recycle():
+        """What is still recoverable, and for how long."""
+        from core.audiobook_recycle import keep_days, list_bin
+
+        return jsonify({"success": True, "entries": list_bin(), "keep_days": keep_days()})
+
+    @bp.route("/library/recycle/<path:name>", methods=["POST"])
+    def library_restore(name: str):
+        from core.audiobook_recycle import restore
+
+        outcome = restore(name)
+        status = 200 if outcome.get("ok") else 400
+        return jsonify({"success": bool(outcome.get("ok")),
+                        "restored_to": outcome.get("restored_to", ""),
+                        "error": outcome.get("error", "")}), status
+
+    @bp.route("/library/recycle/<path:name>", methods=["DELETE"])
+    def library_purge_one(name: str):
+        """Erase one recycled book now, without waiting for the keep window."""
+        from core.audiobook_recycle import purge_entry
+
+        outcome = purge_entry(name)
+        status = 200 if outcome.get("ok") else 400
+        return jsonify({"success": bool(outcome.get("ok")),
+                        "error": outcome.get("error", "")}), status
+
+    @bp.route("/library/recycle", methods=["DELETE"])
+    def library_empty_bin():
+        """Erase everything in the bin now."""
+        from core.audiobook_recycle import empty_bin
+
+        summary = empty_bin()
+        return jsonify({"success": True, **summary})
+
+    # ------------------------------------------------------------------
+    # Blocklist
+    # ------------------------------------------------------------------
+
+    @bp.route("/blocklist", methods=["GET"])
+    def blocklist():
+        """Releases that will never be offered or grabbed again."""
+        return jsonify({"success": True, "blocked": get_audiobook_db().get_blocklist()})
+
+    @bp.route("/blocklist", methods=["POST"])
+    def blocklist_add():
+        """Block one release.
+
+        The RELEASE, never the book: the book stays wanted, this says only
+        that one posting of it is no good.
+        """
+        body = request.get_json(silent=True) or {}
+        release = body.get("release")
+        if not isinstance(release, dict):
+            return jsonify({"success": False, "error": "release is required"}), 400
+
+        blocked = get_audiobook_db().block_release(
+            release,
+            asin=str(body.get("asin") or ""),
+            book_title=str(body.get("book_title") or ""),
+            reason=str(body.get("reason") or "Blocked by hand"),
+        )
+        return jsonify({"success": True, "blocked": blocked})
+
+    @bp.route("/blocklist/<path:key>", methods=["DELETE"])
+    def blocklist_remove(key: str):
+        return jsonify({"success": True,
+                        "removed": get_audiobook_db().unblock_release(key)})
+
+    @bp.route("/blocklist", methods=["DELETE"])
+    def blocklist_clear():
+        return jsonify({"success": True, "removed": get_audiobook_db().clear_blocklist()})
+
     @bp.route("/grab", methods=["POST"])
     def grab():
         """Send one chosen release to the download client.
@@ -830,6 +954,7 @@ def create_audiobooks_blueprint() -> Blueprint:
                 source=str(release.get("protocol") or ""),
                 client_id=client_ref,
                 release_title=str(release.get("title") or ""),
+                release_guid=str(release.get("guid") or ""),
                 indexer=str(release.get("indexer") or ""),
                 author=str(body.get("author") or ""),
                 bytes_total=int(release.get("size_bytes") or 0),

@@ -20,8 +20,10 @@ import { AudiobookCard } from './audiobook-card';
 import { useAudiobookContext } from './audiobook-context';
 import { AudiobookGenreNav } from './audiobook-genre-nav';
 import { AudiobookHero } from './audiobook-hero';
+import { AudiobookLibraryModal } from './audiobook-library-modal';
 import { AudiobookPeopleRow } from './audiobook-people-row';
 import { AudiobookRail } from './audiobook-rail';
+import { AudiobookReviewModal } from './audiobook-review-modal';
 import { AudiobookSearchBar } from './audiobook-search-bar';
 import styles from './audiobooks-page.module.css';
 
@@ -53,6 +55,8 @@ export function AudiobooksBrowsePage() {
   const activeGenre = search.genre ?? '';
   const mode = activeQuery ? 'search' : activeGenre ? 'genre' : 'home';
 
+  const [showBlocklist, setShowBlocklist] = useState(false);
+  const [showLibrary, setShowLibrary] = useState(false);
   const [draft, setDraft] = useState(activeQuery);
 
   const [home, setHome] = useState<AudiobookHome>({ hero: null, shelves: [] });
@@ -194,7 +198,44 @@ export function AudiobooksBrowsePage() {
             <span className={styles.wishlistLinkCount}>{wishlistCounts.total}</span>
           )}
         </Link>
+
+        {/* What you already have, beside what you want and what you refuse. */}
+        <button
+          type="button"
+          className={styles.wishlistLink}
+          onClick={() => setShowLibrary(true)}
+          title="Everything downloaded and filed"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M4 4h5v16H4zM11 4h4v16h-4zM17 5l3 15"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            />
+          </svg>
+          Library
+        </button>
+
+        {/* Beside the wishlist because they are two halves of the same idea:
+            what to fetch, and what never to fetch again. */}
+        <button
+          type="button"
+          className={styles.wishlistLink}
+          onClick={() => setShowBlocklist(true)}
+          title="Deleted books you can still restore, and releases that will never be grabbed"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
+            <path d="M5.6 5.6l12.8 12.8" stroke="currentColor" strokeWidth="1.8" />
+          </svg>
+          Bin
+        </button>
       </div>
+
+      {showLibrary && <AudiobookLibraryModal onClose={() => setShowLibrary(false)} />}
+      {showBlocklist && <AudiobookReviewModal onClose={() => setShowBlocklist(false)} />}
 
       <AudiobookGenreNav categories={categories} active={activeGenre} onSelect={selectGenre} />
 

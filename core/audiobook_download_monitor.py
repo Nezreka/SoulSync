@@ -465,6 +465,26 @@ def _return_to_wishlist(database: Any, row: Dict[str, Any], error: str) -> None:
     if not asin:
         return
 
+    # Block the release that just failed BEFORE putting the book back. The
+    # wishlist searches again on its next pass and would otherwise find the
+    # same broken posting, grab it, fail, and go round again forever — which is
+    # exactly what a release that is really part 1 of 5 would do.
+    #
+    # The RELEASE is blocked, never the book. The book is still wanted; this
+    # says only that one posting of it is no good.
+    try:
+        database.block_release(
+            {"guid": row.get("release_guid") or "",
+             "title": row.get("release_title") or "",
+             "indexer": row.get("indexer") or "",
+             "protocol": row.get("source") or ""},
+            asin=asin,
+            book_title=str(row.get("title") or ""),
+            reason=error or "The download failed",
+        )
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("Could not block the failed release: %s", exc)
+
     try:
         if database.is_wishlisted(asin):
             database.mark_wishlist_status(asin, STATUS_FAILED, error=error)

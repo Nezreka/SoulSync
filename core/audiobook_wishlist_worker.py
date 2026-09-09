@@ -201,6 +201,7 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
                 source=str(getattr(best, "protocol", "") or ""),
                 client_id=client_ref,
                 release_title=str(getattr(best, "title", "") or ""),
+                release_guid=str(getattr(best, "guid", "") or ""),
                 indexer=str(getattr(best, "indexer", "") or ""),
                 author=(row.get("authors") or [""])[0],
                 bytes_total=int(getattr(best, "size_bytes", 0) or 0),

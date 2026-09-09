@@ -146,7 +146,7 @@ def test_the_job_says_what_it_is_doing_while_it_works():
     A blank modal for forty seconds reads as broken however fast the search
     actually is.
     """
-    stages = []
+    seen = set()
     gate = {"released": False}
 
     def steps(*a, **kw):
@@ -159,18 +159,23 @@ def test_the_job_says_what_it_is_doing_while_it_works():
     with _chain(), patch("core.audiobook_release_search.iter_prowlarr_releases", steps), \
          patch("core.audiobook_soulseek.is_available", return_value=False):
         job_id = start(BOOK)
+        # Collect every stage the job publishes rather than asserting on
+        # whichever one the first poll happens to catch. The job is set up
+        # before the search starts, so "Starting the search" is a legitimate
+        # first answer and racing it made this flaky.
         deadline = time.time() + 5
         while time.time() < deadline:
             state = poll(job_id)
             if state and state["stage"]:
-                stages.append(state["stage"])
+                seen.add(state["stage"])
+            if any("andy weir" in stage for stage in seen):
                 break
             time.sleep(0.02)
         gate["released"] = True
         _wait(job_id)
 
-    assert stages, "the job never reported a stage"
-    assert "andy weir project hail mary" in stages[0]
+    assert seen, "the job never reported a stage"
+    assert any("andy weir project hail mary" in stage for stage in seen), seen
 
 
 # ---------------------------------------------------------------------------

@@ -252,3 +252,76 @@ def test_the_handler_never_raises_into_the_engine():
          patch("core.audiobook_watchlist.run_scan", side_effect=RuntimeError("boom")):
         result = auto_scan_audiobook_watchlist({}, deps=None)
     assert result["status"] == "error"
+
+
+# ---------------------------------------------------------------------------
+# Per-author settings
+# ---------------------------------------------------------------------------
+
+def test_following_defaults_to_wishlisting_with_the_credited_narrator(db):
+    db.follow_author("Andy Weir")
+    row = db.get_watchlist()[0]
+    assert row["auto_wishlist"] == 1
+    assert row["narrator_mode"] == "exact"
+
+
+def test_an_author_can_be_watched_without_downloading(db):
+    """"Tell me, do not fetch" — the podcast card's own auto-download toggle.
+
+    The releases are still found and counted so the card can say what turned
+    up; they are simply not queued.
+    """
+    db.follow_author("Brandon Sanderson", since_date="2000-01-01")
+    db.update_watchlist_author("Brandon Sanderson", auto_wishlist=0)
+    row = db.get_watchlist()[0]
+
+    outcome = scan_author(
+        row, db=db, client=_Catalogue([_book("NEW", "Wind and Truth", "2026-06-01")]))
+
+    assert outcome["found"] >= 1
+    assert outcome["wishlisted"] == 0
+    assert db.get_wishlist() == []
+
+
+def test_the_narrator_choice_is_honoured_by_the_scan(db):
+    # Nobody sees an auto-wishlisted book before it is queued, so the answer
+    # has to have been given when the author was followed.
+    db.follow_author("Brandon Sanderson", since_date="2000-01-01")
+    db.update_watchlist_author("Brandon Sanderson", narrator_mode="any")
+    row = db.get_watchlist()[0]
+
+    scan_author(
+        row, db=db, client=_Catalogue([_book("NEW", "Wind and Truth", "2026-06-01")]))
+
+    assert db.get_wishlist()[0]["narrator_mode"] == "any"
+
+
+def test_a_nonsense_narrator_mode_falls_back_to_exact(db):
+    db.follow_author("Andy Weir")
+    db.update_watchlist_author("Andy Weir", narrator_mode="whatever")
+    assert db.get_watchlist()[0]["narrator_mode"] == "exact"
+
+
+def test_the_since_date_can_be_moved_back_to_backfill(db):
+    db.follow_author("Andy Weir")
+    db.update_watchlist_author("Andy Weir", since_date="2010-01-01")
+    assert db.get_watchlist()[0]["since_date"] == "2010-01-01"
+
+
+def test_the_scans_own_bookkeeping_is_not_editable_from_the_card():
+    # last_scanned_at, found_total and last_error are written by the scan.
+    from core.audiobook_database import AudiobookDatabase
+    import inspect
+
+    source = inspect.getsource(AudiobookDatabase.update_watchlist_author)
+    assert "last_scanned_at" not in source.split("allowed = ", 1)[1].split("}", 1)[0]
+    assert "found_total" not in source.split("allowed = ", 1)[1].split("}", 1)[0]
+
+
+def test_updating_an_author_nobody_follows_changes_nothing(db):
+    assert db.update_watchlist_author("Nobody", auto_wishlist=0) is False
+
+
+def test_updating_with_no_fields_changes_nothing(db):
+    db.follow_author("Andy Weir")
+    assert db.update_watchlist_author("Andy Weir") is False

@@ -62,6 +62,17 @@ _COLUMN_MIGRATIONS = (
     # depends on Audible being reachable and unchanged. It often is not: the
     # storefront sheds load, and a title can be pulled outright.
     ("audiobook_downloads", "book_json", "TEXT DEFAULT ''"),
+    # Per-author settings, mirroring the podcast card's own two: whether a new
+    # release is queued for download or only recorded, and which narrator rule
+    # to queue it under. The narrator choice has to live here because an
+    # auto-wishlisted book is never seen by anyone before it is queued — there
+    # is no modal to ask, so the answer is given once when the author is
+    # followed.
+    # The release's own id, so a download that fails can block exactly the
+    # posting it came from rather than anything sharing its name.
+    ("audiobook_downloads", "release_guid", "TEXT DEFAULT ''"),
+    ("audiobook_watchlist", "auto_wishlist", "INTEGER NOT NULL DEFAULT 1"),
+    ("audiobook_watchlist", "narrator_mode", f"TEXT DEFAULT '{NARRATOR_EXACT}'"),
 )
 
 
@@ -261,6 +272,29 @@ class AudiobookDatabase:
                     imported_at REAL NOT NULL
                 )
             """)
+
+            # Releases never to grab again. The key is the release's guid
+            # where it has one, which is stable per indexer, and falls back to
+            # indexer+title — enough to recognise the same posting without
+            # blocking a different upload that happens to share a name.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS audiobook_blocklist (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key TEXT NOT NULL UNIQUE,
+                    profile_id INTEGER NOT NULL DEFAULT 1,
+                    asin TEXT DEFAULT '',
+                    book_title TEXT DEFAULT '',
+                    release_title TEXT DEFAULT '',
+                    indexer TEXT DEFAULT '',
+                    protocol TEXT DEFAULT '',
+                    reason TEXT DEFAULT '',
+                    blocked_at REAL NOT NULL
+                )
+            """)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ab_blocklist_asin "
+                "ON audiobook_blocklist (asin)"
+            )
 
             self._apply_column_migrations(cursor)
             conn.commit()
@@ -502,6 +536,7 @@ class AudiobookDatabase:
         source: str,
         client_id: str = "",
         release_title: str = "",
+        release_guid: str = "",
         indexer: str = "",
         author: str = "",
         bytes_total: int = 0,
@@ -526,13 +561,13 @@ class AudiobookDatabase:
         try:
             conn.execute("""
                 INSERT OR REPLACE INTO audiobook_downloads
-                    (download_id, asin, title, author, source, release_title, indexer,
-                     client_id, status, progress, bytes_done, bytes_total,
-                     book_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'downloading', 0, 0, ?, ?, ?, ?)
+                    (download_id, asin, title, author, source, release_title,
+                     release_guid, indexer, client_id, status, progress, bytes_done,
+                     bytes_total, book_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'downloading', 0, 0, ?, ?, ?, ?)
             """, (download_id, str(asin or ""), str(title or ""), str(author or ""),
-                  str(source or ""), str(release_title or ""), str(indexer or ""),
-                  str(client_id or ""), int(bytes_total or 0),
+                  str(source or ""), str(release_title or ""), str(release_guid or ""),
+                  str(indexer or ""), str(client_id or ""), int(bytes_total or 0),
                   _json_dump_book(book), now, now))
             conn.commit()
             return True
@@ -605,6 +640,105 @@ class AudiobookDatabase:
         ).fetchone()
         return row is not None
 
+    # ------------------------------------------------------------------
+    # Blocklist
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def release_key(release: Dict[str, Any]) -> str:
+        """A stable identity for one release.
+
+        The guid where the source gives one — Prowlarr's is stable per indexer,
+        and the Soulseek key already encodes peer and folder. Otherwise
+        indexer+title, which recognises the same posting without blocking a
+        different upload that merely shares a name.
+        """
+        release = release or {}
+        guid = str(release.get("guid") or "").strip()
+        if guid:
+            return guid
+        indexer = str(release.get("indexer") or "").strip()
+        title = str(release.get("title") or "").strip()
+        return f"{indexer}::{title}" if title else ""
+
+    def block_release(
+        self,
+        release: Dict[str, Any],
+        asin: str = "",
+        book_title: str = "",
+        reason: str = "",
+        profile_id: int = 1,
+    ) -> bool:
+        """Never offer or grab this release again. Idempotent."""
+        key = self.release_key(release)
+        if not key:
+            return False
+        conn = self._connect()
+        try:
+            conn.execute("""
+                INSERT INTO audiobook_blocklist
+                    (key, profile_id, asin, book_title, release_title, indexer,
+                     protocol, reason, blocked_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    reason = COALESCE(NULLIF(excluded.reason, ''), audiobook_blocklist.reason)
+            """, (
+                key, int(profile_id), str(asin or ""), str(book_title or ""),
+                str(release.get("title") or ""), str(release.get("indexer") or ""),
+                str(release.get("protocol") or ""), str(reason or ""), _now(),
+            ))
+            conn.commit()
+            return True
+        except sqlite3.Error as exc:
+            logger.warning("Could not block a release: %s", exc)
+            return False
+
+    def unblock_release(self, key: str, profile_id: int = 1) -> bool:
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                "DELETE FROM audiobook_blocklist WHERE key = ? AND profile_id = ?",
+                (str(key or ""), int(profile_id)),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        except sqlite3.Error as exc:
+            logger.warning("Could not unblock %s: %s", key, exc)
+            return False
+
+    def get_blocklist(self, profile_id: int = 1) -> List[Dict[str, Any]]:
+        conn = self._connect()
+        return [dict(row) for row in conn.execute(
+            "SELECT * FROM audiobook_blocklist WHERE profile_id = ? "
+            "ORDER BY blocked_at DESC",
+            (int(profile_id),),
+        )]
+
+    def blocked_keys(self, profile_id: int = 1) -> Set[str]:
+        """Every blocked key, in one read — a search asks about a page at a time."""
+        conn = self._connect()
+        try:
+            return {
+                str(row[0]) for row in conn.execute(
+                    "SELECT key FROM audiobook_blocklist WHERE profile_id = ?",
+                    (int(profile_id),),
+                ) if row[0]
+            }
+        except sqlite3.Error as exc:
+            logger.warning("Could not read the audiobook blocklist: %s", exc)
+            return set()
+
+    def clear_blocklist(self, profile_id: int = 1) -> int:
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                "DELETE FROM audiobook_blocklist WHERE profile_id = ?", (int(profile_id),))
+            conn.commit()
+            return cursor.rowcount
+        except sqlite3.Error as exc:
+            logger.warning("Could not clear the audiobook blocklist: %s", exc)
+            return 0
+
     def get_watchlist(self, profile_id: int = 1) -> List[Dict[str, Any]]:
         conn = self._connect()
         return [dict(row) for row in conn.execute(
@@ -612,6 +746,46 @@ class AudiobookDatabase:
             "ORDER BY name COLLATE NOCASE",
             (int(profile_id),),
         )]
+
+    def update_watchlist_author(
+        self,
+        name: str,
+        profile_id: int = 1,
+        role: str = "author",
+        **fields: Any,
+    ) -> bool:
+        """Change one followed author's settings.
+
+        Only the settings a person can actually set from the card. The scan's
+        own bookkeeping (last_scanned_at, found_total, last_error) is written by
+        the scan and must not be editable from the UI.
+        """
+        name = str(name or "").strip()
+        allowed = {"auto_wishlist", "narrator_mode", "since_date", "cover_url"}
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not name or not updates:
+            return False
+
+        if "auto_wishlist" in updates:
+            updates["auto_wishlist"] = 1 if updates["auto_wishlist"] else 0
+        if "narrator_mode" in updates:
+            mode = str(updates["narrator_mode"] or "").strip().lower()
+            updates["narrator_mode"] = mode if mode in (NARRATOR_EXACT, NARRATOR_ANY) \
+                else NARRATOR_EXACT
+
+        clause = ", ".join(f"{key} = ?" for key in updates)
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                f"UPDATE audiobook_watchlist SET {clause} "
+                f"WHERE name = ? AND role = ? AND profile_id = ?",
+                (*updates.values(), name, str(role or "author"), int(profile_id)),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        except sqlite3.Error as exc:
+            logger.warning("Could not update the followed author %s: %s", name, exc)
+            return False
 
     def get_watchlist_due(self, profile_id: int = 1,
                           rescan_after_seconds: float = 20 * 3600,

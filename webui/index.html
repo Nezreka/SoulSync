@@ -5522,6 +5522,65 @@
                                     <small class="settings-hint setting-help-body" hidden>Variables: <code>$author</code>, <code>$authorletter</code>, <code>$narrator</code>, <code>$title</code>, <code>$series</code>, <code>$seriespos</code> (01), <code>$year</code>, <code>$asin</code>. Default: <code>$author/$series/$seriespos - $title</code>. Books with no series collapse the series folder and its number cleanly, the same way podcast season folders do. Use <code>${var}</code> to append text.</small>
                                 </div>
 
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="audiobook-recycle-deletes">
+                                        <span>Recycle deleted audiobooks</span>
+                                    </label>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Deleting a book MOVES it to a hidden <code>.deleted</code> folder inside your audiobook library instead of erasing it, so a mis-click can be undone. The folder is hidden so Audiobookshelf, Plex and Jellyfin do not keep showing books you removed. Note the space is not freed until the bin is emptied. Off, deletes are permanent immediately.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Empty The Recycle Bin After:</label>
+                                    <input type="number" id="audiobook-recycle-keep-days" min="0" max="365" step="1" placeholder="7">
+                                    <span class="settings-unit">days</span>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>How long a deleted book stays recoverable before the daily cleanup erases it for good. <strong>0 turns the bin off</strong> &mdash; it does not mean "erase everything now", because purging on that reading would destroy what was recycled while the bin was still on. Default: <code>7</code></small>
+                                </div>
+
+                                <h4 class="settings-subheading">Audiobook Quality</h4>
+                                <small class="settings-hint">What counts as a good file. One profile for every audiobook &mdash; the per-author card carries the settings that differ by author.</small>
+
+                                <div class="form-group">
+                                    <label>Preferred Format:</label>
+                                    <select id="audiobook-format-first" class="form-select">
+                                        <option value="m4b">M4B (recommended)</option>
+                                        <option value="m4a">M4A</option>
+                                        <option value="mp3">MP3</option>
+                                        <option value="opus">Opus</option>
+                                        <option value="ogg">OGG</option>
+                                        <option value="flac">FLAC</option>
+                                    </select>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Ranked first when several releases are otherwise equal; the rest keep their usual order behind it. <strong>M4B</strong> is the only format built for audiobooks &mdash; chapters, bookmarks, and one file instead of ninety. Pick <strong>MP3</strong> if your player cannot read M4B. Format never outweighs having the right book and the right narrator.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Reject Below:</label>
+                                    <input type="number" id="audiobook-min-bitrate" min="0" max="512" step="1" placeholder="0">
+                                    <span class="settings-unit">kbps</span>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Hides releases below this bitrate. <strong>0 means no opinion.</strong> This is taste, and separate from the completeness floor above: that one asks whether a release could be the whole book at all, this one asks whether you want it. Audible's own files are 32 kbps mono and 64 kbps stereo, so 32 is a reasonable floor and anything above 128 is more than speech needs.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Reject Above:</label>
+                                    <input type="number" id="audiobook-max-bitrate" min="0" max="2000" step="1" placeholder="0">
+                                    <span class="settings-unit">kbps</span>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Hides releases above this bitrate, for when disk space matters more than headroom. <strong>0 means no opinion.</strong> Speech gains nothing audible above about 128 kbps, so a 45-hour book at 240 kbps is roughly 4GB for no benefit.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="audiobook-allow-dramatized">
+                                        <span>Show dramatised adaptations</span>
+                                    </label>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>GraphicAudio and similar full-cast productions with music and sound effects. They are a different product from the audiobook &mdash; different cast, different running time, usually sold in several separately-downloaded parts. Left on they are shown but ranked below real readings and clearly labelled; turned off they are hidden entirely.</small>
+                                </div>
+
                                 <h4 class="settings-subheading">Audiobooks</h4>
                                 <small class="settings-hint">Applies to the audiobook library only. Downloads use the same torrent, usenet and Soulseek clients as music &mdash; set those under Downloads.</small>
 

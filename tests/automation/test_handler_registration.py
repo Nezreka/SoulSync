@@ -37,6 +37,7 @@ EXPECTED_ACTION_NAMES = frozenset({
     'audiobook_process_wishlist',
     'audiobook_scan_watchlist',
     'audiobook_scan_library',
+    'audiobook_purge_recycle',
     'scan_library',
     'refresh_mirrored',
     'sync_playlist',

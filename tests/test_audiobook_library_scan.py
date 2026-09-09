@@ -263,3 +263,37 @@ def test_the_root_falls_back_to_the_configured_library(tmp_path, db):
     make_book_folder(tmp_path, "Andy Weir", "Project Hail Mary")
     with patch("core.audiobook_organizer.library_root", return_value=str(tmp_path)):
         assert scan(db=db)["adopted"] == 1
+
+
+# ---------------------------------------------------------------------------
+# The recycle bin is not the library
+# ---------------------------------------------------------------------------
+
+def test_a_deleted_book_is_not_adopted_back_out_of_the_bin(tmp_path, db):
+    """The bin lives INSIDE the library root.
+
+    Without skipping it, a book deleted yesterday is found in .deleted, read
+    from its own sidecar, and adopted straight back — the delete would
+    silently undo itself on the next daily scan.
+    """
+    make_book_folder(tmp_path, ".deleted", "20260909_120000_Project Hail Mary")
+
+    summary = scan(root=str(tmp_path), db=db)
+
+    assert summary["adopted"] == 0
+    assert db.get_library() == []
+
+
+def test_hidden_folders_are_left_alone_generally(tmp_path, db):
+    # Somebody else's dot-folder is not the library's business either.
+    make_book_folder(tmp_path, ".stfolder", "Book")
+    assert scan(root=str(tmp_path), db=db)["adopted"] == 0
+
+
+def test_a_real_book_beside_the_bin_is_still_found(tmp_path, db):
+    make_book_folder(tmp_path, ".deleted", "20260909_120000_Deleted Book", asin="OLD")
+    make_book_folder(tmp_path, "Andy Weir", "Project Hail Mary", asin="KEEP")
+
+    scan(root=str(tmp_path), db=db)
+
+    assert [r["asin"] for r in db.get_library()] == ["KEEP"]
