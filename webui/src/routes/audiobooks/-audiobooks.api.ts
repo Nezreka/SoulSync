@@ -383,6 +383,74 @@ export async function fetchReleases(asin: string): Promise<AudiobookReleaseCandi
   }
 }
 
+/** Begin a search. Returns the job id to poll, or null if it could not start. */
+export async function startReleaseSearch(
+  asin: string,
+): Promise<{ id: string; pollMs: number } | null> {
+  if (!asin) return null;
+  try {
+    const data = await readJson<{ success?: boolean; id?: string; poll_ms?: number }>(
+      apiClient.post(`audiobooks/releases/${encodeURIComponent(asin)}/start`),
+    );
+    if (!data?.success || !data.id) return null;
+    return { id: data.id, pollMs: data.poll_ms || 1200 };
+  } catch (err) {
+    console.error(`Failed to start a release search for ${asin}:`, err);
+    return null;
+  }
+}
+
+/**
+ * The ranked pool so far. Always the WHOLE list, never a delta — ranking is
+ * global, so a peer with the right narrator has to be able to sort above a
+ * torrent found two queries earlier.
+ *
+ * `expired` means the job is gone (server restart, or it aged out). The caller
+ * stops polling and keeps whatever it already rendered rather than blanking.
+ */
+export async function pollReleaseSearch(id: string): Promise<{
+  releases: AudiobookReleaseCandidate[];
+  stage: string;
+  complete: boolean;
+  error: string;
+  expired: boolean;
+} | null> {
+  if (!id) return null;
+  try {
+    const data = await readJson<{
+      success?: boolean;
+      releases?: AudiobookReleaseCandidate[];
+      stage?: string;
+      complete?: boolean;
+      error?: string;
+      expired?: boolean;
+    }>(apiClient.get(`audiobooks/releases/poll?id=${encodeURIComponent(id)}`));
+    if (!data?.success)
+      return { releases: [], stage: '', complete: true, error: '', expired: true };
+    return {
+      releases: Array.isArray(data.releases) ? data.releases : [],
+      stage: data.stage || '',
+      complete: Boolean(data.complete),
+      error: data.error || '',
+      expired: false,
+    };
+  } catch {
+    // A dropped poll is not fatal: the next tick tries again, and a job that
+    // really is gone reports expired above.
+    return null;
+  }
+}
+
+/** Tell the server to forget a search the user walked away from. */
+export async function cancelReleaseSearch(id: string): Promise<void> {
+  if (!id) return;
+  try {
+    await apiClient.delete(`audiobooks/releases/poll?id=${encodeURIComponent(id)}`);
+  } catch {
+    // Best effort — the job expires on its own.
+  }
+}
+
 export async function grabRelease(
   asin: string,
   release: AudiobookReleaseCandidate,

@@ -648,15 +648,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         if book is None:
             return jsonify({"success": False, "error": f"No audiobook found for {asin}"}), 404
 
-        # A book already on the wishlist carries the listener's narrator choice;
-        # asking again from the detail page must not quietly widen it.
-        narrator_mode = str(request.args.get("narrator_mode") or "").strip().lower()
-        if narrator_mode not in ("exact", "any"):
-            stored = next(
-                (row for row in get_audiobook_db().get_wishlist() if row["asin"] == asin),
-                None,
-            )
-            narrator_mode = (stored or {}).get("narrator_mode") or "exact"
+        narrator_mode = _narrator_mode_for(asin)
 
         try:
             found = search_all_sources(
@@ -672,6 +664,71 @@ def create_audiobooks_blueprint() -> Blueprint:
             "narrators": book.narrator_names,
             "releases": [release.to_dict() for release in found],
         })
+
+    def _narrator_mode_for(asin: str) -> str:
+        """The listener's narrator choice for a book, honoured everywhere.
+
+        A book already on the wishlist carries the choice made when they wished
+        for it; asking again from the detail page must not quietly widen it.
+        """
+        requested = str(request.args.get("narrator_mode") or "").strip().lower()
+        if requested in ("exact", "any"):
+            return requested
+        stored = next(
+            (row for row in get_audiobook_db().get_wishlist() if row["asin"] == asin),
+            None,
+        )
+        return (stored or {}).get("narrator_mode") or "exact"
+
+    @bp.route("/releases/<asin>/start", methods=["POST"])
+    def releases_start(asin: str):
+        """Begin a search and hand back an id to poll.
+
+        Same contract as the video side's /downloads/search/start: the modal
+        renders what has arrived and polls for the rest, instead of sitting
+        blank through three sequential fan-outs to every indexer.
+        """
+        from core.audiobook_search_job import start
+
+        book = get_audiobook_client().get_book(asin, marketplace=_marketplace())
+        if book is None:
+            return jsonify({"success": False, "error": f"No audiobook found for {asin}"}), 404
+
+        narrator_mode = _narrator_mode_for(asin)
+        job_id = start(book.to_dict(), narrator_mode=narrator_mode, limit=_limit(25))
+        return jsonify({
+            "success": True,
+            "id": job_id,
+            "asin": asin,
+            "narrator_mode": narrator_mode,
+            "narrators": book.narrator_names,
+            # What the client should wait between polls. Matches video's cadence.
+            "poll_ms": 1200,
+        })
+
+    @bp.route("/releases/poll", methods=["GET"])
+    def releases_poll():
+        """The ranked pool so far for an in-flight search.
+
+        Always the WHOLE list, never a delta: ranking is global, so a peer with
+        the right narrator has to be able to land above a torrent found two
+        queries earlier.
+        """
+        from core.audiobook_search_job import poll
+
+        state = poll(request.args.get("id") or "")
+        if state is None:
+            # Expired or unknown. Not an error the user can act on — the client
+            # just stops polling and keeps whatever it already rendered.
+            return jsonify({"success": False, "expired": True}), 404
+        return jsonify({"success": True, **state})
+
+    @bp.route("/releases/poll", methods=["DELETE"])
+    def releases_cancel():
+        """Stop caring about a search the user walked away from."""
+        from core.audiobook_search_job import forget
+
+        return jsonify({"success": True, "dropped": forget(request.args.get("id") or "")})
 
     @bp.route("/grab", methods=["POST"])
     def grab():

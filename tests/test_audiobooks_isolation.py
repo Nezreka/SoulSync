@@ -204,7 +204,13 @@ def test_only_the_acquisition_routes_write_anything():
                        # Following an author is acquisition too: it is what
                        # feeds the wishlist without the user asking again.
                        "/api/audiobooks/watchlist", "/api/audiobooks/watchlist/<path:name>",
-                       "/api/audiobooks/watchlist/scan"}
+                       "/api/audiobooks/watchlist/scan",
+                       # A search job is a POST that persists NOTHING: it lives
+                       # in process memory for a few minutes so a modal can show
+                       # results as they land. Allowed here, and pinned below to
+                       # stay that way.
+                       "/api/audiobooks/releases/<asin>/start",
+                       "/api/audiobooks/releases/poll"}
     for rule in _blueprint_app().url_map.iter_rules():
         if rule.endpoint == "static":
             continue
@@ -448,3 +454,31 @@ def test_the_library_root_is_still_separate_from_the_download_folder():
         and isinstance(node.args[0].value, str)
     ]
     assert not [key for key in reads if "path" in key], reads
+
+
+def test_a_search_job_persists_nothing():
+    """The one POST in the subsystem that is allowed to write no state.
+
+    It exists so a modal can render results as they arrive rather than sitting
+    blank through three fan-outs. If it ever starts touching a database it
+    stops being a view concern, and the read-only contract above quietly
+    becomes a lie.
+    """
+    imported = _imports("core/audiobook_search_job.py")
+    assert "core.audiobook_database" not in imported
+    assert "sqlite3" not in imported
+
+    source = (_ROOT / "core/audiobook_search_job.py").read_text(encoding="utf-8")
+    assert "get_audiobook_db" not in source
+
+
+def test_a_search_job_cannot_outlive_the_page_that_started_it():
+    # A wedged indexer must not leave a thread running for the life of the
+    # process, and finished jobs must not accumulate.
+    from core.audiobook_search_job import JOB_MAX_SECONDS, JOB_TTL_SECONDS
+
+    assert 0 < JOB_MAX_SECONDS <= 600
+    assert 0 < JOB_TTL_SECONDS <= 3600
+
+    source = (_ROOT / "core/audiobook_search_job.py").read_text(encoding="utf-8")
+    assert "daemon=True" in source

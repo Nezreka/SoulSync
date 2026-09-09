@@ -706,10 +706,54 @@ def search_releases(
         logger.debug("Prowlarr is not configured; no audiobook release search")
         return []
 
+    last: List[AudiobookRelease] = []
+    for step in iter_prowlarr_releases(
+        book, limit=limit, min_relevance=min_relevance,
+        prowlarr_client=client, narrator_mode=narrator_mode,
+    ):
+        last = step["releases"]
+    return last
+
+
+def iter_prowlarr_releases(
+    book: Dict[str, Any],
+    limit: int = 25,
+    min_relevance: float = 0.5,
+    prowlarr_client: Any = None,
+    narrator_mode: str = "exact",
+):
+    """The same search, yielding after every query variant.
+
+    Each yield is ``{"query", "releases", "complete"}`` where releases is the
+    WHOLE ranked pool so far, not the new arrivals. Callers replace rather than
+    append, because ranking is global: a later query can turn up a release that
+    belongs above everything an earlier one found, and appending would pin it
+    to the bottom forever.
+
+    Exists so a UI can show results as they land instead of holding a modal
+    blank through three sequential fan-outs to every indexer.
+    """
+    queries = build_queries(book)
+    if not queries:
+        return
+
+    client = prowlarr_client
+    if client is None:
+        try:
+            from core.prowlarr_client import ProwlarrClient
+            client = ProwlarrClient()
+        except Exception as exc:                            # noqa: BLE001
+            logger.warning("Could not build a Prowlarr client: %s", exc)
+            return
+
+    if hasattr(client, "is_configured") and not client.is_configured():
+        logger.debug("Prowlarr is not configured; no audiobook release search")
+        return
+
     categories = _configured_categories()
     collected: List[AudiobookRelease] = []
 
-    for query in queries:
+    for index, query in enumerate(queries):
         try:
             results = _run(client.search(query, categories=categories, limit=limit * 2))
         except Exception as exc:                            # noqa: BLE001
@@ -721,15 +765,21 @@ def search_releases(
             if release is not None:
                 collected.append(release)
 
-        ranked = rank_releases(deduplicate(collected), book, min_relevance, narrator_mode)
-        # Enough good candidates from a precise query: stop before spending
-        # another search on every indexer.
-        if len(ranked) >= 5:
-            return ranked[:limit]
+        ranked = rank_releases(
+            deduplicate(collected), book, min_relevance, narrator_mode,
+        )[:limit]
 
-    return rank_releases(
-        deduplicate(collected), book, min_relevance, narrator_mode,
-    )[:limit]
+        # Enough good candidates from a precise query: stop before spending
+        # another search on every indexer. Unchanged from the blocking version
+        # — indexer manners are the point, not an optimisation.
+        enough = len(ranked) >= 5
+        yield {
+            "query": query,
+            "releases": ranked,
+            "complete": enough or index == len(queries) - 1,
+        }
+        if enough:
+            return
 
 
 def configured_chain() -> List[str]:

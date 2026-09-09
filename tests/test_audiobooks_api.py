@@ -929,3 +929,74 @@ def test_a_soulseek_grab_stores_the_folder_handle_not_the_card_id(client, catalo
     row = wishlist_db.get_downloads()[0]
     assert row["download_id"] == "slsk:t1"
     assert "t1" in row["client_id"] and "peer" in row["client_id"]
+
+
+# ---------------------------------------------------------------------------
+# Streaming release search
+# ---------------------------------------------------------------------------
+
+def test_starting_a_search_returns_an_id_without_waiting(client, catalog, wishlist_db):
+    # The whole point: the request must not block on the search.
+    catalog.get_book.return_value = _item(asin="B1")
+    with patch("core.audiobook_search_job.start", return_value="job-1") as start:
+        body = client.post("/api/audiobooks/releases/B1/start").get_json()
+    assert body["success"] is True and body["id"] == "job-1"
+    assert body["poll_ms"] > 0
+    start.assert_called_once()
+
+
+def test_starting_a_search_for_an_unknown_book_is_a_404(client, catalog, wishlist_db):
+    catalog.get_book.return_value = None
+    assert client.post("/api/audiobooks/releases/NOPE/start").status_code == 404
+
+
+def test_a_search_honours_the_wishlisted_narrator_choice(client, catalog, wishlist_db):
+    # Asking again from the detail page must not quietly widen a choice the
+    # listener already made.
+    catalog.get_book.return_value = _item(asin="B1")
+    wishlist_db.add_to_wishlist({"asin": "B1", "title": "T"}, narrator_mode="any")
+    with patch("core.audiobook_search_job.start", return_value="job-1") as start:
+        body = client.post("/api/audiobooks/releases/B1/start").get_json()
+    assert body["narrator_mode"] == "any"
+    assert start.call_args.kwargs["narrator_mode"] == "any"
+
+
+def test_polling_returns_the_pool_so_far(client, catalog, wishlist_db):
+    state = {"id": "job-1", "stage": "Searching indexers", "releases": [{"title": "A"}],
+             "complete": False, "error": ""}
+    with patch("core.audiobook_search_job.poll", return_value=state):
+        body = client.get("/api/audiobooks/releases/poll?id=job-1").get_json()
+    assert body["success"] is True
+    assert body["complete"] is False
+    assert body["releases"] == [{"title": "A"}]
+    assert body["stage"] == "Searching indexers"
+
+
+def test_polling_an_expired_job_says_so_rather_than_erroring(client, catalog, wishlist_db):
+    # The client stops polling and keeps what it already rendered.
+    with patch("core.audiobook_search_job.poll", return_value=None):
+        resp = client.get("/api/audiobooks/releases/poll?id=gone")
+    assert resp.status_code == 404
+    assert resp.get_json()["expired"] is True
+
+
+def test_a_search_can_be_cancelled(client, catalog, wishlist_db):
+    # Closing the modal should stop the work, not leave it running for a book
+    # nobody is looking at.
+    with patch("core.audiobook_search_job.forget", return_value=True) as forget:
+        body = client.delete("/api/audiobooks/releases/poll?id=job-1").get_json()
+    assert body["success"] is True and body["dropped"] is True
+    forget.assert_called_once_with("job-1")
+
+
+def test_the_blocking_endpoint_still_works(client, catalog, wishlist_db):
+    # The wishlist path and any script still use it.
+    from core.audiobook_release_search import AudiobookRelease
+
+    catalog.get_book.return_value = _item(asin="B1")
+    found = [AudiobookRelease(source="prowlarr", protocol="torrent", title="Book M4B",
+                              indexer="X", size_bytes=1, download_url="u")]
+    with patch("core.audiobook_release_search.search_all_sources", return_value=found):
+        body = client.get("/api/audiobooks/releases/B1").get_json()
+    assert body["success"] is True
+    assert body["releases"][0]["title"] == "Book M4B"
