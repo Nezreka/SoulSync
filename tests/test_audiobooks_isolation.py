@@ -210,7 +210,12 @@ def test_only_the_acquisition_routes_write_anything():
                        # results as they land. Allowed here, and pinned below to
                        # stay that way.
                        "/api/audiobooks/releases/<asin>/start",
-                       "/api/audiobooks/releases/poll"}
+                       "/api/audiobooks/releases/poll",
+                       # POST only because it carries a release payload too big
+                       # for a query string. It reads a .torrent or NZB into
+                       # memory and returns the file list; nothing is enqueued
+                       # and nothing is stored. Pinned below.
+                       "/api/audiobooks/releases/contents"}
     for rule in _blueprint_app().url_map.iter_rules():
         if rule.endpoint == "static":
             continue
@@ -482,3 +487,25 @@ def test_a_search_job_cannot_outlive_the_page_that_started_it():
 
     source = (_ROOT / "core/audiobook_search_job.py").read_text(encoding="utf-8")
     assert "daemon=True" in source
+
+
+def test_reading_a_release_stores_nothing():
+    """The contents preview is a read, despite being a POST.
+
+    It fetches the .torrent or NZB the indexer already offers and decodes it in
+    memory. If it ever starts writing, the read-only contract above becomes a
+    lie and a preview could enqueue something nobody asked for.
+    """
+    imported = _imports("core/audiobook_release_contents.py")
+    assert "core.audiobook_database" not in imported
+
+    source = (_ROOT / "core/audiobook_release_contents.py").read_text(encoding="utf-8")
+    for forbidden in ("get_audiobook_db", "add_torrent", "add_nzb", "grab_release"):
+        assert forbidden not in source, forbidden
+
+
+def test_reading_a_release_never_starts_a_download():
+    # It shares the torrent FETCHER with the grab path but must not touch the
+    # part that hands anything to a client.
+    imported = _imports("core/audiobook_release_contents.py")
+    assert "core.audiobook_grab" not in imported

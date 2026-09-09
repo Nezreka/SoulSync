@@ -237,3 +237,65 @@ def test_forget_is_safe_for_an_unknown_card():
     _register()
     forget("nope")
     assert "hash-1" in download_tasks
+
+
+# ---------------------------------------------------------------------------
+# The batch goes when its last card does
+# ---------------------------------------------------------------------------
+
+def test_the_batch_is_removed_once_its_last_card_is_forgotten():
+    """Otherwise an empty "Audiobooks" card sits on the Downloads page forever.
+
+    Nothing else will clean it up: the music side's batch healer skips this
+    batch by design because is_music_batch() returns False for it. The same
+    isolation that keeps the music worker pool off our downloads also opts us
+    out of its housekeeping, so the housekeeping has to be done here.
+    """
+    _register("a")
+    assert BATCH_ID in download_batches
+
+    forget("a")
+
+    assert BATCH_ID not in download_batches
+
+
+def test_the_batch_survives_while_any_card_remains():
+    _register("a")
+    _register("b")
+    forget("a")
+    assert BATCH_ID in download_batches
+    assert download_batches[BATCH_ID]["queue"] == ["b"]
+
+    forget("b")
+    assert BATCH_ID not in download_batches
+
+
+def test_a_new_download_recreates_the_batch():
+    # Removing it must not stop the next book from appearing.
+    _register("a")
+    forget("a")
+    _register("c")
+    assert BATCH_ID in download_batches
+    assert download_batches[BATCH_ID]["queue"] == ["c"]
+
+
+def test_a_queue_entry_whose_task_vanished_does_not_hold_the_batch_open():
+    # A card removed by any other path would otherwise leave the queue looking
+    # occupied and the empty batch on screen.
+    _register("a")
+    _register("b")
+    download_tasks.pop("b", None)
+
+    forget("a")
+
+    assert BATCH_ID not in download_batches
+
+
+def test_the_recreated_batch_still_carries_the_isolation_flags():
+    # It must not come back as something the music pipeline will adopt.
+    from core.downloads.lifecycle import is_music_batch
+
+    _register("a")
+    forget("a")
+    _register("b")
+    assert is_music_batch(BATCH_ID, download_batches[BATCH_ID]) is False

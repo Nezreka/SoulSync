@@ -36,7 +36,13 @@ BOOK = {
 }
 
 
-def _track(name, size=10_000_000):
+def _track(name, size=80_000_000):
+    """80MB a file: six of those is ~64 kbps over BOOK's 16h10m runtime.
+
+    Sized like a real audiobook on purpose. At 10MB a file the folder implied
+    8 kbps, which the completeness floor hides as impossible — leaving these
+    tests asserting against an empty list and proving nothing.
+    """
     return SimpleNamespace(filename=name, size=size)
 
 

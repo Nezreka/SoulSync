@@ -216,6 +216,17 @@ export interface AudiobookReleaseCandidate {
   reasons: string[];
   /** Present only on a Soulseek release: which peer, which folder, how many files. */
   soulseek?: AudiobookSoulseekFolder | null;
+  /** Average kbps this size implies over the book's runtime — the one number
+   *  that explains why the same book turns up at 100MB and at 2GB. Null when
+   *  the runtime is unknown. */
+  implied_kbps?: number | null;
+  /** "thin" | "standard" | "good" | "generous" | "oversized". */
+  quality_band?: string;
+  quality_note?: string;
+  /** Set only when the release NAMES a bitrate and the arithmetic says it
+   *  cannot hold the whole book. The one partial-release check that works
+   *  before spending a download. */
+  short_warning?: string;
 }
 
 /**
@@ -249,6 +260,9 @@ export interface AudiobookDownload {
   error: string;
   created_at: number;
   completed_at: number;
+  /** Why a book is staged rather than imported, in words. Without this a held
+   *  book is indistinguishable from a hung one. */
+  completeness?: string;
 }
 
 /** An author being followed for new releases. */

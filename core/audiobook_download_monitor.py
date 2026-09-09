@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from utils.logging_config import get_logger
@@ -105,7 +106,20 @@ def process_download(
         patch["status"] = "downloading"
         return patch
 
-    reported = getattr(status, "save_path", None) or getattr(status, "path", None)
+    # content_path FIRST. It is the client's absolute path to THIS torrent's
+    # own file or folder; save_path is the shared directory it saved into. The
+    # completeness gate walks whatever it is handed recursively, so passing
+    # save_path measured every other download in the folder against this book's
+    # runtime and then staged it forever.
+    #
+    # This is #1139 again — the music album flow had the same bug and fixed it
+    # the same way. Usenet has no content_path and does not need one: SAB's
+    # save_path is already the job's own storage folder.
+    reported = (
+        getattr(status, "content_path", None)
+        or getattr(status, "save_path", None)
+        or getattr(status, "path", None)
+    )
     resolved = resolve_path(reported)
     if not resolved:
         # Complete but the path is not visible from this container yet. Left as
@@ -228,7 +242,22 @@ def _check_complete(source_path: str, row: Dict[str, Any]) -> Dict[str, Any]:
     book = _book_for(row)
     expected = int(book.get("runtime_minutes") or 0)
 
-    verdict = assess(source_path, expected, tolerance_from_settings())
+    # Audible publishes the UNABRIDGED runtime of the reading it sells. Two
+    # kinds of release can never match it and must not be measured against it:
+    # an abridgement (roughly half), and a dramatised adaptation like
+    # GraphicAudio (a full-cast re-recording sold in parts, of unrelated
+    # length). Both would otherwise be held for the whole staging window and
+    # then failed to the wishlist, which would grab the same release again.
+    #
+    # The folder name is checked too: the release title does not always say
+    # what the download turns out to be.
+    from core.audiobook_release_search import is_abridged, is_dramatized
+
+    labels = f"{row.get('release_title') or ''} {Path(source_path).name}"
+    abridged = is_abridged(labels) or is_dramatized(labels)
+
+    verdict = assess(source_path, expected, tolerance_from_settings(),
+                     abridged=abridged)
     if not verdict.get("complete"):
         verdict["expired"] = staging_expired(
             row.get("created_at") or 0, staging_days_from_settings(),

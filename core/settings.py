@@ -913,6 +913,12 @@ class ConfigManager:
                 # book is filed. A client says "complete" when the files it was ASKED
                 # for finished, which is not the same as the book being whole.
                 "completeness_tolerance": 0.92,
+                # A release implying less than this over the book's published
+                # runtime cannot be a complete copy at any bitrate a real
+                # audiobook uses (Audible's own are 32 kbps mono / 64 stereo),
+                # so it is hidden from the results. It is a piece of the book,
+                # a shorter edition, or the wrong title.
+                "min_complete_kbps": 24,
                 # How long a short book is kept staged before giving up. Torrents
                 # finish late and uploaders repair releases, so patience is right;
                 # forever means one broken release holds a wishlist row for good.

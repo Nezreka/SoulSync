@@ -2601,6 +2601,188 @@
   color: rgba(255, 255, 255, 0.3);
 }
 
+/* "What's inside" — a name and a size cannot tell one m4b apart from 87 mp3s
+   plus somebody's discography, so the pack opens in place. */
+.contentsToggle {
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 3px 0;
+  border: none;
+  background: none;
+  color: rgba(var(--accent-rgb), 0.95);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.contentsToggle:hover {
+  text-decoration: underline;
+}
+
+.contents {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.contentsNote {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.contentsSummary {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+/* Capped and scrollable: a 90-chapter book must not push the Download button
+   off the screen. */
+.contentsList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 210px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.contentsFile {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 2px 0;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+/* Anything that is not audio is dimmed, so a pack padded with scans and PDFs
+   reads as padded at a glance. */
+.contentsFile[data-extra='true'] {
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.contentsFileName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contentsFileSize {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+/* The implied-bitrate chip. Colour carries the verdict so a row can be judged
+   without reading the tooltip: dim for too little, plain for fine, warm for
+   suspiciously large. */
+.qualityTag {
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
+.quality_thin {
+  background: rgba(248, 113, 113, 0.16);
+  border-color: rgba(248, 113, 113, 0.36);
+  color: rgb(252, 165, 165);
+}
+
+.quality_standard,
+.quality_good {
+  background: rgba(74, 222, 128, 0.14);
+  border-color: rgba(74, 222, 128, 0.32);
+  color: rgb(134, 239, 172);
+}
+
+.quality_generous {
+  background: rgba(250, 204, 21, 0.13);
+  border-color: rgba(250, 204, 21, 0.3);
+  color: rgb(253, 224, 71);
+}
+
+.quality_oversized {
+  background: rgba(251, 146, 60, 0.15);
+  border-color: rgba(251, 146, 60, 0.34);
+  color: rgb(253, 186, 116);
+}
+
+/* Says out loud what the sort order already means. The ranking has an opinion
+   and was keeping it to itself. */
+.bestMatch {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: rgb(253, 224, 71);
+  background: rgba(250, 204, 21, 0.14);
+  border: 1px solid rgba(250, 204, 21, 0.34);
+  cursor: help;
+}
+
+/* The one partial-release warning that can be given before downloading. */
+.shortWarning {
+  display: block;
+  margin-top: 6px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: rgb(252, 165, 165);
+}
+
+/* Live state for a release grabbed from this modal, in place of its Download
+   button. A book can sit held for days for a good reason, and pointing at
+   another page instead of saying so is how "stuck" gets reported. */
+.rowStatus {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  flex-shrink: 0;
+  max-width: 210px;
+  text-align: right;
+}
+
+.rowStatusLabel {
+  font-size: 12px;
+  font-weight: 650;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.status_completed {
+  color: rgb(134, 239, 172);
+}
+
+.status_staged {
+  color: rgb(253, 224, 71);
+}
+
+.status_failed,
+.status_cancelled {
+  color: rgb(252, 165, 165);
+}
+
+.rowStatusPct {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.rowStatusWhy {
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.5);
+}
+
 .releaseGrab {
   flex-shrink: 0;
   height: 34px;

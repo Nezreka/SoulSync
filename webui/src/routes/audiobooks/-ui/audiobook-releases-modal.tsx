@@ -1,11 +1,15 @@
 import { Link } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
+import type { AudiobookReleaseContents } from '../-audiobooks.api';
+import type { AudiobookDownload } from '../-audiobooks.types';
 import type { AudiobookReleaseCandidate } from '../-audiobooks.types';
 
 import {
   addToWishlist,
   cancelReleaseSearch,
+  fetchDownloads,
+  fetchReleaseContents,
   grabRelease,
   pollReleaseSearch,
   startReleaseSearch,
@@ -18,6 +22,17 @@ interface AudiobookReleasesModalProps {
   title: string;
   onClose: () => void;
 }
+
+/** Plain words for a download row's state. "staged" means nothing to anyone. */
+const STATUS_WORDS: Record<string, string> = {
+  queued: 'Queued',
+  downloading: 'Downloading',
+  importing: 'Importing',
+  staged: 'Held back',
+  completed: 'In your library',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+};
 
 function formatSize(bytes: number): string {
   if (!bytes) return '';
@@ -55,6 +70,15 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
   const [message, setMessage] = useState('');
   const [grabbed, setGrabbed] = useState(false);
   const [wishlisting, setWishlisting] = useState(false);
+  // Contents are read on demand, one release at a time: reading every result
+  // up front would fetch a .torrent from the indexer for every row on screen.
+  const [openRow, setOpenRow] = useState('');
+  const [contents, setContents] = useState<Record<string, AudiobookReleaseContents | null>>({});
+  const [readingRow, setReadingRow] = useState('');
+  // Which release each grab produced, so the row that was clicked can show
+  // what happened to it instead of pointing at another page.
+  const [grabbedRefs, setGrabbedRefs] = useState<Record<string, string>>({});
+  const [downloads, setDownloads] = useState<Record<string, AudiobookDownload>>({});
   const jobRef = useRef('');
 
   useEffect(() => {
@@ -115,12 +139,120 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
   }, [asin]);
 
   const grab = async (release: AudiobookReleaseCandidate) => {
-    setGrabbing(release.guid || release.title);
+    const key = rowKey(release);
+    setGrabbing(key);
     setMessage('');
     const result = await grabRelease(asin, release);
     setGrabbing('');
     setGrabbed(result.ok);
+    if (result.ok && result.ref) {
+      setGrabbedRefs((prev) => ({ ...prev, [key]: result.ref }));
+    }
     setMessage(result.ok ? 'Sent to your download client.' : result.error || 'Grab failed.');
+  };
+
+  /**
+   * Follow anything grabbed from this modal.
+   *
+   * A book can sit at "staged" for days with a perfectly good reason — the
+   * release turned out to be part 1 of 5, or the torrent has not finished —
+   * and without showing that reason a held book is indistinguishable from a
+   * hung one. Only polls while something grabbed here is still in flight.
+   */
+  useEffect(() => {
+    const refs = Object.values(grabbedRefs);
+    if (refs.length === 0) return;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const tick = async () => {
+      if (cancelled) return;
+      const rows = await fetchDownloads(false);
+      if (cancelled) return;
+      const byId: Record<string, AudiobookDownload> = {};
+      for (const row of rows) byId[row.download_id] = row;
+      setDownloads(byId);
+
+      const settled = refs.every((ref) => {
+        const status = byId[ref]?.status;
+        return status === 'completed' || status === 'failed' || status === 'cancelled';
+      });
+      if (!settled) timer = setTimeout(() => void tick(), 2500);
+    };
+
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [grabbedRefs]);
+
+  /**
+   * What to group a release under.
+   *
+   * NOT the peer on Soulseek. A peer offers one folder for a book, so grouping
+   * by peer made every Soulseek row its own group and every one of them a
+   * "best of" — a label on everything is a label on nothing. Soulseek is one
+   * source with many peers, the way an indexer is one source with many
+   * uploads. The peer is still named on the row itself.
+   */
+  const sourceOf = (release: AudiobookReleaseCandidate) =>
+    release.protocol === 'soulseek' ? 'Soulseek' : release.indexer || release.protocol || 'unknown';
+
+  const rowKey = (release: AudiobookReleaseCandidate) => release.guid || release.title;
+
+  /**
+   * The best from each source, then everything else grouped by protocol.
+   *
+   * Marking only the overall winner meant nothing could be labelled until the
+   * whole search settled, because the next indexer to answer could take the
+   * crown. Per source it is decidable the moment that source replies, and it
+   * is the more useful question anyway: twenty rows from one indexer used to
+   * bury a better hit from another.
+   *
+   * The server already sorted by score, so the first row seen for a source IS
+   * that source's best and no re-scoring happens here.
+   */
+  const { ordered, bestKeys } = useMemo(() => {
+    const seen = new Set<string>();
+    const bests: AudiobookReleaseCandidate[] = [];
+    const rest: AudiobookReleaseCandidate[] = [];
+
+    for (const release of releases) {
+      const source = sourceOf(release);
+      if (seen.has(source)) {
+        rest.push(release);
+      } else {
+        seen.add(source);
+        bests.push(release);
+      }
+    }
+
+    // Bests keep the server's score order. The remainder groups by protocol so
+    // a long tail reads as "the rest of the torrents, then the rest of the
+    // Soulseek folders" instead of interleaving them.
+    rest.sort((a, b) => (a.protocol || '').localeCompare(b.protocol || ''));
+
+    return {
+      ordered: [...bests, ...rest],
+      bestKeys: new Set(bests.map(rowKey)),
+    };
+  }, [releases]);
+
+  const toggleContents = async (release: AudiobookReleaseCandidate, key: string) => {
+    if (openRow === key) {
+      setOpenRow('');
+      return;
+    }
+    setOpenRow(key);
+    // Cached: a release's contents do not change while the modal is open, and
+    // re-reading would hit the indexer again on every expand.
+    if (contents[key] !== undefined) return;
+    setReadingRow(key);
+    const found = await fetchReleaseContents(release);
+    setContents((prev) => ({ ...prev, [key]: found }));
+    setReadingRow('');
   };
 
   // The empty state used to TELL the reader to wishlist the book and then give
@@ -212,8 +344,12 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
             </div>
           ) : (
             <ul className={styles.releaseList}>
-              {releases.map((release) => {
-                const key = release.guid || release.title;
+              {ordered.map((release) => {
+                const key = rowKey(release);
+                // Decidable as soon as this source has answered, so it appears
+                // while the slower sources are still running.
+                const best = bestKeys.has(key) && releases.length > 1;
+                const tracked = downloads[grabbedRefs[key] || ''];
                 return (
                   <li className={styles.releaseRow} key={key}>
                     <div className={styles.releaseMain}>
@@ -252,6 +388,23 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
                             {formatSize(release.size_bytes)}
                           </span>
                         )}
+                        {/* Size alone cannot be judged: 800MB is generous for a
+                            6-hour book and thin for a 40-hour one. Against the
+                            runtime it becomes a bitrate, which can be. */}
+                        {release.implied_kbps ? (
+                          <span
+                            className={`${styles.releaseTag} ${styles.qualityTag} ${
+                              styles[`quality_${release.quality_band || 'standard'}`] || ''
+                            }`}
+                            title={
+                              release.abridged
+                                ? `${release.quality_note} Treat this as rough: an abridged release is shorter than the runtime this is measured against.`
+                                : release.quality_note
+                            }
+                          >
+                            ~{release.implied_kbps} kbps
+                          </span>
+                        ) : null}
                         {/* Free upload slots, not seeders: on Soulseek that is
                             what answers "can I actually get this right now". */}
                         {release.seeders != null && (
@@ -262,19 +415,124 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
                           </span>
                         )}
                       </div>
+                      {best && (
+                        <span
+                          className={styles.bestMatch}
+                          title={
+                            `The best ${sourceOf(release)} has for this book: closest ` +
+                            'title match, then narrator, format and whether the size is ' +
+                            'plausible for the runtime. The reasons below show the arithmetic.'
+                          }
+                        >
+                          ★ Best from {sourceOf(release)}
+                        </span>
+                      )}
+
+                      {/* Playing time can otherwise only be measured after
+                          downloading, by decoding the files. A release that
+                          names its bitrate can be caught here instead. */}
+                      {release.short_warning && (
+                        <span className={styles.shortWarning}>⚠ {release.short_warning}</span>
+                      )}
+
                       {release.reasons.length > 0 && (
                         <span className={styles.releaseReasons}>{release.reasons.join(' · ')}</span>
                       )}
+
+                      <button
+                        type="button"
+                        className={styles.contentsToggle}
+                        onClick={() => void toggleContents(release, key)}
+                        aria-expanded={openRow === key}
+                      >
+                        {openRow === key ? '▾' : '▸'} What's inside
+                      </button>
+
+                      {openRow === key && (
+                        <div className={styles.contents}>
+                          {readingRow === key ? (
+                            <span className={styles.contentsNote}>Reading the release…</span>
+                          ) : contents[key] === null ? (
+                            <span className={styles.contentsNote}>
+                              Could not read this release.
+                            </span>
+                          ) : contents[key]?.note ? (
+                            <span className={styles.contentsNote}>{contents[key]?.note}</span>
+                          ) : (
+                            <>
+                              <p className={styles.contentsSummary}>
+                                <strong>{contents[key]?.summary.audio_count}</strong>{' '}
+                                {contents[key]?.summary.audio_count === 1
+                                  ? 'audio file'
+                                  : 'audio files'}
+                                {contents[key]?.summary.formats.length ? (
+                                  <> · {contents[key]?.summary.formats.join(', ').toUpperCase()}</>
+                                ) : null}
+                                {contents[key]?.summary.extra_count ? (
+                                  <>
+                                    {' '}
+                                    · {contents[key]?.summary.extra_count} extra
+                                    {contents[key]?.summary.extra_count === 1 ? '' : 's'}
+                                  </>
+                                ) : null}
+                              </p>
+                              <ul className={styles.contentsList}>
+                                {contents[key]?.files.map((file) => (
+                                  <li
+                                    className={styles.contentsFile}
+                                    key={file.name}
+                                    data-extra={
+                                      /\.(mp3|m4a|m4b|flac|ogg|opus|wav|aac|wma)$/i.test(file.name)
+                                        ? undefined
+                                        : 'true'
+                                    }
+                                  >
+                                    <span className={styles.contentsFileName}>{file.name}</span>
+                                    <span className={styles.contentsFileSize}>
+                                      {formatSize(file.size)}
+                                    </span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
 
-                    <button
-                      type="button"
-                      className={styles.releaseGrab}
-                      onClick={() => void grab(release)}
-                      disabled={Boolean(grabbing)}
-                    >
-                      {grabbing === key ? 'Sending…' : 'Download'}
-                    </button>
+                    {tracked ? (
+                      <div className={styles.rowStatus}>
+                        <span
+                          className={`${styles.rowStatusLabel} ${
+                            styles[`status_${tracked.status}`] || ''
+                          }`}
+                        >
+                          {STATUS_WORDS[tracked.status] || tracked.status}
+                        </span>
+                        {tracked.status === 'downloading' && (
+                          <span className={styles.rowStatusPct}>
+                            {Math.round(tracked.progress)}%
+                          </span>
+                        )}
+                        {/* The reason a book is held. Without it a staged book
+                            looks identical to a hung one. */}
+                        {tracked.completeness && tracked.status === 'staged' && (
+                          <span className={styles.rowStatusWhy}>{tracked.completeness}</span>
+                        )}
+                        {tracked.error && (
+                          <span className={styles.rowStatusWhy}>{tracked.error}</span>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className={styles.releaseGrab}
+                        onClick={() => void grab(release)}
+                        disabled={Boolean(grabbing)}
+                      >
+                        {grabbing === key ? 'Sending…' : 'Download'}
+                      </button>
+                    )}
                   </li>
                 );
               })}

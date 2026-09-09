@@ -343,6 +343,197 @@ def title_relevance(release_title: Optional[str], book_title: Optional[str],
     return round(min(1.0, score), 4)
 
 
+# What an audiobook's size actually MEANS, given its runtime. Audible's own
+# files are the reference point: their standard format is 32 kbps mono and
+# their enhanced one 64 kbps stereo, both AAC. Speech carries almost no high
+# frequency content and no stereo image worth preserving, so anything far above
+# that is not buying audible quality — it is a lossless rip, several formats in
+# one pack, or something that is not only this book.
+_QUALITY_BANDS = (
+    (24, "thin", "Below what Audible ships. Likely to sound muffled."),
+    (48, "standard", "About what Audible's own standard files use."),
+    (96, "good", "Better than Audible ships. Comfortably transparent for speech."),
+    (192, "generous", "More than speech needs, but nothing wrong with it."),
+    (10 ** 9, "oversized",
+     "Far more than speech needs — usually lossless, several formats in one "
+     "pack, or extras that are not the book."),
+)
+
+
+def implied_bitrate_kbps(
+    size_bytes: Optional[int], runtime_minutes: Optional[int],
+) -> Optional[int]:
+    """Average kbps this release must be, from its size and the book's runtime.
+
+    This is the one number that explains why the same book turns up at 100MB
+    and at 2GB, and it needs nothing an indexer has to volunteer: the size is
+    in every search result and the runtime comes from the catalogue.
+
+    None when the runtime is unknown, because the arithmetic has no meaning
+    then. Also unreliable for an ABRIDGED release, whose real runtime is
+    shorter than the catalogue's — the caller has that flag and should say so.
+    """
+    try:
+        size = int(size_bytes or 0)
+        minutes = int(runtime_minutes or 0)
+    except (TypeError, ValueError):
+        return None
+    if size <= 0 or minutes <= 0:
+        return None
+    return int(round((size * 8) / (minutes * 60) / 1000))
+
+
+# "(1 of 5)", "[1/5]", "Part 2 of 6" — an uploader splitting a long book across
+# several postings. Deliberately NOT matching "CD1" or "Disc 2", which are
+# normal internal structure inside a COMPLETE release.
+_PART_RE = re.compile(
+    r"(?i)[\(\[]?\b(?:part|pt\.?)?\s*(\d{1,2})\s*(?:of|/)\s*(\d{1,2})\b[\)\]]?"
+)
+
+
+# A dramatised adaptation is not the audiobook. GraphicAudio and friends
+# re-record the text with a full cast, music and sound effects, sell it in
+# separately-purchased parts, and run to a completely different length — so it
+# can never satisfy a runtime check against the Audible edition, and somebody
+# expecting a narrator reading the book gets a radio play.
+#
+# Plenty of people want exactly that, so this warns rather than rejects.
+_DRAMATIZED_RE = re.compile(
+    r"(?i)\b(graphic\s*audio|a\s+movie\s+in\s+your\s+mind|dramati[sz]ed|"
+    r"dramati[sz]ation|full[\s-]cast\s+dramati[sz])"
+)
+
+
+def is_dramatized(release_title: Optional[str]) -> bool:
+    """True when a release says it is a dramatised adaptation."""
+    return bool(_DRAMATIZED_RE.search(str(release_title or "")))
+
+
+def part_marker(release_title: Optional[str]) -> Optional[tuple]:
+    """``(part, total)`` when a title says it is one piece of a split posting.
+
+    A 45-hour book posted as five 9-hour chunks is the failure that costs a
+    whole download and is invisible until the files are decoded: every chunk
+    plays perfectly and is simply not the book.
+
+    Ambiguous on purpose-built sets — "The Stormlight Archive 1 - Way of Kings
+    (1 of 5)" could be book one of five rather than part one of five — so the
+    caller warns rather than drops.
+    """
+    match = _PART_RE.search(str(release_title or ""))
+    if not match:
+        return None
+    try:
+        part, total = int(match.group(1)), int(match.group(2))
+    except (TypeError, ValueError):
+        return None
+    # 1 of 1 is a whole book saying so. Anything above 20 is not a part count.
+    if total <= 1 or total > 20 or part < 1 or part > total:
+        return None
+    return part, total
+
+
+# The floor below which a release cannot be a COMPLETE copy of the book.
+#
+# Audible's own files are 32 kbps mono (standard) and 64 kbps stereo
+# (enhanced), and no real rip of a whole book lands under about 24. So when
+# size-over-runtime implies less than this, the release is not a thinner encode
+# of the book — it is a piece of it, a different shorter edition, or the wrong
+# title. The old bounds allowed anything from 8 kbps up, which let a release
+# holding a sixth of a 45-hour book rank first.
+#
+# Deliberately below Audible's own 32 so a legitimately frugal mono rip still
+# passes; this is a floor for "impossible", not for "good".
+DEFAULT_MIN_COMPLETE_KBPS = 24
+
+
+def min_complete_kbps() -> float:
+    """The configured floor, in kbps."""
+    try:
+        from core.settings import config_manager
+        value = float(config_manager.get(
+            "audiobooks.min_complete_kbps", DEFAULT_MIN_COMPLETE_KBPS))
+        return value if value > 0 else DEFAULT_MIN_COMPLETE_KBPS
+    except Exception:                                       # noqa: BLE001
+        return DEFAULT_MIN_COMPLETE_KBPS
+
+
+def too_small_to_be_complete(
+    size_bytes: Optional[int],
+    runtime_minutes: Optional[int],
+    floor_kbps: Optional[float] = None,
+) -> bool:
+    """True when this size cannot hold this runtime at any real bitrate.
+
+    Works in both directions without extra rules: the runtime always belongs to
+    the edition being looked at, so an abridged entry is measured against the
+    abridged runtime and an unabridged one against the unabridged runtime.
+    Picking the wrong edition therefore fails this check by itself.
+    """
+    implied = implied_bitrate_kbps(size_bytes, runtime_minutes)
+    if implied is None:
+        return False
+    floor = min_complete_kbps() if floor_kbps is None else float(floor_kbps)
+    return implied < floor
+
+
+def implied_runtime_minutes(
+    size_bytes: Optional[int], kbps: Optional[int],
+) -> Optional[float]:
+    """How long this release can possibly play, at its STATED bitrate.
+
+    The only pre-download way to catch a release that is missing half the book.
+    Playing time can otherwise be measured only after downloading, by decoding
+    the files, so a partial release costs a whole download to discover.
+
+    Needs a bitrate the release actually names — inferring one from the size
+    would be circular, since the size is what we are trying to explain.
+    """
+    try:
+        size = int(size_bytes or 0)
+        rate = int(kbps or 0)
+    except (TypeError, ValueError):
+        return None
+    if size <= 0 or rate <= 0:
+        return None
+    return (size * 8) / (rate * 1000) / 60.0
+
+
+def runtime_coverage(
+    size_bytes: Optional[int], kbps: Optional[int], runtime_minutes: Optional[int],
+) -> Optional[float]:
+    """Fraction of the book a release could hold, or None when unknowable.
+
+    1.0 means it can hold the whole thing. 0.25 means that at the bitrate it
+    claims, there is only a quarter of the book in there — a sample, a single
+    part of a multi-part posting, or a bad rip.
+    """
+    implied = implied_runtime_minutes(size_bytes, kbps)
+    try:
+        expected = int(runtime_minutes or 0)
+    except (TypeError, ValueError):
+        return None
+    if implied is None or expected <= 0:
+        return None
+    return implied / expected
+
+
+# Below this, a release that names its own bitrate cannot be the whole book.
+# Deliberately generous: a title saying "64kbps" over a VBR encode is common
+# and reads low, so only a dramatic shortfall is called out.
+_SHORT_COVERAGE = 0.7
+
+
+def quality_band(kbps: Optional[int]) -> tuple:
+    """``(band, explanation)`` for an implied bitrate, or ("", "") if unknown."""
+    if not kbps or kbps <= 0:
+        return "", ""
+    for ceiling, band, text in _QUALITY_BANDS:
+        if kbps < ceiling:
+            return band, text
+    return "", ""
+
+
 def plausible_size(size_bytes: Optional[int], runtime_minutes: Optional[int]) -> bool:
     """Could a file this size be this book?
 
@@ -437,6 +628,17 @@ class AudiobookRelease:
     # file in it. Torrents and NZBs need nothing beyond their URL, so it stays
     # None for them and the grab side branches on protocol, not on this.
     soulseek: Optional[Dict[str, Any]] = None
+    # Filled in during ranking, where the book's runtime is in hand.
+    implied_kbps: Optional[int] = None
+    quality_band: str = ""
+    quality_note: str = ""
+    # Set only when the release NAMES its bitrate and the maths says it cannot
+    # hold the whole book. The one partial-release check that works before
+    # spending a download.
+    short_warning: str = ""
+    # A full-cast dramatisation rather than a reading. Its runtime bears no
+    # relation to the book's, so the completeness gate must not measure it.
+    dramatized: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -460,6 +662,11 @@ class AudiobookRelease:
             "score": round(self.score, 2),
             "reasons": self.reasons,
             "soulseek": self.soulseek,
+            "implied_kbps": self.implied_kbps,
+            "quality_band": self.quality_band,
+            "quality_note": self.quality_note,
+            "short_warning": self.short_warning,
+            "dramatized": self.dramatized,
         }
 
 
@@ -479,12 +686,66 @@ def score_release(
     """
     reasons: List[str] = []
 
+    # Why one release is 100MB and another 2GB, from data every result already
+    # carries. Recorded even when it does not move the score, because the
+    # person choosing needs it more than the ranker does.
+    release.implied_kbps = implied_bitrate_kbps(
+        release.size_bytes, book.get("runtime_minutes"),
+    )
+    release.quality_band, release.quality_note = quality_band(release.implied_kbps)
+    if release.implied_kbps:
+        reasons.append(f"~{release.implied_kbps} kbps for this runtime")
+
     relevance = title_relevance(
         release.title, book.get("title"), book.get("author_names"),
     )
     release.relevance = relevance
     score = relevance * 100.0
     reasons.append(f"relevance {relevance:.2f}")
+
+    # A release that names its bitrate can be checked for length BEFORE it is
+    # downloaded. Without this, a release holding a quarter of the book looks
+    # identical to a well-compressed complete one until the files are decoded.
+    # A dramatisation is a different product, not a different encode of the
+    # same one. Flagged rather than dropped because plenty of people want it.
+    warnings: List[str] = []
+    if is_dramatized(release.title):
+        release.dramatized = True
+        warnings.append(
+            "This is a dramatised adaptation (full cast, music, sound effects), not "
+            "the audiobook. Different cast and a different running time."
+        )
+        reasons.append("dramatised adaptation, not the audiobook")
+        score -= 50.0
+
+    # A title that says it is one piece of a set. This is the cheapest catch
+    # there is and needs no bitrate: the uploader already told us.
+    part = part_marker(release.title)
+    if part:
+        warnings.append(
+            f"Names itself part {part[0]} of {part[1]}. If that means the audio was "
+            f"split across {part[1]} postings, this is roughly "
+            f"{100 // part[1]}% of the book and will not import on its own."
+        )
+        reasons.append(f"says part {part[0]} of {part[1]}")
+        score -= 60.0
+
+    coverage = runtime_coverage(
+        release.size_bytes, release.bitrate_kbps, book.get("runtime_minutes"),
+    )
+    if coverage is not None and coverage < _SHORT_COVERAGE and not release.abridged:
+        hours = implied_runtime_minutes(release.size_bytes, release.bitrate_kbps) or 0
+        warnings.append(
+            f"At the {release.bitrate_kbps} kbps it claims, this is about "
+            f"{hours / 60:.1f} hours — roughly {coverage * 100:.0f}% of the book."
+        )
+        reasons.append(f"only ~{coverage * 100:.0f}% of the runtime at its stated bitrate")
+        score -= 40.0
+
+    # Every problem found, not just the last one. A GraphicAudio release split
+    # into five parts is two separate things wrong with it and the reader needs
+    # both — assigning to short_warning in turn hid whichever came first.
+    release.short_warning = " ".join(warnings)
 
     format_bonus = _FORMAT_SCORES.get(release.audio_format, 0.0)
     if format_bonus:
@@ -577,6 +838,24 @@ def rank_releases(
     # A release in the wrong language is never what was asked for, whatever the
     # narrator setting says.
     keep = [r for r in keep if r.language_verdict != "mismatch"]
+    # Nor is the wrong EDITION. Audible sells abridged and unabridged as
+    # separate ASINs with different runtimes, so the book being looked at is
+    # already one or the other — an abridgement is a different product, not a
+    # worse copy, exactly like the wrong language. Someone who wants the
+    # abridgement opens its own catalogue entry, and this flips to match.
+    #
+    # Only a CONFIDENT mismatch is dropped: the verdict is "unknown" unless the
+    # catalogue names the edition AND the release names its own, and most
+    # releases name nothing.
+    keep = [r for r in keep if r.abridgement_verdict != "mismatch"]
+    # Too small to be the whole book, at any bitrate a real audiobook uses.
+    # Dropped rather than ranked low for the same reason as the wrong edition:
+    # it is not a worse copy of what was asked for, it is not the thing.
+    floor = min_complete_kbps()
+    keep = [
+        r for r in keep
+        if not too_small_to_be_complete(r.size_bytes, book.get("runtime_minutes"), floor)
+    ]
     if str(narrator_mode).lower() != "any":
         keep = [r for r in keep if r.narrator_verdict != "mismatch"]
     keep.sort(key=lambda r: (r.score, r.size_bytes), reverse=True)

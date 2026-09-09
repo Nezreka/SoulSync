@@ -970,3 +970,468 @@ def test_everything_working_and_finding_nothing_is_not_an_error():
          patch("core.audiobook_soulseek.is_available", return_value=True), \
          patch("core.audiobook_soulseek.search", return_value=[]):
         assert search_all_sources(BOOK) == []
+
+
+# ---------------------------------------------------------------------------
+# Why one release is 100MB and another 2GB
+# ---------------------------------------------------------------------------
+
+_MB = 1024 * 1024
+_GB = 1024 * 1024 * 1024
+
+
+def test_the_implied_bitrate_explains_the_size():
+    from core.audiobook_release_search import implied_bitrate_kbps
+
+    # A 16h10m book. These are the sizes a real search turns up.
+    assert implied_bitrate_kbps(100 * _MB, 970) == 14
+    assert implied_bitrate_kbps(465 * _MB, 970) == 67
+    assert implied_bitrate_kbps(2 * _GB, 970) == 295
+
+
+def test_the_same_size_means_different_things_at_different_runtimes():
+    # Which is the whole reason size alone cannot be judged: 800MB is generous
+    # for a six-hour book and thin for a forty-hour one.
+    from core.audiobook_release_search import implied_bitrate_kbps
+
+    short = implied_bitrate_kbps(800 * _MB, 6 * 60)
+    long = implied_bitrate_kbps(800 * _MB, 40 * 60)
+    assert short > long * 5
+
+
+@pytest.mark.parametrize("size,minutes", [(0, 970), (100 * _MB, 0), (None, 970),
+                                          (100 * _MB, None), ("x", 970)])
+def test_an_unknowable_bitrate_is_none_not_a_guess(size, minutes):
+    from core.audiobook_release_search import implied_bitrate_kbps
+
+    assert implied_bitrate_kbps(size, minutes) is None
+
+
+@pytest.mark.parametrize("kbps,band", [
+    (14, "thin"), (32, "standard"), (67, "good"), (115, "generous"), (295, "oversized"),
+])
+def test_the_band_matches_what_audible_itself_ships(kbps, band):
+    # Audible's own standard files are 32 kbps mono, enhanced 64 kbps stereo.
+    # Those are the reference points, not an arbitrary scale.
+    from core.audiobook_release_search import quality_band
+
+    assert quality_band(kbps)[0] == band
+
+
+def test_every_band_explains_itself():
+    from core.audiobook_release_search import quality_band
+
+    for kbps in (14, 32, 67, 115, 295):
+        band, note = quality_band(kbps)
+        assert band and note, kbps
+
+
+def test_an_unknown_bitrate_has_no_band():
+    from core.audiobook_release_search import quality_band
+
+    assert quality_band(None) == ("", "")
+    assert quality_band(0) == ("", "")
+
+
+def test_a_ranked_release_carries_the_arithmetic():
+    # The person choosing needs this more than the ranker does, so it rides on
+    # the release whether or not it moved the score.
+    release = _release("Project Hail Mary M4B")
+    release.size_bytes = 465 * _MB
+    ranked = rank_releases([release], BOOK, 0.0, "any")
+    assert ranked[0].implied_kbps == 67
+    assert ranked[0].quality_band == "good"
+    assert ranked[0].quality_note
+    assert any("kbps" in reason for reason in ranked[0].reasons)
+
+
+def test_the_arithmetic_survives_serialisation():
+    release = _release("Project Hail Mary M4B")
+    release.size_bytes = 2 * _GB
+    payload = rank_releases([release], BOOK, 0.0, "any")[0].to_dict()
+    assert payload["implied_kbps"] == 295
+    assert payload["quality_band"] == "oversized"
+    assert "lossless" in payload["quality_note"]
+
+
+def test_a_book_with_no_runtime_gets_no_bitrate_rather_than_a_wrong_one():
+    release = _release("Project Hail Mary M4B")
+    release.size_bytes = 465 * _MB
+    ranked = rank_releases([release], {**BOOK, "runtime_minutes": 0}, 0.0, "any")
+    assert ranked[0].implied_kbps is None
+    assert ranked[0].quality_band == ""
+
+
+# ---------------------------------------------------------------------------
+# Catching a partial release BEFORE downloading it
+# ---------------------------------------------------------------------------
+
+def test_a_stated_bitrate_turns_a_size_into_a_runtime():
+    from core.audiobook_release_search import implied_runtime_minutes
+
+    # 100MB at 64kbps is 3.6 hours, whatever the book claims to be.
+    assert round(implied_runtime_minutes(100 * _MB, 64) / 60, 1) == 3.6
+
+
+def test_coverage_says_how_much_of_the_book_can_fit():
+    from core.audiobook_release_search import runtime_coverage
+
+    assert round(runtime_coverage(100 * _MB, 64, 970), 2) == 0.23
+    assert runtime_coverage(465 * _MB, 64, 970) > 1.0
+
+
+@pytest.mark.parametrize("size,kbps,minutes", [
+    (0, 64, 970), (100 * _MB, 0, 970), (100 * _MB, 64, 0),
+    (None, 64, 970), (100 * _MB, None, 970),
+])
+def test_coverage_is_none_rather_than_a_guess(size, kbps, minutes):
+    from core.audiobook_release_search import runtime_coverage
+
+    assert runtime_coverage(size, kbps, minutes) is None
+
+
+def test_a_release_too_short_for_the_book_is_flagged_and_demoted():
+    """The only partial-release check that works before downloading.
+
+    Playing time can otherwise be measured only by decoding the files, so a
+    release holding a third of the book looks identical to a well-compressed
+    complete one until the download has already been spent.
+
+    Sized to clear the completeness floor deliberately: this is the STATED
+    bitrate check, and a release the floor already removes would prove nothing.
+    """
+    short = _release("Project Hail Mary 192kbps mp3")
+    short.size_bytes = 465 * _MB          # 67 kbps implied, clears the floor
+    short.bitrate_kbps = 192              # but at 192 that is only ~5.6 hours
+    whole = _release("Project Hail Mary 64kbps m4b")
+    whole.size_bytes = 465 * _MB
+    whole.bitrate_kbps = 64
+
+    ranked = rank_releases([short, whole], BOOK, 0.0, "any")
+
+    assert ranked[0].title == "Project Hail Mary 64kbps m4b"
+    flagged = [r for r in ranked if r.short_warning]
+    assert len(flagged) == 1
+    assert "35%" in flagged[0].short_warning
+
+
+def test_a_release_that_does_not_name_a_bitrate_is_not_accused():
+    # Inferring the bitrate from the size would be circular: the size is the
+    # thing being explained.
+    release = _release("Project Hail Mary mp3")
+    release.size_bytes = 465 * _MB
+    release.bitrate_kbps = None
+    assert rank_releases([release], BOOK, 0.0, "any")[0].short_warning == ""
+
+
+def test_an_abridged_release_is_not_accused_of_being_short():
+    # It IS shorter than the published runtime, legitimately.
+    release = _release("Project Hail Mary ABRIDGED 192kbps")
+    release.size_bytes = 465 * _MB
+    release.bitrate_kbps = 192
+    release.abridged = True
+    assert rank_releases([release], BOOK, 0.0, "any")[0].short_warning == ""
+
+
+def test_the_warning_survives_serialisation():
+    release = _release("Project Hail Mary 192kbps mp3")
+    release.size_bytes = 465 * _MB
+    release.bitrate_kbps = 192
+    assert "35%" in rank_releases([release], BOOK, 0.0, "any")[0].to_dict()["short_warning"]
+
+
+# ---------------------------------------------------------------------------
+# The wrong edition is the wrong product
+# ---------------------------------------------------------------------------
+
+def test_an_abridged_release_is_dropped_for_an_unabridged_book():
+    """Audible sells the two as separate ASINs with different runtimes.
+
+    So the book being looked at is already one or the other, and an
+    abridgement is a different product rather than a worse copy — the same
+    argument that drops a release in the wrong language.
+    """
+    unabridged = {**BOOK, "format_type": "unabridged"}
+    wrong = _release("Project Hail Mary ABRIDGED mp3")
+    right = _release("Project Hail Mary Unabridged m4b")
+
+    ranked = rank_releases([wrong, right], unabridged, 0.0, "any")
+
+    assert [r.title for r in ranked] == ["Project Hail Mary Unabridged m4b"]
+
+
+def test_an_unabridged_release_is_dropped_for_an_abridged_book():
+    # Symmetrical: someone who opened the abridged entry wants the abridgement.
+    abridged = {**BOOK, "format_type": "abridged"}
+    ranked = rank_releases(
+        [_release("Project Hail Mary Unabridged m4b"),
+         _release("Project Hail Mary Abridged mp3")],
+        abridged, 0.0, "any",
+    )
+    assert [r.title for r in ranked] == ["Project Hail Mary Abridged mp3"]
+
+
+def test_a_release_that_names_no_edition_is_always_kept():
+    # Most releases say nothing, and dropping them would empty the list.
+    unabridged = {**BOOK, "format_type": "unabridged"}
+    ranked = rank_releases([_release("Project Hail Mary m4b")], unabridged, 0.0, "any")
+    assert len(ranked) == 1
+
+
+def test_nothing_is_dropped_when_the_catalogue_does_not_say():
+    # Without a known edition there is no mismatch to be confident about.
+    silent = {**BOOK}
+    silent.pop("format_type", None)
+    ranked = rank_releases(
+        [_release("Project Hail Mary ABRIDGED mp3"),
+         _release("Project Hail Mary Unabridged m4b")],
+        silent, 0.0, "any",
+    )
+    assert len(ranked) == 2
+
+
+def test_the_edition_filter_is_independent_of_the_narrator_setting():
+    # The wrong edition is wrong however relaxed the narrator choice is.
+    unabridged = {**BOOK, "format_type": "unabridged"}
+    for mode in ("exact", "any"):
+        ranked = rank_releases(
+            [_release("Project Hail Mary ABRIDGED mp3")], unabridged, 0.0, mode,
+        )
+        assert ranked == [], mode
+
+
+# ---------------------------------------------------------------------------
+# A release that is one piece of a split posting
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("title,expected", [
+    ("The Stormlight Archive 1 - The Way of Kings (1 of 5)", (1, 5)),
+    ("Way of Kings [2/6] mp3", (2, 6)),
+    ("Way of Kings Part 3 of 4", (3, 4)),
+])
+def test_a_split_posting_is_recognised(title, expected):
+    from core.audiobook_release_search import part_marker
+
+    assert part_marker(title) == expected
+
+
+@pytest.mark.parametrize("title", [
+    "The Way of Kings m4b",
+    "The Way of Kings Disc 1",       # normal structure inside a complete set
+    "The Way of Kings CD2",
+    "Project Hail Mary (1 of 1)",    # a whole book saying so
+    "Some Book 1 of 40",             # not a part count
+])
+def test_a_complete_release_is_not_mistaken_for_a_part(title):
+    from core.audiobook_release_search import part_marker
+
+    assert part_marker(title) is None
+
+
+def test_a_split_posting_is_flagged_and_demoted():
+    """The failure that costs a whole download and is invisible until the
+    files are decoded: every chunk plays perfectly and is simply not the book.
+
+    Caught live — a 45-hour book grabbed as "(1 of 5)" imported nothing and
+    held at staged with 16% of the runtime on disk.
+    """
+    part = _release("The Way of Kings (1 of 5)")
+    whole = _release("The Way of Kings Unabridged m4b")
+
+    ranked = rank_releases([part, whole], BOOK, 0.0, "any")
+
+    assert ranked[0].title == "The Way of Kings Unabridged m4b"
+    flagged = [r for r in ranked if r.short_warning]
+    assert len(flagged) == 1
+    assert "part 1 of 5" in flagged[0].short_warning
+
+
+def test_the_part_warning_says_roughly_how_much_of_the_book_it_is():
+    release = _release("The Way of Kings (1 of 5)")
+    warning = rank_releases([release], BOOK, 0.0, "any")[0].short_warning
+    assert "20%" in warning
+
+
+def test_the_part_warning_needs_no_bitrate():
+    # The cheapest catch there is: the uploader already told us.
+    release = _release("The Way of Kings (1 of 5)")
+    release.bitrate_kbps = None
+    assert rank_releases([release], BOOK, 0.0, "any")[0].short_warning
+
+
+# ---------------------------------------------------------------------------
+# Dramatised adaptations are a different product
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("title", [
+    "The Way of Kings GraphicAudio (1 of 5)",
+    "Graphic Audio - Mistborn",
+    "The Way of Kings - A Movie In Your Mind",
+    "Dramatized Adaptation",
+    "Full-Cast Dramatisation",
+])
+def test_a_dramatisation_is_recognised(title):
+    from core.audiobook_release_search import is_dramatized
+
+    assert is_dramatized(title) is True
+
+
+@pytest.mark.parametrize("title", [
+    "The Way of Kings Unabridged m4b",
+    "Full Cast Recording",      # Audible sells genuine full-cast READINGS
+    "Narrated by a full cast",
+])
+def test_a_reading_is_not_mistaken_for_a_dramatisation(title):
+    from core.audiobook_release_search import is_dramatized
+
+    assert is_dramatized(title) is False
+
+
+def test_a_dramatisation_is_flagged_and_outranked():
+    """A full-cast re-recording with music and effects is not the audiobook.
+
+    Different cast, unrelated running time, sold in separately-downloaded
+    parts. Somebody expecting a narrator reading the book gets a radio play,
+    so it is flagged — but plenty of people want exactly that, so it is not
+    dropped.
+    """
+    drama = _release("The Way of Kings GraphicAudio")
+    reading = _release("The Way of Kings Unabridged m4b")
+
+    ranked = rank_releases([drama, reading], BOOK, 0.0, "any")
+
+    assert ranked[0].title == "The Way of Kings Unabridged m4b"
+    flagged = [r for r in ranked if r.dramatized]
+    assert len(flagged) == 1
+    assert "dramatised adaptation" in flagged[0].short_warning
+
+
+def test_a_dramatisation_still_appears_for_someone_who_wants_one():
+    ranked = rank_releases([_release("The Way of Kings GraphicAudio")], BOOK, 0.0, "any")
+    assert len(ranked) == 1
+
+
+def test_the_dramatisation_flag_survives_serialisation():
+    payload = rank_releases(
+        [_release("The Way of Kings GraphicAudio")], BOOK, 0.0, "any",
+    )[0].to_dict()
+    assert payload["dramatized"] is True
+
+
+def test_every_problem_with_a_release_is_reported_not_just_the_last():
+    """A GraphicAudio release split into five parts is two separate things
+    wrong with it, and the reader needs both.
+
+    Assigning to short_warning in turn kept only whichever check ran last,
+    which silently hid the more important half — this is exactly the release
+    that was grabbed live.
+    """
+    release = _release("The Way of Kings GraphicAudio (1 of 5)")
+    warning = rank_releases([release], BOOK, 0.0, "any")[0].short_warning
+
+    assert "dramatised adaptation" in warning
+    assert "part 1 of 5" in warning
+
+
+@pytest.mark.parametrize("protocol", ["torrent", "usenet", "soulseek"])
+def test_the_warnings_apply_to_every_source(protocol):
+    # Prowlarr supplies the indexer's title; Soulseek supplies the peer's
+    # folder name. Both land in the same field and get the same checks.
+    release = _release("The Way of Kings GraphicAudio (1 of 5)")
+    release.protocol = protocol
+    ranked = rank_releases([release], BOOK, 0.0, "any")
+    assert ranked[0].dramatized is True
+    assert ranked[0].short_warning
+
+
+def test_a_clean_release_carries_no_warning():
+    # The flags must not fire on an ordinary good release.
+    ranked = rank_releases([_release("The Way of Kings Unabridged m4b")], BOOK, 0.0, "any")
+    assert ranked[0].short_warning == ""
+    assert ranked[0].dramatized is False
+
+
+# ---------------------------------------------------------------------------
+# Too small to be the whole book
+# ---------------------------------------------------------------------------
+
+def test_a_release_too_small_for_the_runtime_is_hidden():
+    """Audible's own files are 32 kbps mono; nothing real is under ~24.
+
+    Caught live: a 423MB torrent of a 45.5-hour book implied 22 kbps, ranked
+    FIRST, and turned out to hold a sixth of the book. The old bounds allowed
+    anything from 8 kbps up.
+    """
+    kings = {**BOOK, "title": "The Way of Kings",
+             "author_names": ["Brandon Sanderson"], "runtime_minutes": 2730}
+    tiny = _release("The Way of Kings")
+    tiny.size_bytes = 423 * _MB
+    real = _release("The Way of Kings Unabridged m4b")
+    real.size_bytes = 1250 * _MB
+
+    ranked = rank_releases([tiny, real], kings, 0.0, "any")
+
+    assert [r.title for r in ranked] == ["The Way of Kings Unabridged m4b"]
+
+
+def test_a_frugal_but_real_mono_rip_still_passes():
+    # The floor is for "impossible", not for "good" — 32 kbps mono is exactly
+    # what Audible themselves ship.
+    kings = {**BOOK, "title": "The Way of Kings",
+             "author_names": ["Brandon Sanderson"], "runtime_minutes": 2730}
+    release = _release("The Way of Kings 32k mono")
+    release.size_bytes = 625 * _MB
+    assert len(rank_releases([release], kings, 0.0, "any")) == 1
+
+
+def test_the_floor_works_for_a_short_book_too():
+    # It is a rate, not a size: 100MB is fine for a three-hour book.
+    short_book = {**BOOK, "runtime_minutes": 180}
+    release = _release("Some Novella")
+    release.size_bytes = 100 * _MB
+    assert len(rank_releases([release], short_book, 0.0, "any")) == 1
+
+
+def test_the_floor_needs_a_known_runtime():
+    # With no runtime there is no rate to check, so nothing is hidden.
+    from core.audiobook_release_search import too_small_to_be_complete
+
+    assert too_small_to_be_complete(423 * _MB, 0) is False
+    assert too_small_to_be_complete(423 * _MB, None) is False
+
+
+def test_the_floor_measures_against_the_edition_being_viewed():
+    """Both directions, with no extra rules.
+
+    The runtime always belongs to the edition being looked at, so an abridged
+    entry is measured against the abridged runtime. Picking the wrong edition
+    fails this check by itself.
+    """
+    from core.audiobook_release_search import too_small_to_be_complete
+
+    # 423MB is too small for 45.5 hours...
+    assert too_small_to_be_complete(423 * _MB, 2730) is True
+    # ...but ample for the 9-hour abridgement.
+    assert too_small_to_be_complete(423 * _MB, 540) is False
+
+
+def test_the_floor_is_configurable():
+    from unittest.mock import MagicMock, patch
+
+    from core.audiobook_release_search import min_complete_kbps
+
+    manager = MagicMock()
+    manager.get.side_effect = lambda key, default=None: 48
+    with patch("core.settings.config_manager", manager):
+        assert min_complete_kbps() == 48
+
+
+def test_a_broken_setting_falls_back_to_the_default():
+    from unittest.mock import MagicMock, patch
+
+    from core.audiobook_release_search import DEFAULT_MIN_COMPLETE_KBPS, min_complete_kbps
+
+    manager = MagicMock()
+    manager.get.side_effect = RuntimeError("no config")
+    with patch("core.settings.config_manager", manager):
+        assert min_complete_kbps() == DEFAULT_MIN_COMPLETE_KBPS

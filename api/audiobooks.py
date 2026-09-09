@@ -730,6 +730,33 @@ def create_audiobooks_blueprint() -> Blueprint:
 
         return jsonify({"success": True, "dropped": forget(request.args.get("id") or "")})
 
+    @bp.route("/releases/contents", methods=["POST"])
+    def release_contents():
+        """What is inside one release, before committing to it.
+
+        A name and a size cannot tell an m4b apart from 87 mp3s plus somebody's
+        discography. Takes the release payload the search already handed the
+        client, so nothing has to be looked up again.
+
+        Reads only. It fetches the .torrent or NZB the indexer already offers
+        and decodes it in memory; nothing is enqueued and nothing is stored.
+        """
+        from core.audiobook_release_contents import contents_for
+
+        body = request.get_json(silent=True) or {}
+        release = body.get("release")
+        if not isinstance(release, dict):
+            return jsonify({"success": False, "error": "release is required"}), 400
+
+        try:
+            found = contents_for(release)
+        except Exception as exc:                            # noqa: BLE001
+            # A preview must never be the reason somebody cannot grab a book.
+            logger.warning("Could not read release contents: %s", exc)
+            return jsonify({"success": True, "files": [], "summary": {},
+                            "note": "Could not read this release."})
+        return jsonify({"success": True, **found})
+
     @bp.route("/grab", methods=["POST"])
     def grab():
         """Send one chosen release to the download client.

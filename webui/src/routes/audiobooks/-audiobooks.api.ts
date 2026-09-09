@@ -451,18 +451,59 @@ export async function cancelReleaseSearch(id: string): Promise<void> {
   }
 }
 
+export interface AudiobookReleaseContents {
+  files: { name: string; size: number }[];
+  summary: {
+    total: number;
+    audio_count: number;
+    extra_count: number;
+    audio_bytes: number;
+    total_bytes: number;
+    formats: string[];
+  };
+  note: string;
+}
+
+/**
+ * What is actually inside a release. A name and a size cannot tell one m4b
+ * apart from 87 mp3s plus somebody's discography.
+ *
+ * Reads only — it decodes the .torrent or NZB the indexer already offers.
+ * Soulseek needs no request at all, because the search result already carries
+ * the peer's file list.
+ */
+export async function fetchReleaseContents(
+  release: AudiobookReleaseCandidate,
+): Promise<AudiobookReleaseContents | null> {
+  try {
+    const data = await readJson<{ success?: boolean } & AudiobookReleaseContents>(
+      apiClient.post('audiobooks/releases/contents', { json: { release }, timeout: 40000 }),
+    );
+    if (!data?.success) return null;
+    return {
+      files: Array.isArray(data.files) ? data.files : [],
+      summary: data.summary,
+      note: data.note || '',
+    };
+  } catch (err) {
+    console.error('Failed to read the release contents:', err);
+    return null;
+  }
+}
+
 export async function grabRelease(
   asin: string,
   release: AudiobookReleaseCandidate,
-): Promise<{ ok: boolean; error: string }> {
+): Promise<{ ok: boolean; error: string; ref: string }> {
   try {
-    const data = await readJson<{ success?: boolean; error?: string }>(
+    const data = await readJson<{ success?: boolean; error?: string; ref?: string }>(
       apiClient.post('audiobooks/grab', { json: { asin, release } }),
     );
-    return { ok: Boolean(data?.success), error: data?.error || '' };
+    // The ref is how the row that was clicked follows its own download.
+    return { ok: Boolean(data?.success), error: data?.error || '', ref: data?.ref || '' };
   } catch (err) {
     console.error('Failed to grab the release:', err);
-    return { ok: false, error: 'Request failed' };
+    return { ok: false, error: 'Request failed', ref: '' };
   }
 }
 

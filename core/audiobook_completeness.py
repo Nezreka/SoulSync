@@ -94,15 +94,31 @@ def assess(
     folder: str,
     expected_minutes: Optional[int],
     tolerance: float = DEFAULT_TOLERANCE,
+    abridged: bool = False,
 ) -> Dict[str, Any]:
     """Is what is on disk the whole book?
 
     Returns ``{complete, measured_minutes, expected_minutes, ratio, files,
     unreadable, reason, measured_by}``.
 
+    Deliberately measures PLAYING TIME, never file count. There is no standard
+    for how an audiobook is cut up: the same title ships as one m4b, as 20
+    chapters, or as 50, and every one of those is complete. Counting files
+    could only ever compare a release against another release. Runtime is the
+    one thing that describes the BOOK.
+
     With no expected runtime there is nothing to compare against, so the only
     check left is "is there any audio at all" — a book we know nothing about is
     let through rather than held forever on a comparison that cannot be made.
+
+    ``abridged`` is that same case. Audible publishes the runtime of the
+    edition being viewed, which is the unabridged one; an abridged release is
+    routinely half of it and would look like a book missing half its chapters
+    forever. We do not know how long the abridgement is meant to be, so we do
+    not pretend to. A dramatised adaptation (GraphicAudio and the like) is the
+    same problem again and rides the same flag: a full-cast re-recording with
+    music and effects, sold in parts, whose length has no relation to the
+    reading Audible sells.
     """
     files = collect_audio(Path(folder))
     result: Dict[str, Any] = {
@@ -175,6 +191,19 @@ def assess(
     if expected <= 0:
         result["complete"] = True
         result["reason"] = "No published runtime to compare against"
+        return result
+
+    if abridged:
+        # An abridgement has its own runtime that nobody publishes. Comparing
+        # it against the unabridged figure would stage a perfectly good
+        # download for a week and then fail it to the wishlist, which would
+        # re-grab the same release and do it again.
+        result["complete"] = True
+        result["measured_by"] = "abridged"
+        result["reason"] = (
+            f"{int(measured_minutes)} minutes present; abridged releases have no "
+            f"published runtime to check against"
+        )
         return result
 
     ratio = measured_minutes / expected

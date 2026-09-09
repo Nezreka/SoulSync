@@ -490,3 +490,116 @@ def test_the_card_badge_expands_on_hover_like_every_other_card():
     css = _read("webui/src/routes/audiobooks/-ui/audiobooks-page.module.css")
     assert ":global(.watch-card-icon)" in css
     assert ":global(.watch-icon-label)" in css
+
+
+# ---------------------------------------------------------------------------
+# Helping the reader choose a release
+# ---------------------------------------------------------------------------
+
+def test_the_release_list_names_its_top_pick():
+    """The ranking had an opinion and was keeping it to itself.
+
+    "Not sure what the best choice is" is a fair complaint about a list that
+    is already sorted by narrator match, format and size plausibility without
+    ever saying so.
+    """
+    modal = _read("webui/src/routes/audiobooks/-ui/audiobook-releases-modal.tsx")
+    assert "Best from" in modal
+    assert "styles.bestMatch" in modal
+
+
+def test_the_top_pick_is_named_per_source_not_just_overall():
+    """Marking only the overall winner meant nothing could be labelled until
+    the whole search settled, because the next indexer to answer could take
+    the crown. Per source it is decidable as soon as that source replies.
+    """
+    modal = _read("webui/src/routes/audiobooks/-ui/audiobook-releases-modal.tsx")
+    assert "Best from" in modal
+    assert "bestKeys" in modal
+    # No longer gated on the search having finished.
+    assert "!loading" not in modal.split("const best =", 1)[1].split("\n", 1)[0]
+
+
+def test_the_best_of_each_source_is_listed_first():
+    # Twenty rows from one indexer used to bury a better hit from another.
+    modal = _read("webui/src/routes/audiobooks/-ui/audiobook-releases-modal.tsx")
+    assert "ordered: [...bests, ...rest]" in modal
+    assert "ordered.map(" in modal
+
+
+def test_the_remainder_groups_by_type():
+    modal = _read("webui/src/routes/audiobooks/-ui/audiobook-releases-modal.tsx")
+    block = modal.split("rest.sort(", 1)[1].split("\n", 1)[0]
+    assert "protocol" in block
+
+
+
+def test_the_size_of_a_release_is_explained_not_just_shown():
+    # A name and a size cannot be judged: 800MB is generous for a six-hour
+    # book and thin for a forty-hour one.
+    modal = _read("webui/src/routes/audiobooks/-ui/audiobook-releases-modal.tsx")
+    assert "implied_kbps" in modal
+    assert "quality_note" in modal
+
+
+def test_an_abridged_release_says_its_bitrate_is_rough():
+    # Its real runtime is shorter than the catalogue's, so the arithmetic
+    # reads high. Quietly misleading would be worse than not showing it.
+    modal = _read("webui/src/routes/audiobooks/-ui/audiobook-releases-modal.tsx")
+    block = modal.split("release.implied_kbps ?", 1)[1][:900]
+    assert "abridged" in block
+
+
+def test_soulseek_groups_as_one_source_not_one_per_peer():
+    """A peer offers one folder for a book.
+
+    Grouping by peer made every Soulseek row its own group and therefore its
+    own "best of", and a label on everything is a label on nothing. Soulseek
+    is one source with many peers, like an indexer is one source with many
+    uploads.
+    """
+    modal = _read("webui/src/routes/audiobooks/-ui/audiobook-releases-modal.tsx")
+    block = modal.split("const sourceOf =", 1)[1].split(";", 1)[0]
+    assert "'Soulseek'" in block
+    assert "soulseek?.username" not in block
+
+
+def test_the_peer_is_still_named_on_the_row():
+    # Grouping under one heading must not lose who is actually serving it.
+    modal = _read("webui/src/routes/audiobooks/-ui/audiobook-releases-modal.tsx")
+    assert "release.soulseek.username" in modal
+
+
+def test_a_grabbed_row_shows_its_own_download_status():
+    """Pointing at another page is how "stuck" gets reported.
+
+    A book can sit held for days for a good reason — the release turned out
+    to be part 1 of 5 — and without the reason on the row a held book is
+    indistinguishable from a hung one.
+    """
+    modal = _read("webui/src/routes/audiobooks/-ui/audiobook-releases-modal.tsx")
+    assert "grabbedRefs" in modal
+    assert "tracked.completeness" in modal
+    assert "STATUS_WORDS" in modal
+
+
+def test_the_status_words_are_plain_english():
+    # "staged" means nothing to anyone reading it.
+    modal = _read("webui/src/routes/audiobooks/-ui/audiobook-releases-modal.tsx")
+    block = modal.split("const STATUS_WORDS", 1)[1].split("};", 1)[0]
+    assert "'Held back'" in block
+    assert "'In your library'" in block
+
+
+def test_the_grab_keeps_the_reference_it_is_given():
+    # Without the ref the row has nothing to follow.
+    api = _read("webui/src/routes/audiobooks/-audiobooks.api.ts")
+    block = api.split("export async function grabRelease", 1)[1].split("\n}", 1)[0]
+    assert "ref: data?.ref" in block
+
+
+def test_polling_stops_once_everything_settles():
+    # A modal left open must not poll for the life of the tab.
+    modal = _read("webui/src/routes/audiobooks/-ui/audiobook-releases-modal.tsx")
+    assert "const settled = refs.every(" in modal
+    assert "if (!settled)" in modal

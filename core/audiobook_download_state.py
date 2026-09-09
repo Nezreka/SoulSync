@@ -197,5 +197,20 @@ def forget(task_id: str) -> None:
     with tasks_lock:
         download_tasks.pop(task_id, None)
         batch = download_batches.get(BATCH_ID)
-        if batch and task_id in batch.get("queue", []):
+        if batch is None:
+            return
+        if task_id in batch.get("queue", []):
             batch["queue"].remove(task_id)
+
+        # Drop ids whose task is already gone, so a card removed by any other
+        # path cannot leave the queue looking occupied.
+        batch["queue"] = [t for t in batch.get("queue", []) if t in download_tasks]
+
+        # The batch goes when its last card does. Nothing else will do it:
+        # the music side's batch healer skips this batch by design, because
+        # is_music_batch() returns False for it — the same isolation that keeps
+        # the music worker pool off our downloads also opts us out of its
+        # cleanup, so an emptied batch would sit on the Downloads page as an
+        # "Audiobooks" card with nothing in it, forever.
+        if not batch["queue"]:
+            download_batches.pop(BATCH_ID, None)

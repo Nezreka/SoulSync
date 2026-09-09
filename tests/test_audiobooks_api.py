@@ -1000,3 +1000,27 @@ def test_the_blocking_endpoint_still_works(client, catalog, wishlist_db):
         body = client.get("/api/audiobooks/releases/B1").get_json()
     assert body["success"] is True
     assert body["releases"][0]["title"] == "Book M4B"
+
+
+def test_reading_a_release_returns_its_files(client, catalog, wishlist_db):
+    found = {"protocol": "soulseek", "files": [{"name": "01.mp3", "size": 10}],
+             "summary": {"audio_count": 1}, "note": ""}
+    with patch("core.audiobook_release_contents.contents_for", return_value=found):
+        body = client.post("/api/audiobooks/releases/contents",
+                           json={"release": {"protocol": "soulseek"}}).get_json()
+    assert body["success"] is True
+    assert body["files"][0]["name"] == "01.mp3"
+
+
+def test_reading_a_release_needs_a_release(client, catalog, wishlist_db):
+    assert client.post("/api/audiobooks/releases/contents", json={}).status_code == 400
+
+
+def test_a_failed_read_never_blocks_the_grab(client, catalog, wishlist_db):
+    # A preview must not be the reason somebody cannot download a book.
+    with patch("core.audiobook_release_contents.contents_for",
+               side_effect=RuntimeError("indexer down")):
+        body = client.post("/api/audiobooks/releases/contents",
+                           json={"release": {"protocol": "torrent"}}).get_json()
+    assert body["success"] is True
+    assert body["files"] == [] and body["note"]

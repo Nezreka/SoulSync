@@ -791,3 +791,68 @@ def test_cancelling_a_soulseek_book_stops_its_transfers():
         _cancel_at_client({"source": "soulseek", "client_id": "{}"})
     stop.assert_called_once()
     torrent.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Which folder the book is actually in
+# ---------------------------------------------------------------------------
+
+def _completed(**overrides):
+    payload = {"state": "completed", "progress": 1.0, "size": 100, "downloaded": 100,
+               "download_speed": 0}
+    payload.update(overrides)
+    return SimpleNamespace(**payload)
+
+
+def _capture_path(seen):
+    def check(path, row):
+        seen["path"] = path
+        return {"complete": True, "reason": ""}
+    return check
+
+
+def test_a_finished_torrent_is_measured_in_its_own_folder():
+    """content_path, not save_path.
+
+    save_path is the shared directory the client saved INTO. The completeness
+    gate walks what it is handed recursively, so handing it save_path measured
+    every other download in that folder against this book's runtime — the book
+    then staged forever and nothing ever reached the library. This is #1139
+    again; the music album flow fixed it the same way.
+    """
+    seen = {}
+    patch_out = process_download(
+        _row(),
+        get_status=lambda s, r: _completed(save_path="/downloads",
+                                           content_path="/downloads/The Way of Kings"),
+        resolve_path=_identity_path, organize=_ok_organize(),
+        check_complete=_capture_path(seen),
+    )
+
+    assert seen["path"] == "/downloads/The Way of Kings"
+    assert patch_out["save_path"] == "/downloads/The Way of Kings"
+
+
+def test_usenet_still_uses_its_own_save_path():
+    # SAB has no content_path; its save_path is already the job's own folder.
+    seen = {}
+    process_download(
+        _row(),
+        get_status=lambda s, r: _completed(save_path="/downloads/The Way of Kings"),
+        resolve_path=_identity_path, organize=_ok_organize(),
+        check_complete=_capture_path(seen),
+    )
+    assert seen["path"] == "/downloads/The Way of Kings"
+
+
+def test_a_single_file_torrent_points_at_the_file_not_the_root():
+    # Walking its parent would stage every other torrent's audio with it.
+    seen = {}
+    process_download(
+        _row(),
+        get_status=lambda s, r: _completed(save_path="/downloads",
+                                           content_path="/downloads/Kings.m4b"),
+        resolve_path=_identity_path, organize=_ok_organize(),
+        check_complete=_capture_path(seen),
+    )
+    assert seen["path"] == "/downloads/Kings.m4b"
