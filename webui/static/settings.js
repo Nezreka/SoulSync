@@ -681,6 +681,11 @@ function switchSettingsTab(tab) {
     if (tab === 'downloads' && typeof autoTestSourcesOnce === 'function') {
         autoTestSourcesOnce();
     }
+    // The video chain lives in video.db and can change from the video side, so
+    // re-read on arrival rather than trusting what was rendered earlier.
+    if (tab === 'downloads') {
+        try { _dlchainLoad(); } catch (e) { /* widget is not on every page */ }
+    }
     // Sources: the cards carry live status, so refresh them on arrival and let
     // the same one-shot probe fill the dots in.
     if (tab === 'sources') {
@@ -908,6 +913,245 @@ function toggleAllServiceAccordions(btn) {
             _stgVerifyServices(serviceNames);
         }
     }
+}
+
+
+// ══ Download chains ═════════════════════════════════════════════════════════
+// Music, video and audiobooks each store the same thing — a mode plus an
+// ordered list of sources — and each had its own editor: music a drag list with
+// status dots, audiobooks arrow buttons and toggles, video a third one inside a
+// pop-up on its own side. Same concept, three looks, three behaviours.
+//
+// One widget now, three adapters. The adapters are the only part that differs:
+// where the chain is read from and where it goes back to. Music and audiobooks
+// ride the page's existing settings save; video has its own endpoint because
+// its settings live in video.db, not app_config.
+//
+// A chain of one IS single-source mode. There is no separate switch, because
+// "mode" and "the list" were never independent — a user picking one source and
+// a user dragging one source into the chain mean the same thing.
+const DLCHAIN_KINDS = {
+    music: {
+        label: 'Music',
+        help: 'Downloads try each source in order, top first. One source means single-source mode; two or more is hybrid.',
+        sources: () => HYBRID_SOURCES.map(s => s.id),
+        meta: (id) => HYBRID_SOURCES.find(s => s.id === id) || { id, name: id, emoji: '🎵', icon: null },
+        read: () => ({ order: getHybridOrder() }),
+        write: (order) => {
+            // Feed the SAME module state the old list owned, so saveSettings and
+            // the Sources tiles keep working with no knowledge of this widget.
+            _hybridSourceOrder = order.slice();
+            HYBRID_SOURCES.forEach(s => { _hybridSourceEnabled[s.id] = order.includes(s.id); });
+            _hybridVisualOrder = null;
+            try { _syncHybridHiddenSelects(); } catch (e) { /* legacy selects */ }
+            const modeSel = document.getElementById('download-source-mode');
+            if (modeSel) modeSel.value = order.length > 1 ? 'hybrid' : (order[0] || 'soulseek');
+            try { buildHybridSourceList(); } catch (e) { /* keeps the tiles fresh */ }
+            debouncedAutoSaveSettings();
+        },
+    },
+    video: {
+        label: 'Video',
+        help: 'Video downloads try each source in order, top first. These settings are the video side\'s own and save immediately.',
+        sources: () => ['soulseek', 'torrent', 'usenet', 'extto'],
+        meta: (id) => ({
+            soulseek: { name: 'Soulseek', emoji: '🎵', icon: '/static/img/brands/slskd.png' },
+            torrent: { name: 'Torrent', emoji: '🧲', icon: null },
+            usenet: { name: 'Usenet', emoji: '📰', icon: null },
+            extto: { name: 'External', emoji: '🔗', icon: null },
+        }[id] || { name: id, emoji: '🎬', icon: null }),
+        read: async () => {
+            const r = await _ssJson('/api/video/downloads/config');
+            const cfg = r || {};
+            const order = (cfg.download_mode === 'hybrid' && Array.isArray(cfg.hybrid_order) && cfg.hybrid_order.length)
+                ? cfg.hybrid_order
+                : (cfg.download_mode ? [cfg.download_mode] : ['soulseek']);
+            return { order };
+        },
+        // Video has no page-wide save button, so it commits on change.
+        write: async (order) => {
+            const patch = order.length > 1
+                ? { download_mode: 'hybrid', hybrid_order: order }
+                : { download_mode: order[0] || 'soulseek', hybrid_order: order };
+            await _ssJson('/api/video/downloads/config', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(patch),
+            });
+        },
+    },
+    audiobooks: {
+        label: 'Audiobooks',
+        // A book is fetched as one whole folder, so the order decides who gets
+        // ASKED — the ranking still decides who wins.
+        help: 'Audiobooks are fetched as a whole folder, so the order decides which source is asked first, not which release wins.',
+        sources: () => AUDIOBOOK_SOURCES.slice(),
+        meta: (id) => ({ name: AUDIOBOOK_SOURCE_LABEL[id] || id, emoji: AUDIOBOOK_SOURCE_EMOJI[id] || '📚', icon: null }),
+        read: () => ({ order: _audiobookHybrid.slice() }),
+        write: (order) => {
+            _audiobookHybrid = order.slice();
+            const modeSel = document.getElementById('audiobook-download-mode');
+            if (modeSel) modeSel.value = order.length > 1 ? 'hybrid' : (order[0] || 'torrent');
+            try { renderAudiobookHybrid(); } catch (e) { /* legacy rows */ }
+            debouncedAutoSaveSettings();
+        },
+    },
+};
+
+let _dlchainKind = 'music';
+let _dlchainOrder = [];
+
+function _dlchainRow(kind, id, position) {
+    const spec = DLCHAIN_KINDS[kind];
+    const m = spec.meta(id);
+    const art = m.icon
+        ? `<img class="dlchain-icon" src="${m.icon}" alt="" onerror="this.outerHTML='<span class=\'dlchain-icon emoji-icon\'>${m.emoji}</span>'">`
+        : `<span class="dlchain-icon emoji-icon">${m.emoji}</span>`;
+    const pos = position > 0 ? `<span class="dlchain-pos">${position}</span>` : '';
+    const action = position > 0
+        ? `<button type="button" class="dlchain-btn" title="Remove from the chain" onclick="dlchainRemove('${id}')">&times;</button>`
+        : `<button type="button" class="dlchain-btn" title="Add to the chain" onclick="dlchainAdd('${id}')">+</button>`;
+    return `<div class="dlchain-item" draggable="true" data-src="${id}">`
+         + pos + art
+         + `<span class="dlchain-name">${escapeHtml(m.name)}</span>`
+         + action + '</div>';
+}
+
+function renderDownloadChain() {
+    const kind = _dlchainKind;
+    const spec = DLCHAIN_KINDS[kind];
+    const tabs = document.getElementById('dlchain-tabs');
+    const pool = document.getElementById('dlchain-pool');
+    const list = document.getElementById('dlchain-list');
+    if (!spec || !tabs || !pool || !list) return;
+
+    tabs.innerHTML = Object.keys(DLCHAIN_KINDS).map(k =>
+        `<button type="button" role="tab" class="dlchain-tab${k === kind ? ' active' : ''}" `
+        + `onclick="switchDownloadChain('${k}')">${DLCHAIN_KINDS[k].label}</button>`).join('');
+    const help = document.getElementById('dlchain-help');
+    if (help) help.textContent = spec.help;
+
+    const all = spec.sources();
+    const order = _dlchainOrder.filter(id => all.includes(id));
+    const available = all.filter(id => !order.includes(id));
+
+    list.innerHTML = order.length
+        ? order.map((id, i) => _dlchainRow(kind, id, i + 1)).join('')
+        : '<div class="dlchain-empty">Drag a source here. Downloads need at least one.</div>';
+    pool.innerHTML = available.length
+        ? available.map(id => _dlchainRow(kind, id, 0)).join('')
+        : '<div class="dlchain-empty">Every source is in the chain.</div>';
+
+    const hint = document.getElementById('dlchain-mode-hint');
+    if (hint) {
+        hint.textContent = order.length > 1 ? `hybrid — ${order.length} sources`
+            : order.length === 1 ? 'single source' : 'nothing selected';
+    }
+    _dlchainWireDrag();
+}
+window.renderDownloadChain = renderDownloadChain;
+
+function switchDownloadChain(kind) {
+    if (!DLCHAIN_KINDS[kind]) return;
+    _dlchainKind = kind;
+    _dlchainLoad();
+}
+window.switchDownloadChain = switchDownloadChain;
+
+async function _dlchainLoad() {
+    const spec = DLCHAIN_KINDS[_dlchainKind];
+    if (!spec) return;
+    try {
+        const state = await spec.read();
+        _dlchainOrder = (state && Array.isArray(state.order)) ? state.order.slice() : [];
+    } catch (e) {
+        _dlchainOrder = [];
+    }
+    renderDownloadChain();
+}
+window.loadDownloadChain = _dlchainLoad;
+
+function _dlchainCommit() {
+    const spec = DLCHAIN_KINDS[_dlchainKind];
+    renderDownloadChain();
+    try {
+        const r = spec.write(_dlchainOrder.slice());
+        if (r && typeof r.catch === 'function') {
+            r.catch(() => { if (typeof showToast === 'function') showToast('Could not save the download chain', 'error'); });
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Could not save the download chain', 'error');
+    }
+}
+
+function dlchainAdd(id) {
+    if (!_dlchainOrder.includes(id)) _dlchainOrder.push(id);
+    _dlchainCommit();
+}
+window.dlchainAdd = dlchainAdd;
+
+function dlchainRemove(id) {
+    // An empty chain means nothing can download at all, which is never what a
+    // drag was trying to say. The video side already refused this; now all three do.
+    if (_dlchainOrder.length <= 1) {
+        if (typeof showToast === 'function') showToast('Keep at least one source — downloads need somewhere to go', 'info');
+        return;
+    }
+    _dlchainOrder = _dlchainOrder.filter(x => x !== id);
+    _dlchainCommit();
+}
+window.dlchainRemove = dlchainRemove;
+
+function _dlchainWireDrag() {
+    const pool = document.getElementById('dlchain-pool');
+    const list = document.getElementById('dlchain-list');
+    if (!pool || !list) return;
+
+    document.querySelectorAll('#download-chain-widget .dlchain-item').forEach(item => {
+        item.addEventListener('dragstart', (e) => {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', item.dataset.src);
+            item.classList.add('dragging');
+        });
+        item.addEventListener('dragend', () => {
+            item.classList.remove('dragging');
+            document.querySelectorAll('#download-chain-widget .drag-over')
+                .forEach(el => el.classList.remove('drag-over'));
+        });
+        item.addEventListener('dragover', (e) => {
+            e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+            item.classList.add('drag-over');
+        });
+        item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
+        item.addEventListener('drop', (e) => {
+            e.preventDefault(); e.stopPropagation();
+            item.classList.remove('drag-over');
+            const dragged = e.dataTransfer.getData('text/plain');
+            const target = item.dataset.src;
+            if (!dragged || dragged === target) return;
+            _dlchainOrder = _dlchainOrder.filter(x => x !== dragged);
+            const at = _dlchainOrder.indexOf(target);
+            // Dropping onto a pool row means "put it where that row would be",
+            // which for a source not in the chain is simply the end.
+            _dlchainOrder.splice(at < 0 ? _dlchainOrder.length : at, 0, dragged);
+            _dlchainCommit();
+        });
+    });
+
+    [[list, true], [pool, false]].forEach(([zone, intoChain]) => {
+        zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drag-over'); });
+        zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+        zone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            zone.classList.remove('drag-over');
+            const dragged = e.dataTransfer.getData('text/plain');
+            if (!dragged) return;
+            if (intoChain) {
+                if (!_dlchainOrder.includes(dragged)) { _dlchainOrder.push(dragged); _dlchainCommit(); }
+            } else if (_dlchainOrder.includes(dragged)) {
+                dlchainRemove(dragged);
+            }
+        });
+    });
 }
 
 // ── Hybrid source priority list (drag-and-drop) ──
@@ -2297,6 +2541,9 @@ async function loadSettingsData() {
             .filter(src => AUDIOBOOK_SOURCES.includes(src));
         if (!_audiobookHybrid.length) _audiobookHybrid = [...AUDIOBOOK_SOURCES];
         onAudiobookModeChange();
+        // Both music and audiobook chain state are loaded by now, so the shared
+        // widget can render whichever tab is showing.
+        try { _dlchainLoad(); } catch (e) { /* widget is not on every page */ }
         abVal(document.getElementById('audiobook-torrent-category'),
             ab.torrent_category || 'audiobooks');
         abVal(document.getElementById('audiobook-prowlarr-categories'),

@@ -84031,3 +84031,127 @@ body.src-modal-open { overflow: hidden; }
     line-height: 1.45;
 }
 .setting-warning[hidden] { display: none; }
+
+/* ── Download chains ─────────────────────────────────────────────────────────
+   One editor for music, video and audiobooks. Two columns: what you could use,
+   and what you do use, in order. Built from the same vocabulary as the source
+   tiles and the old .hybrid-source-item rows so the page reads as one thing. */
+.dlchain-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    width: fit-content;
+    max-width: 100%;
+    flex-wrap: wrap;
+}
+.dlchain-tab {
+    padding: 7px 16px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 0.82em;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+}
+.dlchain-tab:hover { color: rgba(255, 255, 255, 0.85); }
+.dlchain-tab.active {
+    background: rgba(var(--accent-rgb), 0.16);
+    color: #fff;
+}
+.dlchain-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 12px;
+}
+@media (max-width: 780px) { .dlchain-columns { grid-template-columns: 1fr; } }
+.dlchain-col-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.dlchain-col-label {
+    font-size: 0.72em;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.6);
+}
+.dlchain-col-hint { font-size: 0.74em; color: rgba(255, 255, 255, 0.32); }
+.dlchain-pool,
+.dlchain-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 96px;
+    padding: 8px;
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    transition: border-color 0.18s, background 0.18s;
+}
+/* The chain is the operative column — give it the accent so which side matters
+   is obvious before reading either heading. */
+.dlchain-list { border-style: solid; border-color: rgba(var(--accent-rgb), 0.22); }
+.dlchain-pool.drag-over,
+.dlchain-list.drag-over {
+    border-color: rgba(var(--accent-rgb), 0.55);
+    background: rgba(var(--accent-rgb), 0.06);
+}
+.dlchain-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 9px;
+    cursor: grab;
+    user-select: none;
+    transition: background 0.18s, border-color 0.18s, transform 0.12s;
+}
+.dlchain-item:hover { background: rgba(255, 255, 255, 0.07); }
+.dlchain-item.dragging { opacity: 0.45; cursor: grabbing; }
+.dlchain-item.drag-over { border-color: rgba(var(--accent-rgb), 0.6); transform: translateY(1px); }
+.dlchain-pos {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(var(--accent-rgb), 0.18);
+    color: #fff;
+    font-size: 0.7em;
+    font-weight: 700;
+}
+.dlchain-icon { width: 20px; height: 20px; object-fit: contain; border-radius: 4px; flex-shrink: 0; }
+.dlchain-icon.emoji-icon { font-size: 16px; line-height: 1; display: flex; align-items: center; justify-content: center; }
+.dlchain-name { flex: 1; font-size: 0.86em; font-weight: 500; color: rgba(255, 255, 255, 0.9); }
+.dlchain-btn {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    font-family: inherit;
+}
+.dlchain-btn:hover { background: rgba(255, 255, 255, 0.13); color: #fff; }
+.dlchain-empty {
+    padding: 14px 10px;
+    text-align: center;
+    font-size: 0.78em;
+    color: rgba(255, 255, 255, 0.3);
+}

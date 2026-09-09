@@ -297,7 +297,13 @@ def test_the_two_downloader_categories_stay_in_step(settings_js):
     # category nothing is watching.
     # Brace-matched rather than split on "}," — the block has a nested object
     # in it, and a naive split stops at the wrong place.
-    start = settings_js.index("audiobooks: {") + len("audiobooks: ")
+    #
+    # Scoped to saveSettings first: the shared download-chain widget also has an
+    # `audiobooks: {` adapter, and it sits earlier in the file, so an unscoped
+    # search brace-matched that instead and reported this field as gone.
+    payload = settings_js.split("async function saveSettings", 1)[1]
+    start = payload.index("audiobooks: {") + len("audiobooks: ")
+    settings_js = payload
     depth = 0
     for end, char in enumerate(settings_js[start:], start):
         if char == "{":

@@ -4153,13 +4153,39 @@
                                     <span class="setting-help-text" style="margin-left:10px;">Checks every selected source &amp; configured connection.</span>
                                 </div>
 
+                                <!-- ═══ DOWNLOAD CHAINS ═════════════════════════════════════
+                                     One widget for all three media types. Music, video and
+                                     audiobooks each keep their own {mode, hybrid_order} —
+                                     the same shape in three places — and used to have three
+                                     separate editors that looked and behaved differently.
+                                ═════════════════════════════════════════════════════════ -->
+                                <div id="download-chain-widget">
+                                    <div class="dlchain-tabs" id="dlchain-tabs" role="tablist"></div>
+                                    <div class="setting-help-text" id="dlchain-help"></div>
+                                    <div class="dlchain-columns">
+                                        <div class="dlchain-col">
+                                            <div class="dlchain-col-head">
+                                                <span class="dlchain-col-label">Available</span>
+                                                <span class="dlchain-col-hint">drag across to use</span>
+                                            </div>
+                                            <div class="dlchain-pool" id="dlchain-pool"></div>
+                                        </div>
+                                        <div class="dlchain-col">
+                                            <div class="dlchain-col-head">
+                                                <span class="dlchain-col-label">Download chain</span>
+                                                <span class="dlchain-col-hint" id="dlchain-mode-hint"></span>
+                                            </div>
+                                            <div class="dlchain-list" id="dlchain-list"></div>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- Hybrid Mode Settings (shown only when hybrid is selected) -->
                                 <div id="hybrid-settings-container" style="display: none;">
-                                    <div class="setting-help-text">
-                                        Drag to reorder source priority. Toggle the sources you want to use — downloads try each enabled source in order. Click a source (or its ⚙) to configure it below. The first source can use album-level downloads when supported; later sources stay track-level fallback.
-                                    </div>
-                                    <div class="hybrid-source-list" id="hybrid-source-list">
-                                        <!-- Populated by JS -->
+                                    <div class="hybrid-source-list" id="hybrid-source-list" hidden>
+                                        <!-- Legacy music list. The chain widget above replaced it;
+                                             kept (hidden) because buildHybridSourceList still owns
+                                             the per-source status probing the Sources tiles read. -->
                                     </div>
                                     <!-- Hidden selects for backward compatibility with saveSettings -->
                                     <select id="hybrid-primary-source" style="display:none;"><option value="soulseek">Soulseek</option><option value="youtube">YouTube</option><option value="tidal">Tidal</option><option value="qobuz">Qobuz</option><option value="hifi">HiFi</option><option value="deezer_dl">Deezer</option><option value="soundcloud">SoundCloud</option></select>
