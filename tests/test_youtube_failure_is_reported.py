@@ -262,6 +262,9 @@ def test_a_failing_probe_reports_the_reason_it_was_given():
         def last_failure_reason(self):
             return "YouTube is asking us to prove we are not a bot."
 
+        def last_failure_raw(self):
+            return "ERROR: Sign in to confirm you're not a bot."
+
     import core.youtube_client as yt_mod
     original = yt_mod.YouTubeClient
     yt_mod.YouTubeClient = _Yt
@@ -397,15 +400,37 @@ def test_a_browser_cookie_store_we_cannot_read_is_classified():
     assert classify(CHROME_MISSING) == COOKIES
 
 
-def test_the_advice_names_the_actual_constraint():
+def test_the_advice_names_the_browser_it_could_not_read():
     reason = human_reason(CHROME_MISSING) or ""
     low = reason.lower()
     assert "chrome" in low
-    assert "same machine" in low
-    # the fix that works on a server
+    # the fix that works everywhere
     assert "paste cookies.txt" in low
     # and NOT the advice for a bot gate, which is a different failure
     assert "not a bot" not in low
+
+
+def test_the_advice_does_not_pick_a_cause_it_cannot_know():
+    """The first version asserted "SoulSync runs under WSL and your browser is a
+    Windows install". That was a guess dressed as a diagnosis, and it was wrong
+    for the first person who read it — he was on Windows with Chrome open in
+    front of him. It has to offer the candidates, not choose one."""
+    low = (human_reason(CHROME_MISSING) or "").lower()
+    for cause in ("open", "127+", "container"):
+        assert cause in low, f"stopped offering {cause!r} as a possible cause"
+    # a bare assertion of one cause reads as fact; the hedge is the point
+    assert "usually one of" in low
+
+
+def test_the_raw_error_survives_next_to_the_explanation():
+    """An explanation that turns out to be wrong is only debuggable if the thing
+    it was explaining is still on screen. Replacing the specific error with a
+    general one is exactly how "check app.log" happened."""
+    src = (__import__("pathlib").Path(__file__).resolve().parents[1]
+           / "core/connection_test.py").read_text(encoding="utf-8", errors="ignore")
+    branch = src.split('elif service == "youtube":', 1)[1].split("elif service ==", 1)[0]
+    assert "yt-dlp said:" in branch
+    assert "last_failure_raw" in branch
 
 
 def test_the_browser_advice_does_not_leak_into_a_bot_gate():
@@ -437,8 +462,10 @@ def test_an_unclassifiable_failure_shows_the_error_not_a_log_reference():
     src = (__import__("pathlib").Path(__file__).resolve().parents[1]
            / "core/connection_test.py").read_text(encoding="utf-8", errors="ignore")
     branch = src.split('elif service == "youtube":', 1)[1].split("elif service ==", 1)[0]
-    assert "last_failure_raw()" in branch
-    assert "check app.log" not in branch
+    # strip comments: the note explaining why the log reference is gone quotes it
+    code = "\n".join(ln for ln in branch.splitlines() if not ln.strip().startswith("#"))
+    assert "last_failure_raw" in code
+    assert "check app.log" not in code
 
 
 def test_the_client_keeps_the_raw_error():

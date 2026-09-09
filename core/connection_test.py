@@ -568,10 +568,23 @@ def run_service_test(service, test_config):
                     return False, f"YouTube download source not available. {_problem}"
                 reason = yt.last_failure_reason()
                 if reason:
+                    # Keep yt-dlp's own line alongside our explanation. Replacing
+                    # a specific error with a general one is how the useless
+                    # "check app.log" message happened in the first place, and an
+                    # explanation that turns out to be wrong is only debuggable
+                    # if the thing it was explaining is still on screen.
+                    _raw_fn = getattr(yt, "last_failure_raw", None)
+                    raw = (_raw_fn() if callable(_raw_fn) else "") or ""
+                    raw = raw.replace("ERROR: ", "", 1).strip()
+                    if raw and raw[:60].lower() not in reason.lower():
+                        if len(raw) > 160:
+                            raw = raw[:157] + "..."
+                        reason = f"{reason}  (yt-dlp said: {raw})"
                     return False, f"YouTube download source not available. {reason}"
                 # No classified reason. Show the error itself rather than
                 # sending somebody to a log file for a string we already have.
-                raw = yt.last_failure_raw()
+                _raw_fn = getattr(yt, "last_failure_raw", None)
+                raw = _raw_fn() if callable(_raw_fn) else None
                 if raw:
                     raw = raw.replace("ERROR: ", "", 1)
                     if len(raw) > 240:

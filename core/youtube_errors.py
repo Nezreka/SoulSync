@@ -229,13 +229,21 @@ def human_reason(error: Any, *, has_cookies: Optional[bool] = None) -> Optional[
         # Reading the cookie SOURCE failed, which is a different problem from
         # YouTube refusing the request and has a different fix.
         if "cookies database" in low or "unsupported browser" in low or "decrypt" in low:
-            browser = next((b for b in ("chrome", "firefox", "edge", "brave", "opera",
-                                        "chromium", "vivaldi", "safari") if b in low), "that browser")
-            return (f"SoulSync could not read {browser}'s cookies. Browser cookie mode only "
-                    f"works when the browser is installed on the SAME machine that runs "
-                    f"SoulSync and under the same user — so it cannot work in Docker, on a "
-                    f"headless server, or when SoulSync runs under WSL and the browser is a "
-                    f"Windows install. Use 'Paste cookies.txt' in Settings instead.")
+            # Deliberately does NOT pick a cause. The first version of this
+            # asserted "SoulSync is running under WSL and your browser is a
+            # Windows install", which was a guess dressed as a diagnosis and
+            # was wrong for the first person who read it — he was running on
+            # Windows with Chrome open in front of him. List what it can be and
+            # let the raw yt-dlp line, which the caller appends, decide.
+            named = next((b for b in ("chrome", "firefox", "edge", "brave", "opera",
+                                      "chromium", "vivaldi", "safari") if b in low), None)
+            whose = f"{named.title()}'s" if named else "the browser's"
+            return (f"SoulSync could not read {whose} cookies. Usually one of: the browser "
+                    f"is open and holding its cookie database (close it and retry); "
+                    f"Chrome and Edge 127+ encrypt cookies in a way yt-dlp cannot read at "
+                    f"all; or the browser is not reachable from wherever SoulSync itself "
+                    f"runs — a container, a headless box, or a Windows browser when "
+                    f"SoulSync runs under WSL. 'Paste cookies.txt' sidesteps all three.")
         return ("YouTube asked us to prove we're not a bot. Add browser cookies in "
                 "Settings; updating yt-dlp alone won't clear this.")
     if kind == THROTTLED:
