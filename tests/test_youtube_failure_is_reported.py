@@ -211,3 +211,121 @@ def test_a_source_that_cannot_explain_itself_still_returns_the_generic_text(monk
 
     assert ok is False
     assert message == "SoundCloud download source not available."
+
+
+# ---------------------------------------------------------------------------
+# #1233 — the Settings probe never actually asked
+# ---------------------------------------------------------------------------
+
+_ROOT = __import__("pathlib").Path(__file__).resolve().parents[1]
+
+
+def _read(rel: str) -> str:
+    return (_ROOT / rel).read_text(encoding="utf-8", errors="ignore")
+
+
+def test_the_settings_probe_is_not_hardcoded_true():
+    """The whole of #1126's work — the cookie-authenticated probe, the
+    classifier, the reason on the status line — was unreachable from the
+    button most people press. ``HYBRID_SOURCE_PROBE.youtube`` was
+    ``() => Promise.resolve(true)``, so the dot was green while YouTube was
+    refusing every download. Same reporter came back with #1233."""
+    js = _read("webui/static/settings.js")
+    probe = js.split("const HYBRID_SOURCE_PROBE = {", 1)[1].split("};", 1)[0]
+    line = next(ln for ln in probe.splitlines() if ln.strip().startswith("youtube:"))
+    assert "Promise.resolve(true)" not in line, "the YouTube probe still cannot fail"
+    assert "_ssTestConn('youtube')" in line
+
+
+def test_the_server_knows_how_to_test_youtube():
+    # Pointing the probe at a service run_service_test does not handle would
+    # turn a permanently-green dot into a permanently-red one.
+    src = _read("core/connection_test.py")
+    assert 'elif service == "youtube":' in src
+    branch = src.split('elif service == "youtube":', 1)[1].split("elif service ==", 1)[0]
+    assert "check_connection()" in branch
+    assert "last_failure_reason()" in branch
+
+
+def test_a_failing_probe_reports_the_reason_it_was_given():
+    """The point of the branch. A bare "not available" is what sent this
+    reporter deleting his config twice."""
+    from core.connection_test import run_service_test
+
+    class _Yt:
+        def is_available(self):
+            return True
+
+        async def check_connection(self):
+            return False
+
+        def last_failure_reason(self):
+            return "YouTube is asking us to prove we are not a bot."
+
+    import core.youtube_client as yt_mod
+    original = yt_mod.YouTubeClient
+    yt_mod.YouTubeClient = _Yt
+    try:
+        ok, message = run_service_test("youtube", {})
+    finally:
+        yt_mod.YouTubeClient = original
+
+    assert ok is False
+    assert "not a bot" in message
+
+
+def test_a_working_probe_says_so():
+    from core.connection_test import run_service_test
+
+    class _Yt:
+        def is_available(self):
+            return True
+
+        async def check_connection(self):
+            return True
+
+        def last_failure_reason(self):
+            return None
+
+    import core.youtube_client as yt_mod
+    original = yt_mod.YouTubeClient
+    yt_mod.YouTubeClient = _Yt
+    try:
+        ok, message = run_service_test("youtube", {})
+    finally:
+        yt_mod.YouTubeClient = original
+
+    assert ok is True
+    assert "ready" in message.lower()
+
+
+def test_a_missing_ytdlp_is_named_as_such():
+    # Not the same failure as a block, and not fixable by re-exporting cookies.
+    from core.connection_test import run_service_test
+
+    class _Yt:
+        def is_available(self):
+            return False
+
+    import core.youtube_client as yt_mod
+    original = yt_mod.YouTubeClient
+    yt_mod.YouTubeClient = _Yt
+    try:
+        ok, message = run_service_test("youtube", {})
+    finally:
+        yt_mod.YouTubeClient = original
+
+    assert ok is False
+    assert "yt-dlp" in message
+
+
+def test_the_summary_toast_carries_a_reason_not_just_a_count():
+    """"Tested sources 1✓, connections 3✓ / 1✗" is the screenshot on #1233.
+    It says something failed and nothing about what, even when the source
+    handed back a sentence explaining itself."""
+    js = _read("webui/static/settings.js")
+    assert "_ssLastTestMessage" in js
+    conn = js.split("function _ssTestConn(", 1)[1].split("\n}", 1)[0]
+    assert "j.message || j.error" in conn, "the reason is still discarded on failure"
+    toast = js.split("const parts = [`sources", 1)[1].split("showToast(", 1)[1]
+    assert "detail" in toast

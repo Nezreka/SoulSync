@@ -516,6 +516,31 @@ def run_service_test(service, test_config):
                 return False, "MusicBrainz returned no results — may be rate-limited or unreachable."
             except Exception as e:
                 return False, f"MusicBrainz connection error: {str(e)}"
+        elif service == "youtube":
+            # There was no branch here at all, and the Settings probe for
+            # YouTube was hardcoded to "true" on the page — so the dot was green
+            # no matter what, while downloads were being bot-blocked (#1233,
+            # a continuation of #1126 from the same reporter).
+            #
+            # The client's own check_connection runs a cookie-authenticated
+            # yt-dlp probe and records a classified reason on failure, which is
+            # the whole point of the work done for #1126. Ask it, then say what
+            # it said.
+            try:
+                from core.youtube_client import YouTubeClient
+                yt = YouTubeClient()
+                if not yt.is_available():
+                    return False, "YouTube unavailable — yt-dlp not installed."
+                if run_async(yt.check_connection()):
+                    return True, "YouTube download source ready."
+                reason = yt.last_failure_reason()
+                if reason:
+                    return False, f"YouTube download source not available. {reason}"
+                return False, ("YouTube download source not available. The probe "
+                               "failed without a reason yt-dlp could classify — "
+                               "check app.log for the raw error.")
+            except Exception as e:
+                return False, f"YouTube connection error: {str(e)}"
         elif service == "soundcloud":
             # Anonymous SoundCloud has no auth, so "test" really means
             # "is yt-dlp installed and can it reach SoundCloud right now."

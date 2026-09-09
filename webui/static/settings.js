@@ -1009,11 +1009,21 @@ async function _ssJson(url, opts) {
     const r = await fetch(url, opts);
     return await r.json();
 }
+// Records what the server SAID about the last failure, keyed by service, so
+// the summary toast can name a reason instead of only a count. Sources
+// that can explain themselves (YouTube's bot-block, for one) were having
+// that explanation thrown away here.
+const _ssLastTestMessage = {};
 function _ssTestConn(service) {
     return _ssJson(API.testConnection || '/api/test-connection', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ service })
-    }).then(j => !!j.success);
+    }).then(j => {
+        const msg = j && (j.message || j.error);
+        if (msg) _ssLastTestMessage[service] = String(msg);
+        else delete _ssLastTestMessage[service];
+        return !!j.success;
+    });
 }
 // Each probe returns a boolean (connected/ok). Endpoints mirror the per-source
 // "Test Connection" buttons so the results match what those buttons would show.
@@ -1030,7 +1040,10 @@ const HYBRID_SOURCE_PROBE = {
     soundcloud: () => _ssJson('/api/soundcloud/status').then(j => j.available === true && j.reachable === true),
     torrent:    () => _ssTestConn('torrent_client'),
     usenet:     () => _ssTestConn('usenet_client'),
-    youtube:    () => Promise.resolve(true),  // no auth required
+    // Was hardcoded to true on the grounds that YouTube needs no auth.
+    // It does now — cookies — and the green dot hid a bot-block from the
+    // reporter of #1126 for long enough that he opened #1233 about it.
+    youtube:    () => _ssTestConn('youtube'),
 };
 // Configured metadata / server connections that support a generic test.
 const CONNECTION_TEST_SERVICES = ['spotify', 'server', 'tidal', 'qobuz', 'lastfm', 'genius', 'listenbrainz', 'acoustid', 'discogs'];
@@ -1061,11 +1074,12 @@ async function testAllSources(opts = {}) {
     buildHybridSourceList();
 
     let ok = 0, fail = 0;
+    const failedIds = [];
     for (const id of sources) {
         const probe = HYBRID_SOURCE_PROBE[id];
         if (!probe) { _hybridSourceStatus[id] = 'na'; continue; }
-        try { const good = await probe(); _hybridSourceStatus[id] = good ? 'ok' : 'fail'; good ? ok++ : fail++; }
-        catch (e) { _hybridSourceStatus[id] = 'fail'; fail++; }
+        try { const good = await probe(); _hybridSourceStatus[id] = good ? 'ok' : 'fail'; good ? ok++ : (fail++, failedIds.push(id)); }
+        catch (e) { _hybridSourceStatus[id] = 'fail'; fail++; failedIds.push(id); }
         buildHybridSourceList();
     }
 
@@ -1078,7 +1092,7 @@ async function testAllSources(opts = {}) {
             for (const svc of CONNECTION_TEST_SERVICES) {
                 const configured = svc === 'server' ? true : (cfg && cfg[svc] && cfg[svc].configured);
                 if (!configured) continue;
-                try { const good = await _ssTestConn(svc); good ? connOk++ : connFail++; } catch (e) { connFail++; }
+                try { const good = await _ssTestConn(svc); good ? connOk++ : (connFail++, failedIds.push(svc)); } catch (e) { connFail++; failedIds.push(svc); }
             }
         } catch (e) { /* config-status unavailable — skip connection sweep */ }
     }
@@ -1087,7 +1101,14 @@ async function testAllSources(opts = {}) {
     if (!silent) {
         const parts = [`sources ${ok}✓${fail ? ' / ' + fail + '✗' : ''}`];
         if (connOk || connFail) parts.push(`connections ${connOk}✓${connFail ? ' / ' + connFail + '✗' : ''}`);
-        showToast('Tested ' + parts.join(', '), (fail || connFail) ? 'error' : 'success');
+        // A count tells you something broke, not what. Sources that can
+        // explain themselves already do — carry the first one through so
+        // the toast is actionable (#1233).
+        let detail = '';
+        for (const id of failedIds) {
+            if (_ssLastTestMessage[id]) { detail = ` — ${_ssLastTestMessage[id]}`; break; }
+        }
+        showToast('Tested ' + parts.join(', ') + detail, (fail || connFail) ? 'error' : 'success');
     }
 }
 window.testAllSources = testAllSources;
