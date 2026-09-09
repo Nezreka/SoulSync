@@ -110,9 +110,9 @@ def test_the_chain_cannot_be_emptied(js):
 
 
 def test_dropping_between_columns_works_both_ways(js):
-    fn = js.split("function _dlchainWireDrag(", 1)[1].split("\n}", 1)[0]
-    assert "intoChain" in fn
-    assert "dlchainRemove(dragged)" in fn
+    fn = js.split("function _dlchainWireDrag(", 1)[1].split("\n}\n", 1)[0]
+    assert "dlchainRemove(src)" in fn      # chain -> pool removes
+    assert "_dlchainOrder.push(src)" in fn  # pool -> chain appends
 
 
 def test_the_video_chain_is_re_read_on_arrival(js):
@@ -156,5 +156,79 @@ def test_the_styling_reuses_the_pages_own_vocabulary():
     css = _read("webui/static/style.css")
     block = css.split("/* ── Download chains", 1)[1]
     assert "--accent-rgb" in block
-    assert ".dlchain-item.dragging" in block
+    # the two draggable things and the two drop targets
+    assert ".dlchain-step.dragging" in block
+    assert ".dlchain-tile.dragging" in block
     assert ".dlchain-list.drag-over" in block
+    assert ".dlchain-pool.drag-over" in block
+
+
+# ---------------------------------------------------------------------------
+# It reads as a flow, not a list
+# ---------------------------------------------------------------------------
+
+def test_the_chain_renders_as_a_flow(js):
+    """Each source is tried in turn, so the arrow between steps is the "then
+    try" — a plain list does not say that."""
+    fn = js.split("function renderDownloadChain(", 1)[1].split("\nwindow.", 1)[0]
+    assert "dlchain-connector" in fn
+    assert "_dlchainStep(" in fn
+
+
+def test_there_is_always_somewhere_to_drop(js):
+    """The slot stays even when the chain is full, so there is an obvious
+    target rather than having to hit a gap between two rows."""
+    fn = js.split("function renderDownloadChain(", 1)[1].split("\nwindow.", 1)[0]
+    assert "dlchain-slot" in fn
+    assert "Drag another source here" in fn
+    assert "downloads need at least one" in fn
+
+
+def test_the_pool_uses_source_tiles(js):
+    """The thing you drag should look like the thing you configure on the
+    Sources tab — same logo, same card shape."""
+    fn = js.split("function _dlchainTile(", 1)[1].split("\n}", 1)[0]
+    assert "dlchain-tile-art" in fn and "dlchain-tile-name" in fn
+    assert "m.icon" in fn and "m.emoji" in fn
+
+
+def test_a_step_says_where_it_sits(js):
+    fn = js.split("function _dlchainStep(", 1)[1].split("\n}", 1)[0]
+    assert "tried first" in fn and "then" in fn
+    assert "dlchain-step-rank" in fn
+
+
+def test_dropping_on_a_step_reorders(js):
+    """Insert-before is how you move something up the chain."""
+    fn = js.split("function _dlchainWireDrag(", 1)[1].split("\n}\n", 1)[0]
+    assert "_dlchainOrder.indexOf(target)" in fn
+    assert "splice(" in fn
+
+
+def test_a_near_miss_still_does_the_obvious_thing(js):
+    """Dropping in the chain column but not on a step or the slot appends,
+    rather than silently doing nothing."""
+    fn = js.split("function _dlchainWireDrag(", 1)[1].split("\n}\n", 1)[0]
+    assert "list.addEventListener('drop'" in fn
+
+
+def test_the_legacy_music_list_is_really_hidden():
+    """`hidden` alone did not work: .hybrid-source-list sets `display: flex`,
+    and a class rule with display outranks the browser's own [hidden] rule, so
+    the old widget rendered underneath the new one."""
+    css = _read("webui/static/style.css")
+    assert ".hybrid-source-list[hidden]" in css
+    rule = css.split(".hybrid-source-list[hidden]", 1)[1].split("}", 1)[0]
+    assert "display: none" in rule and "!important" in rule
+
+
+def test_the_flow_borrows_the_builder_vocabulary():
+    """Two builders in one app should not look like two apps."""
+    css = _read("webui/static/style.css")
+    block = css.split("/* ── Download chains", 1)[1]
+    conn = block.split(".dlchain-connector {", 1)[1].split("}", 1)[0]
+    assert "width: 2px" in conn                      # same as .flow-connector
+    assert "--accent-rgb" in conn
+    assert ".dlchain-connector::after" in block       # the arrowhead
+    slot = block.split(".dlchain-slot {", 1)[1].split("}", 1)[0]
+    assert "dashed" in slot

@@ -999,21 +999,35 @@ const DLCHAIN_KINDS = {
 
 let _dlchainKind = 'music';
 let _dlchainOrder = [];
+let _dlchainDragging = null;
 
-function _dlchainRow(kind, id, position) {
-    const spec = DLCHAIN_KINDS[kind];
-    const m = spec.meta(id);
+// A source in the pool: the Sources-tab tile, shrunk. Same logo, same shape, so
+// the thing you drag looks like the thing you configure.
+function _dlchainTile(kind, id) {
+    const m = DLCHAIN_KINDS[kind].meta(id);
     const art = m.icon
-        ? `<img class="dlchain-icon" src="${m.icon}" alt="" onerror="this.outerHTML='<span class=\'dlchain-icon emoji-icon\'>${m.emoji}</span>'">`
-        : `<span class="dlchain-icon emoji-icon">${m.emoji}</span>`;
-    const pos = position > 0 ? `<span class="dlchain-pos">${position}</span>` : '';
-    const action = position > 0
-        ? `<button type="button" class="dlchain-btn" title="Remove from the chain" onclick="dlchainRemove('${id}')">&times;</button>`
-        : `<button type="button" class="dlchain-btn" title="Add to the chain" onclick="dlchainAdd('${id}')">+</button>`;
-    return `<div class="dlchain-item" draggable="true" data-src="${id}">`
-         + pos + art
-         + `<span class="dlchain-name">${escapeHtml(m.name)}</span>`
-         + action + '</div>';
+        ? `<img src="${m.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${m.emoji}</span>'">`
+        : `<span class="emoji-icon">${m.emoji}</span>`;
+    return `<button type="button" class="dlchain-tile" draggable="true" data-src="${id}" `
+         + `onclick="dlchainAdd('${id}')" title="Add ${escapeHtml(m.name)} to the chain">`
+         + `<span class="dlchain-tile-art">${art}</span>`
+         + `<span class="dlchain-tile-name">${escapeHtml(m.name)}</span></button>`;
+}
+
+// A step in the chain. Reads as a flow rather than a list because that is what
+// it is: each source is tried in turn, and the arrow is the "then try".
+function _dlchainStep(kind, id, position) {
+    const m = DLCHAIN_KINDS[kind].meta(id);
+    const art = m.icon
+        ? `<img src="${m.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${m.emoji}</span>'">`
+        : `<span class="emoji-icon">${m.emoji}</span>`;
+    return `<div class="dlchain-step" draggable="true" data-src="${id}">`
+         + `<span class="dlchain-step-rank">${position}</span>`
+         + `<span class="dlchain-step-art">${art}</span>`
+         + `<span class="dlchain-step-name">${escapeHtml(m.name)}</span>`
+         + `<span class="dlchain-step-role">${position === 1 ? 'tried first' : 'then'}</span>`
+         + `<button type="button" class="dlchain-btn" title="Remove from the chain" `
+         + `onclick="dlchainRemove('${id}')">&times;</button></div>`;
 }
 
 function renderDownloadChain() {
@@ -1034,11 +1048,20 @@ function renderDownloadChain() {
     const order = _dlchainOrder.filter(id => all.includes(id));
     const available = all.filter(id => !order.includes(id));
 
-    list.innerHTML = order.length
-        ? order.map((id, i) => _dlchainRow(kind, id, i + 1)).join('')
-        : '<div class="dlchain-empty">Drag a source here. Downloads need at least one.</div>';
+    // steps, each joined by a connector, then an always-present drop slot so
+    // there is somewhere obvious to aim at even when the chain is full.
+    const steps = order.map((id, i) => _dlchainStep(kind, id, i + 1));
+    const flow = steps.join('<div class="dlchain-connector"></div>')
+        + (steps.length ? '<div class="dlchain-connector"></div>' : '')
+        + `<div class="dlchain-slot${order.length ? '' : ' first'}" id="dlchain-slot">`
+        + (order.length
+            ? 'Drag another source here'
+            : 'Drag a source here — downloads need at least one')
+        + '</div>';
+    list.innerHTML = flow;
+
     pool.innerHTML = available.length
-        ? available.map(id => _dlchainRow(kind, id, 0)).join('')
+        ? available.map(id => _dlchainTile(kind, id)).join('')
         : '<div class="dlchain-empty">Every source is in the chain.</div>';
 
     const hint = document.getElementById('dlchain-mode-hint');
@@ -1106,51 +1129,84 @@ function _dlchainWireDrag() {
     const list = document.getElementById('dlchain-list');
     if (!pool || !list) return;
 
-    document.querySelectorAll('#download-chain-widget .dlchain-item').forEach(item => {
+    const dragged = () => _dlchainDragging;
+
+    // Pool tiles and chain steps are both draggable and both carry data-src.
+    document.querySelectorAll('#download-chain-widget [data-src]').forEach(item => {
         item.addEventListener('dragstart', (e) => {
+            _dlchainDragging = item.dataset.src;
             e.dataTransfer.effectAllowed = 'move';
             e.dataTransfer.setData('text/plain', item.dataset.src);
             item.classList.add('dragging');
         });
         item.addEventListener('dragend', () => {
+            _dlchainDragging = null;
             item.classList.remove('dragging');
             document.querySelectorAll('#download-chain-widget .drag-over')
                 .forEach(el => el.classList.remove('drag-over'));
         });
-        item.addEventListener('dragover', (e) => {
+    });
+
+    // Dropping ON a step inserts before it — that is how you reorder.
+    list.querySelectorAll('.dlchain-step').forEach(step => {
+        step.addEventListener('dragover', (e) => {
             e.preventDefault(); e.dataTransfer.dropEffect = 'move';
-            item.classList.add('drag-over');
+            step.classList.add('drag-over');
         });
-        item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
-        item.addEventListener('drop', (e) => {
+        step.addEventListener('dragleave', () => step.classList.remove('drag-over'));
+        step.addEventListener('drop', (e) => {
             e.preventDefault(); e.stopPropagation();
-            item.classList.remove('drag-over');
-            const dragged = e.dataTransfer.getData('text/plain');
-            const target = item.dataset.src;
-            if (!dragged || dragged === target) return;
-            _dlchainOrder = _dlchainOrder.filter(x => x !== dragged);
+            step.classList.remove('drag-over');
+            const src = e.dataTransfer.getData('text/plain') || dragged();
+            const target = step.dataset.src;
+            if (!src || src === target) return;
+            _dlchainOrder = _dlchainOrder.filter(x => x !== src);
             const at = _dlchainOrder.indexOf(target);
-            // Dropping onto a pool row means "put it where that row would be",
-            // which for a source not in the chain is simply the end.
-            _dlchainOrder.splice(at < 0 ? _dlchainOrder.length : at, 0, dragged);
+            _dlchainOrder.splice(at < 0 ? _dlchainOrder.length : at, 0, src);
             _dlchainCommit();
         });
     });
 
-    [[list, true], [pool, false]].forEach(([zone, intoChain]) => {
-        zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drag-over'); });
-        zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-        zone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            zone.classList.remove('drag-over');
-            const dragged = e.dataTransfer.getData('text/plain');
-            if (!dragged) return;
-            if (intoChain) {
-                if (!_dlchainOrder.includes(dragged)) { _dlchainOrder.push(dragged); _dlchainCommit(); }
-            } else if (_dlchainOrder.includes(dragged)) {
-                dlchainRemove(dragged);
-            }
+    // The slot at the end: always append.
+    const slot = document.getElementById('dlchain-slot');
+    if (slot) {
+        slot.addEventListener('dragover', (e) => {
+            e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+            slot.classList.add('drag-over');
         });
+        slot.addEventListener('dragleave', () => slot.classList.remove('drag-over'));
+        slot.addEventListener('drop', (e) => {
+            e.preventDefault(); e.stopPropagation();
+            slot.classList.remove('drag-over');
+            const src = e.dataTransfer.getData('text/plain') || dragged();
+            if (!src) return;
+            _dlchainOrder = _dlchainOrder.filter(x => x !== src);
+            _dlchainOrder.push(src);
+            _dlchainCommit();
+        });
+    }
+
+    // Anywhere else in the chain column appends too, so a slightly-off drop
+    // still does the obvious thing instead of nothing.
+    list.addEventListener('dragover', (e) => { e.preventDefault(); list.classList.add('drag-over'); });
+    list.addEventListener('dragleave', () => list.classList.remove('drag-over'));
+    list.addEventListener('drop', (e) => {
+        e.preventDefault();
+        list.classList.remove('drag-over');
+        const src = e.dataTransfer.getData('text/plain') || dragged();
+        if (!src || _dlchainOrder.includes(src)) return;
+        _dlchainOrder.push(src);
+        _dlchainCommit();
+    });
+
+    // Dragging a step back to the pool removes it.
+    pool.addEventListener('dragover', (e) => { e.preventDefault(); pool.classList.add('drag-over'); });
+    pool.addEventListener('dragleave', () => pool.classList.remove('drag-over'));
+    pool.addEventListener('drop', (e) => {
+        e.preventDefault();
+        pool.classList.remove('drag-over');
+        const src = e.dataTransfer.getData('text/plain') || dragged();
+        if (src && _dlchainOrder.includes(src)) dlchainRemove(src);
     });
 }
 
