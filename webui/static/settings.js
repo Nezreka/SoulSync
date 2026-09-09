@@ -987,6 +987,16 @@ const HYBRID_SOURCES = [
     { id: 'torrent', name: 'Torrent', icon: null, emoji: '🧲' },
     { id: 'usenet', name: 'Usenet', icon: null, emoji: '📰' },
 ];
+
+// Sources the VIDEO side downloads through too. The Sources tab is shared, so
+// these are the tiles it shows; the rest are music-only and stay hidden there.
+// Prowlarr is not in HYBRID_SOURCES because it is not a link in the download
+// chain — it is the indexer both torrent and usenet search through — but it
+// very much is something you configure to download, so it earns a tile.
+const SHARED_SOURCES = new Set(['youtube', 'torrent', 'usenet', 'prowlarr']);
+const EXTRA_SOURCE_TILES = [
+    { id: 'prowlarr', name: 'Indexers', icon: null, emoji: '🔎' },
+];
 const ALBUM_LEVEL_HYBRID_SOURCES = new Set(['soulseek', 'torrent', 'usenet']);
 
 let _hybridSourceOrder = ['soulseek', 'youtube'];
@@ -1014,7 +1024,9 @@ const SOURCE_CARD_HINTS = {
     amazon: 'Account',
     soundcloud: 'Anonymous — nothing to set up',
     lidarr: 'URL and API key',
-    torrent: 'Runs on Prowlarr plus a torrent or usenet client',
+    torrent: 'Runs on Prowlarr plus a torrent client',
+    usenet: 'Runs on Prowlarr plus a usenet client',
+    prowlarr: 'Prowlarr — searched by both torrent and usenet',
 };
 
 function toggleSourceCard(header) {
@@ -1039,7 +1051,11 @@ function _srcTileMarkup(src, order) {
     const art = src.icon
         ? `<img src="${src.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${src.emoji}</span>'">`
         : `<span class="emoji-icon">${src.emoji}</span>`;
-    const chip = (unready || state === 'warn')
+    // Prowlarr is never "in the chain" — it is what the chain's torrent and
+    // usenet links search through — so the chain chip would read as a fault.
+    const chip = src.id === 'prowlarr'
+        ? '<span class="src-tile-chip">torrent &amp; usenet</span>'
+        : (unready || state === 'warn')
         ? '<span class="src-tile-chip src-tile-chip--warn">needs setup</span>'
         : inChain
             ? `<span class="src-tile-chip src-tile-chip--on">#${pos + 1}</span>`
@@ -1062,12 +1078,15 @@ function buildSourceTiles() {
     const grid = document.getElementById('source-tile-grid');
     if (!grid) return;
     const order = (typeof getHybridOrder === 'function' ? getHybridOrder() : []) || [];
-    const configurable = HYBRID_SOURCES.filter(src => SOURCE_CONFIG_ID_BY_SRC[src.id]);
+    const onVideo = document.body.getAttribute('data-side') === 'video';
 
-    const inChain = configurable
-        .filter(src => order.includes(src.id))
-        .sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
-    const available = configurable.filter(src => !order.includes(src.id));
+    // Only sources that own a config panel get a tile, and on the video side
+    // only the ones it actually downloads through. The music-only tiles are
+    // filtered here rather than with data-music-only because the tiles are
+    // rendered, not written — there is no markup for the CSS rule to hit.
+    const configurable = HYBRID_SOURCES.concat(EXTRA_SOURCE_TILES)
+        .filter(src => SOURCE_CONFIG_ID_BY_SRC[src.id])
+        .filter(src => !onVideo || SHARED_SOURCES.has(src.id));
 
     const section = (label, hint, list) => list.length
         ? `<div class="src-group"><div class="src-group-head">`
@@ -1076,6 +1095,18 @@ function buildSourceTiles() {
           + `<span class="src-group-hint">${hint}</span></div>`
           + `<div class="src-tile-row">${list.map(src => _srcTileMarkup(src, order)).join('')}</div></div>`
         : '';
+
+    if (onVideo) {
+        // The chain is a music concept — video picks its sources on its own
+        // settings, so grouping by "in your chain" would be meaningless here.
+        grid.innerHTML = section('Download sources', 'shared with the music side', configurable);
+        return;
+    }
+
+    const inChain = configurable
+        .filter(src => order.includes(src.id))
+        .sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+    const available = configurable.filter(src => !order.includes(src.id));
 
     grid.innerHTML =
         section('In your chain', 'tried in this order', inChain) +
@@ -1233,10 +1264,12 @@ const SOURCE_CONFIG_ID_BY_SRC = {
     tidal: 'tidal-download-settings-container', qobuz: 'qobuz-settings-container',
     hifi: 'hifi-download-settings-container', deezer_dl: 'deezer-download-settings-container',
     amazon: 'amazon-download-settings-container', lidarr: 'lidarr-download-settings-container',
-    soundcloud: 'soundcloud-download-settings-container', torrent: 'prowlarr-source-redirect',
+    soundcloud: 'soundcloud-download-settings-container',
     // Usenet is its own link in the chain and shares the Prowlarr panel. It had
     // no tile at all, so a usenet user saw nothing to click.
-    usenet: 'prowlarr-source-redirect',
+    torrent: 'torrent-client-settings-container',
+    usenet: 'usenet-client-settings-container',
+    prowlarr: 'prowlarr-settings-container',
 };
 
 const HYBRID_SOURCE_CONFIG_ID = {
@@ -1244,8 +1277,10 @@ const HYBRID_SOURCE_CONFIG_ID = {
     tidal: 'tidal-download-settings-container', qobuz: 'qobuz-settings-container',
     hifi: 'hifi-download-settings-container', deezer_dl: 'deezer-download-settings-container',
     amazon: 'amazon-download-settings-container', lidarr: 'lidarr-download-settings-container',
-    soundcloud: 'soundcloud-download-settings-container', torrent: 'prowlarr-source-redirect',
-    usenet: 'prowlarr-source-redirect',
+    soundcloud: 'soundcloud-download-settings-container',
+    torrent: 'torrent-client-settings-container',
+    usenet: 'usenet-client-settings-container',
+    prowlarr: 'prowlarr-settings-container',
 };
 
 // The cog on a chain row. The config is on the Sources tab now, so this crosses
@@ -1349,6 +1384,8 @@ const HYBRID_SOURCE_PROBE = {
     soundcloud: () => _ssJson('/api/soundcloud/status').then(j => j.available === true && j.reachable === true),
     torrent:    () => _ssTestConn('torrent_client'),
     usenet:     () => _ssTestConn('usenet_client'),
+    // run_service_test already handles 'prowlarr'; the tile just needed wiring.
+    prowlarr:   () => _ssTestConn('prowlarr'),
     // Was hardcoded to true on the grounds that YouTube needs no auth.
     // It does now — cookies — and the green dot hid a bot-block from the
     // reporter of #1126 for long enough that he opened #1233 about it.
@@ -2868,20 +2905,9 @@ function updateDownloadSourceUI() {
     // half-configured source into the chain, before its account fields existed
     // to be filled in. They are plain accordions on the Sources tab now.
 
-    // Indexers & Downloaders: torrent/usenet setup (Prowlarr + the Torrent and
-    // Usenet client tiles) is shared config — keep it always reachable on the
-    // Downloads tab for BOTH the music and video sides, like the Advanced /
-    // Appearance tabs. (It used to be gated on an active torrent/usenet source,
-    // which hid it from anyone whose source was something else — and from the video
-    // side entirely, whose source lives on a separate dropdown.) Only tab-gated so
-    // it never leaks onto another tab.
-    const onDownloadsTab = document.querySelector('.stg-tab.active')?.dataset.tab === 'downloads';
-    const indSection = document.getElementById('indexers-downloaders-section');
-    if (indSection) indSection.style.display = onDownloadsTab ? '' : 'none';
-    const torrentTile = document.getElementById('torrent-tile');
-    if (torrentTile) torrentTile.style.display = '';
-    const usenetTile = document.getElementById('usenet-tile');
-    if (usenetTile) usenetTile.style.display = '';
+    // Indexers, the torrent client and the usenet client used to be gated to
+    // the Downloads tab from here. They live on the Sources tab now, as panels
+    // behind their own tiles, so there is nothing to show or hide.
 
     // Quality profile is now a GLOBAL system — the same ranked-target list
     // drives every source (Soulseek, Tidal, Qobuz, HiFi, Deezer, …), so it is

@@ -30,7 +30,11 @@ _SOURCE_CONTAINERS = (
     "amazon-download-settings-container",
     "soundcloud-download-settings-container",
     "lidarr-download-settings-container",
-    "prowlarr-source-redirect",
+    # the real config moved here from the Downloads tab; these three are
+    # shared with the video side, which downloads through them too
+    "prowlarr-settings-container",
+    "torrent-client-settings-container",
+    "usenet-client-settings-container",
 )
 
 
@@ -63,10 +67,30 @@ def test_the_tab_exists(index):
     assert "switchSettingsTab('sources')" in index
 
 
-def test_the_tab_is_music_only(index):
-    """The video side has its own source dropdown; these are music sources."""
+def test_the_tab_is_available_on_both_sides(index):
+    """It started music-only, which stopped being right the moment the shared
+    config moved in: Prowlarr, the torrent client and the usenet client are the
+    video side's entire acquisition stack. A music-only tab would have taken
+    them away from it. Which TILES show is filtered per side instead.
+    """
     line = next(ln for ln in index.splitlines() if 'data-tab="sources"' in ln)
-    assert "data-music-only" in line
+    assert "data-music-only" not in line
+    group = next(ln for ln in index.splitlines() if 'data-stg="sources"' in ln and "settings-group" in ln)
+    assert "data-music-only" not in group
+
+
+def test_the_video_side_only_sees_sources_it_uses(js):
+    """Soulseek and Tidal mean nothing on the video side. The filter lives in
+    the renderer, not in CSS, because the tiles are generated — there is no
+    markup for a data-music-only rule to hit."""
+    fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
+    assert "data-side" in fn
+    assert "SHARED_SOURCES.has(src.id)" in fn
+    shared = js.split("const SHARED_SOURCES = new Set([", 1)[1].split("])", 1)[0]
+    for s_id in ("youtube", "torrent", "usenet", "prowlarr"):
+        assert f"'{s_id}'" in shared, s_id
+    for music_only in ("soulseek", "tidal", "qobuz", "lidarr"):
+        assert f"'{music_only}'" not in shared, music_only
 
 
 def test_every_source_config_lives_on_the_sources_tab(index):
@@ -120,7 +144,8 @@ def test_every_source_has_a_tile(js):
     """Tiles are rendered, not hand-written, so the check is that the renderer
     covers every source that owns a config panel."""
     fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
-    assert "HYBRID_SOURCES.filter" in fn
+    assert "HYBRID_SOURCES" in fn
+    assert "EXTRA_SOURCE_TILES" in fn      # Prowlarr is not a chain link
     assert "SOURCE_CONFIG_ID_BY_SRC" in fn
     markup = js.split("function _srcTileMarkup(", 1)[1].split("\n}", 1)[0]
     assert "src-tile-name" in markup and "src-tile-art" in markup
@@ -353,3 +378,123 @@ def test_opening_a_source_carries_its_last_result_in(js):
 def test_the_result_line_is_announced(index):
     block = index.split('id="src-modal-result"', 1)[0][-160:]
     assert 'role="status"' in index.split('id="src-modal-result"', 1)[1][:120] or 'role="status"' in block
+
+
+# ---------------------------------------------------------------------------
+# Consolidation: the source config that was scattered across Downloads/Advanced
+# ---------------------------------------------------------------------------
+
+_MOVED_IN = {
+    "prowlarr-settings-container": "prowlarr-url",
+    "torrent-client-settings-container": "torrent-client-type",
+    "usenet-client-settings-container": "usenet-client-type",
+}
+
+
+def _panel_span(index: str, container_id: str) -> str:
+    """Everything inside one panel, walking div depth.
+
+    The obvious version — split on the next `<div id="` — stops at the panel's
+    first nested element with an id, which is a couple of lines in. It reported
+    the yt-dlp block as missing when it was there.
+    """
+    start = index.index(f'id="{container_id}"')
+    i, depth, opened = index.rindex("<div", 0, start), 0, False
+    while i < len(index):
+        nxt_open = index.find("<div", i)
+        nxt_close = index.find("</div>", i)
+        if nxt_close == -1:
+            break
+        if nxt_open != -1 and nxt_open < nxt_close:
+            depth += 1
+            opened = True
+            i = nxt_open + 4
+        else:
+            depth -= 1
+            i = nxt_close + 6
+            if opened and depth == 0:
+                return index[start:i]
+    return index[start:]
+
+
+@pytest.mark.parametrize("container,marker", sorted(_MOVED_IN.items()))
+def test_the_scattered_config_moved_into_its_panel(index, container, marker):
+    """Indexers, the torrent client and the usenet client each had their own
+    collapsible section on the Downloads tab, while the Sources tab showed a
+    tile that just said "configure it over there". The config is in the tile
+    now."""
+    assert f'id="{container}"' in index
+    assert marker in _panel_span(index, container), f"{marker} did not move into {container}"
+
+
+def test_the_old_downloads_tab_section_is_gone(index):
+    # Two homes for one setting is how they drift apart.
+    assert 'id="indexers-downloaders-section"' not in index
+    assert 'id="prowlarr-source-redirect"' not in index
+
+
+def test_nothing_still_points_at_the_removed_wrappers(js):
+    """updateDownloadSourceUI used to show/hide those by id. Left in place they
+    would be silent no-ops that read as working code."""
+    for dead in ("indexers-downloaders-section", "prowlarr-source-redirect",
+                 "torrent-tile", "usenet-tile"):
+        assert dead not in js, dead
+
+
+def test_the_status_dots_survived_the_move(index):
+    """They lived in the section headers the modal replaced. _setIndStatusDot is
+    null-safe, so losing them would not crash — the connection light would just
+    stop working, which is worse than a crash."""
+    for dot, container in (("prowlarr-status-dot", "prowlarr-settings-container"),
+                           ("torrent-client-status-dot", "torrent-client-settings-container"),
+                           ("usenet-client-status-dot", "usenet-client-settings-container")):
+        assert f'id="{dot}"' in _panel_span(index, container), dot
+
+
+def test_prowlarr_gets_a_tile_and_a_test(js):
+    """It is not a link in the download chain, so it is not in HYBRID_SOURCES —
+    but it is very much something you configure in order to download."""
+    extra = js.split("const EXTRA_SOURCE_TILES = [", 1)[1].split("]", 1)[0]
+    assert "'prowlarr'" in extra
+    probes = js.split("const HYBRID_SOURCE_PROBE = {", 1)[1].split("};", 1)[0]
+    assert "prowlarr:" in probes
+
+
+def test_prowlarr_does_not_claim_a_chain_position(js):
+    """order.indexOf('prowlarr') is always -1, so the generic chip would label
+    the indexer "not in chain" — which reads as something being wrong."""
+    fn = js.split("function _srcTileMarkup(", 1)[1].split("\n}", 1)[0]
+    assert "src.id === 'prowlarr'" in fn
+    assert "torrent &amp; usenet" in fn
+
+
+def test_torrent_and_usenet_open_their_own_config(js):
+    """Both used to open the same redirect panel that pointed elsewhere."""
+    m = js.split("const SOURCE_CONFIG_ID_BY_SRC = {", 1)[1].split("};", 1)[0]
+    assert "torrent: 'torrent-client-settings-container'" in m
+    assert "usenet: 'usenet-client-settings-container'" in m
+    assert "prowlarr-source-redirect" not in m
+
+
+def test_ytdlp_moved_in_with_youtube(index):
+    """It was under Advanced. yt-dlp going stale is the single most common cause
+    of YouTube downloads failing, so it belongs where somebody debugging YouTube
+    will look."""
+    panel = _panel_span(index, "youtube-settings-container")
+    assert "ytdlp-update-btn" in panel
+    assert "ytdlp-installed" in panel
+    assert 'id="ytdlp-hint-badge"' in panel      # the badge lived in the old header
+
+
+def test_the_moved_ytdlp_block_left_the_advanced_tab(index):
+    block = index.split('id="ytdlp-update-btn"', 1)[0][-2500:]
+    assert 'data-stg="advanced"' not in block
+
+
+def test_the_filesystem_note_is_still_reachable(index):
+    """It explains that torrent/usenet write to their OWN folders, which is the
+    single most common import failure. It belonged to the section that was
+    dissolved, so it had to land somewhere deliberate."""
+    assert "ind-hero-warning" in index
+    sources = index.split('data-stg="sources"', 1)[1].split("end Sources tab", 1)[0]
+    assert "ind-hero-warning" in sources
