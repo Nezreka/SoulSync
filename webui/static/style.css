@@ -83748,3 +83748,109 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     .np-queue-item-actions { grid-column: 3; grid-row: 1 / span 2; }
     .np-queue-item-status { display: block; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 }
+
+/* ── Sources tab ─────────────────────────────────────────────────────────────
+   One card per download source. Deliberately built from the same vocabulary as
+   .hybrid-source-item on the Downloads tab (same radius, same surface alphas,
+   same status dot colours) so the two views read as one page rather than two
+   features that happen to share a settings screen. */
+.src-card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    margin-top: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+}
+.src-card-header:hover {
+    background: rgba(255, 255, 255, 0.055);
+    border-color: rgba(var(--accent-rgb), 0.3);
+}
+.src-card-header:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.6);
+    outline-offset: 2px;
+}
+/* Open card and its body read as one object: square off the join. */
+.src-card-header:not(.collapsed) {
+    background: rgba(var(--accent-rgb), 0.07);
+    border-color: rgba(var(--accent-rgb), 0.28);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    margin-bottom: 0;
+}
+.src-card-header:not(.collapsed) + .settings-section-body {
+    border: 1px solid rgba(var(--accent-rgb), 0.28);
+    border-top: none;
+    border-radius: 0 0 10px 10px;
+    padding: 14px;
+    background: rgba(255, 255, 255, 0.02);
+    margin-bottom: 8px;
+}
+.src-card-icon {
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.src-card-icon img { width: 22px; height: 22px; object-fit: contain; border-radius: 4px; }
+.src-card-icon .emoji-icon { font-size: 18px; line-height: 1; }
+.src-card-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.src-card-name { font-size: 0.95em; font-weight: 600; color: rgba(255, 255, 255, 0.92); }
+.src-card-hint {
+    font-size: 0.76em;
+    color: rgba(255, 255, 255, 0.42);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.src-card-meta { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.src-card-chip {
+    font-size: 0.68em;
+    line-height: 1;
+    font-weight: 700;
+    padding: 4px 7px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.48);
+    white-space: nowrap;
+}
+.src-card-chip--on {
+    border-color: rgba(125, 211, 252, 0.24);
+    background: rgba(125, 211, 252, 0.1);
+    color: #7dd3fc;
+}
+.src-card-chip--warn {
+    border-color: rgba(245, 158, 11, 0.4);
+    background: rgba(245, 158, 11, 0.12);
+    color: #fbcd7a;
+}
+/* Same dot, same colours as the chain rows. */
+.src-card-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.18);
+}
+.src-card-dot.hss-ok      { background: #34d27b; box-shadow: 0 0 6px rgba(52, 210, 123, 0.6); }
+.src-card-dot.hss-fail    { background: #ff5f57; box-shadow: 0 0 6px rgba(255, 95, 87, 0.5); }
+.src-card-dot.hss-na      { background: rgba(255, 255, 255, 0.12); }
+.src-card-dot.hss-testing { background: #f0b429; animation: hssPulse 0.9s ease-in-out infinite; }
+.src-card-arrow {
+    flex-shrink: 0;
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 12px;
+    transition: transform 0.2s;
+}
+.src-card-header:not(.collapsed) .src-card-arrow { transform: rotate(180deg); }
+@media (max-width: 640px) {
+    /* The hint is the first thing worth losing; the chips carry the state. */
+    .src-card-hint { display: none; }
+}

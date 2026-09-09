@@ -2578,6 +2578,7 @@
                         <div class="stg-tabbar">
                             <button class="stg-tab active" data-tab="connections" onclick="switchSettingsTab('connections')">Connections</button>
                             <button class="stg-tab" data-tab="downloads" onclick="switchSettingsTab('downloads')">Downloads</button>
+                            <button class="stg-tab" data-tab="sources" onclick="switchSettingsTab('sources')" data-music-only>Sources</button>
                             <button class="stg-tab" data-tab="quality" onclick="switchSettingsTab('quality')">Quality</button>
                             <button class="stg-tab" data-tab="library" onclick="switchSettingsTab('library')">Library</button>
                             <button class="stg-tab" data-tab="appearance" onclick="switchSettingsTab('appearance')">Appearance</button>
@@ -4166,8 +4167,34 @@
                                 </div>
                                 </div><!-- end basic source subcard -->
 
+                            </div>
+                            </div><!-- end Download Settings body -->
+
+                            <!-- ═══ SOURCES TAB ═══════════════════════════════════════════
+                                 Every download source SoulSync can use, each one configurable
+                                 whether or not it is currently in the chain. It used to live
+                                 behind a cog on the hybrid-order widget, one source at a time,
+                                 and only for sources that were ALREADY enabled — so setting a
+                                 source up meant turning it on before you could configure it.
+                                 The ordering itself stays on the Downloads tab.
+                            ═══════════════════════════════════════════════════════════════ -->
+                            <div class="settings-group" data-stg="sources" data-music-only>
+                                <h3>Download Sources</h3>
+                                <small class="settings-hint">Set up any source here, then put it in the chain on the Downloads tab. A source does not have to be enabled to be configured.</small>
+
                                 <!-- Soulseek Settings (shown when soulseek is active source) -->
-                                <div id="soulseek-settings-container" style="display: none;">
+                                <div class="src-card-header collapsed" data-source-config="soulseek-settings-container" data-source-id="soulseek"
+                                     role="button" tabindex="0" onclick="toggleSourceCard(this)"
+                                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSourceCard(this);}">
+                                    <span class="src-card-icon" data-src-icon></span>
+                                    <span class="src-card-text">
+                                        <span class="src-card-name">Soulseek</span>
+                                        <span class="src-card-hint">slskd connection, timeouts, peers</span>
+                                    </span>
+                                    <span class="src-card-meta" data-src-meta></span>
+                                    <span class="src-card-arrow">&#9662;</span>
+                                </div>
+                                <div id="soulseek-settings-container" class="settings-section-body collapsed" style="display: none;">
                                     <div class="form-group">
                                         <label>slskd URL:</label>
                                         <div class="path-input-group">
@@ -4249,7 +4276,18 @@
                                 </div>
 
                                 <!-- Tidal Download Settings (shown only when tidal mode is selected) -->
-                                <div id="tidal-download-settings-container" style="display: none;">
+                                <div class="src-card-header collapsed" data-source-config="tidal-download-settings-container" data-source-id="tidal"
+                                     role="button" tabindex="0" onclick="toggleSourceCard(this)"
+                                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSourceCard(this);}">
+                                    <span class="src-card-icon" data-src-icon></span>
+                                    <span class="src-card-text">
+                                        <span class="src-card-name">Tidal</span>
+                                        <span class="src-card-hint">account &amp; quality</span>
+                                    </span>
+                                    <span class="src-card-meta" data-src-meta></span>
+                                    <span class="src-card-arrow">&#9662;</span>
+                                </div>
+                                <div id="tidal-download-settings-container" class="settings-section-body collapsed" style="display: none;">
                                     <div class="form-group">
                                         <label>Tidal Download Auth:</label>
                                         <div class="form-actions" style="margin-top: 4px;">
@@ -4264,7 +4302,18 @@
                                 </div>
 
                                 <!-- Qobuz Settings (shown only when qobuz mode is selected) -->
-                                <div id="qobuz-settings-container" style="display: none;">
+                                <div class="src-card-header collapsed" data-source-config="qobuz-settings-container" data-source-id="qobuz"
+                                     role="button" tabindex="0" onclick="toggleSourceCard(this)"
+                                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSourceCard(this);}">
+                                    <span class="src-card-icon" data-src-icon></span>
+                                    <span class="src-card-text">
+                                        <span class="src-card-name">Qobuz</span>
+                                        <span class="src-card-hint">account &amp; quality</span>
+                                    </span>
+                                    <span class="src-card-meta" data-src-meta></span>
+                                    <span class="src-card-arrow">&#9662;</span>
+                                </div>
+                                <div id="qobuz-settings-container" class="settings-section-body collapsed" style="display: none;">
                                     <div class="form-group">
                                         <label>Qobuz Account:</label>
                                         <div id="qobuz-auth-logged-in" style="display: none; margin-top: 4px;">
@@ -4311,7 +4360,18 @@
                                 </div>
 
                                 <!-- HiFi Download Settings (shown only when hifi mode is selected) -->
-                                <div id="hifi-download-settings-container" style="display: none;">
+                                <div class="src-card-header collapsed" data-source-config="hifi-download-settings-container" data-source-id="hifi"
+                                     role="button" tabindex="0" onclick="toggleSourceCard(this)"
+                                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSourceCard(this);}">
+                                    <span class="src-card-icon" data-src-icon></span>
+                                    <span class="src-card-text">
+                                        <span class="src-card-name">HiFi</span>
+                                        <span class="src-card-hint">public API instances</span>
+                                    </span>
+                                    <span class="src-card-meta" data-src-meta></span>
+                                    <span class="src-card-arrow">&#9662;</span>
+                                </div>
+                                <div id="hifi-download-settings-container" class="settings-section-body collapsed" style="display: none;">
                                     <div class="form-group">
                                         <label>HiFi Status:</label>
                                         <div class="form-actions" style="margin-top: 4px;">
@@ -4343,7 +4403,18 @@
                                 </div>
 
                                 <!-- Deezer Download Settings (shown only when deezer_dl mode is selected) -->
-                                <div id="deezer-download-settings-container" style="display: none;">
+                                <div class="src-card-header collapsed" data-source-config="deezer-download-settings-container" data-source-id="deezer_dl"
+                                     role="button" tabindex="0" onclick="toggleSourceCard(this)"
+                                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSourceCard(this);}">
+                                    <span class="src-card-icon" data-src-icon></span>
+                                    <span class="src-card-text">
+                                        <span class="src-card-name">Deezer</span>
+                                        <span class="src-card-hint">ARL token</span>
+                                    </span>
+                                    <span class="src-card-meta" data-src-meta></span>
+                                    <span class="src-card-arrow">&#9662;</span>
+                                </div>
+                                <div id="deezer-download-settings-container" class="settings-section-body collapsed" style="display: none;">
                                     <div class="form-group">
                                         <label>Deezer ARL Token:</label>
                                         <input type="password" id="deezer-download-arl" class="form-input"
@@ -4366,7 +4437,18 @@
                                 </div>
 
                                 <!-- Amazon Music Download Settings (shown only when amazon mode is selected) -->
-                                <div id="amazon-download-settings-container" style="display: none;">
+                                <div class="src-card-header collapsed" data-source-config="amazon-download-settings-container" data-source-id="amazon"
+                                     role="button" tabindex="0" onclick="toggleSourceCard(this)"
+                                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSourceCard(this);}">
+                                    <span class="src-card-icon" data-src-icon></span>
+                                    <span class="src-card-text">
+                                        <span class="src-card-name">Amazon</span>
+                                        <span class="src-card-hint">account</span>
+                                    </span>
+                                    <span class="src-card-meta" data-src-meta></span>
+                                    <span class="src-card-arrow">&#9662;</span>
+                                </div>
+                                <div id="amazon-download-settings-container" class="settings-section-body collapsed" style="display: none;">
                                     <div class="form-group">
                                         <label>Connection:</label>
                                         <div class="form-actions" style="margin-top: 4px;">
@@ -4380,7 +4462,18 @@
                                 </div>
 
                                 <!-- SoundCloud Download Settings -->
-                                <div id="soundcloud-download-settings-container" style="display: none;">
+                                <div class="src-card-header collapsed" data-source-config="soundcloud-download-settings-container" data-source-id="soundcloud"
+                                     role="button" tabindex="0" onclick="toggleSourceCard(this)"
+                                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSourceCard(this);}">
+                                    <span class="src-card-icon" data-src-icon></span>
+                                    <span class="src-card-text">
+                                        <span class="src-card-name">SoundCloud</span>
+                                        <span class="src-card-hint">anonymous, no setup needed</span>
+                                    </span>
+                                    <span class="src-card-meta" data-src-meta></span>
+                                    <span class="src-card-arrow">&#9662;</span>
+                                </div>
+                                <div id="soundcloud-download-settings-container" class="settings-section-body collapsed" style="display: none;">
                                     <div class="form-group">
                                         <div class="setting-help-text">
                                             SoundCloud downloads run anonymously — no account required. Use this for DJ mixes,
@@ -4402,7 +4495,18 @@
                                 </div>
 
                                 <!-- Lidarr Download Settings -->
-                                <div id="lidarr-download-settings-container" style="display: none;">
+                                <div class="src-card-header collapsed" data-source-config="lidarr-download-settings-container" data-source-id="lidarr"
+                                     role="button" tabindex="0" onclick="toggleSourceCard(this)"
+                                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSourceCard(this);}">
+                                    <span class="src-card-icon" data-src-icon></span>
+                                    <span class="src-card-text">
+                                        <span class="src-card-name">Lidarr</span>
+                                        <span class="src-card-hint">URL &amp; API key</span>
+                                    </span>
+                                    <span class="src-card-meta" data-src-meta></span>
+                                    <span class="src-card-arrow">&#9662;</span>
+                                </div>
+                                <div id="lidarr-download-settings-container" class="settings-section-body collapsed" style="display: none;">
                                     <div class="form-group">
                                         <label>Lidarr URL:</label>
                                         <input type="text" id="lidarr-url" placeholder="http://localhost:8686">
@@ -4434,7 +4538,18 @@
                                 </div>
 
                                 <!-- Torrent / Usenet Settings — settings live on the Indexers tab, just point the user there -->
-                                <div id="prowlarr-source-redirect" style="display: none;">
+                                <div class="src-card-header collapsed" data-source-config="prowlarr-source-redirect" data-source-id="torrent"
+                                     role="button" tabindex="0" onclick="toggleSourceCard(this)"
+                                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSourceCard(this);}">
+                                    <span class="src-card-icon" data-src-icon></span>
+                                    <span class="src-card-text">
+                                        <span class="src-card-name">Torrent / Usenet</span>
+                                        <span class="src-card-hint">configured under Indexers</span>
+                                    </span>
+                                    <span class="src-card-meta" data-src-meta></span>
+                                    <span class="src-card-arrow">&#9662;</span>
+                                </div>
+                                <div id="prowlarr-source-redirect" class="settings-section-body collapsed" style="display: none;">
                                     <div class="form-group">
                                         <div class="setting-help-text" style="padding: 12px 14px; background: rgba(var(--accent-rgb), 0.06); border: 1px solid rgba(var(--accent-rgb), 0.2); border-radius: 10px;">
                                             📡 Torrent / Usenet downloads use Prowlarr plus a torrent or usenet client — configure them in the <strong>Indexers &amp; Downloaders</strong> tiles below.
@@ -4443,7 +4558,18 @@
                                 </div>
 
                                 <!-- YouTube Settings (shown when youtube or hybrid mode) -->
-                                <div id="youtube-settings-container" style="display: none;">
+                                <div class="src-card-header collapsed" data-source-config="youtube-settings-container" data-source-id="youtube"
+                                     role="button" tabindex="0" onclick="toggleSourceCard(this)"
+                                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSourceCard(this);}">
+                                    <span class="src-card-icon" data-src-icon></span>
+                                    <span class="src-card-text">
+                                        <span class="src-card-name">YouTube</span>
+                                        <span class="src-card-hint">cookies, transcode, delay</span>
+                                    </span>
+                                    <span class="src-card-meta" data-src-meta></span>
+                                    <span class="src-card-arrow">&#9662;</span>
+                                </div>
+                                <div id="youtube-settings-container" class="settings-section-body collapsed" style="display: none;">
                                     <div class="form-group">
                                         <label>YouTube Browser Cookies:</label>
                                         <select id="youtube-cookies-browser" class="form-select">
@@ -4522,9 +4648,8 @@
                                         </div>
                                     </div>
                                 </div>
+                            </div><!-- end Sources tab -->
 
-                            </div>
-                            </div><!-- end Download Settings body -->
 
                             <!-- ═══ QUALITY TAB: two-column layout ═══ -->
                             <!-- Left (.qp-main): the 4 quality tiles on the standard Settings

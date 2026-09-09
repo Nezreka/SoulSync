@@ -670,6 +670,12 @@ function switchSettingsTab(tab) {
     if (tab === 'downloads' && typeof autoTestSourcesOnce === 'function') {
         autoTestSourcesOnce();
     }
+    // Sources: the cards carry live status, so refresh them on arrival and let
+    // the same one-shot probe fill the dots in.
+    if (tab === 'sources') {
+        try { buildSourceConfigHeaders(); } catch (e) { /* cards are cosmetic */ }
+        if (typeof autoTestSourcesOnce === 'function') autoTestSourcesOnce();
+    }
     // Initialize live log viewer when switching to Logs tab
     if (tab === 'logs') {
         _logViewerInit();
@@ -982,24 +988,134 @@ let _hybridVisualOrder = null; // Full visual order including disabled sources
 // open from its row), so the long per-source config blocks don't all stack up.
 let _expandedHybridSource = null;
 
-function toggleHybridSourceConfig(srcId) {
-    _expandedHybridSource = (_expandedHybridSource === srcId) ? null : srcId;
-    buildHybridSourceList();
-    updateDownloadSourceUI();
-    // Bring the freshly opened config panel into view.
-    if (_expandedHybridSource) {
-        const map = {
-            soulseek: 'soulseek-settings-container', youtube: 'youtube-settings-container',
-            tidal: 'tidal-download-settings-container', qobuz: 'qobuz-settings-container',
-            hifi: 'hifi-download-settings-container', deezer_dl: 'deezer-download-settings-container',
-            amazon: 'amazon-download-settings-container', lidarr: 'lidarr-download-settings-container',
-            soundcloud: 'soundcloud-download-settings-container', torrent: 'prowlarr-source-redirect',
-            usenet: 'prowlarr-source-redirect',
-        };
-        const el = document.getElementById(map[_expandedHybridSource]);
-        if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 60);
-    }
+// ── Sources tab ─────────────────────────────────────────────────────────────
+// The cards are rendered from HYBRID_SOURCES, the same registry the chain rows
+// on the Downloads tab read. One list of names, icons and ids for both views,
+// so the two cannot drift into disagreeing about what a source is called or
+// what its logo is.
+const SOURCE_CARD_HINTS = {
+    soulseek: 'slskd connection, timeouts, peers',
+    youtube: 'Cookies, transcoding, rate limit',
+    tidal: 'Account and stream quality',
+    qobuz: 'Account and stream quality',
+    hifi: 'Public API instances',
+    deezer_dl: 'ARL token',
+    amazon: 'Account',
+    soundcloud: 'Anonymous — nothing to set up',
+    lidarr: 'URL and API key',
+    torrent: 'Runs on Prowlarr plus a torrent or usenet client',
+};
+
+// Live auth/connection checks, run when a source's card is opened rather than
+// on every settings redraw. Each is best-effort: a probe that throws must not
+// stop the card from opening.
+const SOURCE_OPEN_PROBE = {
+    tidal: () => checkTidalDownloadAuthStatus(),
+    qobuz: () => checkQobuzAuthStatus(),
+    hifi: () => testHiFiConnection(),
+    amazon: () => testAmazonConnection(),
+    soundcloud: () => testSoundcloudConnection(),
+};
+
+function probeSourceOnOpen(srcId) {
+    const probe = SOURCE_OPEN_PROBE[srcId];
+    if (!probe) return;
+    try { probe(); } catch (e) { /* the card still opens */ }
 }
+
+function toggleSourceCard(header) {
+    const body = header.nextElementSibling;
+    const open = header.classList.contains('collapsed');
+    header.classList.toggle('collapsed', !open);
+    if (body) {
+        body.classList.toggle('collapsed', !open);
+        body.style.display = open ? '' : 'none';
+    }
+    if (open) probeSourceOnOpen(header.dataset.sourceId);
+}
+window.toggleSourceCard = toggleSourceCard;
+
+// Fill each card's icon and its right-hand status. Called on load and again
+// whenever the chain or the test results change, so a card always agrees with
+// the row for the same source on the Downloads tab.
+function buildSourceConfigHeaders() {
+    const byId = {};
+    for (const src of HYBRID_SOURCES) byId[src.id] = src;
+    const order = (typeof getHybridOrder === 'function' ? getHybridOrder() : []) || [];
+
+    document.querySelectorAll('#settings-page [data-source-config]').forEach(header => {
+        const srcId = header.dataset.sourceId;
+        const src = byId[srcId];
+        const iconEl = header.querySelector('[data-src-icon]');
+        const metaEl = header.querySelector('[data-src-meta]');
+        const hintEl = header.querySelector('.src-card-hint');
+        if (hintEl && SOURCE_CARD_HINTS[srcId]) hintEl.textContent = SOURCE_CARD_HINTS[srcId];
+
+        if (iconEl && src) {
+            iconEl.innerHTML = src.icon
+                ? `<img src="${src.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${src.emoji}</span>'">`
+                : `<span class="emoji-icon">${src.emoji}</span>`;
+        }
+        if (!metaEl) return;
+
+        const bits = [];
+        // Where it sits in the chain, or that it is not in it. A source that is
+        // configured but unused is a normal, valid state — say so plainly
+        // rather than leaving the card looking broken.
+        const pos = order.indexOf(srcId);
+        const inChain = pos !== -1 || (srcId === 'torrent' && order.includes('usenet'));
+        if (inChain) {
+            bits.push(`<span class="src-card-chip src-card-chip--on">#${(pos === -1 ? order.indexOf('usenet') : pos) + 1} in chain</span>`);
+        } else {
+            bits.push('<span class="src-card-chip">not in chain</span>');
+        }
+        if (_hybridSourceUnready && _hybridSourceUnready[srcId]) {
+            bits.push('<span class="src-card-chip src-card-chip--warn">needs setup</span>');
+        }
+        const state = (_hybridSourceStatus && _hybridSourceStatus[srcId]) || 'unknown';
+        const label = { unknown: 'Not tested yet', testing: 'Testing…', ok: 'Connected',
+                        fail: 'Connection failed', na: 'No connection test for this source' }[state];
+        bits.push(`<span class="src-card-dot hss-${state}" title="${label}"></span>`);
+        metaEl.innerHTML = bits.join('');
+    });
+}
+window.buildSourceConfigHeaders = buildSourceConfigHeaders;
+
+const HYBRID_SOURCE_CONFIG_ID = {
+    soulseek: 'soulseek-settings-container', youtube: 'youtube-settings-container',
+    tidal: 'tidal-download-settings-container', qobuz: 'qobuz-settings-container',
+    hifi: 'hifi-download-settings-container', deezer_dl: 'deezer-download-settings-container',
+    amazon: 'amazon-download-settings-container', lidarr: 'lidarr-download-settings-container',
+    soundcloud: 'soundcloud-download-settings-container', torrent: 'prowlarr-source-redirect',
+    usenet: 'prowlarr-source-redirect',
+};
+
+// The cog on a chain row. The config is on the Sources tab now, so this crosses
+// to it and opens that one source rather than expanding a panel in place.
+function toggleHybridSourceConfig(srcId) {
+    const containerId = HYBRID_SOURCE_CONFIG_ID[srcId];
+    if (!containerId) return;
+    if (typeof switchSettingsTab === 'function') switchSettingsTab('sources');
+    openSourceConfig(containerId);
+}
+
+// Open one source's accordion on the Sources tab and scroll it into view.
+// Collapsed state is carried on BOTH the header and the body (that is what the
+// shared accordion onclick toggles), so opening one by hand has to set both or
+// the next click reads as "already open" and closes nothing.
+function openSourceConfig(containerId) {
+    const body = document.getElementById(containerId);
+    if (!body) return;
+    const header = document.querySelector(`[data-source-config="${containerId}"]`);
+    body.classList.remove('collapsed');
+    body.style.display = '';
+    if (header) {
+        header.classList.remove('collapsed');
+        probeSourceOnOpen(header.dataset.sourceId);
+    }
+    setTimeout(() => (header || body).scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+}
+window.openSourceConfig = openSourceConfig;
 
 // ── Per-source live connection status (shown as a dot in the hybrid list and
 // driven by the "Test all sources" button). srcId -> 'unknown'|'testing'|'ok'|'fail'|'na'
@@ -1123,6 +1239,8 @@ function autoTestSourcesOnce() {
 }
 
 function buildHybridSourceList() {
+    // Same state drives both views; refresh the Sources cards alongside.
+    try { buildSourceConfigHeaders(); } catch (e) { /* cards are cosmetic */ }
     const container = document.getElementById('hybrid-source-list');
     if (!container) return;
 
@@ -2526,16 +2644,9 @@ function toggleServer(serverType) {
 
 function updateDownloadSourceUI() {
     const mode = document.getElementById('download-source-mode').value;
+    // Only the ORDER widget is mode-driven now. The per-source config blocks
+    // moved to the Sources tab and are no longer looked up here at all.
     const hybridContainer = document.getElementById('hybrid-settings-container');
-    const soulseekContainer = document.getElementById('soulseek-settings-container');
-    const tidalContainer = document.getElementById('tidal-download-settings-container');
-    const qobuzContainer = document.getElementById('qobuz-settings-container');
-    const youtubeContainer = document.getElementById('youtube-settings-container');
-    const hifiContainer = document.getElementById('hifi-download-settings-container');
-    const deezerDlContainer = document.getElementById('deezer-download-settings-container');
-    const amazonContainer = document.getElementById('amazon-download-settings-container');
-    const lidarrContainer = document.getElementById('lidarr-download-settings-container');
-    const soundcloudContainer = document.getElementById('soundcloud-download-settings-container');
 
     hybridContainer.style.display = mode === 'hybrid' ? 'block' : 'none';
 
@@ -2550,26 +2661,11 @@ function updateDownloadSourceUI() {
         activeSources.add(mode);
     }
 
-    // In single-source mode the one config block is shown directly. In hybrid
-    // mode there can be many active sources, so we only reveal the one the user
-    // clicked open in the priority list (accordion-style) — no endless stack.
-    const isHybrid = mode === 'hybrid';
-    const showCfg = (src) => activeSources.has(src) && (!isHybrid || _expandedHybridSource === src);
-
-    soulseekContainer.style.display = showCfg('soulseek') ? 'block' : 'none';
-    tidalContainer.style.display = showCfg('tidal') ? 'block' : 'none';
-    qobuzContainer.style.display = showCfg('qobuz') ? 'block' : 'none';
-    youtubeContainer.style.display = showCfg('youtube') ? 'block' : 'none';
-    hifiContainer.style.display = showCfg('hifi') ? 'block' : 'none';
-    if (deezerDlContainer) deezerDlContainer.style.display = showCfg('deezer_dl') ? 'block' : 'none';
-    if (amazonContainer) amazonContainer.style.display = showCfg('amazon') ? 'block' : 'none';
-    if (lidarrContainer) lidarrContainer.style.display = showCfg('lidarr') ? 'block' : 'none';
-    if (soundcloudContainer) soundcloudContainer.style.display = showCfg('soundcloud') ? 'block' : 'none';
-    const prowlarrRedirect = document.getElementById('prowlarr-source-redirect');
-    if (prowlarrRedirect) {
-        const showProwlarr = showCfg('torrent') || showCfg('usenet');
-        prowlarrRedirect.style.display = showProwlarr ? 'block' : 'none';
-    }
+    // Nothing per-source is hidden from here any more. Driving those blocks off
+    // the active-source set is what made a source impossible to configure until
+    // you had already enabled it: you had to switch Tidal on, saving a
+    // half-configured source into the chain, before its account fields existed
+    // to be filled in. They are plain accordions on the Sources tab now.
 
     // Indexers & Downloaders: torrent/usenet setup (Prowlarr + the Torrent and
     // Usenet client tiles) is shared config — keep it always reachable on the
@@ -2598,23 +2694,10 @@ function updateDownloadSourceUI() {
         qualityProfileTile.style.display = onQualityTab ? '' : 'none';
     }
 
-    // Only auto-probe a source's live status when its config panel is visible
-    // (always in single-source mode; only the opened one in hybrid mode).
-    if (showCfg('tidal')) {
-        checkTidalDownloadAuthStatus();
-    }
-    if (showCfg('qobuz')) {
-        checkQobuzAuthStatus();
-    }
-    if (showCfg('hifi')) {
-        testHiFiConnection();
-    }
-    if (showCfg('amazon')) {
-        testAmazonConnection();
-    }
-    if (showCfg('soundcloud')) {
-        testSoundcloudConnection();
-    }
+    // The per-source auth probes used to run from here, gated on the same
+    // active-source test. They belong to a card being OPENED now — see
+    // probeSourceOnOpen — which also stops them firing on every unrelated
+    // settings redraw.
 }
 
 function updateHybridSecondaryOptions() {
