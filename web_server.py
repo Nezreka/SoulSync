@@ -3671,7 +3671,13 @@ def handle_settings():
             # dumps every download onto the install disk — Proxmox LXCs default
             # to an 8GB root, which fills until the container hangs — so the UI
             # needs to know which story to tell and when to warn.
-            data['_environment'] = {'docker': os.path.exists('/.dockerenv')}
+            # `windows` drives the YouTube cookie picker: Chromium-family browsers
+            # seal their cookie store with App-Bound Encryption on Windows, which
+            # yt-dlp cannot read (yt-dlp issue 10927). It is the SERVER's OS that
+            # decides, not the browser the settings page happens to be open in —
+            # SoulSync on Linux read by an admin on a Windows laptop is fine.
+            data['_environment'] = {'docker': os.path.exists('/.dockerenv'),
+                                    'windows': os.name == 'nt'}
             return jsonify(data)
         except Exception as e:
             return jsonify({"error": str(e)}), 500

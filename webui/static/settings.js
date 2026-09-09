@@ -1260,6 +1260,44 @@ window.openSourceConfig = openSourceConfig;
 // driven by the "Test all sources" button). srcId -> 'unknown'|'testing'|'ok'|'fail'|'na'
 let _hybridSourceStatus = {};
 
+// Chromium-family browsers seal their cookie store with App-Bound Encryption on
+// Windows, and yt-dlp cannot read it (yt-dlp issue 10927). Firefox is unaffected
+// — different storage, no DPAPI.
+const _ABE_BROWSERS = ['chrome', 'edge', 'brave', 'opera', 'vivaldi', 'chromium'];
+
+// Mark them rather than disable them, for a reason worth writing down: a
+// <select> whose SELECTED option is disabled reports value === '', so the next
+// auto-save would quietly write an empty cookie source over the user's setting.
+// Labelling warns everybody and destroys nobody's config.
+function markUnsupportedCookieBrowsers(isWindowsServer) {
+    const sel = document.getElementById('youtube-cookies-browser');
+    if (!sel) return;
+    sel.querySelectorAll('option').forEach(opt => {
+        const affected = isWindowsServer && _ABE_BROWSERS.includes(opt.value);
+        const base = opt.dataset.baseLabel || (opt.dataset.baseLabel = opt.textContent.trim());
+        opt.textContent = affected ? `${base} — not supported on Windows` : base;
+        opt.dataset.abeUnsupported = affected ? '1' : '';
+    });
+    updateCookieBrowserWarning();
+}
+window.markUnsupportedCookieBrowsers = markUnsupportedCookieBrowsers;
+
+// Say it at the moment of choosing, not when a download fails days later.
+function updateCookieBrowserWarning() {
+    const sel = document.getElementById('youtube-cookies-browser');
+    const box = document.getElementById('youtube-cookie-abe-warning');
+    if (!sel || !box) return;
+    const opt = sel.selectedOptions && sel.selectedOptions[0];
+    const bad = !!(opt && opt.dataset.abeUnsupported === '1');
+    box.hidden = !bad;
+    if (bad) {
+        box.textContent = `${opt.dataset.baseLabel || sel.value} seals its cookies with `
+            + 'App-Bound Encryption on Windows, which yt-dlp cannot read. This will not work. '
+            + 'Choose "Paste cookies.txt" instead, or "None" if you only download public videos.';
+    }
+}
+window.updateCookieBrowserWarning = updateCookieBrowserWarning;
+
 async function _ssJson(url, opts) {
     const r = await fetch(url, opts);
     return await r.json();
@@ -2059,6 +2097,7 @@ async function loadSettingsData() {
 
         // Populate YouTube settings
         document.getElementById('youtube-cookies-browser').value = settings.youtube?.cookies_browser || '';
+        markUnsupportedCookieBrowsers(!!(settings._environment && settings._environment.windows));
         document.getElementById('youtube-download-delay').value = settings.youtube?.download_delay ?? 3;
         const _ytTranscode = document.getElementById('youtube-transcode');
         const _ytTranscodeOpts = document.getElementById('youtube-transcode-options');
@@ -2091,6 +2130,7 @@ async function loadSettingsData() {
             _toggleYtPaste();
             if (!_ytCookieSel.dataset.pasteToggleBound) {
                 _ytCookieSel.addEventListener('change', _toggleYtPaste);
+                _ytCookieSel.addEventListener('change', updateCookieBrowserWarning);
                 _ytCookieSel.dataset.pasteToggleBound = '1';
             }
         }

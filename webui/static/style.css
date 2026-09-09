@@ -84017,3 +84017,17 @@ body.src-modal-open { overflow: hidden; }
     .src-modal { max-height: 92vh; }
     .src-modal-overlay { padding: 10px; }
 }
+
+/* An inline "this will not work" under a setting, said at the moment of
+   choosing rather than when a download fails days later. */
+.setting-warning {
+    margin: 8px 0 0;
+    padding: 10px 12px;
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    border-radius: 8px;
+    background: rgba(245, 158, 11, 0.1);
+    color: #fbcd7a;
+    font-size: 0.8em;
+    line-height: 1.45;
+}
+.setting-warning[hidden] { display: none; }
