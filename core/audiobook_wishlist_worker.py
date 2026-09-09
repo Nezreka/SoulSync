@@ -112,18 +112,30 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
     leave the book due again immediately and turn the wishlist into a spin loop.
     """
     from core.audiobook_database import (
+        STATUS_DONE,
         STATUS_FAILED,
         STATUS_GRABBED,
         STATUS_SEARCHING,
         get_audiobook_db,
     )
-    from core.audiobook_release_search import search_releases
+    from core.audiobook_release_search import search_all_sources
 
     database = db if db is not None else get_audiobook_db()
     asin = str(row.get("asin") or "")
-    outcome = {"asin": asin, "found": 0, "grabbed": False, "error": ""}
+    outcome = {"asin": asin, "found": 0, "grabbed": False, "error": "", "owned": False}
     if not asin:
         return outcome
+
+    # Already on disk — the usual reason is that it was imported by hand, or the
+    # library scan found a copy. Searching indexers for a book we have is waste,
+    # and grabbing it would be worse.
+    try:
+        if database.is_owned(asin):
+            database.mark_wishlist_status(asin, STATUS_DONE)
+            outcome["owned"] = True
+            return outcome
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("Could not check whether %s is owned: %s", asin, exc)
 
     book = _book_from_row(row)
     # Claimed before the search so a second pass cannot pick up the same book.
@@ -133,7 +145,7 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
         # The narrator choice is the listener's, made when they wished for the
         # book, and the automatic path must honour it exactly as the manual one
         # does — a book is always one narrator, never a mixture.
-        releases = search_releases(
+        releases = search_all_sources(
             book, limit=10, narrator_mode=row.get("narrator_mode") or "exact",
         )
     except Exception as exc:                                # noqa: BLE001
@@ -164,6 +176,9 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
         # this the worker would grab books that nobody ever files into the
         # library.
         ref = str(result.get("ref") or "")
+        # Torrents and NZBs are one job, so the handle IS the ref. A Soulseek
+        # folder is many transfers and carries its own.
+        client_ref = str(result.get("client_ref") or ref)
         if ref:
             # An automatic grab belongs on the Downloads page just as much as a
             # manual one — a book appearing in the library with no card ever
@@ -184,11 +199,14 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
                 asin=asin,
                 title=str(row.get("title") or ""),
                 source=str(getattr(best, "protocol", "") or ""),
-                client_id=ref,
+                client_id=client_ref,
                 release_title=str(getattr(best, "title", "") or ""),
                 indexer=str(getattr(best, "indexer", "") or ""),
                 author=(row.get("authors") or [""])[0],
                 bytes_total=int(getattr(best, "size_bytes", 0) or 0),
+                # The wishlist row already holds everything the import needs, so
+                # nothing has to be asked of the catalogue again later.
+                book=book,
             )
         database.mark_wishlist_status(asin, STATUS_GRABBED, count_attempt=True)
         outcome["grabbed"] = True
@@ -209,7 +227,16 @@ def run_pass(db: Any = None, limit: Optional[int] = None) -> Dict[str, Any]:
     from core.audiobook_database import get_audiobook_db
 
     database = db if db is not None else get_audiobook_db()
-    summary = {"checked": 0, "found": 0, "grabbed": 0, "errors": 0}
+    summary = {"checked": 0, "found": 0, "grabbed": 0, "errors": 0, "freed": 0}
+
+    # Self-healing, at the start of every pass rather than only at boot: a pass
+    # that died mid-search leaves rows claimed as "searching", and the retry
+    # query never looks at those again. Waiting for a restart to notice would
+    # mean a book silently stops being searched for until someone reboots.
+    try:
+        summary["freed"] = database.reset_stale_searching()
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("Could not free stale searching rows: %s", exc)
 
     try:
         due = database.get_wishlist_due(

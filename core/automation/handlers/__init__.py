@@ -13,6 +13,8 @@ to the engine in one place. ``web_server.py`` calls
 from core.automation.handlers.process_wishlist import auto_process_wishlist
 from core.automation.handlers.scan_watchlist import auto_scan_watchlist
 from core.automation.handlers.audiobook_process_wishlist import auto_process_audiobook_wishlist
+from core.automation.handlers.audiobook_scan_watchlist import auto_scan_audiobook_watchlist
+from core.automation.handlers.audiobook_scan_library import auto_scan_audiobook_library
 from core.automation.handlers.scan_watchlist_podcasts import auto_scan_watchlist_podcasts
 from core.automation.handlers.scan_library import auto_scan_library
 from core.automation.handlers.refresh_mirrored import auto_refresh_mirrored
@@ -43,6 +45,8 @@ __all__ = [
     'auto_process_wishlist',
     'auto_scan_watchlist',
     'auto_process_audiobook_wishlist',
+    'auto_scan_audiobook_watchlist',
+    'auto_scan_audiobook_library',
     'auto_scan_watchlist_podcasts',
     'auto_scan_library',
     'auto_refresh_mirrored',

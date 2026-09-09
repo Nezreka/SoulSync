@@ -160,11 +160,53 @@ def test_a_usenet_release_with_no_nzb_is_refused():
     assert result["ok"] is False
 
 
-@pytest.mark.parametrize("protocol", ["", None, "soulseek", "carrier pigeon"])
+@pytest.mark.parametrize("protocol", ["", None, "carrier pigeon"])
 def test_an_unsupported_protocol_is_refused(protocol):
     result = grab_release(_release(protocol=protocol))
     assert result["ok"] is False
     assert "protocol" in result["error"]
+
+
+def test_a_soulseek_release_is_dispatched_to_the_peer():
+    from unittest.mock import patch
+
+    started = {"ok": True, "refs": ["a", "b"], "username": "peer",
+               "folder": "Project Hail Mary", "error": ""}
+    with patch("core.audiobook_soulseek.grab", return_value=started):
+        result = grab_release(_release(protocol="soulseek"))
+
+    assert result["ok"] is True
+    assert result["client"] == "soulseek"
+    assert result["files"] == 2
+    # Every caller reads {ok, ref}. Returning anything else here meant a grab
+    # reported success and registered no download at all.
+    assert result["ref"] == "slsk:a"
+    # The transfer ids ride in the one client_id column the row already has.
+    from core.audiobook_soulseek import decode_refs
+    assert decode_refs(result["client_ref"]) == {
+        "username": "peer", "refs": ["a", "b"], "folder": "Project Hail Mary",
+    }
+
+
+def test_every_protocol_reports_its_handle_the_same_way():
+    # A grab that answers in a different shape is a silent black hole: the
+    # caller sees ok and stores nothing.
+    from unittest.mock import patch
+
+    from core.audiobook_grab import grab_release
+
+    started = {"ok": True, "refs": ["a"], "username": "peer", "folder": "F", "error": ""}
+    with patch("core.audiobook_soulseek.grab", return_value=started):
+        assert grab_release(_release(protocol="soulseek"))["ref"]
+
+
+def test_a_soulseek_folder_nobody_would_serve_is_refused():
+    from unittest.mock import patch
+
+    refused = {"ok": False, "error": "peer accepted none of the files.", "refs": []}
+    with patch("core.audiobook_soulseek.grab", return_value=refused):
+        result = grab_release(_release(protocol="soulseek"))
+    assert result["ok"] is False and "none of the files" in result["error"]
 
 
 def test_dispatch_accepts_the_dataclass_form():
@@ -183,18 +225,41 @@ def test_dispatch_accepts_the_dataclass_form():
 # Isolation from the music side
 # ---------------------------------------------------------------------------
 
-def test_downloads_land_outside_the_music_tree(tmp_path):
-    # A part-downloaded book under a music root is a folder of loose chapter
-    # files, which is exactly what the library scanner imports as an album.
-    target = tmp_path / "audiobooks"
-    with patch("core.settings.config_manager.get", return_value=str(target)):
-        assert audiobook_download_path() == str(target)
-    assert target.exists()
+def test_downloads_go_to_the_universal_download_folder(tmp_path):
+    """No save path is passed, so the client uses its own — the shared one.
 
-
-def test_an_unset_download_path_lets_the_client_decide():
-    with patch("core.settings.config_manager.get", return_value=""):
+    This used to pass ``audiobooks.download_path``, which the settings page
+    fills from the SAME input as the audiobook LIBRARY folder. Books therefore
+    downloaded into the finished library and were then copied into a subfolder
+    of it: every book on disk twice, half-finished ones sitting in the library.
+    The video side has always passed nothing here; audiobooks now match.
+    """
+    with patch("core.settings.config_manager.get", return_value=str(tmp_path)):
         assert audiobook_download_path() is None
+
+
+@pytest.mark.parametrize("protocol", ["torrent", "usenet"])
+def test_a_grab_never_tells_the_client_where_to_put_a_book(protocol):
+    # The end-to-end version of the above: whatever the config says, no
+    # save_path reaches the download client, for either protocol.
+    seen = {}
+
+    async def _capture(*args, **kwargs):
+        seen.update(kwargs)
+        return "ref-1"
+
+    adapter = _Adapter()
+    with patch("core.torrent_clients.get_active_adapter", return_value=adapter), \
+         patch("core.usenet_clients.get_active_adapter", return_value=adapter), \
+         patch("core.torrent_clients.base.add_torrent_smart", new=_capture), \
+         patch.object(_Adapter, "add_nzb", new=_capture), \
+         patch("core.settings.config_manager.get", return_value="/some/library"), \
+         patch("core.audiobook_grab.has_room", return_value=(True, None, 0.0)):
+        result = grab_release(_release(protocol=protocol,
+                                       download_url="http://x/a." + protocol))
+
+    assert result["ok"] is True
+    assert seen.get("save_path") is None
 
 
 def test_grabs_use_their_own_downloader_category():
@@ -241,3 +306,77 @@ def _async_raise(exc):
     async def _inner(*args, **kwargs):
         raise exc
     return _inner
+
+
+# ---------------------------------------------------------------------------
+# Disk space
+#
+# Reuses the shared floor — the "Minimum free disk space (GB)" setting the music
+# side refuses downloads on. Audiobooks are large enough to be the thing that
+# fills the disk.
+# ---------------------------------------------------------------------------
+
+def test_a_grab_is_refused_when_the_disk_is_nearly_full():
+    with patch("core.disk_guard.floor_gb", return_value=5.0), \
+         patch("core.disk_guard.free_gb", return_value=1.2), \
+         patch("core.settings.config_manager.get", return_value="/downloads"), \
+         patch("core.audiobook_grab.grab_torrent") as torrent:
+        result = grab_release(_release())
+    assert result["ok"] is False
+    assert "1.2 GB free" in result["error"]
+    torrent.assert_not_called()
+
+
+def test_a_grab_proceeds_when_there_is_room():
+    with patch("core.disk_guard.floor_gb", return_value=5.0), \
+         patch("core.disk_guard.free_gb", return_value=120.0), \
+         patch("core.settings.config_manager.get", return_value="/downloads"), \
+         patch("core.audiobook_grab.grab_torrent",
+               return_value={"ok": True, "ref": "h"}) as torrent:
+        result = grab_release(_release())
+    assert result["ok"] is True
+    torrent.assert_called_once()
+
+
+def test_the_guard_is_off_when_the_floor_is_zero():
+    with patch("core.disk_guard.floor_gb", return_value=0.0), \
+         patch("core.disk_guard.free_gb", return_value=0.1), \
+         patch("core.audiobook_grab.grab_torrent",
+               return_value={"ok": True, "ref": "h"}) as torrent:
+        assert grab_release(_release())["ok"] is True
+    torrent.assert_called_once()
+
+
+def test_an_unprobeable_disk_never_wedges_downloads():
+    # The same call the music guard makes: unknown always passes.
+    with patch("core.disk_guard.floor_gb", return_value=5.0), \
+         patch("core.disk_guard.free_gb", return_value=None), \
+         patch("core.settings.config_manager.get", return_value="/downloads"), \
+         patch("core.audiobook_grab.grab_torrent",
+               return_value={"ok": True, "ref": "h"}) as torrent:
+        assert grab_release(_release())["ok"] is True
+    torrent.assert_called_once()
+
+
+def test_the_floor_comes_from_the_music_setting():
+    # Not an audiobook-specific knob: it is literally the same disk.
+    import inspect
+
+    import core.audiobook_grab as module
+
+    source = inspect.getsource(module)
+    assert "core.disk_guard" in source
+    assert "min_free_disk_gb" not in source
+
+
+def test_the_disk_probe_is_the_music_one_not_a_copy_of_it():
+    # Audiobooks download to the universal folder, so "is there room" is the
+    # same question music asks. Measuring an audiobook-specific folder was
+    # checking a volume nothing downloads to.
+    from unittest.mock import patch as _patch
+
+    from core.audiobook_grab import has_room
+
+    with _patch("core.disk_guard.music_has_room", return_value=(False, 1.0, 5.0)) as probe:
+        assert has_room() == (False, 1.0, 5.0)
+    probe.assert_called_once()

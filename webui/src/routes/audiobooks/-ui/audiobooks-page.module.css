@@ -905,6 +905,26 @@
   display: block;
 }
 
+/* Bottom-left is the one free corner on a cover: the sequence pill owns top
+   left, the wishlist heart and sample button own top right, the runtime owns
+   bottom right. */
+.cardOwned {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px 3px 6px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  font-weight: 680;
+  letter-spacing: 0.01em;
+  color: #08130c;
+  background: rgba(74, 222, 128, 0.94);
+  backdrop-filter: blur(6px);
+}
+
 .cardRuntime {
   position: absolute;
   right: 8px;
@@ -1410,6 +1430,21 @@
   color: rgba(255, 255, 255, 0.3);
 }
 
+.detailOwned {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 5px 12px 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: rgb(134, 239, 172);
+  background: rgba(74, 222, 128, 0.14);
+  border: 1px solid rgba(74, 222, 128, 0.32);
+}
+
 .detailTitle {
   margin: 0;
   font-size: 44px;
@@ -1652,6 +1687,20 @@
 
 .personTile:hover .personTileSpine {
   transform: rotate(calc(var(--spine) * 6deg)) translateY(-2px);
+}
+
+/* The expand-on-hover half of the standard watch badge is scoped to
+   .library-artist-card over in style.css. The tile re-states it for itself
+   rather than widening that selector, so nothing on the library page moves. */
+.personTile:hover :global(.watch-card-icon) {
+  width: auto !important;
+  padding: 3px 7px !important;
+}
+
+.personTile:hover :global(.watch-icon-label) {
+  opacity: 1;
+  max-width: 60px;
+  margin-left: 2px;
 }
 
 .personTileBody {
@@ -2302,128 +2351,6 @@
   border-radius: 3px;
   background: rgba(var(--accent-rgb), 1);
   transition: width 0.4s ease;
-}
-
-/* ── Narrator choice ────────────────────────────────────────────────────── */
-
-.narratorModal {
-  width: min(520px, 100%);
-  padding: 26px 28px 22px;
-  border-radius: 22px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-top-color: rgba(255, 255, 255, 0.18);
-  background: rgba(20, 20, 25, 0.98);
-  box-shadow: 0 40px 90px rgba(0, 0, 0, 0.65);
-  animation: fadeUp 0.2s ease both;
-}
-
-.narratorHead {
-  display: flex;
-  gap: 16px;
-  align-items: center;
-}
-
-.narratorCover {
-  width: 72px;
-  height: 72px;
-  border-radius: 12px;
-  object-fit: cover;
-  flex-shrink: 0;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5);
-}
-
-.narratorHeadText {
-  min-width: 0;
-}
-
-.narratorTitle {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 720;
-  line-height: 1.2;
-  letter-spacing: -0.02em;
-}
-
-.narratorAuthor {
-  margin: 3px 0 0;
-  font-size: 12.5px;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.narratorBlurb {
-  margin: 18px 0 16px;
-  font-size: 13px;
-  line-height: 1.6;
-  color: rgba(255, 255, 255, 0.6);
-}
-
-.narratorOptions {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-
-.narratorOption {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 14px 16px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
-  color: inherit;
-  text-align: left;
-  font-family: inherit;
-  cursor: pointer;
-  transition:
-    background 0.16s ease,
-    border-color 0.16s ease,
-    transform 0.16s ease;
-}
-
-.narratorOption:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.2);
-  transform: translateY(-1px);
-}
-
-/* The reading they actually picked is the default answer, so it leads. */
-.narratorOptionPrimary {
-  border-color: rgba(var(--accent-rgb), 0.45);
-  background: rgba(var(--accent-rgb), 0.12);
-}
-
-.narratorOptionPrimary:hover {
-  background: rgba(var(--accent-rgb), 0.2);
-  border-color: rgba(var(--accent-rgb), 0.65);
-}
-
-.narratorOptionTitle {
-  font-size: 14px;
-  font-weight: 640;
-}
-
-.narratorOptionSub {
-  font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.narratorCancel {
-  display: block;
-  margin: 16px auto 0;
-  padding: 7px 16px;
-  border: none;
-  border-radius: 9px;
-  background: none;
-  color: rgba(255, 255, 255, 0.45);
-  font-size: 12.5px;
-  font-family: inherit;
-  cursor: pointer;
-}
-
-.narratorCancel:hover {
-  color: #ffffff;
 }
 
 /* ── Releases modal ─────────────────────────────────────────────────────── */

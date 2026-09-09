@@ -21,6 +21,8 @@ from core.audiobook_release_search import (
     detect_bitrate,
     detect_format,
     is_abridged,
+    abridgement_verdict,
+    language_verdict,
     narrator_in_release,
     narrator_verdict,
     normalize_text,
@@ -571,3 +573,400 @@ def test_search_passes_the_narrator_mode_through():
         _prowlarr_result(guid="wrong", title="Project Hail Mary Narrated by Someone Else M4B"),
     ]])
     assert search_releases(NARRATED_BOOK, prowlarr_client=stub, narrator_mode="any")
+
+
+# ---------------------------------------------------------------------------
+# Full-cast recordings
+#
+# A cast recording credits a dozen people. Comparing only against the first one
+# meant a release naming any OTHER cast member read as a different narrator and
+# was dropped — rejecting exactly the release the listener wanted.
+# ---------------------------------------------------------------------------
+
+CAST_BOOK = dict(BOOK, narrator_names=["Michael Kramer", "Kate Reading", "Ray Porter"])
+
+
+def test_any_credited_narrator_counts_as_a_match():
+    assert narrator_verdict("Book Narrated by Kate Reading", CAST_BOOK["narrator_names"]) == "match"
+    assert narrator_verdict("Book Narrated by Ray Porter", CAST_BOOK["narrator_names"]) == "match"
+
+
+def test_someone_not_in_the_cast_is_still_a_mismatch():
+    assert narrator_verdict("Book Narrated by Stephen Fry",
+                            CAST_BOOK["narrator_names"]) == "mismatch"
+
+
+def test_a_full_cast_credit_is_not_a_person():
+    # "A Full Cast" names a production, not someone to match against; treating
+    # it as a different narrator would reject every release of a cast recording.
+    assert narrator_verdict("Book Narrated by Michael Kramer", ["A Full Cast"]) == "unknown"
+    assert narrator_verdict("Book [Full Cast Recording]", ["Michael Kramer"]) == "unknown"
+
+
+def test_a_cast_release_is_kept_in_exact_mode():
+    ranked = rank_releases(
+        [_release(title="Project Hail Mary Narrated by Kate Reading M4B")],
+        CAST_BOOK, narrator_mode="exact",
+    )
+    assert len(ranked) == 1
+
+
+def test_a_single_narrator_string_still_works():
+    assert narrator_verdict("Book Read by Ray Porter", "Ray Porter") == "match"
+
+
+# ---------------------------------------------------------------------------
+# Abridged
+#
+# Audible sells abridged and unabridged as separate ASINs with different
+# runtimes, so wanting a book already means wanting one of them.
+# ---------------------------------------------------------------------------
+
+def test_an_abridged_release_matches_an_abridged_book():
+    assert abridgement_verdict("Book (Abridged) M4B", "abridged") == "match"
+
+
+def test_an_abridged_release_mismatches_an_unabridged_book():
+    assert abridgement_verdict("Book (Abridged) M4B", "unabridged") == "mismatch"
+
+
+def test_unabridged_is_not_read_as_abridged():
+    assert abridgement_verdict("Book [Unabridged]", "unabridged") == "match"
+    assert abridgement_verdict("Book [Unabridged]", "abridged") == "mismatch"
+
+
+def test_a_silent_release_says_nothing_about_its_edition():
+    assert abridgement_verdict("Book M4B 64k", "unabridged") == "unknown"
+
+
+def test_wanting_the_abridged_edition_stops_penalising_it():
+    # The bug: an unconditional penalty punished the very release someone asked
+    # for when the abridged edition was the one they picked.
+    abridged_book = dict(BOOK, format_type="abridged")
+    wanted = score_release(_release("Project Hail Mary (Abridged) M4B"), abridged_book)
+    other = score_release(_release("Project Hail Mary (Unabridged) M4B"), abridged_book)
+    assert wanted.score > other.score
+
+
+def test_unabridged_is_still_preferred_when_that_is_the_edition():
+    unabridged_book = dict(BOOK, format_type="unabridged")
+    full = score_release(_release("Project Hail Mary [Unabridged] M4B"), unabridged_book)
+    cut = score_release(_release("Project Hail Mary (Abridged) M4B"), unabridged_book)
+    assert full.score > cut.score
+
+
+def test_with_no_known_edition_abridged_is_still_penalised():
+    # Unabridged is what people usually mean when nothing says otherwise.
+    unknown_book = dict(BOOK, format_type="")
+    full = score_release(_release("Project Hail Mary M4B"), unknown_book)
+    cut = score_release(_release("Project Hail Mary (Abridged) M4B"), unknown_book)
+    assert cut.score < full.score
+
+
+# ---------------------------------------------------------------------------
+# Language
+#
+# A title search drags translations in alongside the original: "Proyecto Hail
+# Mary" scores well against "Project Hail Mary" because the author and half the
+# words match.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("title,wanted,expected", [
+    ("Proyecto Hail Mary Spanish M4B", "english", "mismatch"),
+    ("Project Hail Mary German Edition", "english", "mismatch"),
+    ("Projekt Hail Mary Deutsch", "german", "match"),
+    ("Project Hail Mary M4B", "english", "unknown"),
+    ("Project Hail Mary M4B", "", "unknown"),
+])
+def test_language_verdict(title, wanted, expected):
+    assert language_verdict(title, wanted) == expected
+
+
+def test_a_translation_is_dropped_whatever_the_narrator_setting():
+    english = dict(BOOK, language="english")
+    ranked = rank_releases([
+        _release(title="Project Hail Mary Spanish Edition M4B", guid="es"),
+        _release(title="Project Hail Mary M4B", guid="en"),
+    ], english, narrator_mode="any")
+    assert [r.guid for r in ranked] == ["en"]
+
+
+def test_a_release_that_names_no_language_is_kept():
+    # Almost none of them do; requiring one would find nothing.
+    english = dict(BOOK, language="english")
+    assert len(rank_releases([_release(title="Project Hail Mary M4B")], english)) == 1
+
+
+# ---------------------------------------------------------------------------
+# The source chain
+# ---------------------------------------------------------------------------
+
+def _chain_config(values):
+    from unittest.mock import MagicMock, patch
+    manager = MagicMock()
+    manager.get.side_effect = lambda key, default=None: values.get(key, default)
+    return patch("core.settings.config_manager", manager)
+
+
+def test_the_chain_defaults_to_all_three_sources():
+    from core.audiobook_release_search import configured_chain
+    with _chain_config({}):
+        assert configured_chain() == ["torrent", "usenet", "soulseek"]
+
+
+@pytest.mark.parametrize("mode", ["torrent", "usenet", "soulseek"])
+def test_a_single_source_mode_is_the_whole_chain(mode):
+    from core.audiobook_release_search import configured_chain
+    with _chain_config({"audiobooks.download_source.mode": mode}):
+        assert configured_chain() == [mode]
+
+
+def test_the_hybrid_order_is_honoured():
+    from core.audiobook_release_search import configured_chain
+    with _chain_config({"audiobooks.download_source.mode": "hybrid",
+                        "audiobooks.download_source.hybrid_order": ["soulseek", "usenet"]}):
+        assert configured_chain() == ["soulseek", "usenet"]
+
+
+def test_an_empty_order_falls_back_rather_than_searching_nothing():
+    from core.audiobook_release_search import configured_chain
+    with _chain_config({"audiobooks.download_source.mode": "hybrid",
+                        "audiobooks.download_source.hybrid_order": []}):
+        assert configured_chain() == ["torrent", "usenet", "soulseek"]
+
+
+def test_the_chain_reads_only_audiobook_settings():
+    # Music's chain must never decide what a book search does.
+    from unittest.mock import MagicMock, patch
+
+    from core.audiobook_release_search import configured_chain
+    manager = MagicMock()
+    manager.get.side_effect = lambda key, default=None: default
+    with patch("core.settings.config_manager", manager):
+        configured_chain()
+    assert all(str(call.args[0]).startswith("audiobooks.")
+               for call in manager.get.call_args_list)
+
+
+def test_both_sources_are_ranked_together_as_one_pool():
+    # A peer with the right narrator has to be able to beat a torrent with the
+    # wrong one, which cannot happen if each source is ranked on its own.
+    from unittest.mock import patch
+
+    from core.audiobook_release_search import AudiobookRelease, search_all_sources
+
+    torrent = AudiobookRelease(source="prowlarr", protocol="torrent",
+                               title="Project Hail Mary read by Scott Brick",
+                               indexer="x", size_bytes=800_000_000)
+    peer = AudiobookRelease(source="soulseek", protocol="soulseek",
+                            title="Project Hail Mary read by Ray Porter",
+                            indexer="soulseek:peer", size_bytes=800_000_000)
+
+    with _chain_config({}), \
+         patch("core.audiobook_release_search.search_releases", return_value=[torrent]), \
+         patch("core.audiobook_soulseek.is_available", return_value=True), \
+         patch("core.audiobook_soulseek.search", return_value=[peer]):
+        found = search_all_sources(BOOK, narrator_mode="exact")
+
+    assert [r.source for r in found] == ["soulseek"]
+
+
+def test_a_broken_prowlarr_still_leaves_the_soulseek_results():
+    from unittest.mock import patch
+
+    from core.audiobook_release_search import AudiobookRelease, search_all_sources
+
+    peer = AudiobookRelease(source="soulseek", protocol="soulseek",
+                            title="Project Hail Mary", indexer="soulseek:peer",
+                            size_bytes=800_000_000)
+    with _chain_config({}), \
+         patch("core.audiobook_release_search.search_releases",
+               side_effect=RuntimeError("down")), \
+         patch("core.audiobook_soulseek.is_available", return_value=True), \
+         patch("core.audiobook_soulseek.search", return_value=[peer]):
+        assert len(search_all_sources(BOOK)) == 1
+
+
+def test_a_broken_soulseek_still_leaves_the_prowlarr_results():
+    from unittest.mock import patch
+
+    from core.audiobook_release_search import AudiobookRelease, search_all_sources
+
+    torrent = AudiobookRelease(source="prowlarr", protocol="torrent",
+                               title="Project Hail Mary", indexer="x",
+                               size_bytes=800_000_000)
+    with _chain_config({}), \
+         patch("core.audiobook_release_search.search_releases", return_value=[torrent]), \
+         patch("core.audiobook_soulseek.is_available", return_value=True), \
+         patch("core.audiobook_soulseek.search", side_effect=RuntimeError("down")):
+        assert len(search_all_sources(BOOK)) == 1
+
+
+def test_a_source_the_chain_excludes_is_never_asked():
+    from unittest.mock import patch
+
+    from core.audiobook_release_search import search_all_sources
+
+    with _chain_config({"audiobooks.download_source.mode": "torrent"}), \
+         patch("core.audiobook_release_search.search_releases", return_value=[]), \
+         patch("core.audiobook_soulseek.is_available", return_value=True), \
+         patch("core.audiobook_soulseek.search") as slsk:
+        search_all_sources(BOOK)
+    # Available but not in the chain: the chain is what decides, not what
+    # happens to be installed.
+    slsk.assert_not_called()
+
+
+def test_a_soulseek_only_chain_never_touches_prowlarr():
+    from unittest.mock import patch
+
+    from core.audiobook_release_search import search_all_sources
+
+    with _chain_config({"audiobooks.download_source.mode": "soulseek"}), \
+         patch("core.audiobook_release_search.search_releases") as prowlarr, \
+         patch("core.audiobook_soulseek.is_available", return_value=True), \
+         patch("core.audiobook_soulseek.search", return_value=[]):
+        search_all_sources(BOOK)
+    prowlarr.assert_not_called()
+
+
+def test_every_source_being_down_is_an_error_not_an_empty_shelf():
+    # Reporting it as "no releases found" would tell the user their book does
+    # not exist and send a wishlist row into a backoff it did not earn.
+    from unittest.mock import patch
+
+    from core.audiobook_release_search import search_all_sources
+
+    with _chain_config({}), \
+         patch("core.audiobook_release_search.search_releases",
+               side_effect=RuntimeError("prowlarr down")), \
+         patch("core.audiobook_soulseek.is_available", return_value=True), \
+         patch("core.audiobook_soulseek.search", side_effect=RuntimeError("slskd down")), \
+         pytest.raises(RuntimeError):
+        search_all_sources(BOOK)
+
+
+def test_the_only_source_being_down_is_an_error():
+    from unittest.mock import patch
+
+    from core.audiobook_release_search import search_all_sources
+
+    with _chain_config({"audiobooks.download_source.mode": "torrent"}), \
+         patch("core.audiobook_release_search.search_releases",
+               side_effect=RuntimeError("prowlarr down")), \
+         pytest.raises(RuntimeError):
+        search_all_sources(BOOK)
+
+
+def test_a_source_that_is_only_UNCONFIGURED_never_masks_the_other_being_down():
+    # slskd listed in the chain but with no URL was never really asked, so it
+    # must not turn "prowlarr is down" into "one of two sources answered".
+    from unittest.mock import patch
+
+    from core.audiobook_release_search import search_all_sources
+
+    with _chain_config({}), \
+         patch("core.audiobook_release_search.search_releases",
+               side_effect=RuntimeError("prowlarr down")), \
+         patch("core.audiobook_soulseek.is_available", return_value=False), \
+         pytest.raises(RuntimeError):
+        search_all_sources(BOOK)
+
+
+def test_an_unconfigured_soulseek_is_never_searched():
+    from unittest.mock import patch
+
+    from core.audiobook_release_search import search_all_sources
+
+    with _chain_config({}), \
+         patch("core.audiobook_release_search.search_releases", return_value=[]), \
+         patch("core.audiobook_soulseek.is_available", return_value=False), \
+         patch("core.audiobook_soulseek.search") as slsk:
+        search_all_sources(BOOK)
+    slsk.assert_not_called()
+
+
+def test_one_source_answering_hides_the_other_being_down():
+    from unittest.mock import patch
+
+    from core.audiobook_release_search import AudiobookRelease, search_all_sources
+
+    peer = AudiobookRelease(source="soulseek", protocol="soulseek",
+                            title="Project Hail Mary", indexer="soulseek:peer",
+                            size_bytes=800_000_000)
+    with _chain_config({}), \
+         patch("core.audiobook_release_search.search_releases",
+               side_effect=RuntimeError("prowlarr down")), \
+         patch("core.audiobook_soulseek.is_available", return_value=True), \
+         patch("core.audiobook_soulseek.search", return_value=[peer]):
+        assert len(search_all_sources(BOOK)) == 1
+
+
+@pytest.mark.parametrize("soulseek_available", [True, False])
+def test_an_outage_reads_the_same_whether_or_not_slskd_is_set_up(soulseek_available):
+    """The verdict must not depend on which sources happen to be configured.
+
+    Requiring EVERY source to have failed made "Prowlarr is down" report as
+    "no releases found" on an install with slskd set up, and as an error on
+    one without. Same outage, two different answers, and the first sends a
+    wishlist row into a backoff it did not earn.
+
+    Caught by an order-dependent test failure, not by design: the two
+    behaviours only diverge when a real config leaks between tests.
+    """
+    from unittest.mock import patch
+
+    from core.audiobook_release_search import search_all_sources
+
+    with _chain_config({}), \
+         patch("core.audiobook_release_search.search_releases",
+               side_effect=RuntimeError("prowlarr down")), \
+         patch("core.audiobook_soulseek.is_available", return_value=soulseek_available), \
+         patch("core.audiobook_soulseek.search", return_value=[]), \
+         pytest.raises(RuntimeError):
+        search_all_sources(BOOK)
+
+
+def test_a_source_finding_nothing_does_not_mask_another_being_down():
+    # "I looked and there is none" and "I could not look" are different
+    # answers, and only the first is safe to act on.
+    from unittest.mock import patch
+
+    from core.audiobook_release_search import search_all_sources
+
+    with _chain_config({}), \
+         patch("core.audiobook_release_search.search_releases", return_value=[]), \
+         patch("core.audiobook_soulseek.is_available", return_value=True), \
+         patch("core.audiobook_soulseek.search", side_effect=RuntimeError("slskd down")), \
+         pytest.raises(RuntimeError):
+        search_all_sources(BOOK)
+
+
+def test_finding_something_beats_any_number_of_broken_sources():
+    # Results win: a book that was found is a book that was found.
+    from unittest.mock import patch
+
+    from core.audiobook_release_search import AudiobookRelease, search_all_sources
+
+    peer = AudiobookRelease(source="soulseek", protocol="soulseek",
+                            title="Project Hail Mary", indexer="soulseek:peer",
+                            size_bytes=800_000_000)
+    with _chain_config({}), \
+         patch("core.audiobook_release_search.search_releases",
+               side_effect=RuntimeError("prowlarr down")), \
+         patch("core.audiobook_soulseek.is_available", return_value=True), \
+         patch("core.audiobook_soulseek.search", return_value=[peer]):
+        assert len(search_all_sources(BOOK)) == 1
+
+
+def test_everything_working_and_finding_nothing_is_not_an_error():
+    # A genuine "this book is not out there" must still read as empty.
+    from unittest.mock import patch
+
+    from core.audiobook_release_search import search_all_sources
+
+    with _chain_config({}), \
+         patch("core.audiobook_release_search.search_releases", return_value=[]), \
+         patch("core.audiobook_soulseek.is_available", return_value=True), \
+         patch("core.audiobook_soulseek.search", return_value=[]):
+        assert search_all_sources(BOOK) == []

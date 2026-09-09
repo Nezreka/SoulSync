@@ -24,7 +24,7 @@ import os
 import sqlite3
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from utils.logging_config import get_logger
 
@@ -54,6 +54,14 @@ _NARRATOR_MODES = (NARRATOR_EXACT, NARRATOR_ANY)
 # appears for anyone already running.
 _COLUMN_MIGRATIONS = (
     ("audiobook_wishlist", "narrator_mode", f"TEXT DEFAULT '{NARRATOR_EXACT}'"),
+    # Why a download is staged rather than imported, in the user's words.
+    ("audiobook_downloads", "completeness", "TEXT DEFAULT ''"),
+    # The whole book as the catalogue described it AT GRAB TIME. Importing needs
+    # the series, the narrator and the runtime — to shelve the book, and to know
+    # how long it should be — and re-fetching them hours later means the import
+    # depends on Audible being reachable and unchanged. It often is not: the
+    # storefront sheds load, and a title can be pulled outright.
+    ("audiobook_downloads", "book_json", "TEXT DEFAULT ''"),
 )
 
 
@@ -66,6 +74,22 @@ def _json_dump(value: Any) -> str:
         return json.dumps(value or [])
     except (TypeError, ValueError):
         return "[]"
+
+
+def _json_dump_book(book: Any) -> str:
+    """Serialise the captured catalogue payload, or "" if it will not go.
+
+    The release is already downloading by the time this runs, so failing to
+    store the context must never fail the grab — the import falls back to a live
+    lookup, which is what it did before this was captured at all.
+    """
+    if not book:
+        return ""
+    try:
+        return json.dumps(book)
+    except (TypeError, ValueError) as exc:
+        logger.warning("Could not store the book context for a download: %s", exc)
+        return ""
 
 
 def _json_load(raw: Any) -> List[Any]:
@@ -192,6 +216,32 @@ class AudiobookDatabase:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ab_downloads_asin "
                 "ON audiobook_downloads (asin)"
+            )
+
+            # Followed authors. Keyed on the NAME, not an ASIN: Audible hands out
+            # an author ASIN but accepts it as a search filter and then ignores
+            # it, so the name is the only key that actually finds their books.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS audiobook_watchlist (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    profile_id INTEGER NOT NULL DEFAULT 1,
+                    role TEXT NOT NULL DEFAULT 'author',
+                    cover_url TEXT DEFAULT '',
+                    -- Only books published AFTER this get wishlisted. Following
+                    -- an author must not dump their whole back catalogue into
+                    -- the wishlist; the point is their next release.
+                    since_date TEXT DEFAULT '',
+                    last_scanned_at REAL DEFAULT 0,
+                    found_total INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT DEFAULT '',
+                    added_at REAL NOT NULL,
+                    UNIQUE (name, role, profile_id)
+                )
+            """)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ab_watchlist_scan "
+                "ON audiobook_watchlist (profile_id, last_scanned_at)"
             )
 
             cursor.execute("""
@@ -340,6 +390,36 @@ class AudiobookDatabase:
         """, (int(profile_id), STATUS_WANTED, STATUS_FAILED, cutoff, max(1, int(limit))))
         return [self._wishlist_row(row) for row in rows]
 
+    def reset_stale_searching(self, older_than_seconds: float = 3600.0,
+                              profile_id: int = 1) -> int:
+        """Free rows abandoned mid-search. Returns how many were freed.
+
+        A row is set to "searching" before the search runs and moved off it
+        afterwards. If the process stops in between — a restart, a crash, a
+        container rebuild — the row stays "searching" forever, and the retry
+        query only picks up "wanted" and "failed". That book is then never
+        looked for again and nothing says so.
+
+        Age-gated so a pass currently running cannot free its own rows out from
+        under itself.
+        """
+        cutoff = _now() - max(0.0, float(older_than_seconds))
+        conn = self._connect()
+        try:
+            cursor = conn.execute("""
+                UPDATE audiobook_wishlist
+                SET status = ?, last_error = 'Search was interrupted'
+                WHERE profile_id = ? AND status = ? AND last_attempt_at <= ?
+            """, (STATUS_WANTED, int(profile_id), STATUS_SEARCHING, cutoff))
+            conn.commit()
+            if cursor.rowcount:
+                logger.info("Freed %d audiobook wishlist rows stuck mid-search",
+                            cursor.rowcount)
+            return cursor.rowcount
+        except sqlite3.Error as exc:
+            logger.warning("Could not free stale searching rows: %s", exc)
+            return 0
+
     def mark_wishlist_status(
         self,
         asin: str,
@@ -377,6 +457,28 @@ class AudiobookDatabase:
             logger.warning("Could not update wishlist status for %s: %s", asin, exc)
             return False
 
+    def set_narrator_mode(self, asin: str, narrator_mode: str, profile_id: int = 1) -> bool:
+        """Change how strictly a wanted book must match its narrator.
+
+        Separate from add_to_wishlist because adding is idempotent: re-adding a
+        book must not silently rewrite a choice the listener already made, and
+        changing the choice must not reset the retry backoff.
+        """
+        if narrator_mode not in _NARRATOR_MODES:
+            return False
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                "UPDATE audiobook_wishlist SET narrator_mode = ? "
+                "WHERE asin = ? AND profile_id = ?",
+                (narrator_mode, str(asin or "").strip(), int(profile_id)),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        except sqlite3.Error as exc:
+            logger.warning("Could not set the narrator mode for %s: %s", asin, exc)
+            return False
+
     def wishlist_counts(self, profile_id: int = 1) -> Dict[str, int]:
         conn = self._connect()
         counts = {status: 0 for status in _STATUSES}
@@ -403,12 +505,18 @@ class AudiobookDatabase:
         indexer: str = "",
         author: str = "",
         bytes_total: int = 0,
+        book: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """Remember that a release was handed to a download client.
 
         Without a row here a grab is fire-and-forget: the client is downloading
         something the app has no idea about, so nothing can ever notice it
         finished and file it into the library.
+
+        ``book`` is the catalogue's description of the title, stored so the
+        import can shelve and measure it without going back to Audible hours
+        later. Everything the import needs is captured at the moment we still
+        have it.
         """
         download_id = str(download_id or "").strip()
         if not download_id:
@@ -420,22 +528,146 @@ class AudiobookDatabase:
                 INSERT OR REPLACE INTO audiobook_downloads
                     (download_id, asin, title, author, source, release_title, indexer,
                      client_id, status, progress, bytes_done, bytes_total,
-                     created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'downloading', 0, 0, ?, ?, ?)
+                     book_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'downloading', 0, 0, ?, ?, ?, ?)
             """, (download_id, str(asin or ""), str(title or ""), str(author or ""),
                   str(source or ""), str(release_title or ""), str(indexer or ""),
-                  str(client_id or ""), int(bytes_total or 0), now, now))
+                  str(client_id or ""), int(bytes_total or 0),
+                  _json_dump_book(book), now, now))
             conn.commit()
             return True
         except sqlite3.Error as exc:
             logger.warning("Could not record the audiobook download %s: %s", download_id, exc)
             return False
 
+    # ------------------------------------------------------------------
+    # Watchlist — followed authors
+    # ------------------------------------------------------------------
+
+    def follow_author(
+        self,
+        name: str,
+        profile_id: int = 1,
+        cover_url: str = "",
+        since_date: str = "",
+        role: str = "author",
+    ) -> bool:
+        """Follow an author so their new releases get wishlisted.
+
+        ``since_date`` is the cutoff: only books published after it are picked
+        up. It defaults to today, because following an author means "tell me
+        about the next one", not "download the 88 books they already wrote".
+        """
+        name = str(name or "").strip()
+        if not name:
+            return False
+        if not since_date:
+            since_date = time.strftime("%Y-%m-%d", time.gmtime())
+
+        conn = self._connect()
+        try:
+            conn.execute("""
+                INSERT INTO audiobook_watchlist
+                    (name, profile_id, role, cover_url, since_date, added_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (name, int(profile_id), str(role or "author"),
+                  str(cover_url or ""), since_date, _now()))
+            conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+        except sqlite3.Error as exc:
+            logger.warning("Could not follow %s: %s", name, exc)
+            return False
+
+    def unfollow_author(self, name: str, profile_id: int = 1,
+                        role: str = "author") -> bool:
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                "DELETE FROM audiobook_watchlist "
+                "WHERE name = ? AND role = ? AND profile_id = ?",
+                (str(name or "").strip(), str(role or "author"), int(profile_id)),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        except sqlite3.Error as exc:
+            logger.warning("Could not unfollow %s: %s", name, exc)
+            return False
+
+    def is_following(self, name: str, profile_id: int = 1,
+                     role: str = "author") -> bool:
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT 1 FROM audiobook_watchlist "
+            "WHERE name = ? AND role = ? AND profile_id = ?",
+            (str(name or "").strip(), str(role or "author"), int(profile_id)),
+        ).fetchone()
+        return row is not None
+
+    def get_watchlist(self, profile_id: int = 1) -> List[Dict[str, Any]]:
+        conn = self._connect()
+        return [dict(row) for row in conn.execute(
+            "SELECT * FROM audiobook_watchlist WHERE profile_id = ? "
+            "ORDER BY name COLLATE NOCASE",
+            (int(profile_id),),
+        )]
+
+    def get_watchlist_due(self, profile_id: int = 1,
+                          rescan_after_seconds: float = 20 * 3600,
+                          limit: int = 25) -> List[Dict[str, Any]]:
+        """Authors due another look.
+
+        Spaced rather than every pass: a new audiobook is announced weeks ahead
+        and published on a date, so checking an author more than once a day
+        spends indexer-adjacent effort to learn nothing.
+        """
+        conn = self._connect()
+        cutoff = _now() - max(0.0, float(rescan_after_seconds))
+        return [dict(row) for row in conn.execute("""
+            SELECT * FROM audiobook_watchlist
+            WHERE profile_id = ? AND last_scanned_at <= ?
+            ORDER BY last_scanned_at ASC
+            LIMIT ?
+        """, (int(profile_id), cutoff, max(1, int(limit))))]
+
+    def mark_author_scanned(self, name: str, found: int = 0, error: str = "",
+                            profile_id: int = 1, role: str = "author") -> bool:
+        conn = self._connect()
+        try:
+            cursor = conn.execute("""
+                UPDATE audiobook_watchlist
+                SET last_scanned_at = ?, found_total = found_total + ?, last_error = ?
+                WHERE name = ? AND role = ? AND profile_id = ?
+            """, (_now(), int(found or 0), str(error or ""),
+                  str(name or "").strip(), str(role or "author"), int(profile_id)))
+            conn.commit()
+            return cursor.rowcount > 0
+        except sqlite3.Error as exc:
+            logger.warning("Could not record the scan of %s: %s", name, exc)
+            return False
+
+    @staticmethod
+    def stored_book(row: Dict[str, Any]) -> Dict[str, Any]:
+        """The catalogue payload captured when this download was grabbed.
+
+        Empty when the row predates the column or the grab had nothing to store;
+        callers fall back to asking the catalogue again.
+        """
+        try:
+            loaded = json.loads(row.get("book_json") or "")
+            return loaded if isinstance(loaded, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+
     def get_downloads(self, active_only: bool = False) -> List[Dict[str, Any]]:
         conn = self._connect()
         sql = "SELECT * FROM audiobook_downloads"
         if active_only:
-            sql += " WHERE status IN ('queued', 'downloading', 'importing')"
+            # 'staged' is active on purpose: a book held back for missing
+            # chapters must keep being re-checked, because the usual reason is a
+            # torrent that has not finished yet.
+            sql += " WHERE status IN ('queued', 'downloading', 'importing', 'staged')"
         sql += " ORDER BY created_at DESC"
         return [dict(row) for row in conn.execute(sql)]
 
@@ -448,6 +680,7 @@ class AudiobookDatabase:
         bytes_total: Optional[int] = None,
         save_path: Optional[str] = None,
         error: Optional[str] = None,
+        completeness: Optional[str] = None,
     ) -> bool:
         """Patch whatever changed. Only the fields given are written.
 
@@ -460,6 +693,7 @@ class AudiobookDatabase:
         for column, value in (
             ("status", status), ("progress", progress), ("bytes_done", bytes_done),
             ("bytes_total", bytes_total), ("save_path", save_path), ("error", error),
+            ("completeness", completeness),
         ):
             if value is not None:
                 fields.append(f"{column} = ?")
@@ -522,6 +756,59 @@ class AudiobookDatabase:
         conn = self._connect()
         return [dict(row) for row in conn.execute(
             "SELECT * FROM audiobook_library ORDER BY imported_at DESC")]
+
+    def owned_asins(self) -> Set[str]:
+        """Every asin on disk, in one read.
+
+        A page of search results asks about twenty books at once, and twenty
+        round trips to answer "do I have this" is twenty more than one.
+        """
+        conn = self._connect()
+        return {
+            str(row[0]) for row in conn.execute("SELECT asin FROM audiobook_library")
+            if row[0]
+        }
+
+    def remove_from_library(self, asin: str) -> bool:
+        """Forget a book. Used by the library scan when the folder is gone.
+
+        Deliberately does NOT touch the wishlist. A user who deletes a book off
+        disk has said something about that copy, not about wanting the book,
+        and re-wishlisting it behind their back would start a download they did
+        not ask for.
+        """
+        asin = str(asin or "").strip()
+        if not asin:
+            return False
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                "DELETE FROM audiobook_library WHERE asin = ?", (asin,))
+            conn.commit()
+            return cursor.rowcount > 0
+        except sqlite3.Error as exc:
+            logger.warning("Could not remove %s from the audiobook library: %s", asin, exc)
+            return False
+
+    def update_library_entry(self, asin: str, **fields: Any) -> bool:
+        """Refresh what the scan measured on disk: path, file count, size."""
+        asin = str(asin or "").strip()
+        allowed = {"path", "file_count", "size_bytes", "audio_format"}
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not asin or not updates:
+            return False
+        clause = ", ".join(f"{key} = ?" for key in updates)
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                f"UPDATE audiobook_library SET {clause} WHERE asin = ?",
+                (*updates.values(), asin),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        except sqlite3.Error as exc:
+            logger.warning("Could not update %s in the audiobook library: %s", asin, exc)
+            return False
 
     @staticmethod
     def _wishlist_row(row: sqlite3.Row) -> Dict[str, Any]:

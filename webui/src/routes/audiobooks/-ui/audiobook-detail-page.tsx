@@ -185,6 +185,22 @@ export function AudiobookDetailPage() {
             </nav>
           )}
 
+          {book.owned && (
+            <p className={styles.detailOwned}>
+              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                <path
+                  d="M2 8.5 6 12.5 14 4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              In your library
+            </p>
+          )}
+
           <h1 className={styles.detailTitle}>{book.title}</h1>
           {book.subtitle && <p className={styles.detailSubtitle}>{book.subtitle}</p>}
 

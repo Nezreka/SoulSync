@@ -54,6 +54,9 @@ export interface AudiobookItem {
   language: string;
   format_type: string;
   is_adult: boolean;
+  /** True when this book is already in the audiobook library on disk. Set by
+   *  the API on every book payload, refreshed by the daily library scan. */
+  owned?: boolean;
   /** "audible" carries narrators and series; "apple" is the thin fallback. */
   source: AudiobookSource;
 }
@@ -137,6 +140,8 @@ export interface AudiobookPersonProfile {
   standalone: AudiobookItem[];
   /** Best-rated titles, for the header. */
   highlights: AudiobookItem[];
+  /** Only ever true for authors — a narrator has no release of their own. */
+  watching?: boolean;
 }
 
 /**
@@ -180,7 +185,15 @@ export interface AudiobookWishlistCounts {
 }
 
 /** Which download client a release needs. */
-export type AudiobookProtocol = 'torrent' | 'usenet';
+export type AudiobookProtocol = 'torrent' | 'usenet' | 'soulseek';
+
+/** What it takes to fetch a folder back off a peer. Only soulseek carries it. */
+export interface AudiobookSoulseekFolder {
+  username: string;
+  album_path: string;
+  file_count: number;
+  queue_length: number;
+}
 
 /** One downloadable candidate found on an indexer. */
 export interface AudiobookReleaseCandidate {
@@ -201,6 +214,8 @@ export interface AudiobookReleaseCandidate {
   score: number;
   /** Why it scored what it did, so an odd ordering can be shown rather than trusted. */
   reasons: string[];
+  /** Present only on a Soulseek release: which peer, which folder, how many files. */
+  soulseek?: AudiobookSoulseekFolder | null;
 }
 
 /**
@@ -234,4 +249,17 @@ export interface AudiobookDownload {
   error: string;
   created_at: number;
   completed_at: number;
+}
+
+/** An author being followed for new releases. */
+export interface AudiobookFollowedAuthor {
+  name: string;
+  role: string;
+  cover_url: string;
+  /** Only books published after this get wishlisted. */
+  since_date: string;
+  last_scanned_at: number;
+  found_total: number;
+  last_error: string;
+  added_at: number;
 }

@@ -5522,6 +5522,102 @@
                                     <small class="settings-hint setting-help-body" hidden>Variables: <code>$author</code>, <code>$authorletter</code>, <code>$narrator</code>, <code>$title</code>, <code>$series</code>, <code>$seriespos</code> (01), <code>$year</code>, <code>$asin</code>. Default: <code>$author/$series/$seriespos - $title</code>. Books with no series collapse the series folder and its number cleanly, the same way podcast season folders do. Use <code>${var}</code> to append text.</small>
                                 </div>
 
+                                <h4 class="settings-subheading">Audiobooks</h4>
+                                <small class="settings-hint">Applies to the audiobook library only. Downloads use the same torrent, usenet and Soulseek clients as music &mdash; set those under Downloads.</small>
+
+                                <div class="form-group">
+                                    <label>Audiobook Download Sources:</label>
+                                    <select id="audiobook-download-mode" class="form-select" onchange="onAudiobookModeChange()">
+                                        <option value="soulseek">Soulseek Only</option>
+                                        <option value="torrent">Torrent Only (via Prowlarr)</option>
+                                        <option value="usenet">Usenet Only (via Prowlarr)</option>
+                                        <option value="hybrid">Hybrid (Primary + Fallback)</option>
+                                    </select>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Which sources a book search asks. Separate from the music chain on purpose &mdash; Tidal, Qobuz, HiFi, Deezer and Amazon carry no audiobooks at all, so a book on the music chain would burn an attempt on each of them before it could succeed. The clients themselves are the same ones music uses; only the order and the category differ.</small>
+                                </div>
+
+                                <div id="audiobook-hybrid-container" style="display:none;">
+                                    <div class="setting-help-text" style="margin-top:10px;">Use the arrows to order sources. Enable the ones you want &mdash; book searches try each enabled source in order, then rank everything together, so this decides who gets asked rather than who wins.</div>
+                                    <div class="hybrid-source-list" id="audiobook-hybrid-rows"></div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Audiobook Downloader Category:</label>
+                                    <input type="text" id="audiobook-torrent-category" placeholder="audiobooks">
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>The category SoulSync tags audiobook torrents and NZBs with in your download client. Keep it different from your music category so a finished book is never picked up by anything watching for music. Default: <code>audiobooks</code></small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Audiobook Prowlarr Categories:</label>
+                                    <input type="text" id="audiobook-prowlarr-categories" placeholder="3030">
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Newznab category IDs searched for audiobooks. <code>3030</code> is the standard audiobook category and is deliberately kept OUT of music searches, so asking for it here costs the music side nothing. Only change this if your indexer uses a non-standard ID.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Import When Runtime Reaches:</label>
+                                    <input type="number" id="audiobook-completeness-tolerance" min="10" max="100" step="1" placeholder="92">
+                                    <span class="settings-unit">%</span>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>How much of the runtime Audible publishes has to actually be on disk before a book is filed into your library. A download client reports "complete" when the files it was <em>asked</em> for finished, which is not the same as the book being whole &mdash; and a book missing its last chapters plays perfectly until you run out of it. Short books are held in staging, never failed outright. Default: <code>92</code></small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Give Up On A Short Book After:</label>
+                                    <input type="number" id="audiobook-staging-days" min="1" max="90" step="1" placeholder="7">
+                                    <span class="settings-unit">days</span>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>How long an incomplete book is kept staged before it is failed and sent back to the wishlist. Torrents finish late and uploaders repair releases, so patience is right here; forever would mean one broken release holds a wishlist row for good. Default: <code>7</code></small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="audiobook-renumber-chapters">
+                                        <span>Renumber chapter files on import</span>
+                                    </label>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Chapter files arrive named however the uploader left them. On by default: a book whose files sort wrong plays wrong. Turn this off only if you trust your releases' own numbering.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="audiobook-embed-metadata">
+                                        <span>Write tags into audiobook files</span>
+                                    </label>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Embeds title, author, series and narrator into each file on import. Narrator goes in the COMPOSER field, which is the convention every audiobook server settled on. Without this a book keeps whatever the uploader's ripper wrote, which is usually chapter 4 of a 27-hour book tagged as a track on an album called "audiobook".</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="audiobook-embed-artwork">
+                                        <span>Embed cover art in audiobook files</span>
+                                    </label>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Embeds the cover into every chapter file. A cover the release already shipped is preferred over fetching one, so this still works offline.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="audiobook-save-artwork">
+                                        <span>Save cover.jpg beside audiobooks</span>
+                                    </label>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Writes <code>cover.jpg</code> into the book folder. Plex, Jellyfin, Audiobookshelf and Booksonic all read it from there.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="audiobook-write-nfo">
+                                        <span>Write audiobook metadata sidecars</span>
+                                    </label>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Writes <code>metadata.opf</code> (Audiobookshelf, Plex, Calibre) and <code>book.nfo</code> (Kodi, Jellyfin, Emby). Both, because the servers genuinely disagree about which to look for and they are a few hundred bytes each. These also carry the ASIN, which is what lets the daily library scan recognise a book you imported months ago.</small>
+                                </div>
+
+
                                 <div class="form-group">
                                     <label>Multi-Disc Folder Label:</label>
                                     <select id="disc-label">

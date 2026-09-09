@@ -3875,6 +3875,25 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .form-group small,
 .settings-group small,
+/* Groups a run of fields inside a settings section that belongs to one
+ * subsystem. Without a marker the next person reads audiobook knobs sitting
+ * in the organization section as global ones. */
+.settings-subheading {
+    margin: 26px 0 2px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.62);
+}
+
+/* The unit that follows a number input, e.g. % or days. */
+.settings-unit {
+    margin-left: 8px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
+}
+
 .settings-hint {
     display: block;
     font-size: 10px;

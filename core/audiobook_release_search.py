@@ -13,9 +13,12 @@ asking for it here costs the music side nothing and reuses the same client, the
 same indexer settings and the same process-wide throttle. Torrent and usenet
 both come back from one search; the protocol is on each result.
 
-Soulseek is the third source in the configured chain and is not wired in here
-yet — ``search_releases`` is shaped to take more sources without changing its
-callers, and the ranking below is source-agnostic.
+Soulseek is the third source and lives in ``core/audiobook_soulseek.py``,
+because a peer's shared FOLDER is a different shape from a torrent and
+pretending otherwise in here would have made both harder to read.
+``search_all_sources`` below is what callers actually ask: it runs whichever
+sources the chain names, then ranks everything together on one scale so a peer
+with the right narrator can beat a torrent with the wrong one.
 
 Rate limiting
 -------------
@@ -208,20 +211,106 @@ def same_person(left: Optional[str], right: Optional[str]) -> bool:
     return True
 
 
+# Credit strings that name a production rather than a person. Matching on them
+# is meaningless, and treating one as "a different narrator" would reject every
+# release of a full-cast recording.
+_CAST_SENTINELS = frozenset({"full cast", "a full cast", "cast", "various", "multiple"})
+
+
 def narrator_verdict(
     release_title: Optional[str],
-    wanted_narrator: Optional[str],
+    wanted_narrators: Any,
 ) -> str:
-    """"match", "mismatch" or "unknown" for a release against a wanted narrator.
+    """"match", "mismatch" or "unknown" for a release against a book's narrators.
 
-    "unknown" is the common case and is NOT a failure — see narrator_in_release.
+    Takes ALL the book's narrators, not just the first. A full-cast recording
+    credits a dozen people, and comparing only against the first meant a release
+    naming any other cast member read as a different narrator and was dropped —
+    rejecting exactly the release the listener wanted.
+
+    "unknown" is the common case and is NOT a failure: most releases never name
+    a narrator, and only one that names somebody demonstrably else is rejected.
     """
-    if not wanted_narrator:
+    if isinstance(wanted_narrators, str):
+        wanted = [wanted_narrators]
+    else:
+        wanted = [str(n) for n in (wanted_narrators or [])]
+    wanted = [n for n in wanted if n.strip()
+              and n.strip().casefold() not in _CAST_SENTINELS]
+    if not wanted:
         return "unknown"
+
     named = narrator_in_release(release_title)
     if not named:
         return "unknown"
-    return "match" if same_person(named, wanted_narrator) else "mismatch"
+    if named.strip().casefold() in _CAST_SENTINELS:
+        # The release says "full cast" — that agrees with a cast recording and
+        # tells us nothing about a single-narrator one.
+        return "unknown"
+    return "match" if any(same_person(named, one) for one in wanted) else "mismatch"
+
+
+# Language names as they appear in release titles, mapped to the value the
+# catalogue reports. Only the ones that actually turn up; an unlisted language
+# simply reads as "unknown" and is allowed through.
+_LANGUAGE_HINTS = {
+    "spanish": ("spanish", "espanol", "español", "castellano"),
+    "german": ("german", "deutsch"),
+    "french": ("french", "francais", "français"),
+    "italian": ("italian", "italiano"),
+    "portuguese": ("portuguese", "portugues", "português"),
+    "dutch": ("dutch", "nederlands"),
+    "japanese": ("japanese",),
+    "russian": ("russian",),
+    "polish": ("polish", "polski"),
+}
+
+
+def language_verdict(release_title: Optional[str], wanted_language: Optional[str]) -> str:
+    """"mismatch" when a release announces a language the book is not in.
+
+    Audible carries the same title in many languages, and a title search drags
+    the translations in alongside the original — "Proyecto Hail Mary" scores
+    well against "Project Hail Mary" because the author and half the words
+    match. A release that names its language is the one honest signal available.
+
+    Silence is "unknown" and always allowed: the overwhelming majority of
+    releases never state a language, and requiring one would find nothing.
+    """
+    wanted = str(wanted_language or "").strip().lower()
+    if not wanted:
+        return "unknown"
+
+    text = normalize_text(release_title)
+    for language, hints in _LANGUAGE_HINTS.items():
+        if any(f" {hint} " in f" {text} " for hint in hints):
+            return "match" if language == wanted else "mismatch"
+    return "unknown"
+
+
+def abridgement_verdict(release_title: Optional[str], wanted_format: Optional[str]) -> str:
+    """"match", "mismatch" or "unknown" for a release's abridgement.
+
+    Audible sells abridged and unabridged as separate ASINs with different
+    runtimes, so wanting a book already means wanting one of them. Penalising
+    "abridged" unconditionally punished the very release someone asked for when
+    the abridged edition was the one they picked.
+
+    A release that says nothing is unknown — most do not say — and unabridged is
+    assumed only when the catalogue told us the edition is unabridged.
+    """
+    wanted = str(wanted_format or "").strip().lower()
+    if wanted not in ("abridged", "unabridged"):
+        return "unknown"
+
+    text = str(release_title or "")
+    if _UNABRIDGED_RE.search(text):
+        found = "unabridged"
+    elif _ABRIDGED_RE.search(text):
+        found = "abridged"
+    else:
+        return "unknown"
+    return "match" if found == wanted else "mismatch"
 
 
 def title_relevance(release_title: Optional[str], book_title: Optional[str],
@@ -324,8 +413,8 @@ def build_queries(book: Dict[str, Any]) -> List[str]:
 class AudiobookRelease:
     """One downloadable candidate for a book."""
 
-    source: str                     # "prowlarr" today; "soulseek" later
-    protocol: str                   # "torrent" | "usenet"
+    source: str                     # "prowlarr" | "soulseek"
+    protocol: str                   # "torrent" | "usenet" | "soulseek"
     title: str
     indexer: str
     size_bytes: int
@@ -339,9 +428,15 @@ class AudiobookRelease:
     abridged: bool = False
     # "match" | "mismatch" | "unknown" against the edition that was wanted.
     narrator_verdict: str = "unknown"
+    abridgement_verdict: str = "unknown"
+    language_verdict: str = "unknown"
     relevance: float = 0.0
     score: float = 0.0
     reasons: List[str] = field(default_factory=list)
+    # Only a Soulseek release carries this: the peer, the folder, and every
+    # file in it. Torrents and NZBs need nothing beyond their URL, so it stays
+    # None for them and the grab side branches on protocol, not on this.
+    soulseek: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -359,16 +454,19 @@ class AudiobookRelease:
             "bitrate_kbps": self.bitrate_kbps,
             "abridged": self.abridged,
             "narrator_verdict": self.narrator_verdict,
+            "abridgement_verdict": self.abridgement_verdict,
+            "language_verdict": self.language_verdict,
             "relevance": self.relevance,
             "score": round(self.score, 2),
             "reasons": self.reasons,
+            "soulseek": self.soulseek,
         }
 
 
 def score_release(
     release: AudiobookRelease,
     book: Dict[str, Any],
-    wanted_narrator: Optional[str] = None,
+    wanted_narrator: Any = None,
 ) -> AudiobookRelease:
     """Rank one candidate, recording why.
 
@@ -393,9 +491,23 @@ def score_release(
         score += format_bonus
         reasons.append(f"{release.audio_format} +{format_bonus:g}")
 
-    # Abridged is a different, shorter recording. Wanted occasionally, almost
-    # never what someone asked for by default.
-    if release.abridged:
+    # Judged against the edition that was actually wanted rather than assumed:
+    # abridged is a different, shorter recording, but it is a legitimate thing
+    # to have chosen.
+    abridgement = abridgement_verdict(release.title, book.get("format_type"))
+    release.abridgement_verdict = abridgement
+    if abridgement == "mismatch":
+        score -= 45.0
+        reasons.append(
+            "abridged, wanted unabridged -45" if release.abridged
+            else "unabridged, wanted abridged -45"
+        )
+    elif abridgement == "match":
+        score += 10.0
+        reasons.append("edition matches +10")
+    elif release.abridged and not str(book.get("format_type") or "").strip():
+        # Nothing known about the wanted edition, so fall back to the old
+        # assumption: unabridged is what people usually mean.
         score -= 30.0
         reasons.append("abridged -30")
 
@@ -408,6 +520,14 @@ def score_release(
     elif verdict == "mismatch":
         score -= 60.0
         reasons.append("different narrator -60")
+
+    language = language_verdict(release.title, book.get("language"))
+    release.language_verdict = language
+    if language == "mismatch":
+        # A translation is a different recording in a language the listener did
+        # not ask for, not a worse copy of this one.
+        score -= 70.0
+        reasons.append("wrong language -70")
 
     seeders = release.seeders
     if seeders is not None:
@@ -448,13 +568,15 @@ def rank_releases(
     narrator is dropped; in "any" it is merely outranked. A release that names
     no narrator is always allowed, because most of them do not.
     """
-    wanted = ""
-    narrators = book.get("narrator_names") or []
-    if narrators:
-        wanted = str(narrators[0])
+    # All of them: a full-cast recording credits a dozen people and any of them
+    # naming the release is confirmation, not contradiction.
+    wanted = book.get("narrator_names") or []
 
     scored = [score_release(release, book, wanted) for release in releases]
     keep = [r for r in scored if r.relevance >= min_relevance]
+    # A release in the wrong language is never what was asked for, whatever the
+    # narrator setting says.
+    keep = [r for r in keep if r.language_verdict != "mismatch"]
     if str(narrator_mode).lower() != "any":
         keep = [r for r in keep if r.narrator_verdict != "mismatch"]
     keep.sort(key=lambda r: (r.score, r.size_bytes), reverse=True)
@@ -605,6 +727,102 @@ def search_releases(
         if len(ranked) >= 5:
             return ranked[:limit]
 
+    return rank_releases(
+        deduplicate(collected), book, min_relevance, narrator_mode,
+    )[:limit]
+
+
+def configured_chain() -> List[str]:
+    """Which sources to ask, in order, from the AUDIOBOOK settings.
+
+    Never music's. A user who runs Soulseek for music and torrents for books
+    gets exactly that, and one side's chain can be changed without touching
+    the other.
+    """
+    default = ["torrent", "usenet", "soulseek"]
+    try:
+        from core.settings import config_manager
+        mode = str(config_manager.get("audiobooks.download_source.mode", "hybrid")
+                   or "hybrid").strip().lower()
+        if mode in ("torrent", "usenet", "soulseek"):
+            return [mode]
+        order = config_manager.get("audiobooks.download_source.hybrid_order", default)
+        chosen = [str(item).strip().lower() for item in (order or []) if str(item).strip()]
+        return chosen or default
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("Could not read the audiobook source chain: %s", exc)
+        return default
+
+
+def search_all_sources(
+    book: Dict[str, Any],
+    limit: int = 25,
+    min_relevance: float = 0.5,
+    prowlarr_client: Any = None,
+    soulseek_client: Any = None,
+    narrator_mode: str = "exact",
+) -> List[AudiobookRelease]:
+    """Every candidate for a book across every configured source, best first.
+
+    The chain decides who gets ASKED, not who wins. Once the answers are in
+    they are ranked together on the same scale, because a peer with the right
+    narrator beats a torrent with the wrong one no matter which came first.
+
+    Both halves fail open independently: an unreachable Prowlarr still leaves
+    Soulseek results, and the other way round.
+    """
+    chain = configured_chain()
+    collected: List[AudiobookRelease] = []
+    failures: List[Exception] = []
+
+    # Prowlarr answers for both torrent and usenet, so one search covers both
+    # rather than the same query going out twice.
+    if prowlarr_client is not None or {"torrent", "usenet"} & set(chain):
+        try:
+            collected.extend(search_releases(
+                book, limit=limit, min_relevance=min_relevance,
+                prowlarr_client=prowlarr_client, narrator_mode=narrator_mode,
+            ))
+        except Exception as exc:                            # noqa: BLE001
+            logger.warning("Prowlarr audiobook search failed: %s", exc)
+            failures.append(exc)
+
+    want_soulseek = soulseek_client is not None
+    if not want_soulseek and "soulseek" in chain:
+        try:
+            from core.audiobook_soulseek import is_available
+            want_soulseek = is_available()
+        except Exception as exc:                            # noqa: BLE001
+            logger.debug("Could not check whether Soulseek is available: %s", exc)
+
+    if want_soulseek:
+        try:
+            from core.audiobook_soulseek import search as search_soulseek
+            collected.extend(search_soulseek(
+                book, limit=limit, min_relevance=min_relevance,
+                client=soulseek_client, narrator_mode=narrator_mode,
+            ))
+        except Exception as exc:                            # noqa: BLE001
+            logger.warning("Soulseek audiobook search failed: %s", exc)
+            failures.append(exc)
+
+    # A source that ERRORED did not answer "no". If nothing was found and
+    # something broke, say so: an empty shelf would tell the user their book
+    # does not exist and send a wishlist row into a backoff it did not earn.
+    #
+    # Deliberately not "every source failed". Requiring that made the verdict
+    # depend on whether slskd happened to be configured — Prowlarr down plus a
+    # configured-but-empty Soulseek reported "no releases found" and hid the
+    # outage, while the same outage on an install without slskd reported the
+    # error. Same failure, two answers.
+    #
+    # Results still win: anything actually found means no error, however many
+    # other sources broke getting there.
+    if failures and not collected:
+        raise failures[0]
+
+    # Re-ranked as one pool. Both halves arrive already ranked, but each was
+    # ranked only against its own kind.
     return rank_releases(
         deduplicate(collected), book, min_relevance, narrator_mode,
     )[:limit]

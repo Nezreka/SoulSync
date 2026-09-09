@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 
 import type { AudiobookPersonProfile, AudiobookRole } from '../-audiobooks.types';
 
-import { fetchPersonProfile } from '../-audiobooks.api';
+import { fetchPersonProfile, followAuthor, unfollowAuthor } from '../-audiobooks.api';
 import { AudiobookBackButton } from './audiobook-back-button';
 import { AudiobookRail } from './audiobook-rail';
 import { AudiobookWorks } from './audiobook-works';
@@ -28,6 +28,8 @@ interface AudiobookPersonPageProps {
 export function AudiobookPersonPage({ name, role }: AudiobookPersonPageProps) {
   const [profile, setProfile] = useState<AudiobookPersonProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [watching, setWatching] = useState(false);
+  const [followBusy, setFollowBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -37,6 +39,7 @@ export function AudiobookPersonPage({ name, role }: AudiobookPersonPageProps) {
       const found = await fetchPersonProfile(name, role);
       if (cancelled) return;
       setProfile(found);
+      setWatching(Boolean(found?.watching));
       setLoading(false);
     })();
     return () => {
@@ -66,6 +69,22 @@ export function AudiobookPersonPage({ name, role }: AudiobookPersonPageProps) {
       </div>
     );
   }
+
+  /**
+   * Following an author records TODAY as the cutoff, so their back catalogue is
+   * never queued — only what they publish from here. A narrator has no release
+   * of their own, so only authors can be followed.
+   */
+  const toggleFollow = async () => {
+    setFollowBusy(true);
+    const next = !watching;
+    setWatching(next);
+    const ok = next
+      ? await followAuthor(profile.name, profile.highlights[0]?.cover_url ?? '')
+      : await unfollowAuthor(profile.name);
+    if (!ok) setWatching(!next);
+    setFollowBusy(false);
+  };
 
   const collaboratorRole: AudiobookRole = role === 'author' ? 'narrator' : 'author';
   const collaboratorLabel = role === 'author' ? 'Narrated by' : 'Writes with';
@@ -126,6 +145,24 @@ export function AudiobookPersonPage({ name, role }: AudiobookPersonPageProps) {
 
             {profile.genres.length > 0 && (
               <p className={styles.personGenreLine}>{profile.genres.slice(0, 4).join(' · ')}</p>
+            )}
+            {role === 'author' && (
+              <button
+                type="button"
+                className={`library-artist-watchlist-btn${watching ? ' watching' : ''}`}
+                disabled={followBusy}
+                onClick={() => void toggleFollow()}
+                title={
+                  watching
+                    ? 'Remove from Watchlist'
+                    : 'Add to Watchlist — new releases are wishlisted automatically'
+                }
+              >
+                <span className="watchlist-icon">👁️</span>
+                <span className="watchlist-text">
+                  {followBusy ? 'Updating…' : watching ? 'Watching' : 'Add to Watchlist'}
+                </span>
+              </button>
             )}
 
             {profile.collaborators.length > 0 && (

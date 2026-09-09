@@ -18,11 +18,16 @@ Endpoints:
 Acquisition (all scoped to the audiobook subsystem):
   - GET    /api/audiobooks/wishlist:          what is wanted, with counts and worker state.
   - POST   /api/audiobooks/wishlist:          want a book by ASIN.
+  - PATCH  /api/audiobooks/wishlist/<asin>:   change its narrator strictness.
   - DELETE /api/audiobooks/wishlist/<asin>:   stop wanting it.
   - POST   /api/audiobooks/wishlist/search:   run a wishlist pass now.
   - GET    /api/audiobooks/releases/<asin>:   what the indexers actually have.
   - POST   /api/audiobooks/grab:              send one release to the download client.
   - GET    /api/audiobooks/downloads:         what is downloading or has finished.
+  - GET    /api/audiobooks/watchlist:         authors being followed.
+  - POST   /api/audiobooks/watchlist:         follow an author.
+  - DELETE /api/audiobooks/watchlist/<name>:  stop following them.
+  - POST   /api/audiobooks/watchlist/scan:    check followed authors now.
 
 Purely additive. Every route lives under /api/audiobooks, every write goes to the
 audiobook subsystem's OWN database file, and nothing here touches the music worker pool,
@@ -96,9 +101,36 @@ def _sort(default: str = "relevance") -> str:
     return value if value in SORT_ORDERS else default
 
 
+def _owned_asins() -> set:
+    """Every asin already on disk, in one read.
+
+    Best effort: an unreadable database costs the badge, not the page. Returns
+    a set rather than asking per book because a page of results asks about
+    twenty at once.
+    """
+    try:
+        return get_audiobook_db().owned_asins()
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("Could not read the owned audiobooks: %s", exc)
+        return set()
+
+
+def _mark_owned(payloads: List[Dict[str, Any]], owned: Optional[set] = None) -> List[Dict[str, Any]]:
+    """Stamp ``owned`` on book payloads, in place.
+
+    Every list route funnels through here, so the badge cannot be right on
+    search and missing on a shelf.
+    """
+    if owned is None:
+        owned = _owned_asins()
+    for payload in payloads:
+        payload["owned"] = str(payload.get("asin") or "") in owned
+    return payloads
+
+
 def _items(items: List[AudiobookItem]) -> List[Dict[str, Any]]:
     """Serialise a result list. The client's to_dict is the only payload shape."""
-    return [item.to_dict() for item in items]
+    return _mark_owned([item.to_dict() for item in items])
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +259,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         item = get_audiobook_client().get_book(asin, marketplace=_marketplace())
         if item is None:
             return jsonify({"success": False, "error": f"No audiobook found for {asin}"}), 404
-        return jsonify({"success": True, "book": item.to_dict()})
+        return jsonify({"success": True, "book": _mark_owned([item.to_dict()])[0]})
 
     @bp.route("/similar/<asin>", methods=["GET"])
     def similar(asin: str):
@@ -300,6 +332,26 @@ def create_audiobooks_blueprint() -> Blueprint:
         profile = get_audiobook_client().get_person_profile(
             name, role=role, marketplace=_marketplace(),
         )
+        # Only authors can be followed: a narrator has no "new release" of their
+        # own, they appear on someone else's.
+        #
+        # Best effort on purpose. This is a catalogue page and the follow state
+        # is a garnish on it, so an unreadable database costs the button its
+        # highlight rather than costing the reader the whole page.
+        watching = False
+        if role == "author":
+            try:
+                watching = bool(get_audiobook_db().is_following(name))
+            except Exception as exc:                        # noqa: BLE001
+                logger.debug("Could not read the follow state for %s: %s", name, exc)
+        profile["watching"] = watching
+
+        owned = _owned_asins()
+        _mark_owned(profile.get("standalone") or [], owned)
+        _mark_owned(profile.get("highlights") or [], owned)
+        for entry in profile.get("series") or []:
+            _mark_owned(entry.get("books") or [], owned)
+
         return jsonify({"success": True, "profile": profile})
 
     # ------------------------------------------------------------------
@@ -483,6 +535,26 @@ def create_audiobooks_blueprint() -> Blueprint:
             "narrator_mode": narrator_mode,
         })
 
+    @bp.route("/wishlist/<asin>", methods=["PATCH"])
+    def wishlist_update(asin: str):
+        """Change how strictly a wanted book must match its narrator.
+
+        Lives here rather than on the add route because adding is idempotent —
+        re-adding must not rewrite a choice already made, and changing the
+        choice must not reset the book's retry backoff.
+        """
+        body = request.get_json(silent=True) or {}
+        narrator_mode = str(body.get("narrator_mode") or "").strip().lower()
+        if narrator_mode not in ("exact", "any"):
+            return jsonify({
+                "success": False, "error": "narrator_mode must be 'exact' or 'any'",
+            }), 400
+
+        changed = get_audiobook_db().set_narrator_mode(asin, narrator_mode)
+        if not changed:
+            return jsonify({"success": False, "error": f"{asin} is not on the wishlist"}), 404
+        return jsonify({"success": True, "narrator_mode": narrator_mode})
+
     @bp.route("/wishlist/<asin>", methods=["DELETE"])
     def wishlist_remove(asin: str):
         """Stop wanting a book."""
@@ -508,6 +580,57 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "summary": summary})
 
     # ------------------------------------------------------------------
+    # Watchlist — followed authors
+    # ------------------------------------------------------------------
+
+    @bp.route("/watchlist", methods=["GET"])
+    def watchlist():
+        """Authors being followed, newest release counts included."""
+        return jsonify({"success": True, "authors": get_audiobook_db().get_watchlist()})
+
+    @bp.route("/watchlist", methods=["POST"])
+    def watchlist_follow():
+        """Follow an author so their new releases get wishlisted.
+
+        ``since`` is the cutoff and defaults to today: following an author means
+        "tell me about the next one", not "queue the 88 they already wrote".
+        Pass an earlier date deliberately to backfill.
+        """
+        body = request.get_json(silent=True) or {}
+        name = str(body.get("name") or "").strip()
+        if not name:
+            return jsonify({"success": False, "error": "name is required"}), 400
+
+        followed = get_audiobook_db().follow_author(
+            name,
+            cover_url=str(body.get("cover_url") or ""),
+            since_date=str(body.get("since") or ""),
+        )
+        return jsonify({"success": True, "followed": followed, "watching": True})
+
+    @bp.route("/watchlist/<path:name>", methods=["DELETE"])
+    def watchlist_unfollow(name: str):
+        removed = get_audiobook_db().unfollow_author(name)
+        return jsonify({"success": True, "removed": removed, "watching": False})
+
+    @bp.route("/watchlist/scan", methods=["POST"])
+    def watchlist_scan():
+        """Check followed authors right now.
+
+        The same code path the daily automation runs, so the button and the
+        schedule cannot drift apart. Each author's own daily spacing still
+        applies, so pressing it repeatedly does not re-check anyone.
+        """
+        from core.audiobook_watchlist import run_scan
+
+        try:
+            summary = run_scan()
+        except Exception as exc:                            # noqa: BLE001
+            logger.warning("Manual audiobook author scan failed: %s", exc, exc_info=True)
+            return jsonify({"success": False, "error": str(exc)}), 500
+        return jsonify({"success": True, "summary": summary})
+
+    # ------------------------------------------------------------------
     # Releases
     # ------------------------------------------------------------------
 
@@ -519,7 +642,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         the shared throttle — so callers must treat it as a long request rather
         than a lookup.
         """
-        from core.audiobook_release_search import search_releases
+        from core.audiobook_release_search import search_all_sources
 
         book = get_audiobook_client().get_book(asin, marketplace=_marketplace())
         if book is None:
@@ -536,7 +659,7 @@ def create_audiobooks_blueprint() -> Blueprint:
             narrator_mode = (stored or {}).get("narrator_mode") or "exact"
 
         try:
-            found = search_releases(
+            found = search_all_sources(
                 book.to_dict(), limit=_limit(25), narrator_mode=narrator_mode,
             )
         except Exception as exc:                            # noqa: BLE001
@@ -565,12 +688,36 @@ def create_audiobooks_blueprint() -> Blueprint:
         if not isinstance(release, dict):
             return jsonify({"success": False, "error": "release is required"}), 400
 
+        # Resolved NOW, while the catalogue is answering, and stored with the
+        # download. The import needs the series and narrator to shelve the book
+        # and the runtime to check it is whole, and by then Audible may be
+        # shedding load or the title may be gone.
+        asin_for_book = str(body.get("asin") or "").strip()
+        book_payload = None
+        if asin_for_book:
+            found = get_audiobook_client().get_book(asin_for_book, marketplace=_marketplace())
+            if found is not None:
+                book_payload = found.to_dict()
+
+        # Already on disk. The library table is written on every import and was
+        # never read back, so nothing stopped a book being fetched twice.
+        if asin_for_book and get_audiobook_db().is_owned(asin_for_book):
+            if not body.get("force"):
+                return jsonify({
+                    "success": False,
+                    "owned": True,
+                    "error": "That book is already in your library. Send force to grab it anyway.",
+                }), 409
+
         result = grab_release(release)
         if not result.get("ok"):
             return jsonify({"success": False, "error": result.get("error") or "Grab failed"}), 502
 
         asin = str(body.get("asin") or "").strip()
         ref = str(result.get("ref") or "")
+        # Torrents and NZBs are one job, so the handle IS the ref. A Soulseek
+        # folder is many transfers and carries its own.
+        client_ref = str(result.get("client_ref") or ref)
         db = get_audiobook_db()
 
         # Two records, deliberately. The audiobook database keeps the history
@@ -580,12 +727,15 @@ def create_audiobooks_blueprint() -> Blueprint:
         if ref:
             from core.audiobook_download_state import register_download
 
+            book = book_payload or {}
+            series_list = book.get("series") or []
             register_download(
                 task_id=ref,
-                title=str(body.get("title") or release.get("title") or ""),
-                author=str(body.get("author") or ""),
-                series=str(body.get("series") or ""),
-                artwork_url=str(body.get("cover_url") or ""),
+                title=str(book.get("title") or body.get("title")
+                          or release.get("title") or ""),
+                author=(book.get("author_names") or [str(body.get("author") or "")])[0],
+                series=str((series_list[0] or {}).get("title") or "") if series_list else "",
+                artwork_url=str(book.get("cover_url") or body.get("cover_url") or ""),
                 protocol=str(release.get("protocol") or ""),
                 size_bytes=int(release.get("size_bytes") or 0),
             )
@@ -594,11 +744,12 @@ def create_audiobooks_blueprint() -> Blueprint:
                 asin=asin,
                 title=str(body.get("title") or release.get("title") or ""),
                 source=str(release.get("protocol") or ""),
-                client_id=ref,
+                client_id=client_ref,
                 release_title=str(release.get("title") or ""),
                 indexer=str(release.get("indexer") or ""),
                 author=str(body.get("author") or ""),
                 bytes_total=int(release.get("size_bytes") or 0),
+                book=book_payload,
             )
 
         if asin:

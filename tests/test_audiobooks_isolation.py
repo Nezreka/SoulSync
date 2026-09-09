@@ -21,6 +21,7 @@ additionally held to the first.
 """
 
 import ast
+import os
 from pathlib import Path
 
 import pytest
@@ -38,7 +39,12 @@ _ALL_MODULES = (
     "core/audiobook_grab.py",
     "core/audiobook_organizer.py",
     "core/audiobook_release_search.py",
+    "core/audiobook_soulseek.py",
     "core/audiobook_wishlist_worker.py",
+    "core/audiobook_completeness.py",
+    "core/audiobook_post_processor.py",
+    "core/audiobook_library_scan.py",
+    "core/audiobook_watchlist.py",
     "api/audiobooks.py",
 )
 
@@ -194,7 +200,11 @@ def test_only_the_acquisition_routes_write_anything():
     # A write appearing anywhere else means state landed somewhere that is
     # supposed to be read-only.
     allowed_writers = {"/api/audiobooks/wishlist", "/api/audiobooks/wishlist/<asin>",
-                       "/api/audiobooks/wishlist/search", "/api/audiobooks/grab"}
+                       "/api/audiobooks/wishlist/search", "/api/audiobooks/grab",
+                       # Following an author is acquisition too: it is what
+                       # feeds the wishlist without the user asking again.
+                       "/api/audiobooks/watchlist", "/api/audiobooks/watchlist/<path:name>",
+                       "/api/audiobooks/watchlist/scan"}
     for rule in _blueprint_app().url_map.iter_rules():
         if rule.endpoint == "static":
             continue
@@ -348,3 +358,93 @@ def test_boot_starts_only_the_download_monitor():
     assert "_ensure_audiobook_downloads()" in source
     assert "_ensure_audiobook_wishlist" not in source
     assert "_ensure_audiobook_downloads(force=True)" not in source
+
+
+# ---------------------------------------------------------------------------
+# Soulseek, shared with music
+# ---------------------------------------------------------------------------
+
+def test_the_orphan_reaper_cannot_reach_a_downloading_book(tmp_path):
+    """A book downloading from a peer lands in slskd's per-share subfolder.
+
+    The music side's orphan reaper sweeps the SAME download root for audio
+    nothing claims, and an audiobook transfer is claimed by no music engine
+    record. It survives only because the reaper is root-level and a peer's
+    files arrive in a folder. If that ever became recursive, every in-flight
+    book would be deleted an hour after it started, so it is pinned here.
+    """
+    from core.downloads.cleanup import sweep_orphaned_download_audio
+
+    book = tmp_path / "Project Hail Mary [Ray Porter]"
+    book.mkdir()
+    chapter = book / "01 - Chapter.mp3"
+    chapter.write_bytes(b"x" * 1000)
+    os.utime(chapter, (0, 0))
+
+    loose = tmp_path / "orphan.mp3"
+    loose.write_bytes(b"x" * 1000)
+    os.utime(loose, (0, 0))
+
+    removed = sweep_orphaned_download_audio(str(tmp_path))
+
+    assert chapter.is_file(), "the reaper reached inside a Soulseek folder"
+    assert [str(loose)] == removed
+
+
+def test_a_soulseek_book_is_never_handed_to_the_music_download_engine():
+    # The book's transfers are followed by the audiobook monitor alone. Going
+    # through the orchestrator would put a book in a music batch.
+    imported = _imports("core/audiobook_soulseek.py")
+    assert "core.download_orchestrator" not in imported
+    assert "core.download_engine" not in imported
+    assert "core.downloads" not in imported
+
+
+def test_the_soulseek_source_reads_only_the_audiobook_chain():
+    # Music's source chain must never decide what a book search does.
+    source = (_ROOT / "core/audiobook_soulseek.py").read_text(encoding="utf-8")
+    for line in source.splitlines():
+        if "config_manager.get(" in line:
+            assert "audiobooks." in line, line.strip()
+
+
+def test_books_download_to_the_universal_folder_not_the_library():
+    """In-progress books must not land in the finished library.
+
+    The settings page fills library.audiobooks_path and
+    audiobooks.download_path from ONE input, so passing the latter as a client
+    save_path meant downloading into the library and then copying into a
+    subfolder of it: every book on disk twice, half-finished ones on the
+    shelf. Video has always passed nothing here.
+    """
+    from core.audiobook_grab import audiobook_download_path
+
+    assert audiobook_download_path() is None
+
+
+def test_the_audiobook_disk_guard_measures_the_disk_that_fills_up():
+    # Audiobooks download to the universal folder, so the question "is there
+    # room" is the one music already asks. A separate probe was measuring a
+    # volume nothing downloads to.
+    source = (_ROOT / "core/audiobook_grab.py").read_text(encoding="utf-8")
+    assert "music_has_room" in source
+
+
+def test_the_library_root_is_still_separate_from_the_download_folder():
+    # The fix must not have collapsed the two: books are ORGANIZED into the
+    # audiobook library, which is not where they download.
+    organizer = (_ROOT / "core/audiobook_organizer.py").read_text(encoding="utf-8")
+    assert "library.audiobooks_path" in organizer
+
+    # The grab side must not READ any library path. Checked on the parsed
+    # calls, not the text, so the docstring explaining this can mention it.
+    grab = ast.parse((_ROOT / "core/audiobook_grab.py").read_text(encoding="utf-8"))
+    reads = [
+        node.args[0].value
+        for node in ast.walk(grab)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute) and node.func.attr == "get"
+        and node.args and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+    ]
+    assert not [key for key in reads if "path" in key], reads

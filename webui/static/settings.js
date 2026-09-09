@@ -894,6 +894,69 @@ function toggleAllServiceAccordions(btn) {
 }
 
 // ── Hybrid source priority list (drag-and-drop) ──
+// ---- Audiobook download sources ----
+// Same three sources the video side offers, and the same .hybrid-source-item
+// markup and CSS music and video already use, so all three read alike. No
+// album-level/track-level badge: that is a music-only idea, a book is always
+// fetched as one whole folder.
+//
+// Torrent first by default. The others are ranked against it afterwards
+// anyway, so the order decides who gets ASKED, not who wins.
+const AUDIOBOOK_SOURCES = ['torrent', 'usenet', 'soulseek'];
+const AUDIOBOOK_SOURCE_LABEL = { torrent: 'Torrent', usenet: 'Usenet', soulseek: 'Soulseek' };
+const AUDIOBOOK_SOURCE_EMOJI = { torrent: '\u{1F9F2}', usenet: '\u{1F4F0}', soulseek: '\u{1F3B5}' };
+let _audiobookHybrid = ['torrent', 'usenet', 'soulseek'];
+
+function renderAudiobookHybrid() {
+    const host = document.getElementById('audiobook-hybrid-rows');
+    if (!host) return;
+    const enabled = _audiobookHybrid.filter(s => AUDIOBOOK_SOURCES.includes(s));
+    const disabled = AUDIOBOOK_SOURCES.filter(s => !enabled.includes(s));
+    host.innerHTML = enabled.concat(disabled).map(src => {
+        const i = enabled.indexOf(src);
+        const on = i >= 0;
+        return `<div class="hybrid-source-item${on ? '' : ' disabled'}">` +
+            '<span class="hybrid-source-arrows">' +
+            `<button type="button" class="hybrid-arrow-btn" onclick="moveAudiobookSource('${src}', -1)"${(!on || i === 0) ? ' disabled' : ''} title="Move up">\u25B2</button>` +
+            `<button type="button" class="hybrid-arrow-btn" onclick="moveAudiobookSource('${src}', 1)"${(!on || i === enabled.length - 1) ? ' disabled' : ''} title="Move down">\u25BC</button>` +
+            '</span>' +
+            `<span class="hybrid-source-icon emoji-icon">${AUDIOBOOK_SOURCE_EMOJI[src] || ''}</span>` +
+            `<span class="hybrid-source-name">${AUDIOBOOK_SOURCE_LABEL[src]}</span>` +
+            `<span class="hybrid-source-priority">${on ? (i + 1) : ''}</span>` +
+            `<label class="hybrid-source-toggle"><input type="checkbox" onchange="toggleAudiobookSource('${src}', this.checked)"${on ? ' checked' : ''}><span class="toggle-track"></span></label>` +
+            '</div>';
+    }).join('');
+}
+
+function moveAudiobookSource(src, direction) {
+    const i = _audiobookHybrid.indexOf(src);
+    const j = i + direction;
+    if (i < 0 || j < 0 || j >= _audiobookHybrid.length) return;
+    [_audiobookHybrid[i], _audiobookHybrid[j]] = [_audiobookHybrid[j], _audiobookHybrid[i]];
+    renderAudiobookHybrid();
+}
+
+function toggleAudiobookSource(src, on) {
+    if (on) {
+        if (!_audiobookHybrid.includes(src)) _audiobookHybrid.push(src);
+    } else {
+        // Keep at least one, the same way video does. An empty chain means
+        // no book can ever be found, with nothing on screen saying why.
+        if (_audiobookHybrid.length <= 1) { renderAudiobookHybrid(); return; }
+        _audiobookHybrid = _audiobookHybrid.filter(s => s !== src);
+    }
+    renderAudiobookHybrid();
+}
+
+// The chain only applies in hybrid mode; a single-source mode has nothing to
+// order, so showing the rows there would imply a choice that does nothing.
+function onAudiobookModeChange() {
+    const mode = document.getElementById('audiobook-download-mode')?.value || 'hybrid';
+    const container = document.getElementById('audiobook-hybrid-container');
+    if (container) container.style.display = mode === 'hybrid' ? '' : 'none';
+    if (mode === 'hybrid') renderAudiobookHybrid();
+}
+
 const HYBRID_SOURCES = [
     { id: 'soulseek', name: 'Soulseek', icon: '/static/img/brands/slskd.png', emoji: '🎵' },
     { id: 'youtube', name: 'YouTube', icon: '/static/img/brands/youtube.svg', emoji: '▶️' },
@@ -1812,6 +1875,35 @@ async function loadSettingsData() {
         if (podcastFormatEl) {
             podcastFormatEl.value = settings.podcasts?.media_format || 'audio';
         }
+
+        // Audiobook settings. Every read carries an explicit default: there is no
+        // deep merge of new defaults into an existing config row, so a key added
+        // after an install was set up comes back undefined, and a bare ?? here
+        // would silently show every switch as off.
+        const ab = settings.audiobooks || {};
+        const abSource = ab.download_source || {};
+        const abVal = (el, value) => { if (el) el.value = value; };
+        const abChecked = (el, value) => { if (el) el.checked = value !== false; };
+        abVal(document.getElementById('audiobook-download-mode'), abSource.mode || 'hybrid');
+        _audiobookHybrid = (abSource.hybrid_order || [])
+            .filter(src => AUDIOBOOK_SOURCES.includes(src));
+        if (!_audiobookHybrid.length) _audiobookHybrid = [...AUDIOBOOK_SOURCES];
+        onAudiobookModeChange();
+        abVal(document.getElementById('audiobook-torrent-category'),
+            ab.torrent_category || 'audiobooks');
+        abVal(document.getElementById('audiobook-prowlarr-categories'),
+            (ab.prowlarr_categories || [3030]).join(', '));
+        // Stored as a fraction because that is what the gate multiplies by;
+        // shown as a percentage because "0.92" in a box labelled % is a bug
+        // report waiting to happen.
+        abVal(document.getElementById('audiobook-completeness-tolerance'),
+            Math.round((ab.completeness_tolerance ?? 0.92) * 100));
+        abVal(document.getElementById('audiobook-staging-days'), ab.staging_days ?? 7);
+        abChecked(document.getElementById('audiobook-renumber-chapters'), ab.renumber_chapters);
+        abChecked(document.getElementById('audiobook-embed-metadata'), ab.embed_metadata);
+        abChecked(document.getElementById('audiobook-embed-artwork'), ab.embed_artwork);
+        abChecked(document.getElementById('audiobook-save-artwork'), ab.save_artwork);
+        abChecked(document.getElementById('audiobook-write-nfo'), ab.write_nfo);
         document.getElementById('disc-label').value = settings.file_organization?.disc_label || 'Disc';
         document.getElementById('collab-artist-mode').value = settings.file_organization?.collab_artist_mode || 'first';
         document.getElementById('artistletter-symbol-fallback').checked = settings.file_organization?.artistletter_symbol_fallback === true;
@@ -4449,6 +4541,11 @@ async function saveSettings(quiet = false) {
         return;
     }
 
+    // Comma-separated text fields, tolerant of stray spaces and empties.
+    const splitList = (raw) => String(raw || '').split(',')
+        .map(part => part.trim())
+        .filter(Boolean);
+
     let musicBrainzServerSettings;
     try {
         musicBrainzServerSettings = collectMusicBrainzServerSettings();
@@ -4804,6 +4901,27 @@ async function saveSettings(quiet = false) {
         },
         audiobooks: {
             download_path: document.getElementById('audiobooks-path')?.value || './audiobooks',
+            download_source: {
+                mode: document.getElementById('audiobook-download-mode')?.value || 'hybrid',
+                hybrid_order: _audiobookHybrid.filter(s => AUDIOBOOK_SOURCES.includes(s)),
+            },
+            torrent_category: document.getElementById('audiobook-torrent-category')?.value.trim() || 'audiobooks',
+            // One category covers both: a book is tagged the same way whichever
+            // client fetched it, and two fields to type the same word twice is
+            // two chances to get it wrong.
+            usenet_category: document.getElementById('audiobook-torrent-category')?.value.trim() || 'audiobooks',
+            prowlarr_categories: splitList(document.getElementById('audiobook-prowlarr-categories')?.value)
+                .map(n => parseInt(n, 10))
+                .filter(n => Number.isFinite(n)),
+            completeness_tolerance: Math.min(1, Math.max(0.1,
+                (parseInt(document.getElementById('audiobook-completeness-tolerance')?.value, 10) || 92) / 100)),
+            staging_days: Math.min(90, Math.max(1,
+                parseInt(document.getElementById('audiobook-staging-days')?.value, 10) || 7)),
+            renumber_chapters: document.getElementById('audiobook-renumber-chapters')?.checked !== false,
+            embed_metadata: document.getElementById('audiobook-embed-metadata')?.checked !== false,
+            embed_artwork: document.getElementById('audiobook-embed-artwork')?.checked !== false,
+            save_artwork: document.getElementById('audiobook-save-artwork')?.checked !== false,
+            write_nfo: document.getElementById('audiobook-write-nfo')?.checked !== false,
         },
         import: {
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,

@@ -905,6 +905,18 @@ class ConfigManager:
                 # keeps it OUT of music searches, so passing it here costs
                 # music nothing and reuses the shared Prowlarr throttle.
                 "prowlarr_categories": [3030],
+                # Downloader categories, so a finished book is never mistaken for a
+                # music release by anything watching the music category.
+                "torrent_category": "audiobooks",
+                "usenet_category": "audiobooks",
+                # How much of the runtime Audible publishes has to be on disk before a
+                # book is filed. A client says "complete" when the files it was ASKED
+                # for finished, which is not the same as the book being whole.
+                "completeness_tolerance": 0.92,
+                # How long a short book is kept staged before giving up. Torrents
+                # finish late and uploaders repair releases, so patience is right;
+                # forever means one broken release holds a wishlist row for good.
+                "staging_days": 7,
                 "embed_metadata": True,
                 "embed_artwork": True,
                 "save_artwork": True,

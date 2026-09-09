@@ -14,12 +14,15 @@ polls for progress.
 Downloads land in the audiobook download directory rather than the music one, so
 a half-finished book never appears under a music root where the library scanner
 would find it and file chapter files as an album.
+
+Disk space is checked against the SAME floor the music side uses — the
+"Minimum free disk space (GB)" setting — because it is usually the same disk,
+and an audiobook is large enough to be the thing that fills it.
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
 from typing import Any, Dict, Optional
 
 from utils.logging_config import get_logger
@@ -45,26 +48,43 @@ def _category(kind: str) -> str:
 
 
 def audiobook_download_path() -> Optional[str]:
-    """Where audiobook downloads should land, or None to let the client decide.
+    """The save path to hand the download client. Always None.
 
-    Kept apart from the music download directory on purpose: a part-downloaded
-    book under a music root is a folder of loose chapter files, which is exactly
-    what the library scanner will try to import as an album.
+    In-progress books belong in the UNIVERSAL download folder with everything
+    else, and the client already knows where that is, so nothing is passed and
+    the client's own (per-category) path applies. This is exactly what the
+    video side does in core/video/client_grab.py.
+
+    It used to pass ``audiobooks.download_path``, which the settings page fills
+    from the SAME input as ``library.audiobooks_path`` — so torrents and NZBs
+    downloaded straight into the finished library and organize_download then
+    copied them into a subfolder of the same tree. Every book on disk twice,
+    with half-finished ones sitting in the library.
+
+    The reasoning behind that was wrong too: the shared download folder is not
+    a music root. It is transient, music's own in-progress files already live
+    there, and the library scanner never looks at it.
+
+    Kept as a function rather than deleted because the grab path reads better
+    naming the decision than hiding it, and a future per-category override for
+    audiobooks would go here.
     """
-    try:
-        from core.settings import config_manager
-        path = config_manager.get("audiobooks.download_path", "") or ""
-    except Exception:                                       # noqa: BLE001
-        return None
-    path = str(path).strip()
-    if not path:
-        return None
-    try:
-        os.makedirs(path, exist_ok=True)
-    except OSError as exc:
-        logger.warning("Could not create the audiobook download path %s: %s", path, exc)
-        return None
-    return path
+    return None
+
+
+def has_room() -> tuple:
+    """(ok, free_gb, floor_gb) for the folder audiobooks actually download to.
+
+    That is the universal download folder, so this is the SAME probe, the same
+    disk and the same "Minimum free disk space (GB)" setting the music side
+    refuses downloads on. Delegated rather than re-derived — measuring an
+    audiobook-specific folder was checking a volume nothing downloads to.
+
+    Unknown always passes: a probe that fails must never wedge downloads.
+    """
+    from core.disk_guard import music_has_room
+
+    return music_has_room()
 
 
 def grab_torrent(url_or_magnet: str, *, save_path: Optional[str] = None,
@@ -133,6 +153,15 @@ def grab_release(release: Any, save_path: Optional[str] = None) -> Dict[str, Any
     Torrents prefer the .torrent URL with the magnet as a fallback; usenet has
     no such pair and takes the URL alone.
     """
+    ok, free, floor = has_room()
+    if not ok:
+        return {
+            "ok": False,
+            "error": (f"Only {free:.1f} GB free on the download disk "
+                      f"(minimum {floor:.0f} GB). Free some space or lower the "
+                      f"limit on Settings."),
+        }
+
     protocol = str(_field(release, "protocol") or "").lower()
     download_url = _field(release, "download_url")
     magnet = _field(release, "magnet_uri")
@@ -150,7 +179,44 @@ def grab_release(release: Any, save_path: Optional[str] = None) -> Dict[str, Any
             return {"ok": False, "error": "That release has no NZB link."}
         return grab_usenet(download_url, save_path=target)
 
+    if protocol == "soulseek":
+        return grab_soulseek(release)
+
     return {"ok": False, "error": f"Unsupported release protocol {protocol!r}."}
+
+
+def grab_soulseek(release: Any) -> Dict[str, Any]:
+    """Start every file in a Soulseek folder as one book.
+
+    A folder is many transfers, so the returned ``download_id`` packs all of
+    their ids together. The monitor unpacks it and adds the transfers up; no
+    other caller has to know the difference.
+
+    No save_path: slskd downloads into its own configured folder and the
+    organizer copies out of there, the same way it does for a torrent whose
+    client chose the path.
+    """
+    from core.audiobook_soulseek import encode_refs, grab as start_folder
+
+    started = start_folder(release)
+    if not started.get("ok"):
+        return {"ok": False, "error": started.get("error") or "Soulseek refused the folder."}
+
+    refs = started["refs"]
+    return {
+        "ok": True,
+        # A short, stable handle for the row and the download card. The first
+        # transfer id is unique to this grab and readable, which a JSON blob
+        # standing in as a card id would not be.
+        "ref": f"slsk:{refs[0]}",
+        # Everything needed to follow and cancel the folder, for the client_id
+        # column. Separate from ref because a book is many transfers and only
+        # this side has to know that.
+        "client_ref": encode_refs(refs, started["username"], started.get("folder", "")),
+        "client": "soulseek",
+        "files": len(refs),
+        "error": "",
+    }
 
 
 def _field(release: Any, name: str) -> Any:

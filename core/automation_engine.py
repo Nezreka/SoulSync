@@ -108,6 +108,25 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'audiobook_process_wishlist',
         'initial_delay': 240,  # 4 minutes after startup, after the podcast scan
     },
+    # Followed authors. Daily, because an audiobook is announced weeks ahead and
+    # published on a date — checking more often spends effort to learn nothing.
+    {
+        'name': 'Auto-Scan Audiobook Authors',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 24, 'unit': 'hours'},
+        'action_type': 'audiobook_scan_watchlist',
+        'initial_delay': 420,  # 7 minutes after startup
+    },
+    # Keeps the "you own this" record honest. Daily and cheap: it reads the
+    # audiobook folder and touches nothing on disk, so the only cost of being
+    # wrong is an Owned badge that outlives the book.
+    {
+        'name': 'Auto-Scan Audiobook Library',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 24, 'unit': 'hours'},
+        'action_type': 'audiobook_scan_library',
+        'initial_delay': 600,  # 10 minutes after startup, last of the audio jobs
+    },
     # Event-based system automations (no initial_delay/next_run needed)
     {
         'name': 'Auto-Scan After Downloads',

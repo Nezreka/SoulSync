@@ -66,7 +66,10 @@ def test_the_schema_holds_only_audiobook_tables(db):
         for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         if not row["name"].startswith("sqlite_")
     }
-    assert tables == {"audiobook_wishlist", "audiobook_downloads", "audiobook_library"}
+    assert tables == {
+        "audiobook_wishlist", "audiobook_downloads",
+        "audiobook_library", "audiobook_watchlist",
+    }
 
 
 def test_opening_twice_is_safe(tmp_path):
@@ -346,3 +349,124 @@ def test_the_default_path_is_its_own_file():
     assert "audiobooks" in DEFAULT_DB_PATH
     assert "music_library" not in DEFAULT_DB_PATH
     assert "video_library" not in DEFAULT_DB_PATH
+
+
+def test_a_download_stores_the_book_as_it_was(db):
+    # The import needs the series to shelve it and the runtime to check it is
+    # whole; asking Audible again hours later may find a shedding storefront.
+    book = {"asin": "B1", "title": "The Final Empire", "runtime_minutes": 1479,
+            "series": [{"title": "The Mistborn Saga", "sequence": "1"}]}
+    db.record_download("hash-1", "B1", "The Final Empire", "torrent", book=book)
+    stored = db.stored_book(db.get_downloads()[0])
+    assert stored["runtime_minutes"] == 1479
+    assert stored["series"][0]["title"] == "The Mistborn Saga"
+
+
+def test_a_download_without_context_stores_nothing(db):
+    db.record_download("hash-1", "B1", "The Final Empire", "torrent")
+    assert db.stored_book(db.get_downloads()[0]) == {}
+
+
+def test_unserializable_context_never_fails_the_grab(db):
+    # The release is already downloading by the time this runs.
+    class Unserializable:
+        pass
+
+    assert db.record_download(
+        "hash-1", "B1", "The Final Empire", "torrent",
+        book={"bad": Unserializable()},
+    ) is True
+    assert db.stored_book(db.get_downloads()[0]) == {}
+
+
+def test_a_corrupt_stored_book_reads_as_empty(db):
+    db.record_download("hash-1", "B1", "The Final Empire", "torrent")
+    conn = db._connect()
+    conn.execute("UPDATE audiobook_downloads SET book_json = ?", ("not json",))
+    conn.commit()
+    assert db.stored_book(db.get_downloads()[0]) == {}
+
+
+# ---------------------------------------------------------------------------
+# Watchlist — followed authors
+# ---------------------------------------------------------------------------
+
+def test_following_an_author(db):
+    assert db.follow_author("Brandon Sanderson") is True
+    rows = db.get_watchlist()
+    assert [r["name"] for r in rows] == ["Brandon Sanderson"]
+    assert db.is_following("Brandon Sanderson") is True
+
+
+def test_following_twice_is_not_an_error(db):
+    db.follow_author("Brandon Sanderson")
+    assert db.follow_author("Brandon Sanderson") is False
+    assert len(db.get_watchlist()) == 1
+
+
+def test_following_defaults_to_watching_from_today(db):
+    # Following an author means "tell me about the next one", not "download the
+    # 88 books they already wrote".
+    import time
+
+    db.follow_author("Brandon Sanderson")
+    since = db.get_watchlist()[0]["since_date"]
+    assert since == time.strftime("%Y-%m-%d", time.gmtime())
+
+
+def test_the_cutoff_can_be_set_explicitly(db):
+    db.follow_author("Brandon Sanderson", since_date="2020-01-01")
+    assert db.get_watchlist()[0]["since_date"] == "2020-01-01"
+
+
+def test_unfollowing(db):
+    db.follow_author("Brandon Sanderson")
+    assert db.unfollow_author("Brandon Sanderson") is True
+    assert db.get_watchlist() == []
+    assert db.unfollow_author("Brandon Sanderson") is False
+
+
+@pytest.mark.parametrize("name", ["", "   ", None])
+def test_an_empty_author_is_refused(db, name):
+    assert db.follow_author(name) is False
+
+
+def test_profiles_do_not_share_followed_authors(db):
+    db.follow_author("Brandon Sanderson", profile_id=1)
+    db.follow_author("Andy Weir", profile_id=2)
+    assert [r["name"] for r in db.get_watchlist(profile_id=1)] == ["Brandon Sanderson"]
+    assert [r["name"] for r in db.get_watchlist(profile_id=2)] == ["Andy Weir"]
+
+
+def test_a_new_follow_is_due_immediately(db):
+    db.follow_author("Brandon Sanderson")
+    assert [r["name"] for r in db.get_watchlist_due()] == ["Brandon Sanderson"]
+
+
+def test_a_just_scanned_author_is_not_due_again(db):
+    # A book is announced weeks ahead and published on a date; checking more
+    # than daily spends effort to learn nothing.
+    db.follow_author("Brandon Sanderson")
+    db.mark_author_scanned("Brandon Sanderson", found=2)
+    assert db.get_watchlist_due(rescan_after_seconds=3600) == []
+
+
+def test_an_author_becomes_due_again_later(db):
+    db.follow_author("Brandon Sanderson")
+    db.mark_author_scanned("Brandon Sanderson")
+    assert len(db.get_watchlist_due(rescan_after_seconds=0)) == 1
+
+
+def test_scanning_records_what_was_found(db):
+    db.follow_author("Brandon Sanderson")
+    db.mark_author_scanned("Brandon Sanderson", found=2)
+    db.mark_author_scanned("Brandon Sanderson", found=1)
+    row = db.get_watchlist()[0]
+    assert row["found_total"] == 3
+    assert row["last_scanned_at"] > 0
+
+
+def test_a_failed_scan_records_why(db):
+    db.follow_author("Brandon Sanderson")
+    db.mark_author_scanned("Brandon Sanderson", error="catalogue unreachable")
+    assert db.get_watchlist()[0]["last_error"] == "catalogue unreachable"

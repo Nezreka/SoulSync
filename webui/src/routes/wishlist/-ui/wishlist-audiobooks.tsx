@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type {
+  AudiobookNarratorMode,
   AudiobookWishlistCounts,
   AudiobookWishlistEntry,
   AudiobookWishlistStatus,
@@ -12,6 +13,7 @@ import {
   fetchWishlist,
   removeFromWishlist,
   runWishlistPass,
+  setNarratorMode,
 } from '@/routes/audiobooks/-audiobooks.api';
 import { AudiobookReleasesModal } from '@/routes/audiobooks/-ui/audiobook-releases-modal';
 
@@ -99,6 +101,23 @@ export function WishlistAudiobooks() {
       );
     }
     await load();
+  };
+
+  /**
+   * Loosening or tightening which reading will do.
+   *
+   * This lives here rather than behind a dialog when the book is added: almost
+   * everyone wants the reading they just picked, and a question on every heart
+   * click taxes the commonest action to serve the rarest intent. A book that is
+   * not turning up is visible on this row, which is exactly the moment someone
+   * decides they would take another narrator after all.
+   */
+  const changeNarratorMode = async (asin: string, mode: AudiobookNarratorMode) => {
+    setItems((current) =>
+      current.map((item) => (item.asin === asin ? { ...item, narrator_mode: mode } : item)),
+    );
+    const ok = await setNarratorMode(asin, mode);
+    if (!ok) await load();
   };
 
   const remove = async (asin: string) => {
@@ -226,6 +245,25 @@ export function WishlistAudiobooks() {
               </span>
 
               <div className={styles.rowActions}>
+                {item.narrators.length > 0 && (
+                  <button
+                    type="button"
+                    className={styles.action}
+                    title={
+                      item.narrator_mode === 'exact'
+                        ? `Only ${item.narrators[0]}'s reading will do — click to accept any narrator`
+                        : 'Any narrator will do — click to hold out for the one you picked'
+                    }
+                    onClick={() =>
+                      void changeNarratorMode(
+                        item.asin,
+                        item.narrator_mode === 'exact' ? 'any' : 'exact',
+                      )
+                    }
+                  >
+                    {item.narrator_mode === 'exact' ? `${item.narrators[0]} only` : 'Any narrator'}
+                  </button>
+                )}
                 <button
                   type="button"
                   className={styles.action}

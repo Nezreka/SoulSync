@@ -52,12 +52,17 @@ def process_download(
     get_status: Callable[[str, str], Any],
     resolve_path: Callable[[Any], Any],
     organize: Callable[[str, Dict[str, Any]], Dict[str, Any]],
+    check_complete: Optional[Callable[[str, Dict[str, Any]], Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Advance one tracked download by a tick.
 
     Returns a patch of what changed — ``{status, progress, bytes_done,
-    bytes_total, save_path, error, imported_path}`` — with only the keys that
-    have a value. An empty patch means nothing to record this tick.
+    bytes_total, save_path, error, imported_path, completeness}`` — with only
+    the keys that have a value. An empty patch means nothing to record this tick.
+
+    ``check_complete`` is the gate between "the client finished" and "the book
+    is whole". Without one the old behaviour holds and anything the client calls
+    complete is imported.
 
     A poll that fails is treated as "unknown right now", not as a failure. A
     download client restarting, or a momentary timeout, must not mark a
@@ -110,6 +115,27 @@ def process_download(
         return patch
 
     patch["save_path"] = str(resolved)
+
+    # The gate. A download client says "complete" when the files it was ASKED
+    # for finished, which is not the same as the book being whole — and a book
+    # missing its last chapters plays perfectly until the listener runs out of
+    # it. Short books are STAGED, not failed: torrents finish late and uploaders
+    # repair releases, so the right answer is to keep the files and look again.
+    if check_complete is not None:
+        verdict = check_complete(str(resolved), row)
+        patch["completeness"] = verdict.get("reason", "")
+        if not verdict.get("complete"):
+            if verdict.get("expired"):
+                patch["status"] = "failed"
+                patch["error"] = (
+                    f"Never completed: {verdict.get('reason') or 'still incomplete'}"
+                )
+            else:
+                # Held, with the reason visible, so "waiting" never looks like
+                # "stuck".
+                patch["status"] = "staged"
+            return patch
+
     result = organize(str(resolved), row)
     if not result.get("ok"):
         patch["status"] = "failed"
@@ -130,9 +156,33 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+class _SoulseekStatus:
+    """The aggregated folder, wearing the shape a client adapter returns.
+
+    Soulseek has no single job to ask about, so the transfers are added up and
+    presented as one. Doing the shaping here keeps the branch to this function
+    instead of spreading a second status shape through the whole tick.
+    """
+
+    def __init__(self, rolled: Dict[str, Any]) -> None:
+        self.state = rolled["state"]
+        self.progress = rolled["progress"]
+        self.size = rolled["size"]
+        self.transferred = rolled["transferred"]
+        self.speed = 0
+        self.save_path = rolled.get("save_path", "")
+        self.files = rolled["total"]
+        self.files_done = rolled["finished"]
+
+
 def _get_status(source: str, ref: str) -> Any:
-    """Poll the shared torrent/usenet client for one job."""
+    """Poll whichever client is carrying this job."""
     try:
+        if source == "soulseek":
+            from core.audiobook_soulseek import status_for
+            rolled = status_for(ref)
+            return _SoulseekStatus(rolled) if rolled else None
+
         if source == "torrent":
             from core.torrent_clients import get_active_adapter
         else:
@@ -160,11 +210,60 @@ def _resolve_path(reported: Any) -> Any:
         return reported
 
 
-def _organize(source_path: str, row: Dict[str, Any]) -> Dict[str, Any]:
-    """File a finished download into the audiobook library."""
-    from core.audiobook_organizer import configured_template, library_root, organize_download
+def _check_complete(source_path: str, row: Dict[str, Any]) -> Dict[str, Any]:
+    """Whether the download on disk is the whole book.
 
-    book = {
+    Compared against the runtime Audible publishes for the title, so this is a
+    measurement rather than a guess at filenames. A short book reports
+    ``expired`` once it has been staged past the deadline — waiting is right,
+    waiting forever means one broken release holds a row for good.
+    """
+    from core.audiobook_completeness import (
+        assess,
+        staging_days_from_settings,
+        staging_expired,
+        tolerance_from_settings,
+    )
+
+    book = _book_for(row)
+    expected = int(book.get("runtime_minutes") or 0)
+
+    verdict = assess(source_path, expected, tolerance_from_settings())
+    if not verdict.get("complete"):
+        verdict["expired"] = staging_expired(
+            row.get("created_at") or 0, staging_days_from_settings(),
+        )
+    return verdict
+
+
+def _book_for(row: Dict[str, Any]) -> Dict[str, Any]:
+    """The catalogue's description of this download's book.
+
+    Prefers the payload captured when the release was grabbed. Importing needs
+    the series and narrator to shelve the book and the runtime to measure it,
+    and asking Audible again hours later makes the import depend on a storefront
+    that sheds load and occasionally pulls titles outright.
+
+    Falls back to a live lookup only for rows recorded before the payload was
+    captured, and to the thin row itself if even that fails — a book still files
+    under its author rather than failing to import over missing cover art.
+    """
+    from core.audiobook_database import AudiobookDatabase
+
+    stored = AudiobookDatabase.stored_book(row)
+    if stored.get("title"):
+        return stored
+
+    try:
+        from core.audiobook_client import get_audiobook_client
+
+        full = get_audiobook_client().get_book(str(row.get("asin") or ""))
+        if full is not None:
+            return full.to_dict()
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("Could not look up %s at import time: %s", row.get("asin"), exc)
+
+    return {
         "asin": row.get("asin"),
         "title": row.get("title"),
         "author_names": [row["author"]] if row.get("author") else [],
@@ -172,15 +271,13 @@ def _organize(source_path: str, row: Dict[str, Any]) -> Dict[str, Any]:
         "series": [],
         "release_date": "",
     }
-    # The stored row is thin; the catalogue knows the series and narrator, which
-    # the path template needs to shelve the book correctly.
-    try:
-        from core.audiobook_client import get_audiobook_client
-        full = get_audiobook_client().get_book(str(row.get("asin") or ""))
-        if full is not None:
-            book = full.to_dict()
-    except Exception as exc:                                # noqa: BLE001
-        logger.debug("Could not enrich %s before organizing: %s", row.get("asin"), exc)
+
+
+def _organize(source_path: str, row: Dict[str, Any]) -> Dict[str, Any]:
+    """File a finished download into the audiobook library."""
+    from core.audiobook_organizer import configured_template, library_root, organize_download
+
+    book = _book_for(row)
 
     try:
         from core.settings import config_manager
@@ -189,10 +286,25 @@ def _organize(source_path: str, row: Dict[str, Any]) -> Dict[str, Any]:
         logger.debug("Could not read the renumber setting, defaulting on: %s", exc)
         renumber = True
 
-    return organize_download(
+    result = organize_download(
         source_path, book, library_root(),
         template=configured_template(), renumber=renumber,
+        # Claims the folder for this release so a retry or an "any narrator"
+        # fallback can never interleave two readings into one book.
+        release_id=str(row.get("release_title") or row.get("download_id") or ""),
     )
+
+    # Tags, cover and sidecars, after the files are safely in place. Guarded
+    # separately and never allowed to fail the import: the book is already in
+    # the library by now, and a badly labelled book beats a lost one.
+    if result.get("ok") and result.get("path"):
+        try:
+            from core.audiobook_post_processor import post_process_book
+            post_process_book(result["path"], book, result.get("files") or None)
+        except Exception as exc:                            # noqa: BLE001
+            logger.warning("Post-processing %s failed: %s", result.get("path"), exc)
+
+    return result
 
 
 def tick(db: Any = None) -> Dict[str, int]:
@@ -200,7 +312,7 @@ def tick(db: Any = None) -> Dict[str, int]:
     from core.audiobook_database import STATUS_DONE, STATUS_FAILED, get_audiobook_db
 
     database = db if db is not None else get_audiobook_db()
-    summary = {"checked": 0, "completed": 0, "failed": 0}
+    summary = {"checked": 0, "completed": 0, "failed": 0, "staged": 0, "cancelled": 0}
 
     try:
         active = database.get_downloads(active_only=True)
@@ -208,12 +320,28 @@ def tick(db: Any = None) -> Dict[str, int]:
         logger.warning("Could not read active audiobook downloads: %s", exc)
         return summary
 
-    from core.audiobook_download_state import forget, mark_status, update_progress
+    from core.audiobook_download_state import (
+        forget,
+        is_cancelled,
+        mark_status,
+        update_progress,
+    )
 
     for row in active:
         summary["checked"] += 1
+
+        # Cancelling a card used to remove it from the page while the torrent
+        # carried on downloading. The client is told, then the row is closed.
+        if is_cancelled(row["download_id"]):
+            _cancel_at_client(row)
+            database.update_download(row["download_id"], status="cancelled",
+                                     error="Cancelled")
+            forget(row["download_id"])
+            summary["cancelled"] += 1
+            continue
         patch = process_download(
-            row, get_status=_get_status, resolve_path=_resolve_path, organize=_organize,
+            row, get_status=_get_status, resolve_path=_resolve_path,
+            organize=_organize, check_complete=_check_complete,
         )
         if not patch:
             continue
@@ -239,19 +367,85 @@ def tick(db: Any = None) -> Dict[str, int]:
             if asin:
                 database.mark_wishlist_status(asin, STATUS_DONE)
                 database.add_to_library(
-                    {"asin": asin, "title": row.get("title"),
-                     "author_names": [row["author"]] if row.get("author") else []},
-                    imported_path or patch.get("save_path", ""),
+                    _book_for(row), imported_path or patch.get("save_path", ""),
                 )
             logger.info("Audiobook imported: %s -> %s", row.get("title"), imported_path)
+        elif patch.get("status") == "staged":
+            # "importing" on the card, and deliberately NOT an error: the book is
+            # waiting for the rest of itself, which is a normal state a torrent
+            # passes through. Putting the reason in error_message would paint it
+            # red on the shared Downloads page as though something had gone
+            # wrong. The reason lives in the audiobook database, where the
+            # audiobook UI can show it as what it is.
+            summary["staged"] += 1
+            mark_status(row["download_id"], "importing")
         elif patch.get("status") == "failed":
             mark_status(row["download_id"], "failed", error=str(patch.get("error") or ""))
             summary["failed"] += 1
+            _return_to_wishlist(database, row, str(patch.get("error") or ""))
             if asin:
                 database.mark_wishlist_status(
                     asin, STATUS_FAILED, error=str(patch.get("error") or ""),
                 )
     return summary
+
+
+def _cancel_at_client(row: Dict[str, Any]) -> None:
+    """Tell the download client to stop, and take its partial data with it.
+
+    Best effort: a client that cannot be reached must not leave the card stuck
+    on the page forever, so the row is closed either way. The worst case is an
+    orphaned torrent the user removes by hand, which is what happened on EVERY
+    cancel before this existed.
+    """
+    source = str(row.get("source") or "").lower()
+    ref = str(row.get("client_id") or "")
+    if not ref:
+        return
+    try:
+        if source == "soulseek":
+            from core.audiobook_soulseek import cancel
+            cancel(ref)
+            return
+
+        if source == "torrent":
+            from core.torrent_clients import get_active_adapter
+        else:
+            from core.usenet_clients import get_active_adapter
+        adapter = get_active_adapter()
+        if adapter is None:
+            return
+        _run(adapter.remove(ref, delete_files=True))
+    except Exception as exc:                                # noqa: BLE001
+        logger.warning("Could not cancel %s at the download client: %s", ref, exc)
+
+
+def _return_to_wishlist(database: Any, row: Dict[str, Any], error: str) -> None:
+    """A download that failed becomes a book we are still looking for.
+
+    Matches the music side, where a failed track returns to the wishlist rather
+    than evaporating. A book already on the wishlist simply goes back to
+    "failed", which the retry backoff picks up on a later pass; one that was
+    grabbed manually and never wishlisted is ADDED, because otherwise a failed
+    manual grab is the one path where a book someone asked for is silently
+    forgotten.
+    """
+    from core.audiobook_database import STATUS_FAILED
+
+    asin = str(row.get("asin") or "")
+    if not asin:
+        return
+
+    try:
+        if database.is_wishlisted(asin):
+            database.mark_wishlist_status(asin, STATUS_FAILED, error=error)
+            return
+        book = _book_for(row)
+        if book.get("title") and database.add_to_wishlist(book):
+            database.mark_wishlist_status(asin, STATUS_FAILED, error=error)
+            logger.info("Failed download %s went back on the wishlist", row.get("title"))
+    except Exception as exc:                                # noqa: BLE001
+        logger.warning("Could not return %s to the wishlist: %s", asin, exc)
 
 
 class AudiobookDownloadMonitor:

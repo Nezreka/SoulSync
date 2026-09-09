@@ -1,9 +1,21 @@
 import { Link } from '@tanstack/react-router';
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { AudiobookItem, AudiobookRole } from '../-audiobooks.types';
 
+import { fetchFollowedAuthors, followAuthor, unfollowAuthor } from '../-audiobooks.api';
 import styles from './audiobooks-page.module.css';
+
+/** The tile is a link, so the badge has to swallow its own click or watching
+ *  an author would navigate to their page instead. Same guard the library
+ *  artist card uses. */
+function badgeClickHandler(action?: () => void) {
+  return (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    action?.();
+  };
+}
 
 interface AudiobookPeopleRowProps {
   results: AudiobookItem[];
@@ -39,6 +51,44 @@ interface PersonHit {
  * click.
  */
 export function AudiobookPeopleRow({ results, roles, max = 6 }: AudiobookPeopleRowProps) {
+  // Which authors are already watched. Fetched once for the whole row rather
+  // than per tile: it is one list, and six tiles asking separately is five
+  // requests for an answer we already have.
+  const [watched, setWatched] = useState<Set<string>>(new Set());
+  const [pending, setPending] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchFollowedAuthors().then((authors) => {
+      if (!cancelled) setWatched(new Set(authors.map((a) => a.name)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const toggleWatch = useCallback(
+    async (name: string, coverUrl: string) => {
+      setPending((prev) => new Set(prev).add(name));
+      const next = !watched.has(name);
+      const ok = next ? await followAuthor(name, coverUrl) : await unfollowAuthor(name);
+      if (ok) {
+        setWatched((prev) => {
+          const updated = new Set(prev);
+          if (next) updated.add(name);
+          else updated.delete(name);
+          return updated;
+        });
+      }
+      setPending((prev) => {
+        const updated = new Set(prev);
+        updated.delete(name);
+        return updated;
+      });
+    },
+    [watched],
+  );
+
   const people = useMemo(() => {
     const tally = new Map<string, PersonHit>();
 
@@ -121,6 +171,39 @@ export function AudiobookPeopleRow({ results, roles, max = 6 }: AudiobookPeopleR
                   />
                 ))}
               </span>
+
+              {/* Authors only: a narrator has no release of their own, they
+                  appear on someone else's. Same badge, same container and the
+                  same top-right corner as the library artist cards, so "watch
+                  this person" looks identical wherever it appears. */}
+              {person.role === 'author' && (
+                <div className="card-badge-container">
+                  <div
+                    className={`watch-card-icon source-card-icon${
+                      watched.has(person.name) ? ' watched' : ''
+                    }`}
+                    data-unwatched={watched.has(person.name) ? undefined : '1'}
+                    style={watched.has(person.name) ? undefined : { opacity: 0.4 }}
+                    title={
+                      watched.has(person.name)
+                        ? 'Remove from Watchlist'
+                        : 'Add to Watchlist — new releases are wishlisted automatically'
+                    }
+                    onClick={badgeClickHandler(() => {
+                      void toggleWatch(person.name, person.covers[0] ?? '');
+                    })}
+                  >
+                    <span className="watch-icon-emoji">👁️</span>
+                    <span className="watch-icon-label">
+                      {pending.has(person.name)
+                        ? '...'
+                        : watched.has(person.name)
+                          ? 'Watching'
+                          : 'Watch'}
+                    </span>
+                  </div>
+                </div>
+              )}
 
               <span className={styles.personTileBody}>
                 <span className={styles.personTileRole}>

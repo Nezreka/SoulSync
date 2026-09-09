@@ -3,6 +3,7 @@ import { apiClient, readJson } from '@/app/api-client';
 import type {
   AudiobookCategory,
   AudiobookDownload,
+  AudiobookFollowedAuthor,
   AudiobookNarratorMode,
   AudiobookHome,
   AudiobookItem,
@@ -321,6 +322,31 @@ export async function removeFromWishlist(asin: string): Promise<boolean> {
   }
 }
 
+/**
+ * Change how strictly a wanted book must match its narrator.
+ *
+ * Its own call rather than a re-add: adding is idempotent, so re-adding must
+ * not rewrite a choice already made, and changing the choice must not reset the
+ * book's retry backoff.
+ */
+export async function setNarratorMode(
+  asin: string,
+  narratorMode: AudiobookNarratorMode,
+): Promise<boolean> {
+  if (!asin) return false;
+  try {
+    const data = await readJson<MutationResponse>(
+      apiClient.patch(`audiobooks/wishlist/${encodeURIComponent(asin)}`, {
+        json: { narrator_mode: narratorMode },
+      }),
+    );
+    return Boolean(data?.success);
+  } catch (err) {
+    console.error(`Failed to change the narrator mode for ${asin}:`, err);
+    return false;
+  }
+}
+
 /** Run a wishlist pass now instead of waiting for the timer. */
 export async function runWishlistPass(): Promise<Record<string, number> | null> {
   try {
@@ -390,5 +416,66 @@ export async function fetchDownloads(activeOnly = false): Promise<AudiobookDownl
   } catch (err) {
     console.error('Failed to load audiobook downloads:', err);
     return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Watchlist — followed authors
+// ---------------------------------------------------------------------------
+
+export async function fetchFollowedAuthors(): Promise<AudiobookFollowedAuthor[]> {
+  try {
+    const data = await readJson<{ success?: boolean; authors?: AudiobookFollowedAuthor[] }>(
+      apiClient.get('audiobooks/watchlist'),
+    );
+    return data?.success && Array.isArray(data.authors) ? data.authors : [];
+  } catch (err) {
+    console.error('Failed to load followed authors:', err);
+    return [];
+  }
+}
+
+/**
+ * Follow an author so their new releases get wishlisted.
+ *
+ * The cutoff is the day you follow them — following an author means "tell me
+ * about the next one", not "queue the eighty-eight they already wrote".
+ */
+export async function followAuthor(name: string, coverUrl = ''): Promise<boolean> {
+  if (!name) return false;
+  try {
+    const data = await readJson<{ success?: boolean }>(
+      apiClient.post('audiobooks/watchlist', { json: { name, cover_url: coverUrl } }),
+    );
+    return Boolean(data?.success);
+  } catch (err) {
+    console.error(`Failed to follow ${name}:`, err);
+    return false;
+  }
+}
+
+export async function unfollowAuthor(name: string): Promise<boolean> {
+  if (!name) return false;
+  try {
+    const data = await readJson<{ success?: boolean }>(
+      apiClient.delete(`audiobooks/watchlist/${encodeURIComponent(name)}`),
+    );
+    return Boolean(data?.success);
+  } catch (err) {
+    console.error(`Failed to unfollow ${name}:`, err);
+    return false;
+  }
+}
+
+/** Check followed authors now instead of waiting for the daily automation. */
+export async function runAuthorScan(): Promise<Record<string, number> | null> {
+  try {
+    const data = await readJson<{ success?: boolean; summary?: Record<string, number> }>(
+      apiClient.post('audiobooks/watchlist/scan', { json: {} }),
+    );
+    return data?.success ? (data.summary ?? null) : null;
+  } catch (err) {
+    console.error('Failed to check followed authors:', err);
+    return null;
   }
 }

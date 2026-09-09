@@ -28,6 +28,23 @@ def client(app):
     return app.test_client()
 
 
+@pytest.fixture(autouse=True)
+def no_real_db():
+    """Keep every route off the real database file.
+
+    Read-only routes consult it for garnish — whether an author is followed,
+    whether a book is owned — and without this a discovery test would open
+    database/audiobooks.db on the developer's machine. Tests that want a real
+    database ask for wishlist_db, whose patch is applied after this one and
+    therefore wins.
+    """
+    stub = MagicMock()
+    stub.is_following.return_value = False
+    stub.is_owned.return_value = False
+    with patch("api.audiobooks.get_audiobook_db", return_value=stub):
+        yield stub
+
+
 @pytest.fixture
 def catalog():
     """Patch the client singleton the routes call, and hand back the mock."""
@@ -500,7 +517,7 @@ def test_releases_returns_ranked_candidates(client, catalog, wishlist_db):
     catalog.get_book.return_value = _item(asin="B1")
     found = [AudiobookRelease(source="prowlarr", protocol="torrent", title="Book M4B",
                               indexer="X", size_bytes=1, download_url="u")]
-    with patch("core.audiobook_release_search.search_releases", return_value=found):
+    with patch("core.audiobook_release_search.search_all_sources", return_value=found):
         body = client.get("/api/audiobooks/releases/B1").get_json()
     assert body["success"] is True
     assert body["releases"][0]["title"] == "Book M4B"
@@ -520,6 +537,7 @@ def test_a_failing_indexer_search_is_a_502(client, catalog, wishlist_db):
 
 
 def test_grabbing_sends_the_release_to_the_client(client, catalog, wishlist_db):
+    catalog.get_book.return_value = _item(asin="B1")
     with patch("core.audiobook_grab.grab_release",
                return_value={"ok": True, "ref": "hash-1"}) as grab:
         body = client.post("/api/audiobooks/grab",
@@ -741,3 +759,173 @@ def test_the_releases_response_names_the_narrator_that_was_wanted(client, catalo
     with patch("core.audiobook_release_search.search_releases", return_value=[]):
         body = client.get("/api/audiobooks/releases/B1").get_json()
     assert body["narrators"] == ["Ray Porter"]
+
+
+def test_the_narrator_choice_can_be_changed_later(client, catalog, wishlist_db):
+    # It moved off the add-to-wishlist path: asking on every heart click taxed
+    # the commonest action to serve the rarest intent.
+    catalog.get_book.return_value = _item(asin="B1")
+    client.post("/api/audiobooks/wishlist", json={"asin": "B1"})
+    assert wishlist_db.get_wishlist()[0]["narrator_mode"] == "exact"
+
+    body = client.patch(
+        "/api/audiobooks/wishlist/B1", json={"narrator_mode": "any"},
+    ).get_json()
+    assert body["success"] is True
+    assert wishlist_db.get_wishlist()[0]["narrator_mode"] == "any"
+
+
+def test_changing_the_choice_does_not_reset_the_backoff(client, catalog, wishlist_db):
+    # Otherwise loosening a book would let it jump the retry queue.
+    from core.audiobook_database import STATUS_FAILED
+
+    catalog.get_book.return_value = _item(asin="B1")
+    client.post("/api/audiobooks/wishlist", json={"asin": "B1"})
+    wishlist_db.mark_wishlist_status("B1", STATUS_FAILED, count_attempt=True)
+    before = wishlist_db.get_wishlist()[0]
+
+    client.patch("/api/audiobooks/wishlist/B1", json={"narrator_mode": "any"})
+    after = wishlist_db.get_wishlist()[0]
+    assert after["attempt_count"] == before["attempt_count"]
+    assert after["last_attempt_at"] == before["last_attempt_at"]
+
+
+def test_re_adding_never_rewrites_the_choice(client, catalog, wishlist_db):
+    catalog.get_book.return_value = _item(asin="B1")
+    client.post("/api/audiobooks/wishlist", json={"asin": "B1", "narrator_mode": "any"})
+    client.post("/api/audiobooks/wishlist", json={"asin": "B1", "narrator_mode": "exact"})
+    assert wishlist_db.get_wishlist()[0]["narrator_mode"] == "any"
+
+
+@pytest.mark.parametrize("mode", ["", "both", "mixed", None])
+def test_an_invalid_narrator_mode_is_refused(client, catalog, wishlist_db, mode):
+    catalog.get_book.return_value = _item(asin="B1")
+    client.post("/api/audiobooks/wishlist", json={"asin": "B1"})
+    resp = client.patch("/api/audiobooks/wishlist/B1", json={"narrator_mode": mode})
+    assert resp.status_code == 400
+    assert wishlist_db.get_wishlist()[0]["narrator_mode"] == "exact"
+
+
+def test_changing_the_choice_on_an_unwanted_book_is_a_404(client, catalog, wishlist_db):
+    resp = client.patch("/api/audiobooks/wishlist/NEVER", json={"narrator_mode": "any"})
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Already owned
+#
+# The library table was written on every import and never read back, so nothing
+# stopped a book being fetched twice.
+# ---------------------------------------------------------------------------
+
+def test_grabbing_a_book_you_already_own_is_refused(client, catalog, wishlist_db):
+    catalog.get_book.return_value = _item(asin="B1")
+    wishlist_db.add_to_library({"asin": "B1", "title": "The Final Empire"},
+                               "/library/Sanderson/Book")
+
+    with patch("core.audiobook_grab.grab_release") as grab:
+        resp = client.post("/api/audiobooks/grab",
+                           json={"asin": "B1", "release": _candidate()})
+    assert resp.status_code == 409
+    assert resp.get_json()["owned"] is True
+    grab.assert_not_called()
+
+
+def test_an_owned_book_can_still_be_grabbed_deliberately(client, catalog, wishlist_db):
+    # For a better edition, or to replace a bad rip.
+    catalog.get_book.return_value = _item(asin="B1")
+    wishlist_db.add_to_library({"asin": "B1", "title": "The Final Empire"},
+                               "/library/Sanderson/Book")
+
+    with patch("core.audiobook_grab.grab_release",
+               return_value={"ok": True, "ref": "h1"}) as grab:
+        resp = client.post("/api/audiobooks/grab",
+                           json={"asin": "B1", "release": _candidate(), "force": True})
+    assert resp.status_code == 200
+    grab.assert_called_once()
+
+
+def test_a_book_you_do_not_own_grabs_normally(client, catalog, wishlist_db):
+    catalog.get_book.return_value = _item(asin="B1")
+    with patch("core.audiobook_grab.grab_release",
+               return_value={"ok": True, "ref": "h1"}) as grab:
+        resp = client.post("/api/audiobooks/grab",
+                           json={"asin": "B1", "release": _candidate()})
+    assert resp.status_code == 200
+    grab.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Owned badges
+# ---------------------------------------------------------------------------
+
+def test_search_results_say_whether_the_book_is_already_owned(client, catalog, no_real_db):
+    no_real_db.owned_asins.return_value = {"B1"}
+    catalog.search_with_fallback.return_value = ([_item(asin="B1"), _item(asin="B2")], "audible")
+    results = client.get("/api/audiobooks/search?q=hail").get_json()["results"]
+    assert [r["owned"] for r in results] == [True, False]
+
+
+def test_a_book_detail_says_whether_it_is_owned(client, catalog, no_real_db):
+    no_real_db.owned_asins.return_value = {"B1"}
+    catalog.get_book.return_value = _item(asin="B1")
+    assert client.get("/api/audiobooks/book/B1").get_json()["book"]["owned"] is True
+
+
+def test_a_shelf_says_whether_its_books_are_owned(client, catalog, no_real_db):
+    no_real_db.owned_asins.return_value = set()
+    catalog.get_bestsellers.return_value = [_item(asin="B1")]
+    results = client.get("/api/audiobooks/bestsellers").get_json()["results"]
+    assert results[0]["owned"] is False
+
+
+def test_the_badge_costs_one_database_read_per_page(client, catalog, no_real_db):
+    # Twenty round trips to answer "do I have this" is nineteen too many.
+    no_real_db.owned_asins.return_value = set()
+    catalog.search_with_fallback.return_value = ([_item(asin=f"B{i}") for i in range(20)], "audible")
+    client.get("/api/audiobooks/search?q=x")
+    assert no_real_db.owned_asins.call_count == 1
+
+
+def test_an_unreadable_database_costs_the_badge_not_the_page(client, catalog, no_real_db):
+    no_real_db.owned_asins.side_effect = RuntimeError("locked")
+    catalog.search_with_fallback.return_value = ([_item(asin="B1")], "audible")
+    body = client.get("/api/audiobooks/search?q=x").get_json()
+    assert body["success"] is True
+    assert body["results"][0]["owned"] is False
+
+
+def test_an_author_page_marks_owned_books_across_every_group(client, catalog, no_real_db):
+    no_real_db.owned_asins.return_value = {"B1", "B3"}
+    catalog.get_person_profile.return_value = {
+        "name": "Andy Weir", "role": "author", "total_books": 3,
+        "total_runtime_minutes": 0, "runtime_formatted": "", "genres": [],
+        "collaborators": [],
+        "series": [{"title": "S", "asin": "S1", "books": [_item(asin="B1").to_dict()]}],
+        "standalone": [_item(asin="B2").to_dict()],
+        "highlights": [_item(asin="B3").to_dict()],
+    }
+    profile = client.get("/api/audiobooks/person?name=Andy+Weir").get_json()["profile"]
+    assert profile["series"][0]["books"][0]["owned"] is True
+    assert profile["standalone"][0]["owned"] is False
+    assert profile["highlights"][0]["owned"] is True
+
+
+def test_a_soulseek_grab_stores_the_folder_handle_not_the_card_id(client, catalog, wishlist_db):
+    # The card id is short and readable; the poller needs every transfer id.
+    # They are different values, and storing the card id would lose the folder.
+    release = {"protocol": "soulseek", "title": "Book", "indexer": "soulseek:peer",
+               "size_bytes": 1, "soulseek": {"username": "peer", "album_path": "x/Book",
+                                             "files": [{"filename": "x/Book/01.mp3", "size": 1}],
+                                             "file_count": 1, "queue_length": 0}}
+    catalog.get_book.return_value = _item(asin="B1")
+    grabbed = {"ok": True, "ref": "slsk:t1", "client_ref": '{"username": "peer", "refs": ["t1"], "folder": "Book"}',
+               "client": "soulseek", "files": 1}
+    with patch("core.audiobook_grab.grab_release", return_value=grabbed):
+        body = client.post("/api/audiobooks/grab",
+                           json={"asin": "B1", "release": release}).get_json()
+
+    assert body["success"] is True and body["ref"] == "slsk:t1"
+    row = wishlist_db.get_downloads()[0]
+    assert row["download_id"] == "slsk:t1"
+    assert "t1" in row["client_id"] and "peer" in row["client_id"]

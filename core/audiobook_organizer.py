@@ -363,6 +363,11 @@ def library_root() -> str:
     """Where organized audiobooks live, from settings."""
     try:
         from core.settings import config_manager
+        # Both keys are filled from the SAME settings input, so the fallback
+        # is the same folder, not a second one. "download_path" is a misnomer
+        # kept for installs that only ever wrote that key: nothing downloads
+        # there any more, in-progress books go to the universal download
+        # folder like every other source (see audiobook_grab).
         configured = (
             config_manager.get("library.audiobooks_path", "")
             or config_manager.get("audiobooks.download_path", "")

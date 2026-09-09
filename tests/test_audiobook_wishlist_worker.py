@@ -125,12 +125,12 @@ def test_a_refused_grab_is_recorded_as_failed(db):
 
 
 def test_the_best_release_is_the_one_grabbed(db):
-    # search_releases already returns them ranked; taking anything but the first
-    # would quietly ignore that ranking.
+    # The search already returns them ranked across every source; taking
+    # anything but the first would quietly ignore that ranking.
     db.add_to_wishlist(_book())
     row = db.get_wishlist()[0]
     ranked = [_release("BEST M4B"), _release("worse mp3")]
-    with patch("core.audiobook_release_search.search_releases", return_value=ranked), \
+    with patch("core.audiobook_release_search.search_all_sources", return_value=ranked), \
          patch("core.audiobook_grab.grab_release", return_value={"ok": True}) as grab:
         process_one(row, db=db)
     assert grab.call_args[0][0].title == "BEST M4B"
@@ -384,3 +384,88 @@ def test_a_row_predating_the_choice_is_treated_as_exact(db):
     with patch("core.audiobook_release_search.search_releases", return_value=[]) as search:
         process_one(row, db=db)
     assert search.call_args.kwargs["narrator_mode"] == "exact"
+
+
+# ---------------------------------------------------------------------------
+# Rows abandoned mid-search
+# ---------------------------------------------------------------------------
+
+def test_a_row_abandoned_mid_search_is_freed(db):
+    """The silent one: a row claimed as "searching" when the process stopped.
+
+    The retry query only picks up "wanted" and "failed", so an abandoned row is
+    never looked at again and nothing says so. Every pass frees them rather than
+    waiting for a restart to notice.
+    """
+    from core.audiobook_database import STATUS_SEARCHING, STATUS_WANTED
+
+    db.add_to_wishlist(_book())
+    db.mark_wishlist_status("B1", STATUS_SEARCHING, count_attempt=True)
+    assert db.get_wishlist_due(retry_after_seconds=0) == []
+
+    freed = db.reset_stale_searching(older_than_seconds=0)
+    assert freed == 1
+    assert db.get_wishlist()[0]["status"] == STATUS_WANTED
+    assert len(db.get_wishlist_due(retry_after_seconds=0)) == 1
+
+
+def test_a_pass_frees_abandoned_rows_before_searching(db):
+    from core.audiobook_database import STATUS_SEARCHING
+
+    db.add_to_wishlist(_book())
+    db.mark_wishlist_status("B1", STATUS_SEARCHING, count_attempt=True)
+    # Aged past the guard: a pass frees rows abandoned by an EARLIER pass, never
+    # the one it is running right now.
+    conn = db._connect()
+    conn.execute("UPDATE audiobook_wishlist SET last_attempt_at = 0")
+    conn.commit()
+
+    with patch("core.audiobook_release_search.search_releases", return_value=[]):
+        summary = run_pass(db=db, limit=10)
+    assert summary["freed"] == 1
+    assert summary["checked"] == 1
+
+
+def test_a_search_running_right_now_is_not_freed(db):
+    # Age-gated, so a pass cannot free its own rows out from under itself.
+    from core.audiobook_database import STATUS_SEARCHING
+
+    db.add_to_wishlist(_book())
+    db.mark_wishlist_status("B1", STATUS_SEARCHING, count_attempt=True)
+    assert db.reset_stale_searching(older_than_seconds=3600) == 0
+    assert db.get_wishlist()[0]["status"] == STATUS_SEARCHING
+
+
+def test_freeing_says_what_happened(db):
+    from core.audiobook_database import STATUS_SEARCHING
+
+    db.add_to_wishlist(_book())
+    db.mark_wishlist_status("B1", STATUS_SEARCHING, count_attempt=True)
+    db.reset_stale_searching(older_than_seconds=0)
+    assert "interrupted" in db.get_wishlist()[0]["last_error"].lower()
+
+
+def test_rows_in_other_states_are_left_alone(db):
+    from core.audiobook_database import STATUS_GRABBED
+
+    db.add_to_wishlist(_book())
+    db.mark_wishlist_status("B1", STATUS_GRABBED)
+    assert db.reset_stale_searching(older_than_seconds=0) == 0
+    assert db.get_wishlist()[0]["status"] == STATUS_GRABBED
+
+
+def test_the_pass_skips_a_book_already_in_the_library(db):
+    # Usually because it was imported by hand or found by the library scan.
+    # Searching indexers for a book we have is waste; grabbing it is worse.
+    from core.audiobook_database import STATUS_DONE
+
+    db.add_to_wishlist(_book())
+    db.add_to_library({"asin": "B1", "title": "The Final Empire"}, "/library/x")
+    row = db.get_wishlist()[0]
+
+    with patch("core.audiobook_release_search.search_releases") as search:
+        result = process_one(row, db=db)
+
+    search.assert_not_called()
+    assert result["owned"] is True
+    assert db.get_wishlist()[0]["status"] == STATUS_DONE

@@ -5,7 +5,7 @@ machine is exercised here without a download client, a filesystem or a network.
 """
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -37,6 +37,17 @@ def _status(state="downloading", **overrides):
                "save_path": "/downloads/book"}
     payload.update(overrides)
     return SimpleNamespace(**payload)
+
+
+def _whole_book(source, row):
+    """The completeness gate saying the book is all there."""
+    return {"complete": True, "reason": "600 of 600 minutes present"}
+
+
+def _short_book(reason="about 180 minutes short", expired=False):
+    def check(source, row):
+        return {"complete": False, "reason": reason, "expired": expired}
+    return check
 
 
 def _ok_organize(path="/library/Author/Book"):
@@ -190,6 +201,7 @@ def test_a_completed_download_reaches_the_library(db):
     with patch("core.audiobook_download_monitor._get_status",
                return_value=_status("completed")), \
          patch("core.audiobook_download_monitor._resolve_path", side_effect=_identity_path), \
+         patch("core.audiobook_download_monitor._check_complete", side_effect=_whole_book), \
          patch("core.audiobook_download_monitor._organize",
                return_value={"ok": True, "path": "/library/Sanderson/Book"}):
         summary = tick(db=db)
@@ -352,6 +364,7 @@ def test_a_finished_book_clears_its_card(db, clean_runtime_state):
     with patch("core.audiobook_download_monitor._get_status",
                return_value=_status("completed")), \
          patch("core.audiobook_download_monitor._resolve_path", side_effect=_identity_path), \
+         patch("core.audiobook_download_monitor._check_complete", side_effect=_whole_book), \
          patch("core.audiobook_download_monitor._organize",
                return_value={"ok": True, "path": "/library/Sanderson/Book"}):
         tick(db=db)
@@ -385,3 +398,396 @@ def test_the_music_engine_still_refuses_the_batch_while_downloading(db, clean_ru
     _, batches = clean_runtime_state
     register_download("hash-1", "The Final Empire")
     assert is_music_batch(BATCH_ID, batches[BATCH_ID]) is False
+
+
+# ---------------------------------------------------------------------------
+# The completeness gate
+#
+# A client says "complete" when the files it was ASKED for finished. A book
+# missing its last chapters plays perfectly until the listener runs out of it,
+# so an incomplete download is STAGED — kept, re-checked — not imported and not
+# failed. Torrents finish late and uploaders repair releases.
+# ---------------------------------------------------------------------------
+
+def test_an_incomplete_book_is_never_imported():
+    organized = []
+
+    def organize(source, row):
+        organized.append(source)
+        return {"ok": True, "path": "/library/x"}
+
+    patch_out = process_download(
+        _row(), get_status=lambda s, r: _status("completed"),
+        resolve_path=_identity_path, organize=organize,
+        check_complete=_short_book(),
+    )
+    assert organized == []
+    assert patch_out["status"] == "staged"
+
+
+def test_a_staged_book_says_why():
+    patch_out = process_download(
+        _row(), get_status=lambda s, r: _status("completed"),
+        resolve_path=_identity_path, organize=_ok_organize(),
+        check_complete=_short_book("about 180 minutes short"),
+    )
+    assert "180 minutes short" in patch_out["completeness"]
+    # Staged is not failed: nothing here is an error the user must act on.
+    assert "error" not in patch_out
+
+
+def test_a_staged_book_keeps_its_files():
+    # save_path is recorded even while held, so the next tick re-checks the same
+    # folder rather than losing track of it.
+    patch_out = process_download(
+        _row(), get_status=lambda s, r: _status("completed"),
+        resolve_path=_identity_path, organize=_ok_organize(),
+        check_complete=_short_book(),
+    )
+    assert patch_out["save_path"] == "/downloads/book"
+
+
+def test_a_book_that_never_completes_eventually_fails():
+    # Waiting is right; waiting forever means one broken release holds a row for
+    # good.
+    patch_out = process_download(
+        _row(), get_status=lambda s, r: _status("completed"),
+        resolve_path=_identity_path, organize=_ok_organize(),
+        check_complete=_short_book("still short", expired=True),
+    )
+    assert patch_out["status"] == "failed"
+    assert "Never completed" in patch_out["error"]
+
+
+def test_a_whole_book_passes_the_gate_and_imports():
+    patch_out = process_download(
+        _row(), get_status=lambda s, r: _status("completed"),
+        resolve_path=_identity_path, organize=_ok_organize("/library/Sanderson/Book"),
+        check_complete=_whole_book,
+    )
+    assert patch_out["status"] == "completed"
+    assert patch_out["imported_path"] == "/library/Sanderson/Book"
+
+
+def test_without_a_gate_the_old_behaviour_holds():
+    # check_complete is optional; omitting it imports whatever the client called
+    # complete, which is what every existing caller did before the gate.
+    patch_out = process_download(
+        _row(), get_status=lambda s, r: _status("completed"),
+        resolve_path=_identity_path, organize=_ok_organize(),
+    )
+    assert patch_out["status"] == "completed"
+
+
+def test_a_staged_book_stays_in_the_active_queue(db):
+    # It has to keep being re-checked; the usual reason it is short is a torrent
+    # that has not finished yet.
+    db.record_download("hash-1", "B1", "The Final Empire", "torrent", client_id="hash-1")
+    db.update_download("hash-1", status="staged")
+    assert [d["download_id"] for d in db.get_downloads(active_only=True)] == ["hash-1"]
+
+
+def test_the_staged_reason_is_stored(db):
+    db.record_download("hash-1", "B1", "The Final Empire", "torrent", client_id="hash-1")
+    db.update_download("hash-1", status="staged", completeness="about 180 minutes short")
+    assert db.get_downloads()[0]["completeness"] == "about 180 minutes short"
+
+
+def test_a_staged_book_is_not_shown_as_an_error(db, clean_runtime_state):
+    """Waiting for the rest of a book is a normal state, not a failure.
+
+    The reason belongs in the audiobook database; putting it in error_message
+    would paint the card red on the shared Downloads page as though something
+    had gone wrong.
+    """
+    from core.audiobook_download_state import register_download
+
+    tasks, _ = clean_runtime_state
+    db.record_download("hash-1", "B1", "The Final Empire", "torrent", client_id="hash-1")
+    register_download("hash-1", "The Final Empire")
+
+    with patch("core.audiobook_download_monitor._get_status",
+               return_value=_status("completed")), \
+         patch("core.audiobook_download_monitor._resolve_path", side_effect=_identity_path), \
+         patch("core.audiobook_download_monitor._check_complete",
+               side_effect=_short_book("about 180 minutes short")):
+        summary = tick(db=db)
+
+    assert summary["staged"] == 1
+    assert tasks["hash-1"]["status"] == "importing"
+    assert not tasks["hash-1"]["error_message"]
+    # The reason is kept where the audiobook UI can read it.
+    assert "180 minutes short" in db.get_downloads()[0]["completeness"]
+
+
+# ---------------------------------------------------------------------------
+# Context captured at grab time
+#
+# Importing needs the series and narrator to shelve a book and the runtime to
+# check it is whole. Asking Audible again hours later makes the import depend on
+# a storefront that sheds load and occasionally pulls titles outright.
+# ---------------------------------------------------------------------------
+
+def _stored_book(**overrides):
+    payload = {
+        "asin": "B1",
+        "title": "The Final Empire",
+        "author_names": ["Brandon Sanderson"],
+        "narrator_names": ["Michael Kramer"],
+        "series": [{"title": "The Mistborn Saga", "sequence": "1"}],
+        "runtime_minutes": 1479,
+        "release_date": "2006-07-17",
+        "cover_url": "https://img/500.jpg",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_the_import_uses_the_book_captured_at_grab_time(db):
+    from core.audiobook_download_monitor import _book_for
+
+    db.record_download("hash-1", "B1", "The Final Empire", "torrent",
+                       client_id="hash-1", book=_stored_book())
+    row = db.get_downloads()[0]
+
+    with patch("core.audiobook_client.get_audiobook_client") as client:
+        book = _book_for(row)
+    # The catalogue is never asked when the payload is already in hand.
+    client.assert_not_called()
+    assert book["series"][0]["title"] == "The Mistborn Saga"
+    assert book["runtime_minutes"] == 1479
+
+
+def test_an_older_row_still_falls_back_to_the_catalogue(db):
+    from core.audiobook_client import AudiobookItem
+    from core.audiobook_download_monitor import _book_for
+
+    db.record_download("hash-1", "B1", "The Final Empire", "torrent", client_id="hash-1")
+    row = db.get_downloads()[0]
+
+    fetched = AudiobookItem(
+        asin="B1", title="The Final Empire", subtitle="", authors=[], narrators=[],
+        series=[], publisher="", summary="", short_summary="", release_date=None,
+        runtime_minutes=1479, cover_url=None, cover_url_large=None, sample_url=None,
+        rating=None, genres=[], language="english", format_type="", is_adult=False,
+    )
+    stub = type("S", (), {"get_book": lambda self, asin, marketplace="us": fetched})()
+    with patch("core.audiobook_client.get_audiobook_client", return_value=stub):
+        assert _book_for(row)["runtime_minutes"] == 1479
+
+
+def test_a_book_still_files_when_nothing_can_be_looked_up(db):
+    # Better to shelve under the author we know than to fail an import over
+    # missing cover art.
+    from core.audiobook_download_monitor import _book_for
+
+    db.record_download("hash-1", "B1", "The Final Empire", "torrent",
+                       client_id="hash-1", author="Brandon Sanderson")
+    row = db.get_downloads()[0]
+    with patch("core.audiobook_client.get_audiobook_client", side_effect=RuntimeError("down")):
+        book = _book_for(row)
+    assert book["title"] == "The Final Empire"
+    assert book["author_names"] == ["Brandon Sanderson"]
+
+
+def test_the_completeness_gate_uses_the_captured_runtime(db, tmp_path):
+    # The gate cannot measure anything if the runtime has to be fetched and the
+    # storefront is shedding.
+    from core.audiobook_download_monitor import _check_complete
+
+    db.record_download("hash-1", "B1", "The Final Empire", "torrent",
+                       client_id="hash-1", book=_stored_book(runtime_minutes=600))
+    row = db.get_downloads()[0]
+    folder = tmp_path / "dl"
+    folder.mkdir()
+    (folder / "01.mp3").write_bytes(b"x")
+
+    with patch("core.audiobook_client.get_audiobook_client") as client, \
+         patch("core.audiobook_completeness.measure_duration_seconds", return_value=600 * 60.0):
+        verdict = _check_complete(str(folder), row)
+    client.assert_not_called()
+    assert verdict["expected_minutes"] == 600
+    assert verdict["complete"] is True
+
+
+def test_the_organizer_is_told_which_release_filled_the_folder(db, tmp_path):
+    # Without this a retry could interleave a second edition's chapters.
+    from core.audiobook_download_monitor import _organize
+
+    db.record_download("hash-1", "B1", "The Final Empire", "torrent",
+                       client_id="hash-1", release_title="Mistborn.M4B-GRP",
+                       book=_stored_book())
+    row = db.get_downloads()[0]
+    with patch("core.audiobook_organizer.organize_download",
+               return_value={"ok": True, "path": "/x"}) as organize:
+        _organize("/downloads/book", row)
+    assert organize.call_args.kwargs["release_id"] == "Mistborn.M4B-GRP"
+
+
+# ---------------------------------------------------------------------------
+# A failed download is still a book you want
+# ---------------------------------------------------------------------------
+
+def test_a_failed_wishlist_book_stays_on_the_wishlist(db):
+    from core.audiobook_database import STATUS_FAILED
+
+    _wishlisted(db)
+    db.record_download("hash-1", "B1", "The Final Empire", "torrent", client_id="hash-1")
+
+    with patch("core.audiobook_download_monitor._get_status",
+               return_value=_status("error", error="dead torrent")), \
+         patch("core.audiobook_download_monitor._resolve_path", side_effect=_identity_path):
+        tick(db=db)
+
+    rows = db.get_wishlist()
+    assert len(rows) == 1
+    assert rows[0]["status"] == STATUS_FAILED
+    # Back in the queue, not evaporated.
+    assert len(db.get_wishlist_due(retry_after_seconds=0)) == 1
+
+
+def test_a_failed_manual_grab_is_added_to_the_wishlist(db):
+    # The one path where a book someone asked for could otherwise be silently
+    # forgotten: grabbed straight from the detail page, never wishlisted, failed.
+    assert db.get_wishlist() == []
+    db.record_download("hash-1", "B1", "The Final Empire", "torrent",
+                       client_id="hash-1", book=_stored_book())
+
+    with patch("core.audiobook_download_monitor._get_status",
+               return_value=_status("error", error="dead torrent")), \
+         patch("core.audiobook_download_monitor._resolve_path", side_effect=_identity_path):
+        tick(db=db)
+
+    rows = db.get_wishlist()
+    assert [r["asin"] for r in rows] == ["B1"]
+    assert "dead torrent" in rows[0]["last_error"]
+
+
+def test_a_failed_grab_with_nothing_to_go_on_adds_nothing(db):
+    # No captured book and no catalogue: better an empty wishlist than a row
+    # nothing could ever search for.
+    db.record_download("hash-1", "", "", "torrent", client_id="hash-1")
+
+    with patch("core.audiobook_download_monitor._get_status",
+               return_value=_status("error", error="dead")), \
+         patch("core.audiobook_download_monitor._resolve_path", side_effect=_identity_path):
+        tick(db=db)
+    assert db.get_wishlist() == []
+
+
+# ---------------------------------------------------------------------------
+# Cancelling
+#
+# Cancelling a card used to remove it from the Downloads page while the torrent
+# carried on downloading.
+# ---------------------------------------------------------------------------
+
+def test_cancelling_a_card_stops_the_download(db, clean_runtime_state):
+    from core.audiobook_download_state import register_download
+
+    tasks, _ = clean_runtime_state
+    db.record_download("hash-1", "B1", "The Final Empire", "torrent", client_id="hash-1")
+    register_download("hash-1", "The Final Empire")
+    tasks["hash-1"]["cancel_requested"] = True
+
+    with patch("core.audiobook_download_monitor._cancel_at_client") as cancel, \
+         patch("core.audiobook_download_monitor._get_status") as poll:
+        summary = tick(db=db)
+
+    cancel.assert_called_once()
+    # No point polling something we just cancelled.
+    poll.assert_not_called()
+    assert summary["cancelled"] == 1
+    assert db.get_downloads()[0]["status"] == "cancelled"
+    assert "hash-1" not in tasks
+
+
+def test_the_client_is_told_to_delete_the_partial_data(db, clean_runtime_state):
+    from core.audiobook_download_monitor import _cancel_at_client
+
+    adapter = MagicMock()
+
+    async def remove(ref, delete_files=False):
+        adapter.removed = (ref, delete_files)
+        return True
+
+    adapter.remove = remove
+    with patch("core.torrent_clients.get_active_adapter", return_value=adapter):
+        _cancel_at_client({"source": "torrent", "client_id": "hash-1"})
+    assert adapter.removed == ("hash-1", True)
+
+
+def test_a_client_that_cannot_be_reached_still_closes_the_card(db, clean_runtime_state):
+    # Otherwise a cancelled card would sit on the page forever.
+    from core.audiobook_download_state import register_download
+
+    tasks, _ = clean_runtime_state
+    db.record_download("hash-1", "B1", "The Final Empire", "torrent", client_id="hash-1")
+    register_download("hash-1", "The Final Empire")
+    tasks["hash-1"]["cancel_requested"] = True
+
+    with patch("core.torrent_clients.get_active_adapter", side_effect=RuntimeError("down")):
+        tick(db=db)
+
+    assert db.get_downloads()[0]["status"] == "cancelled"
+    assert "hash-1" not in tasks
+
+
+def test_a_cancelled_book_is_not_returned_to_the_wishlist(db, clean_runtime_state):
+    # Cancelling means "stop wanting this now", not "keep trying".
+    from core.audiobook_download_state import register_download
+
+    tasks, _ = clean_runtime_state
+    db.record_download("hash-1", "B1", "The Final Empire", "torrent", client_id="hash-1")
+    register_download("hash-1", "The Final Empire")
+    tasks["hash-1"]["cancel_requested"] = True
+
+    with patch("core.audiobook_download_monitor._cancel_at_client"):
+        tick(db=db)
+    assert db.get_wishlist() == []
+
+
+# ---------------------------------------------------------------------------
+# Soulseek downloads
+# ---------------------------------------------------------------------------
+
+def test_a_soulseek_row_is_polled_through_the_peer_client():
+    from unittest.mock import patch
+
+    from core.audiobook_download_monitor import _get_status
+
+    rolled = {"state": "downloading", "progress": 42.0, "size": 100,
+              "transferred": 42, "finished": 1, "failed": 0, "total": 3,
+              "save_path": "/downloads/Book"}
+    with patch("core.audiobook_soulseek.status_for", return_value=rolled):
+        status = _get_status("soulseek", "{}")
+
+    assert status.state == "downloading"
+    assert status.progress == 42.0
+    assert status.save_path == "/downloads/Book"
+
+
+def test_a_soulseek_row_never_reaches_a_torrent_client():
+    # A book must never be handed to the client the music side is using.
+    from unittest.mock import patch
+
+    from core.audiobook_download_monitor import _get_status
+
+    with patch("core.audiobook_soulseek.status_for", return_value=None), \
+         patch("core.torrent_clients.get_active_adapter") as torrent, \
+         patch("core.usenet_clients.get_active_adapter") as usenet:
+        assert _get_status("soulseek", "{}") is None
+    torrent.assert_not_called()
+    usenet.assert_not_called()
+
+
+def test_cancelling_a_soulseek_book_stops_its_transfers():
+    from unittest.mock import patch
+
+    from core.audiobook_download_monitor import _cancel_at_client
+
+    with patch("core.audiobook_soulseek.cancel", return_value=True) as stop, \
+         patch("core.torrent_clients.get_active_adapter") as torrent:
+        _cancel_at_client({"source": "soulseek", "client_id": "{}"})
+    stop.assert_called_once()
+    torrent.assert_not_called()

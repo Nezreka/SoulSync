@@ -4,7 +4,7 @@ import { z } from 'zod';
 // Search params
 // ---------------------------------------------------------------------------
 
-export const WATCHLIST_TAB_VALUES = ['artists', 'labels', 'podcasts'] as const;
+export const WATCHLIST_TAB_VALUES = ['artists', 'labels', 'podcasts', 'audiobooks'] as const;
 export type WatchlistTab = (typeof WATCHLIST_TAB_VALUES)[number];
 
 // Values match the vanilla <select id="watchlist-sort-select"> exactly, so a

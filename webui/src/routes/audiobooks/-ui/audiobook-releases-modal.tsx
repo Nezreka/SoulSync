@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import type { AudiobookReleaseCandidate } from '../-audiobooks.types';
 
 import { fetchReleases, grabRelease } from '../-audiobooks.api';
+import { AudiobookOverlay } from './audiobook-overlay';
 import styles from './audiobooks-page.module.css';
 
 interface AudiobookReleasesModalProps {
@@ -50,14 +51,6 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
     };
   }, [asin]);
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   const grab = async (release: AudiobookReleaseCandidate) => {
     setGrabbing(release.guid || release.title);
     setMessage('');
@@ -67,14 +60,8 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
   };
 
   return (
-    <div className={styles.modalBackdrop} onClick={onClose} role="presentation">
-      <div
-        className={styles.modal}
-        onClick={(event) => event.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Releases for ${title}`}
-      >
+    <AudiobookOverlay onClose={onClose} label={`Releases for ${title}`}>
+      <div className={styles.modal}>
         <header className={styles.modalHeader}>
           <div>
             <span className={styles.modalEyebrow}>Releases</span>
@@ -127,17 +114,37 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
                             Abridged
                           </span>
                         )}
-                        <span className={styles.releaseTag}>{release.protocol}</span>
-                        {release.indexer && (
-                          <span className={styles.releaseTag}>{release.indexer}</span>
+                        <span className={styles.releaseTag}>
+                          {release.protocol === 'soulseek' ? 'Soulseek' : release.protocol}
+                        </span>
+                        {/* A peer IS the source on Soulseek, so it is named
+                            rather than shown as "soulseek:someone". */}
+                        {release.soulseek ? (
+                          <span className={styles.releaseTag}>{release.soulseek.username}</span>
+                        ) : (
+                          release.indexer && (
+                            <span className={styles.releaseTag}>{release.indexer}</span>
+                          )
+                        )}
+                        {release.soulseek && (
+                          <span className={styles.releaseTag}>
+                            {release.soulseek.file_count}{' '}
+                            {release.soulseek.file_count === 1 ? 'file' : 'files'}
+                          </span>
                         )}
                         {formatSize(release.size_bytes) && (
                           <span className={styles.releaseTag}>
                             {formatSize(release.size_bytes)}
                           </span>
                         )}
+                        {/* Free upload slots, not seeders: on Soulseek that is
+                            what answers "can I actually get this right now". */}
                         {release.seeders != null && (
-                          <span className={styles.releaseTag}>{release.seeders} seeders</span>
+                          <span className={styles.releaseTag}>
+                            {release.soulseek
+                              ? `${release.seeders} slots free`
+                              : `${release.seeders} seeders`}
+                          </span>
                         )}
                       </div>
                       {release.reasons.length > 0 && (
@@ -160,6 +167,6 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
           )}
         </div>
       </div>
-    </div>
+    </AudiobookOverlay>
   );
 }
