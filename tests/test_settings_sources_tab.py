@@ -541,3 +541,36 @@ def test_a_moved_panel_still_has_its_content(index, container, marker):
     panel = _panel_span(index, container)
     assert len(panel) > 1000, f"{container} looks empty"
     assert marker in panel
+
+
+def test_the_indexers_tile_can_actually_light_up(js):
+    """It stayed grey however healthy Prowlarr was.
+
+    The tile colour reads _hybridSourceStatus. testAllSources walks the download
+    CHAIN, and Prowlarr is not a link in it — it is what the torrent and usenet
+    links search through — so the loop never reached it. It was already being
+    probed as a prerequisite for those two, and the result was thrown away.
+    """
+    fn = js.split("async function testAllSources(", 1)[1].split("\nwindow.", 1)[0]
+    probe = fn.split("_hybridSourceStatus.prowlarr = 'testing'", 1)[1].split("}", 1)[0]
+    assert "_ssTestConn('prowlarr')" in probe
+    assert "_hybridSourceStatus.prowlarr = good" in probe
+
+
+def test_the_indexer_probe_reaches_the_video_side(js):
+    """`sources` is built from the MUSIC chain dropdown, so on the video side it
+    says nothing about whether Prowlarr matters — and there it is the main path,
+    not an extra."""
+    fn = js.split("async function testAllSources(", 1)[1].split("\nwindow.", 1)[0]
+    assert "_onVideoSide" in fn
+    cond = next(ln for ln in fn.splitlines() if "sources.has('torrent')" in ln)
+    assert "_onVideoSide" in cond
+
+
+def test_the_indexer_result_redraws_its_tile(js):
+    """The per-source loop redraws while walking the chain, which Prowlarr is
+    not part of — so without this the dot would only appear on the next redraw
+    triggered by something else."""
+    fn = js.split("async function testAllSources(", 1)[1].split("\nwindow.", 1)[0]
+    block = fn.split("_hybridSourceStatus.prowlarr = 'testing'", 1)[1].split("for (const id of sources)", 1)[0]
+    assert "buildSourceTiles()" in block

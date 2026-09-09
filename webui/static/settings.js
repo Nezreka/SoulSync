@@ -1422,8 +1422,29 @@ async function testAllSources(opts = {}) {
 
     // Torrent/Usenet downloads go through Prowlarr — its connection must be
     // established first or those source tests fail. Probe Prowlarr up front.
-    if (sources.has('torrent') || sources.has('usenet')) {
-        try { await _ssTestConn('prowlarr'); } catch (e) { /* surfaced via the per-source test below */ }
+    //
+    // The result used to be thrown away, which is why the Indexers tile stayed
+    // grey however healthy Prowlarr was: the tile reads _hybridSourceStatus,
+    // and nothing ever wrote prowlarr into it. Prowlarr is not a link in the
+    // chain, so the loop below — which walks the chain — never reaches it
+    // either. Record it here, where it is already being tested.
+    // `sources` comes from the MUSIC chain dropdown, so on the video side it
+    // says nothing about whether Prowlarr matters — and there it is the main
+    // path, not an extra. Test it there too, or its tile is permanently grey.
+    const _onVideoSide = document.body.getAttribute('data-side') === 'video';
+    if (sources.has('torrent') || sources.has('usenet') || _onVideoSide) {
+        _hybridSourceStatus.prowlarr = 'testing';
+        try {
+            const good = await _ssTestConn('prowlarr');
+            _hybridSourceStatus.prowlarr = good
+                ? (_ssLastTestWarned.prowlarr ? 'warn' : 'ok')
+                : 'fail';
+        } catch (e) {
+            _hybridSourceStatus.prowlarr = 'fail';
+        }
+        // the loop below only redraws while walking the chain, which Prowlarr
+        // is not part of
+        try { buildSourceTiles(); } catch (e) { /* tiles are cosmetic */ }
     }
 
     for (const id of sources) _hybridSourceStatus[id] = 'testing';
