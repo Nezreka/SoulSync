@@ -673,7 +673,7 @@ function switchSettingsTab(tab) {
     // Sources: the cards carry live status, so refresh them on arrival and let
     // the same one-shot probe fill the dots in.
     if (tab === 'sources') {
-        try { buildSourceConfigHeaders(); } catch (e) { /* cards are cosmetic */ }
+        try { buildSourceTiles(); } catch (e) { /* tiles are cosmetic */ }
         if (typeof autoTestSourcesOnce === 'function') autoTestSourcesOnce();
     }
     // Initialize live log viewer when switching to Logs tab
@@ -1006,9 +1006,50 @@ const SOURCE_CARD_HINTS = {
     torrent: 'Runs on Prowlarr plus a torrent or usenet client',
 };
 
-// Live auth/connection checks, run when a source's card is opened rather than
-// on every settings redraw. Each is best-effort: a probe that throws must not
-// stop the card from opening.
+function toggleSourceCard(header) {
+    // kept so an older cached page cannot throw; tiles replaced the row cards.
+    if (header && header.dataset) openSourceModal(header.dataset.sourceId);
+}
+window.toggleSourceCard = toggleSourceCard;
+
+// One tile per source: logo, name under it, and the state that matters at a
+// glance. Rendered from HYBRID_SOURCES so the tiles and the chain rows on the
+// Downloads tab cannot disagree about a name or a logo.
+function buildSourceTiles() {
+    const grid = document.getElementById('source-tile-grid');
+    if (!grid) return;
+    const order = (typeof getHybridOrder === 'function' ? getHybridOrder() : []) || [];
+
+    grid.innerHTML = HYBRID_SOURCES.filter(src => SOURCE_CONFIG_ID_BY_SRC[src.id])
+        .map(src => {
+            const pos = order.indexOf(src.id);
+            const inChain = pos !== -1;
+            const state = (_hybridSourceStatus && _hybridSourceStatus[src.id]) || 'unknown';
+            const unready = _hybridSourceUnready && _hybridSourceUnready[src.id];
+            const dotLabel = { unknown: 'Not tested yet', testing: 'Testing…', ok: 'Connected',
+                               fail: 'Connection failed', na: 'No connection test for this source' }[state];
+            const art = src.icon
+                ? `<img src="${src.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${src.emoji}</span>'">`
+                : `<span class="emoji-icon">${src.emoji}</span>`;
+            const chip = unready
+                ? '<span class="src-tile-chip src-tile-chip--warn">needs setup</span>'
+                : inChain
+                    ? `<span class="src-tile-chip src-tile-chip--on">#${pos + 1} in chain</span>`
+                    : '<span class="src-tile-chip">not in chain</span>';
+            return `<button type="button" class="src-tile${inChain ? ' is-active' : ''}" `
+                 + `data-source-id="${src.id}" onclick="openSourceModal('${src.id}')" `
+                 + `title="Configure ${escapeHtml(src.name)}">`
+                 + `<span class="src-tile-dot hss-${state}" title="${dotLabel}"></span>`
+                 + `<span class="src-tile-art">${art}</span>`
+                 + `<span class="src-tile-name">${escapeHtml(src.name)}</span>`
+                 + chip
+                 + '</button>';
+        }).join('');
+}
+window.buildSourceTiles = buildSourceTiles;
+
+// Live auth/connection checks, run when a source is opened rather than on every
+// settings redraw. Best-effort: a probe that throws must not stop the modal.
 const SOURCE_OPEN_PROBE = {
     tidal: () => checkTidalDownloadAuthStatus(),
     qobuz: () => checkQobuzAuthStatus(),
@@ -1020,66 +1061,86 @@ const SOURCE_OPEN_PROBE = {
 function probeSourceOnOpen(srcId) {
     const probe = SOURCE_OPEN_PROBE[srcId];
     if (!probe) return;
-    try { probe(); } catch (e) { /* the card still opens */ }
+    try { probe(); } catch (e) { /* the modal still opens */ }
 }
 
-function toggleSourceCard(header) {
-    const body = header.nextElementSibling;
-    const open = header.classList.contains('collapsed');
-    header.classList.toggle('collapsed', !open);
-    if (body) {
-        body.classList.toggle('collapsed', !open);
-        body.style.display = open ? '' : 'none';
+let _openSourceModalId = null;
+
+// The panel is MOVED into the modal rather than copied. Cloning would put a
+// second element with the same id in the document, and every getElementById in
+// saveSettings would then read whichever one the browser handed back first —
+// silently saving the copy the user never typed into.
+function openSourceModal(srcId) {
+    const containerId = SOURCE_CONFIG_ID_BY_SRC[srcId];
+    const overlay = document.getElementById('source-config-modal');
+    const body = document.getElementById('src-modal-body');
+    const panel = containerId && document.getElementById(containerId);
+    if (!overlay || !body || !panel) return;
+
+    const src = HYBRID_SOURCES.find(x => x.id === srcId) || { name: srcId, emoji: '🎵', icon: null };
+    document.getElementById('src-modal-title').textContent = src.name;
+    document.getElementById('src-modal-sub').textContent = SOURCE_CARD_HINTS[srcId] || '';
+    const iconEl = document.getElementById('src-modal-icon');
+    iconEl.innerHTML = src.icon
+        ? `<img src="${src.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${src.emoji}</span>'">`
+        : `<span class="emoji-icon">${src.emoji}</span>`;
+    const state = (_hybridSourceStatus && _hybridSourceStatus[srcId]) || 'unknown';
+    document.getElementById('src-modal-meta').innerHTML = `<span class="src-tile-dot hss-${state}"></span>`;
+
+    body.appendChild(panel);
+    overlay.hidden = false;
+    document.body.classList.add('src-modal-open');
+    _openSourceModalId = containerId;
+    probeSourceOnOpen(srcId);
+    setTimeout(() => {
+        const first = body.querySelector('input:not([type=hidden]), select, textarea');
+        if (first) first.focus();
+    }, 40);
+}
+window.openSourceModal = openSourceModal;
+
+function closeSourceModal() {
+    const overlay = document.getElementById('source-config-modal');
+    const home = document.getElementById('source-config-home');
+    if (!overlay) return;
+    // Put the panel back before hiding, so its id never sits inside a hidden
+    // modal where a later open would move an already-moved node.
+    if (_openSourceModalId && home) {
+        const panel = document.getElementById(_openSourceModalId);
+        if (panel) home.appendChild(panel);
     }
-    if (open) probeSourceOnOpen(header.dataset.sourceId);
+    _openSourceModalId = null;
+    overlay.hidden = true;
+    document.body.classList.remove('src-modal-open');
+    // A field edited seconds before closing would otherwise sit on the 2s
+    // auto-save timer with the modal already gone and nothing on screen saying
+    // anything is pending. Land it now.
+    if (typeof settingsAutoSaveTimer !== 'undefined' && settingsAutoSaveTimer) {
+        clearTimeout(settingsAutoSaveTimer);
+        settingsAutoSaveTimer = null;
+        saveSettings(true);
+    }
+    buildSourceTiles();
 }
-window.toggleSourceCard = toggleSourceCard;
+window.closeSourceModal = closeSourceModal;
 
-// Fill each card's icon and its right-hand status. Called on load and again
-// whenever the chain or the test results change, so a card always agrees with
-// the row for the same source on the Downloads tab.
-function buildSourceConfigHeaders() {
-    const byId = {};
-    for (const src of HYBRID_SOURCES) byId[src.id] = src;
-    const order = (typeof getHybridOrder === 'function' ? getHybridOrder() : []) || [];
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        const overlay = document.getElementById('source-config-modal');
+        if (overlay && !overlay.hidden) closeSourceModal();
+    }
+});
 
-    document.querySelectorAll('#settings-page [data-source-config]').forEach(header => {
-        const srcId = header.dataset.sourceId;
-        const src = byId[srcId];
-        const iconEl = header.querySelector('[data-src-icon]');
-        const metaEl = header.querySelector('[data-src-meta]');
-        const hintEl = header.querySelector('.src-card-hint');
-        if (hintEl && SOURCE_CARD_HINTS[srcId]) hintEl.textContent = SOURCE_CARD_HINTS[srcId];
 
-        if (iconEl && src) {
-            iconEl.innerHTML = src.icon
-                ? `<img src="${src.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${src.emoji}</span>'">`
-                : `<span class="emoji-icon">${src.emoji}</span>`;
-        }
-        if (!metaEl) return;
-
-        const bits = [];
-        // Where it sits in the chain, or that it is not in it. A source that is
-        // configured but unused is a normal, valid state — say so plainly
-        // rather than leaving the card looking broken.
-        const pos = order.indexOf(srcId);
-        const inChain = pos !== -1 || (srcId === 'torrent' && order.includes('usenet'));
-        if (inChain) {
-            bits.push(`<span class="src-card-chip src-card-chip--on">#${(pos === -1 ? order.indexOf('usenet') : pos) + 1} in chain</span>`);
-        } else {
-            bits.push('<span class="src-card-chip">not in chain</span>');
-        }
-        if (_hybridSourceUnready && _hybridSourceUnready[srcId]) {
-            bits.push('<span class="src-card-chip src-card-chip--warn">needs setup</span>');
-        }
-        const state = (_hybridSourceStatus && _hybridSourceStatus[srcId]) || 'unknown';
-        const label = { unknown: 'Not tested yet', testing: 'Testing…', ok: 'Connected',
-                        fail: 'Connection failed', na: 'No connection test for this source' }[state];
-        bits.push(`<span class="src-card-dot hss-${state}" title="${label}"></span>`);
-        metaEl.innerHTML = bits.join('');
-    });
-}
-window.buildSourceConfigHeaders = buildSourceConfigHeaders;
+// src id -> the config panel that belongs to it. Only sources with a panel get
+// a tile; torrent and usenet share one, and it is filed under torrent.
+const SOURCE_CONFIG_ID_BY_SRC = {
+    soulseek: 'soulseek-settings-container', youtube: 'youtube-settings-container',
+    tidal: 'tidal-download-settings-container', qobuz: 'qobuz-settings-container',
+    hifi: 'hifi-download-settings-container', deezer_dl: 'deezer-download-settings-container',
+    amazon: 'amazon-download-settings-container', lidarr: 'lidarr-download-settings-container',
+    soundcloud: 'soundcloud-download-settings-container', torrent: 'prowlarr-source-redirect',
+};
 
 const HYBRID_SOURCE_CONFIG_ID = {
     soulseek: 'soulseek-settings-container', youtube: 'youtube-settings-container',
@@ -1093,10 +1154,9 @@ const HYBRID_SOURCE_CONFIG_ID = {
 // The cog on a chain row. The config is on the Sources tab now, so this crosses
 // to it and opens that one source rather than expanding a panel in place.
 function toggleHybridSourceConfig(srcId) {
-    const containerId = HYBRID_SOURCE_CONFIG_ID[srcId];
-    if (!containerId) return;
     if (typeof switchSettingsTab === 'function') switchSettingsTab('sources');
-    openSourceConfig(containerId);
+    // torrent and usenet share one panel
+    openSourceModal(srcId === 'usenet' ? 'torrent' : srcId);
 }
 
 // Open one source's accordion on the Sources tab and scroll it into view.
@@ -1104,16 +1164,9 @@ function toggleHybridSourceConfig(srcId) {
 // shared accordion onclick toggles), so opening one by hand has to set both or
 // the next click reads as "already open" and closes nothing.
 function openSourceConfig(containerId) {
-    const body = document.getElementById(containerId);
-    if (!body) return;
-    const header = document.querySelector(`[data-source-config="${containerId}"]`);
-    body.classList.remove('collapsed');
-    body.style.display = '';
-    if (header) {
-        header.classList.remove('collapsed');
-        probeSourceOnOpen(header.dataset.sourceId);
-    }
-    setTimeout(() => (header || body).scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+    const srcId = Object.keys(SOURCE_CONFIG_ID_BY_SRC)
+        .find(k => SOURCE_CONFIG_ID_BY_SRC[k] === containerId);
+    if (srcId) openSourceModal(srcId);
 }
 window.openSourceConfig = openSourceConfig;
 
@@ -1240,7 +1293,7 @@ function autoTestSourcesOnce() {
 
 function buildHybridSourceList() {
     // Same state drives both views; refresh the Sources cards alongside.
-    try { buildSourceConfigHeaders(); } catch (e) { /* cards are cosmetic */ }
+    try { buildSourceTiles(); } catch (e) { /* tiles are cosmetic */ }
     const container = document.getElementById('hybrid-source-list');
     if (!container) return;
 

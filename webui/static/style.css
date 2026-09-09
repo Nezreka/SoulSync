@@ -3321,6 +3321,9 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     display: flex;
     gap: 20px;
     margin-bottom: 24px;
+    /* min-width: 380px per column means three of them need ~1180px. Without
+       wrapping they simply overflowed the container on anything narrower. */
+    flex-wrap: wrap;
 }
 
 .settings-left-column,
@@ -7339,9 +7342,13 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
         /* Wider stats on large monitors */
     }
 
+    /* This said max-width: 900px, under a comment reading "Wider settings
+       forms". It did the opposite: below 1440px there is no cap at all, so the
+       page was WIDER on a small monitor than on a large one, and on a 1920px
+       screen settings used under half the glass. The three columns want
+       3 x 380px + gaps = ~1180px before they even start to breathe. */
     .settings-content {
-        max-width: 900px;
-        /* Wider settings forms */
+        max-width: 1800px;
     }
 }
 
@@ -60601,9 +60608,14 @@ tr.tag-diff-same {
     background: rgba(255, 255, 255, 0.04);
     border-radius: 12px;
     margin-bottom: 24px;
-    overflow-x: auto;
-    scrollbar-width: none;
-    width: fit-content;
+    /* Was `overflow-x: auto` with the scrollbar hidden and `width: fit-content`:
+       one tab too many and the extras were both unreachable and invisible, with
+       nothing on screen suggesting they existed. Adding the Sources tab tipped
+       it over. Wrapping to a second row shows every tab instead of hiding the
+       overflow behind an invisible scroll. */
+    flex-wrap: wrap;
+    row-gap: 4px;
+    max-width: 100%;
 }
 .stg-tabbar::-webkit-scrollbar { display: none; }
 
@@ -83750,107 +83762,179 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 }
 
 /* ── Sources tab ─────────────────────────────────────────────────────────────
-   One card per download source. Deliberately built from the same vocabulary as
-   .hybrid-source-item on the Downloads tab (same radius, same surface alphas,
-   same status dot colours) so the two views read as one page rather than two
-   features that happen to share a settings screen. */
-.src-card-header {
-    display: flex;
-    align-items: center;
+   A tile per download source: logo, name under it, state at a glance. Opening
+   one puts its configuration in a modal, which keeps the grid as the thing you
+   look at and gives the longer forms (Soulseek has ~40 fields) room to breathe
+   instead of shoving the grid down the page.
+
+   Deliberately the same vocabulary as .hybrid-source-item on the Downloads tab
+   — same radii, same surface alphas, same status-dot colours — so the two
+   views read as one page. */
+.src-tile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
     gap: 12px;
-    padding: 12px 14px;
-    margin-top: 8px;
+    margin-top: 14px;
+}
+.src-tile {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 20px 12px 14px;
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 10px;
+    border-radius: 14px;
     cursor: pointer;
-    transition: background 0.2s, border-color 0.2s;
+    font-family: inherit;
+    transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+                background 0.18s, border-color 0.18s, box-shadow 0.18s;
 }
-.src-card-header:hover {
-    background: rgba(255, 255, 255, 0.055);
-    border-color: rgba(var(--accent-rgb), 0.3);
+.src-tile:hover {
+    transform: translateY(-2px);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(var(--accent-rgb), 0.38);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
 }
-.src-card-header:focus-visible {
-    outline: 2px solid rgba(var(--accent-rgb), 0.6);
+.src-tile:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.65);
     outline-offset: 2px;
 }
-/* Open card and its body read as one object: square off the join. */
-.src-card-header:not(.collapsed) {
+/* In the chain reads as the live one; the rest are available, not broken. */
+.src-tile.is-active {
     background: rgba(var(--accent-rgb), 0.07);
-    border-color: rgba(var(--accent-rgb), 0.28);
-    border-bottom-left-radius: 0;
-    border-bottom-right-radius: 0;
-    margin-bottom: 0;
+    border-color: rgba(var(--accent-rgb), 0.26);
 }
-.src-card-header:not(.collapsed) + .settings-section-body {
-    border: 1px solid rgba(var(--accent-rgb), 0.28);
-    border-top: none;
-    border-radius: 0 0 10px 10px;
-    padding: 14px;
-    background: rgba(255, 255, 255, 0.02);
-    margin-bottom: 8px;
-}
-.src-card-icon {
-    flex-shrink: 0;
-    width: 26px;
-    height: 26px;
+.src-tile-art {
+    width: 46px;
+    height: 46px;
     display: flex;
     align-items: center;
     justify-content: center;
 }
-.src-card-icon img { width: 22px; height: 22px; object-fit: contain; border-radius: 4px; }
-.src-card-icon .emoji-icon { font-size: 18px; line-height: 1; }
-.src-card-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
-.src-card-name { font-size: 0.95em; font-weight: 600; color: rgba(255, 255, 255, 0.92); }
-.src-card-hint {
-    font-size: 0.76em;
-    color: rgba(255, 255, 255, 0.42);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+.src-tile-art img { width: 42px; height: 42px; object-fit: contain; border-radius: 8px; }
+.src-tile-art .emoji-icon { font-size: 34px; line-height: 1; }
+/* Sources that are not in the chain are configurable but idle — dim the art
+   rather than the whole tile, so the name and chips stay readable. */
+.src-tile:not(.is-active) .src-tile-art { opacity: 0.55; }
+.src-tile:hover .src-tile-art { opacity: 1; }
+.src-tile-name {
+    font-size: 0.88em;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+    text-align: center;
+    line-height: 1.2;
 }
-.src-card-meta { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.src-card-chip {
-    font-size: 0.68em;
+.src-tile-chip {
+    font-size: 0.64em;
     line-height: 1;
     font-weight: 700;
     padding: 4px 7px;
     border-radius: 6px;
     border: 1px solid rgba(255, 255, 255, 0.12);
     background: rgba(255, 255, 255, 0.05);
-    color: rgba(255, 255, 255, 0.48);
+    color: rgba(255, 255, 255, 0.45);
     white-space: nowrap;
 }
-.src-card-chip--on {
+.src-tile-chip--on {
     border-color: rgba(125, 211, 252, 0.24);
     background: rgba(125, 211, 252, 0.1);
     color: #7dd3fc;
 }
-.src-card-chip--warn {
+.src-tile-chip--warn {
     border-color: rgba(245, 158, 11, 0.4);
     background: rgba(245, 158, 11, 0.12);
     color: #fbcd7a;
 }
-/* Same dot, same colours as the chain rows. */
-.src-card-dot {
+/* Same dot and same colours as the chain rows on the Downloads tab. */
+.src-tile-dot {
+    position: absolute;
+    top: 10px;
+    right: 10px;
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    flex-shrink: 0;
     background: rgba(255, 255, 255, 0.18);
 }
-.src-card-dot.hss-ok      { background: #34d27b; box-shadow: 0 0 6px rgba(52, 210, 123, 0.6); }
-.src-card-dot.hss-fail    { background: #ff5f57; box-shadow: 0 0 6px rgba(255, 95, 87, 0.5); }
-.src-card-dot.hss-na      { background: rgba(255, 255, 255, 0.12); }
-.src-card-dot.hss-testing { background: #f0b429; animation: hssPulse 0.9s ease-in-out infinite; }
-.src-card-arrow {
-    flex-shrink: 0;
-    color: rgba(255, 255, 255, 0.35);
-    font-size: 12px;
-    transition: transform 0.2s;
+.src-tile-dot.hss-ok      { background: #34d27b; box-shadow: 0 0 6px rgba(52, 210, 123, 0.6); }
+.src-tile-dot.hss-fail    { background: #ff5f57; box-shadow: 0 0 6px rgba(255, 95, 87, 0.5); }
+.src-tile-dot.hss-na      { background: rgba(255, 255, 255, 0.12); }
+.src-tile-dot.hss-testing { background: #f0b429; animation: hssPulse 0.9s ease-in-out infinite; }
+
+/* ── the config modal ─────────────────────────────────────────────────────── */
+.src-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(0, 0, 0, 0.62);
+    backdrop-filter: blur(4px);
+    animation: srcModalFade 0.16s ease-out;
 }
-.src-card-header:not(.collapsed) .src-card-arrow { transform: rotate(180deg); }
-@media (max-width: 640px) {
-    /* The hint is the first thing worth losing; the chips carry the state. */
-    .src-card-hint { display: none; }
+.src-modal-overlay[hidden] { display: none; }
+@keyframes srcModalFade { from { opacity: 0; } to { opacity: 1; } }
+.src-modal {
+    width: min(760px, 100%);
+    max-height: min(84vh, 900px);
+    display: flex;
+    flex-direction: column;
+    background: #16181d;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 16px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+    animation: srcModalRise 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
+}
+@keyframes srcModalRise {
+    from { transform: translateY(10px) scale(0.99); opacity: 0; }
+    to   { transform: none; opacity: 1; }
+}
+.src-modal-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.02);
+    flex-shrink: 0;
+}
+.src-modal-icon { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; }
+.src-modal-icon img { width: 28px; height: 28px; object-fit: contain; border-radius: 6px; }
+.src-modal-icon .emoji-icon { font-size: 24px; line-height: 1; }
+.src-modal-titles { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.src-modal-titles h3 { margin: 0; font-size: 1.02em; font-weight: 600; }
+.src-modal-sub { font-size: 0.76em; color: rgba(255, 255, 255, 0.42); }
+.src-modal-meta { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.src-modal-meta .src-tile-dot { position: static; }
+.src-modal-close {
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    border: none;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.18s, color 0.18s;
+}
+.src-modal-close:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.src-modal-body {
+    padding: 18px;
+    overflow-y: auto;
+    /* The form inside is the page's own markup, moved here wholesale, so it
+       inherits every .form-group rule unchanged. */
+}
+.src-modal-body .src-config-panel { display: block; }
+body.src-modal-open { overflow: hidden; }
+
+@media (max-width: 620px) {
+    .src-tile-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+    .src-modal { max-height: 92vh; }
+    .src-modal-overlay { padding: 10px; }
 }

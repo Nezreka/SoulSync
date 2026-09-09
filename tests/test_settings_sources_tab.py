@@ -34,6 +34,16 @@ _SOURCE_CONTAINERS = (
 )
 
 
+def _strip_comments(css: str) -> str:
+    """CSS with the /* */ comments removed.
+
+    These checks assert a declaration is absent, and the comment explaining WHY
+    it is absent quotes the very string being looked for. Reading the comments
+    as if they were rules makes the guard fail on its own explanation.
+    """
+    return re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+
+
 def _read(rel: str) -> str:
     return (_ROOT / rel).read_text(encoding="utf-8", errors="ignore")
 
@@ -97,56 +107,80 @@ def test_the_chain_widget_stayed_on_downloads(index):
 def test_the_cog_crosses_to_the_tab(js):
     fn = js.split("function toggleHybridSourceConfig(", 1)[1].split("\n}", 1)[0]
     assert "switchSettingsTab('sources')" in fn
-    assert "openSourceConfig(" in fn
+    assert "openSourceModal(" in fn
 
 
-def test_opening_a_card_by_hand_sets_both_halves(js):
-    """The shared accordion onclick toggles the header AND the body. Clearing
-    only one leaves the next click reading 'already open' and closing nothing."""
-    fn = js.split("function openSourceConfig(", 1)[1].split("\n}", 1)[0]
-    assert "body.classList.remove('collapsed')" in fn
-    assert "header.classList.remove('collapsed')" in fn
-
-
-def test_the_cards_are_built_from_the_shared_registry(js):
-    """One list of names and icons for the chain rows and the cards, so the two
-    views cannot end up disagreeing about what a source is called."""
-    fn = js.split("function buildSourceConfigHeaders(", 1)[1].split("\nwindow.", 1)[0]
-    assert "HYBRID_SOURCES" in fn
-    assert "src.icon" in fn and "src.emoji" in fn
-
-
-def test_the_cards_refresh_with_the_chain(js):
-    # Same state drives both; a stale card is a card that lies about status.
+def test_the_tiles_refresh_with_the_chain(js):
+    # Same state drives both; a stale tile is a tile that lies about status.
     fn = js.split("function buildHybridSourceList(", 1)[1].split("\n}", 1)[0]
-    assert "buildSourceConfigHeaders()" in fn
+    assert "buildSourceTiles()" in fn
 
 
-def test_every_card_has_a_source_id(index):
-    """The id is what pairs a card with its registry entry; without it the card
-    renders with no icon and no status."""
-    headers = re.findall(r'<div class="src-card-header[^>]*>', index)
-    assert len(headers) == len(_SOURCE_CONTAINERS)
-    for h in headers:
-        assert "data-source-id=" in h
-        assert re.search(r'data-source-id="[a-z_]+"', h), h
+def test_every_source_has_a_tile(js):
+    """Tiles are rendered, not hand-written, so the check is that the renderer
+    covers every source that owns a config panel."""
+    fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
+    assert "HYBRID_SOURCES.filter" in fn
+    assert "SOURCE_CONFIG_ID_BY_SRC" in fn
+    assert "src-tile-name" in fn and "src-tile-art" in fn
 
 
-def test_the_cards_are_keyboard_reachable(index):
-    # They are divs, not buttons, so they have to say so themselves.
-    headers = re.findall(r'<div class="src-card-header[^>]*>', index)
-    for h in headers:
-        assert 'role="button"' in h and 'tabindex="0"' in h
+def test_the_panel_is_moved_not_cloned(js):
+    """Cloning would put a second element with the same id in the document, and
+    every getElementById in saveSettings would then read whichever one the
+    browser returned first — silently saving the copy nobody typed into."""
+    fn = js.split("function openSourceModal(", 1)[1].split("\nwindow.", 1)[0]
+    assert "appendChild(panel)" in fn
+    assert "cloneNode" not in fn
+
+
+def test_closing_puts_the_panel_back(js):
+    """It has to go home before the overlay hides, or the next open would move
+    a node that is already inside the hidden modal."""
+    fn = js.split("function closeSourceModal(", 1)[1].split("\nwindow.", 1)[0]
+    assert "home.appendChild(panel)" in fn
+    assert fn.index("home.appendChild(panel)") < fn.index("overlay.hidden = true")
+
+
+def test_closing_lands_a_pending_autosave(js):
+    """The page auto-saves 2s after a change. Edit a field, close the modal, and
+    the timer would otherwise still be counting with nothing on screen to say
+    anything was pending."""
+    fn = js.split("function closeSourceModal(", 1)[1].split("\nwindow.", 1)[0]
+    assert "settingsAutoSaveTimer" in fn and "saveSettings(" in fn
+
+
+def test_escape_closes_it(js):
+    assert "e.key === 'Escape'" in js and "closeSourceModal()" in js
+
+
+def test_the_modal_is_a_dialog(index):
+    block = index.split('id="source-config-modal"', 1)[1].split("</div>", 6)[0]
+    assert 'role="dialog"' in block and 'aria-modal="true"' in block
+
+
+def test_the_panels_park_in_a_hidden_home(index):
+    """They are real page markup, not templates — they need somewhere to live
+    that is not on screen when no modal is open."""
+    assert 'id="source-config-home" hidden' in index
+    home = index.split('id="source-config-home"', 1)[1].split("end source-config-home", 1)[0]
+    for cid in _SOURCE_CONTAINERS:
+        assert f'id="{cid}"' in home, f"{cid} is not parked in the home div"
+
+
+def test_the_tiles_refresh_when_the_modal_closes(js):
+    # Changing a setting can change "needs setup" or the chain chip.
+    fn = js.split("function closeSourceModal(", 1)[1].split("\nwindow.", 1)[0]
+    assert "buildSourceTiles()" in fn
 
 
 def test_the_styling_reuses_the_pages_own_vocabulary():
-    """Unified, not a second design language bolted on. The cards borrow the
-    accent token and the same status-dot colours the chain rows use."""
+    """Unified, not a second design language bolted on."""
     css = _read("webui/static/style.css")
     block = css.split("/* ── Sources tab", 1)[1]
     assert "--accent-rgb" in block
     for state in ("hss-ok", "hss-fail", "hss-testing"):
-        assert f".src-card-dot.{state}" in block
+        assert f".src-tile-dot.{state}" in block
 
 
 def test_the_dot_colours_match_the_chain_rows_exactly():
@@ -154,27 +188,32 @@ def test_the_dot_colours_match_the_chain_rows_exactly():
     css = _read("webui/static/style.css")
     for state, colour in (("hss-ok", "#34d27b"), ("hss-fail", "#ff5f57")):
         chain = re.search(rf"\.hybrid-source-status\.{state}\s*{{([^}}]*)}}", css)
-        card = re.search(rf"\.src-card-dot\.{state}\s*{{([^}}]*)}}", css)
-        assert chain and card
-        assert colour in chain.group(1) and colour in card.group(1)
+        tile = re.search(rf"\.src-tile-dot\.{state}\s*{{([^}}]*)}}", css)
+        assert chain and tile
+        assert colour in chain.group(1) and colour in tile.group(1)
 
 
-def test_the_auth_probes_moved_to_card_open(js):
-    """They used to run from updateDownloadSourceUI, gated on the same
-    active-source test. Deleting that gate without moving them left showCfg
-    referenced but undefined — a ReferenceError that would have taken the whole
-    of updateDownloadSourceUI down on every settings redraw."""
-    assert "showCfg" not in js, "showCfg is referenced but no longer defined"
-    fn = js.split("function toggleSourceCard(", 1)[1].split("\n}", 1)[0]
-    assert "probeSourceOnOpen" in fn
+def test_the_settings_page_is_not_capped_at_900px():
+    """The large-screen rule said max-width: 900px under a comment reading
+    "Wider settings forms". Below 1440px there was no cap at all, so the page
+    was wider on a small monitor than on a large one."""
+    css = _strip_comments(_read("webui/static/style.css"))
+    big = css.split("@media (min-width: 1440px)", 1)[1]
+    big = big[:big.index("\n}")]
+    assert "max-width: 900px" not in big
+    assert "max-width: 1800px" in big
 
 
-def test_a_failing_probe_does_not_block_the_card(js):
-    fn = js.split("function probeSourceOnOpen(", 1)[1].split("\n}", 1)[0]
-    assert "try {" in fn and "catch" in fn
+def test_the_tab_bar_cannot_hide_tabs():
+    """It was width: fit-content with overflow-x: auto and the scrollbar hidden,
+    so one tab too many and the extras were unreachable AND invisible."""
+    css = _strip_comments(_read("webui/static/style.css"))
+    bar = css.split(".stg-tabbar {", 1)[1].split("}", 1)[0]
+    assert "flex-wrap: wrap" in bar
+    assert "width: fit-content" not in bar
 
 
-def test_the_deep_link_probes_too(js):
-    # Arriving via the cog should behave the same as clicking the card.
-    fn = js.split("function openSourceConfig(", 1)[1].split("\nwindow.", 1)[0]
-    assert "probeSourceOnOpen" in fn
+def test_the_columns_wrap_instead_of_overflowing():
+    css = _strip_comments(_read("webui/static/style.css"))
+    cols = css.split(".settings-columns {", 1)[1].split("}", 1)[0]
+    assert "flex-wrap: wrap" in cols
