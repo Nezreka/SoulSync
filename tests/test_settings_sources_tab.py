@@ -498,3 +498,46 @@ def test_the_filesystem_note_is_still_reachable(index):
     assert "ind-hero-warning" in index
     sources = index.split('data-stg="sources"', 1)[1].split("end Sources tab", 1)[0]
     assert "ind-hero-warning" in sources
+
+
+def test_indexers_are_their_own_group(js):
+    """Not a source you pick — the catalogue the torrent and usenet links
+    search. Left in "Available" it read as something you could add to the
+    chain, which is not a thing Prowlarr can be."""
+    fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
+    assert "section('Indexers'" in fn
+    assert fn.count("section('Indexers'") == 2, "both sides need the group"
+
+
+def test_an_indexer_cannot_land_in_the_chain_groups(js):
+    """The chain groups partition on order.includes(), and Prowlarr is never in
+    the order — so without splitting it out first it falls into Available every
+    time."""
+    fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
+    assert "const sources = configurable.filter(src => !isIndexer(src))" in fn
+    for group in ("const inChain = sources", "const available = sources"):
+        assert group in fn, group
+
+
+@pytest.mark.parametrize("container", sorted(_MOVED_IN))
+def test_a_moved_panel_carries_no_stale_tab_attribute(index, container):
+    """switchSettingsTab sets display:none on every [data-stg] whose value is
+    not the active tab. The moved wrappers still said "downloads", so on the
+    Sources tab the panel's own contents were hidden and the modal opened
+    completely empty — which is exactly how it shipped and what Boulder hit on
+    the very first click.
+
+    The modal owns visibility now. A tab attribute inside a panel can only
+    hide it.
+    """
+    panel = _panel_span(index, container)
+    assert 'data-stg="downloads"' not in panel
+    assert 'data-stg=' not in panel, "a tab attribute inside a panel can only hide it"
+
+
+@pytest.mark.parametrize("container,marker", sorted(_MOVED_IN.items()))
+def test_a_moved_panel_still_has_its_content(index, container, marker):
+    # The empty-modal bug looked identical to the content not having moved.
+    panel = _panel_span(index, container)
+    assert len(panel) > 1000, f"{container} looks empty"
+    assert marker in panel

@@ -1096,21 +1096,31 @@ function buildSourceTiles() {
           + `<div class="src-tile-row">${list.map(src => _srcTileMarkup(src, order)).join('')}</div></div>`
         : '';
 
+    // Indexers are their own kind of thing: not a source you pick, but the
+    // catalogue the torrent and usenet links search. Grouped separately so the
+    // list does not imply Prowlarr is a source you could add to the chain.
+    const isIndexer = (src) => EXTRA_SOURCE_TILES.some(x => x.id === src.id);
+    const indexers = configurable.filter(isIndexer);
+    const sources = configurable.filter(src => !isIndexer(src));
+
     if (onVideo) {
         // The chain is a music concept — video picks its sources on its own
         // settings, so grouping by "in your chain" would be meaningless here.
-        grid.innerHTML = section('Download sources', 'shared with the music side', configurable);
+        grid.innerHTML =
+            section('Download sources', 'shared with the music side', sources) +
+            section('Indexers', 'searched by torrent and usenet', indexers);
         return;
     }
 
-    const inChain = configurable
+    const inChain = sources
         .filter(src => order.includes(src.id))
         .sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
-    const available = configurable.filter(src => !order.includes(src.id));
+    const available = sources.filter(src => !order.includes(src.id));
 
     grid.innerHTML =
         section('In your chain', 'tried in this order', inChain) +
-        section('Available', 'configure now, add to the chain when you want it', available);
+        section('Available', 'configure now, add to the chain when you want it', available) +
+        section('Indexers', 'searched by torrent and usenet', indexers);
 }
 window.buildSourceTiles = buildSourceTiles;
 
