@@ -51,6 +51,13 @@ def init(
     docker_resolve_path = docker_resolve_path_fn
 
 
+# Prefix on a message that means "this works, but something needs your
+# attention". A test can succeed and still have something worth saying, and
+# collapsing that into pass/fail is how a broken cookie file ended up drawing a
+# red light on a source that downloads perfectly well.
+WARNING_MARKER = "\u26a0"
+
+
 def run_service_test(service, test_config):
     """
     Performs the actual connection test for a given service.
@@ -542,14 +549,23 @@ def run_service_test(service, test_config):
                     _mode, _file,
                     cookiefile_exists=bool(_file) and _os.path.exists(_file),
                 )
-                if _problem:
-                    return False, _problem
-
                 yt = YouTubeClient()
                 if not yt.is_available():
                     return False, "YouTube unavailable — yt-dlp not installed."
                 if run_async(yt.check_connection()):
+                    # Broken cookies are a WARNING, not a failure. YouTube serves
+                    # anonymous requests perfectly well from most connections, so
+                    # failing the source here painted a red light on something
+                    # that downloads fine — which says "this is broken, go fix
+                    # it" about the one thing that is working. The leading marker
+                    # is what the UI reads to draw the amber dot.
+                    if _problem:
+                        return True, f"{WARNING_MARKER} YouTube works, but {_problem[0].lower()}{_problem[1:]}"
                     return True, "YouTube download source ready."
+                # It genuinely is not reachable. If cookies are also broken, say
+                # that first — it is the thing they can actually act on.
+                if _problem:
+                    return False, f"YouTube download source not available. {_problem}"
                 reason = yt.last_failure_reason()
                 if reason:
                     return False, f"YouTube download source not available. {reason}"

@@ -7342,14 +7342,10 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
         /* Wider stats on large monitors */
     }
 
-    /* This said max-width: 900px, under a comment reading "Wider settings
-       forms". It did the opposite: below 1440px there is no cap at all, so the
-       page was WIDER on a small monitor than on a large one, and on a 1920px
-       screen settings used under half the glass. The three columns want
-       3 x 380px + gaps = ~1180px before they even start to breathe. */
-    .settings-content {
-        max-width: 1800px;
-    }
+    /* Deliberately nothing here. The settings width is set by
+       --settings-max-width on the layout override further down; a cap at this
+       level is overridden by its `max-width: 100% !important` and only looks
+       like it works. */
 }
 
 /* ===== VERSION MODAL STYLES ===== */
@@ -60881,6 +60877,10 @@ tr.tag-diff-same {
 
 /* ── Settings page layout override — transform old layout ── */
 
+/* One number for the whole page. The nav row and the columns MUST agree or the
+   tabs and the content below them line up differently. */
+:root { --settings-max-width: 1400px; }
+
 /* Center everything in a single column */
 #settings-page .settings-content {
     flex-direction: column;
@@ -60897,7 +60897,11 @@ tr.tag-diff-same {
     justify-content: flex-start;
     gap: 14px;
     width: 100%;
-    max-width: 920px;
+    /* Was 920px. That is what actually set the page width — the earlier
+       .settings-content cap never applied, this override sets it to 100%
+       !important and caps the CHILDREN instead. 920px also made the tab bar
+       wrap: the tabs fit fine, the row they sit in did not. */
+    max-width: var(--settings-max-width);
     margin: 0 auto 28px;
     padding: 0 2px;
 }
@@ -60933,7 +60937,7 @@ tr.tag-diff-same {
 /* Columns become single centered column */
 #settings-page .settings-columns {
     flex-direction: column;
-    max-width: 920px;
+    max-width: var(--settings-max-width);
     width: 100%;
     gap: 0;
     margin: 0 auto;
@@ -60944,6 +60948,11 @@ tr.tag-diff-same {
    only while the logs group is the visible one (switchSettingsTab clears its
    inline display when active, sets display:none otherwise). */
 #settings-page .settings-columns:has(> .settings-group[data-stg="logs"]:not([style*="none"])) {
+    max-width: 100%;
+}
+/* Sources is a grid, not a form — it uses width the way the log terminal does,
+   fitting more tiles per row instead of stretching text fields. */
+#settings-page .settings-columns:has(> .settings-group[data-stg="sources"]:not([style*="none"])) {
     max-width: 100%;
 }
 
@@ -83772,8 +83781,8 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
    views read as one page. */
 .src-tile-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(164px, 1fr));
+    gap: 14px;
     margin-top: 14px;
 }
 .src-tile {
@@ -83806,6 +83815,10 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     background: rgba(var(--accent-rgb), 0.07);
     border-color: rgba(var(--accent-rgb), 0.26);
 }
+/* A source in the chain that is not working is the case worth spotting from
+   across the room — the dot alone is 8px and easy to miss. */
+.src-tile:has(.src-tile-dot.hss-fail) { border-color: rgba(255, 95, 87, 0.42); }
+.src-tile:has(.src-tile-dot.hss-warn) { border-color: rgba(240, 180, 41, 0.42); }
 .src-tile-art {
     width: 46px;
     height: 46px;
@@ -83859,6 +83872,9 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 }
 .src-tile-dot.hss-ok      { background: #34d27b; box-shadow: 0 0 6px rgba(52, 210, 123, 0.6); }
 .src-tile-dot.hss-fail    { background: #ff5f57; box-shadow: 0 0 6px rgba(255, 95, 87, 0.5); }
+/* Works, but something wants attention — a broken cookie file on a source that
+   still downloads fine. Red said "this is broken" about the one thing working. */
+.src-tile-dot.hss-warn    { background: #f0b429; box-shadow: 0 0 6px rgba(240, 180, 41, 0.5); }
 .src-tile-dot.hss-na      { background: rgba(255, 255, 255, 0.12); }
 .src-tile-dot.hss-testing { background: #f0b429; animation: hssPulse 0.9s ease-in-out infinite; }
 

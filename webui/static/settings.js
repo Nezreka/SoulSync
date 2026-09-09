@@ -1027,11 +1027,13 @@ function buildSourceTiles() {
             const state = (_hybridSourceStatus && _hybridSourceStatus[src.id]) || 'unknown';
             const unready = _hybridSourceUnready && _hybridSourceUnready[src.id];
             const dotLabel = { unknown: 'Not tested yet', testing: 'Testing…', ok: 'Connected',
-                               fail: 'Connection failed', na: 'No connection test for this source' }[state];
+                               warn: _ssLastTestMessage[src.id] || 'Working, but needs attention',
+                               fail: _ssLastTestMessage[src.id] || 'Connection failed',
+                               na: 'No connection test for this source' }[state];
             const art = src.icon
                 ? `<img src="${src.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${src.emoji}</span>'">`
                 : `<span class="emoji-icon">${src.emoji}</span>`;
-            const chip = unready
+            const chip = (unready || state === 'warn')
                 ? '<span class="src-tile-chip src-tile-chip--warn">needs setup</span>'
                 : inChain
                     ? `<span class="src-tile-chip src-tile-chip--on">#${pos + 1} in chain</span>`
@@ -1140,6 +1142,9 @@ const SOURCE_CONFIG_ID_BY_SRC = {
     hifi: 'hifi-download-settings-container', deezer_dl: 'deezer-download-settings-container',
     amazon: 'amazon-download-settings-container', lidarr: 'lidarr-download-settings-container',
     soundcloud: 'soundcloud-download-settings-container', torrent: 'prowlarr-source-redirect',
+    // Usenet is its own link in the chain and shares the Prowlarr panel. It had
+    // no tile at all, so a usenet user saw nothing to click.
+    usenet: 'prowlarr-source-redirect',
 };
 
 const HYBRID_SOURCE_CONFIG_ID = {
@@ -1183,6 +1188,7 @@ async function _ssJson(url, opts) {
 // that can explain themselves (YouTube's bot-block, for one) were having
 // that explanation thrown away here.
 const _ssLastTestMessage = {};
+const _ssLastTestWarned = {};
 function _ssTestConn(service) {
     return _ssJson(API.testConnection || '/api/test-connection', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1191,6 +1197,10 @@ function _ssTestConn(service) {
         const msg = j && (j.message || j.error);
         if (msg) _ssLastTestMessage[service] = String(msg);
         else delete _ssLastTestMessage[service];
+        // A pass can still carry something worth acting on. The server marks
+        // those with a leading warning glyph; without this a working source
+        // with a broken cookie file drew a plain green light and said nothing.
+        _ssLastTestWarned[service] = !!j.success && !!msg && String(msg).trim().startsWith('\u26a0');
         return !!j.success;
     });
 }
@@ -1247,7 +1257,13 @@ async function testAllSources(opts = {}) {
     for (const id of sources) {
         const probe = HYBRID_SOURCE_PROBE[id];
         if (!probe) { _hybridSourceStatus[id] = 'na'; continue; }
-        try { const good = await probe(); _hybridSourceStatus[id] = good ? 'ok' : 'fail'; good ? ok++ : (fail++, failedIds.push(id)); }
+        try {
+            const good = await probe();
+            _hybridSourceStatus[id] = good ? (_ssLastTestWarned[id] ? 'warn' : 'ok') : 'fail';
+            good ? ok++ : (fail++, failedIds.push(id));
+            // a warning is worth surfacing even though the source passed
+            if (good && _ssLastTestWarned[id]) failedIds.push(id);
+        }
         catch (e) { _hybridSourceStatus[id] = 'fail'; fail++; failedIds.push(id); }
         buildHybridSourceList();
     }

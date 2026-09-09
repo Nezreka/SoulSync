@@ -193,15 +193,16 @@ def test_the_dot_colours_match_the_chain_rows_exactly():
         assert colour in chain.group(1) and colour in tile.group(1)
 
 
-def test_the_settings_page_is_not_capped_at_900px():
-    """The large-screen rule said max-width: 900px under a comment reading
-    "Wider settings forms". Below 1440px there was no cap at all, so the page
-    was wider on a small monitor than on a large one."""
+def test_no_dead_width_rule_pretends_to_set_the_page_width():
+    """The @media (min-width: 1440px) block used to cap .settings-content, and
+    a cap there does nothing: the layout override further down sets
+    `max-width: 100% !important` on that element and caps its CHILDREN instead.
+    A rule that looks like it sets the width but cannot is worse than none —
+    it is where I went first, and the page did not move."""
     css = _strip_comments(_read("webui/static/style.css"))
     big = css.split("@media (min-width: 1440px)", 1)[1]
     big = big[:big.index("\n}")]
-    assert "max-width: 900px" not in big
-    assert "max-width: 1800px" in big
+    assert ".settings-content" not in big or "max-width" not in big
 
 
 def test_the_tab_bar_cannot_hide_tabs():
@@ -217,3 +218,72 @@ def test_the_columns_wrap_instead_of_overflowing():
     css = _strip_comments(_read("webui/static/style.css"))
     cols = css.split(".settings-columns {", 1)[1].split("}", 1)[0]
     assert "flex-wrap: wrap" in cols
+
+
+# ---------------------------------------------------------------------------
+# A working source must not be painted as a broken one
+# ---------------------------------------------------------------------------
+
+def test_broken_cookies_do_not_fail_a_reachable_youtube():
+    """A missing cookie file drew a RED light on YouTube. YouTube serves
+    anonymous requests perfectly well from most connections — the source
+    downloads fine — so red said "this is broken, go fix it" about the one
+    thing that was working."""
+    src = _read("core/connection_test.py")
+    branch = src.split('elif service == "youtube":', 1)[1].split("elif service ==", 1)[0]
+    ok_path = branch.split("if run_async(yt.check_connection()):", 1)[1].split("# It genuinely", 1)[0]
+    assert "return True" in ok_path
+    assert "WARNING_MARKER" in ok_path
+
+
+def test_an_unreachable_youtube_still_fails():
+    src = _read("core/connection_test.py")
+    branch = src.split('elif service == "youtube":', 1)[1].split("elif service ==", 1)[0]
+    fail_path = branch.split("# It genuinely", 1)[1]
+    assert "return False" in fail_path
+
+
+def test_the_cookie_problem_is_named_on_both_paths():
+    src = _read("core/connection_test.py")
+    branch = src.split('elif service == "youtube":', 1)[1].split("elif service ==", 1)[0]
+    assert branch.count("_problem") >= 3
+
+
+def test_the_client_records_a_warning_state(js):
+    assert "_ssLastTestWarned" in js
+    fn = js.split("function _ssTestConn(", 1)[1].split("\n}", 1)[0]
+    assert "startsWith" in fn
+
+
+def test_a_warning_gets_its_own_dot_colour():
+    css = _strip_comments(_read("webui/static/style.css"))
+    # the bare declaration, not the :has() ring rule that mentions the same class
+    warn = re.search(r"^\.src-tile-dot\.hss-warn\s*{([^}]*)}", css, re.M)
+    assert warn, "no .src-tile-dot.hss-warn rule"
+    assert "#f0b429" in warn.group(1)   # amber, not the red it used to draw
+    assert "#ff5f57" not in warn.group(1)
+
+
+def test_usenet_has_a_tile(js):
+    """It is its own link in the chain and shares the Prowlarr panel with
+    torrent. It had no entry at all, so a usenet user saw nothing to click."""
+    m = js.split("const SOURCE_CONFIG_ID_BY_SRC = {", 1)[1].split("};", 1)[0]
+    assert "usenet:" in m
+    assert "torrent:" in m
+
+
+def test_the_page_width_is_one_number():
+    """The nav row and the columns have to agree or the tabs and the content
+    below them line up differently."""
+    css = _strip_comments(_read("webui/static/style.css"))
+    assert "--settings-max-width" in css
+    for sel in ("#settings-page .settings-nav-row {", "#settings-page .settings-columns {"):
+        block = css.split(sel, 1)[1].split("}", 1)[0]
+        assert "var(--settings-max-width)" in block, sel
+        assert "920px" not in block
+
+
+def test_sources_gets_the_full_width_like_logs():
+    # A grid uses width by fitting more tiles; a form just stretches its inputs.
+    css = _strip_comments(_read("webui/static/style.css"))
+    assert 'data-stg="sources"' in css.split(":has(", 1)[1][:4000] or 'data-stg="sources"' in css
