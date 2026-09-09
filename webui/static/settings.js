@@ -4886,6 +4886,53 @@ function _getTagConfig(path) {
     return el ? el.checked : true;
 }
 
+// ── reading the form without destroying what is not on it ──────────────────
+// `getElementById('x')?.value || ''` looks defensive and is the opposite: when
+// the element is absent it writes an EMPTY STRING over the stored setting. The
+// server sets keys one at a time with no deep merge, so an empty string IS the
+// new value.
+//
+// That is not hypothetical. A broken edit removed the Indexers / Torrent /
+// Usenet block from index.html for a few minutes; the running server serves
+// that file per request, so the settings page rendered without those fields and
+// the next auto-save wiped three URLs out of the database. The API key survived
+// only because the server refuses to overwrite a stored secret with a blank.
+//
+// These return undefined for a missing element, and JSON.stringify drops
+// undefined-valued keys — so the key never reaches the server and the stored
+// value is left exactly as it was. A missing field now means "I have nothing to
+// say about this", which is the truth, instead of "set it to nothing".
+function _cfgStr(id, { trim = false, fallback } = {}) {
+    const el = document.getElementById(id);
+    if (!el) return undefined;              // absent -> say nothing about it
+    let v = el.value ?? '';
+    if (trim) v = String(v).trim();
+    return (v === '' && fallback !== undefined) ? fallback : v;
+}
+
+// `parseFloat(el?.value) || 0` has the same fault as the int version.
+function _cfgFloat(id, fallback) {
+    const el = document.getElementById(id);
+    if (!el) return undefined;
+    const n = parseFloat(el.value);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+// Same rule for numbers. `parseInt(el?.value) || 0` writes a ZERO over the
+// stored setting when the element is missing — which for a timeout or a bitrate
+// floor is not a blank, it is a different and usually harmful value.
+function _cfgInt(id, fallback) {
+    const el = document.getElementById(id);
+    if (!el) return undefined;
+    const n = parseInt(el.value, 10);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+function _cfgBool(id) {
+    const el = document.getElementById(id);
+    return el ? !!el.checked : undefined;
+}
+
 async function saveSettings(quiet = false) {
     // #879: refuse to save if the settings never loaded successfully — the form
     // is showing defaults, not the user's real config, so saving would wipe it.
@@ -4970,7 +5017,7 @@ async function saveSettings(quiet = false) {
     // Validate the optional "Playlist File Naming" template before saving: it's a
     // filename (no path separator) and must include $title — mirrors the server-side
     // rule so a broken value can't be stored. Empty = feature off (allowed).
-    const _plItemTpl = (document.getElementById('template-playlist-item')?.value || '').trim();
+    const _plItemTpl = (_cfgStr('template-playlist-item')).trim();
     if (_plItemTpl) {
         if (_plItemTpl.includes('/') || _plItemTpl.includes('\\')) {
             showToast('Playlist File Naming can\'t contain a folder separator ( / or \\ ) — it names the file, not a path.', 'error');
@@ -5017,13 +5064,13 @@ async function saveSettings(quiet = false) {
             api_key: document.getElementById('soulseek-api-key').value,
             download_path: document.getElementById('download-path').value,
             transfer_path: document.getElementById('transfer-path').value,
-            min_free_disk_gb: Math.max(0, parseFloat(document.getElementById('min-free-disk-gb')?.value) || 0),
+            min_free_disk_gb: _cfgFloat('min-free-disk-gb', 0),
             search_timeout: parseInt(document.getElementById('soulseek-search-timeout').value) || 60,
             search_timeout_buffer: parseInt(document.getElementById('soulseek-search-timeout-buffer').value) || 15,
             search_min_delay_seconds: parseInt(document.getElementById('soulseek-search-min-delay-seconds').value) || 0,
             min_peer_upload_speed: parseInt(document.getElementById('soulseek-min-peer-speed').value) || 0,
             max_peer_queue: parseInt(document.getElementById('soulseek-max-peer-queue').value) || 0,
-            preferred_version: document.getElementById('preferred-version')?.value || '',
+            preferred_version: _cfgStr('preferred-version'),
             download_timeout: (parseInt(document.getElementById('soulseek-download-timeout').value) || 10) * 60,
             auto_clear_searches: document.getElementById('soulseek-auto-clear-searches').checked
         },
@@ -5035,11 +5082,11 @@ async function saveSettings(quiet = false) {
         acoustid: {
             api_key: document.getElementById('acoustid-api-key').value,
             enabled: document.getElementById('acoustid-enabled').checked,
-            require_verified: document.getElementById('acoustid-require-verified')?.checked === true
+            require_verified: _cfgBool('acoustid-require-verified')
         },
         concerts: {
-            ticketmaster_api_key: document.getElementById('concerts-ticketmaster-api-key')?.value?.trim() || '',
-            setlistfm_api_key: document.getElementById('concerts-setlistfm-api-key')?.value?.trim() || ''
+            ticketmaster_api_key: _cfgStr('concerts-ticketmaster-api-key', { trim: true }),
+            setlistfm_api_key: _cfgStr('concerts-setlistfm-api-key', { trim: true })
         },
         lastfm: {
             api_key: document.getElementById('lastfm-api-key').value,
@@ -5068,17 +5115,17 @@ async function saveSettings(quiet = false) {
             spotify_free: metadataSource === 'spotify_free',
             // Independent opt-in: run the enrichment worker on Spotify Free even
             // when an official account is connected (spares the official quota).
-            spotify_free_enrichment: document.getElementById('metadata-spotify-free-enrichment')?.checked || false
+            spotify_free_enrichment: _cfgBool('metadata-spotify-free-enrichment')
         },
         experimental: {
-            jiosaavn_enabled: document.getElementById('experimental-jiosaavn-enabled')?.checked === true,
-            bandcamp_enabled: document.getElementById('experimental-bandcamp-enabled')?.checked === true,
+            jiosaavn_enabled: _cfgBool('experimental-jiosaavn-enabled'),
+            bandcamp_enabled: _cfgBool('experimental-bandcamp-enabled'),
         },
         image_cache: {
             // Server-side resizing is opt-in; the cache itself keeps whatever
             // it was already set to (on, for every install since it shipped).
-            thumbnails: document.getElementById('imgcache-thumbnails')?.checked === true,
-            max_cache_mb: parseInt(document.getElementById('imgcache-max-mb')?.value, 10) || 0,
+            thumbnails: _cfgBool('imgcache-thumbnails'),
+            max_cache_mb: _cfgInt('imgcache-max-mb', 0),
         },
         hydrabase: {
             url: document.getElementById('hydrabase-url').value,
@@ -5093,7 +5140,7 @@ async function saveSettings(quiet = false) {
             stream_source: document.getElementById('stream-source').value,
             max_concurrent: parseInt(document.getElementById('max-concurrent-downloads').value) || 3,
             // #1056 — streaming-source search timeout override; 0 = source defaults
-            source_search_timeout: parseInt(document.getElementById('source-search-timeout')?.value) || 0,
+            source_search_timeout: _cfgInt('source-search-timeout', 0),
             // Stalled-torrent knobs (rendered in the torrent client section).
             // UI is in MINUTES; stored in SECONDS. Blank/NaN → 10 min default;
             // 0 stays 0 (disabled).
@@ -5101,7 +5148,7 @@ async function saveSettings(quiet = false) {
                 const m = parseInt(document.getElementById('torrent-stall-timeout')?.value, 10);
                 return (Number.isFinite(m) && m >= 0 ? m : 10) * 60;
             })(),
-            torrent_stall_action: document.getElementById('torrent-stall-action')?.value || 'abandon',
+            torrent_stall_action: _cfgStr('torrent-stall-action', { fallback: 'abandon' }),
             // #1139: don't queue a release nobody is serving. Blank/NaN → 1;
             // 0 stays 0 (gate off).
             torrent_min_seeders: (() => {
@@ -5110,8 +5157,8 @@ async function saveSettings(quiet = false) {
             })(),
             // In-container path(s) where SoulSync reads finished torrent/usenet
             // downloads (#857). Rendered in the torrent/usenet client sections.
-            torrent_download_path: document.getElementById('torrent-download-path')?.value || '',
-            usenet_download_path: document.getElementById('usenet-download-path')?.value || '',
+            torrent_download_path: _cfgStr('torrent-download-path'),
+            usenet_download_path: _cfgStr('usenet-download-path'),
         },
         tidal_download: {
             // quality derived from the global Quality Profile (ranked targets); allow_fallback always true
@@ -5134,29 +5181,29 @@ async function saveSettings(quiet = false) {
             api_key: document.getElementById('lidarr-api-key').value || '',
         },
         prowlarr: {
-            url: document.getElementById('prowlarr-url')?.value || '',
-            api_key: document.getElementById('prowlarr-api-key')?.value || '',
-            indexer_ids: document.getElementById('prowlarr-indexer-ids')?.value || '',
+            url: _cfgStr('prowlarr-url'),
+            api_key: _cfgStr('prowlarr-api-key'),
+            indexer_ids: _cfgStr('prowlarr-indexer-ids'),
         },
         torrent_client: {
-            type: document.getElementById('torrent-client-type')?.value || 'qbittorrent',
-            url: document.getElementById('torrent-client-url')?.value || '',
-            username: document.getElementById('torrent-client-username')?.value || '',
-            password: document.getElementById('torrent-client-password')?.value || '',
-            category: document.getElementById('torrent-client-category')?.value || 'soulsync',
-            save_path: document.getElementById('torrent-client-save-path')?.value || '',
-            seed_ratio_goal: parseFloat(document.getElementById('music-seed-ratio')?.value) || 0,
-            seed_time_goal_hours: parseInt(document.getElementById('music-seed-hours')?.value, 10) || 0,
+            type: _cfgStr('torrent-client-type', { fallback: 'qbittorrent' }),
+            url: _cfgStr('torrent-client-url'),
+            username: _cfgStr('torrent-client-username'),
+            password: _cfgStr('torrent-client-password'),
+            category: _cfgStr('torrent-client-category', { fallback: 'soulsync' }),
+            save_path: _cfgStr('torrent-client-save-path'),
+            seed_ratio_goal: _cfgFloat('music-seed-ratio', 0),
+            seed_time_goal_hours: _cfgInt('music-seed-hours', 0),
             seed_remove_data: !!(document.getElementById('music-seed-remove-data') || {}).checked,
-            seed_mode: document.getElementById('music-seed-mode')?.value || 'soulsync',
+            seed_mode: _cfgStr('music-seed-mode', { fallback: 'soulsync' }),
         },
         usenet_client: {
-            type: document.getElementById('usenet-client-type')?.value || 'sabnzbd',
-            url: document.getElementById('usenet-client-url')?.value || '',
-            api_key: document.getElementById('usenet-client-api-key')?.value || '',
-            username: document.getElementById('usenet-client-username')?.value || '',
-            password: document.getElementById('usenet-client-password')?.value || '',
-            category: document.getElementById('usenet-client-category')?.value || 'soulsync',
+            type: _cfgStr('usenet-client-type', { fallback: 'sabnzbd' }),
+            url: _cfgStr('usenet-client-url'),
+            api_key: _cfgStr('usenet-client-api-key'),
+            username: _cfgStr('usenet-client-username'),
+            password: _cfgStr('usenet-client-password'),
+            category: _cfgStr('usenet-client-category', { fallback: 'soulsync' }),
         },
         soundcloud_download: {
             // No knobs yet — anonymous-only. Keeping the key present so
@@ -5220,11 +5267,11 @@ async function saveSettings(quiet = false) {
         wishlist: {
             allow_duplicate_tracks: document.getElementById('allow-duplicate-tracks').checked,
             ignore_ttl_days: Math.max(1, Math.min(365,
-                parseInt(document.getElementById('wishlist-ignore-ttl')?.value, 10) || 30)),
+                _cfgInt('wishlist-ignore-ttl', 30))),
         },
         playlist_sync: {
             create_backup: document.getElementById('create-backup').checked,
-            mode: document.getElementById('playlist-sync-mode')?.value || 'replace'
+            mode: _cfgStr('playlist-sync-mode', { fallback: 'replace' })
         },
         content_filter: {
             allow_explicit: document.getElementById('allow-explicit').checked,
@@ -5247,37 +5294,38 @@ async function saveSettings(quiet = false) {
         library: {
             music_paths: collectMusicPaths(),
             music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos',
-            podcasts_path: document.getElementById('podcasts-path')?.value || './podcasts',
-            audiobooks_path: document.getElementById('audiobooks-path')?.value || './audiobooks',
-            reorganize_preserve_casing: document.getElementById('reorganize-preserve-casing')?.checked !== false
+            podcasts_path: _cfgStr('podcasts-path', { fallback: './podcasts' }),
+            audiobooks_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),
+            reorganize_preserve_casing: _cfgBool('reorganize-preserve-casing')
         },
         podcasts: {
-            download_path: document.getElementById('podcasts-path')?.value || './podcasts',
-            media_format: document.getElementById('podcast-media-format')?.value || 'audio',
+            download_path: _cfgStr('podcasts-path', { fallback: './podcasts' }),
+            media_format: _cfgStr('podcast-media-format', { fallback: 'audio' }),
         },
         audiobooks: {
-            download_path: document.getElementById('audiobooks-path')?.value || './audiobooks',
+            download_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),
             download_source: {
-                mode: document.getElementById('audiobook-download-mode')?.value || 'hybrid',
+                mode: _cfgStr('audiobook-download-mode', { fallback: 'hybrid' }),
                 hybrid_order: _audiobookHybrid.filter(s => AUDIOBOOK_SOURCES.includes(s)),
             },
-            torrent_category: document.getElementById('audiobook-torrent-category')?.value.trim() || 'audiobooks',
+            torrent_category: _cfgStr('audiobook-torrent-category', { trim: true, fallback: 'audiobooks' }),
             // One category covers both: a book is tagged the same way whichever
             // client fetched it, and two fields to type the same word twice is
             // two chances to get it wrong.
-            usenet_category: document.getElementById('audiobook-torrent-category')?.value.trim() || 'audiobooks',
-            prowlarr_categories: splitList(document.getElementById('audiobook-prowlarr-categories')?.value)
+            usenet_category: _cfgStr('audiobook-torrent-category', { trim: true, fallback: 'audiobooks' }),
+            prowlarr_categories: (_cfgStr('audiobook-prowlarr-categories') === undefined
+                ? undefined : splitList(_cfgStr('audiobook-prowlarr-categories')))
                 .map(n => parseInt(n, 10))
                 .filter(n => Number.isFinite(n)),
             completeness_tolerance: Math.min(1, Math.max(0.1,
-                (parseInt(document.getElementById('audiobook-completeness-tolerance')?.value, 10) || 92) / 100)),
+                (_cfgInt('audiobook-completeness-tolerance', 92)) / 100)),
             staging_days: Math.min(90, Math.max(1,
-                parseInt(document.getElementById('audiobook-staging-days')?.value, 10) || 7)),
-            renumber_chapters: document.getElementById('audiobook-renumber-chapters')?.checked !== false,
-            embed_metadata: document.getElementById('audiobook-embed-metadata')?.checked !== false,
-            embed_artwork: document.getElementById('audiobook-embed-artwork')?.checked !== false,
-            save_artwork: document.getElementById('audiobook-save-artwork')?.checked !== false,
-            write_nfo: document.getElementById('audiobook-write-nfo')?.checked !== false,
+                _cfgInt('audiobook-staging-days', 7))),
+            renumber_chapters: _cfgBool('audiobook-renumber-chapters'),
+            embed_metadata: _cfgBool('audiobook-embed-metadata'),
+            embed_artwork: _cfgBool('audiobook-embed-artwork'),
+            save_artwork: _cfgBool('audiobook-save-artwork'),
+            write_nfo: _cfgBool('audiobook-write-nfo'),
             quality: {
                 // The chosen format leads; the default order follows behind it, so
                 // picking MP3 does not silently discard every other format.
@@ -5288,9 +5336,9 @@ async function saveSettings(quiet = false) {
                     return [first, ...rest];
                 })(),
                 min_bitrate_kbps: Math.max(0,
-                    parseInt(document.getElementById('audiobook-min-bitrate')?.value, 10) || 0),
+                    _cfgInt('audiobook-min-bitrate', 0)),
                 max_bitrate_kbps: Math.max(0,
-                    parseInt(document.getElementById('audiobook-max-bitrate')?.value, 10) || 0),
+                    _cfgInt('audiobook-max-bitrate', 0)),
                 allow_dramatized:
                     document.getElementById('audiobook-allow-dramatized')?.checked !== false,
             },
@@ -5298,12 +5346,12 @@ async function saveSettings(quiet = false) {
                 document.getElementById('audiobook-recycle-deletes')?.checked !== false,
             // 0 turns the bin off; it never means "erase everything now".
             recycle_keep_days: Math.min(365, Math.max(0,
-                parseInt(document.getElementById('audiobook-recycle-keep-days')?.value, 10) || 0)),
+                _cfgInt('audiobook-recycle-keep-days', 0))),
         },
         import: {
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,
-            folder_artist_override: document.getElementById('import-folder-artist-override')?.checked !== false,
-            transfer_is_permanent: document.getElementById('import-transfer-permanent')?.checked === true,
+            folder_artist_override: _cfgBool('import-folder-artist-override'),
+            transfer_is_permanent: _cfgBool('import-transfer-permanent'),
             staging_path: document.getElementById('staging-path').value || './Staging'
         },
         playlists: {
@@ -5319,7 +5367,7 @@ async function saveSettings(quiet = false) {
         },
         album_downloads: {
             // Atomic album publishing (#999) — opt-in, default off.
-            atomic_publish: document.getElementById('album-atomic-publish')?.checked === true
+            atomic_publish: _cfgBool('album-atomic-publish')
         },
         listening_stats: {
             enabled: document.getElementById('listening-stats-enabled').checked,
@@ -5337,13 +5385,13 @@ async function saveSettings(quiet = false) {
             entry_base_path: document.getElementById('m3u-entry-base-path').value || '',
             rewrite_from: document.getElementById('m3u-rewrite-from').value || '',
             rewrite_to: document.getElementById('m3u-rewrite-to').value || '',
-            library_enabled: document.getElementById('library-m3u-enabled')?.checked === true,
-            library_path: document.getElementById('library-m3u-path')?.value || ''
+            library_enabled: _cfgBool('library-m3u-enabled'),
+            library_path: _cfgStr('library-m3u-path')
         },
         ui_appearance: {
-            accent_preset: document.getElementById('accent-preset')?.value || '#1db954',
-            accent_color: document.getElementById('accent-custom-color')?.value || '#1db954',
-            sidebar_visualizer: document.getElementById('sidebar-visualizer-type')?.value || 'bars',
+            accent_preset: _cfgStr('accent-preset', { fallback: '#1db954' }),
+            accent_color: _cfgStr('accent-custom-color', { fallback: '#1db954' }),
+            sidebar_visualizer: _cfgStr('sidebar-visualizer-type', { fallback: 'bars' }),
             // Read the runtime flags / localStorage, not the checkboxes: while Max
             // Performance is on it locks those boxes visually-off, but the user's real
             // saved prefs live in the flags — so saving must not clobber them.
@@ -5355,19 +5403,19 @@ async function saveSettings(quiet = false) {
         youtube: {
             cookies_browser: document.getElementById('youtube-cookies-browser').value,
             download_delay: parseInt(document.getElementById('youtube-download-delay').value) || 3,
-            transcode: document.getElementById('youtube-transcode')?.checked || false,
-            transcode_codec: document.getElementById('youtube-transcode-codec')?.value || 'mp3',
-            transcode_bitrate: document.getElementById('youtube-transcode-bitrate')?.value || '320',
+            transcode: _cfgBool('youtube-transcode'),
+            transcode_codec: _cfgStr('youtube-transcode-codec', { fallback: 'mp3' }),
+            transcode_bitrate: _cfgStr('youtube-transcode-bitrate', { fallback: '320' }),
             // Raw cookies.txt blob — backend validates, writes it to a file, and stores
             // only the path (never echoed back). Blank = keep any already-saved file.
-            cookies_paste: document.getElementById('youtube-cookies-paste')?.value || '',
+            cookies_paste: _cfgStr('youtube-cookies-paste'),
         },
         security: {
-            require_pin_on_launch: document.getElementById('security-require-pin')?.checked || false,
-            cors_origins: document.getElementById('security-cors-origins')?.value?.trim() || '',
-            trust_reverse_proxy: document.getElementById('security-trust-proxy')?.checked || false,
-            auth_proxy_header: document.getElementById('security-auth-proxy-header')?.value?.trim() || '',
-            require_login: document.getElementById('security-require-login')?.checked || false,
+            require_pin_on_launch: _cfgBool('security-require-pin'),
+            cors_origins: _cfgStr('security-cors-origins', { trim: true }),
+            trust_reverse_proxy: _cfgBool('security-trust-proxy'),
+            auth_proxy_header: _cfgStr('security-auth-proxy-header', { trim: true }),
+            require_login: _cfgBool('security-require-login'),
         }
     };
 

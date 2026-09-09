@@ -130,9 +130,22 @@ def test_the_folder_path_input_can_be_unlocked(index_html, settings_js):
     assert "audiobooks: 'audiobooks-path'" in settings_js
 
 
+def _touch_count(js: str, element_id: str) -> int:
+    """How many places in settings.js reach this field.
+
+    The save side reads through _cfgStr/_cfgBool/_cfgInt/_cfgFloat rather than
+    getElementById now — those return undefined for a missing element so a field
+    that is not on the page can no longer blank the stored setting. Counting
+    only getElementById would report every saved field as write-only.
+    """
+    return (js.count(f"getElementById('{element_id}')")
+            + sum(js.count(f"_cfg{kind}('{element_id}'")
+                  for kind in ("Str", "Bool", "Int", "Float")))
+
+
 @pytest.mark.parametrize("element_id", ["audiobooks-path", "template-audiobook-path"])
 def test_settings_js_reads_and_writes_the_input(settings_js, element_id):
-    assert settings_js.count(f"getElementById('{element_id}')") >= 2
+    assert _touch_count(settings_js, element_id) >= 2
 
 
 def test_settings_js_persists_the_audiobook_fields(settings_js):
@@ -213,7 +226,7 @@ def test_every_audiobook_knob_has_an_input(index_html, element_id):
 def test_every_audiobook_knob_is_loaded_and_saved(settings_js, element_id):
     # Twice: once populating the form, once collecting it. One occurrence means
     # a field that either shows the wrong value or throws its away on save.
-    assert settings_js.count(f"getElementById('{element_id}')") >= 2
+    assert _touch_count(settings_js, element_id) >= 2
 
 
 @pytest.mark.parametrize("key", sorted(_EXPOSED))
