@@ -828,10 +828,18 @@ class YouTubeClient(DownloadSourcePlugin):
         kind = classify(error)
         self.last_error_reason = reason
         self.last_error_kind = kind
+        # Kept even when we have a nice sentence: when we do NOT, telling the
+        # user to go and read app.log for something we are holding in a variable
+        # is a poor trade for one line of screen space.
+        self.last_error_raw = str(error or "").strip()
         if reason:
             logger.warning("YouTube %s failed (%s): %s", what, kind, reason)
         else:
             logger.error("YouTube %s failed: %s", what, error)
+
+    def last_failure_raw(self) -> Optional[str]:
+        """The unclassified error text, for when we have nothing better."""
+        return getattr(self, 'last_error_raw', None)
 
     def last_failure_reason(self) -> Optional[str]:
         """The last classified failure, for status/UI copy. None when the last

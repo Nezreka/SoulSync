@@ -569,9 +569,15 @@ def run_service_test(service, test_config):
                 reason = yt.last_failure_reason()
                 if reason:
                     return False, f"YouTube download source not available. {reason}"
-                return False, ("YouTube download source not available. The probe "
-                               "failed without a reason yt-dlp could classify — "
-                               "check app.log for the raw error.")
+                # No classified reason. Show the error itself rather than
+                # sending somebody to a log file for a string we already have.
+                raw = yt.last_failure_raw()
+                if raw:
+                    raw = raw.replace("ERROR: ", "", 1)
+                    if len(raw) > 240:
+                        raw = raw[:237] + "..."
+                    return False, f"YouTube download source not available. {raw}"
+                return False, "YouTube download source not available."
             except Exception as e:
                 return False, f"YouTube connection error: {str(e)}"
         elif service == "soundcloud":

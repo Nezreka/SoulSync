@@ -376,3 +376,73 @@ def test_an_age_gate_is_untouched_by_the_cookie_context():
     # Different failure, different fix — cookies being present says nothing here.
     age = "ERROR: Sign in to confirm your age. This video may be inappropriate for some users."
     assert human_reason(age) == human_reason(age, has_cookies=True)
+
+
+# ---------------------------------------------------------------------------
+# Reading the cookie SOURCE can fail, and that is not "unclassifiable"
+# ---------------------------------------------------------------------------
+
+CHROME_MISSING = ('ERROR: could not find chrome cookies database in '
+                  '"/home/broque/.config/google-chrome"')
+
+
+def test_a_browser_cookie_store_we_cannot_read_is_classified():
+    """Selecting Chrome while SoulSync runs under WSL (or in Docker, or on a
+    headless box) means yt-dlp looks for a Linux Chrome profile that is not
+    there. It classified as TRANSIENT, so the settings test said "the probe
+    failed without a reason yt-dlp could classify — check app.log" about a
+    completely explained and entirely fixable problem."""
+    from core.youtube_errors import COOKIES, classify
+
+    assert classify(CHROME_MISSING) == COOKIES
+
+
+def test_the_advice_names_the_actual_constraint():
+    reason = human_reason(CHROME_MISSING) or ""
+    low = reason.lower()
+    assert "chrome" in low
+    assert "same machine" in low
+    # the fix that works on a server
+    assert "paste cookies.txt" in low
+    # and NOT the advice for a bot gate, which is a different failure
+    assert "not a bot" not in low
+
+
+def test_the_browser_advice_does_not_leak_into_a_bot_gate():
+    """The bot gate also mentions --cookies-from-browser. It must keep its own
+    BLOCKED reading, or #1126's conclusion gets undone."""
+    from core.youtube_errors import BLOCKED, classify
+
+    assert classify(BOT_GATE) == BLOCKED
+
+
+@pytest.mark.parametrize("error", [
+    "ERROR: ffmpeg not found",
+    "No such file or directory: /tmp/out.mp3",
+    "ERROR: [youtube] abc: Video unavailable",
+    "HTTP Error 429: Too Many Requests",
+])
+def test_unrelated_failures_are_not_read_as_cookie_problems(error):
+    """The first pass at this added a `no such file or directory` pattern, which
+    would have swallowed a missing ffmpeg and a bad output path as cookie
+    problems — the same over-broad matching this module exists to avoid."""
+    from core.youtube_errors import COOKIES, classify
+
+    assert classify(error) != COOKIES
+
+
+def test_an_unclassifiable_failure_shows_the_error_not_a_log_reference():
+    """"Check app.log for the raw error" is a poor trade for one line of screen
+    space when the string is already in a variable."""
+    src = (__import__("pathlib").Path(__file__).resolve().parents[1]
+           / "core/connection_test.py").read_text(encoding="utf-8", errors="ignore")
+    branch = src.split('elif service == "youtube":', 1)[1].split("elif service ==", 1)[0]
+    assert "last_failure_raw()" in branch
+    assert "check app.log" not in branch
+
+
+def test_the_client_keeps_the_raw_error():
+    src = (__import__("pathlib").Path(__file__).resolve().parents[1]
+           / "core/youtube_client.py").read_text(encoding="utf-8", errors="ignore")
+    assert "def last_failure_raw" in src
+    assert "self.last_error_raw" in src

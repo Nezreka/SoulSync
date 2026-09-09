@@ -103,6 +103,14 @@ _COOKIES_PATTERNS = (
     "cookie file",
     "login required",
     "account authentication is required",
+    # yt-dlp failing to READ the configured cookie source. Not the same thing as
+    # YouTube rejecting us, and it classified as TRANSIENT — so the settings
+    # test said "the probe failed without a reason yt-dlp could classify, check
+    # app.log" about a fully explained, entirely fixable problem.
+    "cookies database",
+    "unsupported browser",
+    "failed to decrypt",
+    "could not decrypt",
 )
 
 _THROTTLED_PATTERNS = (
@@ -218,6 +226,16 @@ def human_reason(error: Any, *, has_cookies: Optional[bool] = None) -> Optional[
         return ("Age-restricted — YouTube wants a signed-in adult account. Add browser "
                 "cookies in Settings to fetch this one.")
     if kind == COOKIES:
+        # Reading the cookie SOURCE failed, which is a different problem from
+        # YouTube refusing the request and has a different fix.
+        if "cookies database" in low or "unsupported browser" in low or "decrypt" in low:
+            browser = next((b for b in ("chrome", "firefox", "edge", "brave", "opera",
+                                        "chromium", "vivaldi", "safari") if b in low), "that browser")
+            return (f"SoulSync could not read {browser}'s cookies. Browser cookie mode only "
+                    f"works when the browser is installed on the SAME machine that runs "
+                    f"SoulSync and under the same user — so it cannot work in Docker, on a "
+                    f"headless server, or when SoulSync runs under WSL and the browser is a "
+                    f"Windows install. Use 'Paste cookies.txt' in Settings instead.")
         return ("YouTube asked us to prove we're not a bot. Add browser cookies in "
                 "Settings; updating yt-dlp alone won't clear this.")
     if kind == THROTTLED:
