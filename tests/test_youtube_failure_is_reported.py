@@ -572,3 +572,31 @@ def test_the_403_advice_still_names_ytdlp_when_cookies_exist():
     assert "restart" in low          # the update does nothing until one
     assert "po token" in low         # and cookies themselves can be the cause
     assert "none" in low
+
+
+def test_cookies_without_a_js_runtime_are_called_out():
+    """The combination that actively makes downloads worse, and the settings
+    page implies the opposite.
+
+    Signed-in requests need a PO token; solving one needs a JS runtime; a
+    signed-out request usually needs none. So on a box with no Deno, following
+    the "add cookies to fix the bot gate" advice turns working downloads into
+    403s. That is Docker and headless servers — and it is what made me wrongly
+    conclude, from a WSL venv with no Deno, that cookies break downloads
+    everywhere. They do not: Boulder's Windows box has Deno and his cookies work.
+    """
+    src = (__import__("pathlib").Path(__file__).resolve().parents[1]
+           / "core/youtube_client.py").read_text(encoding="utf-8", errors="ignore")
+    fn = src.split("def _warn_if_no_js_runtime(", 1)[1].split("\ndef ", 1)[0]
+    assert "_resolve_cookie_opts()" in fn, "the cookie state is not checked here"
+    assert "PO token" in fn
+    assert "back to None" in fn
+
+
+def test_the_retry_comment_does_not_overclaim():
+    """It said the signed-out retry "is the one that works", full stop. That was
+    measured in an environment with no JS runtime and does not generalise."""
+    src = (__import__("pathlib").Path(__file__).resolve().parents[1]
+           / "core/youtube_client.py").read_text(encoding="utf-8", errors="ignore")
+    chain = src.split("elif attempt >= 2:", 1)[1].split("break", 1)[0]
+    assert "not a cure" in chain

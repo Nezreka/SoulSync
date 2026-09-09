@@ -560,6 +560,23 @@ def _warn_if_no_js_runtime():
             "Install Deno (https://docs.deno.com/runtime/) and restart SoulSync. "
             "Windows: winget install DenoLand.Deno"
         )
+        # Cookies make this WORSE, which is the opposite of what the settings
+        # page implies. Signed-in requests need a PO token, solving one needs
+        # the runtime that is missing, and a signed-out request often does not
+        # need one at all — so on a box with no Deno, adding cookies to fix a
+        # bot gate turns working downloads into 403s. Said here because this is
+        # the one place that already knows the runtime is absent.
+        try:
+            if _resolve_cookie_opts():
+                logger.warning(
+                    "YouTube cookies are configured AND there is no JavaScript "
+                    "runtime. That combination is worse than no cookies: signed-in "
+                    "requests need a PO token, solving one needs Deno, and "
+                    "signed-out requests usually do not need one. Install Deno, or "
+                    "set Settings -> Sources -> YouTube cookies back to None."
+                )
+        except Exception as _cfg_err:   # noqa: BLE001 - a startup warning must never raise
+            logger.debug("cookie check during JS-runtime warning failed: %s", _cfg_err)
 
 
 class YouTubeClient(DownloadSourcePlugin):
@@ -1829,15 +1846,19 @@ class YouTubeClient(DownloadSourcePlugin):
                             }
                     elif attempt >= 2:
                         if extra:
-                            # Dropping the cookies IS the fix, and this attempt
-                            # used to undo it in the same breath by switching to
-                            # 'best'. Signed-in YouTube wants a PO token and 403s
-                            # the media URL without one, so the signed-out retry
-                            # is the one that works — proved on Boulder's install
-                            # with one video and one yt-dlp: cookies fail,
-                            # no-cookies + the original selector downloads, and
-                            # no-cookies + 'best' fails on format. Changing two
-                            # things at once meant the recovery never landed.
+                            # This attempt used to drop the cookies AND switch
+                            # the format to 'best' in the same breath. Changing
+                            # two things at once means a fallback cannot tell you
+                            # which one mattered, and here the second undid the
+                            # first: measured on one video with one yt-dlp,
+                            # no-cookies + the original selector downloaded and
+                            # no-cookies + 'best' failed on format.
+                            #
+                            # Dropping cookies helps when signed-in requests
+                            # cannot get a PO token, which needs a JS runtime
+                            # (see _warn_if_no_js_runtime). With Deno present
+                            # cookies are usually fine — so this is a fallback
+                            # worth trying, not a cure.
                             logger.info(
                                 "Retry %s/%s without cookies (keeping the format selector)",
                                 attempt + 1, max_retries,
