@@ -74,20 +74,30 @@ def parse_profile_id(request, default: int = 1) -> int:
     return default
 
 
-def download_permission_error(profile_id: int = 1):
-    """A 403 response when this profile may not download, otherwise ``None``.
+def download_permission_error():
+    """A 403 response when the current profile may not download, else ``None``.
 
     "Can download" is one switch per profile, not one per media type, so
     podcasts and audiobooks answer to the same checkbox music and video
     already answer to. Profile 1 is the admin and is always allowed.
 
-    Mirrors the music side's ``check_download_permission`` so callers read the
-    same: ``err = download_permission_error(pid)`` then ``if err: return err``.
-    It lives here rather than in web_server so the isolated blueprints can use
-    it without importing the app.
+    The profile is resolved from the SESSION, never from the request. There is
+    a parse_profile_id() helper that reads an X-Profile-Id header, and it is
+    the right tool for scoping data (whose wishlist am I reading) — but it is
+    caller-supplied, so using it to authorise an action means the caller votes
+    on its own permissions: omit the header and the check reads profile 1 and
+    waves everything through. It takes no argument for that reason. Tests
+    patch get_current_profile_id, not an override parameter.
+
+    Mirrors the music side's ``check_download_permission``, which resolves the
+    same way, so callers read the same: ``err = download_permission_error()``
+    then ``if err: return err``. It lives here rather than in web_server so the
+    isolated blueprints can use it without importing the app.
     """
+    from core.profile_context import get_current_profile_id
+
     try:
-        pid = int(profile_id or 1)
+        pid = int(get_current_profile_id() or 1)
     except (TypeError, ValueError):
         pid = 1
     if pid == 1:

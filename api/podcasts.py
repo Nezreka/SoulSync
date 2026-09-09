@@ -723,7 +723,7 @@ def create_podcasts_blueprint() -> Blueprint:
         # so a profile with downloads off could still fill the podcast folder.
         from .helpers import download_permission_error
 
-        denied = download_permission_error(_profile())
+        denied = download_permission_error()
         if denied is not None:
             return denied
 

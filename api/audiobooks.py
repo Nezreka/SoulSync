@@ -123,10 +123,14 @@ def _download_denied():
     The library and the download client are shared, so the answer does not
     depend on whose wishlist a book came from — only on whether the person
     pressing the button is allowed to spend the download client at all.
+
+    Deliberately NOT _profile(): that reads a header the caller controls, which
+    is right for picking whose wishlist to read and wrong for deciding what
+    they may do. The permission comes from the session.
     """
     from .helpers import download_permission_error
 
-    return download_permission_error(_profile())
+    return download_permission_error()
 
 
 def _owned_asins() -> set:

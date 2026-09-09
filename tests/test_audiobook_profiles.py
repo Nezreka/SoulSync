@@ -204,13 +204,16 @@ class _Profiles:
 
 
 def _permission(monkeypatch, rows, profile_id):
+    import core.profile_context as profile_context
     import database.music_database as music_db
     from api.helpers import download_permission_error
 
     monkeypatch.setattr(music_db, "get_database", lambda *a, **k: _Profiles(rows))
+    # the SESSION's profile, which is what the check is required to read
+    monkeypatch.setattr(profile_context, "get_current_profile_id", lambda: profile_id)
     # the refusal is a jsonify response, which needs an app to render into
     with Flask(__name__).app_context():
-        return download_permission_error(profile_id)
+        return download_permission_error()
 
 
 def test_a_profile_with_downloads_off_is_refused(monkeypatch):
@@ -245,9 +248,12 @@ def test_a_broken_lookup_fails_open(monkeypatch):
     def _explode(*_a, **_k):
         raise RuntimeError("db down")
 
+    import core.profile_context as profile_context
+
     monkeypatch.setattr(music_db, "get_database", _explode)
+    monkeypatch.setattr(profile_context, "get_current_profile_id", lambda: 2)
     with Flask(__name__).app_context():
-        assert download_permission_error(2) is None
+        assert download_permission_error() is None
 
 
 def test_a_missing_profile_is_allowed(monkeypatch):
@@ -271,7 +277,7 @@ def test_a_manual_wishlist_pass_asks_too():
 def test_the_podcast_download_asks_too():
     api = _read("api/podcasts.py")
     route = api.split('@bp.route("/download"', 1)[1].split("@bp.route", 1)[0]
-    assert "download_permission_error(_profile())" in route
+    assert "download_permission_error()" in route
 
 
 def test_the_catalogue_stays_open_to_everyone():
@@ -302,3 +308,39 @@ def test_the_permission_label_names_what_it_covers():
     assert "Can download (music, podcasts, audiobooks &amp; video)" in index
     init = _read("webui/static/init.js")
     assert "Can download (music, podcasts, audiobooks & video)" in init
+
+
+def test_the_permission_ignores_a_caller_supplied_profile_header(monkeypatch):
+    """The check must read the SESSION, never the request.
+
+    parse_profile_id() takes an X-Profile-Id header, and it is the right tool
+    for scoping data. Authorising with it lets the caller vote on its own
+    permissions: a restricted profile just omits the header, the check reads
+    profile 1, and the gate waves the download through. This is a regression
+    test for exactly that — it failed when the check took a profile argument
+    the routes filled in from the header.
+    """
+    import core.profile_context as profile_context
+    import database.music_database as music_db
+    from api.helpers import download_permission_error
+
+    monkeypatch.setattr(music_db, "get_database",
+                        lambda *a, **k: _Profiles({2: {"can_download": False}}))
+    monkeypatch.setattr(profile_context, "get_current_profile_id", lambda: 2)
+
+    app = Flask(__name__)
+    # the header claims to be the admin. the session says otherwise.
+    with app.test_request_context("/api/audiobooks/grab", headers={"X-Profile-Id": "1"}):
+        denied = download_permission_error()
+    assert denied is not None, "a header must not be able to buy a permission"
+    assert denied[1] == 403
+
+
+def test_the_permission_takes_no_caller_supplied_argument():
+    """Structural guard. An optional override parameter would re-open the hole
+    the moment somebody passed _profile() into it again."""
+    import inspect
+
+    from api.helpers import download_permission_error
+
+    assert list(inspect.signature(download_permission_error).parameters) == []
