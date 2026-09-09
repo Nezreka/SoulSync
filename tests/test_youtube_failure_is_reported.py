@@ -329,3 +329,50 @@ def test_the_summary_toast_carries_a_reason_not_just_a_count():
     assert "j.message || j.error" in conn, "the reason is still discarded on failure"
     toast = js.split("const parts = [`sources", 1)[1].split("showToast(", 1)[1]
     assert "detail" in toast
+
+
+# ---------------------------------------------------------------------------
+# #1233 — the advice has to depend on whether cookies exist
+# ---------------------------------------------------------------------------
+
+def test_a_server_with_no_cookies_is_still_told_to_update_ytdlp():
+    """Unchanged for every existing caller. `has_cookies` left unset keeps the
+    exact wording the video side and the failure summary already rely on."""
+    assert "yt-dlp" in (human_reason(BOT_GATE) or "")
+    assert "yt-dlp" in (human_reason(BOT_GATE, has_cookies=False) or "")
+
+
+def test_a_server_WITH_cookies_is_told_the_export_went_stale():
+    """This is fabian42069's actual situation, twice over.
+
+    He pasted cookies, was told to update yt-dlp, re-exported instead, got a
+    couple of working days and came back. "Worked for a few days then stopped
+    and I changed nothing" is not an old yt-dlp — it is Google rotating the
+    session-refresh token behind an export taken from a browser he stayed
+    signed in to.
+    """
+    reason = human_reason(BOT_GATE, has_cookies=True) or ""
+    assert "yt-dlp" not in reason, "still sending him to the lever that did nothing"
+    low = reason.lower()
+    assert "stale" in low or "re-export" in low
+    # The bit that actually makes the next export last.
+    assert "private" in low or "incognito" in low
+    assert "without signing out" in low
+    # And the honest fallback, because it might genuinely be the IP.
+    assert "ip" in low
+
+
+def test_the_client_tells_the_classifier_whether_cookies_exist():
+    """A pure function cannot know, so the client has to say. Without this the
+    cookie-aware branch is unreachable in the only place it matters."""
+    src = (__import__("pathlib").Path(__file__).resolve().parents[1]
+           / "core/youtube_client.py").read_text(encoding="utf-8", errors="ignore")
+    record = src.split("def _record_failure(", 1)[1].split("\n    def ", 1)[0]
+    assert "has_cookies=has_cookies" in record
+    assert "_resolve_cookie_opts()" in record
+
+
+def test_an_age_gate_is_untouched_by_the_cookie_context():
+    # Different failure, different fix — cookies being present says nothing here.
+    age = "ERROR: Sign in to confirm your age. This video may be inappropriate for some users."
+    assert human_reason(age) == human_reason(age, has_cookies=True)

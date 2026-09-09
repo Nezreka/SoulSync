@@ -71,6 +71,45 @@ _ESSENTIAL_COOKIES = frozenset({
 _YTMUSIC_ORIGIN = "https://music.youtube.com"
 
 
+def cookie_setup_problem(
+    mode: Any,
+    cookiefile_path: str = "",
+    *,
+    cookiefile_exists: bool = False,
+) -> Optional[str]:
+    """Why the configured cookies will NOT be used, or ``None`` when they will.
+
+    ``build_youtube_cookie_opts`` returns ``{}`` for paste mode with a missing
+    file, which is the right call — a broken ``cookiefile`` arg is worse than
+    none. What was missing is anybody saying so. The dropdown still reads
+    "Paste cookies.txt", so Settings looks configured while every request goes
+    out signed-out, and the user is left arguing with a bot gate about cookies
+    they believe are in play.
+
+    Docker makes this the default outcome rather than an edge case: the path
+    lives in the database (a mounted volume) and the file lives in the config
+    folder (often NOT one), so an image pull takes the file and leaves the
+    setting. "It worked for a couple of days and then stopped, and I changed
+    nothing" is what that looks like from the outside.
+
+    Pure — the caller does the ``os.path.exists``, same as the builder.
+    """
+    if str(mode or "").strip() != PASTE_MODE:
+        return None
+    if not cookiefile_path:
+        return ("Settings has 'Paste cookies.txt' selected but no file was ever "
+                "saved, so YouTube requests are going out signed-out. Paste your "
+                "cookies.txt again in Settings -> YouTube.")
+    if not cookiefile_exists:
+        return (f"Settings has 'Paste cookies.txt' selected but the saved file is "
+                f"gone ({cookiefile_path}), so YouTube requests are going out "
+                f"signed-out. Paste your cookies.txt again in Settings -> YouTube. "
+                f"In Docker this happens when the config folder is not a mounted "
+                f"volume: the file dies with the container while the setting "
+                f"survives in the database.")
+    return None
+
+
 def build_youtube_cookie_opts(
     mode: Any,
     cookiefile_path: str = "",

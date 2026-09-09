@@ -41,6 +41,9 @@ from core.quality.selection import quality_meets_profile
 logger = get_logger("youtube_client")
 
 
+_COOKIE_PROBLEM_LOGGED = False
+
+
 def _resolve_cookie_opts() -> dict:
     """yt-dlp cookie options from Settings → YouTube: either a browser store OR a
     pasted cookies.txt. The 'Paste cookies.txt' dropdown value is the sentinel
@@ -49,9 +52,17 @@ def _resolve_cookie_opts() -> dict:
     custom'). Delegates to the shared, tested precedence in core.youtube_cookies."""
     from core.settings import config_manager
     from core.youtube_cookies import build_youtube_cookie_opts
+    from core.youtube_cookies import cookie_setup_problem
     mode = config_manager.get('youtube.cookies_browser', '')
     cookiefile = config_manager.get('youtube.cookies_file', '')
     exists = bool(cookiefile) and os.path.exists(cookiefile)
+    # Said once per process, not per request: a missing cookie file turns every
+    # YouTube call anonymous, and until now the only symptom was a bot gate.
+    global _COOKIE_PROBLEM_LOGGED
+    problem = cookie_setup_problem(mode, cookiefile, cookiefile_exists=exists)
+    if problem and not _COOKIE_PROBLEM_LOGGED:
+        _COOKIE_PROBLEM_LOGGED = True
+        logger.warning("YouTube cookies are configured but unusable: %s", problem)
     return build_youtube_cookie_opts(mode, cookiefile, cookiefile_exists=exists)
 
 
@@ -806,7 +817,14 @@ class YouTubeClient(DownloadSourcePlugin):
         happened is YouTube refusing us. The classifier is the same one the video
         side uses, so both halves of the app name the same failure the same way."""
         from core.youtube_errors import classify, human_reason
-        reason = human_reason(error)
+        # Whether cookies are configured changes what the advice should be, and
+        # it is the difference between telling somebody to update yt-dlp and
+        # telling them their export has gone stale (#1233).
+        try:
+            has_cookies = bool(_resolve_cookie_opts())
+        except Exception:      # noqa: BLE001 - never let the reporter be the thing that raises
+            has_cookies = None
+        reason = human_reason(error, has_cookies=has_cookies)
         kind = classify(error)
         self.last_error_reason = reason
         self.last_error_kind = kind

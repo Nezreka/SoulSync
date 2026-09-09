@@ -527,7 +527,24 @@ def run_service_test(service, test_config):
             # the whole point of the work done for #1126. Ask it, then say what
             # it said.
             try:
+                import os as _os
+
                 from core.youtube_client import YouTubeClient
+                from core.youtube_cookies import cookie_setup_problem
+
+                # Ask this BEFORE probing. Paste mode with a missing file falls
+                # back to anonymous silently, so the probe would come back with a
+                # bot gate and send the user off to fix cookies that were never
+                # being sent in the first place.
+                _mode = config_manager.get('youtube.cookies_browser', '')
+                _file = config_manager.get('youtube.cookies_file', '')
+                _problem = cookie_setup_problem(
+                    _mode, _file,
+                    cookiefile_exists=bool(_file) and _os.path.exists(_file),
+                )
+                if _problem:
+                    return False, _problem
+
                 yt = YouTubeClient()
                 if not yt.is_available():
                     return False, "YouTube unavailable — yt-dlp not installed."

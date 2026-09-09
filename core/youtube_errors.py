@@ -183,10 +183,21 @@ def classify(error: Any) -> str:
     return TRANSIENT
 
 
-def human_reason(error: Any) -> Optional[str]:
+def human_reason(error: Any, *, has_cookies: Optional[bool] = None) -> Optional[str]:
     """What to show the user instead of a raw yt-dlp traceback, or None when we
     have nothing better to say than the original. The 403 message names yt-dlp on
-    purpose — five identical 'Forbidden' rows tell you nothing actionable."""
+    purpose — five identical 'Forbidden' rows tell you nothing actionable.
+
+    ``has_cookies`` is whether cookies are actually configured, when the caller
+    knows. It changes the BLOCKED advice, and it has to: "update yt-dlp" is the
+    right lever for a server with no cookies at all and the WRONG one for
+    somebody who has already pasted them. fabian42069 was told to update yt-dlp
+    (#1126), re-exported his cookies twice instead, and came back a fortnight
+    later with #1233 saying it had worked for a couple of days and then stopped
+    again — which is the signature of the export itself going stale, not of an
+    old yt-dlp. Left as ``None`` the wording is unchanged, so every existing
+    caller keeps the message it already had.
+    """
     low = _clean(error)
     kind = classify(error)
     if kind == GONE:
@@ -217,6 +228,24 @@ def human_reason(error: Any) -> Optional[str]:
     if kind == DISK:
         return "Out of disk space. Free some room and this will go straight through."
     if kind == BLOCKED:
+        if has_cookies:
+            # Order matters here and it is not the obvious one. The instinct is
+            # to blame the cookies, but #1126 was this exact message with
+            # cookies configured, and re-exporting them twice changed nothing —
+            # it was the datacenter IP. Boulder has run pasted cookies for
+            # months on a home connection and never seen it, which fits: a
+            # residential IP is rarely bot-gated at all, so the cookies never
+            # have to carry anything.
+            #
+            # A stale export IS a real second cause (Google rotates
+            # __Secure-1PSIDTS, and a browser you stay signed in to keeps
+            # rotating it out from under the copy yt-dlp holds), so it is worth
+            # ruling out — cheaply, and second.
+            return ("YouTube refused us even though cookies are configured. On a "
+                    "server or VPS that is usually YouTube refusing the IP, which "
+                    "no cookie will fix. Rule out a stale export first: re-export "
+                    "from a private/incognito window and close it WITHOUT signing "
+                    "out. If fresh cookies change nothing, it is the IP.")
         return ("YouTube refused the download. This is almost always an out-of-date "
                 "yt-dlp — update it with: pip install -U yt-dlp")
     return None
