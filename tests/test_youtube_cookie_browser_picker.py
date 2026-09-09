@@ -97,3 +97,19 @@ def test_the_warning_has_somewhere_to_render():
 def test_the_picker_is_marked_on_load(js):
     # A user who never touches the dropdown still needs to see it.
     assert "markUnsupportedCookieBrowsers(!!(settings._environment" in js
+
+
+def test_the_help_text_points_at_something_that_works():
+    """It used to say browser mode works "when that browser is on the same
+    machine as SoulSync", which is true and, on Windows, useless: Chrome is on
+    the same machine and still cannot be read. Naming the two modes that DO
+    work is the difference between a fact and an instruction."""
+    index = _read("webui/index.html")
+    # up to the paste field: the warning div now sits between the select and
+    # the help text, so a 3-div window stops short of it
+    block = index.split('id="youtube-cookies-browser"', 1)[1].split('id="youtube-cookies-paste-group"', 1)[0]
+    low = block.lower()
+    assert "firefox" in low
+    assert "paste cookies.txt" in low
+    # and it should not imply cookies are required at all
+    assert "public videos download fine" in low
