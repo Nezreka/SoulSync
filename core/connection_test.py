@@ -566,7 +566,14 @@ def run_service_test(service, test_config):
                 # that first — it is the thing they can actually act on.
                 if _problem:
                     return False, f"YouTube download source not available. {_problem}"
+                # Re-read the classified reason with the browser the user actually
+                # picked. The client cannot always tell from the error text — a
+                # DPAPI failure names no browser at all.
                 reason = yt.last_failure_reason()
+                _raw_for_reason = getattr(yt, "last_failure_raw", None)
+                if callable(_raw_for_reason) and _raw_for_reason() and _mode and _mode != "custom":
+                    from core.youtube_errors import human_reason as _hr
+                    reason = _hr(_raw_for_reason(), has_cookies=True, cookie_source=_mode) or reason
                 if reason:
                     # Keep yt-dlp's own line alongside our explanation. Replacing
                     # a specific error with a general one is how the useless
@@ -575,7 +582,9 @@ def run_service_test(service, test_config):
                     # if the thing it was explaining is still on screen.
                     _raw_fn = getattr(yt, "last_failure_raw", None)
                     raw = (_raw_fn() if callable(_raw_fn) else "") or ""
-                    raw = raw.replace("ERROR: ", "", 1).strip()
+                    while raw.startswith("ERROR: "):
+                        raw = raw[7:]
+                    raw = raw.strip()
                     if raw and raw[:60].lower() not in reason.lower():
                         if len(raw) > 160:
                             raw = raw[:157] + "..."
@@ -586,7 +595,8 @@ def run_service_test(service, test_config):
                 _raw_fn = getattr(yt, "last_failure_raw", None)
                 raw = _raw_fn() if callable(_raw_fn) else None
                 if raw:
-                    raw = raw.replace("ERROR: ", "", 1)
+                    while raw.startswith("ERROR: "):
+                        raw = raw[7:]
                     if len(raw) > 240:
                         raw = raw[:237] + "..."
                     return False, f"YouTube download source not available. {raw}"

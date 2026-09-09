@@ -473,3 +473,57 @@ def test_the_client_keeps_the_raw_error():
            / "core/youtube_client.py").read_text(encoding="utf-8", errors="ignore")
     assert "def last_failure_raw" in src
     assert "self.last_error_raw" in src
+
+
+# ---------------------------------------------------------------------------
+# App-Bound Encryption — the actual cause, from Boulder's own machine
+# ---------------------------------------------------------------------------
+
+DPAPI = ("ERROR: ERROR: Failed to decrypt with DPAPI. "
+         "See https://github.com/yt-dlp/yt-dlp/issues/10927 for more info")
+
+
+def test_dpapi_is_named_precisely_not_hedged():
+    """Three candidate causes was the right answer while the cause was unknown.
+    It stopped being the right answer the moment the raw line came back saying
+    DPAPI: that IS Chromium's App-Bound Encryption, it cannot be configured
+    around, and closing the browser does not help."""
+    reason = human_reason(DPAPI, cookie_source="chrome") or ""
+    low = reason.lower()
+    assert "app-bound encryption" in low
+    assert "10927" in reason
+    assert "closing the browser will not help" in low
+    assert "usually one of" not in low       # the hedge must be gone here
+    assert "paste cookies.txt" in low
+
+
+def test_the_browser_is_named_from_what_the_user_picked():
+    """The DPAPI error contains no browser name, so sniffing the error text
+    produced "the browser's cookies" for somebody who had plainly selected
+    Chrome. The configured value is the reliable source."""
+    assert "Chrome's" in (human_reason(DPAPI, cookie_source="chrome") or "")
+    assert "Firefox's" in (human_reason(DPAPI, cookie_source="firefox") or "")
+
+
+def test_the_possessive_is_not_mangled():
+    # .title() on "chrome's" gives "Chrome'S".
+    for src in ("chrome", "edge", "brave"):
+        assert "'S " not in (human_reason(DPAPI, cookie_source=src) or "")
+
+
+def test_a_generic_cookie_store_failure_keeps_the_hedge():
+    """Only DPAPI is certain. A missing profile really could be any of three
+    things, and picking one is what got this wrong the first time."""
+    low = (human_reason(CHROME_MISSING, cookie_source="chrome") or "").lower()
+    assert "usually one of" in low
+    assert "app-bound" not in low
+
+
+def test_a_doubled_error_prefix_is_stripped():
+    """yt-dlp emitted "ERROR: ERROR: Failed to decrypt..." and a single
+    replace left one of them in the message."""
+    src = (__import__("pathlib").Path(__file__).resolve().parents[1]
+           / "core/connection_test.py").read_text(encoding="utf-8", errors="ignore")
+    branch = src.split('elif service == "youtube":', 1)[1].split("elif service ==", 1)[0]
+    assert 'while raw.startswith("ERROR: ")' in branch
+    assert 'raw.replace("ERROR: ", "", 1)' not in branch

@@ -111,6 +111,7 @@ _COOKIES_PATTERNS = (
     "unsupported browser",
     "failed to decrypt",
     "could not decrypt",
+    "dpapi",
 )
 
 _THROTTLED_PATTERNS = (
@@ -191,7 +192,8 @@ def classify(error: Any) -> str:
     return TRANSIENT
 
 
-def human_reason(error: Any, *, has_cookies: Optional[bool] = None) -> Optional[str]:
+def human_reason(error: Any, *, has_cookies: Optional[bool] = None,
+                 cookie_source: Optional[str] = None) -> Optional[str]:
     """What to show the user instead of a raw yt-dlp traceback, or None when we
     have nothing better to say than the original. The 403 message names yt-dlp on
     purpose — five identical 'Forbidden' rows tell you nothing actionable.
@@ -235,9 +237,25 @@ def human_reason(error: Any, *, has_cookies: Optional[bool] = None) -> Optional[
             # was wrong for the first person who read it — he was running on
             # Windows with Chrome open in front of him. List what it can be and
             # let the raw yt-dlp line, which the caller appends, decide.
-            named = next((b for b in ("chrome", "firefox", "edge", "brave", "opera",
-                                      "chromium", "vivaldi", "safari") if b in low), None)
+            # Prefer what the user CONFIGURED over sniffing the error text: the
+            # DPAPI failure names no browser at all, so sniffing produced "the
+            # browser's cookies" for somebody who had plainly picked Chrome.
+            named = (str(cookie_source).strip().lower() or None) if cookie_source else None
+            if not named:
+                named = next((b for b in ("chrome", "firefox", "edge", "brave", "opera",
+                                          "chromium", "vivaldi", "safari") if b in low), None)
             whose = f"{named.title()}'s" if named else "the browser's"
+
+            # A DPAPI failure is not one of three maybes. It IS Chromium's
+            # App-Bound Encryption, it cannot be configured around, and closing
+            # the browser does not help — so say that instead of a shrug.
+            if "dpapi" in low:
+                subject = f"{named.title()}'s" if named else "Those"
+                return (f"{subject} cookies are sealed with App-Bound Encryption, which "
+                        f"yt-dlp cannot read (yt-dlp issue 10927). Closing the browser will "
+                        f"not help and there is no setting that changes it. Use "
+                        f"'Paste cookies.txt' in Settings instead — export it with a "
+                        f"'Get cookies.txt LOCALLY' extension.")
             return (f"SoulSync could not read {whose} cookies. Usually one of: the browser "
                     f"is open and holding its cookie database (close it and retry); "
                     f"Chrome and Edge 127+ encrypt cookies in a way yt-dlp cannot read at "
