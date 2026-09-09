@@ -423,6 +423,17 @@ function initializeSettings() {
         settingsPage.querySelectorAll('input[type="text"], input[type="url"], input[type="password"], input[type="number"], input[type="range"]').forEach(input => {
             input.addEventListener('input', debouncedAutoSaveSettings);
         });
+        // Textareas were in NEITHER list, so nothing on the page auto-saved
+        // them. Paste a cookies.txt, click Test, and the test ran against the
+        // config as it was before the paste — the value only reached the server
+        // if something else happened to trigger a save. 'input' rather than
+        // 'change' because 'change' on a textarea waits for blur, and pasting
+        // then clicking a button inside the same panel never blurs it.
+        // The Hydrabase payload boxes are a dev console, not settings, and must
+        // not fire a full settings save on every keystroke.
+        settingsPage.querySelectorAll('textarea:not(.hydra-payload)').forEach(input => {
+            input.addEventListener('input', debouncedAutoSaveSettings);
+        });
         settingsPage.querySelectorAll('input[type="checkbox"], select').forEach(input => {
             input.addEventListener('change', debouncedAutoSaveSettings);
         });
@@ -7240,15 +7251,25 @@ async function loadYtdlpStatus() {
     try {
         const resp = await fetch('/api/ytdlp/status?channel=' + encodeURIComponent(channel));
         const d = await resp.json();
-        instEl.textContent = d.installed || 'Not installed';
+        // The running process keeps the yt-dlp it imported at startup, so after
+        // an update these two disagree until a restart. Saying only the loaded
+        // one made a SUCCESSFUL update read as "still behind", while the button
+        // said "already on the newest build" — both true, and together they made
+        // it look like the update had not worked.
+        instEl.textContent = d.restart_pending
+            ? `${d.installed} running — ${d.on_disk} installed, restart to finish`
+            : (d.installed || 'Not installed');
+        instEl.style.color = d.restart_pending ? '#ffb300' : '';
         // A PyPI outage must not read as "you are up to date" — say we could not
         // look, which is a different fact from "nothing newer exists".
         latEl.textContent = d.latest || (d.lookup_error ? "Couldn't check — no connection to PyPI" : 'Unknown');
         latEl.style.color = d.behind ? '#ffb300' : '';
         if (badge) {
-            badge.hidden = !d.behind;
+            badge.hidden = !(d.behind || d.restart_pending);
             badge.style.color = '#ffb300';
-            badge.title = d.behind ? 'A newer yt-dlp is available' : '';
+            badge.title = d.restart_pending
+                ? 'yt-dlp is updated on disk — restart SoulSync to use it'
+                : (d.behind ? 'A newer yt-dlp is available' : '');
         }
     } catch (e) {
         instEl.textContent = 'Unknown';

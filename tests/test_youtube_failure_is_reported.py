@@ -345,25 +345,24 @@ def test_a_server_with_no_cookies_is_still_told_to_update_ytdlp():
     assert "yt-dlp" in (human_reason(BOT_GATE, has_cookies=False) or "")
 
 
-def test_a_server_WITH_cookies_is_told_the_export_went_stale():
-    """This is fabian42069's actual situation, twice over.
+def test_a_server_WITH_cookies_gets_advice_that_fits_the_evidence():
+    """This test used to assert the stale-cookie-export theory: re-export from a
+    private window, close it without signing out. That theory was mine, it was
+    unproven, and Boulder's install disproved it — he had never had a working
+    cookie file at all, and his eventual 403s came from a 92-day-old yt-dlp plus
+    cookies YouTube wanted a PO token for.
 
-    He pasted cookies, was told to update yt-dlp, re-exported instead, got a
-    couple of working days and came back. "Worked for a few days then stopped
-    and I changed nothing" is not an old yt-dlp — it is Google rotating the
-    session-refresh token behind an export taken from a browser he stayed
-    signed in to.
+    So the advice names what has actually been observed to fix this, in order of
+    how often it does: update yt-dlp (and restart, which the update needs), then
+    turn cookies off, then the IP for server installs.
     """
     reason = human_reason(BOT_GATE, has_cookies=True) or ""
-    assert "yt-dlp" not in reason, "still sending him to the lever that did nothing"
     low = reason.lower()
-    assert "stale" in low or "re-export" in low
-    # The bit that actually makes the next export last.
-    assert "private" in low or "incognito" in low
-    assert "without signing out" in low
-    # And the honest fallback, because it might genuinely be the IP.
-    assert "ip" in low
-
+    assert "yt-dlp" in low
+    assert "restart" in low
+    assert "po token" in low
+    # the guess that got dropped
+    assert "private" not in low and "incognito" not in low
 
 def test_the_client_tells_the_classifier_whether_cookies_exist():
     """A pure function cannot know, so the client has to say. Without this the
@@ -527,3 +526,49 @@ def test_a_doubled_error_prefix_is_stripped():
     branch = src.split('elif service == "youtube":', 1)[1].split("elif service ==", 1)[0]
     assert 'while raw.startswith("ERROR: ")' in branch
     assert 'raw.replace("ERROR: ", "", 1)' not in branch
+
+
+# ---------------------------------------------------------------------------
+# The retry that dropped cookies and then undid itself
+# ---------------------------------------------------------------------------
+
+def test_the_cookie_dropping_retry_keeps_its_format():
+    """Proved on Boulder's install with one video and one yt-dlp:
+
+        cookies                    -> fails
+        no cookies, bestaudio/best -> DOWNLOADS
+        no cookies, 'best'         -> fails on format
+
+    The third attempt dropped the cookies (the fix) and switched the format to
+    'best' in the same breath (which defeats it), so the recovery never landed
+    and every download burned its whole retry budget."""
+    src = (__import__("pathlib").Path(__file__).resolve().parents[1]
+           / "core/youtube_client.py").read_text(encoding="utf-8", errors="ignore")
+    chain = src.split("elif attempt >= 2:", 1)[1].split("break", 1)[0]
+    cookie_path = chain.split("if extra:", 1)[1].split("else:", 1)[0]
+    assert "cookiefile" in cookie_path, "the retry no longer drops cookies"
+    assert "download_opts['format'] = 'best'" not in cookie_path, \
+        "the cookie-dropping retry changes the format again"
+
+
+def test_the_format_fallback_survives_when_there_are_no_cookies():
+    """With nothing to drop it is still the format fallback it always was."""
+    src = (__import__("pathlib").Path(__file__).resolve().parents[1]
+           / "core/youtube_client.py").read_text(encoding="utf-8", errors="ignore")
+    chain = src.split("elif attempt >= 2:", 1)[1].split("break", 1)[0]
+    no_cookie_path = chain.split("else:", 1)[1]
+    assert "download_opts['format'] = 'best'" in no_cookie_path
+
+
+def test_the_403_advice_still_names_ytdlp_when_cookies_exist():
+    """I removed this line this morning, reasoning that somebody who already has
+    cookies has been sent to the wrong lever. Then Boulder's own 403s turned out
+    to be a 92-day-old yt-dlp AND cookies YouTube wanted a PO token for — and the
+    advice that would have fixed it was the one I had just taken away."""
+    reason = human_reason("ERROR: unable to download video data: HTTP Error 403: Forbidden",
+                          has_cookies=True) or ""
+    low = reason.lower()
+    assert "yt-dlp" in low
+    assert "restart" in low          # the update does nothing until one
+    assert "po token" in low         # and cookies themselves can be the cause
+    assert "none" in low

@@ -103,10 +103,55 @@ def installed_version(importer: Optional[Callable] = None) -> Optional[str]:
         return None
 
 
+def version_on_disk(reader: Optional[Callable] = None) -> Optional[str]:
+    """The version pip has actually INSTALLED, read from its metadata rather
+    than from the imported module.
+
+    These two disagree for the whole window between updating and restarting,
+    and that gap is where the confusion lives: the panel reads the loaded module
+    and says "you are behind" while the button asks pip, gets "already
+    satisfied", and says "already on the newest build". Both are telling the
+    truth about different things. Reading each separately is what lets the panel
+    say the useful thing instead — update done, restart pending.
+    """
+    try:
+        if reader is not None:
+            return str(reader("yt-dlp") or "") or None
+        from importlib.metadata import version as _v   # noqa: PLC0415
+        return str(_v("yt-dlp") or "") or None
+    except Exception:   # noqa: BLE001 - not installed / no metadata
+        return None
+
+
+def _newer(candidate: Any, baseline: Any) -> bool:
+    """Is ``candidate`` a later yt-dlp than ``baseline``?
+
+    Padded to equal length before comparing, because the same build is spelled
+    two ways: ``yt_dlp.version.__version__`` is '2026.08.30.232658' while pip's
+    metadata for that identical wheel is '2026.8.30.232658.dev0'. Comparing the
+    raw tuples makes the second look newer than the first forever, which would
+    have parked a permanent "restart to finish" on every nightly install.
+    """
+    a, b = _version_key(candidate), _version_key(baseline)
+    width = max(len(a), len(b))
+    a += (0,) * (width - len(a))
+    b += (0,) * (width - len(b))
+    return a > b
+
+
+def restart_pending(loaded: Any, on_disk: Any) -> bool:
+    """True when a newer yt-dlp is on disk than the one this process is using."""
+    if not loaded or not on_disk:
+        return False
+    return _newer(on_disk, loaded)
+
+
 def is_behind(installed: Any, latest: Any) -> bool:
     if not installed or not latest:
         return False
-    return _version_key(latest) > _version_key(installed)
+    # Same padding problem: PyPI lists the nightly as '...dev0' and the loaded
+    # module reports it without, so a fully up-to-date nightly read as behind.
+    return _newer(latest, installed)
 
 
 def interpret_result(returncode: Any, stdout: Any = "", stderr: Any = "",

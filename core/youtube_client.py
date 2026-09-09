@@ -1828,16 +1828,27 @@ class YouTubeClient(DownloadSourcePlugin):
                                 'youtube': {'player_client': ['web_creator']},
                             }
                     elif attempt >= 2:
-                        download_opts['format'] = 'best'
                         if extra:
+                            # Dropping the cookies IS the fix, and this attempt
+                            # used to undo it in the same breath by switching to
+                            # 'best'. Signed-in YouTube wants a PO token and 403s
+                            # the media URL without one, so the signed-out retry
+                            # is the one that works — proved on Boulder's install
+                            # with one video and one yt-dlp: cookies fail,
+                            # no-cookies + the original selector downloads, and
+                            # no-cookies + 'best' fails on format. Changing two
+                            # things at once meant the recovery never landed.
                             logger.info(
-                                "Retry %s/%s with 'best' format (dropping cookies)",
+                                "Retry %s/%s without cookies (keeping the format selector)",
                                 attempt + 1, max_retries,
                             )
                             download_opts.pop('cookiefile', None)
                             download_opts.pop('cookiesfrombrowser', None)
                             download_opts.pop('extractor_args', None)
                         else:
+                            # Nothing to drop, so this is the format fallback it
+                            # always was: there were never cookies in play.
+                            download_opts['format'] = 'best'
                             logger.info(
                                 "Retry %s/%s with 'best' format",
                                 attempt + 1, max_retries,

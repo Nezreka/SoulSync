@@ -273,23 +273,21 @@ def human_reason(error: Any, *, has_cookies: Optional[bool] = None,
         return "Out of disk space. Free some room and this will go straight through."
     if kind == BLOCKED:
         if has_cookies:
-            # Order matters here and it is not the obvious one. The instinct is
-            # to blame the cookies, but #1126 was this exact message with
-            # cookies configured, and re-exporting them twice changed nothing —
-            # it was the datacenter IP. Boulder has run pasted cookies for
-            # months on a home connection and never seen it, which fits: a
-            # residential IP is rarely bot-gated at all, so the cookies never
-            # have to carry anything.
-            #
-            # A stale export IS a real second cause (Google rotates
-            # __Secure-1PSIDTS, and a browser you stay signed in to keeps
-            # rotating it out from under the copy yt-dlp holds), so it is worth
-            # ruling out — cheaply, and second.
-            return ("YouTube refused us even though cookies are configured. On a "
-                    "server or VPS that is usually YouTube refusing the IP, which "
-                    "no cookie will fix. Rule out a stale export first: re-export "
-                    "from a private/incognito window and close it WITHOUT signing "
-                    "out. If fresh cookies change nothing, it is the IP.")
+            # Do NOT drop the yt-dlp line here. I removed it this morning on the
+            # reasoning that somebody who already has cookies has been sent to
+            # the wrong lever — and then Boulder's own 403s turned out to be a
+            # 92-day-old yt-dlp plus cookies that YouTube wanted a PO token for.
+            # Both mattered, and the advice that would have fixed it was the one
+            # I had just taken away. "Has cookies" says nothing about whether
+            # yt-dlp is current.
+            return ("YouTube refused the download even though cookies are configured. "
+                    "Two things do this. An out-of-date yt-dlp is the common one — "
+                    "update it in Settings -> Advanced -> yt-dlp, and RESTART SoulSync "
+                    "afterwards, because the running process keeps the version it "
+                    "started with. The other is the cookies themselves: signed-in "
+                    "requests need a PO token that YouTube will not always issue, so "
+                    "setting cookies back to None often fixes downloads outright. On a "
+                    "server or VPS it can also simply be the IP being refused.")
         return ("YouTube refused the download. This is almost always an out-of-date "
                 "yt-dlp — update it with: pip install -U yt-dlp")
     return None

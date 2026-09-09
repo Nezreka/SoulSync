@@ -14066,16 +14066,24 @@ def ytdlp_status():
     than a guess. The PyPI lookup is best-effort — no network must never mean no
     version panel."""
     from core.ytdlp_update import (PYPI_URL, installed_version, is_behind,
-                                   normalize_channel, parse_pypi)
+                                   normalize_channel, parse_pypi, restart_pending,
+                                   version_on_disk)
     channel = normalize_channel(request.args.get('channel'))
     installed = installed_version()
+    on_disk = version_on_disk()
     latest, err = None, None
     try:
         import requests as _rq
         latest = parse_pypi(_rq.get(PYPI_URL, timeout=8).text, channel)
     except Exception as e:      # noqa: BLE001 - offline is a state, not an error page
         err = str(e)
+    # `installed` is what this process LOADED; `on_disk` is what pip has put
+    # there. They differ for the whole window between updating and restarting,
+    # and saying so is the difference between "you are behind" (which reads as
+    # "the update did not work") and "update done, restart to finish".
     return jsonify({'success': True, 'installed': installed, 'latest': latest,
+                    'on_disk': on_disk,
+                    'restart_pending': restart_pending(installed, on_disk),
                     'channel': channel, 'behind': is_behind(installed, latest),
                     'lookup_error': err})
 
