@@ -99,8 +99,8 @@ def test_the_sources_tab_shows_every_tile_on_both_sides(js):
 
 
 def test_the_shared_tabs_carry_no_side_gating(index):
-    """The Sources, Downloads and Library tabs are fully shared: identical
-    content on both sides. The invariant that keeps them that way is that nothing on either tab
+    """The Sources, Downloads, Library and Quality tabs are fully shared:
+    identical content on both sides. The invariant that keeps them that way is that nothing on either tab
     carries data-music-only or data-video-only.
 
     This is the rule that was actually broken before. A blanket CSS rule hid
@@ -123,7 +123,7 @@ def test_the_shared_tabs_carry_no_side_gating(index):
     for m in _re.finditer(r'<[^>]*data-(?:music|video)-only[^>]*>', markup):
         own = _re.search(r'data-stg="([a-z]+)"', m.group(0))
         tab = own.group(1) if own else tab_of(m.start())
-        if tab in ("sources", "downloads", "library"):
+        if tab in ("sources", "downloads", "library", "quality"):
             offenders.append((tab, m.group(0)[:88]))
     assert not offenders, f"side gating on a shared tab: {offenders}"
 
@@ -690,10 +690,19 @@ def test_the_library_tab_speaks_one_card_language():
             titles.append(re.sub(r"<[^>]+>", "", t.group(1)).strip())
 
     assert titles == [
-        "Paths &amp; Organization", "Video Folders", "Post-Processing",
-        "Video Organization", "Video Preferences", "Listening Stats",
-        "Discovery", "Import", "Filtering", "Playlists",
+        # files & folders
+        "Music Folders", "Music Organization", "Video Folders", "Video Organization",
+        # processing
+        "Post-Processing", "Import", "Filtering",
+        # your library
+        "Playlists", "Listening Stats", "Discovery", "Video Preferences",
     ], titles
+
+    # ...and they sit under three labelled groups. ten identical cards in a flat
+    # column is a list you scan by reading every label; three groups is a list
+    # you scan by skipping two of them.
+    groups = re.findall(r'<span class="stg-cardgroup-label">(.*?)</span>', markup)
+    assert groups == ["Files &amp; folders", "Processing", "Your library"], groups
 
     # no bare settings-group left stranded outside a card on this tab
     for m in re.finditer(r'<div class="settings-group"[^>]*data-stg="library"[^>]*>', markup):
@@ -827,4 +836,161 @@ def test_every_section_toggle_is_reachable_without_a_mouse(index, js):
     assert "e.key !== 'Enter'" in js, "no keyboard activation"
     assert "setAttribute('aria-expanded'" in js, "aria-expanded is never updated"
     assert "e.preventDefault()" in js, "Space would scroll the page instead of toggling"
+
+
+def test_library_headers_report_what_is_set_not_what_is_inside(index, js):
+    """Every library hint used to be a table-of-contents entry - "Metadata,
+    tags, conversion, lyrics" tells you what the section CONTAINS and nothing
+    about your install, so learning anything meant opening all ten cards. That
+    is the problem the Sources tab had before its tiles started showing state,
+    and showing state is what made that page work.
+
+    Each wired header now reports its own current value.
+
+    Two properties matter more than the wording:
+
+      * a fallback. if a summary cannot be computed the header shows its static
+        description again, so it degrades to the old behaviour rather than to a
+        blank gap.
+      * summaries are computed from the LIVE controls, never from a second copy
+        of the state. a summary that can disagree with the field below it is a
+        bug generator, and this page has already been bitten by exactly that
+        kind of drift twice (the download-mode select, the slskd form).
+    """
+    slots = re.findall(r'<span class="settings-section-hint"[^>]*data-stg-summary="([^"]+)"[^>]*>', index)
+    assert len(slots) >= 8, f"only {len(slots)} headers report live values"
+
+    for m in re.finditer(r'<span class="settings-section-hint"[^>]*data-stg-summary="[^"]+"[^>]*>', index):
+        assert 'data-stg-fallback="' in m.group(0), (
+            "no fallback - a header that cannot compute its summary would go blank"
+        )
+
+    # every wired key must have a matching computer, and vice versa
+    computed = set(re.findall(r"^\s*'([a-z-]+)': \(\) =>", js, re.M))
+    assert set(slots) <= computed, f"markup asks for summaries nothing computes: {set(slots) - computed}"
+    assert computed <= set(slots), f"computed but never shown: {computed - set(slots)}"
+
+    # and they read the real inputs rather than a cached copy of the settings
+    engine = js.split('const LIBRARY_SUMMARIES', 1)[1].split('function refreshLibrarySummaries', 1)[0]
+    assert 'getElementById' in engine
+    assert 'settings.' not in engine, "reading a settings object instead of the live fields"
+
+
+def test_a_failed_settings_load_does_not_summarise_an_empty_form(js):
+    """If the fetch fails the form is blank, and a blank form summarised reads as
+    "nothing enabled" - which is a confident lie about the user's config at the
+    exact moment they should be told to reload. The refresh therefore sits INSIDE
+    the try, alongside the other population, not in a finally."""
+    fn = js.split('async function loadSettingsData()', 1)[1]
+    # the loader has several NESTED try/catch blocks, so splitting on the first
+    # 'catch' stops long before the end of the success path. the OUTER catch -
+    # the last one - is the boundary that matters here.
+    body = fn.rsplit("} catch (error) {", 1)
+    assert len(body) > 1, "loader shape changed"
+    assert 'refreshLibrarySummaries()' in body[0], (
+        "summaries are refreshed outside the success path - a failed load would "
+        "report an empty form as real settings"
+    )
+    tail = body[1][:400]
+    assert 'refreshLibrarySummaries()' not in tail, (
+        "refreshed in the failure path too, which is the thing this prevents"
+    )
+
+
+def test_the_two_sides_name_their_sections_the_same_way():
+    """Music used to have ONE card called "Paths & Organization" while video had
+    TWO, "Video Folders" and "Video Organization". That is not a naming quibble:
+    the combined name existed because the card was combined, so the same feature
+    looked like two different features depending on which half you were reading.
+
+    Folders is where things live. Organization is how they get named. Both sides
+    answer both questions under the same two words now, and this fails if one
+    side grows a section the other does not have.
+    """
+    index = _read("webui/index.html")
+    markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
+
+    titles = []
+    for m in re.finditer(r'<div class="settings-section-header[^"]*"[^>]*data-stg="library"[^>]*>', markup):
+        t = re.search(r"<h3[^>]*>(.*?)</h3>", markup[m.end():m.end() + 400], re.S)
+        if t:
+            titles.append(re.sub(r"<[^>]+>", "", t.group(1)).strip())
+
+    for noun in ("Folders", "Organization"):
+        music = f"Music {noun}"
+        video = f"Video {noun}"
+        assert music in titles, f"no {music} - the sides have drifted apart again"
+        assert video in titles, f"no {video} - the sides have drifted apart again"
+
+    # the combined name is what the split replaced; its return means the merge undid
+    assert "Paths &amp; Organization" not in titles
+
+
+def test_a_settings_row_reads_left_to_right_the_same_way_everywhere(index):
+    """One row grammar: what it is on the left, what it is set to on the right.
+
+    Selects and text inputs already landed on the trailing edge. Checkbox rows
+    did the opposite - the switch sat on the LEFT with its label trailing after
+    it - so a card holding both kinds read as two layouts stacked together, with
+    no single edge for the eye to run down.
+
+    Fixed in CSS with row-reverse rather than by rewriting ~100 labels: the
+    <input> is the first child, so reversing lays the text first and the control
+    last. That also survives the two shapes the markup uses (bare text, and text
+    wrapped in a span).
+    """
+    css = _read("webui/static/style.css")
+    m = re.search(
+        r'(?m)^#settings-page \.form-group > \.checkbox-label\s*\{([^}]*)\}', css)
+    assert m, "no rule for the checkbox row"
+    # strip comments FIRST: the note inside this very rule explains what
+    # row-reverse does, so matching the raw body passes on the prose even when
+    # the declaration has been deleted. this exact trap has now fooled three
+    # separate guards in this file.
+    rule = re.sub(r"/\*.*?\*/", "", m.group(1), flags=re.S)
+    assert "flex-direction: row-reverse" in rule, "the switch is back on the leading edge"
+    assert "justify-content: space-between" in rule
+
+
+def test_no_checkbox_opts_out_of_the_switch(index):
+    """178 checkboxes render as switches. Six carried inline width/height, which
+    beats any stylesheet, so they rendered as small squares among switches - the
+    kind of inconsistency that reads as a rendering bug rather than a choice.
+
+    Inline sizing on a checkbox is always a mistake here: the size belongs to the
+    control's styling, not to one instance of it.
+    """
+    offenders = re.findall(
+        r'<input type="checkbox"[^>]*style="[^"]*(?:width|height)[^"]*"[^>]*>', index)
+    assert not offenders, (
+        f"{len(offenders)} checkbox(es) override the switch size inline: "
+        f"{[o[:70] for o in offenders[:3]]}"
+    )
+
+
+def test_no_two_cards_share_a_name():
+    """Two cards were both called "Quality" - one the music profile, one the
+    video ladder. Nobody had noticed, because the tab hid the music half on the
+    video side, so the pair could never appear on screen together. Hiding things
+    does not remove a collision, it removes the evidence of one.
+
+    They are Music Quality and Video Quality now, matching Music Folders /
+    Video Folders. A duplicate title anywhere on the settings page means two
+    sections are claiming the same subject.
+    """
+    index = _read("webui/index.html")
+    markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
+
+    from collections import Counter
+    titles = []
+    for m in re.finditer(r'<div class="settings-section-header[^"]*"[^>]*>', markup):
+        t = re.search(r"<h3[^>]*>(.*?)</h3>", markup[m.end():m.end() + 400], re.S)
+        if t:
+            titles.append(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", t.group(1))).strip())
+
+    dupes = [t for t, n in Counter(titles).items() if n > 1]
+    assert not dupes, f"more than one card claims this title: {dupes}"
+
+    # and the pair that caused it stays explicit about which side it serves
+    assert "Music Quality" in titles and "Video Quality" in titles
 

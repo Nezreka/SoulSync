@@ -61419,6 +61419,15 @@ tr.tag-diff-same {
     border-radius: 0 !important;
     padding: 4px 0 !important;
     background: transparent !important;
+    /* one row grammar: what it is on the left, what it is set to on the right.
+       row-reverse moves the switch to the trailing edge - where every select and
+       input already sits - without touching any of the ~100 labels in the
+       markup, because the <input> is the first child. */
+    flex: 1 1 100%;
+    width: 100%;
+    flex-direction: row-reverse;
+    justify-content: space-between;
+    gap: 16px;
 }
 
 /* ── Tag service groups ── */
@@ -84973,3 +84982,61 @@ body.src-modal-open { overflow: hidden; }
    and .settings-group both set display, which beats the [hidden] attribute on
    its own, and some of these are toggled inline by their own scripts. */
 #settings-page [data-dupe-of] { display: none !important; }
+
+/* ── Settings: card groups ─────────────────────────────────────────────────────
+   Ten identical cards in a flat column is a list you scan by reading every
+   label. Three labelled groups is a list you scan by skipping two of them.
+   Same idea as the Sources tab's tile groups, same visual language. */
+.stg-cardgroup {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 30px 0 12px 2px;
+}
+.stg-cardgroup:first-of-type { margin-top: 6px; }
+.stg-cardgroup-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.5);
+}
+.stg-cardgroup-sub {
+    font-size: var(--stg-t-sub, 0.75rem);
+    color: rgba(255, 255, 255, 0.3);
+}
+
+/* A hint showing a LIVE value rather than a static description. Slightly
+   brighter, because it is information about this install rather than a caption
+   telling you what the section contains. */
+#settings-page .settings-section-hint.is-live {
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 500;
+}
+
+@media (max-width: 560px) {
+    .stg-cardgroup { margin: 22px 0 10px 2px; gap: 4px; }
+    /* the group's own subtitle is the first thing to go when space is short */
+    .stg-cardgroup-sub { display: none; }
+}
+
+/* ── Settings: one row grammar ─────────────────────────────────────────────────
+   A settings row reads: what it is on the left, what it is set to on the right.
+   Selects and text inputs already did that. Checkbox rows did the opposite -
+   the switch sat on the LEFT with its label trailing after it - so a card
+   holding both kinds read as two different layouts stacked on top of each other,
+   and the eye had no single edge to run down.
+
+   The switches themselves were already right; only their placement was not.
+   row-reverse puts the control on the trailing edge without touching a single
+   one of the ~100 labels in the markup: the <input> is the first child, so
+   reversing lays the text out first and the switch last. */
+/* the text half takes the slack so the switch parks on the edge, matching where
+   a select or an input lands in the row above it */
+#settings-page .form-group > .checkbox-label > input[type="checkbox"] { flex: none; }
+
+/* a checkbox row is one control, so it does not need the two-column padding a
+   label+control row uses */
+#settings-page .form-group:has(> .checkbox-label) { padding-right: 12px !important; }
+

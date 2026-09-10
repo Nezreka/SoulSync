@@ -336,13 +336,11 @@ body[data-side="video"] .settings-group[data-stg="connections"]:not([data-video-
    Both the rule and the data-shared escape hatch are gone; a shared tab needs
    no marker saying so. The per-tab rules below still apply to the tabs that
    genuinely differ (connections, quality, library). */
-/* The Quality tab's music sections (quality profile, import checks, conversion,
-   audio verification) are music-specific. The video side shows its OWN quality
-   sections here instead — Video Quality Profile + YouTube Quality, both moved
-   out of Downloads and carrying data-video-only. Hide every music quality bit. */
-body[data-side="video"] [data-stg="quality"]:not([data-video-only]) {
-    display: none !important;
-}
+/* The Quality tab is SHARED, like Sources, Downloads and Library. It used to
+   hide every music section on the video side, which meant two cards both called
+   "Quality" that no one could ever see side by side - so nobody noticed they
+   were the same word for two different things. They are Music Quality and Video
+   Quality now, and both sides see both. */
 
 /* ── Dashboard header: match music, minus the sweep animation ──────────── */
 /* The header reuses music's .dashboard-header markup/CSS for an identical look;

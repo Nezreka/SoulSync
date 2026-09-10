@@ -645,6 +645,112 @@ function validateFileOrganizationTemplates() {
     return errors;
 }
 
+// ── Library tab: what each section currently SAYS ──────────────────────────
+//
+// Ten collapsed cards whose hints all read like table-of-contents entries
+// ("Metadata, tags, conversion, lyrics") tell you what is inside a section but
+// nothing about your install. You had to open all ten to learn anything, which
+// is the same problem the Sources tab had before its tiles started showing
+// state - and showing state is what made that page work.
+//
+// So each header reports its own current value instead. The card still says
+// what it is; the hint now says what it is SET TO.
+//
+// Rules that keep this honest:
+//   * only report what is actually on the page. a field that has not rendered
+//     yet reports nothing rather than "off" - claiming a setting is disabled
+//     when you simply cannot see it is worse than staying quiet.
+//   * derive from the live controls, never from a second copy of the state.
+//     a summary that can disagree with the field below it is a bug generator.
+const LIBRARY_SUMMARIES = {
+    'library-paths': () => {
+        const named = ['download-path', 'transfer-path', 'podcasts-path', 'audiobooks-path']
+            .map(id => document.getElementById(id))
+            .filter(el => el && String(el.value || '').trim());
+        if (!named.length) return 'no folders set yet';
+        const tail = String(named[0].value).replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+        return named.length === 1 ? tail : `${tail} +${named.length - 1} more`;
+    },
+    'library-music-org': () => {
+        const on = document.getElementById('file-organization-enabled');
+        if (!on) return '';
+        if (!on.checked) return 'organizing off';
+        const tpl = (document.getElementById('template-album-path')?.value || '').trim();
+        // the template itself is the most useful thing to show - it is what the
+        // user is actually deciding here - but it is long, so show its shape
+        return tpl ? tpl.split('/').slice(-2).join('/') : 'organizing on';
+    },
+    'library-video-folders': () => {
+        const set = ['video-movies-path', 'video-tv-path', 'video-youtube-path']
+            .filter(id => (document.getElementById(id)?.value || '').trim()).length;
+        return set ? `${set} of 3 libraries set` : 'no libraries set yet';
+    },
+    'library-post-processing': () => {
+        const on = (id) => document.getElementById(id)?.checked;
+        const bits = [];
+        if (on('metadata-enabled')) bits.push('tagging');
+        if (on('embed-album-art')) bits.push('artwork');
+        return bits.length ? bits.join(' · ') : 'nothing enabled';
+    },
+    'library-filtering': () => {
+        const explicit = document.getElementById('allow-explicit');
+        const genre = document.getElementById('genre-whitelist-enabled');
+        const bits = [];
+        if (explicit) bits.push(explicit.checked ? 'explicit allowed' : 'explicit blocked');
+        if (genre?.checked) bits.push('genre whitelist on');
+        return bits.join(' · ');
+    },
+    'library-playlists': () => {
+        const bits = [];
+        if (document.getElementById('m3u-export-enabled')?.checked) bits.push('M3U export');
+        if (document.getElementById('library-m3u-enabled')?.checked) bits.push('library M3U');
+        return bits.length ? bits.join(' · ') : 'off';
+    },
+    'library-stats': () => {
+        const el = document.getElementById('listening-stats-enabled');
+        if (!el) return '';
+        return el.checked ? 'collecting play history' : 'off';
+    },
+    'library-discovery': () => {
+        const v = document.getElementById('discover-adventurousness')?.value;
+        if (v === undefined || v === null || v === '') return '';
+        const n = Number(v);
+        return n <= 25 ? 'plays it safe' : n <= 60 ? 'balanced' : 'adventurous';
+    },
+    'library-video-prefs': () => {
+        const region = document.getElementById('video-watch-region');
+        const label = region?.selectedOptions?.[0]?.textContent?.trim();
+        return label ? `where to watch: ${label}` : '';
+    },
+};
+
+function refreshLibrarySummaries() {
+    for (const [key, compute] of Object.entries(LIBRARY_SUMMARIES)) {
+        const slot = document.querySelector(`[data-stg-summary="${key}"]`);
+        if (!slot) continue;
+        let text = '';
+        try { text = compute() || ''; } catch (e) { text = ''; }
+        // an empty summary falls back to the static description rather than
+        // leaving a blank gap where a hint used to be
+        if (text) {
+            slot.textContent = text;
+            slot.classList.add('is-live');
+        } else {
+            slot.textContent = slot.dataset.stgFallback || '';
+            slot.classList.remove('is-live');
+        }
+    }
+}
+window.refreshLibrarySummaries = refreshLibrarySummaries;
+
+// recompute whenever anything on the page changes, not on a timer
+document.addEventListener('change', (e) => {
+    if (e.target.closest?.('#settings-page')) refreshLibrarySummaries();
+});
+document.addEventListener('input', (e) => {
+    if (e.target.closest?.('#settings-page [data-stg="library"]')) refreshLibrarySummaries();
+});
+
 // ── Collapsible section headers: keyboard + screen reader ──────────────────
 //
 // The 31 section toggles are <div onclick>. That works for a mouse and for
@@ -3039,6 +3145,13 @@ async function loadSettingsData() {
         // on top of it, and an untouched field re-masks on blur (round-trips the
         // sentinel, which the server treats as "keep existing").
         _wireRedactedSecrets();
+
+        // the library headers report live values, so they are only meaningful
+        // once the form actually holds them. deliberately inside the try: if the
+        // load failed there is nothing true to summarise, and the headers keep
+        // their static descriptions rather than reporting an empty form as
+        // "nothing enabled".
+        if (typeof refreshLibrarySummaries === 'function') refreshLibrarySummaries();
 
     } catch (error) {
         console.error('Error loading settings:', error);
