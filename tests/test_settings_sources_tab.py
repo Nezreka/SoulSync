@@ -701,7 +701,12 @@ def test_the_library_tab_speaks_one_card_language():
     # ...and they sit under three labelled groups. ten identical cards in a flat
     # column is a list you scan by reading every label; three groups is a list
     # you scan by skipping two of them.
-    groups = re.findall(r'<span class="stg-cardgroup-label">(.*?)</span>', markup)
+    # scoped to THIS tab: the same group markup is used on Connections now, and
+    # a global sweep would pick its heading up too
+    groups = [
+        re.search(r'<span class="stg-cardgroup-label">(.*?)</span>', markup[m.end():m.end() + 300]).group(1)
+        for m in re.finditer(r'<div class="stg-cardgroup"[^>]*data-stg="library"[^>]*>', markup)
+    ]
     assert groups == ["Files &amp; folders", "Processing", "Your library"], groups
 
     # no bare settings-group left stranded outside a card on this tab
@@ -993,4 +998,499 @@ def test_no_two_cards_share_a_name():
 
     # and the pair that caused it stays explicit about which side it serves
     assert "Music Quality" in titles and "Video Quality" in titles
+
+
+# ── Connections: services as tiles ─────────────────────────────────────────
+
+
+def test_every_service_has_a_handle_a_tile_can_use(index):
+    """22 services live in two "API Configuration" groups as nested accordions.
+    The tiles are built by querying for those frames, so each one needs a stable
+    attribute; a service without one is simply absent from the grid, with nothing
+    to say why.
+
+    The two sides use different attribute names - data-service for music,
+    data-video-service for video - which is how the renderer knows which side a
+    service belongs to without a second registry to keep in step.
+    """
+    music = re.findall(r'<div class="[^"]*api-service-frame[^"]*"[^>]*\bdata-service="([^"]+)"', index)
+    video = re.findall(r'<div class="[^"]*api-service-frame[^"]*"[^>]*\bdata-video-service="([^"]+)"', index)
+    assert len(music) >= 12, f"only {len(music)} music services carry a handle"
+    assert len(video) >= 10, f"only {len(video)} video services carry a handle"
+    assert not (set(music) & set(video)), "a service id is claimed by both sides"
+
+    # every framed service on the connections tab should be reachable
+    for m in re.finditer(r'<div class="[^"]*api-service-frame[^"]*stg-service[^"]*"([^>]*)>', index):
+        attrs = m.group(1)
+        assert 'data-service=' in attrs or 'data-video-service=' in attrs, (
+            f"service frame with no handle - it will not appear as a tile: {attrs[:70]}"
+        )
+
+
+def test_opening_a_service_moves_the_panel_and_never_clones_it(js):
+    """The forms are not rebuilt for the modal - the real panel is MOVED into it.
+
+    That is not a style preference. Cloning would duplicate every field id in
+    that panel, and on this page a duplicated id is how a save reads one element
+    and writes another - which is exactly how live Prowlarr, torrent and usenet
+    URLs got blanked. innerHTML anywhere near the panel would do the same.
+
+    The panel also has to go home to the EXACT slot it came from, or the
+    accordion groups silently reorder themselves as services get opened.
+    """
+    open_fn = js.split('function openServiceModal(', 1)[1].split('\nwindow.', 1)[0]
+    assert 'appendChild(frame)' in open_fn, "the panel is not moved into the modal"
+    assert 'cloneNode' not in open_fn, "cloning would duplicate every id in the panel"
+    assert 'parent: frame.parentNode' in open_fn and 'next: frame.nextSibling' in open_fn, (
+        "the panel's original slot is not recorded - it cannot go back where it was"
+    )
+
+    close_fn = js.split('function closeServiceModal(', 1)[1].split('\nwindow.', 1)[0]
+    assert 'insertBefore(frame' in close_fn, "the panel is not restored to its slot"
+    # order matters: home first, hide second
+    assert close_fn.index('insertBefore') < close_fn.index('overlay.hidden = true'), (
+        "the panel is put back after the modal is hidden, so its ids sit inside a "
+        "hidden modal in between"
+    )
+
+
+def test_closing_a_service_lands_a_pending_key(js):
+    """An API key typed seconds before closing sits on the 2s autosave timer. If
+    the modal just closes, the field it belongs to has been moved out of view and
+    nothing on screen says a save is still pending - and a reload loses it."""
+    close_fn = js.split('function closeServiceModal(', 1)[1].split('\nwindow.', 1)[0]
+    assert 'clearTimeout(settingsAutoSaveTimer)' in close_fn
+    assert 'saveSettings(true)' in close_fn
+
+
+def test_a_service_tile_reports_the_live_field_not_a_cached_setting(js):
+    """Same rule as the library summaries: judge by the inputs on the page. A
+    tile that reads a cached settings object can disagree with the field behind
+    it, and "configured" is not a claim worth getting wrong about a credential.
+
+    A service with nothing to judge by reports nothing rather than "not set up" -
+    claiming a service is unconfigured because you cannot see its fields is worse
+    than staying quiet.
+    """
+    fn = js.split('function _svcConfigured(', 1)[1].split('\n}', 1)[0]
+    assert 'querySelectorAll' in fn and 'settings.' not in fn
+    assert 'return null' in fn, "no 'cannot tell' state - it will guess instead"
+
+
+def test_the_old_accordion_list_is_not_shown_alongside_the_tiles(index):
+    """The tiles REPLACE the two "API Configuration" accordion groups; they do
+    not sit above them. Leaving both on screen meant a video user saw a grid of
+    music service tiles and, directly underneath, the old video accordion list -
+    the same information twice in two different shapes.
+
+    The groups stay in the DOM because they are where a service panel lives
+    between visits to the modal: a tile lifts the panel out and puts it straight
+    back. They are hidden on the GROUP, so a panel moved into the modal is no
+    longer a descendant and renders normally.
+    """
+    assert index.count('data-svc-legacy') == 2, "the legacy groups moved or multiplied"
+
+    css = _read("webui/static/style.css")
+    rule = re.search(r'#settings-page \.settings-group\[data-svc-legacy\]\s*\{([^}]*)\}', css)
+    assert rule, "the legacy accordion groups are not hidden"
+    assert "display: none" in rule.group(1) and "!important" in rule.group(1)
+
+    # the panels themselves must NOT be individually hidden, or lifting one into
+    # the modal would show an empty dialog
+    assert 'api-service-frame[data-svc-legacy]' not in css
+
+
+def test_the_required_keys_note_survived_hiding_its_group(index):
+    """TMDB and TVDB are required, and the note saying so - crucially including
+    "both are free" - lived inside the group that is now hidden. The tiles show a
+    "required" chip, but a chip cannot say why, and someone who assumes it is a
+    paid feature just skips it and wonders why matching never works."""
+    at = index.index('stg-required-note')
+    enclosing = index.rfind('data-svc-legacy', 0, at)
+    # if the note were still inside the hidden group there would be no closing
+    # </div> between that group's tag and the note
+    assert enclosing == -1 or index.count('</div>', enclosing, at) > 0, (
+        "the required-keys note is inside the hidden group and will never be seen"
+    )
+    assert 'svc-required-note' in index
+
+
+def test_the_service_tabs_open_on_the_side_you_are_on(js):
+    """Defaulting to music meant a video user landed on a grid of Spotify and
+    Tidal tiles with their own TMDB key nowhere in sight. Same fix, and same
+    reasoning, as the download chain's media tabs."""
+    assert '_svcSyncKindToSide' in js
+    fn = js.split('function _svcSyncKindToSide(', 1)[1].split('\n}', 1)[0]
+    assert 'data-side' in fn and 'video' in fn
+
+    build = js.split('function buildServiceTiles(', 1)[1].split('\nwindow.', 1)[0]
+    assert '_svcSyncKindToSide()' in build, "the side default is never applied"
+
+    switch = js.split('function switchServiceKind(', 1)[1].split('\nwindow.', 1)[0]
+    assert '_svcKindChosen = true' in switch, "a manual pick would be overridden"
+
+
+def test_every_mapped_service_logo_actually_exists(js):
+    """A wrong path fails silently: the <img> 404s, onerror swaps in the
+    monogram, and the card looks deliberate while quietly having lost its
+    artwork. Nobody would ever notice from the page."""
+    import os
+    block = js.split('const SERVICE_LOGOS = {', 1)[1].split('};', 1)[0]
+    pairs = re.findall(r"(\w+):\s*'([^']+)'", block)
+    assert len(pairs) >= 13, f"only {len(pairs)} services mapped to artwork"
+    missing = [(svc, path) for svc, path in pairs
+               if not os.path.exists(str(_ROOT / 'webui') + path)]
+    assert not missing, f"logo paths that do not exist: {missing}"
+
+
+def test_a_service_without_artwork_still_looks_deliberate(js):
+    """Nine services have no brand art in the repo. A grey blob for each would
+    make the grid a list you have to read anyway, which defeats the point of a
+    grid. They get a monogram on their own brand colour instead.
+
+    The colour comes off the element as --svc-brand rather than out of a
+    stylesheet map, so a service added later picks its hue up with no CSS change.
+    """
+    meta = js.split('function _svcMeta(', 1)[1].split('\n}', 1)[0]
+    assert 'monogram' in meta, "no monogram fallback"
+    assert "replace(/[^A-Za-z0-9]/g, '')" in meta, (
+        "a name starting with punctuation would yield an empty monogram"
+    )
+    build = js.split('function buildServiceTiles(', 1)[1].split('\nwindow.', 1)[0]
+    assert '--svc-brand' in build, "the brand colour never reaches the card"
+    assert 'svc-monogram' in build
+
+    css = _read("webui/static/style.css")
+    # the tinted well lives on the shared container, not on the fallback: a card
+    # with artwork and a card with a monogram must be the same object with
+    # different contents, or the grid reads as two kinds of card
+    well = re.search(r'(?m)^\.svc-tile-art\s*\{([^}]*)\}', css)
+    assert well and 'var(--svc-brand)' in well.group(1), (
+        "the icon well is not brand-tinted on the shared container"
+    )
+    mono = re.search(r'(?m)^\.svc-monogram\s*\{([^}]*)\}', css)
+    assert mono and 'border-radius' not in mono.group(1), (
+        "the monogram has a well of its own again - that nests two squares"
+    )
+
+
+def test_the_service_grid_only_shows_actual_services(js):
+    """"Detail Pages" is a video-preferences panel on the LIBRARY tab that
+    happens to use the same accordion component. An unscoped query pulled it into
+    the Connections grid, where it appeared as a connection you could configure -
+    which it is not.
+
+    The grid is scoped to the connections tab, so a panel reusing this component
+    elsewhere cannot wander in.
+    """
+    fn = js.split('function _svcFrames(', 1)[1].split('\n}', 1)[0]
+    assert 'closest(' in fn and 'data-stg="connections"' in fn, (
+        "the service query is not scoped to the connections tab"
+    )
+
+
+def test_the_media_tab_owns_the_whole_connections_tab(index, js):
+    """The Services tabs moved only the tile grid. The server sections below kept
+    following body[data-side], so a music user clicking "Video" got video service
+    tiles sitting directly above their own MUSIC server settings - the tab said
+    one thing and the panel under it said another.
+
+    Both server sections are marked with the side they belong to, and the tab
+    decides which is on screen. The data-video-only marker stays: it still
+    describes whose settings these ARE, which is a different question from which
+    one is currently shown.
+    """
+    assert index.count('data-svc-side=') == 2, "the two server sections are not both marked"
+    assert 'data-svc-side="music"' in index and 'data-svc-side="video"' in index
+
+    build = js.split('function buildServiceTiles(', 1)[1].split('\nwindow.', 1)[0]
+    assert 'data-svc-side' in build and 'svc-side-active' in build, (
+        "switching tab does not move the server section with it"
+    )
+
+
+def test_the_server_override_can_actually_win():
+    """The rule it overrides lives in video-side.css, is loaded last, and carries
+    !important. A plain rule in style.css could never beat that no matter how it
+    was written - so the override lives in the same file, and uses an id so the
+    specificity wins outright rather than by a class count that could shift.
+
+    This is the exact trap that hid the download-chain widget from the video side
+    for weeks: a rule in one file quietly losing to a rule in another.
+    """
+    video_css = _read("webui/static/video/video-side.css")
+    rules = re.sub(r"/\*.*?\*/", "", video_css, flags=re.S)
+    assert '.settings-group[data-svc-side].svc-side-active' in rules, (
+        "the override is not in the file that loads last"
+    )
+    # Both halves need !important to beat the side-gating rule beside them.
+    # Matched by their exact selectors rather than "first occurrence + N chars":
+    # other rules use this selector now, and a positional slice silently starts
+    # measuring one of those instead.
+    hide = re.search(
+        r'#settings-page \.settings-group\[data-svc-side\]\s*\{([^}]*)\}', rules)
+    show = re.search(
+        r'#settings-page \.settings-group\[data-svc-side\]\.svc-side-active\s*\{([^}]*)\}', rules)
+    assert hide and 'display: none !important' in hide.group(1), (
+        "the hide half does not win against the side-gating rule"
+    )
+    assert show and 'display: block !important' in show.group(1), (
+        "the show half does not win, so the active tab's section stays hidden"
+    )
+
+
+def test_both_server_sections_use_the_same_copy_style(index):
+    """The video server section's description used .callback-help - 10px,
+    italic, off the type scale - while the music side's equivalent copy used
+    setting-help-text. Italic body copy was removed page-wide earlier because it
+    reads as a warning rather than as an explanation; this one had been missed
+    because the two sections could never be seen at the same time.
+    """
+    at = index.index('data-svc-side="video"')
+    d, seg = 0, None
+    for m in re.finditer(r"<(/?)div\b[^>]*?(/?)>", index[index.rfind("<div", 0, at):]):
+        if m.group(2) == "/":
+            continue
+        d += -1 if m.group(1) else 1
+        if d == 0:
+            start = index.rfind("<div", 0, at)
+            seg = index[start:start + m.end()]
+            break
+    assert seg, "could not read the video server section"
+    assert 'class="callback-help"' not in seg, (
+        "the video server copy is back on the off-scale italic class"
+    )
+
+
+def test_the_server_toggles_are_one_control_on_both_sides():
+    """Same button, same metrics, same focus ring - they are the same control
+    doing the same job, and the only reason they ever drifted is that the two
+    sections were never on screen together to be compared."""
+    css = _read("webui/static/style.css")
+    rule = re.search(
+        r'(?m)^#settings-page \.settings-group\[data-svc-side\] \.server-toggle-btn\s*\{([^}]*)\}', css)
+    assert rule, "the shared toggle styling is gone"
+    body = re.sub(r"/\*.*?\*/", "", rule.group(1), flags=re.S)
+    assert "border-radius" in body and "transition" in body
+
+    focus = re.search(
+        r'(?m)^#settings-page \.settings-group\[data-svc-side\] \.server-toggle-btn:focus-visible\s*\{([^}]*)\}', css)
+    assert focus and "outline" in focus.group(1), "no keyboard focus ring on the server toggles"
+
+
+def test_the_music_tab_shows_every_music_server_from_either_side():
+    """The video side downloads through Plex or Jellyfin only, so Navidrome and
+    SoulSync's own server are hidden there. Correct for VIDEO settings - wrong
+    for the Music tab, which is showing MUSIC settings and happens to be rendered
+    while the user stands on the video side.
+
+    The effect was quiet and bad: open your music settings from the video side
+    and you were offered two of your four servers, with nothing saying the list
+    had been trimmed. The tabs exist precisely so either side can manage the
+    other's settings, so the hiding rule needs an exception for the active music
+    section - the library pickers too, since those ARE the music ones.
+    """
+    css = _read("webui/static/video/video-side.css")
+    rules = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+
+    for toggle in ('#navidrome-toggle', '#soulsync-toggle'):
+        assert f'.settings-group[data-svc-side="music"].svc-side-active {toggle}' in rules, (
+            f"{toggle} is still hidden on the Music tab when viewed from the video side"
+        )
+    for picker in ('#plex-library-selector-container',
+                   '#jellyfin-library-selector-container',
+                   '#navidrome-folder-selector-container'):
+        assert f'.svc-side-active {picker}' in rules, (
+            f"{picker} is a MUSIC library picker and is still hidden on the Music tab"
+        )
+
+
+def test_a_server_row_is_one_setting_per_row(index):
+    """The video half packed two library selects and a caption into a single
+    form-group. A form-group is a flex ROW, so all three rendered on one line and
+    the caption came out looking like a heading.
+
+    One setting per row, same as everywhere else on the page.
+    """
+    at = index.index('video-library-selectors')
+    start = index.rfind('<div', 0, at)
+    window = index[start:start + 1400]
+    selects = re.findall(r'data-video-lib-select="(\w+)"', window)
+    assert set(selects) == {'movies', 'tv'}, selects
+
+    # each select must sit in its OWN form-group
+    for lib in ('movies', 'tv'):
+        pos = index.index(f'data-video-lib-select="{lib}"')
+        owner = index.rfind('<div class="form-group', 0, pos)
+        # no second select between that form-group opening and this one
+        between = index[owner:pos]
+        assert between.count('data-video-lib-select') == 0, (
+            f"the {lib} selector shares a row with another control"
+        )
+
+    # the caption is help text, not a row
+    assert 'setting-help-text video-library-note' in index
+
+
+def test_services_without_art_reuse_the_app_s_own_glyphs(js):
+    """Six video services have no brand art anywhere in the repo - OMDb,
+    fanart.tv, OpenSubtitles, Trakt, MDBList, Community Data - and a grid of
+    letter monograms among real logos reads as placeholders, not as icons.
+
+    The video dashboard ALREADY shows a glyph for most of these sources. Reusing
+    them keeps one vocabulary across the app: OMDb is the same star in both
+    places. Inventing icons here would have started a second, competing set.
+
+    The ones with no established glyph keep a monogram on their brand colour -
+    that is a deliberate floor, not an oversight.
+    """
+    index = _read("webui/index.html")
+    dash = set(re.findall(r'<span class="video-enrich-glyph"[^>]*>(.*?)</span>', index))
+    assert dash, "the dashboard glyphs this borrows from are gone"
+
+    block = js.split('const SERVICE_GLYPHS = {', 1)[1].split('};', 1)[0]
+    mapped = re.findall(r'^\s*(\w+):', block, re.M)
+    assert len(mapped) >= 5, f"only {len(mapped)} services reuse a dashboard glyph"
+    for svc in ('omdb', 'fanart', 'opensubtitles', 'trakt'):
+        assert svc in mapped, f"{svc} still falls back to a letter"
+
+    # order of preference: artwork, then the app's glyph, then a monogram
+    build = js.split('function buildServiceTiles(', 1)[1].split('\nwindow.', 1)[0]
+    assert 'm.glyph' in build and 'svc-monogram' in build
+    assert build.index('const fallback') < build.index('const art'), (
+        "the fallback is built after the art that depends on it"
+    )
+
+    css = _read("webui/static/style.css")
+    glyph = re.search(r'(?m)^\.svc-glyph\s*\{([^}]*)\}', css)
+    assert glyph, "no styling for the glyph"
+
+    # artwork, glyph and monogram all sit in ONE well on .svc-tile-art, so they
+    # cannot disagree about their box any more - which is what this used to have
+    # to check pair by pair. What matters now is that none of them re-grows a
+    # box of its own.
+    for sel in ('.svc-glyph', '.svc-monogram'):
+        body = re.search(r'(?m)^' + re.escape(sel) + r'\s*\{([^}]*)\}', css).group(1)
+        for prop in ('width', 'height', 'border-radius', 'background'):
+            # anchored to the start of a declaration: a bare substring check for
+            # "height" also matches "line-height", which the glyph legitimately sets
+            assert not re.search(r'(?m)^\s*' + re.escape(prop) + r'\s*:', body), (
+                f"{sel} sets {prop} - it is content inside the shared well, not a well"
+            )
+
+
+def test_a_caption_is_not_styled_as_a_heading():
+    """<small> inside a settings row shared one rule with .settings-subheading -
+    a heading class by its own comment - so every caption inherited heading
+    styling and rendered as bold uppercase. They are all full sentences:
+
+        "Select which music library to use (doesn't affect config file)"
+        "Use 0.1 for up to 10 requests/second on your server"
+
+    Uppercasing a sentence is shouting it. This is also what made the music and
+    video server sections read differently for the same content: one had its
+    caption in a <small> and the other did not.
+    """
+    css = _read("webui/static/style.css")
+
+    cap = re.search(r'(?m)^\.form-group small,\s*\n\.settings-group small\s*\{([^}]*)\}', css)
+    assert cap, "the caption rule is gone or merged back into a heading rule"
+    body = cap.group(1)
+    assert "text-transform: none" in body, "captions are being uppercased again"
+    assert "font-weight: 400" in body, "captions are being bolded like a heading"
+
+    # the heading class keeps its own treatment - it really is a heading
+    head = re.search(r'(?m)^\.settings-subheading\s*\{([^}]*)\}', css)
+    assert head and "text-transform: uppercase" in head.group(1)
+
+
+def test_the_server_toggles_are_the_same_size_on_both_sides():
+    """The video toggles were deliberately shrunk - a 32px logo cap - while the
+    music ones let .server-logo fill at width:100%. Same control, same job, two
+    sizes. Nobody compared them because the two sections could never be on
+    screen at once; the media tabs mean they can be now."""
+    video_css = _read("webui/static/video/video-side.css")
+    rules = re.sub(r"/\*.*?\*/", "", video_css, flags=re.S)
+
+    opt_out = re.search(
+        r'#settings-page \.settings-group\[data-svc-side\] \.server-logo\s*\{([^}]*)\}', rules)
+    assert opt_out, "the settings server sections do not opt out of the video shrink"
+    body = opt_out.group(1)
+    # both sides read ONE token rather than each hard-coding a size. the override
+    # has to live in this file - it loads last and is the only thing that can beat
+    # the [data-video-only] 32px cap - but the value belongs in style.css.
+    assert 'var(--svc-server-logo-max' in body, (
+        "the video override hard-codes a size instead of reading the shared token"
+    )
+    main_css = _read("webui/static/style.css")
+    assert '--svc-server-logo-max:' in main_css, "the shared token is not declared"
+
+
+def test_the_video_server_row_is_not_capped_narrower_than_music():
+    """[data-video-only] caps the server toggle row at 420px and the config at
+    560px. That was invisible while the two sections could never be compared -
+    now the media tabs put them one click apart, and two buttons floating in a
+    third of the width next to four that span it is the first thing you see.
+
+    The caps stay for any other data-video-only use of these blocks; the settings
+    server sections opt out.
+    """
+    css = _read("webui/static/video/video-side.css")
+    rules = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    m = re.search(
+        r'#settings-page \.settings-group\[data-svc-side\] \.server-toggle-container,\s*'
+        r'#settings-page \.settings-group\[data-svc-side\] \.server-config-container\s*\{([^}]*)\}',
+        rules)
+    assert m, "the settings server sections do not opt out of the video width caps"
+    assert "max-width: none" in m.group(1)
+
+
+def test_the_server_cards_have_a_ceiling():
+    """.server-logo is width:100% and .server-toggle-btn is flex:1, so with
+    nothing stopping them a four-server row grew ~450px-tall cards - a
+    poster-sized logo to answer "which server". Both axes are capped now.
+
+    The cap is a TOKEN read by two rules: the one in style.css for the music
+    side, and the one in video-side.css that has to exist because that file loads
+    last and is the only thing able to beat its own [data-video-only] caps. One
+    value, two readers - not two opinions.
+    """
+    css = _read("webui/static/style.css")
+    assert '--svc-server-logo-max:' in css and '--svc-server-btn-max:' in css
+
+    btn = re.search(
+        r'(?m)^#settings-page \.settings-group\[data-svc-side\] \.server-toggle-btn\s*\{([^}]*)\}', css)
+    assert btn, "no shared rule for the server toggles"
+    body = re.sub(r"/\*.*?\*/", "", btn.group(1), flags=re.S)
+    assert 'max-width: var(--svc-server-btn-max' in body, "the button has no width ceiling"
+
+    logo = re.search(
+        r'(?m)^#settings-page \.settings-group\[data-svc-side\] \.server-logo\s*\{([^}]*)\}', css)
+    assert logo and 'max-height: var(--svc-server-logo-max' in logo.group(1), (
+        "the logo has no height ceiling - the card will grow to whatever the art is"
+    )
+
+
+def test_the_connections_tab_survives_a_phone():
+    """The service tiles had narrow-screen rules; the server section had NONE.
+    Four buttons capped at 176px in a flex row do not fit a 360px screen - the
+    row either scrolled sideways or squeezed each logo into a sliver.
+
+    Also pins that the icon well shrinks on BOTH axes. It is a square, and an
+    earlier version set only height, which left a 48x40 box and icons that had
+    quietly stopped being square.
+    """
+    css = _read("webui/static/style.css")
+    blocks = re.findall(r'@media \(max-width: 560px\)\s*\{(.*?)\n\}', css, re.S)
+    assert blocks, "the phone breakpoint is gone"
+    narrow = "\n".join(blocks)
+
+    assert 'server-toggle-btn' in narrow, "the server toggles have no phone rules"
+    assert 'flex: 1 1 calc(50% - 4px)' in narrow, "the toggles do not wrap two per line"
+
+    art = re.search(r'\.svc-tile-art\s*\{([^}]*)\}', narrow)
+    assert art, "the icon well has no phone rule"
+    assert 'width:' in art.group(1) and 'height:' in art.group(1), (
+        "only one axis shrinks - the well stops being square"
+    )
 

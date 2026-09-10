@@ -2594,7 +2594,43 @@
                         <!-- Left Column - API Configuration -->
                         <div class="settings-left-column">
                             <!-- API Configuration -->
-                            <div class="settings-group" data-stg="connections" data-music-only>
+                            <!-- Services, as tiles. The two "API Configuration" groups below are still
+                                 the real forms - a tile opens its panel in a modal by MOVING the node,
+                                 never cloning it, so every id stays unique and the existing save/load
+                                 code keeps working untouched. Same contract the Sources tab uses.
+                            
+                                 22 services in nested accordions meant scrolling a wall of chevrons to
+                                 find out whether Last.fm was even configured. The tiles answer that
+                                 without opening anything. -->
+                            <div class="stg-cardgroup" data-stg="connections">
+                                <span class="stg-cardgroup-label">Services</span>
+                                <span class="stg-cardgroup-sub">Accounts and API keys SoulSync connects to</span>
+                            </div>
+                            <div class="dlchain-tabs" id="svc-tabs" role="tablist" data-stg="connections"></div>
+                                                        <div class="svc-required-note" data-stg="connections" data-video-only>
+<p class="stg-required-note">
+                                    <strong>TMDB &amp; TVDB are required.</strong> The video side matches, enriches and automates
+                                    everything from these &mdash; library matching, artwork, airing shows, collections &mdash; so nothing
+                                    works until both keys are set. Both are free. OMDb and fanart.tv below are optional extras.
+                                </p>
+                            </div>
+                            <div class="src-tile-grid" id="service-tile-grid" data-stg="connections"></div>
+                            <div class="src-modal-overlay" id="service-config-modal" data-stg="connections" hidden
+                                 onclick="if (event.target === this) closeServiceModal()">
+                                <div class="src-modal" role="dialog" aria-modal="true" aria-labelledby="svc-modal-title">
+                                    <div class="src-modal-header">
+                                        <span class="src-modal-icon" id="svc-modal-icon"></span>
+                                        <span class="src-modal-titles">
+                                            <h3 id="svc-modal-title">Service</h3>
+                                            <span class="src-modal-sub" id="svc-modal-sub"></span>
+                                        </span>
+                                        <button type="button" class="src-modal-close" onclick="closeServiceModal()" aria-label="Close">&times;</button>
+                                    </div>
+                                    <div class="src-modal-body" id="svc-modal-body"></div>
+                                </div>
+                            </div>
+
+                            <div class="settings-group" data-stg="connections" data-music-only data-svc-legacy>
                                 <h3>API Configuration <button class="stg-accordion-toggle" onclick="toggleAllServiceAccordions(this)">Expand All</button></h3>
 
                                 <!-- Metadata Source Selection (first — tells user what they're configuring for) -->
@@ -2962,7 +2998,7 @@
                                 </div>
 
                                 <!-- MusicBrainz server (optional; public API requires no credentials) -->
-                                <div class="api-service-frame stg-service" id="musicbrainz-server-settings">
+                                <div class="api-service-frame stg-service" id="musicbrainz-server-settings" data-service="musicbrainz">
                                     <div class="stg-service-header" onclick="toggleStgService(this)">
                                         <span class="stg-service-dot" style="color: #ba478f;"></span>
                                         <h4 class="service-title">MusicBrainz</h4>
@@ -3106,13 +3142,8 @@
                             <!-- Video API Configuration (placeholders; shown only on the video
                                  side in place of the music API services). Same structure as the
                                  music service frames above. -->
-                            <div class="settings-group" data-stg="connections" data-video-only>
+                            <div class="settings-group" data-stg="connections" data-video-only data-svc-legacy>
                                 <h3>API Configuration <button class="stg-accordion-toggle" onclick="toggleAllServiceAccordions(this)">Expand All</button></h3>
-                                <p class="stg-required-note">
-                                    <strong>TMDB &amp; TVDB are required.</strong> The video side matches, enriches and automates
-                                    everything from these &mdash; library matching, artwork, airing shows, collections &mdash; so nothing
-                                    works until both keys are set. Both are free. OMDb and fanart.tv below are optional extras.
-                                </p>
                                 <div class="api-service-frame stg-service" data-video-service="tmdb">
                                     <div class="stg-service-header" onclick="toggleStgService(this)">
                                         <span class="stg-service-dot" style="color: #01b4e4;"></span>
@@ -3297,9 +3328,9 @@
                                  the music settings but stored separately (video.db), so the
                                  two sides stay fully independent. Sits at the bottom of the
                                  Connections tab. -->
-                            <div class="settings-group" data-stg="connections" data-video-only>
+                            <div class="settings-group" data-stg="connections" data-video-only data-svc-side="video">
                                 <h3>Server Connection</h3>
-                                <p class="callback-help" style="margin: -4px 0 14px;">Pick the server the video side uses. Fields are pre-filled from your Music settings — edit them to point video at a different server without touching Music.</p>
+                                <p class="setting-help-text" style="margin: -4px 0 14px;">Pick the server the video side uses. Fields are pre-filled from your Music settings — edit them to point video at a different server without touching Music.</p>
 
                                 <div class="server-toggle-container">
                                     <button class="server-toggle-btn" type="button" data-video-server-toggle="plex">
@@ -3320,7 +3351,7 @@
                                         <label>Plex Token:</label>
                                         <input type="password" data-video-conn="plex-token" placeholder="X-Plex-Token">
                                     </div>
-                                    <div class="callback-help" data-video-conn-note="plex"></div>
+                                    <div class="setting-help-text" data-video-conn-note="plex"></div>
                                     <div class="form-actions">
                                         <button class="test-button" type="button" data-video-conn-test="plex">Test Connection</button>
                                     </div>
@@ -3336,7 +3367,7 @@
                                         <label>API Key:</label>
                                         <input type="password" data-video-conn="jellyfin-key" placeholder="Jellyfin API Key">
                                     </div>
-                                    <div class="callback-help" data-video-conn-note="jellyfin"></div>
+                                    <div class="setting-help-text" data-video-conn-note="jellyfin"></div>
                                     <div class="form-actions">
                                         <button class="test-button" type="button" data-video-conn-test="jellyfin">Test Connection</button>
                                     </div>
@@ -3350,14 +3381,20 @@
                                 </div>
 
                                 <!-- Which libraries on the chosen server the video side scans. -->
-                                <div class="form-group video-library-selectors" style="margin-top: 20px;">
+                                <!-- One row per setting, like every other row on this page. These were a
+                                     single form-group holding two label+select pairs and a caption, and a
+                                     form-group is a flex ROW - so both libraries and the note all landed on
+                                     one line and the caption rendered like a heading. -->
+                                <div class="form-group video-library-selectors">
                                     <label>Movies Library:</label>
                                     <select data-video-lib-select="movies"><option value="">Loading...</option></select>
-                                    <label style="margin-top: 12px;">TV Shows Library:</label>
+                                </div>
+                                <div class="form-group video-library-selectors">
+                                    <label>TV Shows Library:</label>
                                     <select data-video-lib-select="tv"><option value="">Loading...</option></select>
-                                    <small style="color: #999; font-size: 0.9em; display: block; margin-top: 5px;">
-                                        Which libraries the video side scans. <span data-video-lib-status></span>
-                                    </small>
+                                </div>
+                                <div class="setting-help-text video-library-note">
+                                    Which libraries the video side scans. <span data-video-lib-status></span>
                                 </div>
                             </div>
                             <!-- Video Library Organization — uses the SAME settings vocabulary as the
@@ -3372,7 +3409,7 @@
 
 
                             <!-- Server Connections -->
-                            <div class="settings-group" data-stg="connections">
+                            <div class="settings-group" data-stg="connections" data-svc-side="music">
                                 <h3>Server Connections</h3>
 
                                 <!-- Server Toggle Buttons -->

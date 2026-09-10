@@ -305,6 +305,13 @@ body[data-side="video"] #jellyfin-library-selector-container,
 body[data-side="video"] #navidrome-folder-selector-container {
     display: none !important;
 }
+/* same exception: these ARE the music library pickers, so the Music tab is
+   exactly where they belong, whichever side of the app you happen to be on */
+body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #plex-library-selector-container,
+body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #jellyfin-library-selector-container,
+body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #navidrome-folder-selector-container {
+    display: block !important;
+}
 /* Music-only settings sections (e.g. the music API services) are hidden on the
    video side; their video counterparts carry data-video-only. */
 body[data-side="video"] [data-music-only] {
@@ -2336,6 +2343,16 @@ a.vd-guest:hover .vd-guest-name { color: rgb(var(--vd-accent-rgb)); }
    is untouched). The "Video Source" panel governs which video server is used. */
 body[data-side="video"] #navidrome-toggle,
 body[data-side="video"] #soulsync-toggle { display: none; }
+/* ...except when the settings page's MUSIC tab is the one on screen. The video
+   side downloads through Plex or Jellyfin only, which is why these are hidden
+   here - but the Music tab is showing MUSIC settings, and a music library can
+   live on Navidrome or on SoulSync's own server. Hiding them there meant a user
+   on the video side could open their music settings and silently be offered two
+   of their four options, with nothing to say the list had been trimmed. */
+body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #navidrome-toggle,
+body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #soulsync-toggle {
+    display: flex;
+}
 
 
 /* ── Calendar — the Week Grid (every episode, air times, breathing cells) ──── */
@@ -6128,7 +6145,30 @@ body[data-side="video"] #gsearch-aura {
    The shared .server-logo is width:100% with flex:1 buttons and no size cap —
    fine in music's narrow column, gigantic in this wide settings group. */
 [data-video-only] .server-toggle-container { max-width: 420px; }
+/* ...but not in Settings. These caps are why the video server row stopped at
+   420px while the music one filled the column - two buttons floating in a third
+   of the width against four that spanned it. The media tabs put the two
+   sections one click apart, so the difference is now visible and pointless. */
+#settings-page .settings-group[data-svc-side] .server-toggle-container,
+#settings-page .settings-group[data-svc-side] .server-config-container {
+    max-width: none;
+}
 [data-video-only] .server-toggle-btn { padding: 12px 16px; }
+/* The video server toggles were deliberately shrunk (32px logo) while the music
+   ones let .server-logo fill at width:100%. Same control, same job, two sizes -
+   and since the two sections could never be seen together, nobody compared them.
+   The settings server sections opt out of the shrink and match music. Kept for
+   any other data-video-only use of this button outside settings. */
+#settings-page .settings-group[data-svc-side] .server-logo {
+    width: auto;
+    max-width: 100%;
+    /* the same token style.css uses, so both sides read one value. this rule
+       only exists because [data-video-only] .server-logo below carries a 32px
+       cap and this file loads last - it is an override, not a second opinion. */
+    max-height: var(--svc-server-logo-max, 44px);
+    object-fit: contain;
+}
+
 [data-video-only] .server-logo {
     width: auto; max-width: 120px; max-height: 32px; object-fit: contain;
 }
@@ -7479,3 +7519,16 @@ body[data-side="video"] #gsearch-aura {
     line-height: 1;
 }
 .vsr-context button:hover { background: rgba(255,255,255,0.18); color: #fff; }
+
+
+/* ── Connections: the media tab decides which server section is on screen ──────
+   The Services tabs used to move only the tile grid; the server sections below
+   still followed body[data-side], so a music user clicking "Video" got video
+   service tiles above their own MUSIC server settings, and the reverse on the
+   other side. The tab said one thing and the panel below it said another.
+
+   These rules live here, in the file loaded LAST, because the side-gating rule
+   they override is also here and carries !important. An id in the selector wins
+   the specificity regardless of how many classes the other rule has. */
+#settings-page .settings-group[data-svc-side] { display: none !important; }
+#settings-page .settings-group[data-svc-side].svc-side-active { display: block !important; }

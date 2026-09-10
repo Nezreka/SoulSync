@@ -645,6 +645,252 @@ function validateFileOrganizationTemplates() {
     return errors;
 }
 
+// ── Connections: services as tiles ─────────────────────────────────────────
+//
+// 22 services lived in two "API Configuration" groups as nested accordions, so
+// finding out whether Last.fm was even configured meant scrolling a wall of
+// chevrons and opening them one at a time. The tiles answer that without
+// opening anything, and the media tabs stop the music side and the video side
+// being one undifferentiated list.
+//
+// The forms themselves are NOT rebuilt. A tile opens the real panel in a modal
+// by MOVING the node - never cloning it - so every id stays unique and all the
+// existing save/load/test code keeps working with no idea this happened. Same
+// contract the Sources tab runs on, and the reason it is worth restating: a
+// clone would duplicate ~200 field ids, and on this page a duplicated id is how
+// a save writes the wrong value into a real credential.
+//
+// Where a panel goes home is remembered as (parent, nextSibling) rather than a
+// shared holding container. It restores to the exact slot it came from, so the
+// accordion groups below keep their order even after a service has been opened.
+const SERVICE_KINDS = {
+    music: { label: 'Music', attr: 'data-service' },
+    video: { label: 'Video', attr: 'data-video-service' },
+};
+
+// Real brand art wherever the repo already has it. A service with no logo gets
+// a monogram on its own colour rather than a grey blob - the point of the grid
+// is to be recognisable at a glance, and a row of identical blobs is a list you
+// have to read anyway.
+const SERVICE_LOGOS = {
+    spotify: '/static/img/brands/spotify.png',
+    itunes: '/static/img/brands/itunes.png',
+    deezer: '/static/img/brands/deezer.png',
+    discogs: '/static/img/brands/discogs.svg',
+    tidal: '/static/img/brands/tidal.svg',
+    qobuz: '/static/img/brands/qobuz.svg',
+    lastfm: '/static/img/brands/lastfm.png',
+    genius: '/static/img/brands/genius.png',
+    musicbrainz: '/static/img/brands/musicbrainz.png',
+    listenbrainz: '/static/img/brands/listenbrainz.png',
+    tmdb: '/static/img/brands/tmdb.svg',
+    tvdb: '/static/img/brands/tvdb.svg',
+    ytextras: '/static/img/brands/youtube.svg',
+};
+
+// Marks that are dark artwork and vanish on a dark tile, same list the download
+// chain keeps for the same reason.
+const INVERT_SERVICE_MARKS = new Set(['tidal', 'qobuz', 'discogs', 'tvdb']);
+
+// Services with no brand art in the repo. Rather than invent icons, these reuse
+// the glyphs the VIDEO DASHBOARD already shows for the same sources - so OMDb is
+// the same star in both places and the app keeps ONE vocabulary. A service with
+// neither a logo nor an established glyph falls back to its monogram; inventing
+// one here would be the start of a second, competing icon set.
+const SERVICE_GLYPHS = {
+    omdb: '\u2605',             // star - ratings, as on the dashboard
+    fanart: '\u{1F3A8}',        // palette - artwork
+    opensubtitles: '\u{1F4AC}', // speech bubble - subtitles
+    trakt: '\u2605',            // star - audience rating
+    nokey: '\u{1F4FA}',         // tv - community data (TVmaze)
+};
+
+// Follow the side you are standing on, exactly like the download chain does.
+// Defaulting to music meant a video user landed on a grid of Spotify and Tidal
+// tiles with their own TMDB key nowhere in sight.
+let _svcKind = 'music';
+let _svcKindChosen = false;
+
+function _svcSyncKindToSide() {
+    if (_svcKindChosen) return;
+    _svcKind = document.body.getAttribute('data-side') === 'video' ? 'video' : 'music';
+}
+let _svcOpen = null;          // { id, parent, next } for the panel currently lifted
+
+function _svcFrames(kind) {
+    const attr = SERVICE_KINDS[kind]?.attr;
+    if (!attr) return [];
+    // Scoped to the CONNECTIONS tab. Unscoped this also picked up "Detail Pages",
+    // a video-preferences panel that lives on the Library tab and is not a
+    // service at all - it appeared in the grid as a connection you could
+    // configure, which it is not.
+    return Array.from(document.querySelectorAll(`#settings-page .api-service-frame[${attr}]`))
+        .filter(f => f.closest('[data-stg="connections"]'));
+}
+
+function _svcMeta(frame) {
+    const title = frame.querySelector('.service-title')?.textContent?.trim() || '';
+    const id = frame.getAttribute('data-service') || frame.getAttribute('data-video-service') || '';
+    const logo = SERVICE_LOGOS[id]
+        || frame.querySelector('.video-svc-logo')?.getAttribute('src')
+        || null;
+    const dot = frame.querySelector('.stg-service-dot');
+    const colour = dot?.style?.color || '';
+    const required = !!frame.querySelector('.stg-req-pill');
+    // "Deezer (Favorites & Playlists)" is a name plus an explanation; the tile
+    // shows the name and the modal shows the rest.
+    const paren = title.indexOf('(');
+    const name = (paren > 0 ? title.slice(0, paren) : title).trim();
+    return {
+        id, name,
+        detail: paren > 0 ? title.slice(paren + 1).replace(/\)\s*$/, '').trim() : '',
+        logo, colour, required,
+        inverted: INVERT_SERVICE_MARKS.has(id),
+        glyph: SERVICE_GLYPHS[id] || null,
+        monogram: (name.replace(/[^A-Za-z0-9]/g, '')[0] || '?').toUpperCase(),
+    };
+}
+
+// A service counts as configured when it holds a non-empty credential. Read
+// from the live inputs, never from a cached settings object - the same rule the
+// library summaries follow, and for the same reason.
+function _svcConfigured(frame) {
+    const fields = frame.querySelectorAll('input[type="text"], input[type="password"], input[type="email"]');
+    if (fields.length) {
+        for (const f of fields) {
+            if (String(f.value || '').trim()) return true;
+        }
+        return false;
+    }
+    // keyless services (Community Data, YouTube Extras) are on/off instead
+    const toggles = frame.querySelectorAll('input[type="checkbox"]');
+    for (const t of toggles) {
+        if (t.checked) return true;
+    }
+    return null;          // nothing to judge by - say nothing rather than "off"
+}
+
+function buildServiceTiles() {
+    _svcSyncKindToSide();
+    const grid = document.getElementById('service-tile-grid');
+    const tabs = document.getElementById('svc-tabs');
+    if (!grid || !tabs) return;
+
+    tabs.innerHTML = Object.entries(SERVICE_KINDS).map(([k, spec]) =>
+        `<button type="button" role="tab" class="dlchain-tab${k === _svcKind ? ' active' : ''}" `
+        + `onclick="switchServiceKind('${k}')">${spec.label}</button>`).join('');
+
+    // the tab owns the whole tab, not just the grid: the matching side's server
+    // section comes with it, so what is on screen agrees with what the tab says
+    document.querySelectorAll('#settings-page .settings-group[data-svc-side]').forEach(g => {
+        g.classList.toggle('svc-side-active', g.getAttribute('data-svc-side') === _svcKind);
+    });
+
+    const frames = _svcFrames(_svcKind);
+    if (!frames.length) {
+        grid.innerHTML = '<div class="dlchain-empty">No services on this side yet.</div>';
+        return;
+    }
+    const attr = SERVICE_KINDS[_svcKind].attr;
+    grid.innerHTML = '<div class="svc-tile-row">' + frames.map(frame => {
+        const id = frame.getAttribute(attr);
+        const m = _svcMeta(frame);
+        const set = _svcConfigured(frame);
+        const state = set === null ? 'na' : (set ? 'ok' : 'warn');
+        // real artwork first, then the app's own glyph for that source, then a
+        // monogram. each step is a real fallback, not a placeholder.
+        const fallback = m.glyph
+            ? `<span class="svc-glyph">${m.glyph}</span>`
+            : `<span class="svc-monogram">${escapeHtml(m.monogram)}</span>`;
+        const art = m.logo
+            ? `<img class="svc-mark${m.inverted ? ' is-inverted' : ''}" src="${escapeHtml(m.logo)}" alt="" `
+              + `onerror="this.replaceWith(document.createRange().createContextualFragment(this.dataset.fb))" `
+              + `data-fb="${escapeHtml(fallback)}">`
+            : fallback;
+        const chip = m.required && !set
+            ? '<span class="src-tile-chip src-tile-chip--warn">required</span>'
+            : (set === null ? '<span class="src-tile-chip">no key needed</span>'
+               : set ? '<span class="src-tile-chip src-tile-chip--on">configured</span>'
+                     : '<span class="src-tile-chip">not set up</span>');
+        const brand = (m.colour || '').replace('#', '');
+        return `<button type="button" class="svc-tile${set ? ' is-active' : ''}" `
+             + `data-service-tile="${escapeHtml(id)}" onclick="openServiceModal('${escapeHtml(id)}')" `
+             + `style="--svc-brand: ${escapeHtml(m.colour || '#8a8a8a')}" `
+             + `title="Configure ${escapeHtml(m.name)}">`
+             + `<span class="src-tile-dot hss-${state}"></span>`
+             + `<span class="svc-tile-art">${art}</span>`
+             + `<span class="svc-tile-name">${escapeHtml(m.name)}</span>`
+             + chip + '</button>';
+    }).join('') + '</div>';
+}
+window.buildServiceTiles = buildServiceTiles;
+
+function switchServiceKind(kind) {
+    if (!SERVICE_KINDS[kind]) return;
+    _svcKindChosen = true;      // an explicit pick outranks the side default
+    _svcKind = kind;
+    buildServiceTiles();
+}
+window.switchServiceKind = switchServiceKind;
+
+function openServiceModal(id) {
+    const attr = SERVICE_KINDS[_svcKind].attr;
+    const frame = document.querySelector(`#settings-page .api-service-frame[${attr}="${CSS.escape(id)}"]`);
+    const overlay = document.getElementById('service-config-modal');
+    const body = document.getElementById('svc-modal-body');
+    if (!frame || !overlay || !body) return;
+    if (_svcOpen) closeServiceModal();          // never lift two panels at once
+
+    const m = _svcMeta(frame);
+    document.getElementById('svc-modal-title').textContent = m.name;
+    document.getElementById('svc-modal-sub').textContent = m.detail;
+    document.getElementById('svc-modal-icon').innerHTML = m.logo
+        ? `<img class="svc-mark${m.inverted ? ' is-inverted' : ''}" src="${escapeHtml(m.logo)}" alt="">`
+        : (m.glyph ? `<span class="svc-glyph">${m.glyph}</span>`
+                   : `<span class="svc-monogram">${escapeHtml(m.monogram)}</span>`);
+
+    // remember the exact slot so it goes back where it came from
+    _svcOpen = { id, attr, parent: frame.parentNode, next: frame.nextSibling };
+    body.appendChild(frame);
+    // the accordion inside is collapsed by default; in a modal it IS the content
+    frame.querySelector('.stg-service-body')?.style.setProperty('display', 'block');
+    overlay.hidden = false;
+    document.body.classList.add('src-modal-open');
+}
+window.openServiceModal = openServiceModal;
+
+function closeServiceModal() {
+    const overlay = document.getElementById('service-config-modal');
+    if (!overlay) return;
+    // home BEFORE hiding, so the panel's ids never sit inside a hidden modal
+    if (_svcOpen) {
+        const frame = document.querySelector(
+            `#settings-page .api-service-frame[${_svcOpen.attr}="${CSS.escape(_svcOpen.id)}"]`);
+        if (frame && _svcOpen.parent) {
+            frame.querySelector('.stg-service-body')?.style.removeProperty('display');
+            _svcOpen.parent.insertBefore(frame, _svcOpen.next);
+        }
+    }
+    _svcOpen = null;
+    overlay.hidden = true;
+    document.body.classList.remove('src-modal-open');
+    // an api key typed seconds before closing would otherwise sit on the 2s
+    // autosave timer with the modal gone and nothing on screen saying so
+    if (typeof settingsAutoSaveTimer !== 'undefined' && settingsAutoSaveTimer) {
+        clearTimeout(settingsAutoSaveTimer);
+        settingsAutoSaveTimer = null;
+        saveSettings(true);
+    }
+    buildServiceTiles();
+}
+window.closeServiceModal = closeServiceModal;
+
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const overlay = document.getElementById('service-config-modal');
+    if (overlay && !overlay.hidden) closeServiceModal();
+});
+
 // ── Library tab: what each section currently SAYS ──────────────────────────
 //
 // Ten collapsed cards whose hints all read like table-of-contents entries
@@ -3152,6 +3398,10 @@ async function loadSettingsData() {
         // their static descriptions rather than reporting an empty form as
         // "nothing enabled".
         if (typeof refreshLibrarySummaries === 'function') refreshLibrarySummaries();
+        // the service tiles report which credentials are actually filled in, so
+        // they are only truthful once the form holds them. same reason as above:
+        // summarising an empty form would report every service as "not set up".
+        if (typeof buildServiceTiles === 'function') buildServiceTiles();
 
     } catch (error) {
         console.error('Error loading settings:', error);

@@ -3894,8 +3894,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     margin-bottom: 12px;
 }
 
-.form-group small,
-.settings-group small,
 /* Groups a run of fields inside a settings section that belongs to one
  * subsystem. Without a marker the next person reads audiobook knobs sitting
  * in the organization section as global ones. */
@@ -3906,6 +3904,27 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: rgba(255, 255, 255, 0.62);
+}
+
+/* <small> inside a settings row is a CAPTION, and it used to share the rule
+   above with .settings-subheading - a heading class, by its own comment. So
+   every caption inherited heading styling and came out as bold uppercase.
+   They are all full sentences:
+       "Select which music library to use (doesn't affect config file)"
+       "Use 0.1 for up to 10 requests/second on your server"
+   Uppercasing a sentence is shouting it. Same treatment as the page's other
+   help text now, which is also what makes the music and video server sections
+   finally read alike - one had a <small> and the other did not. */
+.form-group small,
+.settings-group small {
+    display: block;
+    margin: 4px 0 2px;
+    font-size: var(--stg-t-sub, 0.75rem);
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.42);
 }
 
 /* The unit that follows a number input, e.g. % or days. */
@@ -84812,6 +84831,13 @@ body.src-modal-open { overflow: hidden; }
     --stg-t-label:   0.78rem;   /* a field label */
     --stg-t-sub:     0.75rem;   /* explanatory copy */
     --stg-t-micro:   0.66rem;   /* the small caps group labels */
+
+    /* Server-toggle sizing. Lives here as a token because the rule that has to
+       apply it on the VIDEO side is in video-side.css - that file loads last and
+       is the only place that can beat its own [data-video-only] caps. The value
+       stays in one place even though two rules read it. */
+    --svc-server-logo-max: 44px;
+    --svc-server-btn-max: 176px;
 }
 
 /* ── the behaviour group ── */
@@ -85040,3 +85066,262 @@ body.src-modal-open { overflow: hidden; }
    label+control row uses */
 #settings-page .form-group:has(> .checkbox-label) { padding-right: 12px !important; }
 
+/* ── Connections: service tiles ────────────────────────────────────────────────
+   Reuses the Sources tab's tile and modal classes outright rather than growing a
+   second look for the same idea. Only two things here are new: services without
+   a brand logo get a colour blob built from the dot colour the accordion already
+   carried, and an open panel is a plain block rather than a collapsed accordion. */
+/* ── Connections: service cards ────────────────────────────────────────────────
+   The mark carries the card. A row of tiles you have to READ is a list with
+   extra steps - you should recognise Spotify or Trakt before your eye reaches
+   the label. So the artwork gets the top two thirds and real size, and the name
+   sits under it as a caption.
+
+   Every card is tinted by its own brand colour, which the accordion already
+   carried as a dot. --svc-brand comes off the element, so a service added later
+   picks its own hue up with no stylesheet change. */
+.svc-tile-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(126px, 1fr));
+    gap: 12px;
+}
+.svc-tile {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 20px 12px 14px;
+    border: none;
+    border-radius: 16px;
+    cursor: pointer;
+    font-family: inherit;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.025)),
+        linear-gradient(160deg, color-mix(in srgb, var(--svc-brand) 16%, transparent), transparent 60%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06),
+                inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    transition: transform 140ms cubic-bezier(0.2, 0, 0, 1),
+                background 140ms cubic-bezier(0.2, 0, 0, 1),
+                box-shadow 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+.svc-tile:hover {
+    transform: translateY(-3px);
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.095), rgba(255, 255, 255, 0.04)),
+        linear-gradient(160deg, color-mix(in srgb, var(--svc-brand) 30%, transparent), transparent 62%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09),
+                inset 0 0 0 1px color-mix(in srgb, var(--svc-brand) 45%, transparent),
+                0 14px 30px -16px rgba(0, 0, 0, 1),
+                0 0 26px -10px color-mix(in srgb, var(--svc-brand) 60%, transparent);
+}
+.svc-tile:active { transform: translateY(-1px) scale(0.99); }
+.svc-tile:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.75);
+    outline-offset: 2px;
+}
+/* configured is a state, so it reads in the ACCENT, not the brand - otherwise
+   "set up" would look different for every service and stop reading as a state */
+.svc-tile.is-active {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09),
+                inset 0 0 0 1px rgba(var(--accent-rgb), 0.3);
+}
+
+/* the mark: the biggest thing on the card */
+.svc-tile-art {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 13px;
+    /* the well belongs to the CARD, not to the fallback. before this, a service
+       with artwork drew its logo bare while one without drew a tinted square, so
+       the same grid contained two different kinds of object. */
+    background: linear-gradient(160deg,
+        color-mix(in srgb, var(--svc-brand) 30%, transparent),
+        color-mix(in srgb, var(--svc-brand) 12%, transparent));
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.13);
+}
+/* wide marks (TMDB, TVDB) and square ones (Spotify) both have to sit inside the
+   same box without one of them dominating, so cap both axes */
+.svc-tile-art .svc-mark { max-width: 32px; max-height: 30px; object-fit: contain; }
+.svc-tile-art .svc-mark.is-inverted { filter: brightness(0) invert(1); opacity: 0.95; }
+/* A source with no brand art but a glyph the video dashboard already uses for
+   it. Sized to sit exactly where a logo would, on the same tinted well, so a
+   grid mixing logos and glyphs still reads as one set of cards rather than as
+   some cards and some placeholders. */
+/* the glyph and the monogram are now CONTENT inside the shared well above,
+   not wells of their own - otherwise a card would have two nested squares */
+.svc-glyph {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+    line-height: 1;
+}
+.src-modal-icon .svc-glyph { width: 30px; height: 30px; font-size: 1rem; border-radius: 9px; }
+.svc-monogram {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: #fff;
+}
+.svc-tile-name {
+    font-size: var(--stg-t-label, 0.78rem);
+    font-weight: 600;
+    letter-spacing: -0.006em;
+    color: rgba(255, 255, 255, 0.95);
+    text-align: center;
+    line-height: 1.25;
+}
+#settings-page .svc-tile .src-tile-chip { margin-top: -2px; }
+.src-modal-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(160deg,
+        color-mix(in srgb, var(--svc-brand, #8a8a8a) 30%, transparent),
+        color-mix(in srgb, var(--svc-brand, #8a8a8a) 12%, transparent));
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.13);
+}
+.src-modal-icon .svc-mark { max-width: 22px; max-height: 22px; object-fit: contain; }
+.src-modal-icon .svc-mark.is-inverted { filter: brightness(0) invert(1); }
+.src-modal-icon .svc-monogram,
+.src-modal-icon .svc-glyph { font-size: 0.95rem; }
+
+@media (max-width: 560px) {
+    .svc-tile-row { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 9px; }
+    .svc-tile { padding: 15px 8px 11px; gap: 8px; }
+    /* the well is a square, so BOTH axes shrink - setting only height left a
+       48x40 box and the icons stopped being square */
+    .svc-tile-art { width: 40px; height: 40px; border-radius: 11px; }
+    .svc-tile-art .svc-mark { max-width: 26px; max-height: 24px; }
+    .svc-glyph { font-size: 1.05rem; }
+    .svc-monogram { font-size: 1rem; }
+
+    /* Server toggles had NO narrow-screen rules at all: four capped-at-176px
+       buttons in a flex row do not fit a 360px screen, and the row scrolled
+       sideways or squeezed the logos into slivers. Two per line, and the logo
+       cap comes down with them. */
+    #settings-page .settings-group[data-svc-side] .server-toggle-container {
+        gap: 8px;
+    }
+    #settings-page .settings-group[data-svc-side] .server-toggle-btn {
+        flex: 1 1 calc(50% - 4px);
+        max-width: none;
+        min-height: 66px;
+        padding: 10px 12px;
+    }
+    #settings-page .settings-group[data-svc-side] .server-logo {
+        max-height: 30px;
+    }
+    /* label above control, so a URL field is not 60px wide next to its label */
+    #settings-page .settings-group[data-svc-side] .form-group > select,
+    #settings-page .settings-group[data-svc-side] .form-group > input {
+        margin-left: 0;
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+}
+#settings-page .src-modal-body .api-service-frame {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+}
+/* inside the modal the service IS the content, so its own header would just be
+   the title repeated under the title */
+#settings-page .src-modal-body .stg-service-header { display: none; }
+#settings-page .src-modal-body .stg-service-body { display: block !important; }
+
+/* The two "API Configuration" accordion groups are the OLD entry point. The
+   tiles above replace them, but the groups have to stay in the DOM because they
+   are where the real service panels live between visits to the modal - a tile
+   lifts a panel out of here and puts it straight back.
+
+   Hidden rather than deleted, and hidden on the GROUP so that a panel moved into
+   the modal is no longer a descendant of it and shows normally. */
+#settings-page .settings-group[data-svc-legacy] { display: none !important; }
+
+/* The required-keys note, lifted out of the hidden legacy group. The tiles show
+   a "required" chip, but a chip cannot say WHY - and "both are free" is the part
+   that stops someone assuming it is a paid feature and skipping it. */
+.svc-required-note { margin: 0 0 14px; }
+.svc-required-note .stg-required-note { margin: 0; }
+
+/* ── Server sections: one look on both sides ───────────────────────────────────
+   The two server sections share their markup classes already, so most of this
+   is bringing the video half onto the same type scale and spacing rather than
+   restyling it. .callback-help - 10px italic, off the scale - was the one real
+   mismatch, and italic is the treatment removed page-wide earlier for reading
+   as a warning instead of as copy.
+
+   The remaining difference between the two is not style: the music side has
+   auto-detect, OAuth linking and a library picker that video simply does not
+   have. That is a feature gap and cannot be closed from a stylesheet. */
+#settings-page .settings-group[data-svc-side] .server-toggle-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 4px 0 16px;
+}
+#settings-page .settings-group[data-svc-side] .server-config-container {
+    padding: 0;
+    margin: 0;
+}
+/* the toggles are the same control on both sides, so they get the same metrics */
+#settings-page .settings-group[data-svc-side] .server-toggle-btn {
+    border-radius: 12px;
+    /* Capped. .server-logo is width:100% with flex:1 on the button, so with
+       nothing stopping it a four-server row grew ~450px-tall cards - a logo the
+       size of a poster to answer "which server". */
+    flex: 0 1 150px;
+    max-width: var(--svc-server-btn-max, 176px);
+    min-height: 88px;
+    padding: 14px 16px;
+    transition: transform 140ms cubic-bezier(0.2, 0, 0, 1),
+                box-shadow 140ms cubic-bezier(0.2, 0, 0, 1),
+                background 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+#settings-page .settings-group[data-svc-side] .server-logo {
+    width: auto;
+    max-width: 100%;
+    max-height: var(--svc-server-logo-max, 44px);
+    object-fit: contain;
+}
+#settings-page .settings-group[data-svc-side] .server-toggle-btn:hover {
+    transform: translateY(-2px);
+}
+#settings-page .settings-group[data-svc-side] .server-toggle-btn:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.75);
+    outline-offset: 2px;
+}
+/* the picked server, stated the same way on both sides */
+#settings-page .settings-group[data-svc-side] .server-toggle-btn.active {
+    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.45),
+                0 0 20px -8px rgba(var(--accent-rgb), 0.6);
+}
+
+/* Rows inside a server section follow the page's grammar: one setting per row,
+   label left, control right. The video half had two libraries and a caption in
+   ONE form-group - and a form-group is a flex row - so all three landed on a
+   single line with the caption rendering like a heading. */
+#settings-page .settings-group[data-svc-side] .form-group > select,
+#settings-page .settings-group[data-svc-side] .form-group > input {
+    margin-left: auto;
+}
+#settings-page .settings-group[data-svc-side] .video-library-note {
+    margin: 2px 0 0;
+}
+/* both sides describe their section the same way */
+#settings-page .settings-group[data-svc-side] > .setting-help-text {
+    margin: -2px 0 14px;
+    max-width: 74ch;
+}
