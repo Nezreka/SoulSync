@@ -23,6 +23,15 @@ from datetime import datetime, timezone
 from email.utils import format_datetime
 from typing import Any, Dict, List, Optional
 import xml.etree.ElementTree as ET
+from urllib.parse import urljoin
+
+from core.podcast_ingest_guard import (
+    MAX_OPML_BYTES,
+    MAX_REDIRECTS,
+    check_url,
+    has_fetchable_scheme,
+    parse_xml_safely,
+)
 
 import requests
 from flask import Blueprint, Response, jsonify, request
@@ -132,6 +141,39 @@ def show_to_dict(show: PodcastShow, include_episodes: bool = True) -> Dict[str, 
 
 
 # ---------------------------------------------------------------------------
+# Proxy helper
+# ---------------------------------------------------------------------------
+
+def _proxy_get_following_checked_redirects(url: str, headers: dict):
+    """GET a checked url for streaming, re-checking every redirect hop.
+
+    fetch_guarded in the ingest guard buffers its body, which is right for a
+    feed and wrong here: this proxy forwards Range requests so seeking inside
+    an episode works, and that means handing back the live response. Same rule
+    though - requests would follow a 302 to anywhere, so the hops are walked by
+    hand and each one goes back through check_url.
+
+    Returns the response, or None when a hop is refused or the chain is too long.
+    """
+    current = url
+    for _ in range(MAX_REDIRECTS + 1):
+        ok, reason = check_url(current)
+        if not ok:
+            logger.warning("audio-proxy refused a redirect hop: %s (%s)", current[:120], reason)
+            return None
+        resp = requests.get(current, headers=headers, stream=True,
+                            timeout=15, allow_redirects=False)
+        if resp.status_code not in (301, 302, 303, 307, 308):
+            return resp
+        location = resp.headers.get("Location") or ""
+        resp.close()
+        if not location:
+            return None
+        current = urljoin(current, location)
+    return None
+
+
+# ---------------------------------------------------------------------------
 # OPML Helpers
 # ---------------------------------------------------------------------------
 
@@ -150,7 +192,11 @@ def parse_opml_content(content: str | bytes) -> List[Dict[str, str]]:
         else:
             content_bytes = content
 
-        root = ET.fromstring(content_bytes)
+        # an opml file is uploaded, so it is untrusted the same way a feed is.
+        # parse_xml_safely refuses a DOCTYPE, which is the whole billion-laughs
+        # family - stdlib ElementTree will not fetch an external entity but it
+        # expands internal ones happily.
+        root = parse_xml_safely(content_bytes)
     except Exception as exc:
         logger.warning("Failed to parse OPML XML: %s", exc)
         return []
@@ -193,6 +239,14 @@ def parse_opml_content(content: str | bytes) -> List[Dict[str, str]]:
         ).strip()
         description = (outline.get("description") or "").strip()
         html_url = (outline.get("htmlUrl") or outline.get("htmlurl") or "").strip()
+
+        # an opml file is a list of urls somebody else wrote, so a scheme we do
+        # not fetch is dropped here rather than stored and retried on a timer
+        # forever. only the scheme: whether a HOST is private is a dns question,
+        # and check_url asks it at fetch time, where the answer is still true.
+        if not has_fetchable_scheme(xml_url):
+            logger.warning("OPML import skipped a feed URL we cannot fetch: %s", xml_url[:120])
+            continue
 
         feeds.append({
             "title": title or xml_url,
@@ -748,6 +802,18 @@ def create_podcasts_blueprint() -> Blueprint:
         if not target_url:
             return jsonify({"error": "Missing url parameter"}), 400
 
+        # this endpoint takes a url from the query string and fetches it from
+        # the server, which is an open relay into whatever network soulsync is
+        # running on unless it is checked. the audiobook sample proxy says the
+        # same thing about itself and solves it with an allowlist; podcast audio
+        # comes from thousands of cdns so there is no list, and the check is on
+        # the address instead. login is off by default, so anyone who can reach
+        # the web ui could otherwise read internal http services through this.
+        ok, reason = check_url(target_url)
+        if not ok:
+            logger.warning("audio-proxy refused a URL: %s (%s)", target_url[:120], reason)
+            return jsonify({"error": reason}), 400
+
         headers = {}
         if "Range" in request.headers:
             headers["Range"] = request.headers["Range"]
@@ -758,7 +824,12 @@ def create_podcasts_blueprint() -> Blueprint:
         )
 
         try:
-            req = requests.get(target_url, headers=headers, stream=True, timeout=15)
+            # redirects are NOT followed: the check above applies to the url we
+            # were handed, and a 302 could point anywhere. real enclosure hosts
+            # do redirect, so a hop is re-checked and followed by hand.
+            req = _proxy_get_following_checked_redirects(target_url, headers)
+            if req is None:
+                return jsonify({"error": "That host redirected somewhere SoulSync will not fetch"}), 502
             forward_headers = {}
             for h in ("Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"):
                 if h in req.headers:
@@ -811,7 +882,8 @@ def create_podcasts_blueprint() -> Blueprint:
             return jsonify({"success": True, "is_watching": False, "podcast": None})
 
         try:
-            pod = db.get_watchlist_podcast(feed_url=feed_url or None, itunes_id=itunes_id)
+            pod = db.get_watchlist_podcast(feed_url=feed_url or None, itunes_id=itunes_id,
+                                          profile_id=_profile())
             is_watching = pod is not None
             return jsonify({"success": True, "is_watching": is_watching, "podcast": pod})
         except Exception as exc:
@@ -875,7 +947,7 @@ def create_podcasts_blueprint() -> Blueprint:
                 episode_count=episode_count,
                 profile_id=profile_id,
             )
-            pod = db.get_watchlist_podcast(feed_url=feed_url)
+            pod = db.get_watchlist_podcast(feed_url=feed_url, profile_id=profile_id)
             return jsonify({"success": bool(ok), "is_watching": True, "podcast": pod})
         except Exception as exc:
             logger.exception("podcasts_watchlist_add failed for %s: %s", title, exc)
@@ -900,7 +972,8 @@ def create_podcasts_blueprint() -> Blueprint:
             return jsonify({"success": False, "error": "database unavailable"}), 500
 
         try:
-            ok = db.remove_watchlist_podcast(feed_url=feed_url or None, itunes_id=itunes_id)
+            ok = db.remove_watchlist_podcast(feed_url=feed_url or None, itunes_id=itunes_id,
+                                            profile_id=_profile())
             return jsonify({"success": bool(ok), "is_watching": False})
         except Exception as exc:
             logger.exception("podcasts_watchlist_remove failed: %s", exc)
@@ -934,8 +1007,9 @@ def create_podcasts_blueprint() -> Blueprint:
                 feed_url,
                 auto_download=auto_download,
                 retention_days=retention_days,
+                profile_id=_profile(),
             )
-            pod = db.get_watchlist_podcast(feed_url=feed_url)
+            pod = db.get_watchlist_podcast(feed_url=feed_url, profile_id=_profile())
             return jsonify({"success": bool(ok), "podcast": pod})
         except Exception as exc:
             logger.exception("podcasts_watchlist_settings failed for %s: %s", feed_url, exc)
@@ -946,7 +1020,8 @@ def create_podcasts_blueprint() -> Blueprint:
         """Trigger an immediate scan of all watchlisted podcast feeds."""
         try:
             from core.podcast_automation import scan_and_auto_download_podcasts
-            res = scan_and_auto_download_podcasts()
+            # a person pressing Scan Now means their own shows, not profile 1's
+            res = scan_and_auto_download_podcasts(profile_id=_profile())
             return jsonify(res), 200
         except Exception as exc:
             logger.exception("Failed to run podcast scan: %s", exc)
@@ -1009,10 +1084,22 @@ def create_podcasts_blueprint() -> Blueprint:
             action = "subscribe"
         elif "file" in request.files:
             uploaded = request.files["file"]
-            raw_content = uploaded.read()
+            # read one byte past the cap so a file that is exactly at the limit
+            # still imports and anything larger is refused rather than truncated
+            raw_content = uploaded.read(MAX_OPML_BYTES + 1)
+            if len(raw_content) > MAX_OPML_BYTES:
+                return jsonify({
+                    "success": False,
+                    "error": f"That OPML file is larger than {MAX_OPML_BYTES // (1024 * 1024)}MB",
+                }), 413
             feeds = parse_opml_content(raw_content)
         else:
             content = body_json.get("opml_text") or body_json.get("xml") or ""
+            if len(content) > MAX_OPML_BYTES:
+                return jsonify({
+                    "success": False,
+                    "error": f"That OPML document is larger than {MAX_OPML_BYTES // (1024 * 1024)}MB",
+                }), 413
             if content:
                 feeds = parse_opml_content(content)
             else:

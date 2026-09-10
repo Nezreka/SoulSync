@@ -767,7 +767,7 @@ class MusicDatabase:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS watchlist_podcasts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    feed_url TEXT UNIQUE NOT NULL,
+                    feed_url TEXT NOT NULL,
                     itunes_id INTEGER,
                     title TEXT NOT NULL,
                     author TEXT,
@@ -781,13 +781,88 @@ class MusicDatabase:
                     last_scan_timestamp TIMESTAMP,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    profile_id INTEGER DEFAULT 1
+                    profile_id INTEGER DEFAULT 1,
+                    UNIQUE(feed_url, profile_id)
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_podcasts_feed "
                            "ON watchlist_podcasts (feed_url)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_podcasts_itunes "
                            "ON watchlist_podcasts (itunes_id)")
+
+            # feed_url used to be unique on its own, which reads fine until a
+            # second profile follows a show the first one already follows: the
+            # insert hit ON CONFLICT(feed_url) and UPDATED the first profile's
+            # row instead of making a new one, so the second person got a
+            # success and an empty watchlist. the rows are per profile, so the
+            # constraint has to be per profile too.
+            #
+            # sqlite cannot alter a constraint, so the table is rebuilt. it only
+            # holds subscriptions, so it is small, and the whole thing runs in
+            # one transaction - either the new table is in place with every row
+            # copied or nothing changed at all.
+            try:
+                _wp_sql = cursor.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='watchlist_podcasts'"
+                ).fetchone()
+                _wp_sql = (_wp_sql[0] if _wp_sql else "") or ""
+                _wp_norm = " ".join(_wp_sql.split())
+                # two ways to be wrong: no pair constraint at all, or a pair
+                # constraint sitting next to the old column-level UNIQUE, which
+                # still refuses the second profile. either shape gets rebuilt.
+                _wp_needs_rebuild = (
+                    "UNIQUE(feed_url, profile_id)" not in _wp_norm
+                    or "feed_url TEXT UNIQUE" in _wp_norm
+                )
+                if _wp_sql and _wp_needs_rebuild:
+                    logger.info("Migrating watchlist_podcasts to a per-profile unique key")
+                    cursor.execute("""
+                        CREATE TABLE watchlist_podcasts_migrating (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            feed_url TEXT NOT NULL,
+                            itunes_id INTEGER,
+                            title TEXT NOT NULL,
+                            author TEXT,
+                            description TEXT,
+                            artwork_url TEXT,
+                            website TEXT,
+                            auto_download INTEGER NOT NULL DEFAULT 1,
+                            retention_days INTEGER NOT NULL DEFAULT 14,
+                            episode_count INTEGER,
+                            date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            last_scan_timestamp TIMESTAMP,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            profile_id INTEGER DEFAULT 1,
+                            UNIQUE(feed_url, profile_id)
+                        )
+                    """)
+                    cursor.execute("""
+                        INSERT INTO watchlist_podcasts_migrating (
+                            id, feed_url, itunes_id, title, author, description,
+                            artwork_url, website, auto_download, retention_days,
+                            episode_count, date_added, last_scan_timestamp,
+                            created_at, updated_at, profile_id
+                        )
+                        SELECT id, feed_url, itunes_id, title, author, description,
+                               artwork_url, website, auto_download, retention_days,
+                               episode_count, date_added, last_scan_timestamp,
+                               created_at, updated_at, COALESCE(profile_id, 1)
+                        FROM watchlist_podcasts
+                    """)
+                    cursor.execute("DROP TABLE watchlist_podcasts")
+                    cursor.execute("ALTER TABLE watchlist_podcasts_migrating "
+                                   "RENAME TO watchlist_podcasts")
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_podcasts_feed "
+                                   "ON watchlist_podcasts (feed_url)")
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_podcasts_itunes "
+                                   "ON watchlist_podcasts (itunes_id)")
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_podcasts_profile "
+                                   "ON watchlist_podcasts (profile_id)")
+            except Exception as _wp_err:
+                # a failed migration must not stop the database opening. the old
+                # shape still works for one profile, which is what it did before.
+                logger.error("watchlist_podcasts migration skipped: %s", _wp_err)
 
             # Downloaded podcast episodes tracker (for auto-download deduplication and retention pruning)
             cursor.execute("""
@@ -13503,7 +13578,7 @@ class MusicDatabase:
                     "feed_url, itunes_id, title, author, description, artwork_url, website, "
                     "auto_download, retention_days, episode_count, profile_id"
                     ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                    "ON CONFLICT(feed_url) DO UPDATE SET "
+                    "ON CONFLICT(feed_url, profile_id) DO UPDATE SET "
                     "itunes_id=COALESCE(excluded.itunes_id, watchlist_podcasts.itunes_id), "
                     "title=excluded.title, "
                     "author=COALESCE(excluded.author, watchlist_podcasts.author), "
@@ -13537,24 +13612,34 @@ class MusicDatabase:
         feed_url: Optional[str] = None,
         itunes_id: Optional[int] = None,
         podcast_id: Optional[int] = None,
+        profile_id: Optional[int] = None,
     ) -> bool:
-        """Unfollow a podcast by feed_url, itunes_id, or database id."""
+        """Unfollow a podcast by feed_url, itunes_id, or database id.
+
+        Scoped to one profile when profile_id is given. Without it this deleted
+        by feed_url alone, so one profile could unfollow another profile's show.
+        """
         try:
             with self._get_connection() as conn:
+                # profile_id None means "any profile", which is what this did
+                # before it took the argument at all. Every caller in the app
+                # passes one; leaving None working keeps older callers honest.
+                scope = "" if profile_id is None else " AND COALESCE(profile_id, 1) = ?"
+                extra = () if profile_id is None else (int(profile_id),)
                 if feed_url:
                     cur = conn.execute(
-                        "DELETE FROM watchlist_podcasts WHERE feed_url = ?",
-                        (str(feed_url).strip(),),
+                        "DELETE FROM watchlist_podcasts WHERE feed_url = ?" + scope,
+                        (str(feed_url).strip(),) + extra,
                     )
                 elif itunes_id:
                     cur = conn.execute(
-                        "DELETE FROM watchlist_podcasts WHERE itunes_id = ?",
-                        (int(itunes_id),),
+                        "DELETE FROM watchlist_podcasts WHERE itunes_id = ?" + scope,
+                        (int(itunes_id),) + extra,
                     )
                 elif podcast_id:
                     cur = conn.execute(
-                        "DELETE FROM watchlist_podcasts WHERE id = ?",
-                        (int(podcast_id),),
+                        "DELETE FROM watchlist_podcasts WHERE id = ?" + scope,
+                        (int(podcast_id),) + extra,
                     )
                 else:
                     return False
@@ -13568,27 +13653,55 @@ class MusicDatabase:
         self,
         feed_url: Optional[str] = None,
         itunes_id: Optional[int] = None,
+        profile_id: Optional[int] = None,
     ) -> bool:
-        """Check if a podcast is followed by feed_url or itunes_id."""
+        """Check if a podcast is followed by feed_url or itunes_id.
+
+        Scoped to one profile when profile_id is given. Unscoped this answered
+        True for a show somebody ELSE follows, so the button read "following"
+        on a page whose watchlist did not contain it.
+        """
         try:
             with self._get_connection() as conn:
+                scope = "" if profile_id is None else " AND COALESCE(profile_id, 1) = ?"
+                extra = () if profile_id is None else (int(profile_id),)
                 if feed_url:
                     row = conn.execute(
-                        "SELECT 1 FROM watchlist_podcasts WHERE feed_url = ?",
-                        (str(feed_url).strip(),),
+                        "SELECT 1 FROM watchlist_podcasts WHERE feed_url = ?" + scope,
+                        (str(feed_url).strip(),) + extra,
                     ).fetchone()
                     if row:
                         return True
                 if itunes_id:
                     row = conn.execute(
-                        "SELECT 1 FROM watchlist_podcasts WHERE itunes_id = ?",
-                        (int(itunes_id),),
+                        "SELECT 1 FROM watchlist_podcasts WHERE itunes_id = ?" + scope,
+                        (int(itunes_id),) + extra,
                     ).fetchone()
                     if row:
                         return True
                 return False
         except Exception:
             return False
+
+    def profiles_with_podcast_rows(self) -> List[int]:
+        """Every profile that actually follows a podcast.
+
+        A timed scan has no request behind it, so there is no caller whose
+        profile it could act as - system automations all run as profile 1. That
+        meant a second person's shows were never scanned at all. The profile has
+        to come from the rows instead, which is how the audiobook wishlist
+        worker solves the same problem.
+        """
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(
+                    "SELECT DISTINCT COALESCE(profile_id, 1) AS pid "
+                    "FROM watchlist_podcasts ORDER BY pid"
+                ).fetchall()
+                return [int(r["pid"]) for r in rows] or [1]
+        except Exception as e:
+            logger.error("profiles_with_podcast_rows failed: %s", e)
+            return [1]
 
     def get_watchlist_podcasts(self, profile_id: int = 1) -> List[Dict[str, Any]]:
         """List all watchlisted podcasts."""
@@ -13616,24 +13729,31 @@ class MusicDatabase:
         self,
         feed_url: Optional[str] = None,
         itunes_id: Optional[int] = None,
+        profile_id: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Get a single watchlisted podcast record by feed_url or itunes_id."""
+        """Get a single watchlisted podcast record by feed_url or itunes_id.
+
+        Scoped to one profile when profile_id is given, so the row handed back
+        is the caller's own settings rather than whoever followed the show first.
+        """
         try:
             with self._get_connection() as conn:
+                scope = "" if profile_id is None else " AND COALESCE(profile_id, 1) = ?"
+                extra = () if profile_id is None else (int(profile_id),)
                 row = None
                 if feed_url:
                     row = conn.execute(
                         "SELECT id, feed_url, itunes_id, title, author, description, artwork_url, website, "
                         "auto_download, retention_days, episode_count, date_added, last_scan_timestamp "
-                        "FROM watchlist_podcasts WHERE feed_url = ?",
-                        (str(feed_url).strip(),),
+                        "FROM watchlist_podcasts WHERE feed_url = ?" + scope,
+                        (str(feed_url).strip(),) + extra,
                     ).fetchone()
                 if not row and itunes_id:
                     row = conn.execute(
                         "SELECT id, feed_url, itunes_id, title, author, description, artwork_url, website, "
                         "auto_download, retention_days, episode_count, date_added, last_scan_timestamp "
-                        "FROM watchlist_podcasts WHERE itunes_id = ?",
-                        (int(itunes_id),),
+                        "FROM watchlist_podcasts WHERE itunes_id = ?" + scope,
+                        (int(itunes_id),) + extra,
                     ).fetchone()
                 if row:
                     d = dict(row)
@@ -13651,8 +13771,14 @@ class MusicDatabase:
         *,
         auto_download: Optional[bool] = None,
         retention_days: Optional[int] = None,
+        profile_id: Optional[int] = None,
     ) -> bool:
-        """Update auto_download or retention_days settings for a followed podcast."""
+        """Update auto_download or retention_days settings for a followed podcast.
+
+        Scoped to one profile when profile_id is given. Unscoped this matched on
+        feed_url alone, so changing your own retention rewrote the row of
+        whoever followed the show first.
+        """
         feed_url = str(feed_url or '').strip()
         if not feed_url:
             return False
@@ -13668,10 +13794,15 @@ class MusicDatabase:
             return True
         clauses.append("updated_at = CURRENT_TIMESTAMP")
         params.append(feed_url)
+        scope = ""
+        if profile_id is not None:
+            scope = " AND COALESCE(profile_id, 1) = ?"
+            params.append(int(profile_id))
         try:
             with self._get_connection() as conn:
                 cur = conn.execute(
-                    f"UPDATE watchlist_podcasts SET {', '.join(clauses)} WHERE feed_url = ?",
+                    f"UPDATE watchlist_podcasts SET {', '.join(clauses)} "
+                    f"WHERE feed_url = ?{scope}",
                     params,
                 )
                 conn.commit()

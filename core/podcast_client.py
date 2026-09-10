@@ -25,6 +25,12 @@ from typing import Dict, List, Optional
 
 import requests
 
+from core.podcast_ingest_guard import (
+    MAX_FEED_BYTES,
+    UnsafeXmlError,
+    fetch_guarded,
+    parse_xml_safely,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("podcast_client")
@@ -345,19 +351,24 @@ class PodcastClient:
         especially artwork, where the feed-level image is always higher-res
         than the iTunes API thumbnail.
         """
-        try:
-            resp = self._session.get(feed_url, timeout=_FETCH_TIMEOUT)
-            resp.raise_for_status()
-        except Exception as exc:
-            logger.warning("Failed to fetch feed %r: %s", feed_url, exc)
+        # a feed url comes from a person pasting one, or from an opml file
+        # somebody else exported, so it is fetched through the guard: checked
+        # scheme and address, redirects followed by hand so each hop is checked
+        # too, and a cap on how much we will read. see core/podcast_ingest_guard.
+        body, error = fetch_guarded(
+            self._session, feed_url,
+            timeout=_FETCH_TIMEOUT, limit=MAX_FEED_BYTES,
+        )
+        if body is None:
+            logger.warning("Failed to fetch feed %r: %s", feed_url, error)
             return None
 
         try:
             # Parse from bytes so ElementTree honours the XML encoding
             # declaration — parsing from text after decode can mis-handle
             # non-UTF-8 feeds.
-            root = ET.fromstring(resp.content)
-        except ET.ParseError as exc:
+            root = parse_xml_safely(body)
+        except (UnsafeXmlError, ET.ParseError) as exc:
             logger.warning("RSS parse error for %r: %s", feed_url, exc)
             return None
 

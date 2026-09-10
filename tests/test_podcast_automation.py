@@ -15,8 +15,6 @@ from api.podcasts import create_podcasts_blueprint
 from core.podcast_automation import (
     get_scan_status,
     scan_and_auto_download_podcasts,
-    start_podcast_automation,
-    stop_podcast_automation,
 )
 from core.podcast_client import PodcastEpisode, PodcastShow
 
@@ -257,9 +255,14 @@ def test_api_watchlist_scan_endpoints(client):
     assert "status" in status_data
 
 
-def test_scan_only_downloads_most_recent_episode_even_with_many_unseen():
-    """Verify that when a feed has multiple (e.g. 5) un-downloaded episodes,
-    only the single newest episode is queued for download."""
+def test_a_row_with_no_follow_date_still_takes_only_the_newest():
+    """An older watchlist row has no date_added, so it keeps the old behaviour.
+
+    The scan takes what was published since you followed a show. A row written
+    before that had a follow date cannot answer "since when", and guessing would
+    mean claiming a back catalogue nobody asked for, so it falls back to the
+    single newest episode exactly as it did before.
+    """
     mock_db = MagicMock()
     mock_db.get_watchlist_podcasts.return_value = [
         {
@@ -331,3 +334,127 @@ def test_scan_only_downloads_most_recent_episode_even_with_many_unseen():
         assert args["title"] == "Episode 5"
         assert args["enclosure_url"] == "https://example.com/ep5.mp3"
 
+
+
+# ---------------------------------------------------------------------------
+# What counts as new: published since you followed the show
+# ---------------------------------------------------------------------------
+
+def _episode(n, published):
+    return PodcastEpisode(
+        guid=f"ep{n}", title=f"Episode {n}", enclosure_url=f"https://cdn.example/ep{n}.mp3",
+        enclosure_type="audio/mpeg", enclosure_length=1000, pub_date=published,
+        duration_seconds=300, description="", show_notes="", season=1,
+        episode_number=n, episode_type="full", artwork_url="", chapter_url=None,
+        transcript_url=None, show_title="Backlog Show", author="Host",
+    )
+
+
+def _show_with(episodes):
+    return PodcastShow(
+        feed_url="https://feeds.example.com/backlog.xml", title="Backlog Show",
+        author="Host", description="", artwork_url="", itunes_id=None, website="",
+        language="en", categories=[], explicit=False,
+        episode_count=len(episodes), episodes=episodes,
+    )
+
+
+def _scan_with(rows, episodes):
+    db = MagicMock()
+    db.get_watchlist_podcasts.return_value = rows
+    db.is_podcast_episode_downloaded.return_value = False
+    client = MagicMock()
+    client.fetch_feed.return_value = _show_with(episodes)
+    with patch("core.podcast_automation._get_db", return_value=db), \
+         patch("core.podcast_automation.get_podcast_client", return_value=client), \
+         patch("api.podcasts.queue_podcast_download",
+               return_value={"success": True, "task_id": "t"}) as queued:
+        result = scan_and_auto_download_podcasts(profile_id=1)
+    return result, queued
+
+
+def _row(followed_at):
+    return {
+        "id": 1, "feed_url": "https://feeds.example.com/backlog.xml",
+        "title": "Backlog Show", "author": "Host", "auto_download": 1,
+        "retention_days": 0, "date_added": followed_at,
+    }
+
+
+def test_every_episode_published_since_you_followed_is_taken():
+    """Three episodes between two passes used to lose two of them, silently.
+
+    The next pass looks at the newest again, finds it already downloaded, and
+    never looks further back - so the middle episodes never arrive and nothing
+    anywhere reports a problem.
+    """
+    followed = datetime.now(timezone.utc) - timedelta(days=10)
+    episodes = [_episode(n, followed + timedelta(days=n)) for n in (3, 2, 1)]
+    result, queued = _scan_with([_row(followed.isoformat())], episodes)
+
+    assert result["episodes_queued"] == 3
+    assert queued.call_count == 3
+
+
+def test_the_back_catalogue_from_before_you_followed_is_left_alone():
+    """Following a show with 800 old episodes must not queue 800 downloads."""
+    followed = datetime.now(timezone.utc)
+    old = [_episode(n, followed - timedelta(days=n)) for n in range(1, 20)]
+    result, queued = _scan_with([_row(followed.isoformat())], old)
+
+    assert result["episodes_queued"] == 0
+    assert queued.call_count == 0
+
+
+def test_one_show_cannot_claim_the_whole_pass():
+    from core.podcast_automation import MAX_BACKLOG_PER_SHOW_PER_PASS
+
+    followed = datetime.now(timezone.utc) - timedelta(days=100)
+    many = [_episode(n, followed + timedelta(days=n)) for n in range(40, 0, -1)]
+    result, _ = _scan_with([_row(followed.isoformat())], many)
+
+    assert result["episodes_queued"] == MAX_BACKLOG_PER_SHOW_PER_PASS
+
+
+def test_an_episode_with_no_date_is_treated_as_new():
+    """A feed that omits pub_date would otherwise never auto-download at all."""
+    followed = datetime.now(timezone.utc) - timedelta(days=5)
+    result, _ = _scan_with([_row(followed.isoformat())], [_episode(1, None)])
+
+    assert result["episodes_queued"] == 1
+
+
+def test_an_already_downloaded_episode_is_not_queued_again():
+    followed = datetime.now(timezone.utc) - timedelta(days=10)
+    episodes = [_episode(n, followed + timedelta(days=n)) for n in (2, 1)]
+
+    db = MagicMock()
+    db.get_watchlist_podcasts.return_value = [_row(followed.isoformat())]
+    # the newer one is already on disk, the older one is not
+    db.is_podcast_episode_downloaded.side_effect = lambda **kw: kw["guid"] == "ep2"
+    client = MagicMock()
+    client.fetch_feed.return_value = _show_with(episodes)
+    with patch("core.podcast_automation._get_db", return_value=db), \
+         patch("core.podcast_automation.get_podcast_client", return_value=client), \
+         patch("api.podcasts.queue_podcast_download",
+               return_value={"success": True, "task_id": "t"}) as queued:
+        result = scan_and_auto_download_podcasts(profile_id=1)
+
+    assert result["episodes_queued"] == 1
+    assert queued.call_args.args[0]["guid"] == "ep1"
+
+
+def test_a_naive_follow_date_from_sqlite_is_comparable():
+    """date_added comes back naive from sqlite while pub_date is aware.
+
+    Comparing those two directly raises TypeError, which the per-podcast except
+    would swallow into a scan error rather than a crash - so the episodes would
+    quietly stop arriving.
+    """
+    followed = datetime.now(timezone.utc) - timedelta(days=10)
+    sqlite_shape = followed.strftime("%Y-%m-%d %H:%M:%S")
+    episodes = [_episode(n, followed + timedelta(days=n)) for n in (2, 1)]
+    result, _ = _scan_with([_row(sqlite_shape)], episodes)
+
+    assert result["errors"] == []
+    assert result["episodes_queued"] == 2
