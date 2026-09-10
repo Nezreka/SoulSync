@@ -99,8 +99,8 @@ def test_the_sources_tab_shows_every_tile_on_both_sides(js):
 
 
 def test_the_shared_tabs_carry_no_side_gating(index):
-    """The Sources and Downloads tabs are fully shared: identical content both
-    sides. The invariant that keeps them that way is that nothing on either tab
+    """The Sources, Downloads and Library tabs are fully shared: identical
+    content on both sides. The invariant that keeps them that way is that nothing on either tab
     carries data-music-only or data-video-only.
 
     This is the rule that was actually broken before. A blanket CSS rule hid
@@ -123,7 +123,7 @@ def test_the_shared_tabs_carry_no_side_gating(index):
     for m in _re.finditer(r'<[^>]*data-(?:music|video)-only[^>]*>', markup):
         own = _re.search(r'data-stg="([a-z]+)"', m.group(0))
         tab = own.group(1) if own else tab_of(m.start())
-        if tab in ("sources", "downloads"):
+        if tab in ("sources", "downloads", "library"):
             offenders.append((tab, m.group(0)[:88]))
     assert not offenders, f"side gating on a shared tab: {offenders}"
 
@@ -667,4 +667,50 @@ def test_an_inverted_mark_is_not_then_dimmed_into_grey():
         "no exemption from .src-tile:not(.is-active) dimming for line-art marks"
     )
     assert ".dlchain-tile-art:has(.dlchain-mark.is-inverted)" in css
+
+
+def test_the_library_tab_speaks_one_card_language():
+    """It used to be three loose blocks of video settings followed by seven
+    music cards - and the music half was hidden on the video side entirely, so
+    neither side ever saw the whole tab.
+
+    Now every section is an expandable card and they are ordered by SUBJECT
+    rather than by side: music paths beside video folders, music post-processing
+    beside video organization (which is where video's post-processing lives).
+    Grouping by which side a setting came from is an implementation detail
+    leaking into the layout.
+    """
+    index = _read("webui/index.html")
+    markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
+
+    titles = []
+    for m in re.finditer(r'<div class="settings-section-header[^"]*"[^>]*data-stg="library"[^>]*>', markup):
+        t = re.search(r"<h3[^>]*>(.*?)</h3>", markup[m.end():m.end() + 400], re.S)
+        if t:
+            titles.append(re.sub(r"<[^>]+>", "", t.group(1)).strip())
+
+    assert titles == [
+        "Paths &amp; Organization", "Video Folders", "Post-Processing",
+        "Video Organization", "Video Preferences", "Listening Stats",
+        "Discovery", "Import", "Filtering", "Playlists",
+    ], titles
+
+    # no bare settings-group left stranded outside a card on this tab
+    for m in re.finditer(r'<div class="settings-group"[^>]*data-stg="library"[^>]*>', markup):
+        before = markup[:m.start()]
+        assert before.rstrip().endswith('>'), "a library group is not inside a card"
+
+    # every card's body must be its header's next sibling or the toggle misses it
+    for m in re.finditer(r'<div class="settings-section-header[^"]*"[^>]*data-stg="library"[^>]*>', markup):
+        depth = 0
+        for mm in re.finditer(r"<(/?)div\b[^>]*?(/?)>", markup[m.start():]):
+            if mm.group(2) == "/":
+                continue
+            depth += -1 if mm.group(1) else 1
+            if depth == 0:
+                end = m.start() + mm.end()
+                break
+        assert markup[end:].lstrip().startswith('<div class="settings-section-body'), (
+            "a library card's body is not its header's next sibling"
+        )
 

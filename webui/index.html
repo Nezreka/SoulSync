@@ -3363,216 +3363,13 @@
                             <!-- Video Library Organization — uses the SAME settings vocabulary as the
                                  music "File Organization" section (.settings-group / .form-group /
                                  .checkbox-label / .form-select / .settings-hint / .test-button). -->
-                            <div class="settings-group" data-stg="library" data-video-only>
-                                <h3>Video Download Folders</h3>
-                                <div class="setting-help-text">
-                                    One shared download folder (where slskd / torrent drop files), then a separate library folder per type — finished files are sorted to the right one automatically. SEPARATE from your Music paths.
-                                </div>
-                                <div class="form-group">
-                                    <label>Download Folder (Input — shared with Music):</label>
-                                    <input type="text" id="video-download-path" placeholder="./downloads">
-                                    <div class="setting-help-text">Where downloads land — point this at the same folder as your slskd / torrent client. This is the SAME folder as the Music side; changing it here changes it there too.</div>
-                                </div>
-                                <div class="form-group">
-                                    <label>🎬 Movies Library:</label>
-                                    <input type="text" id="video-movies-path" placeholder="/media/movies">
-                                </div>
-                                <div class="form-group">
-                                    <label>📺 TV Shows Library:</label>
-                                    <input type="text" id="video-tv-path" placeholder="/media/tv">
-                                </div>
-                                <div class="form-group">
-                                    <label>▶️ YouTube Library:</label>
-                                    <input type="text" id="video-youtube-path" placeholder="/media/youtube">
-                                </div>
-                            </div>
-                            <div class="settings-group" data-stg="library" data-video-only>
-                                <h3>📁 Library Organization</h3>
+                                                        
 
-                                <div class="form-group">
-                                    <label>Movie Path Template:</label>
-                                    <input type="text" id="vo-movie-template" placeholder="$title ($year)/$title ($year) $quality">
-                                    <small class="settings-hint">Variables: $title, $titlefirst, $year, $quality (e.g. Bluray-1080p), $resolution, $source, $codec, $edition, $tmdbid, $imdbid. Folders split on "/", the last segment is the filename.</small>
-                                    <small class="settings-hint">Example: <code id="vo-movie-preview">&hellip;</code></small>
-                                </div>
+                                                        
 
-                                <div class="form-group">
-                                    <label>Episode Path Template:</label>
-                                    <input type="text" id="vo-episode-template" placeholder="$series/Season $season/$series - S$seasonE$episode - $episodetitle $quality">
-                                    <small class="settings-hint">Variables: $series, $season (01), $seasonraw (1), $episode (01), $episodetitle, $year, $quality, $resolution, $source, $codec, $tvdbid.</small>
-                                    <small class="settings-hint">Example: <code id="vo-episode-preview">&hellip;</code></small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>YouTube Path Template:</label>
-                                    <input type="text" id="vo-youtube-template" placeholder="$channel/Season $year/$channel - $sxe - $title">
-                                    <small class="settings-hint">Followed YouTube channels organize as a TV show. Variables: $channel, $year, $sxe (s2024e0315 &mdash; lets Plex/Jellyfin index episodes without an online agent), $date (2024-03-15), $month (03), $day (15), $title, $videoid.</small>
-                                    <small class="settings-hint">Plex tip: set the YouTube library's agent to <strong>Personal Media Shows</strong> &mdash; episode titles then come straight from the filename, and the channel folder gets its poster/fanart automatically.</small>
-                                    <small class="settings-hint">Example: <code id="vo-youtube-preview">&hellip;</code></small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>YouTube: videos to grab when you follow a channel:</label>
-                                    <input type="number" id="vo-yt-follow-count" min="0" max="100" placeholder="5">
-                                    <small class="settings-hint">Following a channel backfills its most recent N videos, then watches for anything new posted after you follow. This is also the rolling "keep the last N current" net the channel scan uses. <strong>0</strong> = don't backfill anything, only grab new uploads going forward. It never pulls the whole back catalog.</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>When a file finishes:</label>
-                                    <select id="vo-transfer-mode" class="form-select">
-                                        <option value="copy">Copy in, then remove the source (kept for torrents)</option>
-                                        <option value="move">Move into the library</option>
-                                    </select>
-                                    <small class="settings-hint">How a finished download moves from the download folder into your library.</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="vo-verify">
-                                        <span>Verify with ffprobe</span>
-                                    </label>
-                                    <small class="settings-hint">Tag by the file's real resolution and reject corrupt / sample files. Needs ffmpeg; falls back to the release name when absent.</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="vo-replace">
-                                        <span>Replace an existing copy when the new one is better</span>
-                                    </label>
-                                    <small class="settings-hint">Deletes the old file when an upgrade lands.</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="vo-subs">
-                                        <span>Carry matching subtitles</span>
-                                    </label>
-                                    <small class="settings-hint">Bring sibling .srt / .ass files alongside the video, renamed to match.</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="vo-artwork">
-                                        <span>Save artwork into the folder</span>
-                                    </label>
-                                    <small class="settings-hint">Download the full artwork set &mdash; poster.jpg, fanart.jpg, clearlogo.png (plus season posters for shows) &mdash; next to the movie / into the show folder. Off by default; Plex/Jellyfin usually fetch their own once the folder is named cleanly. Turn on to pin specific art or for offline/local-assets setups.</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="vo-nfo">
-                                        <span>Write NFO metadata files</span>
-                                    </label>
-                                    <small class="settings-hint">Write Kodi/Jellyfin-style movie.nfo / tvshow.nfo (title, plot, rating, genres, cast, ids) so the library is fully portable. Off by default &mdash; Plex ignores these, but Jellyfin/Kodi/Emby use them.</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="vo-subs-dl">
-                                        <span>Download subtitles</span>
-                                    </label>
-                                    <small class="settings-hint">Fetch external .srt files from OpenSubtitles next to the video (uses your OpenSubtitles API key on the enrichment settings). Off by default &mdash; the free tier is daily-quota-limited, and most releases already carry embedded subs.</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>Subtitle Languages:</label>
-                                    <input type="text" id="vo-sub-langs" placeholder="en">
-                                    <small class="settings-hint">Comma-separated language codes to fetch, in priority order (e.g. <code>en,es</code>). One .srt per language is written as &lt;video&gt;.&lt;lang&gt;.srt.</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="vo-recycle">
-                                        <span>Recycle deleted files instead of erasing them</span>
-                                    </label>
-                                    <small class="settings-hint">Upgrade-replaced copies, retention-cleaned YouTube episodes and dismissed imports move into an <code>ss_recycle</code> folder inside the library instead of being deleted &mdash; a safety net if something gets replaced by mistake.</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>Keep recycled files for (days):</label>
-                                    <input type="number" id="vo-recycle-days" min="1" max="365" placeholder="7">
-                                    <small class="settings-hint">Recycled files older than this are removed for good (cleaned automatically as new files are recycled).</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>Recycle folder (optional):</label>
-                                    <input type="text" id="vo-recycle-path" placeholder="auto — ss_recycle inside each library">
-                                    <small class="settings-hint">Set a single folder to collect everything (keep it on the same drive as your libraries so moves are instant). Blank = an <code>ss_recycle</code> folder per library.</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>Minimum free disk space (GB):</label>
-                                    <input type="number" id="vo-min-free" min="0" step="1" placeholder="0 = off">
-                                    <small class="settings-hint">New grabs are refused (and the wishlist drains pause) when the target drive has less free space than this &mdash; so a download can never fill the disk. 0 disables the check.</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>YouTube: SponsorBlock</label>
-                                    <select id="vo-sponsorblock">
-                                        <option value="off">Off</option>
-                                        <option value="mark">Mark segments as chapters</option>
-                                        <option value="remove">Cut sponsor segments out</option>
-                                    </select>
-                                    <small class="settings-hint">Uses the community SponsorBlock database at download time. <strong>Mark</strong> adds skippable chapters (sponsor, self-promo, intro, outro); <strong>Cut</strong> removes sponsor/self-promo/interaction segments from the file entirely.</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="vo-yt-subs">
-                                        <span>YouTube: embed subtitles</span>
-                                    </label>
-                                    <small class="settings-hint">Embeds YouTube's subtitles (your Subtitle Languages above) into the downloaded file so Plex/Jellyfin offer them without sidecar files.</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <button class="test-button" id="vo-reset" style="background: #666;">&#128260; Reset to Defaults</button>
-                                    <small class="settings-hint">Restores the Radarr/Sonarr standard layout.</small>
-                                </div>
-                            </div>
                             <!-- Video Preferences — lives on the Library settings tab -->
-                            <div class="settings-group" data-stg="library" data-video-only>
-                                <h3>Video Preferences</h3>
-                                <div class="api-service-frame stg-service" data-video-service="prefs">
-                                    <div class="stg-service-header" onclick="toggleStgService(this)">
-                                        <span class="stg-service-dot" style="color: #38bdf8;"></span>
-                                        <h4 class="service-title">Detail Pages</h4>
-                                        <span class="stg-service-chevron">›</span>
-                                    </div>
-                                    <div class="stg-service-body">
-                                        <label class="vid-pref-row">
-                                            <input type="checkbox" id="video-billboard-autoplay" data-video-pref="billboard_autoplay">
-                                            <span>Autoplay trailers in the billboard</span>
-                                        </label>
-                                        <div class="callback-info">
-                                            <div class="callback-help">Plays a muted trailer behind the hero after a moment (uses more bandwidth).</div>
-                                        </div>
-                                        <label class="vid-pref-row vid-pref-row--select">
-                                            <span>Where-to-watch region</span>
-                                            <select id="video-watch-region" data-video-pref="watch_region">
-                                                <option value="US">United States</option>
-                                                <option value="GB">United Kingdom</option>
-                                                <option value="CA">Canada</option>
-                                                <option value="AU">Australia</option>
-                                                <option value="IE">Ireland</option>
-                                                <option value="NZ">New Zealand</option>
-                                                <option value="DE">Germany</option>
-                                                <option value="FR">France</option>
-                                                <option value="ES">Spain</option>
-                                                <option value="IT">Italy</option>
-                                                <option value="NL">Netherlands</option>
-                                                <option value="SE">Sweden</option>
-                                                <option value="NO">Norway</option>
-                                                <option value="DK">Denmark</option>
-                                                <option value="BR">Brazil</option>
-                                                <option value="MX">Mexico</option>
-                                                <option value="IN">India</option>
-                                                <option value="JP">Japan</option>
-                                                <option value="KR">South Korea</option>
-                                            </select>
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
+                                                        
+
 
                             <!-- Server Connections -->
                             <div class="settings-group" data-stg="connections">
@@ -5447,7 +5244,7 @@
                                     <small class="settings-hint">Your main music library. Finished tracks are moved here, organized into Artist/Album folders.</small>
                                 </div>
 
-                                <div class="form-group" data-music-only>
+                                <div class="form-group">
                                     <label>Podcasts Folder (output):</label>
                                     <div class="path-input-group">
                                         <input type="text" id="podcasts-path" placeholder="./podcasts" readonly>
@@ -5456,7 +5253,7 @@
                                     <small class="settings-hint">Where downloaded podcast episodes are saved and organized.</small>
                                 </div>
 
-                                <div class="form-group" data-music-only>
+                                <div class="form-group">
                                     <label>Audiobooks Folder (output):</label>
                                     <div class="path-input-group">
                                         <input type="text" id="audiobooks-path" placeholder="./audiobooks" readonly>
@@ -5479,7 +5276,7 @@
                                     </div>
                                 </div>
 
-                                <div class="form-group" data-music-only>
+                                <div class="form-group">
                                     <label>Music Videos Dir:</label>
                                     <div class="path-input-group">
                                         <input type="text" id="music-videos-path" placeholder="./MusicVideos" readonly>
@@ -5487,7 +5284,7 @@
                                     </div>
                                 </div>
 
-                                <div class="form-group" data-music-only>
+                                <div class="form-group">
                                     <label>Playlists Folder:</label>
                                     <div class="path-input-group">
                                         <input type="text" id="playlists-materialize-path" placeholder="./Playlists" readonly>
@@ -5499,7 +5296,7 @@
                                     </div>
                                 </div>
 
-                                <div class="form-group" data-music-only>
+                                <div class="form-group">
                                     <label>Playlist Folder Style:</label>
                                     <select id="playlists-materialize-mode">
                                         <option value="symlink">Symlinks — no extra disk, point to your library</option>
@@ -5517,7 +5314,7 @@
                                     </div>
                                 </div>
 
-                                <div class="form-group" data-music-only>
+                                <div class="form-group">
                                     <label>M3U Entry Base Path:</label>
                                     <div class="path-input-group">
                                         <input type="text" id="m3u-entry-base-path" placeholder="e.g. /mnt/music (leave empty for relative paths)" readonly>
@@ -5529,7 +5326,7 @@
                                     </div>
                                 </div>
 
-                                <div class="form-group" data-music-only>
+                                <div class="form-group">
                                     <label>M3U Path Prefix Rewrite:</label>
                                     <div class="path-input-group">
                                         <input type="text" id="m3u-rewrite-from" placeholder="replace this prefix, e.g. /data/media">
@@ -5910,6 +5707,36 @@
                             <!-- ═══ POST-PROCESSING ═══ -->
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Video Folders</h3>
+                                <span class="settings-section-hint">Movies, TV &amp; YouTube libraries</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="library">
+<div class="settings-group" data-stg="library">
+                                
+                                <div class="setting-help-text">
+                                    One shared download folder (where slskd / torrent drop files), then a separate library folder per type — finished files are sorted to the right one automatically. SEPARATE from your Music paths.
+                                </div>
+                                <div class="form-group">
+                                    <label>Download Folder (Input — shared with Music):</label>
+                                    <input type="text" id="video-download-path" placeholder="./downloads">
+                                    <div class="setting-help-text">Where downloads land — point this at the same folder as your slskd / torrent client. This is the SAME folder as the Music side; changing it here changes it there too.</div>
+                                </div>
+                                <div class="form-group">
+                                    <label>🎬 Movies Library:</label>
+                                    <input type="text" id="video-movies-path" placeholder="/media/movies">
+                                </div>
+                                <div class="form-group">
+                                    <label>📺 TV Shows Library:</label>
+                                    <input type="text" id="video-tv-path" placeholder="/media/tv">
+                                </div>
+                                <div class="form-group">
+                                    <label>▶️ YouTube Library:</label>
+                                    <input type="text" id="video-youtube-path" placeholder="/media/youtube">
+                                </div>
+                            </div>
+                            </div>
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Post-Processing</h3>
                                 <span class="settings-section-hint">Metadata, tags, conversion, lyrics</span>
                             </div>
@@ -6202,6 +6029,206 @@
                             </div><!-- end Post-Processing body -->
 
                             <!-- ═══ LISTENING STATS ═══ -->
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Video Organization</h3>
+                                <span class="settings-section-hint">Path templates, post-processing &amp; recycle</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="library">
+<div class="settings-group" data-stg="library">
+                                
+
+                                <div class="form-group">
+                                    <label>Movie Path Template:</label>
+                                    <input type="text" id="vo-movie-template" placeholder="$title ($year)/$title ($year) $quality">
+                                    <small class="settings-hint">Variables: $title, $titlefirst, $year, $quality (e.g. Bluray-1080p), $resolution, $source, $codec, $edition, $tmdbid, $imdbid. Folders split on "/", the last segment is the filename.</small>
+                                    <small class="settings-hint">Example: <code id="vo-movie-preview">&hellip;</code></small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Episode Path Template:</label>
+                                    <input type="text" id="vo-episode-template" placeholder="$series/Season $season/$series - S$seasonE$episode - $episodetitle $quality">
+                                    <small class="settings-hint">Variables: $series, $season (01), $seasonraw (1), $episode (01), $episodetitle, $year, $quality, $resolution, $source, $codec, $tvdbid.</small>
+                                    <small class="settings-hint">Example: <code id="vo-episode-preview">&hellip;</code></small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>YouTube Path Template:</label>
+                                    <input type="text" id="vo-youtube-template" placeholder="$channel/Season $year/$channel - $sxe - $title">
+                                    <small class="settings-hint">Followed YouTube channels organize as a TV show. Variables: $channel, $year, $sxe (s2024e0315 &mdash; lets Plex/Jellyfin index episodes without an online agent), $date (2024-03-15), $month (03), $day (15), $title, $videoid.</small>
+                                    <small class="settings-hint">Plex tip: set the YouTube library's agent to <strong>Personal Media Shows</strong> &mdash; episode titles then come straight from the filename, and the channel folder gets its poster/fanart automatically.</small>
+                                    <small class="settings-hint">Example: <code id="vo-youtube-preview">&hellip;</code></small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>YouTube: videos to grab when you follow a channel:</label>
+                                    <input type="number" id="vo-yt-follow-count" min="0" max="100" placeholder="5">
+                                    <small class="settings-hint">Following a channel backfills its most recent N videos, then watches for anything new posted after you follow. This is also the rolling "keep the last N current" net the channel scan uses. <strong>0</strong> = don't backfill anything, only grab new uploads going forward. It never pulls the whole back catalog.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>When a file finishes:</label>
+                                    <select id="vo-transfer-mode" class="form-select">
+                                        <option value="copy">Copy in, then remove the source (kept for torrents)</option>
+                                        <option value="move">Move into the library</option>
+                                    </select>
+                                    <small class="settings-hint">How a finished download moves from the download folder into your library.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="vo-verify">
+                                        <span>Verify with ffprobe</span>
+                                    </label>
+                                    <small class="settings-hint">Tag by the file's real resolution and reject corrupt / sample files. Needs ffmpeg; falls back to the release name when absent.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="vo-replace">
+                                        <span>Replace an existing copy when the new one is better</span>
+                                    </label>
+                                    <small class="settings-hint">Deletes the old file when an upgrade lands.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="vo-subs">
+                                        <span>Carry matching subtitles</span>
+                                    </label>
+                                    <small class="settings-hint">Bring sibling .srt / .ass files alongside the video, renamed to match.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="vo-artwork">
+                                        <span>Save artwork into the folder</span>
+                                    </label>
+                                    <small class="settings-hint">Download the full artwork set &mdash; poster.jpg, fanart.jpg, clearlogo.png (plus season posters for shows) &mdash; next to the movie / into the show folder. Off by default; Plex/Jellyfin usually fetch their own once the folder is named cleanly. Turn on to pin specific art or for offline/local-assets setups.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="vo-nfo">
+                                        <span>Write NFO metadata files</span>
+                                    </label>
+                                    <small class="settings-hint">Write Kodi/Jellyfin-style movie.nfo / tvshow.nfo (title, plot, rating, genres, cast, ids) so the library is fully portable. Off by default &mdash; Plex ignores these, but Jellyfin/Kodi/Emby use them.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="vo-subs-dl">
+                                        <span>Download subtitles</span>
+                                    </label>
+                                    <small class="settings-hint">Fetch external .srt files from OpenSubtitles next to the video (uses your OpenSubtitles API key on the enrichment settings). Off by default &mdash; the free tier is daily-quota-limited, and most releases already carry embedded subs.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Subtitle Languages:</label>
+                                    <input type="text" id="vo-sub-langs" placeholder="en">
+                                    <small class="settings-hint">Comma-separated language codes to fetch, in priority order (e.g. <code>en,es</code>). One .srt per language is written as &lt;video&gt;.&lt;lang&gt;.srt.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="vo-recycle">
+                                        <span>Recycle deleted files instead of erasing them</span>
+                                    </label>
+                                    <small class="settings-hint">Upgrade-replaced copies, retention-cleaned YouTube episodes and dismissed imports move into an <code>ss_recycle</code> folder inside the library instead of being deleted &mdash; a safety net if something gets replaced by mistake.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Keep recycled files for (days):</label>
+                                    <input type="number" id="vo-recycle-days" min="1" max="365" placeholder="7">
+                                    <small class="settings-hint">Recycled files older than this are removed for good (cleaned automatically as new files are recycled).</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Recycle folder (optional):</label>
+                                    <input type="text" id="vo-recycle-path" placeholder="auto — ss_recycle inside each library">
+                                    <small class="settings-hint">Set a single folder to collect everything (keep it on the same drive as your libraries so moves are instant). Blank = an <code>ss_recycle</code> folder per library.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Minimum free disk space (GB):</label>
+                                    <input type="number" id="vo-min-free" min="0" step="1" placeholder="0 = off">
+                                    <small class="settings-hint">New grabs are refused (and the wishlist drains pause) when the target drive has less free space than this &mdash; so a download can never fill the disk. 0 disables the check.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>YouTube: SponsorBlock</label>
+                                    <select id="vo-sponsorblock">
+                                        <option value="off">Off</option>
+                                        <option value="mark">Mark segments as chapters</option>
+                                        <option value="remove">Cut sponsor segments out</option>
+                                    </select>
+                                    <small class="settings-hint">Uses the community SponsorBlock database at download time. <strong>Mark</strong> adds skippable chapters (sponsor, self-promo, intro, outro); <strong>Cut</strong> removes sponsor/self-promo/interaction segments from the file entirely.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="vo-yt-subs">
+                                        <span>YouTube: embed subtitles</span>
+                                    </label>
+                                    <small class="settings-hint">Embeds YouTube's subtitles (your Subtitle Languages above) into the downloaded file so Plex/Jellyfin offer them without sidecar files.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <button class="test-button" id="vo-reset" style="background: #666;">&#128260; Reset to Defaults</button>
+                                    <small class="settings-hint">Restores the Radarr/Sonarr standard layout.</small>
+                                </div>
+                            </div>
+                            </div>
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Video Preferences</h3>
+                                <span class="settings-section-hint">Trailers &amp; where-to-watch region</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="library">
+<div class="settings-group" data-stg="library">
+                                
+                                <div class="api-service-frame stg-service" data-video-service="prefs">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #38bdf8;"></span>
+                                        <h4 class="service-title">Detail Pages</h4>
+                                        <span class="stg-service-chevron">›</span>
+                                    </div>
+                                    <div class="stg-service-body">
+                                        <label class="vid-pref-row">
+                                            <input type="checkbox" id="video-billboard-autoplay" data-video-pref="billboard_autoplay">
+                                            <span>Autoplay trailers in the billboard</span>
+                                        </label>
+                                        <div class="callback-info">
+                                            <div class="callback-help">Plays a muted trailer behind the hero after a moment (uses more bandwidth).</div>
+                                        </div>
+                                        <label class="vid-pref-row vid-pref-row--select">
+                                            <span>Where-to-watch region</span>
+                                            <select id="video-watch-region" data-video-pref="watch_region">
+                                                <option value="US">United States</option>
+                                                <option value="GB">United Kingdom</option>
+                                                <option value="CA">Canada</option>
+                                                <option value="AU">Australia</option>
+                                                <option value="IE">Ireland</option>
+                                                <option value="NZ">New Zealand</option>
+                                                <option value="DE">Germany</option>
+                                                <option value="FR">France</option>
+                                                <option value="ES">Spain</option>
+                                                <option value="IT">Italy</option>
+                                                <option value="NL">Netherlands</option>
+                                                <option value="SE">Sweden</option>
+                                                <option value="NO">Norway</option>
+                                                <option value="DK">Denmark</option>
+                                                <option value="BR">Brazil</option>
+                                                <option value="MX">Mexico</option>
+                                                <option value="IN">India</option>
+                                                <option value="JP">Japan</option>
+                                                <option value="KR">South Korea</option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            </div>
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Listening Stats</h3>

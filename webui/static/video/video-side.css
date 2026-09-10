@@ -310,12 +310,15 @@ body[data-side="video"] #navidrome-folder-selector-container {
 body[data-side="video"] [data-music-only] {
     display: none !important;
 }
-/* The whole Library tab is music-specific today (file-org templates, music
-   paths, post-processing, conversion, stats) — hide it all on the video side.
-   Future video library settings just need data-video-only to stay visible. */
-body[data-side="video"] [data-stg="library"]:not([data-video-only]) {
-    display: none !important;
-}
+/* The Library tab is SHARED, like Sources and Downloads. It used to be hidden
+   wholesale on the video side as "music-specific today", which stopped being
+   true the moment video grew its own folders, path templates and preferences -
+   and left a video user looking at a tab with three loose blocks on it while
+   the seven music cards sat invisible beside them.
+
+   Both sides see the whole tab now. Same reasoning as the other two: this is a
+   settings page, and which side you happen to be standing on is not a reason to
+   be unable to see a setting. */
 /* The video side has its OWN server section (Video Source above) and reuses the
    shared Plex/Jellyfin credentials — so hide music's Server Connections group
    entirely on the video side. Video never configures or selects the MUSIC server. */

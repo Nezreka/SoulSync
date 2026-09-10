@@ -672,10 +672,14 @@ def test_the_downloads_tab_is_shared_without_needing_a_marker():
     # strip comments first: the note explaining why the rule was removed mentions
     # both strings, and matching your own explanation is not a test.
     rules = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
-    assert 'data-stg="downloads"' not in rules, "the downloads tab is being gated again"
+    for shared in ('downloads', 'sources', 'library'):
+        assert f'data-stg="{shared}"' not in rules, f"the {shared} tab is being gated again"
     assert "data-shared" not in rules
-    # the tabs that really do differ keep theirs
-    for tab in ("library", "quality", "connections"):
+    # the tabs that really do differ keep theirs. Library left this list when it
+    # grew video folders, templates and preferences of its own - "music-specific
+    # today" stopped being true, and hiding it left a video user on a tab with
+    # three loose blocks while seven music cards sat invisible beside them.
+    for tab in ("quality", "connections"):
         assert f'[data-stg="{tab}"]' in css, f"lost the {tab} rule"
 
 def test_every_source_has_a_brand_colour():
