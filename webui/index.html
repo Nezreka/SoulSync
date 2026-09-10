@@ -3364,6 +3364,29 @@
                                  music "File Organization" section (.settings-group / .form-group /
                                  .checkbox-label / .form-select / .settings-hint / .test-button). -->
                             <div class="settings-group" data-stg="library" data-video-only>
+                                <h3>Video Download Folders</h3>
+                                <div class="setting-help-text">
+                                    One shared download folder (where slskd / torrent drop files), then a separate library folder per type — finished files are sorted to the right one automatically. SEPARATE from your Music paths.
+                                </div>
+                                <div class="form-group">
+                                    <label>Download Folder (Input — shared with Music):</label>
+                                    <input type="text" id="video-download-path" placeholder="./downloads">
+                                    <div class="setting-help-text">Where downloads land — point this at the same folder as your slskd / torrent client. This is the SAME folder as the Music side; changing it here changes it there too.</div>
+                                </div>
+                                <div class="form-group">
+                                    <label>🎬 Movies Library:</label>
+                                    <input type="text" id="video-movies-path" placeholder="/media/movies">
+                                </div>
+                                <div class="form-group">
+                                    <label>📺 TV Shows Library:</label>
+                                    <input type="text" id="video-tv-path" placeholder="/media/tv">
+                                </div>
+                                <div class="form-group">
+                                    <label>▶️ YouTube Library:</label>
+                                    <input type="text" id="video-youtube-path" placeholder="/media/youtube">
+                                </div>
+                            </div>
+                            <div class="settings-group" data-stg="library" data-video-only>
                                 <h3>📁 Library Organization</h3>
 
                                 <div class="form-group">
@@ -3738,35 +3761,19 @@
                             <!-- VIDEO Downloads (isolated; shown only on the video side). EVERY music
                                  download element in this tab is hidden via video-side.css; these
                                  data-video-only ones replace them. Order: folders → source → slskd → quality. -->
+                            
                             <div class="settings-group" data-stg="downloads" data-video-only>
-                                <h3>Video Download Folders</h3>
-                                <div class="setting-help-text">
-                                    One shared download folder (where slskd / torrent drop files), then a separate library folder per type — finished files are sorted to the right one automatically. SEPARATE from your Music paths.
-                                </div>
-                                <div class="form-group">
-                                    <label>Download Folder (Input — shared with Music):</label>
-                                    <input type="text" id="video-download-path" placeholder="./downloads">
-                                    <div class="setting-help-text">Where downloads land — point this at the same folder as your slskd / torrent client. This is the SAME folder as the Music side; changing it here changes it there too.</div>
-                                </div>
-                                <div class="form-group">
-                                    <label>🎬 Movies Library:</label>
-                                    <input type="text" id="video-movies-path" placeholder="/media/movies">
-                                </div>
-                                <div class="form-group">
-                                    <label>📺 TV Shows Library:</label>
-                                    <input type="text" id="video-tv-path" placeholder="/media/tv">
-                                </div>
-                                <div class="form-group">
-                                    <label>▶️ YouTube Library:</label>
-                                    <input type="text" id="video-youtube-path" placeholder="/media/youtube">
-                                </div>
-                            </div>
-                            <div class="settings-group" data-stg="downloads" data-video-only>
-                                <h3>Download Source</h3>
-                                <div class="setting-help-text">
+                                <h3>Notifications</h3>
+                                <!-- Was "Download Source". The source picker below is retired: the shared
+                                     download-chain widget (Source Settings) is the one editor for the video
+                                     chain now, and it carries a Video tab. The select and its arrow list stay
+                                     in the DOM because video-settings.js reads them on load, but they are
+                                     hidden - two controls for one setting is how they drift, and these two
+                                     genuinely did: saving a seed ratio used to re-post a stale chain. -->
+                                <div class="setting-help-text" data-video-legacy-source hidden>
                                     Video downloads from slskd, torrent or usenet only. Hybrid tries each enabled source in order.
                                 </div>
-                                <div class="form-group">
+                                <div class="form-group" data-video-legacy-source hidden>
                                     <label>Download Source:</label>
                                     <select id="video-download-mode" class="form-select">
                                         <option value="soulseek">Soulseek Only</option>
@@ -3777,55 +3784,12 @@
                                 </div>
                                 <!-- Hybrid chain — reuses music's hybrid-source-list markup/CSS for
                                      visual parity (minus the album/track badge, which is music-only). -->
-                                <div id="video-hybrid-container" style="display:none;">
+                                <div id="video-hybrid-container" data-video-legacy-source hidden>
                                     <div class="setting-help-text" style="margin-top:10px;">Use the arrows to order sources. Enable the ones you want — downloads try each enabled source in order.</div>
                                     <div class="hybrid-source-list" id="video-hybrid-rows"></div>
                                 </div>
                                 <!-- Seeding lifecycle (arr-parity P5) — torrent grabs only -->
-                                <div class="form-group" id="video-seeding-goals">
-                                    <label>Seeding goals (torrents):</label>
-                                    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
-                                        <span class="settings-hint">Ratio</span>
-                                        <input type="number" id="video-seed-ratio" min="0" step="0.1" style="max-width:90px;" placeholder="0">
-                                        <span class="settings-hint">or hours seeded</span>
-                                        <input type="number" id="video-seed-hours" min="0" step="1" style="max-width:90px;" placeholder="0">
-                                        <label style="display:flex; align-items:center; gap:6px; font-size:12.5px;">
-                                            <input type="checkbox" id="video-seed-remove-data" checked> also delete the client's copy
-                                        </label>
-                                    </div>
-                                    <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
-                                        <span class="settings-hint">Enforced by</span>
-                                        <select id="video-seed-mode" class="form-select" style="max-width:260px;">
-                                            <option value="soulsync">SoulSync (watches the client + removes)</option>
-                                            <option value="client">Torrent client (writes its own seed limit)</option>
-                                        </select>
-                                    </div>
-                                    <small class="settings-hint">Both at 0 = never remove (the old behavior). <strong>SoulSync</strong>: SS polls the client and removes when a goal is hit (your imported library copy is separate and never touched). <strong>Torrent client</strong>: SS writes the ratio/time limit into the client (arr-style) and lets it enforce — it shows in the client's share-limit dialog and works even when SS is off.</small>
-                                    <div id="video-seed-per-indexer" style="margin-top:12px;">
-                                        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                                            <span class="settings-hint">Per-indexer overrides</span>
-                                            <button class="test-button" type="button" id="video-seed-idx-refresh">Load indexers</button>
-                                        </div>
-                                        <small class="settings-hint" style="display:block; margin:6px 0 8px;">
-                                            Sonarr/Radarr put seed rules on the indexer, not globally &mdash; a private tracker needs a ratio or a week of seeding, a public one needs nothing.
-                                            Leave a box <strong>blank</strong> to inherit the goal above; type <strong>0</strong> to exempt that tracker from it. <strong>Pack hrs</strong> is the longer window season packs get (blank = same as Hours).
-                                        </small>
-                                        <div id="video-seed-idx-rows" class="ind-indexer-list">
-                                            <em class="settings-hint">Click Load indexers to list the torrent indexers from Prowlarr.</em>
-                                        </div>
-                                    </div>
-                                </div>
-                                <!-- Import lists (arr-parity P6) -->
-                                <div class="form-group" id="video-import-lists">
-                                    <label>Import lists:</label>
-                                    <small class="settings-hint" style="display:block; margin-bottom:8px;">
-                                        Everything on a list enters acquisition automatically (movies → wishlist, shows → follow with the chosen monitor policy).
-                                        Only NEW list members are added, so removing something never boomerangs back. Synced by the "Sync Import Lists" automation.
-                                        Ref: a TMDB list id, a chart key (trending_movies, top_shows, …), an IMDb ls-id/URL — Plex Watchlist needs no ref.
-                                    </small>
-                                    <div id="vq-implist-rows"></div>
-                                    <button class="test-button" type="button" data-vq-implist-add>+ Add list</button>
-                                </div>
+                                
                                 <!-- Notifications (arr-parity P11) -->
                                 <div class="form-group" id="video-notifications">
                                     <label>Notifications:</label>
@@ -3841,7 +3805,19 @@
                                  app-wide soulseek.* config, not video.db. Collapsible; shown when soulseek
                                  is active. Inner header/body carry no data-stg so the broad hide rule
                                  doesn't catch them (the wrapping group is data-video-only). -->
-                            <div class="settings-group" data-stg="downloads" data-video-only id="video-slskd-container" style="display:none;">
+                            
+                            <!-- Retired duplicate. These nine fields wrote the SAME nine config
+                                 keys as the music Soulseek panel - soulseek.slskd_url, api_key,
+                                 search_timeout and the rest - through
+                                 /api/video/downloads/slskd. Its own help text said so: "SHARED
+                                 with the Music side". Two forms for one slskd instance, and the
+                                 same clobber this page has already been bitten by: saveSlskd()
+                                 posts every field whenever one changes, so a video edit re-posted
+                                 whatever stale URL this form was holding.
+                                 The Sources tab is shared and shows on the video side, so the
+                                 Soulseek card there is the single editor. Kept in the DOM because
+                                 video-settings.js still reads and writes these ids. -->
+                            <div class="settings-group" data-stg="downloads" data-video-only id="video-slskd-container" style="display:none;" data-dupe-of="soulseek-settings-container" hidden>
                                 <div class="settings-section-header collapsed" onclick="this.classList.toggle('collapsed'); var b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':'';">
                                     <span class="settings-section-arrow">&#9660;</span>
                                     <h3>Soulseek (slskd) Connection</h3>
@@ -4065,14 +4041,18 @@
                             </div>
                             </div>
                             <!-- Download Settings -->
-                                                        <!-- Download Settings (collapsible tile) -->
-                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
-                                <span class="settings-section-arrow">&#9660;</span>
+                            <!-- Source Settings is always open. It is the main event on this
+                                 tab - the download chain, the source pool and the stream /
+                                 concurrency settings - so putting it behind a click only hid
+                                 the thing people came here for. Static heading, no arrow, no
+                                 toggle; the body carries no .collapsed class, which is what
+                                 switchSettingsTab keys off when it re-hides bodies. -->
+                            <div class="settings-section-header settings-section-static" data-stg="downloads" data-shared>
                                 <h3>Source Settings</h3>
                                 <span class="settings-section-hint">Source, stream &amp; concurrency</span>
                             </div>
-                            <div class="settings-section-body collapsed" data-stg="downloads">
-<div class="settings-group source-settings-wrapper" data-stg="downloads">
+                            <div class="settings-section-body" data-stg="downloads" data-shared>
+<div class="settings-group source-settings-wrapper" data-stg="downloads" data-shared>
 
                                 <div class="settings-subcard">
                                 <!-- The chain widget below IS this setting now: one source in the
@@ -4124,13 +4104,30 @@
                                             <div class="dlchain-col-head">
                                                 <span class="dlchain-col-label">Available</span>
                                                 <span class="dlchain-col-hint">drag one across, or click it</span>
+                                                <input type="search" id="dlchain-filter" class="dlchain-filter"
+                                                       placeholder="Filter" aria-label="Filter available sources"
+                                                       oninput="dlchainFilter(this.value)" autocomplete="off">
                                             </div>
                                             <div class="dlchain-pool" id="dlchain-pool"></div>
-                                            <!-- These live under the pool because the column was empty below the
-                                                 tiles and these are the rest of the same subject. Music-wide, so
-                                                 renderDownloadChain() hides them on the Video and Audiobooks tabs
-                                                 rather than implying they apply per media type. -->
-                                            <div id="dlchain-extra" class="dlchain-extra">
+                                            
+                                        </div>
+                                        <div class="dlchain-col">
+                                            <div class="dlchain-col-head">
+                                                <span class="dlchain-col-label">Download chain</span>
+                                                <span class="dlchain-col-hint" id="dlchain-mode-hint"></span>
+                                            </div>
+                                            <div class="dlchain-list" id="dlchain-list"></div>
+                                        </div>
+                                    </div>
+                                    <!-- Its own group, below the chain. These are general download
+                                         settings - concurrency, timeouts, the preview source - and they
+                                         are not part of the chain. They sat inside the pool column only
+                                         because that column had space going spare, which is not a reason
+                                         to put anything anywhere. Still music-wide, so
+                                         renderDownloadChain() still hides the group on the other tabs. -->
+                                    <div class="dlchain-behaviour" id="dlchain-behaviour">
+                                        <div class="dlchain-group-title">Download behaviour</div>
+<div id="dlchain-extra" class="dlchain-extra">
                                 <div class="form-group">
                                     <label>Stream / Preview Source:</label>
                                     <select id="stream-source" class="form-select">
@@ -4181,15 +4178,8 @@
                                     <span class="setting-help-text" style="margin-left:10px;">Checks every selected source &amp; configured connection.</span>
                                 </div>
                                             </div>
-                                        </div>
-                                        <div class="dlchain-col">
-                                            <div class="dlchain-col-head">
-                                                <span class="dlchain-col-label">Download chain</span>
-                                                <span class="dlchain-col-hint" id="dlchain-mode-hint"></span>
-                                            </div>
-                                            <div class="dlchain-list" id="dlchain-list"></div>
-                                        </div>
                                     </div>
+
                                 </div>
 
                                 <!-- Hybrid Mode Settings (shown only when hybrid is selected) -->
@@ -4805,6 +4795,47 @@
                                         </div>
                                     </div>
                                 </div>
+                                
+                                    <!-- Video torrent seeding. Moved here from the video Downloads
+                                         tab: it configures what happens to a TORRENT after it
+                                         finishes, so it belongs with the torrent client, not in a
+                                         separate downloads page. Still data-video-only - the values
+                                         live in the video db and video-settings.js owns them. -->
+                                    <div data-video-only>
+<div class="form-group" id="video-seeding-goals">
+                                    <label>Seeding goals (torrents):</label>
+                                    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+                                        <span class="settings-hint">Ratio</span>
+                                        <input type="number" id="video-seed-ratio" min="0" step="0.1" style="max-width:90px;" placeholder="0">
+                                        <span class="settings-hint">or hours seeded</span>
+                                        <input type="number" id="video-seed-hours" min="0" step="1" style="max-width:90px;" placeholder="0">
+                                        <label style="display:flex; align-items:center; gap:6px; font-size:12.5px;">
+                                            <input type="checkbox" id="video-seed-remove-data" checked> also delete the client's copy
+                                        </label>
+                                    </div>
+                                    <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+                                        <span class="settings-hint">Enforced by</span>
+                                        <select id="video-seed-mode" class="form-select" style="max-width:260px;">
+                                            <option value="soulsync">SoulSync (watches the client + removes)</option>
+                                            <option value="client">Torrent client (writes its own seed limit)</option>
+                                        </select>
+                                    </div>
+                                    <small class="settings-hint">Both at 0 = never remove (the old behavior). <strong>SoulSync</strong>: SS polls the client and removes when a goal is hit (your imported library copy is separate and never touched). <strong>Torrent client</strong>: SS writes the ratio/time limit into the client (arr-style) and lets it enforce — it shows in the client's share-limit dialog and works even when SS is off.</small>
+                                    <div id="video-seed-per-indexer" style="margin-top:12px;">
+                                        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                                            <span class="settings-hint">Per-indexer overrides</span>
+                                            <button class="test-button" type="button" id="video-seed-idx-refresh">Load indexers</button>
+                                        </div>
+                                        <small class="settings-hint" style="display:block; margin:6px 0 8px;">
+                                            Sonarr/Radarr put seed rules on the indexer, not globally &mdash; a private tracker needs a ratio or a week of seeding, a public one needs nothing.
+                                            Leave a box <strong>blank</strong> to inherit the goal above; type <strong>0</strong> to exempt that tracker from it. <strong>Pack hrs</strong> is the longer window season packs get (blank = same as Hours).
+                                        </small>
+                                        <div id="video-seed-idx-rows" class="ind-indexer-list">
+                                            <em class="settings-hint">Click Load indexers to list the torrent indexers from Prowlarr.</em>
+                                        </div>
+                                    </div>
+                                </div>
+                                    </div>
                                 </div>
 
                                 <!-- The usenet client.
@@ -6924,6 +6955,32 @@
                             </div>
 
                             <!-- Experimental (collapsible tile) -->
+                            <!-- Import lists. Moved off the video Downloads tab: it is a background
+                                 sync rule, not a download setting, and Advanced is where the other
+                                 background machinery lives. Still data-video-only - the endpoints are
+                                 /api/video/downloads/config/import-lists and it feeds the VIDEO
+                                 wishlist, so it would do nothing on the music side. -->
+                            <div class="settings-section-header collapsed" data-stg="advanced" data-video-only onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Import Lists</h3>
+                                <span class="settings-section-hint">Auto-add movies &amp; shows from a list</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="advanced" data-video-only>
+                            <div class="settings-group" data-stg="advanced" data-video-only>
+<!-- Import lists (arr-parity P6) -->
+                                <div class="form-group" id="video-import-lists">
+                                    <label>Import lists:</label>
+                                    <small class="settings-hint" style="display:block; margin-bottom:8px;">
+                                        Everything on a list enters acquisition automatically (movies → wishlist, shows → follow with the chosen monitor policy).
+                                        Only NEW list members are added, so removing something never boomerangs back. Synced by the "Sync Import Lists" automation.
+                                        Ref: a TMDB list id, a chart key (trending_movies, top_shows, …), an IMDb ls-id/URL — Plex Watchlist needs no ref.
+                                    </small>
+                                    <div id="vq-implist-rows"></div>
+                                    <button class="test-button" type="button" data-vq-implist-add>+ Add list</button>
+                                </div>
+                            </div>
+                            </div>
+
                             <div class="settings-section-header collapsed" data-stg="advanced" data-music-only onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Experimental</h3>

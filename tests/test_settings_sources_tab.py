@@ -290,6 +290,28 @@ def test_a_warning_gets_its_own_dot_colour():
     assert "#ff5f57" not in warn.group(1)
 
 
+def test_a_broken_source_is_visible_at_the_tile_not_just_the_dot():
+    """The tile used to carry this on border-color. The visual pass dropped
+    borders in favour of tonal surfaces, and this signal came within one edit of
+    going with them - the dot tests below stayed green either way, because the
+    dot is a separate element. So pin the tile-level ring, not the dot.
+
+    The alert also has to outrank .src-tile.is-active, which sets a box-shadow of
+    its own: a source that is IN the chain and failing is exactly the one you
+    need to see, so ordering in the file is load-bearing here.
+    """
+    css = _strip_comments(_read("webui/static/style.css"))
+    for state, colour in (("hss-fail", "255, 95, 87"), ("hss-warn", "240, 180, 41")):
+        m = re.search(r"^\.src-tile:has\(\.src-tile-dot\.%s\)\s*{([^}]*)}" % state, css, re.M)
+        assert m, "no tile-level ring for %s" % state
+        assert "box-shadow" in m.group(1), "%s ring is not drawn" % state
+        assert colour in m.group(1), "%s ring lost its colour" % state
+        assert css.index(m.group(0)) > css.index(".src-tile.is-active {"), (
+            "the %s ring must come after .src-tile.is-active or the chain "
+            "gradient wins and a failing in-chain source looks healthy" % state
+        )
+
+
 def test_usenet_has_a_tile(js):
     """It is its own link in the chain and shares the Prowlarr panel with
     torrent. It had no entry at all, so a usenet user saw nothing to click."""
@@ -574,3 +596,35 @@ def test_the_indexer_result_redraws_its_tile(js):
     fn = js.split("async function testAllSources(", 1)[1].split("\nwindow.", 1)[0]
     block = fn.split("_hybridSourceStatus.prowlarr = 'testing'", 1)[1].split("for (const id of sources)", 1)[0]
     assert "buildSourceTiles()" in block
+
+
+def test_an_inverted_mark_is_not_then_dimmed_into_grey():
+    """Tidal, Qobuz and SoundCloud ship as thin black OUTLINE svgs - stroke only,
+    an 800px viewBox drawn at 30px. They are inverted to white so they are not
+    invisible on a dark tile.
+
+    The bug this pins: opacity MULTIPLIES down the tree. The mark carried 0.92 of
+    its own while the idle rule put 0.55 on the parent, so a source that was not
+    in the chain drew its white hairlines at 0.5 - which on a dark tile is grey,
+    and looks exactly like the inversion was never applied at all. It was; it was
+    being eaten one rule further up. Both halves have to stay put, which is why
+    this checks the parent exemption and not just the filter.
+    """
+    css = _strip_comments(_read("webui/static/style.css"))
+
+    for sel in (r"\.src-tile-art img\.is-inverted", r"\.dlchain-mark\.is-inverted"):
+        m = re.search(r"^%s\s*{([^}]*)}" % sel, css, re.M)
+        assert m, "no invert rule for %s" % sel
+        assert "brightness(0) invert(1)" in m.group(1)
+        op = re.search(r"opacity:\s*([\d.]+)", m.group(1))
+        assert op and float(op.group(1)) == 1, (
+            "an inverted mark must carry full opacity; anything less multiplies "
+            "with the parent dimming and turns white line art grey"
+        )
+
+    # and the idle dimming has to let these through
+    assert ".src-tile-art:has(img.is-inverted)" in css, (
+        "no exemption from .src-tile:not(.is-active) dimming for line-art marks"
+    )
+    assert ".dlchain-tile-art:has(.dlchain-mark.is-inverted)" in css
+

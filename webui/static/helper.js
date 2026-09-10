@@ -1712,9 +1712,14 @@ const HELPER_CONTENT = {
         description: 'Configure credentials for metadata sources (Spotify, Tidal, Last.fm, etc.) and media server connections (Plex, Jellyfin, Navidrome).',
         docsId: 'set-services'
     },
+    '.stg-tab[data-tab="sources"]': {
+        title: 'Sources',
+        description: 'Every download source in one place - Soulseek, YouTube, Tidal, Qobuz, Deezer and the rest, plus the indexer, torrent and usenet clients the video side shares. Click a tile to configure it, whether or not it is in a download chain.',
+        docsId: 'set-download'
+    },
     '.stg-tab[data-tab="downloads"]': {
         title: 'Downloads',
-        description: 'Configure download sources, paths, quality profiles, and hybrid mode priority order.',
+        description: 'Build the download chain - the order sources are tried in - plus paths and quality profiles.',
         docsId: 'set-download'
     },
     '.stg-tab[data-tab="library"]': {
@@ -2480,7 +2485,7 @@ const HELPER_TOURS = {
         icon: '⚙️',
         steps: [
             // Tab bar
-            { page: 'settings', selector: '.stg-tabbar', title: 'Settings Tabs', description: 'Settings are organized into 5 tabs: Connections (API keys, server setup), Downloads (sources, paths, quality), Library (file organization, post-processing), Appearance (theme, colors), and Advanced.' },
+            { page: 'settings', selector: '.stg-tabbar', title: 'Settings Tabs', description: 'Settings are organized into 6 tabs: Connections (API keys, server setup), Sources (every download source, configured in one place), Downloads (the download chain, paths, quality), Library (file organization, post-processing), Appearance (theme, colors), and Advanced.' },
 
             // Connections
             { page: 'settings', selector: '.stg-tab[data-tab="connections"]', title: 'Connections Tab', description: 'This is where you connect all your services. API keys for Spotify, Tidal, Last.fm, Genius, AcoustID, and your metadata source preference. Plus your media server (Plex, Jellyfin, or Navidrome).' },
@@ -2488,6 +2493,7 @@ const HELPER_TOURS = {
             { page: 'settings', selector: '.server-toggle-container', title: 'Media Server', description: 'Toggle on your media server — Plex, Jellyfin, or Navidrome. Enter the server URL and token/API key. This is where your music library lives and where downloads get synced to.' },
 
             // Downloads
+            { page: 'settings', selector: '.stg-tab[data-tab="sources"]', title: 'Sources Tab', description: 'Every download source lives here, each as a tile you click to configure. A tile lights up when it is part of a download chain, and shows a red or amber ring when it is configured but not connecting. The indexer, torrent and usenet clients appear here too, since music and video both download through them.' },
             { page: 'settings', selector: '.stg-tab[data-tab="downloads"]', title: 'Downloads Tab', description: 'Configure where music comes from and where it goes. Set your download source (Soulseek, YouTube, Tidal, Qobuz, HiFi, Deezer, or Hybrid mode), download paths, and quality preferences.' },
             { page: 'settings', selector: '.stg-tab[data-tab="downloads"]', title: 'Quality Profiles', description: 'Quality profiles control what files are acceptable — format (FLAC, MP3, etc.), minimum bitrate, bit depth preference, and peer speed requirements. The waterfall filter tries your preferred format first, then falls back.' },
 

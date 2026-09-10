@@ -998,11 +998,71 @@ const DLCHAIN_KINDS = {
 };
 
 let _dlchainKind = 'music';
+// The widget is deliberately shared: the Sources and Downloads tabs render on
+// the video side too. But the kind above is a music default, so a video user
+// opening Downloads landed on the MUSIC chain, with the music-only behaviour
+// group under it. Until they pick a tab themselves, follow the side they are on.
+let _dlchainKindChosen = false;
+
+function _dlchainSyncKindToSide() {
+    if (_dlchainKindChosen) return;
+    _dlchainKind = document.body.getAttribute('data-side') === 'video' ? 'video' : 'music';
+}
 let _dlchainOrder = [];
 let _dlchainDragging = null;
 
 // A source in the pool: the Sources-tab tile, shrunk. Same logo, same shape, so
 // the thing you drag looks like the thing you configure.
+// Groups in a fixed order, each with a count, then anything unlisted under
+// "Other" so a new source is never silently dropped from the pool.
+function _dlchainPoolHtml(kind, available) {
+    if (!available.length) return '<div class="dlchain-empty">Every source is in the chain.</div>';
+    const seen = new Set();
+    let html = '';
+    const group = (label, ids) => {
+        if (!ids.length) return '';
+        ids.forEach(id => seen.add(id));
+        return `<div class="dlchain-group">`
+             + `<div class="dlchain-group-head">`
+             + `<span class="dlchain-group-label">${escapeHtml(label)}</span>`
+             + `<span class="dlchain-group-count">${ids.length}</span></div>`
+             + `<div class="dlchain-group-row">${ids.map(id => _dlchainTile(kind, id)).join('')}</div>`
+             + `</div>`;
+    };
+    for (const g of DLCHAIN_GROUPS) html += group(g.label, g.ids.filter(id => available.includes(id)));
+    html += group('Other', available.filter(id => !seen.has(id)));
+    html += '<div class="dlchain-empty" id="dlchain-no-match" hidden>Nothing matches that.</div>';
+    return html;
+}
+
+// Filter state lives outside the render so re-rendering (adding a source, or
+// switching media tab) does not silently drop what was typed.
+let _dlchainQuery = '';
+
+function dlchainFilter(q) {
+    _dlchainQuery = String(q || '').trim().toLowerCase();
+    _dlchainApplyFilter();
+}
+window.dlchainFilter = dlchainFilter;
+
+function _dlchainApplyFilter() {
+    const pool = document.getElementById('dlchain-pool');
+    if (!pool) return;
+    const q = _dlchainQuery;
+    let shown = 0;
+    pool.querySelectorAll('.dlchain-tile').forEach(tile => {
+        const name = (tile.querySelector('.dlchain-tile-name')?.textContent || '').toLowerCase();
+        const hit = !q || name.includes(q) || (tile.dataset.src || '').toLowerCase().includes(q);
+        tile.hidden = !hit;
+        if (hit) shown++;
+    });
+    pool.querySelectorAll('.dlchain-group').forEach(g => {
+        g.hidden = !g.querySelector('.dlchain-tile:not([hidden])');
+    });
+    const none = document.getElementById('dlchain-no-match');
+    if (none) none.hidden = !(q && shown === 0);
+}
+
 function _dlchainTile(kind, id) {
     const m = DLCHAIN_KINDS[kind].meta(id);
     const inv = INVERT_BRAND_MARKS.has(id) ? ' is-inverted' : '';
@@ -1027,19 +1087,28 @@ function _dlchainStep(kind, id, position, total) {
         : `<span class="emoji-icon">${m.emoji}</span>`;
     const role = position === 1 ? 'Tried first' : `Fallback ${position - 1}`;
     const name = escapeHtml(m.name);
+    // A full-width row rather than a logo in a box. The logo alone could not say
+    // which source a step was - an emoji shopping cart for Amazon Music is not
+    // recognisable - and a small centred card in a wide column left most of the
+    // column empty, which is what made the whole panel look unfinished.
     return `<div class="dlchain-step" draggable="true" data-src="${id}" `
-         + `title="${name} — ${role}" aria-label="${name}, ${role}">`
-         + '<span class="dlchain-step-move">'
-         + `<button type="button" class="dlchain-move" title="Move ${name} up" aria-label="Move ${name} up"`
-         + `${position === 1 ? ' disabled' : ''} onclick="dlchainMove('${id}', -1)">▲</button>`
-         + `<button type="button" class="dlchain-move" title="Move ${name} down" aria-label="Move ${name} down"`
-         + `${position === total ? ' disabled' : ''} onclick="dlchainMove('${id}', 1)">▼</button>`
-         + '</span>'
+         + `title="${name} - ${role}" aria-label="${name}, ${role}">`
+         + '<span class="dlchain-grip" aria-hidden="true">&#x283F;</span>'
          + `<span class="dlchain-step-rank">${position}</span>`
          + `<span class="dlchain-step-art">${art}</span>`
+         + '<span class="dlchain-step-text">'
+         + `<span class="dlchain-step-name">${name}</span>`
+         + `<span class="dlchain-step-role">${role}</span></span>`
+         + '<span class="dlchain-step-move">'
+         + `<button type="button" class="dlchain-move" title="Move ${name} up" aria-label="Move ${name} up"`
+         + `${position === 1 ? ' disabled' : ''} onclick="dlchainMove('${id}', -1)">&#9650;</button>`
+         + `<button type="button" class="dlchain-move" title="Move ${name} down" aria-label="Move ${name} down"`
+         + `${position === total ? ' disabled' : ''} onclick="dlchainMove('${id}', 1)">&#9660;</button>`
+         + '</span>'
          + `<button type="button" class="dlchain-btn" title="Remove ${name} from the chain" `
          + `aria-label="Remove ${name} from the chain" onclick="dlchainRemove('${id}')">&times;</button></div>`;
 }
+
 
 // Arrows because dragging is precise work on a touchpad and impossible on a
 // phone; the drag stays for people who prefer it.
@@ -1092,14 +1161,14 @@ function renderDownloadChain() {
         + '</div>';
     list.innerHTML = flow;
 
-    pool.innerHTML = available.length
-        ? available.map(id => _dlchainTile(kind, id)).join('')
-        : '<div class="dlchain-empty">Every source is in the chain.</div>';
+    pool.innerHTML = _dlchainPoolHtml(kind, available);
+    _dlchainApplyFilter();
 
-    // The extra settings under the pool are download_source.* — music-wide.
-    // Showing them under a video or audiobook pool would say they apply there.
-    const extra = document.getElementById('dlchain-extra');
-    if (extra) extra.hidden = kind !== 'music';
+    // The behaviour group is download_source.* — music-wide. Showing it under a
+    // video or audiobook chain would say it applies there. Hide the WRAPPER, not
+    // the inner block, or the "Download behaviour" heading stays behind on its own.
+    const behaviour = document.getElementById('dlchain-behaviour');
+    if (behaviour) behaviour.hidden = kind !== 'music';
 
     const hint = document.getElementById('dlchain-mode-hint');
     if (hint) {
@@ -1112,12 +1181,14 @@ window.renderDownloadChain = renderDownloadChain;
 
 function switchDownloadChain(kind) {
     if (!DLCHAIN_KINDS[kind]) return;
+    _dlchainKindChosen = true;   // an explicit pick outranks the side default
     _dlchainKind = kind;
     _dlchainLoad();
 }
 window.switchDownloadChain = switchDownloadChain;
 
 async function _dlchainLoad() {
+    _dlchainSyncKindToSide();
     const spec = DLCHAIN_KINDS[_dlchainKind];
     if (!spec) return;
     try {
@@ -1316,6 +1387,18 @@ function onAudiobookModeChange() {
 // `brightness(0) invert(1)` — already used for the equalizer and auto-sync icons.
 const INVERT_BRAND_MARKS = new Set(['tidal', 'qobuz', 'soundcloud']);
 
+// The pool is grouped rather than one flat grid: eleven music sources is more
+// than anyone scans comfortably, and "which of these is a streaming service"
+// is the question people actually arrive with. Ids not listed here fall into
+// "Other", so adding a source to HYBRID_SOURCES can never make it disappear.
+const DLCHAIN_GROUPS = [
+    { label: 'Peer-to-peer', ids: ['soulseek'] },
+    { label: 'Streaming services', ids: ['tidal', 'qobuz', 'deezer_dl', 'amazon', 'soundcloud', 'hifi'] },
+    { label: 'Public video', ids: ['youtube'] },
+    { label: 'Torrent & Usenet', ids: ['torrent', 'usenet', 'extto'] },
+    { label: 'Library manager', ids: ['lidarr'] },
+];
+
 const HYBRID_SOURCES = [
     { id: 'soulseek', name: 'Soulseek', icon: '/static/img/brands/slskd.png', emoji: '🎵' },
     { id: 'youtube', name: 'YouTube', icon: '/static/img/brands/youtube.svg', emoji: '▶️' },
@@ -1390,8 +1473,13 @@ function _srcTileMarkup(src, order) {
                        warn: said || 'Working, but needs attention',
                        fail: said || 'Connection failed',
                        na: 'No connection test for this source' }[state];
+    // Same brand marks that get inverted in the download-chain widget: these
+    // logos are dark-on-light artwork and disappear against a dark tile. They
+    // were only inverted in the chain, so the same source looked different in
+    // the two places it appears.
+    const srcInv = INVERT_BRAND_MARKS.has(src.id) ? ' class="is-inverted"' : '';
     const art = src.icon
-        ? `<img src="${src.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${src.emoji}</span>'">`
+        ? `<img${srcInv} src="${src.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${src.emoji}</span>'">`
         : `<span class="emoji-icon">${src.emoji}</span>`;
     // Prowlarr is never "in the chain" — it is what the chain's torrent and
     // usenet links search through — so the chain chip would read as a fault.

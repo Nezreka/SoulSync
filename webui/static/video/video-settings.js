@@ -414,8 +414,13 @@
                 movies_path: val('video-movies-path'),
                 tv_path: val('video-tv-path'),
                 youtube_path: val('video-youtube-path'),
-                download_mode: _videoMode,
-                hybrid_order: _videoHybrid,
+                // download_mode / hybrid_order are NOT sent from here any more.
+                // The shared download-chain widget owns them and writes them
+                // straight to this endpoint. _videoMode/_videoHybrid only refresh
+                // when this file loads, so sending them meant that changing a
+                // folder path or a seed ratio re-posted a stale chain and silently
+                // undid whatever the widget had just saved. The endpoint only
+                // persists keys that are present, so leaving them out is safe.
                 seed_ratio_goal: parseFloat(val('video-seed-ratio')) || 0,
                 seed_time_goal_hours: parseInt(val('video-seed-hours'), 10) || 0,
                 seed_remove_data: !!(document.getElementById('video-seed-remove-data') || {}).checked,
