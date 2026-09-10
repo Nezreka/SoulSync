@@ -4106,6 +4106,31 @@
                                     </div>
                                 </div>
 
+
+
+
+
+                                <!-- ═══ DOWNLOAD CHAINS ═════════════════════════════════════
+                                     One widget for all three media types. Music, video and
+                                     audiobooks each keep their own {mode, hybrid_order} —
+                                     the same shape in three places — and used to have three
+                                     separate editors that looked and behaved differently.
+                                ═════════════════════════════════════════════════════════ -->
+                                <div id="download-chain-widget">
+                                    <div class="dlchain-tabs" id="dlchain-tabs" role="tablist"></div>
+                                    <div class="setting-help-text" id="dlchain-help"></div>
+                                    <div class="dlchain-columns">
+                                        <div class="dlchain-col">
+                                            <div class="dlchain-col-head">
+                                                <span class="dlchain-col-label">Available</span>
+                                                <span class="dlchain-col-hint">drag one across, or click it</span>
+                                            </div>
+                                            <div class="dlchain-pool" id="dlchain-pool"></div>
+                                            <!-- These live under the pool because the column was empty below the
+                                                 tiles and these are the rest of the same subject. Music-wide, so
+                                                 renderDownloadChain() hides them on the Video and Audiobooks tabs
+                                                 rather than implying they apply per media type. -->
+                                            <div id="dlchain-extra" class="dlchain-extra">
                                 <div class="form-group">
                                     <label>Stream / Preview Source:</label>
                                     <select id="stream-source" class="form-select">
@@ -4119,7 +4144,6 @@
                                         "Active Download Source" uses your configured source (Tidal, Qobuz, etc.) — if that's Soulseek, YouTube is used automatically.
                                     </div>
                                 </div>
-
                                 <div class="form-group">
                                     <label>Concurrent Downloads:</label>
                                     <select id="max-concurrent-downloads" class="form-select">
@@ -4140,7 +4164,6 @@
                                         Takes effect after a restart, since the worker threads are created at startup.
                                     </div>
                                 </div>
-
                                 <div class="form-group">
                                     <label>Source search timeout (seconds):</label>
                                     <input type="number" id="source-search-timeout" min="0" max="120" step="1" placeholder="0 = source defaults" style="max-width:180px;">
@@ -4153,28 +4176,11 @@
                                         Soulseek is not affected — it has its own Search Timeout setting above.
                                     </div>
                                 </div>
-
                                 <div class="form-group">
                                     <button class="test-button" id="test-all-sources-btn" onclick="testAllSources()">Test all sources</button>
                                     <span class="setting-help-text" style="margin-left:10px;">Checks every selected source &amp; configured connection.</span>
                                 </div>
-
-                                <!-- ═══ DOWNLOAD CHAINS ═════════════════════════════════════
-                                     One widget for all three media types. Music, video and
-                                     audiobooks each keep their own {mode, hybrid_order} —
-                                     the same shape in three places — and used to have three
-                                     separate editors that looked and behaved differently.
-                                ═════════════════════════════════════════════════════════ -->
-                                <div id="download-chain-widget">
-                                    <div class="dlchain-tabs" id="dlchain-tabs" role="tablist"></div>
-                                    <div class="setting-help-text" id="dlchain-help"></div>
-                                    <div class="dlchain-columns">
-                                        <div class="dlchain-col">
-                                            <div class="dlchain-col-head">
-                                                <span class="dlchain-col-label">Available</span>
-                                                <span class="dlchain-col-hint">drag one across, or click it</span>
                                             </div>
-                                            <div class="dlchain-pool" id="dlchain-pool"></div>
                                         </div>
                                         <div class="dlchain-col">
                                             <div class="dlchain-col-head">

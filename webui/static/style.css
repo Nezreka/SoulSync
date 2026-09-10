@@ -84125,6 +84125,19 @@ body.src-modal-open { overflow: hidden; }
     border-color: rgba(var(--accent-rgb), 0.5);
     background: rgba(var(--accent-rgb), 0.05);
 }
+/* The rest of the source settings, tucked under the pool — the column was
+   empty below the tiles and these are the same subject. */
+.dlchain-extra {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.dlchain-extra[hidden] { display: none; }
+.dlchain-extra .form-group { margin-bottom: 0; }
+
 .dlchain-tile {
     display: flex;
     flex-direction: column;

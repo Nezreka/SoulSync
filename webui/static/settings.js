@@ -1096,6 +1096,11 @@ function renderDownloadChain() {
         ? available.map(id => _dlchainTile(kind, id)).join('')
         : '<div class="dlchain-empty">Every source is in the chain.</div>';
 
+    // The extra settings under the pool are download_source.* — music-wide.
+    // Showing them under a video or audiobook pool would say they apply there.
+    const extra = document.getElementById('dlchain-extra');
+    if (extra) extra.hidden = kind !== 'music';
+
     const hint = document.getElementById('dlchain-mode-hint');
     if (hint) {
         hint.textContent = order.length > 1 ? `hybrid — ${order.length} sources`

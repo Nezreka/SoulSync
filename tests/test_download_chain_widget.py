@@ -412,3 +412,31 @@ def test_it_works_on_a_phone():
     assert ".dlchain-step { width: 100%" in phone
     assert ".dlchain-move" in phone and ".dlchain-btn" in phone
     assert ".dlchain-tabs" in phone
+
+
+def test_the_rest_of_the_source_settings_sit_under_the_pool(index):
+    """The left column was empty below the tiles while stream source,
+    concurrency and the search timeout sat in a separate block above — the same
+    subject, split across the page for no reason."""
+    assert 'id="dlchain-extra"' in index
+    # position is the claim: between the pool above and the chain beside it
+    pool_at = index.index('id="dlchain-pool"')
+    extra_at = index.index('id="dlchain-extra"')
+    chain_at = index.index('id="dlchain-list"')
+    assert pool_at < extra_at < chain_at, "the extras are not between the pool and the chain"
+
+
+def test_the_extras_are_music_only(js):
+    """They are download_source.* — music-wide. Under a video or audiobook pool
+    they would say they apply there."""
+    fn = js.split("function renderDownloadChain(", 1)[1].split("\nwindow.", 1)[0]
+    assert "dlchain-extra" in fn
+    assert "kind !== 'music'" in fn
+
+
+def test_moving_them_did_not_orphan_their_settings(js, index):
+    """They are read by saveSettings by id, so the move is safe only as long as
+    every id still exists — which is exactly the wipe this page already had."""
+    for el in ("stream-source", "max-concurrent-downloads", "source-search-timeout",
+               "test-all-sources-btn"):
+        assert f'id="{el}"' in index, el
