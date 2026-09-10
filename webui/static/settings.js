@@ -1413,12 +1413,14 @@ const HYBRID_SOURCES = [
     { id: 'usenet', name: 'Usenet', icon: null, emoji: '📰' },
 ];
 
-// Sources the VIDEO side downloads through too. The Sources tab is shared, so
-// these are the tiles it shows; the rest are music-only and stay hidden there.
 // Prowlarr is not in HYBRID_SOURCES because it is not a link in the download
-// chain — it is the indexer both torrent and usenet search through — but it
+// chain - it is the indexer both torrent and usenet search through - but it
 // very much is something you configure to download, so it earns a tile.
-const SHARED_SOURCES = new Set(['youtube', 'torrent', 'usenet', 'prowlarr']);
+//
+// There used to be a SHARED_SOURCES set here naming the four tiles the video
+// side was allowed to see. The Sources tab is fully shared now: every side sees
+// every tile, because hiding Tidal from someone standing on the video side just
+// means they cannot fix their Tidal credentials without switching sides first.
 const EXTRA_SOURCE_TILES = [
     { id: 'prowlarr', name: 'Indexers', icon: null, emoji: '🔎' },
 ];
@@ -1508,15 +1510,11 @@ function buildSourceTiles() {
     const grid = document.getElementById('source-tile-grid');
     if (!grid) return;
     const order = (typeof getHybridOrder === 'function' ? getHybridOrder() : []) || [];
-    const onVideo = document.body.getAttribute('data-side') === 'video';
 
-    // Only sources that own a config panel get a tile, and on the video side
-    // only the ones it actually downloads through. The music-only tiles are
-    // filtered here rather than with data-music-only because the tiles are
-    // rendered, not written — there is no markup for the CSS rule to hit.
+    // Only sources that own a config panel get a tile. No side filtering: this
+    // tab is shared and shows the same thing on both sides.
     const configurable = HYBRID_SOURCES.concat(EXTRA_SOURCE_TILES)
-        .filter(src => SOURCE_CONFIG_ID_BY_SRC[src.id])
-        .filter(src => !onVideo || SHARED_SOURCES.has(src.id));
+        .filter(src => SOURCE_CONFIG_ID_BY_SRC[src.id]);
 
     const section = (label, hint, list) => list.length
         ? `<div class="src-group"><div class="src-group-head">`
@@ -1532,15 +1530,6 @@ function buildSourceTiles() {
     const isIndexer = (src) => EXTRA_SOURCE_TILES.some(x => x.id === src.id);
     const indexers = configurable.filter(isIndexer);
     const sources = configurable.filter(src => !isIndexer(src));
-
-    if (onVideo) {
-        // The chain is a music concept — video picks its sources on its own
-        // settings, so grouping by "in your chain" would be meaningless here.
-        grid.innerHTML =
-            section('Download sources', 'shared with the music side', sources) +
-            section('Indexers', 'searched by torrent and usenet', indexers);
-        return;
-    }
 
     const inChain = sources
         .filter(src => order.includes(src.id))

@@ -322,19 +322,17 @@ body[data-side="video"] [data-stg="library"]:not([data-video-only]) {
 body[data-side="video"] .settings-group[data-stg="connections"]:not([data-video-only]) {
     display: none !important;
 }
-/* The Downloads tab is almost entirely music-specific (streaming sources, music
-   quality profile, retry logic). Hide EVERY music download element on the video
-   side — not just .settings-group, but also the quality-profile tile + the
-   collapsible section headers/bodies (#quality-profile-tile, .settings-section-*).
-   The video-only ones (folders, video source/hybrid, video quality) replace them.
-   EXCEPTION: the shared torrent/usenet setup (Indexers/Prowlarr, Torrent Client,
-   Usenet Client) is identical for both sides — the video downloader grabs via
-   Prowlarr too — so those sections (header + body + group) carry data-shared and
-   stay visible on video. (Pre-merge these lived on a separate "indexers" tab that
-   this rule didn't touch; the merge folded them under data-stg="downloads".) */
-body[data-side="video"] [data-stg="downloads"]:not([data-video-only]):not([data-shared]) {
-    display: none !important;
-}
+/* The Downloads and Sources tabs are FULLY SHARED - identical content on both
+   sides. This is a settings page: you change things here, and which side you
+   happen to be standing on is not a reason to be unable to see a setting.
+   That is what the tabs are for.
+
+   There used to be a blanket rule here hiding every music element on the
+   downloads tab unless it carried data-shared - and nothing carried it, so it
+   was deleting the shared download-chain widget from the video side entirely.
+   Both the rule and the data-shared escape hatch are gone; a shared tab needs
+   no marker saying so. The per-tab rules below still apply to the tabs that
+   genuinely differ (connections, quality, library). */
 /* The Quality tab's music sections (quality profile, import checks, conversion,
    audio verification) are music-specific. The video side shows its OWN quality
    sections here instead — Video Quality Profile + YouTube Quality, both moved

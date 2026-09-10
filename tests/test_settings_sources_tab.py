@@ -79,18 +79,56 @@ def test_the_tab_is_available_on_both_sides(index):
     assert "data-music-only" not in group
 
 
-def test_the_video_side_only_sees_sources_it_uses(js):
-    """Soulseek and Tidal mean nothing on the video side. The filter lives in
-    the renderer, not in CSS, because the tiles are generated — there is no
-    markup for a data-music-only rule to hit."""
+def test_the_sources_tab_shows_every_tile_on_both_sides(js):
+    """REVERSED. This used to assert the opposite: the video side saw only a
+    SHARED_SOURCES subset - 4 tiles out of 13 - on the theory that Tidal and
+    Soulseek mean nothing to video.
+
+    They mean plenty. This is a settings page. Hiding Tidal from someone who
+    happens to be standing on the video side only means they cannot fix their
+    Tidal credentials without switching sides first, and which side you are on
+    is not a reason to be unable to see a setting. The tab is shared, so it
+    renders the same thing on both sides - same tiles, same grouping.
+
+    buildSourceTiles must therefore not branch on the side at all: not to filter
+    the list, and not to group it differently either."""
     fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
-    assert "data-side" in fn
-    assert "SHARED_SOURCES.has(src.id)" in fn
-    shared = js.split("const SHARED_SOURCES = new Set([", 1)[1].split("])", 1)[0]
-    for s_id in ("youtube", "torrent", "usenet", "prowlarr"):
-        assert f"'{s_id}'" in shared, s_id
-    for music_only in ("soulseek", "tidal", "qobuz", "lidarr"):
-        assert f"'{music_only}'" not in shared, music_only
+    assert "data-side" not in fn, "buildSourceTiles still branches on the side"
+    assert "SHARED_SOURCES" not in fn
+    assert "SHARED_SOURCES = new Set" not in js, "the dead subset is still declared"
+
+
+def test_the_shared_tabs_carry_no_side_gating(index):
+    """The Sources and Downloads tabs are fully shared: identical content both
+    sides. The invariant that keeps them that way is that nothing on either tab
+    carries data-music-only or data-video-only.
+
+    This is the rule that was actually broken before. A blanket CSS rule hid
+    every music element on the downloads tab unless it carried data-shared, and
+    data-shared appeared exactly zero times in the markup - so the shared
+    download-chain widget, the whole point of the exercise, was deleted from the
+    video side and nobody could see why."""
+    import re as _re
+
+    # comments explaining the gating are not gating. without stripping them this
+    # test fails on its own explanatory notes, which is a very silly way to fail.
+    markup = _re.sub(r"<!--.*?-->", "", index, flags=_re.S)
+
+    def tab_of(pos):
+        at = markup.rfind('data-stg="', 0, pos)
+        m = _re.search(r'data-stg="([a-z]+)"', markup[at:at + 32]) if at != -1 else None
+        return m.group(1) if m else None
+
+    offenders = []
+    for m in _re.finditer(r'<[^>]*data-(?:music|video)-only[^>]*>', markup):
+        own = _re.search(r'data-stg="([a-z]+)"', m.group(0))
+        tab = own.group(1) if own else tab_of(m.start())
+        if tab in ("sources", "downloads"):
+            offenders.append((tab, m.group(0)[:88]))
+    assert not offenders, f"side gating on a shared tab: {offenders}"
+
+    # and the escape hatch that existed only to punch through the old rule
+    assert "data-shared" not in markup
 
 
 def test_every_source_config_lives_on_the_sources_tab(index):
@@ -528,7 +566,9 @@ def test_indexers_are_their_own_group(js):
     chain, which is not a thing Prowlarr can be."""
     fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
     assert "section('Indexers'" in fn
-    assert fn.count("section('Indexers'") == 2, "both sides need the group"
+    # one code path now, not two. this used to require 2 because the video side
+    # rendered its own grouping; the tab is shared and renders once for both.
+    assert fn.count("section('Indexers'") == 1, "the side branch is back"
 
 
 def test_an_indexer_cannot_land_in_the_chain_groups(js):

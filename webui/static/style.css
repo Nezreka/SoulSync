@@ -84599,7 +84599,6 @@ body.src-modal-open { overflow: hidden; }
         grid-template-columns: 1fr !important;
     }
     .dlchain-behaviour { margin-top: 20px; padding-top: 18px; }
-    .dlchain-group-title { font-size: 0.88rem; margin-bottom: 10px; }
     .dlchain-tab { flex: 1; padding: 9px 10px; }
 }
 
@@ -84806,19 +84805,10 @@ body.src-modal-open { overflow: hidden; }
 }
 
 /* ── the behaviour group ── */
-.dlchain-behaviour {
-    margin-top: 26px;
-    padding-top: 22px;
-    border-top: 1px solid rgba(255, 255, 255, 0.07);
-}
-.dlchain-behaviour[hidden] { display: none; }
-.dlchain-group-title {
-    font-size: var(--stg-t-section);
-    font-weight: 600;
-    letter-spacing: -0.012em;
-    color: rgba(255, 255, 255, 0.94);
-    margin-bottom: 14px;
-}
+/* #dlchain-behaviour is the wrapper (header + body); .dlchain-behaviour is the
+   group inside it. renderDownloadChain() hides the wrapper by id on the Video
+   and Audiobooks tabs, which takes the section header with it. */
+#dlchain-behaviour[hidden] { display: none; }
 /* One grid for the whole group: label column fixed, control column fluid, so
    every row shares an edge. Two columns of rows on a wide screen, one when narrow. */
 #settings-page .dlchain-behaviour .dlchain-extra {

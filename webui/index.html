@@ -3762,45 +3762,7 @@
                                  download element in this tab is hidden via video-side.css; these
                                  data-video-only ones replace them. Order: folders → source → slskd → quality. -->
                             
-                            <div class="settings-group" data-stg="downloads" data-video-only>
-                                <h3>Notifications</h3>
-                                <!-- Was "Download Source". The source picker below is retired: the shared
-                                     download-chain widget (Source Settings) is the one editor for the video
-                                     chain now, and it carries a Video tab. The select and its arrow list stay
-                                     in the DOM because video-settings.js reads them on load, but they are
-                                     hidden - two controls for one setting is how they drift, and these two
-                                     genuinely did: saving a seed ratio used to re-post a stale chain. -->
-                                <div class="setting-help-text" data-video-legacy-source hidden>
-                                    Video downloads from slskd, torrent or usenet only. Hybrid tries each enabled source in order.
-                                </div>
-                                <div class="form-group" data-video-legacy-source hidden>
-                                    <label>Download Source:</label>
-                                    <select id="video-download-mode" class="form-select">
-                                        <option value="soulseek">Soulseek Only</option>
-                                        <option value="torrent">Torrent Only (via Prowlarr)</option>
-                                        <option value="usenet">Usenet Only (via Prowlarr)</option>
-                                        <option value="hybrid">Hybrid (Primary + Fallback)</option>
-                                    </select>
-                                </div>
-                                <!-- Hybrid chain — reuses music's hybrid-source-list markup/CSS for
-                                     visual parity (minus the album/track badge, which is music-only). -->
-                                <div id="video-hybrid-container" data-video-legacy-source hidden>
-                                    <div class="setting-help-text" style="margin-top:10px;">Use the arrows to order sources. Enable the ones you want — downloads try each enabled source in order.</div>
-                                    <div class="hybrid-source-list" id="video-hybrid-rows"></div>
-                                </div>
-                                <!-- Seeding lifecycle (arr-parity P5) — torrent grabs only -->
-                                
-                                <!-- Notifications (arr-parity P11) -->
-                                <div class="form-group" id="video-notifications">
-                                    <label>Notifications:</label>
-                                    <small class="settings-hint" style="display:block; margin-bottom:8px;">
-                                        Get told when things happen — a Discord webhook, any generic webhook (raw JSON), or a Telegram bot.
-                                        Each connection picks which events it cares about.
-                                    </small>
-                                    <div id="vq-notify-rows"></div>
-                                    <button class="test-button" type="button" data-vq-notify-add>+ Add connection</button>
-                                </div>
-                            </div>
+                            
                             <!-- slskd connection — SHARED with Music (one slskd instance). Writes the
                                  app-wide soulseek.* config, not video.db. Collapsible; shown when soulseek
                                  is active. Inner header/body carry no data-stg so the broad hide rule
@@ -3817,7 +3779,7 @@
                                  The Sources tab is shared and shows on the video side, so the
                                  Soulseek card there is the single editor. Kept in the DOM because
                                  video-settings.js still reads and writes these ids. -->
-                            <div class="settings-group" data-stg="downloads" data-video-only id="video-slskd-container" style="display:none;" data-dupe-of="soulseek-settings-container" hidden>
+                            <div class="settings-group" data-stg="downloads" id="video-slskd-container" style="display:none;" data-dupe-of="soulseek-settings-container" hidden>
                                 <div class="settings-section-header collapsed" onclick="this.classList.toggle('collapsed'); var b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':'';">
                                     <span class="settings-section-arrow">&#9660;</span>
                                     <h3>Soulseek (slskd) Connection</h3>
@@ -4047,12 +4009,12 @@
                                  the thing people came here for. Static heading, no arrow, no
                                  toggle; the body carries no .collapsed class, which is what
                                  switchSettingsTab keys off when it re-hides bodies. -->
-                            <div class="settings-section-header settings-section-static" data-stg="downloads" data-shared>
+                            <div class="settings-section-header settings-section-static" data-stg="downloads">
                                 <h3>Source Settings</h3>
                                 <span class="settings-section-hint">Source, stream &amp; concurrency</span>
                             </div>
-                            <div class="settings-section-body" data-stg="downloads" data-shared>
-<div class="settings-group source-settings-wrapper" data-stg="downloads" data-shared>
+                            <div class="settings-section-body" data-stg="downloads">
+<div class="settings-group source-settings-wrapper" data-stg="downloads">
 
                                 <div class="settings-subcard">
                                 <!-- The chain widget below IS this setting now: one source in the
@@ -4119,66 +4081,7 @@
                                             <div class="dlchain-list" id="dlchain-list"></div>
                                         </div>
                                     </div>
-                                    <!-- Its own group, below the chain. These are general download
-                                         settings - concurrency, timeouts, the preview source - and they
-                                         are not part of the chain. They sat inside the pool column only
-                                         because that column had space going spare, which is not a reason
-                                         to put anything anywhere. Still music-wide, so
-                                         renderDownloadChain() still hides the group on the other tabs. -->
-                                    <div class="dlchain-behaviour" id="dlchain-behaviour">
-                                        <div class="dlchain-group-title">Download behaviour</div>
-<div id="dlchain-extra" class="dlchain-extra">
-                                <div class="form-group">
-                                    <label>Stream / Preview Source:</label>
-                                    <select id="stream-source" class="form-select">
-                                        <option value="youtube">YouTube (Instant)</option>
-                                        <option value="active">Active Download Source</option>
-                                    </select>
-                                    <span class="info-icon" role="button" tabindex="0" title="What's this?"
-                                        onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                    <div class="setting-help-text setting-help-body" hidden>
-                                        Where to stream audio when previewing tracks. YouTube is instant and requires no setup.
-                                        "Active Download Source" uses your configured source (Tidal, Qobuz, etc.) — if that's Soulseek, YouTube is used automatically.
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label>Concurrent Downloads:</label>
-                                    <select id="max-concurrent-downloads" class="form-select">
-                                        <option value="1">1</option>
-                                        <option value="2">2</option>
-                                        <option value="3" selected>3 (Default)</option>
-                                        <option value="4">4</option>
-                                        <option value="5">5</option>
-                                        <option value="6">6</option>
-                                        <option value="8">8</option>
-                                        <option value="10">10</option>
-                                    </select>
-                                    <span class="info-icon" role="button" tabindex="0" title="What's this?"
-                                        onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                    <div class="setting-help-text setting-help-body" hidden>
-                                        Maximum simultaneous downloads per batch. Soulseek album downloads always use 1 worker
-                                        due to per-user upload limits. Higher values speed up large playlists and wishlists.
-                                        Takes effect after a restart, since the worker threads are created at startup.
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label>Source search timeout (seconds):</label>
-                                    <input type="number" id="source-search-timeout" min="0" max="120" step="1" placeholder="0 = source defaults" style="max-width:180px;">
-                                    <span class="info-icon" role="button" tabindex="0" title="What's this?"
-                                        onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                    <div class="setting-help-text setting-help-body" hidden>
-                                        How long to wait on a streaming source's API during search (HiFi, Qobuz, Deezer, and the stream preview search).
-                                        <strong>0 (or blank) = each source's built-in default</strong> — HiFi/Qobuz 15s, Deezer 10s. Raise it if a slow
-                                        connection makes searches give up too early; lower means failing over to the next source faster. Clamped to 5&ndash;120.
-                                        Soulseek is not affected — it has its own Search Timeout setting above.
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <button class="test-button" id="test-all-sources-btn" onclick="testAllSources()">Test all sources</button>
-                                    <span class="setting-help-text" style="margin-left:10px;">Checks every selected source &amp; configured connection.</span>
-                                </div>
-                                            </div>
-                                    </div>
+                                    
 
                                 </div>
 
@@ -4801,7 +4704,7 @@
                                          finishes, so it belongs with the torrent client, not in a
                                          separate downloads page. Still data-video-only - the values
                                          live in the video db and video-settings.js owns them. -->
-                                    <div data-video-only>
+                                    <div>
 <div class="form-group" id="video-seeding-goals">
                                     <label>Seeding goals (torrents):</label>
                                     <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
@@ -5335,6 +5238,78 @@
                             </div><!-- end qp-layout -->
 
                             <!-- ═══ INDEXERS & DOWNLOADERS (gated: only shown when torrent/usenet is a selected source — see updateDownloadSourceUI) ═══ -->
+
+                            <!-- ═══ DOWNLOAD BEHAVIOUR ═══ -->
+                            <!-- An expandable card like Retry Logic and Album Publishing, not a block
+                                 bolted to the bottom of the chain widget. These are general download
+                                 settings and have nothing to do with the chain; they only lived inside
+                                 it because that column had space going spare.
+                                 The wrapper keeps id="dlchain-behaviour" because renderDownloadChain()
+                                 hides it on the Video and Audiobooks tabs - these are download_source.*,
+                                 which is music-wide. Hiding the wrapper takes the header with it, so the
+                                 title never sits above nothing. -->
+                            <div id="dlchain-behaviour" data-stg="downloads">
+                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Download Behaviour</h3>
+                                <span class="settings-section-hint">Preview source, concurrency &amp; timeouts</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="downloads">
+                            <div class="settings-group dlchain-behaviour" data-stg="downloads">
+<div id="dlchain-extra" class="dlchain-extra">
+                                <div class="form-group">
+                                    <label>Stream / Preview Source:</label>
+                                    <select id="stream-source" class="form-select">
+                                        <option value="youtube">YouTube (Instant)</option>
+                                        <option value="active">Active Download Source</option>
+                                    </select>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                        onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <div class="setting-help-text setting-help-body" hidden>
+                                        Where to stream audio when previewing tracks. YouTube is instant and requires no setup.
+                                        "Active Download Source" uses your configured source (Tidal, Qobuz, etc.) — if that's Soulseek, YouTube is used automatically.
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Concurrent Downloads:</label>
+                                    <select id="max-concurrent-downloads" class="form-select">
+                                        <option value="1">1</option>
+                                        <option value="2">2</option>
+                                        <option value="3" selected>3 (Default)</option>
+                                        <option value="4">4</option>
+                                        <option value="5">5</option>
+                                        <option value="6">6</option>
+                                        <option value="8">8</option>
+                                        <option value="10">10</option>
+                                    </select>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                        onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <div class="setting-help-text setting-help-body" hidden>
+                                        Maximum simultaneous downloads per batch. Soulseek album downloads always use 1 worker
+                                        due to per-user upload limits. Higher values speed up large playlists and wishlists.
+                                        Takes effect after a restart, since the worker threads are created at startup.
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Source search timeout (seconds):</label>
+                                    <input type="number" id="source-search-timeout" min="0" max="120" step="1" placeholder="0 = source defaults" style="max-width:180px;">
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                        onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <div class="setting-help-text setting-help-body" hidden>
+                                        How long to wait on a streaming source's API during search (HiFi, Qobuz, Deezer, and the stream preview search).
+                                        <strong>0 (or blank) = each source's built-in default</strong> — HiFi/Qobuz 15s, Deezer 10s. Raise it if a slow
+                                        connection makes searches give up too early; lower means failing over to the next source faster. Clamped to 5&ndash;120.
+                                        Soulseek is not affected — it has its own Search Timeout setting above.
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <button class="test-button" id="test-all-sources-btn" onclick="testAllSources()">Test all sources</button>
+                                    <span class="setting-help-text" style="margin-left:10px;">Checks every selected source &amp; configured connection.</span>
+                                </div>
+                                            </div>
+                            </div>
+                            </div>
+                            </div>
 
                             <!-- ═══ RETRY LOGIC (download behaviour — after the source/indexer config) ═══ -->
                             <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
@@ -6955,6 +6930,59 @@
                             </div>
 
                             <!-- Experimental (collapsible tile) -->
+                            <!-- Notifications. Moved off the video Downloads tab: being told when a
+                                 download finishes is not a download SETTING, and Advanced is where the
+                                 other background machinery lives (import lists, logging, the API).
+                                 data-video-only because the endpoint is /api/video/notifications - it
+                                 would do nothing on the music side. The retired video source picker
+                                 rides along inside: it is hidden, and video-settings.js still reads its
+                                 ids on load, so it has to stay somewhere in the page. -->
+                            <div class="settings-section-header collapsed" data-stg="advanced" data-video-only onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Notifications</h3>
+                                <span class="settings-section-hint">Discord, webhooks &amp; Telegram</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="advanced" data-video-only>
+                            <div class="settings-group" data-stg="advanced" data-video-only>
+<!-- Was "Download Source". The source picker below is retired: the shared
+                                     download-chain widget (Source Settings) is the one editor for the video
+                                     chain now, and it carries a Video tab. The select and its arrow list stay
+                                     in the DOM because video-settings.js reads them on load, but they are
+                                     hidden - two controls for one setting is how they drift, and these two
+                                     genuinely did: saving a seed ratio used to re-post a stale chain. -->
+                                <div class="setting-help-text" data-video-legacy-source hidden>
+                                    Video downloads from slskd, torrent or usenet only. Hybrid tries each enabled source in order.
+                                </div>
+                                <div class="form-group" data-video-legacy-source hidden>
+                                    <label>Download Source:</label>
+                                    <select id="video-download-mode" class="form-select">
+                                        <option value="soulseek">Soulseek Only</option>
+                                        <option value="torrent">Torrent Only (via Prowlarr)</option>
+                                        <option value="usenet">Usenet Only (via Prowlarr)</option>
+                                        <option value="hybrid">Hybrid (Primary + Fallback)</option>
+                                    </select>
+                                </div>
+                                <!-- Hybrid chain — reuses music's hybrid-source-list markup/CSS for
+                                     visual parity (minus the album/track badge, which is music-only). -->
+                                <div id="video-hybrid-container" data-video-legacy-source hidden>
+                                    <div class="setting-help-text" style="margin-top:10px;">Use the arrows to order sources. Enable the ones you want — downloads try each enabled source in order.</div>
+                                    <div class="hybrid-source-list" id="video-hybrid-rows"></div>
+                                </div>
+                                <!-- Seeding lifecycle (arr-parity P5) — torrent grabs only -->
+                                
+                                <!-- Notifications (arr-parity P11) -->
+                                <div class="form-group" id="video-notifications">
+                                    <label>Notifications:</label>
+                                    <small class="settings-hint" style="display:block; margin-bottom:8px;">
+                                        Get told when things happen — a Discord webhook, any generic webhook (raw JSON), or a Telegram bot.
+                                        Each connection picks which events it cares about.
+                                    </small>
+                                    <div id="vq-notify-rows"></div>
+                                    <button class="test-button" type="button" data-vq-notify-add>+ Add connection</button>
+                                </div>
+                            </div>
+                            </div>
+
                             <!-- Import lists. Moved off the video Downloads tab: it is a background
                                  sync rule, not a download setting, and Advanced is where the other
                                  background machinery lives. Still data-video-only - the endpoints are

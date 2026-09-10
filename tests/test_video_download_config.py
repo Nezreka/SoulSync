@@ -220,3 +220,31 @@ def test_the_video_slskd_form_is_a_retired_duplicate():
         music = "soulseek-" + alias.get(stem, stem)
         assert f"'{music}'" in mjs, f"{vid} has no music counterpart ({music}) - hiding it loses that setting"
 
+
+def test_the_downloads_tab_holds_only_download_settings():
+    """The video Downloads tab had become a dumping ground - folders, the source
+    picker, seeding, import lists and notifications all under one heading. Each
+    of those went to where its subject already lives, and what is left is four
+    expandable cards that are all actually about downloading.
+
+    Notifications in particular: being told when a download finishes is not a
+    download setting, it is background machinery, so it sits in Advanced with
+    import lists and logging.
+    """
+    index = (_WEBUI / "index.html").read_text(encoding="utf-8")
+    markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
+
+    titles = []
+    for m in re.finditer(r'<div class="settings-section-header[^"]*"[^>]*data-stg="downloads"[^>]*>', markup):
+        t = re.search(r"<h3[^>]*>(.*?)</h3>", markup[m.end():m.end() + 900], re.S)
+        if t:
+            titles.append(re.sub(r"<[^>]+>", "", t.group(1)).strip())
+    assert titles == ["Source Settings", "Download Behaviour", "Retry Logic", "Album Publishing"], titles
+
+    # the two that moved must not have crept back
+    for stray in ("video-notifications", "video-import-lists"):
+        at = markup.index(f'id="{stray}"')
+        stg = markup.rfind('data-stg="', 0, at)
+        tab = re.search(r'data-stg="([a-z]+)"', markup[stg:stg + 32]).group(1)
+        assert tab == "advanced", f"{stray} is back on the {tab} tab"
+

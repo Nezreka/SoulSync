@@ -445,11 +445,23 @@ def test_the_behaviour_settings_are_their_own_group(index):
 
     The claim is position: after BOTH columns, not inside either one."""
     assert 'id="dlchain-behaviour"' in index
-    assert "Download behaviour" in index
+    assert "<h3>Download Behaviour</h3>" in index
+
     pool_at = index.index('id="dlchain-pool"')
     chain_at = index.index('id="dlchain-list"')
     group_at = index.index('id="dlchain-behaviour"')
     assert group_at > chain_at > pool_at, "the group is still tangled in a column"
+
+    # and it is an expandable card like Retry Logic / Album Publishing, not a
+    # block welded to the bottom of the widget. the collapse handler walks
+    # header.nextElementSibling, so the body has to be the very next element.
+    head = index.index('<h3>Download Behaviour</h3>')
+    hdr = index.rfind('<div class="settings-section-header', 0, head)
+    assert "settings-section-header" in index[hdr:head]
+    after = index[index.index("</div>", head) + 6:]
+    assert after.lstrip().startswith('<div class="settings-section-body'), (
+        "the body is not the header's next sibling - the collapse toggle will miss it"
+    )
 
 
 def test_the_behaviour_group_is_music_only(js):
@@ -644,38 +656,27 @@ def test_the_chain_opens_on_the_side_you_are_standing_on(js):
     assert "_dlchainKindChosen = true" in switch, "a manual pick would be overridden"
 
 
-def test_the_downloads_tab_lets_the_shared_section_through_on_video():
-    """The check above was not enough, and reported a false pass.
+def test_the_downloads_tab_is_shared_without_needing_a_marker():
+    """REVERSED, and this is the good kind of reversal.
 
-    Side gating is not only data-music-only. video-side.css also carries blanket
-    per-tab rules, and this one:
+    video-side.css used to hide every music element on the downloads tab unless
+    it carried data-shared. Nothing carried it, so the shared chain widget - the
+    entire point - never appeared on the video side. The first fix was to add
+    data-shared to three wrappers.
 
-        body[data-side="video"] [data-stg="downloads"]:not([data-video-only]):not([data-shared])
-
-    hides EVERY music-side element on the Downloads tab. The chain widget carries
-    no data-music-only, so an ancestor scan says "visible" - while that rule was
-    deleting the whole Source Settings section on the video side. The widget has a
-    Video tab and was built to be shared, and it was not reachable from the video
-    side at all.
-
-    data-shared is the opt-out the rule already provides. It has to be on the
-    header, the body AND the group: the selector matches each of them
-    independently, so one bare wrapper still hides everything inside it.
-    """
+    The better fix is that the tab is simply shared. The blanket rule is gone and
+    so is data-shared: a shared tab needs no marker announcing it, and a marker
+    that must be remembered on every new wrapper is a bug waiting to be written
+    again. The per-tab rules for the tabs that genuinely differ still stand."""
     css = _read("webui/static/video/video-side.css")
-    assert ':not([data-shared])' in css, "the opt-out this test relies on is gone"
-
-    index = _read("webui/index.html")
-    for needle in ('<div class="settings-section-header settings-section-static" data-stg="downloads"',
-                   '<div class="settings-section-body" data-stg="downloads"',
-                   '<div class="settings-group source-settings-wrapper" data-stg="downloads"'):
-        at = index.index(needle)
-        tag = index[at:index.index('>', at) + 1]
-        assert 'data-shared' in tag, (
-            "this wrapper is hidden on the video side by the downloads blanket "
-            "rule, which takes the whole chain widget with it: " + needle[:60]
-        )
-
+    # strip comments first: the note explaining why the rule was removed mentions
+    # both strings, and matching your own explanation is not a test.
+    rules = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    assert 'data-stg="downloads"' not in rules, "the downloads tab is being gated again"
+    assert "data-shared" not in rules
+    # the tabs that really do differ keep theirs
+    for tab in ("library", "quality", "connections"):
+        assert f'[data-stg="{tab}"]' in css, f"lost the {tab} rule"
 
 def test_every_source_has_a_brand_colour():
     """Colour on these cards comes from the SOURCE, not from one page-wide tint.
