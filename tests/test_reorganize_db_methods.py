@@ -211,3 +211,110 @@ def test_get_album_display_meta_propagates_db_errors(db):
 def test_get_artist_albums_for_reorganize_propagates_db_errors(db):
     with pytest.raises(sqlite3.OperationalError):
         db.get_artist_albums_for_reorganize('ar-1')
+
+
+# ── reorganize_queue durability helpers (#1235) ───────────────────────────
+#
+# The queue's own tests use a fake store, so nothing there executes this SQL.
+# A typo in the upsert would sail past all of them and only surface as a lost
+# backlog on someone's server, which is exactly the failure being fixed.
+
+
+def _queue_table(db):
+    with db._get_connection() as conn:
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS reorganize_queue (
+                queue_id TEXT PRIMARY KEY,
+                album_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                enqueued_at REAL NOT NULL,
+                payload TEXT NOT NULL
+            )
+        """)
+
+
+def _snap(queue_id, album_id, status='queued', at=1.0):
+    return {'queue_id': queue_id, 'album_id': album_id, 'status': status,
+            'enqueued_at': at, 'album_title': 'T', 'artist_name': 'A',
+            'artist_id': 'ar-1', 'source': None, 'metadata_source': 'api',
+            'rename_only': False}
+
+
+def test_queue_save_is_an_upsert_not_a_duplicate(db):
+    _queue_table(db)
+    db.reorganize_queue_save(_snap('q1', 'alb-1'))
+    db.reorganize_queue_save(_snap('q1', 'alb-1', status='running'))
+    pending = db.reorganize_queue_load_pending()
+    assert len(pending) == 1, "the second save inserted a second row"
+
+
+def test_queue_load_returns_interrupted_work_as_queued(db):
+    """A row still marked 'running' means the process that owned it died. It has
+    to come back as work to do - left as 'running' it would be invisible to the
+    worker, which only ever claims 'queued'."""
+    _queue_table(db)
+    db.reorganize_queue_save(_snap('q1', 'alb-1', status='running'))
+    pending = db.reorganize_queue_load_pending()
+    assert [p['status'] for p in pending] == ['queued']
+    assert pending[0]['started_at'] is None
+
+
+def test_queue_load_is_oldest_first(db):
+    _queue_table(db)
+    db.reorganize_queue_save(_snap('q2', 'alb-2', at=200.0))
+    db.reorganize_queue_save(_snap('q1', 'alb-1', at=100.0))
+    assert [p['album_id'] for p in db.reorganize_queue_load_pending()] == ['alb-1', 'alb-2']
+
+
+def test_queue_delete_removes_only_that_item(db):
+    _queue_table(db)
+    db.reorganize_queue_save(_snap('q1', 'alb-1'))
+    db.reorganize_queue_save(_snap('q2', 'alb-2'))
+    db.reorganize_queue_delete('q1')
+    assert [p['album_id'] for p in db.reorganize_queue_load_pending()] == ['alb-2']
+
+
+def test_queue_clear_spares_the_running_item(db):
+    """Clearing the backlog must not delete the album currently being moved -
+    it is still in flight, and losing its row makes it unresumable."""
+    _queue_table(db)
+    db.reorganize_queue_save(_snap('q1', 'alb-1', status='queued'))
+    db.reorganize_queue_save(_snap('q2', 'alb-2', status='running'))
+    assert db.reorganize_queue_delete_queued() == 1
+    assert [p['album_id'] for p in db.reorganize_queue_load_pending()] == ['alb-2']
+
+
+def test_a_corrupt_payload_does_not_sink_the_whole_backlog(db):
+    """One unreadable row must cost one album, not every album behind it."""
+    _queue_table(db)
+    db.reorganize_queue_save(_snap('q1', 'alb-1'))
+    with db._get_connection() as conn:
+        conn.cursor().execute(
+            "INSERT INTO reorganize_queue VALUES ('q2','alb-2','queued',2.0,'{not json')")
+        conn.commit()
+    db.reorganize_queue_save(_snap('q3', 'alb-3', at=3.0))
+    assert [p['album_id'] for p in db.reorganize_queue_load_pending()] == ['alb-1', 'alb-3']
+
+
+def test_a_fresh_database_gets_the_queue_table(db):
+    """The helpers above are useless if the table is never created. This runs the
+    REAL _initialize_database against the in-memory harness, so it fails if the
+    CREATE TABLE is dropped or moved out of the init path - which would leave the
+    backlog silently unpersisted again, the exact shape of the original bug."""
+    db._initialize_database()
+    with db._get_connection() as conn:
+        names = [r[0] for r in conn.cursor().execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+        idx = [r[0] for r in conn.cursor().execute(
+            "SELECT name FROM sqlite_master WHERE type='index'").fetchall()]
+        cols = [r[1] for r in conn.cursor().execute(
+            "PRAGMA table_info(reorganize_queue)").fetchall()]
+    assert 'reorganize_queue' in names
+    assert 'idx_reorg_queue_status' in idx, "the status lookup has no index"
+    assert cols == ['queue_id', 'album_id', 'status', 'enqueued_at', 'payload']
+
+    # and the real helpers work against the real schema, not just the hand-rolled
+    # table the other tests create
+    db.reorganize_queue_save(_snap('q1', 'alb-1'))
+    assert [p['album_id'] for p in db.reorganize_queue_load_pending()] == ['alb-1']
+

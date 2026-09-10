@@ -485,6 +485,28 @@ class MusicDatabase:
                     applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Bulk library reorganize used to queue entirely in process memory.
+            # A gunicorn worker recycle - an OOM SIGKILL in the report that found
+            # this - took every queued album with it, silently, while the job
+            # still reported success, leaving the library half-converted with no
+            # error anywhere. Only OUTSTANDING work lives here: a row exists while
+            # an item is queued or running and is deleted when it reaches a
+            # terminal state, so the table stays the size of the backlog rather
+            # than of the history.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS reorganize_queue (
+                    queue_id TEXT PRIMARY KEY,
+                    album_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    enqueued_at REAL NOT NULL,
+                    payload TEXT NOT NULL          -- json snapshot of the QueueItem
+                )
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_reorg_queue_status
+                    ON reorganize_queue(status, enqueued_at)
+            """)
             
             # Wishlist table for storing failed download tracks for retry
             cursor.execute("""
@@ -10713,6 +10735,91 @@ class MusicDatabase:
             logger.error(f"Error getting album completion stats for artist '{artist_name}': {e}")
             return {'complete': 0, 'nearly_complete': 0, 'partial': 0, 'missing': 0, 'total': 0}
     
+    # ── reorganize queue durability (issue #1235) ───────────────────────────
+    # The bulk reorganize queue lived only in process memory, so a gunicorn
+    # worker recycle discarded every queued album without a word while the job
+    # reported success. These three keep the OUTSTANDING backlog on disk; the
+    # queue's recent-history list stays in memory because it is only cosmetic.
+
+    def reorganize_queue_save(self, snapshot: dict):
+        """Insert or update one outstanding item."""
+        import json
+        try:
+            with self._get_connection() as conn:
+                conn.cursor().execute("""
+                    INSERT INTO reorganize_queue (queue_id, album_id, status, enqueued_at, payload)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(queue_id) DO UPDATE SET
+                        status = excluded.status,
+                        payload = excluded.payload
+                """, (
+                    snapshot.get('queue_id'),
+                    str(snapshot.get('album_id') or ''),
+                    str(snapshot.get('status') or 'queued'),
+                    float(snapshot.get('enqueued_at') or 0.0),
+                    json.dumps(snapshot),
+                ))
+                conn.commit()
+        except Exception as e:
+            # Never let bookkeeping break the actual reorganize. A lost row means
+            # that one album is not resumable, which is still better than the
+            # whole queue dying because the db hiccuped.
+            logger.error(f"Error persisting reorganize queue item: {e}")
+
+    def reorganize_queue_delete(self, queue_id: str):
+        """Drop an item that reached a terminal state (or was cancelled)."""
+        try:
+            with self._get_connection() as conn:
+                conn.cursor().execute(
+                    "DELETE FROM reorganize_queue WHERE queue_id = ?", (queue_id,))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error deleting reorganize queue item {queue_id}: {e}")
+
+    def reorganize_queue_load_pending(self) -> list:
+        """Every item that never finished, oldest first.
+
+        Anything left in 'running' was interrupted mid-flight - the process that
+        owned it is gone - so it comes back as 'queued' to be tried again.
+        """
+        import json
+        rows = []
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT payload FROM reorganize_queue
+                    WHERE status IN ('queued', 'running')
+                    ORDER BY enqueued_at ASC
+                """)
+                rows = cursor.fetchall()
+        except Exception as e:
+            logger.error(f"Error loading reorganize queue: {e}")
+            return []
+        out = []
+        for row in rows:
+            try:
+                snap = json.loads(row[0])
+            except (TypeError, ValueError):
+                continue
+            if snap.get('status') == 'running':
+                snap['status'] = 'queued'
+                snap['started_at'] = None
+            out.append(snap)
+        return out
+
+    def reorganize_queue_delete_queued(self) -> int:
+        """Drop everything still waiting. Used by the queue's clear action."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM reorganize_queue WHERE status = 'queued'")
+                conn.commit()
+                return cursor.rowcount or 0
+        except Exception as e:
+            logger.error(f"Error clearing reorganize queue: {e}")
+            return 0
+
     def set_metadata(self, key: str, value: str):
         """Set a metadata value"""
         try:
