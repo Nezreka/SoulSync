@@ -3365,29 +3365,36 @@ body.helper-mode-active #dashboard-activity-feed:hover {
    the weight comes down and the letters tighten rather than spread. */
 .settings-section-header h3 {
     margin: 0;
-    font-size: 17px;
+    font-size: var(--stg-t-section, 0.95rem);
     font-weight: 600;
     color: rgba(255, 255, 255, 0.95);
-    letter-spacing: -0.01em;
+    letter-spacing: -0.012em;
 }
 
 .settings-section-arrow {
-    font-size: 11px;
-    color: rgba(var(--accent-rgb), 0.7);
-    transition: transform 0.2s;
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.34);
+    transition: transform 240ms cubic-bezier(0.2, 0, 0, 1),
+                color 140ms cubic-bezier(0.2, 0, 0, 1);
     flex-shrink: 0;
 }
+.settings-section-header:hover .settings-section-arrow { color: rgba(255, 255, 255, 0.7); }
 
 .settings-section-header.collapsed .settings-section-arrow {
     transform: rotate(-90deg);
 }
 
 .settings-section-hint {
-    font-size: 11.5px;
-    color: rgba(255, 255, 255, 0.3);
+    font-size: var(--stg-t-sub, 0.75rem);
+    color: rgba(255, 255, 255, 0.32);
     margin-left: auto;
-    font-weight: 500;
-    letter-spacing: 0.01em;
+    font-weight: 450;
+    letter-spacing: 0;
+    /* it is a caption, not a second title: it yields first when space runs out */
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .settings-section-body {
@@ -60930,6 +60937,8 @@ tr.tag-diff-same {
     width: fit-content;
     max-width: 100%;
     min-width: 0;
+    background: rgba(0, 0, 0, 0.34);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.045);
 }
 
 #settings-page .settings-nav-row .header-actions {
@@ -61109,7 +61118,7 @@ tr.tag-diff-same {
     transition: background 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 #settings-page .form-group:hover {
-    background: rgba(255, 255, 255, 0.02);
+    background: rgba(255, 255, 255, 0.028);
 }
 #settings-page .form-group:last-child { border-bottom: none; }
 /* .form-group sets display:flex, and a class rule with display beats the
@@ -61524,24 +61533,23 @@ tr.tag-diff-same {
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;
     margin-bottom: 0;
-    /* Accent-tinted frame so the OPEN card clearly stands out from the grey
-       page instead of grey-on-grey. */
-    background: rgba(var(--accent-rgb), 0.07);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025));
     border-color: rgba(var(--accent-rgb), 0.30);
-    border-bottom: 1px solid rgba(var(--accent-rgb), 0.18);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 #settings-page .settings-section-body:not(.collapsed) {
-    border: 1px solid rgba(var(--accent-rgb), 0.30);
+    /* The open body is the bottom half of ONE card: no top border, and the
+       radius only on the bottom corners so it continues the header above it.
+       Neutral rather than accent-framed - the accent is for state, and "this
+       section happens to be open" is not a state worth colouring the page for. */
+    border: 1px solid rgba(255, 255, 255, 0.06);
     border-top: none;
     border-bottom-left-radius: 12px;
     border-bottom-right-radius: 12px;
-    /* Dark neutral body (accent stays on the border + header) so the lighter
-       inner sub-cards stand out clearly instead of washing out on a tint.
-       Symmetric padding so the inner sub-cards sit an equal distance from the
-       outer frame on every side. */
-    background: rgba(0, 0, 0, 0.22);
-    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.28);
-    padding: 14px;
+    background: rgba(255, 255, 255, 0.012);
+    box-shadow: 0 10px 26px -18px rgba(0, 0, 0, 0.7);
+    padding: 16px;
 }
 /* Inner groups inside an expanded tile: no own frame/shadow/accent bar —
    they're sub-sections of the one tile card, separated by their h3 labels. */
@@ -61604,8 +61612,11 @@ tr.tag-diff-same {
     background: transparent !important;
     border: none !important;
     box-shadow: none !important;
-    padding: 4px 14px 6px !important;
+    padding: 0 !important;
     margin: 0 !important;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -79070,12 +79081,7 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 #reid-confirm-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.4); }
 
 /* Settings cleanup: source settings uses the same inner-card spacing as Retry Logic. */
-#settings-page .settings-section-body:not(.collapsed) > .settings-group.source-settings-wrapper {
-    padding: 0 !important;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-}
+
 #settings-page .settings-section-body:not(.collapsed) > .settings-group.source-settings-wrapper > .settings-subcard {
     margin: 0 !important;
 }
@@ -84664,10 +84670,7 @@ body.src-modal-open { overflow: hidden; }
 #settings-page .settings-section-header h3 { color: #fff; }
 
 /* ── the tab bar ── */
-#settings-page .stg-tabbar {
-    background: rgba(0, 0, 0, 0.34);
-    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.045);
-}
+
 /* the selected tab gets its bloom back - it is the one stateful thing on the bar */
 #settings-page .stg-tab.active {
     background: linear-gradient(180deg,
@@ -84717,6 +84720,9 @@ body.src-modal-open { overflow: hidden; }
 #settings-page .dlchain-slot {
     border-color: rgba(255, 255, 255, 0.12);
     background: rgba(255, 255, 255, 0.02);
+    border-style: dashed;
+    border-width: 1px;
+    border-radius: var(--stg-tok-radius);
 }
 #settings-page .dlchain-slot:hover,
 #settings-page .dlchain-slot.drag-over {
@@ -84727,7 +84733,7 @@ body.src-modal-open { overflow: hidden; }
 }
 
 /* ── rows and fields ── */
-#settings-page .form-group:hover { background: rgba(255, 255, 255, 0.028); }
+
 #settings-page .form-group > input[type="text"],
 #settings-page .form-group > input[type="password"],
 #settings-page .form-group > input[type="number"],
@@ -84759,15 +84765,6 @@ body.src-modal-open { overflow: hidden; }
    specific than the plain header rule above, so without this the open cards
    would keep the old flat tint while the closed ones got the gradient. Same
    treatment, plus the frame that joins the header to its body. */
-#settings-page .settings-section-header:not(.collapsed) {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025));
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-}
-#settings-page .settings-section-body:not(.collapsed) {
-    background: rgba(255, 255, 255, 0.012);
-    border-color: rgba(255, 255, 255, 0.06);
-}
 
 /* A heading that does not toggle anything must not offer to. Same tinted bar as
    an open section (it IS open, permanently) minus the pointer and the hover
@@ -84869,11 +84866,7 @@ body.src-modal-open { overflow: hidden; }
 #settings-page .src-tile-name { font-size: var(--stg-t-label); }
 
 /* ── the drop target reads as the next step, not a leftover box ── */
-#settings-page .dlchain-slot {
-    border-style: dashed;
-    border-width: 1px;
-    border-radius: var(--stg-tok-radius);
-}
+
 #settings-page .dlchain-slot-title {
     font-size: var(--stg-t-body);
     font-weight: 600;

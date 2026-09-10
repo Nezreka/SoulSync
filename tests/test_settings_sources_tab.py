@@ -714,3 +714,43 @@ def test_the_library_tab_speaks_one_card_language():
             "a library card's body is not its header's next sibling"
         )
 
+
+def test_no_settings_selector_is_defined_twice_at_the_top_level():
+    """Two top-level rules for one selector is how a test ends up asserting
+    against the rule the browser is ignoring. That happened twice in one day
+    here: a first-in-chain rule and a section-body rule each had a second copy
+    further down, and the guards written for them passed while the page did the
+    opposite of what they claimed.
+
+    Media-query overrides are exempt - repeating a selector inside a breakpoint
+    is the whole point of one.
+    """
+    css = _read("webui/static/style.css")
+    blanked = re.sub(r"/\*.*?\*/", lambda m: " " * len(m.group(0)), css, flags=re.S)
+
+    media, seen, dupes = [], {}, []
+    for m in re.finditer(r"@media[^{]*\{|([^{}]+)\{([^{}]*)\}|\}", blanked):
+        tok = m.group(0)
+        if tok.startswith("@media"):
+            media.append(1)
+            continue
+        if tok == "}":
+            if media:
+                media.pop()
+            continue
+        if media:
+            continue
+        head = m.group(1)
+        head = head[max(head.rfind("}"), head.rfind(";")) + 1:].strip()
+        # only single-selector rules; a grouped selector legitimately repeats names
+        if not head.startswith("#settings-page") or "," in head or "\n" in head:
+            continue
+        if head in seen:
+            dupes.append(head)
+        seen[head] = True
+
+    # #settings-page itself is allowed to repeat: those blocks only declare
+    # custom properties, which is how the token layers are kept separate.
+    dupes = [d for d in dupes if d != "#settings-page"]
+    assert not dupes, f"defined more than once at top level: {sorted(set(dupes))}"
+
