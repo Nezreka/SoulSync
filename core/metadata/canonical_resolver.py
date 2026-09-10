@@ -347,17 +347,18 @@ def resolve_and_store_canonical_for_album(
     Returns the resolved ``{source, album_id, score}`` or None when unresolved.
     ``store=False`` resolves without writing — used by the backfill job's dry run.
 
-    Uses the SAME album/source-id loader the Reorganizer uses
-    (``load_album_and_tracks`` + ``_extract_source_ids``) so the canonical is
-    chosen over exactly the source IDs the reorganizer sees. Scores off the DB
+    Uses the SAME album loader the Reorganizer uses (``load_album_and_tracks``)
+    and the shared source-id map, so the canonical is chosen over exactly the
+    source IDs the rest of the app sees. Scores off the DB
     track rows' ``duration`` (stored in ms) + ``title`` — the library's view of
     the files — so no per-file disk reads are needed."""
-    from core.library_reorganize import _extract_source_ids, load_album_and_tracks
+    from core.library_reorganize import load_album_and_tracks
+    from core.metadata.registry import extract_album_source_ids
 
     album_data, tracks = load_album_and_tracks(db, album_id)
     if not album_data or not tracks:
         return None
-    source_ids = {s: v for s, v in _extract_source_ids(album_data).items() if v}
+    source_ids = {s: v for s, v in extract_album_source_ids(album_data).items() if v}
     if not source_ids:
         return None
 

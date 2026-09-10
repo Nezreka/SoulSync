@@ -1,19 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import type { EnhancedAlbum } from '../-artist-detail.enhanced';
-import type { ReorganizePreviewTrack, ReorganizeSource } from '../-artist-detail.reorganize';
+import type { ReorganizePreviewTrack } from '../-artist-detail.reorganize';
 
 import {
   classifyPreviewTrack,
-  fetchAlbumReorganizeSources,
-  fetchGlobalReorganizeSources,
   fetchReorganizePreview,
   queueReorganizeAllRequest,
   queueReorganizeRequest,
-  readReorganizeMode,
   refreshReorganizeQueue,
   summarizeReorganizePreview,
-  writeReorganizeMode,
 } from '../-artist-detail.reorganize';
 
 /**
@@ -21,78 +17,12 @@ import {
  * _showReorganizeAllModal 6174). Queue model: apply enqueues and closes;
  * progress arrives through the Reorganize Status panel, never a locked button.
  *
- * The metadata-mode pick (#592 — "tags" reads embedded file tags, zero API
- * calls) persists in localStorage and hides the source picker, since tags are
- * read straight off the file.
+ * There is nothing to configure. A reorganize moves the album's files to the
+ * paths the current template dictates, computed from the library's own rows —
+ * so there is no metadata source to pick (#592's "read the tags instead" and
+ * #875's "rename only" are both just what it does now), and the preview needs
+ * no network call.
  */
-
-const MODE_HINT =
-  '"API" queries your metadata source for the canonical tracklist. "Embedded tags" reads each file\'s own tags as the source of truth — useful for well-tagged libraries and avoids API calls.';
-
-function ModeSection({ mode, onChange }: { mode: string; onChange: (mode: string) => void }) {
-  return (
-    <div className="reorganize-source-section">
-      <label className="reorganize-label">Metadata Mode</label>
-      <div className="reorganize-template-hint">{MODE_HINT}</div>
-      <select
-        id="reorganize-mode-select"
-        className="reorganize-template-input"
-        value={mode}
-        onChange={(e) => {
-          onChange(e.target.value);
-          writeReorganizeMode(e.target.value);
-        }}
-      >
-        <option value="api">API metadata (default)</option>
-        <option value="tags">Embedded file tags</option>
-      </select>
-    </div>
-  );
-}
-
-function SourceSection({
-  label,
-  hint,
-  visible,
-  sources,
-  emptyMessage,
-  source,
-  onChange,
-}: {
-  label: string;
-  hint: string;
-  /** Hidden when mode = 'tags' — the picker is irrelevant there. */
-  visible: boolean;
-  sources: ReorganizeSource[];
-  emptyMessage: string | null;
-  source: string;
-  onChange: (source: string) => void;
-}) {
-  return (
-    <div
-      className="reorganize-source-section"
-      id="reorganize-source-section"
-      style={visible ? undefined : { display: 'none' }}
-    >
-      <label className="reorganize-label">{label}</label>
-      <div className="reorganize-template-hint">{hint}</div>
-      <select
-        id="reorganize-source-select"
-        className="reorganize-template-input"
-        value={source}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">Use configured primary (auto)</option>
-        {sources.map((s) => (
-          <option value={s.source} key={s.source}>
-            {s.label || s.source}
-          </option>
-        ))}
-        {emptyMessage ? <option disabled>{emptyMessage}</option> : null}
-      </select>
-    </div>
-  );
-}
 
 function ModalShell({
   title,
@@ -139,10 +69,6 @@ function ModalShell({
 }
 
 export function ReorganizeModal({ album, onClose }: { album: EnhancedAlbum; onClose: () => void }) {
-  const [mode, setMode] = useState(() => readReorganizeMode());
-  const [source, setSource] = useState('');
-  const [sources, setSources] = useState<ReorganizeSource[] | null>(null);
-  const [action, setAction] = useState('full');
   const [preview, setPreview] = useState<{
     loading?: boolean;
     error?: string;
@@ -150,27 +76,10 @@ export function ReorganizeModal({ album, onClose }: { album: EnhancedAlbum; onCl
   } | null>(null);
   const [applying, setApplying] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetchAlbumReorganizeSources(album.id)
-      .then((list) => {
-        if (!cancelled) setSources(list);
-      })
-      .catch((error: unknown) => {
-        console.error('Failed to load reorganize sources:', error);
-        if (!cancelled) setSources([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // The album never changes for a mounted modal.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const loadPreview = async () => {
     setPreview({ loading: true });
     try {
-      const result = await fetchReorganizePreview(album.id, source, mode);
+      const result = await fetchReorganizePreview(album.id);
       if (result.error) setPreview({ error: result.error });
       else setPreview({ tracks: result.tracks });
     } catch (error) {
@@ -184,11 +93,7 @@ export function ReorganizeModal({ album, onClose }: { album: EnhancedAlbum; onCl
   const apply = async () => {
     setApplying(true);
     try {
-      const message = await queueReorganizeRequest(album.id, String(album.title || 'album'), {
-        source,
-        mode,
-        renameOnly: action === 'rename',
-      });
+      const message = await queueReorganizeRequest(album.id, String(album.title || 'album'));
       onClose();
       window.showToast?.(message, 'info');
       // Wake the status panel so the new item lands immediately rather than
@@ -217,37 +122,13 @@ export function ReorganizeModal({ album, onClose }: { album: EnhancedAlbum; onCl
       }
     >
       <div className="reorganize-content">
-        <ModeSection mode={mode} onChange={setMode} />
-        <SourceSection
-          label="Metadata Source"
-          hint="Pick which source to read the album's tracklist from. Defaults to your configured primary. Reorganize uses your global download template, same as fresh downloads."
-          visible={mode !== 'tags'}
-          sources={sources ?? []}
-          emptyMessage={
-            sources && sources.length === 0 ? 'No sources available — run enrichment first' : null
-          }
-          source={source}
-          onChange={setSource}
-        />
-
         <div className="reorganize-source-section">
-          <label className="reorganize-label">Action</label>
           <div className="reorganize-template-hint">
-            "Full reorganize" re-tags and re-checks every track through the import pipeline —
-            thorough, but slow and it re-touches every file. "Rename only" just moves files to your
-            current naming scheme: no re-tagging, no quality/AcoustID checks, and only files whose
-            name actually changes are touched. Tip: renaming can reset play counts / date-added on
-            your media server.
+            Moves this album's files to the paths your current naming scheme dictates, using the
+            titles the library holds. Tags and audio are left byte-for-byte alone, and only files
+            whose path actually changes are touched. Tip: renaming can reset play counts /
+            date-added on your media server.
           </div>
-          <select
-            id="reorganize-action-select"
-            className="reorganize-template-input"
-            value={action}
-            onChange={(e) => setAction(e.target.value)}
-          >
-            <option value="full">Full reorganize (default)</option>
-            <option value="rename">Rename only (skip post-processing)</option>
-          </select>
         </div>
 
         <div className="reorganize-preview-section">
@@ -343,22 +224,6 @@ export function ReorganizeAllModal({
   artistName: string;
   onClose: () => void;
 }) {
-  const [mode, setMode] = useState(() => readReorganizeMode());
-  const [source, setSource] = useState('');
-  const [sources, setSources] = useState<ReorganizeSource[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchGlobalReorganizeSources()
-      .then((list) => {
-        if (!cancelled) setSources(list);
-      })
-      .catch((error: unknown) => console.error('Failed to load reorganize sources:', error));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const queueAll = async () => {
     const total = albums.length;
     const confirmed = await window.showConfirmDialog?.({
@@ -370,10 +235,7 @@ export function ReorganizeAllModal({
     if (!confirmed) return;
     onClose();
     try {
-      const { message, tone } = await queueReorganizeAllRequest(artistId, artistName, {
-        source,
-        mode,
-      });
+      const { message, tone } = await queueReorganizeAllRequest(artistId, artistName);
       window.showToast?.(message, tone);
       void refreshReorganizeQueue();
     } catch (error) {
@@ -397,16 +259,12 @@ export function ReorganizeAllModal({
       }
     >
       <div className="reorganize-content">
-        <ModeSection mode={mode} onChange={setMode} />
-        <SourceSection
-          label="Metadata Source (applies to all albums)"
-          hint="Pick which source to read tracklists from. Albums without an ID for that source will be skipped. Reorganize uses your global download template, same as fresh downloads."
-          visible={mode !== 'tags'}
-          sources={sources}
-          emptyMessage={null}
-          source={source}
-          onChange={setSource}
-        />
+        <div className="reorganize-source-section">
+          <div className="reorganize-template-hint">
+            Moves every album's files to the paths your current naming scheme dictates, using the
+            titles the library holds. Tags and audio are left alone.
+          </div>
+        </div>
         <div style={{ marginTop: 14 }}>
           <label className="reorganize-label">
             {albums.length} album{albums.length !== 1 ? 's' : ''} will be reorganized:

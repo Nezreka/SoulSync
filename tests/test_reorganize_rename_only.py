@@ -7,6 +7,7 @@ the preview marked `unchanged` are left alone (the "every file got modified" bug
 import os
 
 from core.library_reorganize import (
+    _move_album_sidecars,
     _rename_track_in_place,
     reorganize_album_rename_only,
 )
@@ -230,3 +231,160 @@ def test_an_unresolvable_source_is_skipped_without_creating_folders(tmp_path):
 
     assert not new.parent.exists(), "an empty destination tree was created"
     assert out["moved"] == 0 and out["failed"] == 0 and out["skipped"] == 1
+
+
+# ── sidecars travel with the file they belong to ──
+
+def test_lyrics_sidecar_follows_the_track(tmp_path):
+    """A reorganize that leaves the .lrc behind has lost it.
+
+    The full-mode reorganize could DELETE per-track sidecars at the source
+    because post-processing re-created them at the destination. A move has no
+    such second half, so it has to carry them.
+    """
+    src = tmp_path / "old" / "01 - Song.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"audio")
+    (tmp_path / "old" / "01 - Song.lrc").write_text("[00:01.00] a line")
+    dst = tmp_path / "new" / "Song - Artist.flac"
+
+    ok, err = _rename_track_in_place(str(src), str(dst))
+
+    assert ok and err is None
+    assert (tmp_path / "new" / "Song - Artist.lrc").read_text() == "[00:01.00] a line"
+    assert not (tmp_path / "old" / "01 - Song.lrc").exists()
+
+
+def test_other_per_track_sidecars_follow_too(tmp_path):
+    src = tmp_path / "old" / "01 - Song.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"audio")
+    for ext in ('.nfo', '.cue'):
+        (tmp_path / "old" / f"01 - Song{ext}").write_text(ext)
+    dst = tmp_path / "new" / "Song - Artist.flac"
+
+    ok, _ = _rename_track_in_place(str(src), str(dst))
+
+    assert ok
+    for ext in ('.nfo', '.cue'):
+        assert (tmp_path / "new" / f"Song - Artist{ext}").read_text() == ext
+
+
+def test_a_sidecar_already_at_the_destination_is_not_clobbered(tmp_path):
+    src = tmp_path / "old" / "01 - Song.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"audio")
+    (tmp_path / "old" / "01 - Song.lrc").write_text("mine")
+    dst_dir = tmp_path / "new"; dst_dir.mkdir()
+    (dst_dir / "Song - Artist.lrc").write_text("already there")
+
+    ok, _ = _rename_track_in_place(str(src), str(dst_dir / "Song - Artist.flac"))
+
+    assert ok
+    assert (dst_dir / "Song - Artist.lrc").read_text() == "already there"
+
+
+# ── album-level artwork follows once the source album is empty ─────────────
+
+def test_album_art_and_album_sidecars_follow_the_album(tmp_path):
+    src = tmp_path / "old album"
+    dst = tmp_path / "new album"
+    src.mkdir(); dst.mkdir()
+    for name in ("cover.jpg", "folder.png", "album.nfo", "playlist.m3u"):
+        (src / name).write_text(name)
+
+    moved = _move_album_sidecars(str(src), str(dst))
+
+    assert moved == 4
+    for name in ("cover.jpg", "folder.png", "album.nfo", "playlist.m3u"):
+        assert (dst / name).read_text() == name
+        assert not (src / name).exists()
+
+
+def test_album_sidecars_wait_until_no_audio_remains(tmp_path):
+    src = tmp_path / "old album"
+    dst = tmp_path / "new album"
+    src.mkdir(); dst.mkdir()
+    (src / "cover.jpg").write_bytes(b"cover")
+    (src / "track-still-here.flac").write_bytes(b"audio")
+
+    assert _move_album_sidecars(str(src), str(dst)) == 0
+    assert (src / "cover.jpg").read_bytes() == b"cover"
+    assert not (dst / "cover.jpg").exists()
+
+
+def test_album_sidecars_never_overwrite_destination_files(tmp_path):
+    src = tmp_path / "old album"
+    dst = tmp_path / "new album"
+    src.mkdir(); dst.mkdir()
+    (src / "cover.jpg").write_bytes(b"old")
+    (dst / "cover.jpg").write_bytes(b"new")
+
+    assert _move_album_sidecars(str(src), str(dst)) == 0
+    assert (src / "cover.jpg").read_bytes() == b"old"
+    assert (dst / "cover.jpg").read_bytes() == b"new"
+
+
+def test_album_sidecar_move_keeps_real_documents_at_source(tmp_path):
+    src = tmp_path / "old album"
+    dst = tmp_path / "new album"
+    src.mkdir(); dst.mkdir()
+    (src / "cover.jpg").write_bytes(b"cover")
+    (src / "booklet.pdf").write_bytes(b"booklet")
+
+    assert _move_album_sidecars(str(src), str(dst)) == 1
+    assert (dst / "cover.jpg").exists()
+    assert (src / "booklet.pdf").read_bytes() == b"booklet"
+
+
+# ── a sibling-format file is part of the track, not a separate move ──
+
+def test_a_sibling_never_overwrites_a_file_already_at_the_destination(tmp_path):
+    """The canonical move refuses a destination that already holds a different
+    file ('destination already exists'). The sibling move used `shutil.move`
+    with no check at all, which on one filesystem is `os.rename` and clobbers.
+    """
+    src = tmp_path / "old" / "01 - Song.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"audio")
+    (tmp_path / "old" / "01 - Song.opus").write_bytes(b"lossy copy")
+    dst_dir = tmp_path / "new"; dst_dir.mkdir()
+    (dst_dir / "Song - Artist.opus").write_bytes(b"someone else")
+
+    ok, _ = _rename_track_in_place(str(src), str(dst_dir / "Song - Artist.flac"))
+
+    assert ok
+    assert (dst_dir / "Song - Artist.opus").read_bytes() == b"someone else"
+    assert (tmp_path / "old" / "01 - Song.opus").read_bytes() == b"lossy copy"
+
+
+def test_a_failed_move_leaves_the_sibling_where_it_was(tmp_path, monkeypatch):
+    """Siblings were carried BEFORE the canonical rename. When that rename then
+    failed the track was reported failed, but the `.opus` was already at the new
+    location while the `.flac` and the catalogue row still named the old one.
+
+    Same rule the sidecar helper states for itself: a failed move must leave the
+    whole track where it was.
+    """
+    src = tmp_path / "old" / "01 - Song.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"audio")
+    sibling = tmp_path / "old" / "01 - Song.opus"
+    sibling.write_bytes(b"lossy copy")
+    dst = tmp_path / "new" / "Song - Artist.flac"
+
+    real_rename = os.rename
+
+    def _rename(a, b, *args, **kwargs):
+        if str(a) == str(src):
+            raise OSError(13, "Permission denied")
+        return real_rename(a, b, *args, **kwargs)
+
+    monkeypatch.setattr(os, "rename", _rename)
+
+    ok, err = _rename_track_in_place(str(src), str(dst))
+
+    assert not ok and err
+    assert src.exists()
+    assert sibling.exists()                       # not carried ahead of the audio
+    assert not (tmp_path / "new" / "Song - Artist.opus").exists()

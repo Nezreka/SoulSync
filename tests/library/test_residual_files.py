@@ -35,17 +35,9 @@ def test_real_content_not_disposable():
         assert not is_disposable(n), n
 
 
-# ── the reorganize sweep that uses the predicate ──────────────────────────────
-def test_delete_album_sidecars_sweeps_all_residual_keeps_real(tmp_path: Path):
-    from core.library_reorganize import _delete_album_sidecars
-
-    d = tmp_path / 'Old Album'
-    d.mkdir()
-    for n in ('cover.jpg', 'back.jpg', 'disc.png', 'lyrics.lrc', 'album.nfo', '.DS_Store'):
-        (d / n).write_text('x')
-    (d / 'booklet.pdf').write_text('keep')      # unrecognized → must survive
-
-    _delete_album_sidecars(str(d))
-
-    survivors = {p.name for p in d.iterdir()}
-    assert survivors == {'booklet.pdf'}          # every residual swept, booklet kept
+# The reorganize sweep that used this predicate (`_delete_album_sidecars`) is
+# gone. It DELETED an emptied source folder's cover art and sidecars, which was
+# safe only because the full-mode reorganize re-created them at the destination
+# from the provider. A reorganize moves files now and has no such second half,
+# so deleting them would lose them. The predicate stays — it is what any future
+# "carry these along" sweep will ask.

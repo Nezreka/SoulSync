@@ -43,8 +43,8 @@ def test_does_not_pin_source_canonical_cant_read(source):
 def test_sources_stay_in_sync_with_album_id_columns():
     # The set must mirror the canonical reader's column map; if a source is
     # added there, this fails until CANONICAL_ALBUM_SOURCES is updated.
-    from core.library_reorganize import _ALBUM_ID_COLUMNS
-    assert CANONICAL_ALBUM_SOURCES == set(_ALBUM_ID_COLUMNS)
+    from core.metadata.registry import ALBUM_SOURCE_ID_COLUMNS
+    assert CANONICAL_ALBUM_SOURCES == set(ALBUM_SOURCE_ID_COLUMNS)
 
 
 # ---------------------------------------------------------------------------

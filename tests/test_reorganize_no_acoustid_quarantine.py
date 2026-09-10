@@ -1,40 +1,37 @@
 """Reorganize must not re-adjudicate the identity of a file already in the library.
 
-A reorganize stages a COPY of the user's own library file and runs it through the
-full download post-process, AcoustID identity check included. When the fingerprint
-disagrees, that check quarantines the file — so moving a track you already own
-into a differently-named folder ended in:
+A reorganize used to stage a COPY of the user's own library file and run it
+through the full download post-process, AcoustID identity check included. When
+the fingerprint disagreed, that check quarantined the file — so moving a track
+you already own into a differently-named folder ended in:
 
     AcoustID verification result: fail - Audio mismatch:
         'APETITAN' by '澤野弘之' — expected artist not found
     File quarantined: downloads/ss_quarantine/...02 - Apetitan.flac.quarantined
     [Queue] Finished ... status=failed, moved=0, failed=2
 
-The library original survives (only the staged copy is quarantined), which is why
-the run had to be repeated with "Rename only" to get anywhere — the reported
+The library original survived (only the staged copy was quarantined), which is
+why the run had to be repeated with "Rename only" to get anywhere — the reported
 "reorganize only works the second time". It also left a ~40 MB quarantined copy
 per attempt and a quarantine list full of files the user still owns.
 
-The duration leg was excluded from this pipeline for exactly the same reason
-(#804): a re-resolved API tracklist may legitimately disagree with the user's
-copy. A fingerprint may too — a different master, a regional release, or an
-artist credited in a different script, as here. Identity of library files is
-adjudicated by the AcoustID Scanner, which raises a finding instead of moving
-anyone's audio.
+#1182 answered this with an opt-out: `_skip_quarantine_check: 'acoustid'` in the
+reorganize context, alongside `is_local_import` (#804) for the duration leg,
+which was excluded for the same reason — a re-resolved API tracklist may
+legitimately disagree with the user's copy, and so may a fingerprint (a
+different master, a regional release, or an artist credited in another script,
+as here).
+
+The answer now is structural rather than a flag: a reorganize MOVES files and
+runs no acceptance check at all, so there is nothing to opt out of. Identity of
+library files is adjudicated by the AcoustID Scanner, which raises a finding
+instead of moving anyone's audio.
 """
 
 from __future__ import annotations
 
-import pytest
-
 from core.imports.pipeline import _should_skip_quarantine_check
 from core.library_reorganize import _build_post_process_context
-
-
-@pytest.fixture(autouse=True)
-def _preserve(monkeypatch):
-    monkeypatch.setattr("core.library_reorganize._preserve_casing_enabled", lambda: True)
-    monkeypatch.setattr("core.library_reorganize._feat_in_title_enabled", lambda: False)
 
 
 def _ctx():
@@ -43,19 +40,27 @@ def _ctx():
          "total_tracks": 45, "images": [{"url": ""}]},
         {"name": "Apetitan", "track_number": 2, "disc_number": 1,
          "artists": [{"name": "Sawano Hiroyuki"}]},
-        "Sawano Hiroyuki", "AoT S2 OST", 2, local_title="Apetitan")
+        "Sawano Hiroyuki", "AoT S2 OST", 2)
 
 
-def test_the_acoustid_quarantine_leg_is_skipped():
-    assert _should_skip_quarantine_check(_ctx(), "acoustid") is True
-
-
-def test_the_corruption_legs_still_run():
-    """Skipping identity is not skipping safety: a truncated or unparseable file
-    must still be caught before it is moved anywhere."""
+def test_no_acceptance_check_runs_so_there_is_nothing_to_opt_out_of():
+    """The context carries neither flag, because it no longer reaches a
+    pipeline that reads them. The reorganize context exists for one purpose
+    now: handing the shared path builder the shape a download hands it."""
     ctx = _ctx()
-    assert _should_skip_quarantine_check(ctx, "integrity") is False
-    assert _should_skip_quarantine_check(ctx, "bit_depth") is False
+    assert "_skip_quarantine_check" not in ctx
+    assert "is_local_import" not in ctx
+
+
+def test_the_executor_that_ran_the_check_is_gone():
+    """The quarantine happened inside `reorganize_album`, which staged a copy
+    and called `_post_process_matched_download`. Both are gone; the only
+    executor moves the file the user already has."""
+    import core.library_reorganize as lr
+    assert not hasattr(lr, "reorganize_album")
+    assert not hasattr(lr, "_stage_track")
+    assert not hasattr(lr, "_run_post_process_for_track")
+    assert hasattr(lr, "reorganize_album_rename_only")
 
 
 def test_a_normal_download_still_gets_the_identity_check():

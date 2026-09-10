@@ -20,30 +20,42 @@ from core.library.retag_planner import (
     plan_track,
 )
 from core.metadata.album_tracks import get_album_for_source, get_album_tracks_for_source
-from core.metadata_service import get_primary_source, get_source_priority
+from core.metadata_service import (
+    ALBUM_SOURCE_ID_COLUMNS,
+    get_primary_source,
+    get_source_priority,
+)
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.library_retag")
 
-# (source, albums-table column) in resolution-preference order is decided at
-# runtime from the configured source priority; this maps source -> column.
-_ALBUM_SOURCE_COLUMNS = {
-    'spotify': 'spotify_album_id',
-    'itunes': 'itunes_album_id',
-    'deezer': 'deezer_id',
-    'musicbrainz': 'musicbrainz_release_id',
-}
+# Which albums this job can pull fresh data for. The order it resolves them in
+# is decided at runtime from the configured source priority; the map itself is
+# shared with reorganize so the two agree on what "matched" means.
+_ALBUM_SOURCE_COLUMNS = ALBUM_SOURCE_ID_COLUMNS
 
 
 def _read_current_tags(file_path):
+    """The file's current tags, read with the SAME reader the writer's guards
+    use (``core.tag_writer.read_file_tags``).
+
+    This was ``core.soulsync_client._read_tags`` — mutagen's easy view, which
+    keeps only the FIRST value of each frame. A multi-genre file came back as
+    one genre, so the plan and ``write_tags_to_file`` disagreed about the very
+    same file.
+
+    A failure returns ``{'error': ...}`` rather than ``{}``: an empty dict
+    reads as "this file has no tags at all", which is how an unreadable file
+    turned into a finding claiming every field was wrong.
+    """
     try:
-        from core.soulsync_client import _read_tags
-        return _read_tags(file_path) or {}
+        from core.tag_writer import read_file_tags
+        return read_file_tags(file_path) or {}
     except Exception as exc:
         logger.debug("read tags failed for %s: %s", file_path, exc)
-        return {}
+        return {'error': str(exc)}
 
 
 def _run_full_enrich(file_path, full_meta) -> bool:
@@ -104,7 +116,9 @@ def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False
             _lyrics_client = None
 
     from core.tag_writer import write_tags_to_file
-    last_dir = None
+    # Every folder a track was actually written into. A multi-disc album lives
+    # in more than one, and the sidecar used to follow only the last track.
+    written_dirs: list = []
     for tp in track_plans or []:
         fp = tp.get('file_path')
         db_data = tp.get('db_data') or {}
@@ -115,7 +129,9 @@ def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False
             res = write_tags_to_file(fp, db_data, embed_cover=embed_cover, cover_data=cover_data)
             if res.get('success'):
                 result['written'] += 1
-                last_dir = _os.path.dirname(fp)
+                fp_dir = _os.path.dirname(fp)
+                if fp_dir not in written_dirs:
+                    written_dirs.append(fp_dir)
                 if full and tp.get('full_meta'):
                     _run_full_enrich(fp, tp['full_meta'])
             else:
@@ -146,15 +162,16 @@ def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False
                 except Exception as e:
                     logger.debug("retag lyrics fetch failed for %s: %s", fp, e)
 
-    if cover_action and cover_data and last_dir:
-        try:
-            cover_path = _os.path.join(last_dir, 'cover.jpg')
-            if cover_action == 'replace' or not _os.path.exists(cover_path):
-                with open(cover_path, 'wb') as fh:
-                    fh.write(cover_data[0])
-                result['cover_written'] = True
-        except Exception as e:
-            logger.debug("retag cover.jpg write failed: %s", e)
+    if cover_action and cover_data:
+        for cover_dir in written_dirs:
+            try:
+                cover_path = _os.path.join(cover_dir, 'cover.jpg')
+                if cover_action == 'replace' or not _os.path.exists(cover_path):
+                    with open(cover_path, 'wb') as fh:
+                        fh.write(cover_data[0])
+                    result['cover_written'] = True
+            except Exception as e:
+                logger.debug("retag cover.jpg write failed for %s: %s", cover_dir, e)
     return result
 
 
@@ -244,9 +261,11 @@ class LibraryRetagJob(RepairJob):
         'Turn it off to auto-apply on scan.\n'
         '- Mode: "overwrite" rewrites every field the source provides; "fill_missing" '
         'only fills blank tags (keeps your existing values).\n'
-        '- Cover art: replace / fill-missing / skip. "replace" force-refreshes '
-        'art on every matched album (use this after changing your cover-art '
-        'sources to re-pull fresh covers). When you have configured cover-art '
+        '- Cover art: fill-missing (default) / replace / skip. "fill-missing" '
+        'only touches albums with no art. "replace" force-refreshes art on '
+        'EVERY matched album — that means a finding for every one of them, so '
+        'use it deliberately after changing your cover-art sources. When you '
+        'have configured cover-art '
         'sources (Settings > metadata enhancement art order), the art is pulled '
         'from those; otherwise it falls back to the matched source\'s album image.\n'
         '- Source: which matched source to pull from (default: your source priority).'
@@ -258,7 +277,12 @@ class LibraryRetagJob(RepairJob):
         'dry_run': True,
         'depth': 'light',
         'mode': MODE_OVERWRITE,
-        'cover_art': 'replace',
+        # fill_missing, not replace. A cover action alone is enough to create a
+        # finding, and 'replace' produces one for EVERY matched album whose tags
+        # are already perfect — on every scan, forever, because a pending
+        # finding is refreshed in place rather than re-inserted. 'replace' stays
+        # available as the deliberate "re-pull all my art" run.
+        'cover_art': 'fill_missing',
         'lyrics': 'skip',
         'source': 'auto',
     }
@@ -267,7 +291,7 @@ class LibraryRetagJob(RepairJob):
         'mode': [MODE_OVERWRITE, MODE_FILL_MISSING],
         'cover_art': ['replace', 'fill_missing', 'skip'],
         'lyrics': ['fetch', 'skip'],
-        'source': ['auto', 'spotify', 'itunes', 'deezer', 'musicbrainz'],
+        'source': ['auto', *ALBUM_SOURCE_ID_COLUMNS],
     }
     auto_fix = True
     writes_library_files = True
@@ -402,29 +426,39 @@ class LibraryRetagJob(RepairJob):
             except Exception as e:
                 logger.debug("preferred cover-art lookup failed for album %s: %s", album_id, e)
 
-        # Cover action (album-level), independent of tag changes. Decided first
-        # so cover-only albums (tags fine, art missing) still include their
-        # tracks for the apply to embed art into.
-        cover_action = self._cover_action(cover_mode, cover_url, library_tracks)
-
-        pairs = match_source_tracks(source_tracks, library_tracks)
+        # Resolve container/host path mismatches the same way the apply handler
+        # does, ONCE, up front. The old bare os.path.isfile() on the raw DB path
+        # failed for EVERY track on path-mapped setups (Docker mounts), so
+        # cover-mode scans produced "(0 track(s))" findings that the apply then
+        # rejected with "No tracks to re-tag in finding".
         download_folder = (context.config_manager.get('soulseek.download_path', '')
                            if context.config_manager else None)
-        track_plans = []
-        unmatched = []
-        unreachable = 0
-        for lib, src in pairs:
-            # Resolve container/host path mismatches the same way the apply
-            # handler does. The old bare os.path.isfile() on the raw DB path
-            # failed for EVERY track on path-mapped setups (Docker mounts), so
-            # cover-mode scans produced "(0 track(s))" findings that the apply
-            # then rejected with "No tracks to re-tag in finding".
-            rp = resolve_library_file_path(
-                lib['file_path'],
+        resolved = {
+            t['id']: resolve_library_file_path(
+                t['file_path'],
                 transfer_folder=getattr(context, 'transfer_folder', None),
                 download_folder=download_folder,
                 config_manager=context.config_manager,
             )
+            for t in library_tracks
+        }
+
+        # Cover action (album-level), independent of tag changes. Decided first
+        # so cover-only albums (tags fine, art missing) still include their
+        # tracks for the apply to embed art into. It asks about a RESOLVED path:
+        # "does this album have art?" answered against a container path the
+        # scan process cannot see is always "no", which made fill-missing
+        # behave exactly like replace.
+        rep_path = next((p for p in resolved.values() if p), None)
+        cover_action = self._cover_action(cover_mode, cover_url, rep_path)
+
+        pairs = match_source_tracks(source_tracks, library_tracks)
+        track_plans = []
+        unmatched = []
+        unreachable = 0
+        unreadable = 0
+        for lib, src in pairs:
+            rp = resolved.get(lib['id'])
             if not rp:
                 unreachable += 1
                 continue  # genuinely unreachable from this process
@@ -450,6 +484,12 @@ class LibraryRetagJob(RepairJob):
                     track_plans.append(plan_row)
                 continue
             current = _read_current_tags(rp)
+            if current.get('error'):
+                # No known current value means no diff worth showing. Planning
+                # against "everything is empty" would promise to rewrite tags
+                # nobody has read.
+                unreadable += 1
+                continue
             plan = plan_track(current, src, album_meta, mode=mode)
             # Include a track when its tags change, OR there's a cover action,
             # OR lyrics are being fetched (db_data may be empty — apply still
@@ -464,6 +504,11 @@ class LibraryRetagJob(RepairJob):
                     'changes': plan['changes'],
                     'db_data': db_data,
                 }
+                if plan.get('protected'):
+                    # Fields where the writer keeps the file's own value (#800
+                    # placeholders). Carried so the finding can say so instead
+                    # of listing a change that will not happen.
+                    tp['protected'] = plan['protected']
                 if lyrics_action:
                     # READ-only lyrics query metadata (never written as tags).
                     tp['lyrics_meta'] = {
@@ -512,6 +557,12 @@ class LibraryRetagJob(RepairJob):
                      f'tags left untouched{" (cover art still applied)" if cover_action else ""}.')
         if unreachable:
             desc += f' {unreachable} track(s) not reachable on disk and skipped.'
+        if unreadable:
+            desc += f' {unreadable} track(s) had unreadable tags and were skipped.'
+        held_back = sorted({f for tp in track_plans for f in (tp.get('protected') or {})})
+        if held_back:
+            desc += (f' {", ".join(held_back)}: the source offers a placeholder, so '
+                     f'your own value is held back.')
 
         # Cover-only findings say so instead of the puzzling "(0 track(s))".
         title_what = (f'{tag_change_tracks} track(s)' if tag_change_tracks
@@ -549,8 +600,12 @@ class LibraryRetagJob(RepairJob):
                 result.findings_skipped_dedup += 1
 
     @staticmethod
-    def _cover_action(cover_mode, cover_url, library_tracks):
-        """Return 'replace' / 'fill' / None for the album's cover under the mode."""
+    def _cover_action(cover_mode, cover_url, rep_path):
+        """Return 'replace' / 'fill' / None for the album's cover under the mode.
+
+        ``rep_path`` is a RESOLVED path to one of the album's files — the folder
+        it lives in is where the sidecar is looked for.
+        """
         if cover_mode == 'skip' or not cover_url:
             return None
         if cover_mode == 'replace':
@@ -558,8 +613,7 @@ class LibraryRetagJob(RepairJob):
         # fill_missing — only if the album has no art on disk
         try:
             from core.metadata.art_apply import album_has_art_on_disk
-            rep = library_tracks[0]['file_path'] if library_tracks else ''
-            return None if album_has_art_on_disk(rep) else 'fill'
+            return None if album_has_art_on_disk(rep_path or '') else 'fill'
         except Exception:
             return None
 
