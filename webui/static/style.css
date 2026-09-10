@@ -4344,16 +4344,25 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     line-height: 1;
 }
 
-/* Quality tab: the settings tiles stay exactly on the normal centered 920px
-   settings column. On wide screens only the profile panel protrudes into the
-   empty right margin, so the Quality tab lines up with the other tabs. */
+/* Quality tab: the profile panel sits INSIDE the settings column, as its right
+   hand column.
+
+   It used to hang outside instead - the layout was one side-panel wider than its
+   container, so the panel spilled into the empty margin beside a 920px settings
+   column. That was the right trade when the column was 920px and a 320px panel
+   would have left the tiles too narrow to read.
+
+   The column is --settings-max-width wide now, so the trade is gone: the tiles
+   keep about 1070px, which is wider than the whole column used to be. Hanging
+   outside had also started to LOOK wrong once the settings card grew a visible
+   border, because the panel was sitting past it with nothing behind it. */
 .qp-layout {
     --qp-side-width: 320px;
-    --qp-side-gap: 8px;
+    --qp-side-gap: 22px;
     display: flex;
     align-items: flex-start;
     gap: var(--qp-side-gap);
-    width: calc(100% + var(--qp-side-width) + var(--qp-side-gap));
+    width: 100%;
     overflow: visible;
 }
 
@@ -4862,7 +4871,12 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     min-width: 132px;
 }
 
-@media (max-width: 1800px) {
+/* Stacked only when the column really is too narrow to split. The old
+   breakpoint was 1800px because the panel hung outside and needed the viewport
+   to be wider than the column PLUS the panel plus margins. Now it lives inside
+   the column, so it can stay beside the tiles until the two together get tight,
+   which is a good deal narrower. */
+@media (max-width: 1100px) {
     .qp-layout {
         flex-direction: column-reverse;
         width: 100%;
