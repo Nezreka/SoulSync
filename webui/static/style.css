@@ -3342,8 +3342,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 11px 14px;
-    margin-bottom: 6px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
     cursor: pointer;
     border-radius: 12px;
     background: rgba(255, 255, 255, 0.04);
@@ -3399,9 +3399,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .settings-section-body {
     transition: all 0.2s ease;
+    /* matches the closed-card gap above, so the column keeps its rhythm whether
+       a section is open or shut */
     /* Breathing room before the next tile header so an expanded tile's last
        control (e.g. "+ Add Path") never sits flush against the next section. */
-    margin-bottom: 18px;
+    margin-bottom: 8px;
 }
 
 .settings-section-body.collapsed {
@@ -61082,7 +61084,7 @@ tr.tag-diff-same {
     text-transform: uppercase;
     color: rgba(255, 255, 255, 0.55);
     /* more air above than below, so the label belongs to what follows it */
-    padding: 28px 0 9px 2px;
+    padding: 24px 0 8px 2px;
     margin: 0;
     border: none;
     border-bottom: 1px solid rgba(255, 255, 255, 0.07);

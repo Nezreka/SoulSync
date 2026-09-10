@@ -645,6 +645,37 @@ function validateFileOrganizationTemplates() {
     return errors;
 }
 
+// ── Collapsible section headers: keyboard + screen reader ──────────────────
+//
+// The 31 section toggles are <div onclick>. That works for a mouse and for
+// nothing else: Tab skipped every one of them, Enter and Space did nothing, and
+// the :focus-visible styling written for them could never fire. They carry
+// role="button" and tabindex="0" now, and this supplies the half a real button
+// would have given for free.
+//
+// Delegated rather than 31 listeners: the markup is static, but a delegated
+// handler cannot go stale if a section is ever rendered late.
+//
+// aria-expanded is kept in sync here too. Setting it once in the markup and
+// never updating it is worse than omitting it - a screen reader would announce
+// "collapsed" for a section the user just opened.
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+    const header = e.target.closest?.('#settings-page .settings-section-header[role="button"]');
+    if (!header) return;
+    e.preventDefault();          // Space would scroll the page
+    header.click();              // reuse the inline toggle - one behaviour, not two
+});
+
+document.addEventListener('click', (e) => {
+    const header = e.target.closest?.('#settings-page .settings-section-header[role="button"]');
+    if (!header) return;
+    // after the inline handler has run, so it reports the state we ended in
+    requestAnimationFrame(() => {
+        header.setAttribute('aria-expanded', header.classList.contains('collapsed') ? 'false' : 'true');
+    });
+});
+
 // Settings redesign — tab switching + service accordions
 function switchSettingsTab(tab) {
     // Update tab bar

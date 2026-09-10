@@ -791,3 +791,40 @@ def test_the_settings_page_sizes_text_from_one_scale():
             leftovers.append((sel[:60], size))
     assert not leftovers, f"still sizing text in em: {leftovers}"
 
+
+def test_every_section_toggle_is_reachable_without_a_mouse(index, js):
+    """31 collapsible sections were <div onclick>. Tab skipped all of them,
+    Enter and Space did nothing, and the :focus-visible rules written for them
+    could never fire - the element was not focusable, so there was no focus to
+    style.
+
+    They carry role="button" and tabindex="0" now, with a delegated keydown
+    handler supplying the half a real <button> would have given for free.
+
+    aria-expanded is checked separately and on purpose: an attribute that is set
+    once in the markup and never updated is WORSE than no attribute, because a
+    screen reader would confidently announce "collapsed" for a section the user
+    just opened. So the handler has to write it back.
+    """
+    headers = re.findall(r'<div class="settings-section-header[^"]*"[^>]*>', index)
+    assert headers, "no section headers found"
+
+    for h in headers:
+        if 'settings-section-static' in h:
+            continue          # a heading that toggles nothing needs no button role
+        assert 'tabindex="0"' in h, f"not focusable: {h[:90]}"
+        assert 'role="button"' in h, f"no button role: {h[:90]}"
+        assert 'aria-expanded' in h, f"no expanded state: {h[:90]}"
+
+    # a collapsed section must not claim to be open
+    for h in headers:
+        if 'settings-section-static' in h or 'aria-expanded' not in h:
+            continue
+        collapsed = 'settings-section-header collapsed' in h
+        expected = 'false' if collapsed else 'true'
+        assert f'aria-expanded="{expected}"' in h, f"wrong initial state: {h[:90]}"
+
+    assert "e.key !== 'Enter'" in js, "no keyboard activation"
+    assert "setAttribute('aria-expanded'" in js, "aria-expanded is never updated"
+    assert "e.preventDefault()" in js, "Space would scroll the page instead of toggling"
+

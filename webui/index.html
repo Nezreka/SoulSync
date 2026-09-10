@@ -3577,7 +3577,7 @@
                                  Soulseek card there is the single editor. Kept in the DOM because
                                  video-settings.js still reads and writes these ids. -->
                             <div class="settings-group" data-stg="downloads" id="video-slskd-container" style="display:none;" data-dupe-of="soulseek-settings-container" hidden>
-                                <div class="settings-section-header collapsed" onclick="this.classList.toggle('collapsed'); var b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':'';">
+                                <div class="settings-section-header collapsed" onclick="this.classList.toggle('collapsed'); var b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':'';" role="button" tabindex="0" aria-expanded="false">
                                     <span class="settings-section-arrow">&#9660;</span>
                                     <h3>Soulseek (slskd) Connection</h3>
                                     <span class="settings-section-hint">shared with Music · URL, key, timeouts, peers</span>
@@ -3630,7 +3630,7 @@
                                 </div>
                             </div>
                             <!-- VIDEO quality profile — one unified profile across slskd/torrent/usenet -->
-                            <div class="settings-section-header collapsed" data-stg="quality" data-video-only onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="quality" data-video-only onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Quality</h3>
                                 <span class="settings-section-hint">Ladder, cutoff, rejects &amp; tie-breakers</span>
@@ -3742,7 +3742,7 @@
                             </div>
                             </div>
                             <!-- VIDEO youtube quality — separate, smaller yt-dlp profile -->
-                            <div class="settings-section-header collapsed" data-stg="quality" data-video-only onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="quality" data-video-only onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>YouTube Quality</h3>
                                 <span class="settings-section-hint">Resolution ceiling, codec &amp; container for followed channels</span>
@@ -4645,7 +4645,7 @@
                                  by settings.js updateSourceVisibility — gating only the inner
                                  group would leave an empty expandable shell. -->
                             <div id="quality-profile-tile" data-stg="quality">
-                            <div class="settings-section-header collapsed" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Quality</h3>
                                 <span class="qp-governed-badge" title="Saved under the active profile in the panel on the right">Profile</span>
@@ -4857,7 +4857,7 @@
                             </div><!-- end Quality Profile tile -->
 
                             <!-- ═══ QUALITY ON IMPORT (moved from Library > Import — quality enforcement at import time) ═══ -->
-                            <div class="settings-section-header collapsed" data-stg="quality" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="quality" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Quality on Import</h3>
                                 <span class="qp-governed-badge" title="Saved under the active profile in the panel on the right">Profile</span>
@@ -4888,7 +4888,7 @@
                             </div><!-- end Quality on Import body -->
 
                             <!-- ═══ POST-DOWNLOAD CONVERSION (quality — moved from Library) ═══ -->
-                            <div class="settings-section-header collapsed" data-stg="quality" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="quality" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Post-Download Conversion</h3>
                                 <span class="qp-governed-badge" title="Saved under the active profile in the panel on the right">Profile</span>
@@ -4957,7 +4957,7 @@
                             </div><!-- end Post-Download Conversion body -->
 
                             <!-- ═══ AUDIO VERIFICATION (global quality gate) ═══ -->
-                            <div class="settings-section-header collapsed" data-stg="quality" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="quality" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Audio Verification</h3>
                                 <span class="qp-governed-badge" title="Saved under the active profile in the panel on the right">Profile</span>
@@ -5046,7 +5046,7 @@
                                  which is music-wide. Hiding the wrapper takes the header with it, so the
                                  title never sits above nothing. -->
                             <div id="dlchain-behaviour" data-stg="downloads">
-                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Download Behaviour</h3>
                                 <span class="settings-section-hint">Preview source, concurrency &amp; timeouts</span>
@@ -5109,7 +5109,7 @@
                             </div>
 
                             <!-- ═══ RETRY LOGIC (download behaviour — after the source/indexer config) ═══ -->
-                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Retry Logic</h3>
                                 <span class="settings-section-hint">What happens when a download is rejected</span>
@@ -5171,7 +5171,7 @@
                             </div><!-- end Retry Logic body -->
 
                             <!-- ═══ ALBUM PUBLISHING (#999 — atomic album publish, opt-in) ═══ -->
-                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Album Publishing</h3>
                                 <span class="settings-section-hint">When album downloads appear in your library</span>
@@ -5193,7 +5193,7 @@
                             </div><!-- end Album Publishing body -->
 
                             <!-- ═══ PATHS & ORGANIZATION ═══ -->
-                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Paths &amp; Organization</h3>
                                 <span class="settings-section-hint">Folders, file templates &amp; library paths</span>
@@ -5705,7 +5705,7 @@
                             </div><!-- end Paths & Organization body -->
 
                             <!-- ═══ POST-PROCESSING ═══ -->
-                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Video Folders</h3>
                                 <span class="settings-section-hint">Movies, TV &amp; YouTube libraries</span>
@@ -5735,7 +5735,7 @@
                                 </div>
                             </div>
                             </div>
-                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Post-Processing</h3>
                                 <span class="settings-section-hint">Metadata, tags, conversion, lyrics</span>
@@ -6029,7 +6029,7 @@
                             </div><!-- end Post-Processing body -->
 
                             <!-- ═══ LISTENING STATS ═══ -->
-                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Video Organization</h3>
                                 <span class="settings-section-hint">Path templates, post-processing &amp; recycle</span>
@@ -6179,7 +6179,7 @@
                                 </div>
                             </div>
                             </div>
-                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Video Preferences</h3>
                                 <span class="settings-section-hint">Trailers &amp; where-to-watch region</span>
@@ -6229,7 +6229,7 @@
                                 </div>
                             </div>
                             </div>
-                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Listening Stats</h3>
                                 <span class="settings-section-hint">Play history from your media server</span>
@@ -6255,7 +6255,7 @@
                             </div><!-- end Listening Stats body -->
 
                             <!-- Discovery (collapsible tile) -->
-                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Discovery</h3>
                                 <span class="settings-section-hint">How adventurous your recommendations are</span>
@@ -6279,7 +6279,7 @@
                             </div><!-- end Discovery body -->
 
                             <!-- Security & Access (collapsible tile) -->
-                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Security &amp; Access</h3>
                                 <span class="settings-section-hint">PIN · user accounts · reverse proxy</span>
@@ -6406,7 +6406,7 @@
 
                             <!-- Discovery Settings -->
                                                         <!-- Discovery Pool Settings (collapsible tile) -->
-                            <div class="settings-section-header collapsed" data-stg="advanced" data-music-only onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="advanced" data-music-only onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Discovery Pool Settings</h3>
                                 <span class="settings-section-hint">Lookback &amp; hemisphere</span>
@@ -6521,7 +6521,7 @@
 
                             <!-- Database Settings -->
                                                         <!-- Database Settings (collapsible tile) -->
-                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Database Settings</h3>
                                 <span class="settings-section-hint">Concurrency</span>
@@ -6550,7 +6550,7 @@
 
                             <!-- Database Maintenance -->
                                                         <!-- Database Maintenance (collapsible tile) -->
-                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Database Maintenance</h3>
                                 <span class="settings-section-hint">Size, vacuum &amp; cleanup</span>
@@ -6588,7 +6588,7 @@
                                  YouTube-sourced audio on the music side, so both sides get it. -->
 
                             <!-- Import Settings (collapsible tile) — first here so it isn't buried among filters -->
-                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Import</h3>
                                 <span class="settings-section-hint">Folder-artist override, permanent library</span>
@@ -6636,7 +6636,7 @@
                             </div><!-- end Import body -->
 
                             <!-- Filtering (Content Filter + Genre Whitelist consolidated into one tile) -->
-                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Filtering</h3>
                                 <span class="settings-section-hint">Explicit content &amp; genre whitelist</span>
@@ -6721,7 +6721,7 @@
                             </div><!-- end Filtering body -->
 
                             <!-- Playlists (M3U Export + Playlist Sync consolidated into one tile) -->
-                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Playlists</h3>
                                 <span class="settings-section-hint">M3U export &amp; server playlist sync</span>
@@ -6782,7 +6782,7 @@
 
                             <!-- Logging Settings -->
                                                         <!-- Logging (collapsible tile) -->
-                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Logging</h3>
                                 <span class="settings-section-hint">Log level &amp; path</span>
@@ -6814,7 +6814,7 @@
 
                             <!-- SoulSync API Keys -->
                                                         <!-- SoulSync API (collapsible tile) -->
-                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>SoulSync API</h3>
                                 <span class="settings-section-hint">REST keys &amp; inbound endpoint</span>
@@ -6878,7 +6878,7 @@
 
                             <!-- Developer Mode -->
                                                         <!-- Developer Mode (collapsible tile) -->
-                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Developer Mode</h3>
                                 <span class="settings-section-hint">Advanced log viewer</span>
@@ -6900,7 +6900,7 @@
                             <!-- Artwork cache. Deliberately NOT marked video-only: one cache
                                  serves covers on the music side and posters on the video side,
                                  same as the yt-dlp tile above. -->
-                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Artwork Cache</h3>
                                 <span class="settings-section-hint">Local copies of cover &amp; poster art</span>
@@ -6964,7 +6964,7 @@
                                  would do nothing on the music side. The retired video source picker
                                  rides along inside: it is hidden, and video-settings.js still reads its
                                  ids on load, so it has to stay somewhere in the page. -->
-                            <div class="settings-section-header collapsed" data-stg="advanced" data-video-only onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="advanced" data-video-only onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Notifications</h3>
                                 <span class="settings-section-hint">Discord, webhooks &amp; Telegram</span>
@@ -7015,7 +7015,7 @@
                                  background machinery lives. Still data-video-only - the endpoints are
                                  /api/video/downloads/config/import-lists and it feeds the VIDEO
                                  wishlist, so it would do nothing on the music side. -->
-                            <div class="settings-section-header collapsed" data-stg="advanced" data-video-only onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="advanced" data-video-only onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Import Lists</h3>
                                 <span class="settings-section-hint">Auto-add movies &amp; shows from a list</span>
@@ -7036,7 +7036,7 @@
                             </div>
                             </div>
 
-                            <div class="settings-section-header collapsed" data-stg="advanced" data-music-only onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="advanced" data-music-only onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Experimental</h3>
                                 <span class="settings-section-hint">Opt-in preview features</span>
