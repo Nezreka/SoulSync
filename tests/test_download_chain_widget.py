@@ -175,13 +175,40 @@ def test_the_chain_renders_as_a_flow(js):
     assert "_dlchainStep(" in fn
 
 
-def test_there_is_always_somewhere_to_drop(js):
-    """The slot stays even when the chain is full, so there is an obvious
-    target rather than having to hit a gap between two rows."""
+def test_there_is_exactly_one_empty_slot(js):
+    """The question a person has looking at this is "where does the next one
+    go". A row of identical empty boxes answers it worse than a single obvious
+    one, so only the end of the chain gets a slot."""
     fn = js.split("function renderDownloadChain(", 1)[1].split("\nwindow.", 1)[0]
+    assert fn.count('id="dlchain-slot"') == 1
     assert "dlchain-slot" in fn
-    assert "Drag another source here" in fn
-    assert "downloads need at least one" in fn
+
+
+def test_the_slot_says_what_goes_in_it_and_why(js):
+    """A thin strip with dim text reads as a divider. The automation builder's
+    slot is big, dashed and explains itself, and that is the thing in this app
+    people already understand."""
+    fn = js.split("function renderDownloadChain(", 1)[1].split("\nwindow.", 1)[0]
+    assert "Drag a source here" in fn
+    assert "tried first" in fn            # empty chain
+    assert "tried after" in fn            # naming the source above it
+    assert "dlchain-slot-title" in fn and "dlchain-slot-hint" in fn
+
+
+def test_the_slot_is_a_target_not_a_divider():
+    css = _read("webui/static/style.css")
+    block = css.split("/* ── Download chains", 1)[1]
+    slot = block.split(".dlchain-slot {", 1)[1].split("}", 1)[0]
+    assert "min-height" in slot
+    assert "dashed" in slot
+    # empty chain gets the bigger one, the way the builder's first slot is
+    first = block.split(".dlchain-slot.first {", 1)[1].split("}", 1)[0]
+    assert "min-height" in first
+
+
+def test_clicking_is_offered_as_well_as_dragging(index):
+    """Drag-only is a trap on a touchpad, and the tiles already take a click."""
+    assert "drag one across, or click it" in index
 
 
 def test_the_pool_uses_source_tiles(js):

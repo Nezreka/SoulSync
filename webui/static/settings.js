@@ -1048,15 +1048,25 @@ function renderDownloadChain() {
     const order = _dlchainOrder.filter(id => all.includes(id));
     const available = all.filter(id => !order.includes(id));
 
-    // steps, each joined by a connector, then an always-present drop slot so
-    // there is somewhere obvious to aim at even when the chain is full.
+    // Steps joined by connectors, then ONE empty slot at the end. One, not a
+    // row of placeholders: the question a person has when they look at this is
+    // "where does the next one go", and several identical empty boxes answer it
+    // worse than a single obvious one. Sized and worded like the automation
+    // builder's slots, which is the thing in this app that already gets it
+    // right — a big dashed target that says what to put in it and why.
     const steps = order.map((id, i) => _dlchainStep(kind, id, i + 1));
+    const lastName = order.length ? spec.meta(order[order.length - 1]).name : '';
+    const slotTitle = order.length
+        ? `Drag a source here — tried after ${escapeHtml(lastName)}`
+        : 'Drag a source here — this one is tried first';
+    const slotHint = order.length
+        ? 'It only runs if everything above it came up empty.'
+        : 'Downloads need at least one source. Add more to fall back in order.';
     const flow = steps.join('<div class="dlchain-connector"></div>')
         + (steps.length ? '<div class="dlchain-connector"></div>' : '')
         + `<div class="dlchain-slot${order.length ? '' : ' first'}" id="dlchain-slot">`
-        + (order.length
-            ? 'Drag another source here'
-            : 'Drag a source here — downloads need at least one')
+        + `<span class="dlchain-slot-title">${slotTitle}</span>`
+        + `<span class="dlchain-slot-hint">${slotHint}</span>`
         + '</div>';
     list.innerHTML = flow;
 
