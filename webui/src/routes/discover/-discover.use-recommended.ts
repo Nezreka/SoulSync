@@ -84,18 +84,27 @@ export function useRecommended(onToast: (toast: RecToast) => void): RecommendedC
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ artist_ids: ids, source }),
       });
+      // The endpoint answers with a MAP keyed by artist id, not a list
+      // (#1234). It was typed as a list here, and `!data.artists` waves an
+      // object through because an object is truthy — including the `{}` the
+      // route returns when it has nothing to say. `for...of` on it then threw
+      // "e.artists is not iterable", and because the throw happened inside the
+      // setImages updater React ran it during render, past this try/catch, so
+      // it took the whole Discovery page down instead of leaving placeholders.
       const data = (await res.json()) as {
         success?: boolean;
-        artists?: { artist_id?: string; image_url?: string }[];
+        artists?: Record<string, { image_url?: string } | undefined>;
       };
-      if (!data.success || !data.artists) return;
-      setImages((prev) => {
-        const next = { ...prev };
-        for (const a of data.artists!) {
-          if (a.artist_id && a.image_url) next[a.artist_id] = a.image_url;
-        }
-        return next;
-      });
+      const payload = data.artists;
+      if (!data.success || !payload || typeof payload !== 'object') return;
+      // Built out here on purpose: the updater must be a plain merge, so a
+      // shape we did not expect can never escape into the render phase again.
+      const found: Record<string, string> = {};
+      for (const [artistId, artist] of Object.entries(payload)) {
+        if (artistId && artist?.image_url) found[artistId] = artist.image_url;
+      }
+      if (Object.keys(found).length === 0) return;
+      setImages((prev) => ({ ...prev, ...found }));
     } catch {
       /* cards keep their placeholders (1034) */
     }

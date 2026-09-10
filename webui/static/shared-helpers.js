@@ -3961,7 +3961,16 @@ function applyDynamicGlow(cardElement, colors) {
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
-    return div.innerHTML;
+    // textContent/innerHTML escapes & < > but NOT a double quote, because a
+    // text node does not need one. Almost every caller interpolates the
+    // result into a double-quoted ATTRIBUTE, where a raw quote closes the
+    // attribute early: a track called 'Crazy (12" mix)' reached MusicBrainz
+    // as 'Crazy (12' with everything after it dropped (#1230).
+    //
+    // Safe in both places: the output is always inserted via innerHTML, so
+    // &quot; renders as a plain quote in text and parses correctly in an
+    // attribute.
+    return div.innerHTML.replace(/"/g, '&quot;');
 }
 
 // --- Service Status and System Stats Functions ---

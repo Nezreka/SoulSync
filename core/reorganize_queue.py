@@ -32,10 +32,29 @@ Design rules:
   changes the item's status to `cancelled` and removes it from the
   active queue.
 
-- **In-memory only**: queue state lives in a module-level singleton.
-  A server restart loses the queue (in-flight item likely also lost
-  half-way through post-process). DB persistence is a follow-up if
-  this turns out to matter operationally.
+- **Durable backlog** (#1235): outstanding items are mirrored to the
+  ``reorganize_queue`` table, so a process death does not take the
+  queue with it. This started as "DB persistence is a follow-up if
+  this turns out to matter operationally"; it mattered. A gunicorn
+  worker recycle (OOM SIGKILL) discarded ~1,815 queued albums on one
+  run and ~1,900 on the next, silently, while the job still reported
+  success - leaving a library half in the old layout and half in the
+  new one, with nothing to say so.
+
+  Only the BACKLOG is persisted. A row lives while an item is queued
+  or running and is deleted when it reaches a terminal state, so the
+  table is the size of the outstanding work, not of the history. The
+  recent-history list the status panel shows stays in memory: it is
+  cosmetic, and persisting it would grow the table forever.
+
+  An item found ``running`` at load was interrupted mid-flight, so it
+  returns as ``queued``. Reorganize is re-entrant enough for that - a
+  second pass over an album already in its final layout finds nothing
+  left to move.
+
+  The store is INJECTED and defaults to ``None``. Tests construct
+  ``ReorganizeQueue()`` bare and must not write to the real library
+  database; production wires the store in :func:`get_queue`.
 """
 
 import threading
@@ -124,9 +143,14 @@ class ReorganizeQueue:
     up isolated instances.
     """
 
-    def __init__(self, *, runner: Optional[Callable[[QueueItem], dict]] = None):
+    def __init__(self, *, runner: Optional[Callable[[QueueItem], dict]] = None,
+                 store: Optional[Any] = None):
         """
         Args:
+            store: Optional durable backing store with ``save(snapshot)``,
+                ``delete(queue_id)``, ``delete_queued()`` and
+                ``load_pending()``. ``None`` (the default) keeps the old
+                in-memory-only behaviour, which is what the tests want.
             runner: Callable that takes a `QueueItem` and runs the
                 actual reorganize, returning a summary dict with
                 ``status``, ``source``, ``moved``, ``skipped``,
@@ -144,6 +168,8 @@ class ReorganizeQueue:
         self._cond = threading.Condition()
         self._items: List[QueueItem] = []        # everything ever submitted (active + recent)
         self._runner = runner
+        self._store = store
+        self._warned_no_runner = False
         self._worker: Optional[threading.Thread] = None
         self._stopped = False
 
@@ -155,6 +181,8 @@ class ReorganizeQueue:
         injected dependencies (post-process fn, db, etc.)."""
         with self._cond:
             self._runner = runner
+            # the worker parks when there is no runner; wake it now there is one
+            self._cond.notify_all()
 
     def enqueue(
         self,
@@ -198,6 +226,7 @@ class ReorganizeQueue:
                 rename_only=bool(rename_only),
             )
             self._items.append(item)
+            self._persist(item)
             position = sum(1 for i in self._items if i.status == 'queued')
             self._ensure_worker()
             self._cond.notify_all()
@@ -278,6 +307,7 @@ class ReorganizeQueue:
                 if item.status == 'queued':
                     item.status = 'cancelled'
                     item.finished_at = time.time()
+                    self._persist(item)
                     logger.info(f"[Queue] Cancelled queued item {queue_id} ('{item.album_title}')")
                     return {'cancelled': True}
                 if item.status == 'running':
@@ -296,6 +326,12 @@ class ReorganizeQueue:
                     item.status = 'cancelled'
                     item.finished_at = now
                     cancelled += 1
+            # one statement instead of N deletes - this can be thousands of rows
+            if cancelled and self._store is not None:
+                try:
+                    self._store.delete_queued()
+                except Exception as e:
+                    logger.error(f"[Queue] Could not clear the saved backlog: {e}")
         if cancelled:
             logger.info(f"[Queue] Bulk-cancelled {cancelled} queued items")
         return cancelled
@@ -338,6 +374,72 @@ class ReorganizeQueue:
 
     # -- internals ---------------------------------------------------
 
+    # -- durability --------------------------------------------------
+    #
+    # Every one of these swallows its own errors. Bookkeeping must never be
+    # able to break an actual reorganize: losing a row costs one album its
+    # resumability, which is a far smaller failure than the queue dying.
+
+    def _persist(self, item: QueueItem) -> None:
+        """Mirror one item to the store, or drop it once it is finished."""
+        if self._store is None:
+            return
+        try:
+            if item.status in ('queued', 'running'):
+                self._store.save(item.to_snapshot())
+            else:
+                self._store.delete(item.queue_id)
+        except Exception as e:
+            logger.error(f"[Queue] Could not persist {item.queue_id}: {e}")
+
+    def restore(self) -> int:
+        """Re-load the backlog left by a process that died. Returns the count.
+
+        Called once at startup, before the worker exists. Items already in
+        memory win, so calling this twice cannot duplicate work.
+        """
+        if self._store is None:
+            return 0
+        try:
+            pending = self._store.load_pending()
+        except Exception as e:
+            logger.error(f"[Queue] Could not read the saved backlog: {e}")
+            return 0
+        if not pending:
+            return 0
+        restored = 0
+        with self._cond:
+            known = {i.album_id for i in self._items if i.status in ('queued', 'running')}
+            for snap in pending:
+                if snap.get('album_id') in known:
+                    continue
+                try:
+                    item = QueueItem(
+                        queue_id=snap['queue_id'],
+                        album_id=snap['album_id'],
+                        album_title=snap.get('album_title') or '',
+                        artist_id=snap.get('artist_id'),
+                        artist_name=snap.get('artist_name') or '',
+                        source=snap.get('source'),
+                        enqueued_at=float(snap.get('enqueued_at') or time.time()),
+                        metadata_source=snap.get('metadata_source') or 'api',
+                        rename_only=bool(snap.get('rename_only')),
+                    )
+                except (KeyError, TypeError, ValueError):
+                    continue
+                self._items.append(item)
+                known.add(item.album_id)
+                restored += 1
+            if restored:
+                self._ensure_worker()
+                self._cond.notify_all()
+        if restored:
+            logger.warning(
+                f"[Queue] Restored {restored} album(s) left over from a previous "
+                f"run - the last process died before it finished them"
+            )
+        return restored
+
     def _ensure_worker(self) -> None:
         """Lazy worker start — only spawn the thread when there's
         actually something to process. Caller MUST hold ``_cond``."""
@@ -357,11 +459,30 @@ class ReorganizeQueue:
         cancel() call now sees status='running' and is rejected."""
         with self._cond:
             while not self._stopped:
-                for item in self._items:
-                    if item.status == 'queued':
-                        item.status = 'running'
-                        item.started_at = time.time()
-                        return item
+                # Never claim work before a runner exists. get_queue() restores
+                # the backlog and starts this thread, and web_server calls
+                # set_runner() straight after - so without this guard the worker
+                # can grab a restored album in that gap, find no runner, and mark
+                # it FAILED. That would destroy the very backlog restore just
+                # rescued. Wait instead; set_runner notifies.
+                if self._runner is not None:
+                    self._warned_no_runner = False
+                    for item in self._items:
+                        if item.status == 'queued':
+                            item.status = 'running'
+                            item.started_at = time.time()
+                            self._persist(item)
+                            return item
+                elif any(i.status == 'queued' for i in self._items) and not self._warned_no_runner:
+                    # Waiting is right, but it must not be silent: if the runner
+                    # is never wired the backlog would sit here forever with
+                    # nothing to say so. Once per park, not once per loop.
+                    self._warned_no_runner = True
+                    logger.warning(
+                        "[Queue] Albums are waiting but no runner is configured yet - "
+                        "holding them rather than failing them. If this persists, "
+                        "set_runner() was never called."
+                    )
                 # No queued items — wait for an enqueue or shutdown.
                 # 60s timeout so a stuck notify (shouldn't happen, but
                 # defensive) doesn't park the worker forever.
@@ -395,6 +516,7 @@ class ReorganizeQueue:
                     item.status = 'failed'
                     item.error = str(e)
                     item.finished_at = time.time()
+                    self._persist(item)
                 continue
 
             with self._cond:
@@ -415,6 +537,8 @@ class ReorganizeQueue:
                 item.current_track = None
                 item.progress_total = 0
                 item.progress_processed = 0
+                # terminal: drops the row, so the table only ever holds the backlog
+                self._persist(item)
 
             logger.info(
                 f"[Queue] Finished '{item.album_title}' — status={item.status}, "
@@ -450,11 +574,47 @@ _singleton: Optional[ReorganizeQueue] = None
 _singleton_lock = threading.Lock()
 
 
+class _DatabaseQueueStore:
+    """Durable backing store on the music database.
+
+    Thin on purpose: the four statements live on MusicDatabase next to every
+    other query, and this only adapts them to the shape the queue wants.
+    """
+
+    def __init__(self, get_db: Optional[Callable[[], Any]] = None):
+        self._get_db = get_db
+
+    def _db(self):
+        if self._get_db is not None:
+            return self._get_db()
+        from database.music_database import get_database
+        return get_database()
+
+    def save(self, snapshot: dict) -> None:
+        self._db().reorganize_queue_save(snapshot)
+
+    def delete(self, queue_id: str) -> None:
+        self._db().reorganize_queue_delete(queue_id)
+
+    def delete_queued(self) -> int:
+        return self._db().reorganize_queue_delete_queued()
+
+    def load_pending(self) -> List[dict]:
+        return self._db().reorganize_queue_load_pending()
+
+
 def get_queue() -> ReorganizeQueue:
     global _singleton
     with _singleton_lock:
         if _singleton is None:
-            _singleton = ReorganizeQueue()
+            # Production gets the durable store AND picks up whatever the last
+            # process died holding. restore() runs inside the lock so a second
+            # caller cannot see a half-restored queue.
+            _singleton = ReorganizeQueue(store=_DatabaseQueueStore())
+            try:
+                _singleton.restore()
+            except Exception as e:
+                logger.error(f"[Queue] Restore failed, starting empty: {e}")
         return _singleton
 
 

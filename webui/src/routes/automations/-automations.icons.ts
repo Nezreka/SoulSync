@@ -17,6 +17,7 @@ export const AUTOMATION_ICONS: Record<string, string> = {
   playlist_changed: '✏️',
   process_wishlist: '📋',
   scan_watchlist: '👁️',
+  scan_watchlist_podcasts: '🎙️',
   scan_library: '🔄',
   refresh_mirrored: '📂',
   sync_playlist: '🔁',

@@ -30,6 +30,7 @@ const FALLBACK_LABELS: Record<string, string> = {
   dashboard: 'Back to Dashboard',
   sync: 'Back to Sync',
   'active-downloads': 'Back to Downloads',
+  podcasts: 'Back to Podcasts',
 };
 
 function labels(): Record<string, string> {

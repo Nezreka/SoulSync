@@ -89,6 +89,54 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'scan_watchlist',
         'initial_delay': 300,  # 5 minutes after startup
     },
+    {
+        'name': 'Auto-Scan Podcasts',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 6, 'unit': 'hours'},
+        'action_type': 'scan_watchlist_podcasts',
+        'initial_delay': 180,  # 3 minutes after startup
+    },
+    # Audiobooks drain their wishlist through the engine like every other side.
+    # Hourly rather than the music wishlist's 30 minutes: each BOOK also carries
+    # its own multi-hour backoff, so a shorter interval would only re-walk rows
+    # that are not due yet. No owned_by — the podcast scan has none either, so
+    # audio-side automations sit on the same page as music.
+    {
+        'name': 'Auto-Process Audiobook Wishlist',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'audiobook_process_wishlist',
+        'initial_delay': 240,  # 4 minutes after startup, after the podcast scan
+    },
+    # Followed authors. Daily, because an audiobook is announced weeks ahead and
+    # published on a date — checking more often spends effort to learn nothing.
+    {
+        'name': 'Auto-Scan Audiobook Authors',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 24, 'unit': 'hours'},
+        'action_type': 'audiobook_scan_watchlist',
+        'initial_delay': 420,  # 7 minutes after startup
+    },
+    # Keeps the "you own this" record honest. Daily and cheap: it reads the
+    # audiobook folder and touches nothing on disk, so the only cost of being
+    # wrong is an Owned badge that outlives the book.
+    # Empties the audiobook recycle bin. The schedule is what matters: the
+    # opportunistic pass only fires when something else is deleted, so on a
+    # library nobody prunes the bin would never expire.
+    {
+        'name': 'Empty Audiobook Recycle Bin',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 24, 'unit': 'hours'},
+        'action_type': 'audiobook_purge_recycle',
+        'initial_delay': 780,  # 13 minutes after startup
+    },
+    {
+        'name': 'Auto-Scan Audiobook Library',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 24, 'unit': 'hours'},
+        'action_type': 'audiobook_scan_library',
+        'initial_delay': 600,  # 10 minutes after startup, last of the audio jobs
+    },
     # Event-based system automations (no initial_delay/next_run needed)
     {
         'name': 'Auto-Scan After Downloads',

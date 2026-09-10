@@ -371,7 +371,7 @@ _requerying: set = set()  # download ids with a requery thread in flight
 
 
 def _now():
-    return time.strftime("%Y-%m-%d %H:%M:%S")
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
 
 
 # ── auto-retry ────────────────────────────────────────────────────────────────
@@ -818,6 +818,12 @@ def _tick(db) -> None:
     # so a restart/crash mid-requery would otherwise strand it forever — _tick skips
     # 'searching'). _spawn_requery is a no-op if a thread is already running.
     for d in all_active:
+        if d.get("status") == "searching" and d.get("source") in ("torrent", "usenet"):
+            # Repair rows stranded by the old cross-transport retry path. Keep the
+            # original client reference and resume polling that exact transfer.
+            db.update_video_download(d["id"], status="downloading", error=None)
+            d["status"] = "downloading"
+            d["error"] = None
         if d.get("status") == "searching" and d.get("source") != "youtube" and d["id"] not in _requerying:
             logger.info("video download %s: re-adopting orphaned 'searching' row", d["id"])
             _spawn_requery(d["id"])
@@ -830,7 +836,8 @@ def _tick(db) -> None:
         return
     from core.settings import config_manager
     download_dir = str(config_manager.get("soulseek.download_path", "") or "")
-    transfers = list_downloads()
+    transfers = list_downloads() if any(d.get("source") not in ("torrent", "usenet")
+                                       for d in active) else []
     organizer = _make_organizer(db)
     pack_importer = _make_pack_importer(db, organizer)
     live_ids = set()
@@ -854,7 +861,10 @@ def _tick(db) -> None:
             _misses[dl["id"]] = n
             if n >= _GIVE_UP_AFTER:
                 _misses.pop(dl["id"], None)
-                _fail_or_retry(db, dl, "Soulseek transfer disappeared")
+                _fail_or_retry(db, dl,
+                               "Download client could not report this transfer; check the client connection and job"
+                               if dl.get("source") in ("torrent", "usenet")
+                               else "Soulseek transfer disappeared")
             continue
         _misses.pop(dl["id"], None)
         if upd.get("status") == "failed":

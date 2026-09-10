@@ -843,7 +843,7 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
             status = task.get('status', 'queued')
             live_identities.add(_download_identity(title, artist, album))
             # Determine download progress percentage
-            progress = 0
+            progress = float(task.get('progress', 0) or 0)
             live_info = None
             if status == 'completed':
                 progress = 100
@@ -857,7 +857,7 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                     lookup_key = deps.make_context_key(task_username, task_filename)
                     live_info = deps.get_cached_transfer_data().get(lookup_key)
                     if live_info:
-                        progress = live_info.get('percentComplete', 0)
+                        progress = live_info.get('percentComplete', progress)
 
             item = {
                 'task_id': task_id,
@@ -867,7 +867,7 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                 'artwork': artwork,
                 'status': status,
                 'progress': progress,
-                'error': task.get('error_message'),
+                'error': task.get('error_message') or task.get('error'),
                 'verification_status': task.get('verification_status'),
                 # library_history row id (set at import) so the Unverified review
                 # queue can act on a still-live completed task before it becomes
@@ -879,12 +879,12 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                 'retry_info': task.get('retry_info'),
                 'retry_trigger': task.get('retry_trigger'),
                 'batch_id': batch_id,
-                'batch_name': batch.get('playlist_name') or batch.get('album_name') or '',
-                'batch_source': batch.get('source_page') or batch.get('initiated_from') or '',
+                'batch_name': batch.get('playlist_name') or batch.get('album_name') or task.get('batch_name') or '',
+                'batch_source': batch.get('source_page') or batch.get('initiated_from') or task.get('batch_source') or '',
                 # playlist_id is needed by per-row cancel (cancel_task_v2
                 # takes playlist_id + track_index). Surfacing it here so
                 # the frontend doesn't need a second lookup.
-                'playlist_id': batch.get('playlist_id', ''),
+                'playlist_id': batch.get('playlist_id', '') or task.get('playlist_id', ''),
                 'track_index': task.get('track_index', 0),
                 # the display ordinal - position within the batch queue, or
                 # None when the task somehow isn't in its batch's queue
@@ -896,7 +896,7 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                 # Where it came from, for LIVE rows too (#1156): the label used
                 # to appear only once the row aged into persistent history, so
                 # a just-completed download never said "YouTube"/"Tidal".
-                'download_source': resolve_source_label(task.get('username')),
+                'download_source': task.get('download_source') or resolve_source_label(task.get('username')),
             }
             _attach_live_detail(item, task, live_info)
             items.append(item)

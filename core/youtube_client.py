@@ -41,6 +41,9 @@ from core.quality.selection import quality_meets_profile
 logger = get_logger("youtube_client")
 
 
+_COOKIE_PROBLEM_LOGGED = False
+
+
 def _resolve_cookie_opts() -> dict:
     """yt-dlp cookie options from Settings → YouTube: either a browser store OR a
     pasted cookies.txt. The 'Paste cookies.txt' dropdown value is the sentinel
@@ -49,9 +52,17 @@ def _resolve_cookie_opts() -> dict:
     custom'). Delegates to the shared, tested precedence in core.youtube_cookies."""
     from core.settings import config_manager
     from core.youtube_cookies import build_youtube_cookie_opts
+    from core.youtube_cookies import cookie_setup_problem
     mode = config_manager.get('youtube.cookies_browser', '')
     cookiefile = config_manager.get('youtube.cookies_file', '')
     exists = bool(cookiefile) and os.path.exists(cookiefile)
+    # Said once per process, not per request: a missing cookie file turns every
+    # YouTube call anonymous, and until now the only symptom was a bot gate.
+    global _COOKIE_PROBLEM_LOGGED
+    problem = cookie_setup_problem(mode, cookiefile, cookiefile_exists=exists)
+    if problem and not _COOKIE_PROBLEM_LOGGED:
+        _COOKIE_PROBLEM_LOGGED = True
+        logger.warning("YouTube cookies are configured but unusable: %s", problem)
     return build_youtube_cookie_opts(mode, cookiefile, cookiefile_exists=exists)
 
 
@@ -549,6 +560,23 @@ def _warn_if_no_js_runtime():
             "Install Deno (https://docs.deno.com/runtime/) and restart SoulSync. "
             "Windows: winget install DenoLand.Deno"
         )
+        # Cookies make this WORSE, which is the opposite of what the settings
+        # page implies. Signed-in requests need a PO token, solving one needs
+        # the runtime that is missing, and a signed-out request often does not
+        # need one at all — so on a box with no Deno, adding cookies to fix a
+        # bot gate turns working downloads into 403s. Said here because this is
+        # the one place that already knows the runtime is absent.
+        try:
+            if _resolve_cookie_opts():
+                logger.warning(
+                    "YouTube cookies are configured AND there is no JavaScript "
+                    "runtime. That combination is worse than no cookies: signed-in "
+                    "requests need a PO token, solving one needs Deno, and "
+                    "signed-out requests usually do not need one. Install Deno, or "
+                    "set Settings -> Sources -> YouTube cookies back to None."
+                )
+        except Exception as _cfg_err:   # noqa: BLE001 - a startup warning must never raise
+            logger.debug("cookie check during JS-runtime warning failed: %s", _cfg_err)
 
 
 class YouTubeClient(DownloadSourcePlugin):
@@ -806,14 +834,29 @@ class YouTubeClient(DownloadSourcePlugin):
         happened is YouTube refusing us. The classifier is the same one the video
         side uses, so both halves of the app name the same failure the same way."""
         from core.youtube_errors import classify, human_reason
-        reason = human_reason(error)
+        # Whether cookies are configured changes what the advice should be, and
+        # it is the difference between telling somebody to update yt-dlp and
+        # telling them their export has gone stale (#1233).
+        try:
+            has_cookies = bool(_resolve_cookie_opts())
+        except Exception:      # noqa: BLE001 - never let the reporter be the thing that raises
+            has_cookies = None
+        reason = human_reason(error, has_cookies=has_cookies)
         kind = classify(error)
         self.last_error_reason = reason
         self.last_error_kind = kind
+        # Kept even when we have a nice sentence: when we do NOT, telling the
+        # user to go and read app.log for something we are holding in a variable
+        # is a poor trade for one line of screen space.
+        self.last_error_raw = str(error or "").strip()
         if reason:
             logger.warning("YouTube %s failed (%s): %s", what, kind, reason)
         else:
             logger.error("YouTube %s failed: %s", what, error)
+
+    def last_failure_raw(self) -> Optional[str]:
+        """The unclassified error text, for when we have nothing better."""
+        return getattr(self, 'last_error_raw', None)
 
     def last_failure_reason(self) -> Optional[str]:
         """The last classified failure, for status/UI copy. None when the last
@@ -1802,10 +1845,22 @@ class YouTubeClient(DownloadSourcePlugin):
                                 'youtube': {'player_client': ['web_creator']},
                             }
                     elif attempt >= 2:
-                        download_opts['format'] = 'best'
                         if extra:
+                            # This attempt used to drop the cookies AND switch
+                            # the format to 'best' in the same breath. Changing
+                            # two things at once means a fallback cannot tell you
+                            # which one mattered, and here the second undid the
+                            # first: measured on one video with one yt-dlp,
+                            # no-cookies + the original selector downloaded and
+                            # no-cookies + 'best' failed on format.
+                            #
+                            # Dropping cookies helps when signed-in requests
+                            # cannot get a PO token, which needs a JS runtime
+                            # (see _warn_if_no_js_runtime). With Deno present
+                            # cookies are usually fine — so this is a fallback
+                            # worth trying, not a cure.
                             logger.info(
-                                "Retry %s/%s with 'best' format (dropping cookies)",
+                                "Retry %s/%s without cookies, relaxed format",
                                 attempt + 1, max_retries,
                             )
                             download_opts.pop('cookiefile', None)
@@ -1813,9 +1868,17 @@ class YouTubeClient(DownloadSourcePlugin):
                             download_opts.pop('extractor_args', None)
                         else:
                             logger.info(
-                                "Retry %s/%s with 'best' format",
+                                "Retry %s/%s with a relaxed format",
                                 attempt + 1, max_retries,
                             )
+                        # 'best' meant "take anything" when muxed streams were
+                        # normal. YouTube has all but stopped serving them, so
+                        # on a modern extract it is the NARROWEST selector there
+                        # is and fails with "Requested format is not available"
+                        # — measured on a real video with a current yt-dlp,
+                        # where 'best' failed and 'bestaudio/best' downloaded.
+                        # Same last-ditch intent, a selector that still matches.
+                        download_opts['format'] = 'bestaudio/best'
 
 
                     # Perform download. Ranking already probed itags; fetch

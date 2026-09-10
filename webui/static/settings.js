@@ -423,6 +423,17 @@ function initializeSettings() {
         settingsPage.querySelectorAll('input[type="text"], input[type="url"], input[type="password"], input[type="number"], input[type="range"]').forEach(input => {
             input.addEventListener('input', debouncedAutoSaveSettings);
         });
+        // Textareas were in NEITHER list, so nothing on the page auto-saved
+        // them. Paste a cookies.txt, click Test, and the test ran against the
+        // config as it was before the paste — the value only reached the server
+        // if something else happened to trigger a save. 'input' rather than
+        // 'change' because 'change' on a textarea waits for blur, and pasting
+        // then clicking a button inside the same panel never blurs it.
+        // The Hydrabase payload boxes are a dev console, not settings, and must
+        // not fire a full settings save on every keystroke.
+        settingsPage.querySelectorAll('textarea:not(.hydra-payload)').forEach(input => {
+            input.addEventListener('input', debouncedAutoSaveSettings);
+        });
         settingsPage.querySelectorAll('input[type="checkbox"], select').forEach(input => {
             input.addEventListener('change', debouncedAutoSaveSettings);
         });
@@ -486,13 +497,17 @@ function resetFileOrganizationTemplates() {
         album: '$albumartist/$albumartist - $album/$track - $title',
         single: '$artist/$artist - $title/$title',
         playlist: '$playlist/$artist - $title',
-        video: '$artist/$title-video'
+        video: '$artist/$title-video',
+        podcast: '$show/Season $season/$title',
+        audiobook: '$author/$series/$seriespos - $title'
     };
 
     document.getElementById('template-album-path').value = defaults.album;
     document.getElementById('template-single-path').value = defaults.single;
     document.getElementById('template-playlist-path').value = defaults.playlist;
     document.getElementById('template-video-path').value = defaults.video;
+    document.getElementById('template-podcast-path').value = defaults.podcast;
+    document.getElementById('template-audiobook-path').value = defaults.audiobook;
 
     debouncedAutoSaveSettings();
 }
@@ -505,13 +520,16 @@ function validateFileOrganizationTemplates() {
         album: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$track', '$disc', '$discnum', '$cdnum', '$year', '$quality'],
         single: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$track', '$year', '$quality'],
         playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality'],
-        video: ['$artist', '$artistletter', '$title', '$year']
+        video: ['$artist', '$artistletter', '$title', '$year'],
+        podcast: ['$show', '$podcast', '$author', '$artist', '$title', '$season', '$seasonnum', '$episode', '$episodenum', '$year', '$date', '$type'],
+        audiobook: ['$author', '$authorletter', '$narrator', '$title', '$series', '$seriespos', '$year', '$asin']
     };
 
     // Get template values
     const albumPath = document.getElementById('template-album-path').value.trim();
     const singlePath = document.getElementById('template-single-path').value.trim();
     const playlistPath = document.getElementById('template-playlist-path').value.trim();
+    const podcastPath = document.getElementById('template-podcast-path').value.trim();
 
     // Validate album template
     if (albumPath) {
@@ -599,8 +617,416 @@ function validateFileOrganizationTemplates() {
         });
     }
 
+    // Validate podcast template
+    if (podcastPath) {
+        if (podcastPath.endsWith('/')) {
+            errors.push('Podcast template cannot end with /');
+        }
+        if (podcastPath.startsWith('/')) {
+            errors.push('Podcast template cannot start with /');
+        }
+        if (podcastPath.includes('//')) {
+            errors.push('Podcast template cannot have consecutive slashes //');
+        }
+        const podcastVarPattern = /\$\{([a-zA-Z]+)\}|\$([a-zA-Z]+)/g;
+        const foundVars = podcastPath.match(podcastVarPattern) || [];
+        foundVars.forEach(v => {
+            const normalized = v.startsWith('${') ? '$' + v.slice(2, -1) : v;
+            const lowerVar = normalized.toLowerCase();
+            const isValid = validVars.podcast.some(validVar => validVar.toLowerCase() === lowerVar);
+            if (!isValid) {
+                errors.push(`Invalid variable "${normalized}" in podcast template. Valid: ${validVars.podcast.join(', ')}`);
+            } else if (normalized !== lowerVar && validVars.podcast.includes(lowerVar)) {
+                errors.push(`Variable "${normalized}" should be lowercase: "${lowerVar}"`);
+            }
+        });
+    }
+
     return errors;
 }
+
+// ── Connections: services as tiles ─────────────────────────────────────────
+//
+// 22 services lived in two "API Configuration" groups as nested accordions, so
+// finding out whether Last.fm was even configured meant scrolling a wall of
+// chevrons and opening them one at a time. The tiles answer that without
+// opening anything, and the media tabs stop the music side and the video side
+// being one undifferentiated list.
+//
+// The forms themselves are NOT rebuilt. A tile opens the real panel in a modal
+// by MOVING the node - never cloning it - so every id stays unique and all the
+// existing save/load/test code keeps working with no idea this happened. Same
+// contract the Sources tab runs on, and the reason it is worth restating: a
+// clone would duplicate ~200 field ids, and on this page a duplicated id is how
+// a save writes the wrong value into a real credential.
+//
+// Where a panel goes home is remembered as (parent, nextSibling) rather than a
+// shared holding container. It restores to the exact slot it came from, so the
+// accordion groups below keep their order even after a service has been opened.
+const SERVICE_KINDS = {
+    music: { label: 'Music', attr: 'data-service' },
+    video: { label: 'Video', attr: 'data-video-service' },
+};
+
+// Real brand art wherever the repo already has it. A service with no logo gets
+// a monogram on its own colour rather than a grey blob - the point of the grid
+// is to be recognisable at a glance, and a row of identical blobs is a list you
+// have to read anyway.
+const SERVICE_LOGOS = {
+    spotify: '/static/img/brands/spotify.png',
+    itunes: '/static/img/brands/itunes.png',
+    deezer: '/static/img/brands/deezer.png',
+    discogs: '/static/img/brands/discogs.svg',
+    tidal: '/static/img/brands/tidal.svg',
+    qobuz: '/static/img/brands/qobuz.svg',
+    lastfm: '/static/img/brands/lastfm.png',
+    genius: '/static/img/brands/genius.png',
+    musicbrainz: '/static/img/brands/musicbrainz.png',
+    listenbrainz: '/static/img/brands/listenbrainz.png',
+    tmdb: '/static/img/brands/tmdb.svg',
+    tvdb: '/static/img/brands/tvdb.svg',
+    ytextras: '/static/img/brands/youtube.svg',
+};
+
+// Marks that are dark artwork and vanish on a dark tile, same list the download
+// chain keeps for the same reason.
+const INVERT_SERVICE_MARKS = new Set(['tidal', 'qobuz', 'discogs', 'tvdb']);
+
+// Services with no brand art in the repo. Rather than invent icons, these reuse
+// the glyphs the VIDEO DASHBOARD already shows for the same sources - so OMDb is
+// the same star in both places and the app keeps ONE vocabulary. A service with
+// neither a logo nor an established glyph falls back to its monogram; inventing
+// one here would be the start of a second, competing icon set.
+const SERVICE_GLYPHS = {
+    omdb: '\u2605',             // star - ratings, as on the dashboard
+    fanart: '\u{1F3A8}',        // palette - artwork
+    opensubtitles: '\u{1F4AC}', // speech bubble - subtitles
+    trakt: '\u2605',            // star - audience rating
+    nokey: '\u{1F4FA}',         // tv - community data (TVmaze)
+};
+
+// Follow the side you are standing on, exactly like the download chain does.
+// Defaulting to music meant a video user landed on a grid of Spotify and Tidal
+// tiles with their own TMDB key nowhere in sight.
+let _svcKind = 'music';
+let _svcKindChosen = false;
+
+function _svcSyncKindToSide() {
+    if (_svcKindChosen) return;
+    _svcKind = document.body.getAttribute('data-side') === 'video' ? 'video' : 'music';
+}
+let _svcOpen = null;          // { id, parent, next } for the panel currently lifted
+
+function _svcFrames(kind) {
+    const attr = SERVICE_KINDS[kind]?.attr;
+    if (!attr) return [];
+    // Scoped to the CONNECTIONS tab. Unscoped this also picked up "Detail Pages",
+    // a video-preferences panel that lives on the Library tab and is not a
+    // service at all - it appeared in the grid as a connection you could
+    // configure, which it is not.
+    return Array.from(document.querySelectorAll(`#settings-page .api-service-frame[${attr}]`))
+        .filter(f => f.closest('[data-stg="connections"]'));
+}
+
+function _svcMeta(frame) {
+    const title = frame.querySelector('.service-title')?.textContent?.trim() || '';
+    const id = frame.getAttribute('data-service') || frame.getAttribute('data-video-service') || '';
+    const logo = SERVICE_LOGOS[id]
+        || frame.querySelector('.video-svc-logo')?.getAttribute('src')
+        || null;
+    const dot = frame.querySelector('.stg-service-dot');
+    const colour = dot?.style?.color || '';
+    const required = !!frame.querySelector('.stg-req-pill');
+    // "Deezer (Favorites & Playlists)" is a name plus an explanation; the tile
+    // shows the name and the modal shows the rest.
+    const paren = title.indexOf('(');
+    const name = (paren > 0 ? title.slice(0, paren) : title).trim();
+    return {
+        id, name,
+        detail: paren > 0 ? title.slice(paren + 1).replace(/\)\s*$/, '').trim() : '',
+        logo, colour, required,
+        inverted: INVERT_SERVICE_MARKS.has(id),
+        glyph: SERVICE_GLYPHS[id] || null,
+        monogram: (name.replace(/[^A-Za-z0-9]/g, '')[0] || '?').toUpperCase(),
+    };
+}
+
+// A service counts as configured when it holds a non-empty credential. Read
+// from the live inputs, never from a cached settings object - the same rule the
+// library summaries follow, and for the same reason.
+function _svcConfigured(frame) {
+    const fields = frame.querySelectorAll('input[type="text"], input[type="password"], input[type="email"]');
+    if (fields.length) {
+        for (const f of fields) {
+            if (String(f.value || '').trim()) return true;
+        }
+        return false;
+    }
+    // keyless services (Community Data, YouTube Extras) are on/off instead
+    const toggles = frame.querySelectorAll('input[type="checkbox"]');
+    for (const t of toggles) {
+        if (t.checked) return true;
+    }
+    return null;          // nothing to judge by - say nothing rather than "off"
+}
+
+function buildServiceTiles() {
+    _svcSyncKindToSide();
+    const grid = document.getElementById('service-tile-grid');
+    const tabs = document.getElementById('svc-tabs');
+    if (!grid || !tabs) return;
+
+    tabs.innerHTML = Object.entries(SERVICE_KINDS).map(([k, spec]) =>
+        `<button type="button" role="tab" class="dlchain-tab${k === _svcKind ? ' active' : ''}" `
+        + `onclick="switchServiceKind('${k}')">${spec.label}</button>`).join('');
+
+    // the tab owns the whole tab, not just the grid: the matching side's server
+    // section comes with it, so what is on screen agrees with what the tab says
+    document.querySelectorAll('#settings-page .settings-group[data-svc-side]').forEach(g => {
+        g.classList.toggle('svc-side-active', g.getAttribute('data-svc-side') === _svcKind);
+    });
+
+    const frames = _svcFrames(_svcKind);
+    if (!frames.length) {
+        grid.innerHTML = '<div class="dlchain-empty">No services on this side yet.</div>';
+        return;
+    }
+    const attr = SERVICE_KINDS[_svcKind].attr;
+    grid.innerHTML = '<div class="svc-tile-row">' + frames.map(frame => {
+        const id = frame.getAttribute(attr);
+        const m = _svcMeta(frame);
+        const set = _svcConfigured(frame);
+        const state = set === null ? 'na' : (set ? 'ok' : 'warn');
+        // real artwork first, then the app's own glyph for that source, then a
+        // monogram. each step is a real fallback, not a placeholder.
+        const fallback = m.glyph
+            ? `<span class="svc-glyph">${m.glyph}</span>`
+            : `<span class="svc-monogram">${escapeHtml(m.monogram)}</span>`;
+        const art = m.logo
+            ? `<img class="svc-mark${m.inverted ? ' is-inverted' : ''}" src="${escapeHtml(m.logo)}" alt="" `
+              + `onerror="this.replaceWith(document.createRange().createContextualFragment(this.dataset.fb))" `
+              + `data-fb="${escapeHtml(fallback)}">`
+            : fallback;
+        const chip = m.required && !set
+            ? '<span class="src-tile-chip src-tile-chip--warn">required</span>'
+            : (set === null ? '<span class="src-tile-chip">no key needed</span>'
+               : set ? '<span class="src-tile-chip src-tile-chip--on">configured</span>'
+                     : '<span class="src-tile-chip">not set up</span>');
+        const brand = (m.colour || '').replace('#', '');
+        return `<button type="button" class="svc-tile${set ? ' is-active' : ''}" `
+             + `data-service-tile="${escapeHtml(id)}" onclick="openServiceModal('${escapeHtml(id)}')" `
+             + `style="--svc-brand: ${escapeHtml(m.colour || '#8a8a8a')}" `
+             + `title="Configure ${escapeHtml(m.name)}">`
+             + `<span class="src-tile-dot hss-${state}"></span>`
+             + `<span class="svc-tile-art">${art}</span>`
+             + `<span class="svc-tile-name">${escapeHtml(m.name)}</span>`
+             + chip + '</button>';
+    }).join('') + '</div>';
+}
+window.buildServiceTiles = buildServiceTiles;
+
+function switchServiceKind(kind) {
+    if (!SERVICE_KINDS[kind]) return;
+    _svcKindChosen = true;      // an explicit pick outranks the side default
+    _svcKind = kind;
+    buildServiceTiles();
+}
+window.switchServiceKind = switchServiceKind;
+
+function openServiceModal(id) {
+    const attr = SERVICE_KINDS[_svcKind].attr;
+    const frame = document.querySelector(`#settings-page .api-service-frame[${attr}="${CSS.escape(id)}"]`);
+    const overlay = document.getElementById('service-config-modal');
+    const body = document.getElementById('svc-modal-body');
+    if (!frame || !overlay || !body) return;
+    if (_svcOpen) closeServiceModal();          // never lift two panels at once
+
+    const m = _svcMeta(frame);
+    document.getElementById('svc-modal-title').textContent = m.name;
+    document.getElementById('svc-modal-sub').textContent = m.detail;
+    document.getElementById('svc-modal-icon').innerHTML = m.logo
+        ? `<img class="svc-mark${m.inverted ? ' is-inverted' : ''}" src="${escapeHtml(m.logo)}" alt="">`
+        : (m.glyph ? `<span class="svc-glyph">${m.glyph}</span>`
+                   : `<span class="svc-monogram">${escapeHtml(m.monogram)}</span>`);
+
+    // remember the exact slot so it goes back where it came from
+    _svcOpen = { id, attr, parent: frame.parentNode, next: frame.nextSibling };
+    body.appendChild(frame);
+    // the accordion inside is collapsed by default; in a modal it IS the content
+    frame.querySelector('.stg-service-body')?.style.setProperty('display', 'block');
+    overlay.hidden = false;
+    document.body.classList.add('src-modal-open');
+}
+window.openServiceModal = openServiceModal;
+
+function closeServiceModal() {
+    const overlay = document.getElementById('service-config-modal');
+    if (!overlay) return;
+    // home BEFORE hiding, so the panel's ids never sit inside a hidden modal
+    if (_svcOpen) {
+        const frame = document.querySelector(
+            `#settings-page .api-service-frame[${_svcOpen.attr}="${CSS.escape(_svcOpen.id)}"]`);
+        if (frame && _svcOpen.parent) {
+            frame.querySelector('.stg-service-body')?.style.removeProperty('display');
+            _svcOpen.parent.insertBefore(frame, _svcOpen.next);
+        }
+    }
+    _svcOpen = null;
+    overlay.hidden = true;
+    document.body.classList.remove('src-modal-open');
+    // an api key typed seconds before closing would otherwise sit on the 2s
+    // autosave timer with the modal gone and nothing on screen saying so
+    if (typeof settingsAutoSaveTimer !== 'undefined' && settingsAutoSaveTimer) {
+        clearTimeout(settingsAutoSaveTimer);
+        settingsAutoSaveTimer = null;
+        saveSettings(true);
+    }
+    buildServiceTiles();
+}
+window.closeServiceModal = closeServiceModal;
+
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const overlay = document.getElementById('service-config-modal');
+    if (overlay && !overlay.hidden) closeServiceModal();
+});
+
+// ── Library tab: what each section currently SAYS ──────────────────────────
+//
+// Ten collapsed cards whose hints all read like table-of-contents entries
+// ("Metadata, tags, conversion, lyrics") tell you what is inside a section but
+// nothing about your install. You had to open all ten to learn anything, which
+// is the same problem the Sources tab had before its tiles started showing
+// state - and showing state is what made that page work.
+//
+// So each header reports its own current value instead. The card still says
+// what it is; the hint now says what it is SET TO.
+//
+// Rules that keep this honest:
+//   * only report what is actually on the page. a field that has not rendered
+//     yet reports nothing rather than "off" - claiming a setting is disabled
+//     when you simply cannot see it is worse than staying quiet.
+//   * derive from the live controls, never from a second copy of the state.
+//     a summary that can disagree with the field below it is a bug generator.
+const LIBRARY_SUMMARIES = {
+    'library-paths': () => {
+        const named = ['download-path', 'transfer-path', 'podcasts-path', 'audiobooks-path']
+            .map(id => document.getElementById(id))
+            .filter(el => el && String(el.value || '').trim());
+        if (!named.length) return 'no folders set yet';
+        const tail = String(named[0].value).replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+        return named.length === 1 ? tail : `${tail} +${named.length - 1} more`;
+    },
+    'library-music-org': () => {
+        const on = document.getElementById('file-organization-enabled');
+        if (!on) return '';
+        if (!on.checked) return 'organizing off';
+        const tpl = (document.getElementById('template-album-path')?.value || '').trim();
+        // the template itself is the most useful thing to show - it is what the
+        // user is actually deciding here - but it is long, so show its shape
+        return tpl ? tpl.split('/').slice(-2).join('/') : 'organizing on';
+    },
+    'library-video-folders': () => {
+        const set = ['video-movies-path', 'video-tv-path', 'video-youtube-path']
+            .filter(id => (document.getElementById(id)?.value || '').trim()).length;
+        return set ? `${set} of 3 libraries set` : 'no libraries set yet';
+    },
+    'library-post-processing': () => {
+        const on = (id) => document.getElementById(id)?.checked;
+        const bits = [];
+        if (on('metadata-enabled')) bits.push('tagging');
+        if (on('embed-album-art')) bits.push('artwork');
+        return bits.length ? bits.join(' · ') : 'nothing enabled';
+    },
+    'library-filtering': () => {
+        const explicit = document.getElementById('allow-explicit');
+        const genre = document.getElementById('genre-whitelist-enabled');
+        const bits = [];
+        if (explicit) bits.push(explicit.checked ? 'explicit allowed' : 'explicit blocked');
+        if (genre?.checked) bits.push('genre whitelist on');
+        return bits.join(' · ');
+    },
+    'library-playlists': () => {
+        const bits = [];
+        if (document.getElementById('m3u-export-enabled')?.checked) bits.push('M3U export');
+        if (document.getElementById('library-m3u-enabled')?.checked) bits.push('library M3U');
+        return bits.length ? bits.join(' · ') : 'off';
+    },
+    'library-stats': () => {
+        const el = document.getElementById('listening-stats-enabled');
+        if (!el) return '';
+        return el.checked ? 'collecting play history' : 'off';
+    },
+    'library-discovery': () => {
+        const v = document.getElementById('discover-adventurousness')?.value;
+        if (v === undefined || v === null || v === '') return '';
+        const n = Number(v);
+        return n <= 25 ? 'plays it safe' : n <= 60 ? 'balanced' : 'adventurous';
+    },
+    'library-video-prefs': () => {
+        const region = document.getElementById('video-watch-region');
+        const label = region?.selectedOptions?.[0]?.textContent?.trim();
+        return label ? `where to watch: ${label}` : '';
+    },
+};
+
+function refreshLibrarySummaries() {
+    for (const [key, compute] of Object.entries(LIBRARY_SUMMARIES)) {
+        const slot = document.querySelector(`[data-stg-summary="${key}"]`);
+        if (!slot) continue;
+        let text = '';
+        try { text = compute() || ''; } catch (e) { text = ''; }
+        // an empty summary falls back to the static description rather than
+        // leaving a blank gap where a hint used to be
+        if (text) {
+            slot.textContent = text;
+            slot.classList.add('is-live');
+        } else {
+            slot.textContent = slot.dataset.stgFallback || '';
+            slot.classList.remove('is-live');
+        }
+    }
+}
+window.refreshLibrarySummaries = refreshLibrarySummaries;
+
+// recompute whenever anything on the page changes, not on a timer
+document.addEventListener('change', (e) => {
+    if (e.target.closest?.('#settings-page')) refreshLibrarySummaries();
+});
+document.addEventListener('input', (e) => {
+    if (e.target.closest?.('#settings-page [data-stg="library"]')) refreshLibrarySummaries();
+});
+
+// ── Collapsible section headers: keyboard + screen reader ──────────────────
+//
+// The 31 section toggles are <div onclick>. That works for a mouse and for
+// nothing else: Tab skipped every one of them, Enter and Space did nothing, and
+// the :focus-visible styling written for them could never fire. They carry
+// role="button" and tabindex="0" now, and this supplies the half a real button
+// would have given for free.
+//
+// Delegated rather than 31 listeners: the markup is static, but a delegated
+// handler cannot go stale if a section is ever rendered late.
+//
+// aria-expanded is kept in sync here too. Setting it once in the markup and
+// never updating it is worse than omitting it - a screen reader would announce
+// "collapsed" for a section the user just opened.
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+    const header = e.target.closest?.('#settings-page .settings-section-header[role="button"]');
+    if (!header) return;
+    e.preventDefault();          // Space would scroll the page
+    header.click();              // reuse the inline toggle - one behaviour, not two
+});
+
+document.addEventListener('click', (e) => {
+    const header = e.target.closest?.('#settings-page .settings-section-header[role="button"]');
+    if (!header) return;
+    // after the inline handler has run, so it reports the state we ended in
+    requestAnimationFrame(() => {
+        header.setAttribute('aria-expanded', header.classList.contains('collapsed') ? 'false' : 'true');
+    });
+});
 
 // Settings redesign — tab switching + service accordions
 function switchSettingsTab(tab) {
@@ -627,7 +1053,12 @@ function switchSettingsTab(tab) {
     if (tab === 'advanced' && typeof loadDbMaintenanceInfo === 'function') {
         try { loadDbMaintenanceInfo(); } catch (e) { }
     }
-    if (tab === 'advanced' && typeof loadYtdlpStatus === 'function') {
+    // The yt-dlp tile moved to the YouTube panel on the SOURCES tab - "it belongs
+    // where somebody debugging YouTube will actually look" - but this trigger
+    // stayed behind on Advanced. So the card sat on "Loading..." forever unless
+    // you happened to visit Advanced first, which is not a thing anyone does to
+    // read a version number. Load it wherever it now lives.
+    if ((tab === 'advanced' || tab === 'sources') && typeof loadYtdlpStatus === 'function') {
         try { loadYtdlpStatus(); } catch (e) { }
     }
     if (tab === 'advanced' && typeof loadImageCacheStatus === 'function') {
@@ -637,6 +1068,17 @@ function switchSettingsTab(tab) {
     // dots reflect real connection state without a manual "Test all sources".
     if (tab === 'downloads' && typeof autoTestSourcesOnce === 'function') {
         autoTestSourcesOnce();
+    }
+    // The video chain lives in video.db and can change from the video side, so
+    // re-read on arrival rather than trusting what was rendered earlier.
+    if (tab === 'downloads') {
+        try { _dlchainLoad(); } catch (e) { /* widget is not on every page */ }
+    }
+    // Sources: the cards carry live status, so refresh them on arrival and let
+    // the same one-shot probe fill the dots in.
+    if (tab === 'sources') {
+        try { buildSourceTiles(); } catch (e) { /* tiles are cosmetic */ }
+        if (typeof autoTestSourcesOnce === 'function') autoTestSourcesOnce();
     }
     // Initialize live log viewer when switching to Logs tab
     if (tab === 'logs') {
@@ -861,7 +1303,490 @@ function toggleAllServiceAccordions(btn) {
     }
 }
 
+
+// ══ Download chains ═════════════════════════════════════════════════════════
+// Music, video and audiobooks each store the same thing — a mode plus an
+// ordered list of sources — and each had its own editor: music a drag list with
+// status dots, audiobooks arrow buttons and toggles, video a third one inside a
+// pop-up on its own side. Same concept, three looks, three behaviours.
+//
+// One widget now, three adapters. The adapters are the only part that differs:
+// where the chain is read from and where it goes back to. Music and audiobooks
+// ride the page's existing settings save; video has its own endpoint because
+// its settings live in video.db, not app_config.
+//
+// A chain of one IS single-source mode. There is no separate switch, because
+// "mode" and "the list" were never independent — a user picking one source and
+// a user dragging one source into the chain mean the same thing.
+const DLCHAIN_KINDS = {
+    music: {
+        label: 'Music',
+        help: 'Downloads try each source in order, top first. One source means single-source mode; two or more is hybrid.',
+        sources: () => HYBRID_SOURCES.map(s => s.id),
+        meta: (id) => HYBRID_SOURCES.find(s => s.id === id) || { id, name: id, emoji: '🎵', icon: null },
+        read: () => ({ order: getHybridOrder() }),
+        write: (order) => {
+            // Feed the SAME module state the old list owned, so saveSettings and
+            // the Sources tiles keep working with no knowledge of this widget.
+            _hybridSourceOrder = order.slice();
+            HYBRID_SOURCES.forEach(s => { _hybridSourceEnabled[s.id] = order.includes(s.id); });
+            _hybridVisualOrder = null;
+            try { _syncHybridHiddenSelects(); } catch (e) { /* legacy selects */ }
+            const modeSel = document.getElementById('download-source-mode');
+            if (modeSel) modeSel.value = order.length > 1 ? 'hybrid' : (order[0] || 'soulseek');
+            try { buildHybridSourceList(); } catch (e) { /* keeps the tiles fresh */ }
+            debouncedAutoSaveSettings();
+        },
+    },
+    video: {
+        label: 'Video',
+        help: 'Video downloads try each source in order, top first. These settings are the video side\'s own and save immediately.',
+        sources: () => ['soulseek', 'torrent', 'usenet', 'extto'],
+        meta: (id) => ({
+            soulseek: { name: 'Soulseek', emoji: '🎵', icon: '/static/img/brands/slskd.png' },
+            torrent: { name: 'Torrent', emoji: '🧲', icon: null },
+            usenet: { name: 'Usenet', emoji: '📰', icon: null },
+            extto: { name: 'External', emoji: '🔗', icon: null },
+        }[id] || { name: id, emoji: '🎬', icon: null }),
+        read: async () => {
+            const r = await _ssJson('/api/video/downloads/config');
+            const cfg = r || {};
+            const order = (cfg.download_mode === 'hybrid' && Array.isArray(cfg.hybrid_order) && cfg.hybrid_order.length)
+                ? cfg.hybrid_order
+                : (cfg.download_mode ? [cfg.download_mode] : ['soulseek']);
+            return { order };
+        },
+        // Video has no page-wide save button, so it commits on change.
+        write: async (order) => {
+            const patch = order.length > 1
+                ? { download_mode: 'hybrid', hybrid_order: order }
+                : { download_mode: order[0] || 'soulseek', hybrid_order: order };
+            await _ssJson('/api/video/downloads/config', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(patch),
+            });
+        },
+    },
+    audiobooks: {
+        label: 'Audiobooks',
+        // A book is fetched as one whole folder, so the order decides who gets
+        // ASKED — the ranking still decides who wins.
+        help: 'Audiobooks are fetched as a whole folder, so the order decides which source is asked first, not which release wins.',
+        sources: () => AUDIOBOOK_SOURCES.slice(),
+        meta: (id) => ({ name: AUDIOBOOK_SOURCE_LABEL[id] || id, emoji: AUDIOBOOK_SOURCE_EMOJI[id] || '📚', icon: null }),
+        read: () => ({ order: _audiobookHybrid.slice() }),
+        write: (order) => {
+            _audiobookHybrid = order.slice();
+            const modeSel = document.getElementById('audiobook-download-mode');
+            if (modeSel) modeSel.value = order.length > 1 ? 'hybrid' : (order[0] || 'torrent');
+            try { renderAudiobookHybrid(); } catch (e) { /* legacy rows */ }
+            debouncedAutoSaveSettings();
+        },
+    },
+};
+
+let _dlchainKind = 'music';
+// The widget is deliberately shared: the Sources and Downloads tabs render on
+// the video side too. But the kind above is a music default, so a video user
+// opening Downloads landed on the MUSIC chain, with the music-only behaviour
+// group under it. Until they pick a tab themselves, follow the side they are on.
+let _dlchainKindChosen = false;
+
+function _dlchainSyncKindToSide() {
+    if (_dlchainKindChosen) return;
+    _dlchainKind = document.body.getAttribute('data-side') === 'video' ? 'video' : 'music';
+}
+let _dlchainOrder = [];
+let _dlchainDragging = null;
+
+// A source in the pool: the Sources-tab tile, shrunk. Same logo, same shape, so
+// the thing you drag looks like the thing you configure.
+// Groups in a fixed order, each with a count, then anything unlisted under
+// "Other" so a new source is never silently dropped from the pool.
+function _dlchainPoolHtml(kind, available) {
+    if (!available.length) return '<div class="dlchain-empty">Every source is in the chain.</div>';
+    const seen = new Set();
+    let html = '';
+    const group = (label, ids) => {
+        if (!ids.length) return '';
+        ids.forEach(id => seen.add(id));
+        return `<div class="dlchain-group">`
+             + `<div class="dlchain-group-head">`
+             + `<span class="dlchain-group-label">${escapeHtml(label)}</span>`
+             + `<span class="dlchain-group-count">${ids.length}</span></div>`
+             + `<div class="dlchain-group-row">${ids.map(id => _dlchainTile(kind, id)).join('')}</div>`
+             + `</div>`;
+    };
+    for (const g of DLCHAIN_GROUPS) html += group(g.label, g.ids.filter(id => available.includes(id)));
+    html += group('Other', available.filter(id => !seen.has(id)));
+    html += '<div class="dlchain-empty" id="dlchain-no-match" hidden>Nothing matches that.</div>';
+    return html;
+}
+
+// Filter state lives outside the render so re-rendering (adding a source, or
+// switching media tab) does not silently drop what was typed.
+let _dlchainQuery = '';
+
+function dlchainFilter(q) {
+    _dlchainQuery = String(q || '').trim().toLowerCase();
+    _dlchainApplyFilter();
+}
+window.dlchainFilter = dlchainFilter;
+
+function _dlchainApplyFilter() {
+    const pool = document.getElementById('dlchain-pool');
+    if (!pool) return;
+    const q = _dlchainQuery;
+    let shown = 0;
+    pool.querySelectorAll('.dlchain-tile').forEach(tile => {
+        const name = (tile.querySelector('.dlchain-tile-name')?.textContent || '').toLowerCase();
+        const hit = !q || name.includes(q) || (tile.dataset.src || '').toLowerCase().includes(q);
+        tile.hidden = !hit;
+        if (hit) shown++;
+    });
+    pool.querySelectorAll('.dlchain-group').forEach(g => {
+        g.hidden = !g.querySelector('.dlchain-tile:not([hidden])');
+    });
+    const none = document.getElementById('dlchain-no-match');
+    if (none) none.hidden = !(q && shown === 0);
+}
+
+function _dlchainTile(kind, id) {
+    const m = DLCHAIN_KINDS[kind].meta(id);
+    const inv = INVERT_BRAND_MARKS.has(id) ? ' is-inverted' : '';
+    const art = m.icon
+        ? `<img class="dlchain-mark${inv}" src="${m.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${m.emoji}</span>'">`
+        : `<span class="emoji-icon">${m.emoji}</span>`;
+    return `<button type="button" class="dlchain-tile" draggable="true" data-src="${id}" `
+         + `onclick="dlchainAdd('${id}')" title="Add ${escapeHtml(m.name)} to the chain">`
+         + `<span class="dlchain-tile-art">${art}</span>`
+         + `<span class="dlchain-tile-name">${escapeHtml(m.name)}</span></button>`;
+}
+
+// A step in the chain: the logo, and almost nothing else. The mark identifies
+// the source faster than its name does, and repeating the name in a column
+// already headed "download chain" earned its width back nowhere. The name still
+// reaches a screen reader, and a pointer, through the label.
+function _dlchainStep(kind, id, position, total) {
+    const m = DLCHAIN_KINDS[kind].meta(id);
+    const inv = INVERT_BRAND_MARKS.has(id) ? ' is-inverted' : '';
+    const art = m.icon
+        ? `<img class="dlchain-mark${inv}" src="${m.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${m.emoji}</span>'">`
+        : `<span class="emoji-icon">${m.emoji}</span>`;
+    const role = position === 1 ? 'Tried first' : `Fallback ${position - 1}`;
+    const name = escapeHtml(m.name);
+    // A full-width row rather than a logo in a box. The logo alone could not say
+    // which source a step was - an emoji shopping cart for Amazon Music is not
+    // recognisable - and a small centred card in a wide column left most of the
+    // column empty, which is what made the whole panel look unfinished.
+    return `<div class="dlchain-step" draggable="true" data-src="${id}" `
+         + `title="${name} - ${role}" aria-label="${name}, ${role}">`
+         + '<span class="dlchain-grip" aria-hidden="true">&#x283F;</span>'
+         + `<span class="dlchain-step-rank">${position}</span>`
+         + `<span class="dlchain-step-art">${art}</span>`
+         + '<span class="dlchain-step-text">'
+         + `<span class="dlchain-step-name">${name}</span>`
+         + `<span class="dlchain-step-role">${role}</span></span>`
+         + '<span class="dlchain-step-move">'
+         + `<button type="button" class="dlchain-move" title="Move ${name} up" aria-label="Move ${name} up"`
+         + `${position === 1 ? ' disabled' : ''} onclick="dlchainMove('${id}', -1)">&#9650;</button>`
+         + `<button type="button" class="dlchain-move" title="Move ${name} down" aria-label="Move ${name} down"`
+         + `${position === total ? ' disabled' : ''} onclick="dlchainMove('${id}', 1)">&#9660;</button>`
+         + '</span>'
+         + `<button type="button" class="dlchain-btn" title="Remove ${name} from the chain" `
+         + `aria-label="Remove ${name} from the chain" onclick="dlchainRemove('${id}')">&times;</button></div>`;
+}
+
+
+// Arrows because dragging is precise work on a touchpad and impossible on a
+// phone; the drag stays for people who prefer it.
+function dlchainMove(id, delta) {
+    const i = _dlchainOrder.indexOf(id);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= _dlchainOrder.length) return;
+    [_dlchainOrder[i], _dlchainOrder[j]] = [_dlchainOrder[j], _dlchainOrder[i]];
+    _dlchainCommit();
+}
+window.dlchainMove = dlchainMove;
+
+function renderDownloadChain() {
+    const kind = _dlchainKind;
+    const spec = DLCHAIN_KINDS[kind];
+    const tabs = document.getElementById('dlchain-tabs');
+    const pool = document.getElementById('dlchain-pool');
+    const list = document.getElementById('dlchain-list');
+    if (!spec || !tabs || !pool || !list) return;
+
+    tabs.innerHTML = Object.keys(DLCHAIN_KINDS).map(k =>
+        `<button type="button" role="tab" class="dlchain-tab${k === kind ? ' active' : ''}" `
+        + `onclick="switchDownloadChain('${k}')">${DLCHAIN_KINDS[k].label}</button>`).join('');
+    const help = document.getElementById('dlchain-help');
+    if (help) help.textContent = spec.help;
+
+    const all = spec.sources();
+    const order = _dlchainOrder.filter(id => all.includes(id));
+    const available = all.filter(id => !order.includes(id));
+
+    // Steps joined by connectors, then ONE empty slot at the end. One, not a
+    // row of placeholders: the question a person has when they look at this is
+    // "where does the next one go", and several identical empty boxes answer it
+    // worse than a single obvious one. Sized and worded like the automation
+    // builder's slots, which is the thing in this app that already gets it
+    // right — a big dashed target that says what to put in it and why.
+    const steps = order.map((id, i) => _dlchainStep(kind, id, i + 1, order.length));
+    const lastName = order.length ? spec.meta(order[order.length - 1]).name : '';
+    const slotTitle = order.length
+        ? `Drag a source here — tried after ${escapeHtml(lastName)}`
+        : 'Drag a source here — this one is tried first';
+    const slotHint = order.length
+        ? 'It only runs if everything above it came up empty.'
+        : 'Downloads need at least one source. Add more to fall back in order.';
+    const flow = steps.join('<div class="dlchain-connector"></div>')
+        + (steps.length ? '<div class="dlchain-connector"></div>' : '')
+        + `<div class="dlchain-slot${order.length ? '' : ' first'}" id="dlchain-slot">`
+        + `<span class="dlchain-slot-title">${slotTitle}</span>`
+        + `<span class="dlchain-slot-hint">${slotHint}</span>`
+        + '</div>';
+    list.innerHTML = flow;
+
+    pool.innerHTML = _dlchainPoolHtml(kind, available);
+    _dlchainApplyFilter();
+
+    // The behaviour group is download_source.* — music-wide. Showing it under a
+    // video or audiobook chain would say it applies there. Hide the WRAPPER, not
+    // the inner block, or the "Download behaviour" heading stays behind on its own.
+    const behaviour = document.getElementById('dlchain-behaviour');
+    if (behaviour) behaviour.hidden = kind !== 'music';
+
+    const hint = document.getElementById('dlchain-mode-hint');
+    if (hint) {
+        hint.textContent = order.length > 1 ? `hybrid — ${order.length} sources`
+            : order.length === 1 ? 'single source' : 'nothing selected';
+    }
+    _dlchainWireDrag();
+}
+window.renderDownloadChain = renderDownloadChain;
+
+function switchDownloadChain(kind) {
+    if (!DLCHAIN_KINDS[kind]) return;
+    _dlchainKindChosen = true;   // an explicit pick outranks the side default
+    _dlchainKind = kind;
+    _dlchainLoad();
+}
+window.switchDownloadChain = switchDownloadChain;
+
+async function _dlchainLoad() {
+    _dlchainSyncKindToSide();
+    const spec = DLCHAIN_KINDS[_dlchainKind];
+    if (!spec) return;
+    try {
+        const state = await spec.read();
+        _dlchainOrder = (state && Array.isArray(state.order)) ? state.order.slice() : [];
+    } catch (e) {
+        _dlchainOrder = [];
+    }
+    renderDownloadChain();
+}
+window.loadDownloadChain = _dlchainLoad;
+
+function _dlchainCommit() {
+    const spec = DLCHAIN_KINDS[_dlchainKind];
+    renderDownloadChain();
+    try {
+        const r = spec.write(_dlchainOrder.slice());
+        if (r && typeof r.catch === 'function') {
+            r.catch(() => { if (typeof showToast === 'function') showToast('Could not save the download chain', 'error'); });
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Could not save the download chain', 'error');
+    }
+}
+
+function dlchainAdd(id) {
+    if (!_dlchainOrder.includes(id)) _dlchainOrder.push(id);
+    _dlchainCommit();
+}
+window.dlchainAdd = dlchainAdd;
+
+function dlchainRemove(id) {
+    // An empty chain means nothing can download at all, which is never what a
+    // drag was trying to say. The video side already refused this; now all three do.
+    if (_dlchainOrder.length <= 1) {
+        if (typeof showToast === 'function') showToast('Keep at least one source — downloads need somewhere to go', 'info');
+        return;
+    }
+    _dlchainOrder = _dlchainOrder.filter(x => x !== id);
+    _dlchainCommit();
+}
+window.dlchainRemove = dlchainRemove;
+
+function _dlchainWireDrag() {
+    const pool = document.getElementById('dlchain-pool');
+    const list = document.getElementById('dlchain-list');
+    if (!pool || !list) return;
+
+    const dragged = () => _dlchainDragging;
+
+    // Pool tiles and chain steps are both draggable and both carry data-src.
+    document.querySelectorAll('#download-chain-widget [data-src]').forEach(item => {
+        item.addEventListener('dragstart', (e) => {
+            _dlchainDragging = item.dataset.src;
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', item.dataset.src);
+            item.classList.add('dragging');
+        });
+        item.addEventListener('dragend', () => {
+            _dlchainDragging = null;
+            item.classList.remove('dragging');
+            document.querySelectorAll('#download-chain-widget .drag-over')
+                .forEach(el => el.classList.remove('drag-over'));
+        });
+    });
+
+    // Dropping ON a step inserts before it — that is how you reorder.
+    list.querySelectorAll('.dlchain-step').forEach(step => {
+        step.addEventListener('dragover', (e) => {
+            e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+            step.classList.add('drag-over');
+        });
+        step.addEventListener('dragleave', () => step.classList.remove('drag-over'));
+        step.addEventListener('drop', (e) => {
+            e.preventDefault(); e.stopPropagation();
+            step.classList.remove('drag-over');
+            const src = e.dataTransfer.getData('text/plain') || dragged();
+            const target = step.dataset.src;
+            if (!src || src === target) return;
+            _dlchainOrder = _dlchainOrder.filter(x => x !== src);
+            const at = _dlchainOrder.indexOf(target);
+            _dlchainOrder.splice(at < 0 ? _dlchainOrder.length : at, 0, src);
+            _dlchainCommit();
+        });
+    });
+
+    // The slot at the end: always append.
+    const slot = document.getElementById('dlchain-slot');
+    if (slot) {
+        slot.addEventListener('dragover', (e) => {
+            e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+            slot.classList.add('drag-over');
+        });
+        slot.addEventListener('dragleave', () => slot.classList.remove('drag-over'));
+        slot.addEventListener('drop', (e) => {
+            e.preventDefault(); e.stopPropagation();
+            slot.classList.remove('drag-over');
+            const src = e.dataTransfer.getData('text/plain') || dragged();
+            if (!src) return;
+            _dlchainOrder = _dlchainOrder.filter(x => x !== src);
+            _dlchainOrder.push(src);
+            _dlchainCommit();
+        });
+    }
+
+    // Anywhere else in the chain column appends too, so a slightly-off drop
+    // still does the obvious thing instead of nothing.
+    list.addEventListener('dragover', (e) => { e.preventDefault(); list.classList.add('drag-over'); });
+    list.addEventListener('dragleave', () => list.classList.remove('drag-over'));
+    list.addEventListener('drop', (e) => {
+        e.preventDefault();
+        list.classList.remove('drag-over');
+        const src = e.dataTransfer.getData('text/plain') || dragged();
+        if (!src || _dlchainOrder.includes(src)) return;
+        _dlchainOrder.push(src);
+        _dlchainCommit();
+    });
+
+    // Dragging a step back to the pool removes it.
+    pool.addEventListener('dragover', (e) => { e.preventDefault(); pool.classList.add('drag-over'); });
+    pool.addEventListener('dragleave', () => pool.classList.remove('drag-over'));
+    pool.addEventListener('drop', (e) => {
+        e.preventDefault();
+        pool.classList.remove('drag-over');
+        const src = e.dataTransfer.getData('text/plain') || dragged();
+        if (src && _dlchainOrder.includes(src)) dlchainRemove(src);
+    });
+}
+
 // ── Hybrid source priority list (drag-and-drop) ──
+// ---- Audiobook download sources ----
+// Same three sources the video side offers, and the same .hybrid-source-item
+// markup and CSS music and video already use, so all three read alike. No
+// album-level/track-level badge: that is a music-only idea, a book is always
+// fetched as one whole folder.
+//
+// Torrent first by default. The others are ranked against it afterwards
+// anyway, so the order decides who gets ASKED, not who wins.
+const AUDIOBOOK_SOURCES = ['torrent', 'usenet', 'soulseek'];
+const AUDIOBOOK_SOURCE_LABEL = { torrent: 'Torrent', usenet: 'Usenet', soulseek: 'Soulseek' };
+const AUDIOBOOK_SOURCE_EMOJI = { torrent: '\u{1F9F2}', usenet: '\u{1F4F0}', soulseek: '\u{1F3B5}' };
+let _audiobookHybrid = ['torrent', 'usenet', 'soulseek'];
+
+function renderAudiobookHybrid() {
+    const host = document.getElementById('audiobook-hybrid-rows');
+    if (!host) return;
+    const enabled = _audiobookHybrid.filter(s => AUDIOBOOK_SOURCES.includes(s));
+    const disabled = AUDIOBOOK_SOURCES.filter(s => !enabled.includes(s));
+    host.innerHTML = enabled.concat(disabled).map(src => {
+        const i = enabled.indexOf(src);
+        const on = i >= 0;
+        return `<div class="hybrid-source-item${on ? '' : ' disabled'}">` +
+            '<span class="hybrid-source-arrows">' +
+            `<button type="button" class="hybrid-arrow-btn" onclick="moveAudiobookSource('${src}', -1)"${(!on || i === 0) ? ' disabled' : ''} title="Move up">\u25B2</button>` +
+            `<button type="button" class="hybrid-arrow-btn" onclick="moveAudiobookSource('${src}', 1)"${(!on || i === enabled.length - 1) ? ' disabled' : ''} title="Move down">\u25BC</button>` +
+            '</span>' +
+            `<span class="hybrid-source-icon emoji-icon">${AUDIOBOOK_SOURCE_EMOJI[src] || ''}</span>` +
+            `<span class="hybrid-source-name">${AUDIOBOOK_SOURCE_LABEL[src]}</span>` +
+            `<span class="hybrid-source-priority">${on ? (i + 1) : ''}</span>` +
+            `<label class="hybrid-source-toggle"><input type="checkbox" onchange="toggleAudiobookSource('${src}', this.checked)"${on ? ' checked' : ''}><span class="toggle-track"></span></label>` +
+            '</div>';
+    }).join('');
+}
+
+function moveAudiobookSource(src, direction) {
+    const i = _audiobookHybrid.indexOf(src);
+    const j = i + direction;
+    if (i < 0 || j < 0 || j >= _audiobookHybrid.length) return;
+    [_audiobookHybrid[i], _audiobookHybrid[j]] = [_audiobookHybrid[j], _audiobookHybrid[i]];
+    renderAudiobookHybrid();
+}
+
+function toggleAudiobookSource(src, on) {
+    if (on) {
+        if (!_audiobookHybrid.includes(src)) _audiobookHybrid.push(src);
+    } else {
+        // Keep at least one, the same way video does. An empty chain means
+        // no book can ever be found, with nothing on screen saying why.
+        if (_audiobookHybrid.length <= 1) { renderAudiobookHybrid(); return; }
+        _audiobookHybrid = _audiobookHybrid.filter(s => s !== src);
+    }
+    renderAudiobookHybrid();
+}
+
+// The chain only applies in hybrid mode; a single-source mode has nothing to
+// order, so showing the rows there would imply a choice that does nothing.
+function onAudiobookModeChange() {
+    const mode = document.getElementById('audiobook-download-mode')?.value || 'hybrid';
+    const container = document.getElementById('audiobook-hybrid-container');
+    if (container) container.style.display = mode === 'hybrid' ? '' : 'none';
+    if (mode === 'hybrid') renderAudiobookHybrid();
+}
+
+// Dark-foreground brand marks that vanish against the dark UI. The app's
+// canonical recipe for "render this image as pure white" is
+// `brightness(0) invert(1)` — already used for the equalizer and auto-sync icons.
+const INVERT_BRAND_MARKS = new Set(['tidal', 'qobuz', 'soundcloud']);
+
+// The pool is grouped rather than one flat grid: eleven music sources is more
+// than anyone scans comfortably, and "which of these is a streaming service"
+// is the question people actually arrive with. Ids not listed here fall into
+// "Other", so adding a source to HYBRID_SOURCES can never make it disappear.
+const DLCHAIN_GROUPS = [
+    { label: 'Peer-to-peer', ids: ['soulseek'] },
+    { label: 'Streaming services', ids: ['tidal', 'qobuz', 'deezer_dl', 'amazon', 'soundcloud', 'hifi'] },
+    { label: 'Public video', ids: ['youtube'] },
+    { label: 'Torrent & Usenet', ids: ['torrent', 'usenet', 'extto'] },
+    { label: 'Library manager', ids: ['lidarr'] },
+];
+
 const HYBRID_SOURCES = [
     { id: 'soulseek', name: 'Soulseek', icon: '/static/img/brands/slskd.png', emoji: '🎵' },
     { id: 'youtube', name: 'YouTube', icon: '/static/img/brands/youtube.svg', emoji: '▶️' },
@@ -875,6 +1800,18 @@ const HYBRID_SOURCES = [
     { id: 'torrent', name: 'Torrent', icon: null, emoji: '🧲' },
     { id: 'usenet', name: 'Usenet', icon: null, emoji: '📰' },
 ];
+
+// Prowlarr is not in HYBRID_SOURCES because it is not a link in the download
+// chain - it is the indexer both torrent and usenet search through - but it
+// very much is something you configure to download, so it earns a tile.
+//
+// There used to be a SHARED_SOURCES set here naming the four tiles the video
+// side was allowed to see. The Sources tab is fully shared now: every side sees
+// every tile, because hiding Tidal from someone standing on the video side just
+// means they cannot fix their Tidal credentials without switching sides first.
+const EXTRA_SOURCE_TILES = [
+    { id: 'prowlarr', name: 'Indexers', icon: null, emoji: '🔎' },
+];
 const ALBUM_LEVEL_HYBRID_SOURCES = new Set(['soulseek', 'torrent', 'usenet']);
 
 let _hybridSourceOrder = ['soulseek', 'youtube'];
@@ -887,38 +1824,371 @@ let _hybridVisualOrder = null; // Full visual order including disabled sources
 // open from its row), so the long per-source config blocks don't all stack up.
 let _expandedHybridSource = null;
 
-function toggleHybridSourceConfig(srcId) {
-    _expandedHybridSource = (_expandedHybridSource === srcId) ? null : srcId;
-    buildHybridSourceList();
-    updateDownloadSourceUI();
-    // Bring the freshly opened config panel into view.
-    if (_expandedHybridSource) {
-        const map = {
-            soulseek: 'soulseek-settings-container', youtube: 'youtube-settings-container',
-            tidal: 'tidal-download-settings-container', qobuz: 'qobuz-settings-container',
-            hifi: 'hifi-download-settings-container', deezer_dl: 'deezer-download-settings-container',
-            amazon: 'amazon-download-settings-container', lidarr: 'lidarr-download-settings-container',
-            soundcloud: 'soundcloud-download-settings-container', torrent: 'prowlarr-source-redirect',
-            usenet: 'prowlarr-source-redirect',
-        };
-        const el = document.getElementById(map[_expandedHybridSource]);
-        if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 60);
-    }
+// ── Sources tab ─────────────────────────────────────────────────────────────
+// The cards are rendered from HYBRID_SOURCES, the same registry the chain rows
+// on the Downloads tab read. One list of names, icons and ids for both views,
+// so the two cannot drift into disagreeing about what a source is called or
+// what its logo is.
+const SOURCE_CARD_HINTS = {
+    soulseek: 'slskd connection, timeouts, peers',
+    youtube: 'Cookies, transcoding, rate limit',
+    tidal: 'Account and stream quality',
+    qobuz: 'Account and stream quality',
+    hifi: 'Public API instances',
+    deezer_dl: 'ARL token',
+    amazon: 'Account',
+    soundcloud: 'Anonymous — nothing to set up',
+    lidarr: 'URL and API key',
+    torrent: 'Runs on Prowlarr plus a torrent client',
+    usenet: 'Runs on Prowlarr plus a usenet client',
+    prowlarr: 'Prowlarr — searched by both torrent and usenet',
+};
+
+function toggleSourceCard(header) {
+    // kept so an older cached page cannot throw; tiles replaced the row cards.
+    if (header && header.dataset) openSourceModal(header.dataset.sourceId);
 }
+window.toggleSourceCard = toggleSourceCard;
+
+// One tile per source: logo, name under it, and the state that matters at a
+// glance. Rendered from HYBRID_SOURCES so the tiles and the chain rows on the
+// Downloads tab cannot disagree about a name or a logo.
+function _srcTileMarkup(src, order) {
+    const pos = order.indexOf(src.id);
+    const inChain = pos !== -1;
+    const state = (_hybridSourceStatus && _hybridSourceStatus[src.id]) || 'unknown';
+    const unready = _hybridSourceUnready && _hybridSourceUnready[src.id];
+    const said = _ssLastTestMessage[src.id];
+    const dotLabel = { unknown: 'Not tested yet', testing: 'Testing…', ok: 'Connected',
+                       warn: said || 'Working, but needs attention',
+                       fail: said || 'Connection failed',
+                       na: 'No connection test for this source' }[state];
+    // Same brand marks that get inverted in the download-chain widget: these
+    // logos are dark-on-light artwork and disappear against a dark tile. They
+    // were only inverted in the chain, so the same source looked different in
+    // the two places it appears.
+    const srcInv = INVERT_BRAND_MARKS.has(src.id) ? ' class="is-inverted"' : '';
+    const art = src.icon
+        ? `<img${srcInv} src="${src.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${src.emoji}</span>'">`
+        : `<span class="emoji-icon">${src.emoji}</span>`;
+    // Prowlarr is never "in the chain" — it is what the chain's torrent and
+    // usenet links search through — so the chain chip would read as a fault.
+    const chip = src.id === 'prowlarr'
+        ? '<span class="src-tile-chip">torrent &amp; usenet</span>'
+        : (unready || state === 'warn')
+        ? '<span class="src-tile-chip src-tile-chip--warn">needs setup</span>'
+        : inChain
+            ? `<span class="src-tile-chip src-tile-chip--on">#${pos + 1}</span>`
+            : '<span class="src-tile-chip">not in chain</span>';
+    return `<button type="button" class="src-tile${inChain ? ' is-active' : ''}" `
+         + `data-source-id="${src.id}" onclick="openSourceModal('${src.id}')" `
+         + `title="Configure ${escapeHtml(src.name)}">`
+         + `<span class="src-tile-dot hss-${state}" title="${escapeHtml(String(dotLabel))}"></span>`
+         + `<span class="src-tile-art">${art}</span>`
+         + `<span class="src-tile-name">${escapeHtml(src.name)}</span>`
+         + chip
+         + '</button>';
+}
+
+// Two groups rather than one long ragged wrap: what is actually downloading for
+// you, in the order it is tried, then everything else. Eleven tiles in a single
+// auto-fill grid wrapped 7-then-4 and read as an accident, and registry order
+// put "#4" before "#2", which made the chain numbers look wrong.
+function buildSourceTiles() {
+    const grid = document.getElementById('source-tile-grid');
+    if (!grid) return;
+    const order = (typeof getHybridOrder === 'function' ? getHybridOrder() : []) || [];
+
+    // Only sources that own a config panel get a tile. No side filtering: this
+    // tab is shared and shows the same thing on both sides.
+    const configurable = HYBRID_SOURCES.concat(EXTRA_SOURCE_TILES)
+        .filter(src => SOURCE_CONFIG_ID_BY_SRC[src.id]);
+
+    const section = (label, hint, list) => list.length
+        ? `<div class="src-group"><div class="src-group-head">`
+          + `<span class="src-group-label">${label}</span>`
+          + `<span class="src-group-count">${list.length}</span>`
+          + `<span class="src-group-hint">${hint}</span></div>`
+          + `<div class="src-tile-row">${list.map(src => _srcTileMarkup(src, order)).join('')}</div></div>`
+        : '';
+
+    // Indexers are their own kind of thing: not a source you pick, but the
+    // catalogue the torrent and usenet links search. Grouped separately so the
+    // list does not imply Prowlarr is a source you could add to the chain.
+    const isIndexer = (src) => EXTRA_SOURCE_TILES.some(x => x.id === src.id);
+    const indexers = configurable.filter(isIndexer);
+    const sources = configurable.filter(src => !isIndexer(src));
+
+    const inChain = sources
+        .filter(src => order.includes(src.id))
+        .sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+    const available = sources.filter(src => !order.includes(src.id));
+
+    grid.innerHTML =
+        section('In your chain', 'tried in this order', inChain) +
+        section('Available', 'configure now, add to the chain when you want it', available) +
+        section('Indexers', 'searched by torrent and usenet', indexers);
+}
+window.buildSourceTiles = buildSourceTiles;
+
+// Live auth/connection checks, run when a source is opened rather than on every
+// settings redraw. Best-effort: a probe that throws must not stop the modal.
+const SOURCE_OPEN_PROBE = {
+    tidal: () => checkTidalDownloadAuthStatus(),
+    qobuz: () => checkQobuzAuthStatus(),
+    hifi: () => testHiFiConnection(),
+    amazon: () => testAmazonConnection(),
+    soundcloud: () => testSoundcloudConnection(),
+};
+
+function probeSourceOnOpen(srcId) {
+    const probe = SOURCE_OPEN_PROBE[srcId];
+    if (!probe) return;
+    try { probe(); } catch (e) { /* the modal still opens */ }
+}
+
+let _openSourceModalId = null;
+
+// The panel is MOVED into the modal rather than copied. Cloning would put a
+// second element with the same id in the document, and every getElementById in
+// saveSettings would then read whichever one the browser handed back first —
+// silently saving the copy the user never typed into.
+// Test one source from its own modal and SHOW what the server said. The
+// summary toast only ever gave a count, and the tile dot only a colour, so a
+// source that was amber for a reason you could act on had no way of telling
+// you what the reason was.
+async function testOneSource(srcId) {
+    const btn = document.getElementById('src-modal-test');
+    const out = document.getElementById('src-modal-result');
+    const probe = HYBRID_SOURCE_PROBE[srcId];
+    if (!out) return;
+    if (!probe) {
+        out.className = 'src-modal-result is-na';
+        out.textContent = 'This source has no connection test.';
+        return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Testing…'; }
+    _hybridSourceStatus[srcId] = 'testing';
+    out.className = 'src-modal-result is-testing';
+    out.textContent = 'Testing…';
+    let good = false;
+    try {
+        good = await probe();
+    } catch (e) {
+        good = false;
+        _ssLastTestMessage[srcId] = String((e && e.message) || e || 'Test failed');
+    }
+    const warned = !!_ssLastTestWarned[srcId];
+    const state = good ? (warned ? 'warn' : 'ok') : 'fail';
+    _hybridSourceStatus[srcId] = state;
+    const said = _ssLastTestMessage[srcId];
+    out.className = `src-modal-result is-${state}`;
+    out.textContent = said || (good ? 'Connected.' : 'Connection failed.');
+    document.getElementById('src-modal-meta').innerHTML =
+        `<span class="src-tile-dot hss-${state}"></span>`;
+    if (btn) { btn.disabled = false; btn.textContent = 'Test'; }
+    buildSourceTiles();
+}
+window.testOneSource = testOneSource;
+
+function openSourceModal(srcId) {
+    // opening the YouTube card is the moment its yt-dlp version matters
+    if (srcId === 'youtube' && typeof loadYtdlpStatus === 'function') {
+        try { loadYtdlpStatus(); } catch (e) { }
+    }
+    const containerId = SOURCE_CONFIG_ID_BY_SRC[srcId];
+    const overlay = document.getElementById('source-config-modal');
+    const body = document.getElementById('src-modal-body');
+    const panel = containerId && document.getElementById(containerId);
+    if (!overlay || !body || !panel) return;
+
+    const src = HYBRID_SOURCES.find(x => x.id === srcId) || { name: srcId, emoji: '🎵', icon: null };
+    document.getElementById('src-modal-title').textContent = src.name;
+    document.getElementById('src-modal-sub').textContent = SOURCE_CARD_HINTS[srcId] || '';
+    const iconEl = document.getElementById('src-modal-icon');
+    iconEl.innerHTML = src.icon
+        ? `<img src="${src.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${src.emoji}</span>'">`
+        : `<span class="emoji-icon">${src.emoji}</span>`;
+    const state = (_hybridSourceStatus && _hybridSourceStatus[srcId]) || 'unknown';
+    document.getElementById('src-modal-meta').innerHTML = `<span class="src-tile-dot hss-${state}"></span>`;
+
+    const testBtn = document.getElementById('src-modal-test');
+    if (testBtn) {
+        testBtn.disabled = false;
+        testBtn.textContent = 'Test';
+        testBtn.style.display = HYBRID_SOURCE_PROBE[srcId] ? '' : 'none';
+        testBtn.onclick = () => testOneSource(srcId);
+    }
+    // Carry the last result in rather than showing a blank slate: an amber dot
+    // on the tile should still explain itself once you are inside.
+    const out = document.getElementById('src-modal-result');
+    if (out) {
+        const said = _ssLastTestMessage[srcId];
+        if (said && state !== 'unknown') {
+            out.className = `src-modal-result is-${state}`;
+            out.textContent = said;
+        } else {
+            out.className = 'src-modal-result';
+            out.textContent = '';
+        }
+    }
+
+    body.appendChild(panel);
+    overlay.hidden = false;
+    document.body.classList.add('src-modal-open');
+    _openSourceModalId = containerId;
+    probeSourceOnOpen(srcId);
+    setTimeout(() => {
+        const first = body.querySelector('input:not([type=hidden]), select, textarea');
+        if (first) first.focus();
+    }, 40);
+}
+window.openSourceModal = openSourceModal;
+
+function closeSourceModal() {
+    const overlay = document.getElementById('source-config-modal');
+    const home = document.getElementById('source-config-home');
+    if (!overlay) return;
+    // Put the panel back before hiding, so its id never sits inside a hidden
+    // modal where a later open would move an already-moved node.
+    if (_openSourceModalId && home) {
+        const panel = document.getElementById(_openSourceModalId);
+        if (panel) home.appendChild(panel);
+    }
+    _openSourceModalId = null;
+    overlay.hidden = true;
+    document.body.classList.remove('src-modal-open');
+    // A field edited seconds before closing would otherwise sit on the 2s
+    // auto-save timer with the modal already gone and nothing on screen saying
+    // anything is pending. Land it now.
+    if (typeof settingsAutoSaveTimer !== 'undefined' && settingsAutoSaveTimer) {
+        clearTimeout(settingsAutoSaveTimer);
+        settingsAutoSaveTimer = null;
+        saveSettings(true);
+    }
+    buildSourceTiles();
+}
+window.closeSourceModal = closeSourceModal;
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        const overlay = document.getElementById('source-config-modal');
+        if (overlay && !overlay.hidden) closeSourceModal();
+    }
+});
+
+
+// src id -> the config panel that belongs to it. Only sources with a panel get
+// a tile; torrent and usenet share one, and it is filed under torrent.
+const SOURCE_CONFIG_ID_BY_SRC = {
+    soulseek: 'soulseek-settings-container', youtube: 'youtube-settings-container',
+    tidal: 'tidal-download-settings-container', qobuz: 'qobuz-settings-container',
+    hifi: 'hifi-download-settings-container', deezer_dl: 'deezer-download-settings-container',
+    amazon: 'amazon-download-settings-container', lidarr: 'lidarr-download-settings-container',
+    soundcloud: 'soundcloud-download-settings-container',
+    // Usenet is its own link in the chain and shares the Prowlarr panel. It had
+    // no tile at all, so a usenet user saw nothing to click.
+    torrent: 'torrent-client-settings-container',
+    usenet: 'usenet-client-settings-container',
+    prowlarr: 'prowlarr-settings-container',
+};
+
+const HYBRID_SOURCE_CONFIG_ID = {
+    soulseek: 'soulseek-settings-container', youtube: 'youtube-settings-container',
+    tidal: 'tidal-download-settings-container', qobuz: 'qobuz-settings-container',
+    hifi: 'hifi-download-settings-container', deezer_dl: 'deezer-download-settings-container',
+    amazon: 'amazon-download-settings-container', lidarr: 'lidarr-download-settings-container',
+    soundcloud: 'soundcloud-download-settings-container',
+    torrent: 'torrent-client-settings-container',
+    usenet: 'usenet-client-settings-container',
+    prowlarr: 'prowlarr-settings-container',
+};
+
+// The cog on a chain row. The config is on the Sources tab now, so this crosses
+// to it and opens that one source rather than expanding a panel in place.
+function toggleHybridSourceConfig(srcId) {
+    if (typeof switchSettingsTab === 'function') switchSettingsTab('sources');
+    // torrent and usenet share one panel
+    openSourceModal(srcId === 'usenet' ? 'torrent' : srcId);
+}
+
+// Open one source's accordion on the Sources tab and scroll it into view.
+// Collapsed state is carried on BOTH the header and the body (that is what the
+// shared accordion onclick toggles), so opening one by hand has to set both or
+// the next click reads as "already open" and closes nothing.
+function openSourceConfig(containerId) {
+    const srcId = Object.keys(SOURCE_CONFIG_ID_BY_SRC)
+        .find(k => SOURCE_CONFIG_ID_BY_SRC[k] === containerId);
+    if (srcId) openSourceModal(srcId);
+}
+window.openSourceConfig = openSourceConfig;
 
 // ── Per-source live connection status (shown as a dot in the hybrid list and
 // driven by the "Test all sources" button). srcId -> 'unknown'|'testing'|'ok'|'fail'|'na'
 let _hybridSourceStatus = {};
 
+// Chromium-family browsers seal their cookie store with App-Bound Encryption on
+// Windows, and yt-dlp cannot read it (yt-dlp issue 10927). Firefox is unaffected
+// — different storage, no DPAPI.
+const _ABE_BROWSERS = ['chrome', 'edge', 'brave', 'opera', 'vivaldi', 'chromium'];
+
+// Mark them rather than disable them, for a reason worth writing down: a
+// <select> whose SELECTED option is disabled reports value === '', so the next
+// auto-save would quietly write an empty cookie source over the user's setting.
+// Labelling warns everybody and destroys nobody's config.
+function markUnsupportedCookieBrowsers(isWindowsServer) {
+    const sel = document.getElementById('youtube-cookies-browser');
+    if (!sel) return;
+    sel.querySelectorAll('option').forEach(opt => {
+        const affected = isWindowsServer && _ABE_BROWSERS.includes(opt.value);
+        const base = opt.dataset.baseLabel || (opt.dataset.baseLabel = opt.textContent.trim());
+        opt.textContent = affected ? `${base} — not supported on Windows` : base;
+        opt.dataset.abeUnsupported = affected ? '1' : '';
+    });
+    updateCookieBrowserWarning();
+}
+window.markUnsupportedCookieBrowsers = markUnsupportedCookieBrowsers;
+
+// Say it at the moment of choosing, not when a download fails days later.
+function updateCookieBrowserWarning() {
+    const sel = document.getElementById('youtube-cookies-browser');
+    const box = document.getElementById('youtube-cookie-abe-warning');
+    if (!sel || !box) return;
+    const opt = sel.selectedOptions && sel.selectedOptions[0];
+    const bad = !!(opt && opt.dataset.abeUnsupported === '1');
+    box.hidden = !bad;
+    if (bad) {
+        box.textContent = `${opt.dataset.baseLabel || sel.value} seals its cookies with `
+            + 'App-Bound Encryption on Windows, which yt-dlp cannot read. This will not work. '
+            + 'Choose "Paste cookies.txt" instead, or "None" if you only download public videos.';
+    }
+}
+window.updateCookieBrowserWarning = updateCookieBrowserWarning;
+
 async function _ssJson(url, opts) {
     const r = await fetch(url, opts);
     return await r.json();
 }
+// Records what the server SAID about the last failure, keyed by service, so
+// the summary toast can name a reason instead of only a count. Sources
+// that can explain themselves (YouTube's bot-block, for one) were having
+// that explanation thrown away here.
+const _ssLastTestMessage = {};
+const _ssLastTestWarned = {};
 function _ssTestConn(service) {
     return _ssJson(API.testConnection || '/api/test-connection', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ service })
-    }).then(j => !!j.success);
+    }).then(j => {
+        const msg = j && (j.message || j.error);
+        if (msg) _ssLastTestMessage[service] = String(msg);
+        else delete _ssLastTestMessage[service];
+        // A pass can still carry something worth acting on. The server marks
+        // those with a leading warning glyph; without this a working source
+        // with a broken cookie file drew a plain green light and said nothing.
+        _ssLastTestWarned[service] = !!j.success && !!msg && String(msg).trim().startsWith('\u26a0');
+        return !!j.success;
+    });
 }
 // Each probe returns a boolean (connected/ok). Endpoints mirror the per-source
 // "Test Connection" buttons so the results match what those buttons would show.
@@ -935,7 +2205,12 @@ const HYBRID_SOURCE_PROBE = {
     soundcloud: () => _ssJson('/api/soundcloud/status').then(j => j.available === true && j.reachable === true),
     torrent:    () => _ssTestConn('torrent_client'),
     usenet:     () => _ssTestConn('usenet_client'),
-    youtube:    () => Promise.resolve(true),  // no auth required
+    // run_service_test already handles 'prowlarr'; the tile just needed wiring.
+    prowlarr:   () => _ssTestConn('prowlarr'),
+    // Was hardcoded to true on the grounds that YouTube needs no auth.
+    // It does now — cookies — and the green dot hid a bot-block from the
+    // reporter of #1126 for long enough that he opened #1233 about it.
+    youtube:    () => _ssTestConn('youtube'),
 };
 // Configured metadata / server connections that support a generic test.
 const CONNECTION_TEST_SERVICES = ['spotify', 'server', 'tidal', 'qobuz', 'lastfm', 'genius', 'listenbrainz', 'acoustid', 'discogs'];
@@ -958,19 +2233,47 @@ async function testAllSources(opts = {}) {
 
     // Torrent/Usenet downloads go through Prowlarr — its connection must be
     // established first or those source tests fail. Probe Prowlarr up front.
-    if (sources.has('torrent') || sources.has('usenet')) {
-        try { await _ssTestConn('prowlarr'); } catch (e) { /* surfaced via the per-source test below */ }
+    //
+    // The result used to be thrown away, which is why the Indexers tile stayed
+    // grey however healthy Prowlarr was: the tile reads _hybridSourceStatus,
+    // and nothing ever wrote prowlarr into it. Prowlarr is not a link in the
+    // chain, so the loop below — which walks the chain — never reaches it
+    // either. Record it here, where it is already being tested.
+    // `sources` comes from the MUSIC chain dropdown, so on the video side it
+    // says nothing about whether Prowlarr matters — and there it is the main
+    // path, not an extra. Test it there too, or its tile is permanently grey.
+    const _onVideoSide = document.body.getAttribute('data-side') === 'video';
+    if (sources.has('torrent') || sources.has('usenet') || _onVideoSide) {
+        _hybridSourceStatus.prowlarr = 'testing';
+        try {
+            const good = await _ssTestConn('prowlarr');
+            _hybridSourceStatus.prowlarr = good
+                ? (_ssLastTestWarned.prowlarr ? 'warn' : 'ok')
+                : 'fail';
+        } catch (e) {
+            _hybridSourceStatus.prowlarr = 'fail';
+        }
+        // the loop below only redraws while walking the chain, which Prowlarr
+        // is not part of
+        try { buildSourceTiles(); } catch (e) { /* tiles are cosmetic */ }
     }
 
     for (const id of sources) _hybridSourceStatus[id] = 'testing';
     buildHybridSourceList();
 
     let ok = 0, fail = 0;
+    const failedIds = [];
     for (const id of sources) {
         const probe = HYBRID_SOURCE_PROBE[id];
         if (!probe) { _hybridSourceStatus[id] = 'na'; continue; }
-        try { const good = await probe(); _hybridSourceStatus[id] = good ? 'ok' : 'fail'; good ? ok++ : fail++; }
-        catch (e) { _hybridSourceStatus[id] = 'fail'; fail++; }
+        try {
+            const good = await probe();
+            _hybridSourceStatus[id] = good ? (_ssLastTestWarned[id] ? 'warn' : 'ok') : 'fail';
+            good ? ok++ : (fail++, failedIds.push(id));
+            // a warning is worth surfacing even though the source passed
+            if (good && _ssLastTestWarned[id]) failedIds.push(id);
+        }
+        catch (e) { _hybridSourceStatus[id] = 'fail'; fail++; failedIds.push(id); }
         buildHybridSourceList();
     }
 
@@ -983,7 +2286,7 @@ async function testAllSources(opts = {}) {
             for (const svc of CONNECTION_TEST_SERVICES) {
                 const configured = svc === 'server' ? true : (cfg && cfg[svc] && cfg[svc].configured);
                 if (!configured) continue;
-                try { const good = await _ssTestConn(svc); good ? connOk++ : connFail++; } catch (e) { connFail++; }
+                try { const good = await _ssTestConn(svc); good ? connOk++ : (connFail++, failedIds.push(svc)); } catch (e) { connFail++; failedIds.push(svc); }
             }
         } catch (e) { /* config-status unavailable — skip connection sweep */ }
     }
@@ -992,7 +2295,14 @@ async function testAllSources(opts = {}) {
     if (!silent) {
         const parts = [`sources ${ok}✓${fail ? ' / ' + fail + '✗' : ''}`];
         if (connOk || connFail) parts.push(`connections ${connOk}✓${connFail ? ' / ' + connFail + '✗' : ''}`);
-        showToast('Tested ' + parts.join(', '), (fail || connFail) ? 'error' : 'success');
+        // A count tells you something broke, not what. Sources that can
+        // explain themselves already do — carry the first one through so
+        // the toast is actionable (#1233).
+        let detail = '';
+        for (const id of failedIds) {
+            if (_ssLastTestMessage[id]) { detail = ` — ${_ssLastTestMessage[id]}`; break; }
+        }
+        showToast('Tested ' + parts.join(', ') + detail, (fail || connFail) ? 'error' : 'success');
     }
 }
 window.testAllSources = testAllSources;
@@ -1007,6 +2317,8 @@ function autoTestSourcesOnce() {
 }
 
 function buildHybridSourceList() {
+    // Same state drives both views; refresh the Sources cards alongside.
+    try { buildSourceTiles(); } catch (e) { /* tiles are cosmetic */ }
     const container = document.getElementById('hybrid-source-list');
     if (!container) return;
 
@@ -1567,6 +2879,27 @@ async function loadSettingsData() {
         applyPathsEnvironment(settings);
         document.getElementById('staging-path').value = settings.import?.staging_path || './Staging';
         document.getElementById('music-videos-path').value = settings.library?.music_videos_path || './MusicVideos';
+        const isDocker = !!(settings._environment && settings._environment.docker) ||
+                         (settings.soulseek?.transfer_path || '').startsWith('/app/') ||
+                         (settings.soulseek?.download_path || '').startsWith('/app/');
+        const defaultPodcastPath = isDocker ? '/app/podcasts' : './podcasts';
+        const podcastsEl = document.getElementById('podcasts-path');
+        if (podcastsEl) {
+            podcastsEl.placeholder = defaultPodcastPath;
+            const currentPodcastsVal = settings.podcasts?.download_path || settings.library?.podcasts_path;
+            podcastsEl.value = (isDocker && (!currentPodcastsVal || currentPodcastsVal === './podcasts'))
+                ? defaultPodcastPath
+                : (currentPodcastsVal || defaultPodcastPath);
+        }
+        const defaultAudiobookPath = isDocker ? '/app/audiobooks' : './audiobooks';
+        const audiobooksEl = document.getElementById('audiobooks-path');
+        if (audiobooksEl) {
+            audiobooksEl.placeholder = defaultAudiobookPath;
+            const currentAudiobooksVal = settings.audiobooks?.download_path || settings.library?.audiobooks_path;
+            audiobooksEl.value = (isDocker && (!currentAudiobooksVal || currentAudiobooksVal === './audiobooks'))
+                ? defaultAudiobookPath
+                : (currentAudiobooksVal || defaultAudiobookPath);
+        }
         document.getElementById('playlists-materialize-path').value = settings.playlists?.materialize_path || './Playlists';
         document.getElementById('playlists-materialize-mode').value = settings.playlists?.materialize_mode || 'symlink';
 
@@ -1654,6 +2987,7 @@ async function loadSettingsData() {
 
         // Populate YouTube settings
         document.getElementById('youtube-cookies-browser').value = settings.youtube?.cookies_browser || '';
+        markUnsupportedCookieBrowsers(!!(settings._environment && settings._environment.windows));
         document.getElementById('youtube-download-delay').value = settings.youtube?.download_delay ?? 3;
         const _ytTranscode = document.getElementById('youtube-transcode');
         const _ytTranscodeOpts = document.getElementById('youtube-transcode-options');
@@ -1686,6 +3020,7 @@ async function loadSettingsData() {
             _toggleYtPaste();
             if (!_ytCookieSel.dataset.pasteToggleBound) {
                 _ytCookieSel.addEventListener('change', _toggleYtPaste);
+                _ytCookieSel.addEventListener('change', updateCookieBrowserWarning);
                 _ytCookieSel.dataset.pasteToggleBound = '1';
             }
         }
@@ -1753,6 +3088,59 @@ async function loadSettingsData() {
         document.getElementById('template-playlist-path').value = settings.file_organization?.templates?.playlist_path || '$playlist/$artist - $title';
         document.getElementById('template-playlist-item').value = settings.file_organization?.templates?.playlist_item || '';
         document.getElementById('template-video-path').value = settings.file_organization?.templates?.video_path || '$artist/$title-video';
+        document.getElementById('template-podcast-path').value = settings.file_organization?.templates?.podcast_path || '$show/Season $season/$title';
+        document.getElementById('template-audiobook-path').value = settings.file_organization?.templates?.audiobook_path || '$author/$series/$seriespos - $title';
+        const podcastFormatEl = document.getElementById('podcast-media-format');
+        if (podcastFormatEl) {
+            podcastFormatEl.value = settings.podcasts?.media_format || 'audio';
+        }
+
+        // Audiobook settings. Every read carries an explicit default: there is no
+        // deep merge of new defaults into an existing config row, so a key added
+        // after an install was set up comes back undefined, and a bare ?? here
+        // would silently show every switch as off.
+        const ab = settings.audiobooks || {};
+        const abSource = ab.download_source || {};
+        const abVal = (el, value) => { if (el) el.value = value; };
+        const abChecked = (el, value) => { if (el) el.checked = value !== false; };
+        abVal(document.getElementById('audiobook-download-mode'), abSource.mode || 'hybrid');
+        _audiobookHybrid = (abSource.hybrid_order || [])
+            .filter(src => AUDIOBOOK_SOURCES.includes(src));
+        if (!_audiobookHybrid.length) _audiobookHybrid = [...AUDIOBOOK_SOURCES];
+        onAudiobookModeChange();
+        // Both music and audiobook chain state are loaded by now, so the shared
+        // widget can render whichever tab is showing.
+        try { _dlchainLoad(); } catch (e) { /* widget is not on every page */ }
+        abVal(document.getElementById('audiobook-torrent-category'),
+            ab.torrent_category || 'audiobooks');
+        abVal(document.getElementById('audiobook-prowlarr-categories'),
+            (ab.prowlarr_categories || [3030]).join(', '));
+        // Stored as a fraction because that is what the gate multiplies by;
+        // shown as a percentage because "0.92" in a box labelled % is a bug
+        // report waiting to happen.
+        abVal(document.getElementById('audiobook-completeness-tolerance'),
+            Math.round((ab.completeness_tolerance ?? 0.92) * 100));
+        abVal(document.getElementById('audiobook-staging-days'), ab.staging_days ?? 7);
+        abChecked(document.getElementById('audiobook-renumber-chapters'), ab.renumber_chapters);
+        abChecked(document.getElementById('audiobook-embed-metadata'), ab.embed_metadata);
+        abChecked(document.getElementById('audiobook-embed-artwork'), ab.embed_artwork);
+        abChecked(document.getElementById('audiobook-save-artwork'), ab.save_artwork);
+        abChecked(document.getElementById('audiobook-write-nfo'), ab.write_nfo);
+
+        // Quality profile. The stored order is a list, best first; the page
+        // only edits which format leads, and the rest keep their order behind
+        // it — a full drag-to-reorder list is more UI than the choice needs.
+        const abq = ab.quality || {};
+        const abOrder = Array.isArray(abq.format_order) && abq.format_order.length
+            ? abq.format_order
+            : ['m4b', 'm4a', 'mp3', 'opus', 'ogg', 'flac'];
+        abVal(document.getElementById('audiobook-format-first'), abOrder[0] || 'm4b');
+        abVal(document.getElementById('audiobook-min-bitrate'), abq.min_bitrate_kbps ?? 0);
+        abVal(document.getElementById('audiobook-max-bitrate'), abq.max_bitrate_kbps ?? 0);
+        abChecked(document.getElementById('audiobook-allow-dramatized'),
+            abq.allow_dramatized);
+        abChecked(document.getElementById('audiobook-recycle-deletes'), ab.recycle_deletes);
+        abVal(document.getElementById('audiobook-recycle-keep-days'), ab.recycle_keep_days ?? 7);
         document.getElementById('disc-label').value = settings.file_organization?.disc_label || 'Disc';
         document.getElementById('collab-artist-mode').value = settings.file_organization?.collab_artist_mode || 'first';
         document.getElementById('artistletter-symbol-fallback').checked = settings.file_organization?.artistletter_symbol_fallback === true;
@@ -2012,6 +3400,17 @@ async function loadSettingsData() {
         // on top of it, and an untouched field re-masks on blur (round-trips the
         // sentinel, which the server treats as "keep existing").
         _wireRedactedSecrets();
+
+        // the library headers report live values, so they are only meaningful
+        // once the form actually holds them. deliberately inside the try: if the
+        // load failed there is nothing true to summarise, and the headers keep
+        // their static descriptions rather than reporting an empty form as
+        // "nothing enabled".
+        if (typeof refreshLibrarySummaries === 'function') refreshLibrarySummaries();
+        // the service tiles report which credentials are actually filled in, so
+        // they are only truthful once the form holds them. same reason as above:
+        // summarising an empty form would report every service as "not set up".
+        if (typeof buildServiceTiles === 'function') buildServiceTiles();
 
     } catch (error) {
         console.error('Error loading settings:', error);
@@ -2339,16 +3738,9 @@ function toggleServer(serverType) {
 
 function updateDownloadSourceUI() {
     const mode = document.getElementById('download-source-mode').value;
+    // Only the ORDER widget is mode-driven now. The per-source config blocks
+    // moved to the Sources tab and are no longer looked up here at all.
     const hybridContainer = document.getElementById('hybrid-settings-container');
-    const soulseekContainer = document.getElementById('soulseek-settings-container');
-    const tidalContainer = document.getElementById('tidal-download-settings-container');
-    const qobuzContainer = document.getElementById('qobuz-settings-container');
-    const youtubeContainer = document.getElementById('youtube-settings-container');
-    const hifiContainer = document.getElementById('hifi-download-settings-container');
-    const deezerDlContainer = document.getElementById('deezer-download-settings-container');
-    const amazonContainer = document.getElementById('amazon-download-settings-container');
-    const lidarrContainer = document.getElementById('lidarr-download-settings-container');
-    const soundcloudContainer = document.getElementById('soundcloud-download-settings-container');
 
     hybridContainer.style.display = mode === 'hybrid' ? 'block' : 'none';
 
@@ -2363,41 +3755,15 @@ function updateDownloadSourceUI() {
         activeSources.add(mode);
     }
 
-    // In single-source mode the one config block is shown directly. In hybrid
-    // mode there can be many active sources, so we only reveal the one the user
-    // clicked open in the priority list (accordion-style) — no endless stack.
-    const isHybrid = mode === 'hybrid';
-    const showCfg = (src) => activeSources.has(src) && (!isHybrid || _expandedHybridSource === src);
+    // Nothing per-source is hidden from here any more. Driving those blocks off
+    // the active-source set is what made a source impossible to configure until
+    // you had already enabled it: you had to switch Tidal on, saving a
+    // half-configured source into the chain, before its account fields existed
+    // to be filled in. They are plain accordions on the Sources tab now.
 
-    soulseekContainer.style.display = showCfg('soulseek') ? 'block' : 'none';
-    tidalContainer.style.display = showCfg('tidal') ? 'block' : 'none';
-    qobuzContainer.style.display = showCfg('qobuz') ? 'block' : 'none';
-    youtubeContainer.style.display = showCfg('youtube') ? 'block' : 'none';
-    hifiContainer.style.display = showCfg('hifi') ? 'block' : 'none';
-    if (deezerDlContainer) deezerDlContainer.style.display = showCfg('deezer_dl') ? 'block' : 'none';
-    if (amazonContainer) amazonContainer.style.display = showCfg('amazon') ? 'block' : 'none';
-    if (lidarrContainer) lidarrContainer.style.display = showCfg('lidarr') ? 'block' : 'none';
-    if (soundcloudContainer) soundcloudContainer.style.display = showCfg('soundcloud') ? 'block' : 'none';
-    const prowlarrRedirect = document.getElementById('prowlarr-source-redirect');
-    if (prowlarrRedirect) {
-        const showProwlarr = showCfg('torrent') || showCfg('usenet');
-        prowlarrRedirect.style.display = showProwlarr ? 'block' : 'none';
-    }
-
-    // Indexers & Downloaders: torrent/usenet setup (Prowlarr + the Torrent and
-    // Usenet client tiles) is shared config — keep it always reachable on the
-    // Downloads tab for BOTH the music and video sides, like the Advanced /
-    // Appearance tabs. (It used to be gated on an active torrent/usenet source,
-    // which hid it from anyone whose source was something else — and from the video
-    // side entirely, whose source lives on a separate dropdown.) Only tab-gated so
-    // it never leaks onto another tab.
-    const onDownloadsTab = document.querySelector('.stg-tab.active')?.dataset.tab === 'downloads';
-    const indSection = document.getElementById('indexers-downloaders-section');
-    if (indSection) indSection.style.display = onDownloadsTab ? '' : 'none';
-    const torrentTile = document.getElementById('torrent-tile');
-    if (torrentTile) torrentTile.style.display = '';
-    const usenetTile = document.getElementById('usenet-tile');
-    if (usenetTile) usenetTile.style.display = '';
+    // Indexers, the torrent client and the usenet client used to be gated to
+    // the Downloads tab from here. They live on the Sources tab now, as panels
+    // behind their own tiles, so there is nothing to show or hide.
 
     // Quality profile is now a GLOBAL system — the same ranked-target list
     // drives every source (Soulseek, Tidal, Qobuz, HiFi, Deezer, …), so it is
@@ -2411,23 +3777,10 @@ function updateDownloadSourceUI() {
         qualityProfileTile.style.display = onQualityTab ? '' : 'none';
     }
 
-    // Only auto-probe a source's live status when its config panel is visible
-    // (always in single-source mode; only the opened one in hybrid mode).
-    if (showCfg('tidal')) {
-        checkTidalDownloadAuthStatus();
-    }
-    if (showCfg('qobuz')) {
-        checkQobuzAuthStatus();
-    }
-    if (showCfg('hifi')) {
-        testHiFiConnection();
-    }
-    if (showCfg('amazon')) {
-        testAmazonConnection();
-    }
-    if (showCfg('soundcloud')) {
-        testSoundcloudConnection();
-    }
+    // The per-source auth probes used to run from here, gated on the same
+    // active-source test. They belong to a card being OPENED now — see
+    // probeSourceOnOpen — which also stops them firing on every unrelated
+    // settings redraw.
 }
 
 function updateHybridSecondaryOptions() {
@@ -4379,6 +5732,53 @@ function _getTagConfig(path) {
     return el ? el.checked : true;
 }
 
+// ── reading the form without destroying what is not on it ──────────────────
+// `getElementById('x')?.value || ''` looks defensive and is the opposite: when
+// the element is absent it writes an EMPTY STRING over the stored setting. The
+// server sets keys one at a time with no deep merge, so an empty string IS the
+// new value.
+//
+// That is not hypothetical. A broken edit removed the Indexers / Torrent /
+// Usenet block from index.html for a few minutes; the running server serves
+// that file per request, so the settings page rendered without those fields and
+// the next auto-save wiped three URLs out of the database. The API key survived
+// only because the server refuses to overwrite a stored secret with a blank.
+//
+// These return undefined for a missing element, and JSON.stringify drops
+// undefined-valued keys — so the key never reaches the server and the stored
+// value is left exactly as it was. A missing field now means "I have nothing to
+// say about this", which is the truth, instead of "set it to nothing".
+function _cfgStr(id, { trim = false, fallback } = {}) {
+    const el = document.getElementById(id);
+    if (!el) return undefined;              // absent -> say nothing about it
+    let v = el.value ?? '';
+    if (trim) v = String(v).trim();
+    return (v === '' && fallback !== undefined) ? fallback : v;
+}
+
+// `parseFloat(el?.value) || 0` has the same fault as the int version.
+function _cfgFloat(id, fallback) {
+    const el = document.getElementById(id);
+    if (!el) return undefined;
+    const n = parseFloat(el.value);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+// Same rule for numbers. `parseInt(el?.value) || 0` writes a ZERO over the
+// stored setting when the element is missing — which for a timeout or a bitrate
+// floor is not a blank, it is a different and usually harmful value.
+function _cfgInt(id, fallback) {
+    const el = document.getElementById(id);
+    if (!el) return undefined;
+    const n = parseInt(el.value, 10);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+function _cfgBool(id) {
+    const el = document.getElementById(id);
+    return el ? !!el.checked : undefined;
+}
+
 async function saveSettings(quiet = false) {
     // #879: refuse to save if the settings never loaded successfully — the form
     // is showing defaults, not the user's real config, so saving would wipe it.
@@ -4389,6 +5789,11 @@ async function saveSettings(quiet = false) {
         }
         return;
     }
+
+    // Comma-separated text fields, tolerant of stray spaces and empties.
+    const splitList = (raw) => String(raw || '').split(',')
+        .map(part => part.trim())
+        .filter(Boolean);
 
     let musicBrainzServerSettings;
     try {
@@ -4458,7 +5863,7 @@ async function saveSettings(quiet = false) {
     // Validate the optional "Playlist File Naming" template before saving: it's a
     // filename (no path separator) and must include $title — mirrors the server-side
     // rule so a broken value can't be stored. Empty = feature off (allowed).
-    const _plItemTpl = (document.getElementById('template-playlist-item')?.value || '').trim();
+    const _plItemTpl = (_cfgStr('template-playlist-item')).trim();
     if (_plItemTpl) {
         if (_plItemTpl.includes('/') || _plItemTpl.includes('\\')) {
             showToast('Playlist File Naming can\'t contain a folder separator ( / or \\ ) — it names the file, not a path.', 'error');
@@ -4505,13 +5910,13 @@ async function saveSettings(quiet = false) {
             api_key: document.getElementById('soulseek-api-key').value,
             download_path: document.getElementById('download-path').value,
             transfer_path: document.getElementById('transfer-path').value,
-            min_free_disk_gb: Math.max(0, parseFloat(document.getElementById('min-free-disk-gb')?.value) || 0),
+            min_free_disk_gb: _cfgFloat('min-free-disk-gb', 0),
             search_timeout: parseInt(document.getElementById('soulseek-search-timeout').value) || 60,
             search_timeout_buffer: parseInt(document.getElementById('soulseek-search-timeout-buffer').value) || 15,
             search_min_delay_seconds: parseInt(document.getElementById('soulseek-search-min-delay-seconds').value) || 0,
             min_peer_upload_speed: parseInt(document.getElementById('soulseek-min-peer-speed').value) || 0,
             max_peer_queue: parseInt(document.getElementById('soulseek-max-peer-queue').value) || 0,
-            preferred_version: document.getElementById('preferred-version')?.value || '',
+            preferred_version: _cfgStr('preferred-version'),
             download_timeout: (parseInt(document.getElementById('soulseek-download-timeout').value) || 10) * 60,
             auto_clear_searches: document.getElementById('soulseek-auto-clear-searches').checked
         },
@@ -4523,11 +5928,11 @@ async function saveSettings(quiet = false) {
         acoustid: {
             api_key: document.getElementById('acoustid-api-key').value,
             enabled: document.getElementById('acoustid-enabled').checked,
-            require_verified: document.getElementById('acoustid-require-verified')?.checked === true
+            require_verified: _cfgBool('acoustid-require-verified')
         },
         concerts: {
-            ticketmaster_api_key: document.getElementById('concerts-ticketmaster-api-key')?.value?.trim() || '',
-            setlistfm_api_key: document.getElementById('concerts-setlistfm-api-key')?.value?.trim() || ''
+            ticketmaster_api_key: _cfgStr('concerts-ticketmaster-api-key', { trim: true }),
+            setlistfm_api_key: _cfgStr('concerts-setlistfm-api-key', { trim: true })
         },
         lastfm: {
             api_key: document.getElementById('lastfm-api-key').value,
@@ -4556,17 +5961,17 @@ async function saveSettings(quiet = false) {
             spotify_free: metadataSource === 'spotify_free',
             // Independent opt-in: run the enrichment worker on Spotify Free even
             // when an official account is connected (spares the official quota).
-            spotify_free_enrichment: document.getElementById('metadata-spotify-free-enrichment')?.checked || false
+            spotify_free_enrichment: _cfgBool('metadata-spotify-free-enrichment')
         },
         experimental: {
-            jiosaavn_enabled: document.getElementById('experimental-jiosaavn-enabled')?.checked === true,
-            bandcamp_enabled: document.getElementById('experimental-bandcamp-enabled')?.checked === true,
+            jiosaavn_enabled: _cfgBool('experimental-jiosaavn-enabled'),
+            bandcamp_enabled: _cfgBool('experimental-bandcamp-enabled'),
         },
         image_cache: {
             // Server-side resizing is opt-in; the cache itself keeps whatever
             // it was already set to (on, for every install since it shipped).
-            thumbnails: document.getElementById('imgcache-thumbnails')?.checked === true,
-            max_cache_mb: parseInt(document.getElementById('imgcache-max-mb')?.value, 10) || 0,
+            thumbnails: _cfgBool('imgcache-thumbnails'),
+            max_cache_mb: _cfgInt('imgcache-max-mb', 0),
         },
         hydrabase: {
             url: document.getElementById('hydrabase-url').value,
@@ -4581,7 +5986,7 @@ async function saveSettings(quiet = false) {
             stream_source: document.getElementById('stream-source').value,
             max_concurrent: parseInt(document.getElementById('max-concurrent-downloads').value) || 3,
             // #1056 — streaming-source search timeout override; 0 = source defaults
-            source_search_timeout: parseInt(document.getElementById('source-search-timeout')?.value) || 0,
+            source_search_timeout: _cfgInt('source-search-timeout', 0),
             // Stalled-torrent knobs (rendered in the torrent client section).
             // UI is in MINUTES; stored in SECONDS. Blank/NaN → 10 min default;
             // 0 stays 0 (disabled).
@@ -4589,7 +5994,7 @@ async function saveSettings(quiet = false) {
                 const m = parseInt(document.getElementById('torrent-stall-timeout')?.value, 10);
                 return (Number.isFinite(m) && m >= 0 ? m : 10) * 60;
             })(),
-            torrent_stall_action: document.getElementById('torrent-stall-action')?.value || 'abandon',
+            torrent_stall_action: _cfgStr('torrent-stall-action', { fallback: 'abandon' }),
             // #1139: don't queue a release nobody is serving. Blank/NaN → 1;
             // 0 stays 0 (gate off).
             torrent_min_seeders: (() => {
@@ -4598,8 +6003,8 @@ async function saveSettings(quiet = false) {
             })(),
             // In-container path(s) where SoulSync reads finished torrent/usenet
             // downloads (#857). Rendered in the torrent/usenet client sections.
-            torrent_download_path: document.getElementById('torrent-download-path')?.value || '',
-            usenet_download_path: document.getElementById('usenet-download-path')?.value || '',
+            torrent_download_path: _cfgStr('torrent-download-path'),
+            usenet_download_path: _cfgStr('usenet-download-path'),
         },
         tidal_download: {
             // quality derived from the global Quality Profile (ranked targets); allow_fallback always true
@@ -4622,29 +6027,29 @@ async function saveSettings(quiet = false) {
             api_key: document.getElementById('lidarr-api-key').value || '',
         },
         prowlarr: {
-            url: document.getElementById('prowlarr-url')?.value || '',
-            api_key: document.getElementById('prowlarr-api-key')?.value || '',
-            indexer_ids: document.getElementById('prowlarr-indexer-ids')?.value || '',
+            url: _cfgStr('prowlarr-url'),
+            api_key: _cfgStr('prowlarr-api-key'),
+            indexer_ids: _cfgStr('prowlarr-indexer-ids'),
         },
         torrent_client: {
-            type: document.getElementById('torrent-client-type')?.value || 'qbittorrent',
-            url: document.getElementById('torrent-client-url')?.value || '',
-            username: document.getElementById('torrent-client-username')?.value || '',
-            password: document.getElementById('torrent-client-password')?.value || '',
-            category: document.getElementById('torrent-client-category')?.value || 'soulsync',
-            save_path: document.getElementById('torrent-client-save-path')?.value || '',
-            seed_ratio_goal: parseFloat(document.getElementById('music-seed-ratio')?.value) || 0,
-            seed_time_goal_hours: parseInt(document.getElementById('music-seed-hours')?.value, 10) || 0,
+            type: _cfgStr('torrent-client-type', { fallback: 'qbittorrent' }),
+            url: _cfgStr('torrent-client-url'),
+            username: _cfgStr('torrent-client-username'),
+            password: _cfgStr('torrent-client-password'),
+            category: _cfgStr('torrent-client-category', { fallback: 'soulsync' }),
+            save_path: _cfgStr('torrent-client-save-path'),
+            seed_ratio_goal: _cfgFloat('music-seed-ratio', 0),
+            seed_time_goal_hours: _cfgInt('music-seed-hours', 0),
             seed_remove_data: !!(document.getElementById('music-seed-remove-data') || {}).checked,
-            seed_mode: document.getElementById('music-seed-mode')?.value || 'soulsync',
+            seed_mode: _cfgStr('music-seed-mode', { fallback: 'soulsync' }),
         },
         usenet_client: {
-            type: document.getElementById('usenet-client-type')?.value || 'sabnzbd',
-            url: document.getElementById('usenet-client-url')?.value || '',
-            api_key: document.getElementById('usenet-client-api-key')?.value || '',
-            username: document.getElementById('usenet-client-username')?.value || '',
-            password: document.getElementById('usenet-client-password')?.value || '',
-            category: document.getElementById('usenet-client-category')?.value || 'soulsync',
+            type: _cfgStr('usenet-client-type', { fallback: 'sabnzbd' }),
+            url: _cfgStr('usenet-client-url'),
+            api_key: _cfgStr('usenet-client-api-key'),
+            username: _cfgStr('usenet-client-username'),
+            password: _cfgStr('usenet-client-password'),
+            category: _cfgStr('usenet-client-category', { fallback: 'soulsync' }),
         },
         soundcloud_download: {
             // No knobs yet — anonymous-only. Keeping the key present so
@@ -4700,17 +6105,19 @@ async function saveSettings(quiet = false) {
                 single_path: document.getElementById('template-single-path').value,
                 playlist_path: document.getElementById('template-playlist-path').value,
                 playlist_item: document.getElementById('template-playlist-item').value,
-                video_path: document.getElementById('template-video-path').value
+                video_path: document.getElementById('template-video-path').value,
+                podcast_path: document.getElementById('template-podcast-path').value,
+                audiobook_path: document.getElementById('template-audiobook-path').value
             }
         },
         wishlist: {
             allow_duplicate_tracks: document.getElementById('allow-duplicate-tracks').checked,
             ignore_ttl_days: Math.max(1, Math.min(365,
-                parseInt(document.getElementById('wishlist-ignore-ttl')?.value, 10) || 30)),
+                _cfgInt('wishlist-ignore-ttl', 30))),
         },
         playlist_sync: {
             create_backup: document.getElementById('create-backup').checked,
-            mode: document.getElementById('playlist-sync-mode')?.value || 'replace'
+            mode: _cfgStr('playlist-sync-mode', { fallback: 'replace' })
         },
         content_filter: {
             allow_explicit: document.getElementById('allow-explicit').checked,
@@ -4733,12 +6140,64 @@ async function saveSettings(quiet = false) {
         library: {
             music_paths: collectMusicPaths(),
             music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos',
-            reorganize_preserve_casing: document.getElementById('reorganize-preserve-casing')?.checked !== false
+            podcasts_path: _cfgStr('podcasts-path', { fallback: './podcasts' }),
+            audiobooks_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),
+            reorganize_preserve_casing: _cfgBool('reorganize-preserve-casing')
+        },
+        podcasts: {
+            download_path: _cfgStr('podcasts-path', { fallback: './podcasts' }),
+            media_format: _cfgStr('podcast-media-format', { fallback: 'audio' }),
+        },
+        audiobooks: {
+            download_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),
+            download_source: {
+                mode: _cfgStr('audiobook-download-mode', { fallback: 'hybrid' }),
+                hybrid_order: _audiobookHybrid.filter(s => AUDIOBOOK_SOURCES.includes(s)),
+            },
+            torrent_category: _cfgStr('audiobook-torrent-category', { trim: true, fallback: 'audiobooks' }),
+            // One category covers both: a book is tagged the same way whichever
+            // client fetched it, and two fields to type the same word twice is
+            // two chances to get it wrong.
+            usenet_category: _cfgStr('audiobook-torrent-category', { trim: true, fallback: 'audiobooks' }),
+            prowlarr_categories: (_cfgStr('audiobook-prowlarr-categories') === undefined
+                ? undefined : splitList(_cfgStr('audiobook-prowlarr-categories')))
+                .map(n => parseInt(n, 10))
+                .filter(n => Number.isFinite(n)),
+            completeness_tolerance: Math.min(1, Math.max(0.1,
+                (_cfgInt('audiobook-completeness-tolerance', 92)) / 100)),
+            staging_days: Math.min(90, Math.max(1,
+                _cfgInt('audiobook-staging-days', 7))),
+            renumber_chapters: _cfgBool('audiobook-renumber-chapters'),
+            embed_metadata: _cfgBool('audiobook-embed-metadata'),
+            embed_artwork: _cfgBool('audiobook-embed-artwork'),
+            save_artwork: _cfgBool('audiobook-save-artwork'),
+            write_nfo: _cfgBool('audiobook-write-nfo'),
+            quality: {
+                // The chosen format leads; the default order follows behind it, so
+                // picking MP3 does not silently discard every other format.
+                format_order: (function () {
+                    const first = document.getElementById('audiobook-format-first')?.value || 'm4b';
+                    const rest = ['m4b', 'm4a', 'mp3', 'opus', 'ogg', 'flac']
+                        .filter(f => f !== first);
+                    return [first, ...rest];
+                })(),
+                min_bitrate_kbps: Math.max(0,
+                    _cfgInt('audiobook-min-bitrate', 0)),
+                max_bitrate_kbps: Math.max(0,
+                    _cfgInt('audiobook-max-bitrate', 0)),
+                allow_dramatized:
+                    document.getElementById('audiobook-allow-dramatized')?.checked !== false,
+            },
+            recycle_deletes:
+                document.getElementById('audiobook-recycle-deletes')?.checked !== false,
+            // 0 turns the bin off; it never means "erase everything now".
+            recycle_keep_days: Math.min(365, Math.max(0,
+                _cfgInt('audiobook-recycle-keep-days', 0))),
         },
         import: {
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,
-            folder_artist_override: document.getElementById('import-folder-artist-override')?.checked !== false,
-            transfer_is_permanent: document.getElementById('import-transfer-permanent')?.checked === true,
+            folder_artist_override: _cfgBool('import-folder-artist-override'),
+            transfer_is_permanent: _cfgBool('import-transfer-permanent'),
             staging_path: document.getElementById('staging-path').value || './Staging'
         },
         playlists: {
@@ -4754,7 +6213,7 @@ async function saveSettings(quiet = false) {
         },
         album_downloads: {
             // Atomic album publishing (#999) — opt-in, default off.
-            atomic_publish: document.getElementById('album-atomic-publish')?.checked === true
+            atomic_publish: _cfgBool('album-atomic-publish')
         },
         listening_stats: {
             enabled: document.getElementById('listening-stats-enabled').checked,
@@ -4772,13 +6231,13 @@ async function saveSettings(quiet = false) {
             entry_base_path: document.getElementById('m3u-entry-base-path').value || '',
             rewrite_from: document.getElementById('m3u-rewrite-from').value || '',
             rewrite_to: document.getElementById('m3u-rewrite-to').value || '',
-            library_enabled: document.getElementById('library-m3u-enabled')?.checked === true,
-            library_path: document.getElementById('library-m3u-path')?.value || ''
+            library_enabled: _cfgBool('library-m3u-enabled'),
+            library_path: _cfgStr('library-m3u-path')
         },
         ui_appearance: {
-            accent_preset: document.getElementById('accent-preset')?.value || '#1db954',
-            accent_color: document.getElementById('accent-custom-color')?.value || '#1db954',
-            sidebar_visualizer: document.getElementById('sidebar-visualizer-type')?.value || 'bars',
+            accent_preset: _cfgStr('accent-preset', { fallback: '#1db954' }),
+            accent_color: _cfgStr('accent-custom-color', { fallback: '#1db954' }),
+            sidebar_visualizer: _cfgStr('sidebar-visualizer-type', { fallback: 'bars' }),
             // Read the runtime flags / localStorage, not the checkboxes: while Max
             // Performance is on it locks those boxes visually-off, but the user's real
             // saved prefs live in the flags — so saving must not clobber them.
@@ -4790,19 +6249,19 @@ async function saveSettings(quiet = false) {
         youtube: {
             cookies_browser: document.getElementById('youtube-cookies-browser').value,
             download_delay: parseInt(document.getElementById('youtube-download-delay').value) || 3,
-            transcode: document.getElementById('youtube-transcode')?.checked || false,
-            transcode_codec: document.getElementById('youtube-transcode-codec')?.value || 'mp3',
-            transcode_bitrate: document.getElementById('youtube-transcode-bitrate')?.value || '320',
+            transcode: _cfgBool('youtube-transcode'),
+            transcode_codec: _cfgStr('youtube-transcode-codec', { fallback: 'mp3' }),
+            transcode_bitrate: _cfgStr('youtube-transcode-bitrate', { fallback: '320' }),
             // Raw cookies.txt blob — backend validates, writes it to a file, and stores
             // only the path (never echoed back). Blank = keep any already-saved file.
-            cookies_paste: document.getElementById('youtube-cookies-paste')?.value || '',
+            cookies_paste: _cfgStr('youtube-cookies-paste'),
         },
         security: {
-            require_pin_on_launch: document.getElementById('security-require-pin')?.checked || false,
-            cors_origins: document.getElementById('security-cors-origins')?.value?.trim() || '',
-            trust_reverse_proxy: document.getElementById('security-trust-proxy')?.checked || false,
-            auth_proxy_header: document.getElementById('security-auth-proxy-header')?.value?.trim() || '',
-            require_login: document.getElementById('security-require-login')?.checked || false,
+            require_pin_on_launch: _cfgBool('security-require-pin'),
+            cors_origins: _cfgStr('security-cors-origins', { trim: true }),
+            trust_reverse_proxy: _cfgBool('security-trust-proxy'),
+            auth_proxy_header: _cfgStr('security-auth-proxy-header', { trim: true }),
+            require_login: _cfgBool('security-require-login'),
         }
     };
 
@@ -6309,6 +7768,8 @@ async function logoutQobuz() {
 const PATH_INPUT_IDS = {
     download: 'download-path',
     transfer: 'transfer-path',
+    podcasts: 'podcasts-path',
+    audiobooks: 'audiobooks-path',
     staging: 'staging-path',
     'music-videos': 'music-videos-path',
     'playlists-materialize': 'playlists-materialize-path',
@@ -6334,16 +7795,19 @@ function applyPathsEnvironment(settings) {
 }
 
 function togglePathLock(pathType, btn) {
-    const input = document.getElementById(PATH_INPUT_IDS[pathType]);
+    const inputId = PATH_INPUT_IDS[pathType] || (pathType.endsWith('-path') ? pathType : pathType + '-path');
+    const input = document.getElementById(inputId);
     if (!input) return;
-    const isLocked = input.hasAttribute('readonly');
+    const isLocked = input.hasAttribute('readonly') || input.readOnly;
     if (isLocked) {
         input.removeAttribute('readonly');
+        input.readOnly = false;
         input.focus();
         btn.textContent = 'Lock';
         btn.classList.remove('locked');
     } else {
         input.setAttribute('readonly', '');
+        input.readOnly = true;
         btn.textContent = 'Unlock';
         btn.classList.add('locked');
     }
@@ -6717,15 +8181,25 @@ async function loadYtdlpStatus() {
     try {
         const resp = await fetch('/api/ytdlp/status?channel=' + encodeURIComponent(channel));
         const d = await resp.json();
-        instEl.textContent = d.installed || 'Not installed';
+        // The running process keeps the yt-dlp it imported at startup, so after
+        // an update these two disagree until a restart. Saying only the loaded
+        // one made a SUCCESSFUL update read as "still behind", while the button
+        // said "already on the newest build" — both true, and together they made
+        // it look like the update had not worked.
+        instEl.textContent = d.restart_pending
+            ? `${d.installed} running — ${d.on_disk} installed, restart to finish`
+            : (d.installed || 'Not installed');
+        instEl.style.color = d.restart_pending ? '#ffb300' : '';
         // A PyPI outage must not read as "you are up to date" — say we could not
         // look, which is a different fact from "nothing newer exists".
         latEl.textContent = d.latest || (d.lookup_error ? "Couldn't check — no connection to PyPI" : 'Unknown');
         latEl.style.color = d.behind ? '#ffb300' : '';
         if (badge) {
-            badge.hidden = !d.behind;
+            badge.hidden = !(d.behind || d.restart_pending);
             badge.style.color = '#ffb300';
-            badge.title = d.behind ? 'A newer yt-dlp is available' : '';
+            badge.title = d.restart_pending
+                ? 'yt-dlp is updated on disk — restart SoulSync to use it'
+                : (d.behind ? 'A newer yt-dlp is available' : '');
         }
     } catch (e) {
         instEl.textContent = 'Unknown';

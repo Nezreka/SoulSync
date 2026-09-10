@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.3.3"
+_SOULSYNC_BASE_VERSION = "3.4.0"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -189,6 +189,7 @@ from core.metadata.source import (
     mb_release_detail_cache_lock,
     normalize_album_cache_key,
 )
+from core import direct_download_state
 from core import runtime_state as _rt_state
 from core.runtime_state import (
     activity_feed,
@@ -481,6 +482,10 @@ from core.socketio_cors import (
 )
 _socketio_cors_origins = _resolve_socketio_cors_origins(config_manager)
 socketio = SocketIO(app, async_mode='threading', cors_allowed_origins=_socketio_cors_origins)
+
+# Wrap Socket.IO as well as Flask; set before serving any requests.
+from core.url_base import configure_url_base
+configure_url_base(app, os.environ.get("SOULSYNC_URL_BASE", ""))
 _log_socketio_startup_status(_socketio_cors_origins, logger)
 _socketio_rejection_logger = _SocketIORejectionLogger(logger)
 set_activity_toast_emitter(socketio.emit)
@@ -850,6 +855,8 @@ VALID_PAGE_IDS = {
     'help',
     'hydrabase',
     'issues',
+    'podcasts',
+    'audiobooks',
     # Video side — per-profile page toggles (admin-only surfaces are gated separately,
     # not via allowed_pages: overlay studio, video-import, video-settings, video-automations).
     'video-dashboard',
@@ -1724,6 +1731,7 @@ import core.downloads.monitor as _download_monitor_module
 # the post_processing stuck window, defined once in lifecycle where the rescue
 # itself lives. healing only decides WHEN to ask; lifecycle decides what to do.
 from core.downloads.lifecycle import _POST_PROCESSING_STUCK_TIMEOUT
+from core.downloads import lifecycle as _downloads_lifecycle
 
 # Global download monitor instance
 download_monitor = WebUIDownloadMonitor()
@@ -1751,6 +1759,9 @@ def validate_and_heal_batch_states():
                 active_count = batch_data.get('active_count', 0)
                 queue = batch_data.get('queue', [])
                 phase = batch_data.get('phase', 'unknown')
+
+                if not _downloads_lifecycle.is_music_batch(batch_id, batch_data):
+                    continue
 
                 # AUTO-CLEANUP: Remove terminal batches after 5 minutes to prevent stale state.
                 # 'failed' (e.g. an album-bundle hard failure) was missing here, so a failed
@@ -1882,7 +1893,9 @@ def validate_and_heal_batch_states():
                 _global_max = None
             if _global_max is not None:
                 _total_active = sum(
-                    b.get('active_count', 0) for b in download_batches.values()
+                    b.get('active_count', 0)
+                    for _k, b in download_batches.items()
+                    if _downloads_lifecycle.is_music_batch(_k, b)
                 )
                 # AT MOST ONE BATCH PER FREE SLOT. Queueing every held batch
                 # would have each acquire two locks only to find the limit full
@@ -1900,6 +1913,8 @@ def validate_and_heal_batch_states():
                         if _free_slots <= 0:
                             break
                         if _bid in batches_needing_workers:
+                            continue
+                        if not _downloads_lifecycle.is_music_batch(_bid, _bdata):
                             continue
                         if _bdata.get('phase') in ('complete', 'error', 'cancelled', 'failed'):
                             continue
@@ -3545,7 +3560,7 @@ def handle_settings():
                     for key, value in _experimental_in.items():
                         config_manager.set(f'experimental.{key}', value)
 
-                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental', 'image_cache']:
+                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache']:
                     if service in new_settings:
                         if service == 'experimental' and isinstance(_experimental_in, dict):
                             continue
@@ -3657,7 +3672,13 @@ def handle_settings():
             # dumps every download onto the install disk — Proxmox LXCs default
             # to an 8GB root, which fills until the container hangs — so the UI
             # needs to know which story to tell and when to warn.
-            data['_environment'] = {'docker': os.path.exists('/.dockerenv')}
+            # `windows` drives the YouTube cookie picker: Chromium-family browsers
+            # seal their cookie store with App-Bound Encryption on Windows, which
+            # yt-dlp cannot read (yt-dlp issue 10927). It is the SERVER's OS that
+            # decides, not the browser the settings page happens to be open in —
+            # SoulSync on Linux read by an admin on a Windows laptop is fine.
+            data['_environment'] = {'docker': os.path.exists('/.dockerenv'),
+                                    'windows': os.name == 'nt'}
             return jsonify(data)
         except Exception as e:
             return jsonify({"error": str(e)}), 500
@@ -3912,7 +3933,7 @@ def setup_status_endpoint():
     setup_done = config_manager.get('setup.completed', False)
     download_mode = config_manager.get('download_source.mode', '')
     # Either the explicit flag or a user-configured download source means setup is done
-    has_user_config = bool(setup_done) or bool(download_mode)
+    has_user_config = bool(setup_done) or (bool(download_mode) and not config_manager.get('setup.in_progress', False))
     return jsonify({
         "setup_complete": has_user_config,
     })
@@ -3921,6 +3942,7 @@ def setup_status_endpoint():
 def setup_complete_endpoint():
     """Mark first-run setup as completed."""
     config_manager.set('setup.completed', True)
+    config_manager.set('setup.in_progress', False)
     return jsonify({"success": True})
 
 @app.route('/api/test-connection', methods=['POST'])
@@ -5107,8 +5129,6 @@ def spotify_callback():
         token_info = auth_manager.get_access_token(auth_code)
 
         if token_info:
-            # CRITICAL: update the GLOBAL spotify_client, not a local variable
-            global spotify_client
             clear_cached_metadata_client("spotify")
             spotify_client = get_spotify_client()
             if spotify_client.is_spotify_authenticated():
@@ -5814,8 +5834,22 @@ def download_music_video():
             _music_video_downloads[video_id]['artist'] = artist_name
             _music_video_downloads[video_id]['title'] = track_title
 
+            # Also put it on the Downloads page. This path keeps its own private
+            # dict and its own status endpoint, so until now a music video was
+            # downloading with nothing to show for it on the page whose whole
+            # job is showing downloads. Registered as managed_externally: this
+            # thread runs and files it, the music engine must not adopt it.
+            _mv_card = direct_download_state.register(
+                direct_download_state.MUSIC_VIDEO_BATCH, video_id,
+                title=track_title, artist=artist_name, album='Music Videos',
+                artwork_url=data.get('thumbnail') or '',
+                source_label='Music Video (YouTube)',
+            )
+
             def _progress(pct):
                 _music_video_downloads[video_id]['progress'] = round(pct, 1)
+                if _mv_card:
+                    direct_download_state.update_progress(video_id, percent=pct)
 
             final_path = download_orchestrator.client("youtube").download_music_video(video_url, output_path, progress_callback=_progress)
 
@@ -5823,16 +5857,24 @@ def download_music_video():
                 _music_video_downloads[video_id]['status'] = 'completed'
                 _music_video_downloads[video_id]['progress'] = 100
                 _music_video_downloads[video_id]['path'] = final_path
+                if _mv_card:
+                    direct_download_state.mark_status(video_id, 'completed', file_path=final_path)
                 logger.info(f"[Music Video] Downloaded: {artist_name} - {track_title} → {final_path}")
                 add_activity_item("", "Music Video Downloaded", f"{artist_name} - {track_title}", "Now")
             else:
                 _music_video_downloads[video_id]['status'] = 'error'
                 _music_video_downloads[video_id]['error'] = 'Download failed — file not found'
+                if _mv_card:
+                    direct_download_state.mark_status(video_id, 'failed',
+                                                     error='Download failed — file not found')
                 logger.error(f"[Music Video] Download failed for: {artist_name} - {track_title}")
 
         except Exception as e:
             _music_video_downloads[video_id]['status'] = 'error'
             _music_video_downloads[video_id]['error'] = str(e)
+            # A card left saying 'downloading' after the thread died is worse
+            # than no card: the page would show it running forever.
+            direct_download_state.mark_status(video_id, 'failed', error=str(e))
             logger.error(f"[Music Video] {e}")
 
     # Run in background thread
@@ -6122,6 +6164,89 @@ def playback_queue_prefetch_status():
         return jsonify({'success': False, 'error': str(exc)}), 500
 
 
+# States a plugin reports when there is nothing left to wait for. Soulseek and
+# the torrent adapters spell success differently, so match on substrings.
+_QUICK_DONE = ('succeeded', 'completed', 'complete')
+_QUICK_DEAD = ('errored', 'error', 'failed', 'rejected', 'cancelled', 'canceled', 'aborted')
+
+
+def _track_quick_download(download_id, title, artist='', size_bytes=0, source_label=''):
+    """Put a basic-search download on the Downloads page and keep it moving.
+
+    This path hands the file to the orchestrator and returns, so there is no
+    batch and nothing writes a task row — which is why these downloads ran
+    invisibly. Registering a card is only half of it: a card nothing updates
+    would sit at "downloading" forever, which is worse than no card at all. So
+    a small poller follows this one download until it reaches a terminal state.
+
+    A thread per download matches what the music-video path already does, and
+    these are user-initiated one at a time. It is a daemon thread and every
+    exit path marks the card, including the give-up.
+    """
+    download_id = str(download_id or '').strip()
+    if not download_id or not direct_download_state.register(
+            direct_download_state.QUICK_BATCH, download_id, title=title,
+            artist=artist, album='Quick Downloads', size_bytes=size_bytes,
+            source_label=source_label or 'Search'):
+        return
+
+    def _poll():
+        import time as _t
+        misses = 0
+        # ~30 minutes at 2s. A download the client has forgotten stops being
+        # our problem long before that, but a slow Soulseek peer is normal.
+        for _ in range(900):
+            _t.sleep(2)
+            if direct_download_state.is_cancelled(download_id):
+                direct_download_state.mark_status(download_id, 'cancelled')
+                return
+            try:
+                st = run_async(download_orchestrator.get_download_status(download_id),
+                               timeout=20)
+            except Exception as poll_err:      # noqa: BLE001 - a status poll must not kill the thread
+                logger.debug("quick download poll failed for %s: %s", download_id, poll_err)
+                st = None
+            if st is None:
+                misses += 1
+                # Gone from the client: finished and reaped, or never started.
+                if misses >= 15:
+                    direct_download_state.mark_status(
+                        download_id, 'failed',
+                        error='The download client stopped reporting this transfer.')
+                    return
+                continue
+            misses = 0
+
+            size = int(getattr(st, 'size', 0) or 0)
+            done = int(getattr(st, 'transferred', 0) or 0)
+            # progress is 0-1 on some plugins and 0-100 on others; bytes are
+            # unambiguous, so prefer them and only fall back to the field.
+            if size > 0:
+                percent = (done / size) * 100.0
+            else:
+                raw = float(getattr(st, 'progress', 0) or 0)
+                percent = raw * 100.0 if raw <= 1.0 else raw
+            direct_download_state.update_progress(
+                download_id, percent=percent, bytes_done=done, bytes_total=size)
+
+            state = str(getattr(st, 'state', '') or '').lower()
+            if any(w in state for w in _QUICK_DEAD):
+                direct_download_state.mark_status(download_id, 'failed', error=state)
+                return
+            if any(w in state for w in _QUICK_DONE):
+                direct_download_state.mark_status(
+                    download_id, 'completed',
+                    file_path=str(getattr(st, 'file_path', '') or ''))
+                return
+
+        direct_download_state.mark_status(
+            download_id, 'failed', error='Timed out waiting for the download to finish.')
+
+    import threading as _threading
+    _threading.Thread(target=_poll, daemon=True,
+                      name=f'quick-dl-{download_id[:12]}').start()
+
+
 @app.route('/api/download', methods=['POST'])
 def start_download():
     """Simple download route"""
@@ -6170,6 +6295,13 @@ def start_download():
                                 'spotify_album': None,
                                 'track_info': None
                             }
+                        _track_quick_download(
+                            download_id,
+                            title=track_data.get('title') or filename,
+                            artist=track_data.get('artist') or '',
+                            size_bytes=file_size,
+                            source_label='Album download',
+                        )
                         started_downloads += 1
                 except Exception as e:
                     logger.error(f"Failed to start track download: {e}")
@@ -6250,6 +6382,13 @@ def start_download():
 
                 # Extract track name from filename for activity
                 track_name = filename.split('/')[-1] if '/' in filename else filename.split('\\')[-1] if '\\' in filename else filename
+                _track_quick_download(
+                    download_id,
+                    title=data.get('title') or track_name,
+                    artist=data.get('artist') or username or '',
+                    size_bytes=file_size,
+                    source_label=source_label or 'Search',
+                )
                 logger.info(f"Starting simple track download: '{track_name}'")
                 add_activity_item("", "Track Download Started", f"'{track_name}'", "Now")
                 return jsonify({"success": True, "message": "Download started"})
@@ -6972,7 +7111,7 @@ def get_task_detail(task_id):
             want_title = _norm_track_key(ti.get('name', ''))
             if want_title:
                 db = get_database()
-                entries, _ = db.get_library_history(event_type='download', page=1, limit=100)
+                entries, _ = db.get_library_history(event_type=('download', 'podcast'), page=1, limit=100)
                 for e in entries:
                     if _norm_track_key(e.get('title', '')) == want_title:
                         history = e
@@ -7713,7 +7852,9 @@ def get_library_history():
     """Get persistent library history (downloads and server imports)."""
     try:
         event_type = request.args.get('type', None)
-        if event_type and event_type not in ('download', 'import'):
+        if event_type == 'podcasts':
+            event_type = 'podcast'
+        if event_type and event_type not in ('download', 'import', 'podcast'):
             event_type = None
         page = max(1, int(request.args.get('page', 1)))
         limit = min(200, max(1, int(request.args.get('limit', 50))))
@@ -14045,16 +14186,24 @@ def ytdlp_status():
     than a guess. The PyPI lookup is best-effort — no network must never mean no
     version panel."""
     from core.ytdlp_update import (PYPI_URL, installed_version, is_behind,
-                                   normalize_channel, parse_pypi)
+                                   normalize_channel, parse_pypi, restart_pending,
+                                   version_on_disk)
     channel = normalize_channel(request.args.get('channel'))
     installed = installed_version()
+    on_disk = version_on_disk()
     latest, err = None, None
     try:
         import requests as _rq
         latest = parse_pypi(_rq.get(PYPI_URL, timeout=8).text, channel)
     except Exception as e:      # noqa: BLE001 - offline is a state, not an error page
         err = str(e)
+    # `installed` is what this process LOADED; `on_disk` is what pip has put
+    # there. They differ for the whole window between updating and restarting,
+    # and saying so is the difference between "you are behind" (which reads as
+    # "the update did not work") and "update done, restart to finish".
     return jsonify({'success': True, 'installed': installed, 'latest': latest,
+                    'on_disk': on_disk,
+                    'restart_pending': restart_pending(installed, on_disk),
                     'channel': channel, 'behind': is_behind(installed, latest),
                     'lookup_error': err})
 
@@ -14348,8 +14497,7 @@ def _get_batch_lock(batch_id):
             batch_locks[batch_id] = threading.Lock()
         return batch_locks[batch_id]
 
-# Batch lifecycle logic lives in core/downloads/lifecycle.py.
-from core.downloads import lifecycle as _downloads_lifecycle
+# Batch lifecycle logic lives in core/downloads/lifecycle.py (imported above as _downloads_lifecycle).
 
 
 def _build_lifecycle_deps():
@@ -15194,7 +15342,7 @@ def _build_status_deps():
         run_async=run_async,
         on_download_completed=_on_download_completed,
         get_persistent_download_history=lambda limit: get_database().get_library_history(
-            event_type='download',
+            event_type=('download', 'podcast'),
             page=1,
             limit=limit,
             # the acoustid scanner's synthetic review rows carry
@@ -20018,6 +20166,7 @@ _init_redownload(
     resolve_library_file_path_fn=_resolve_library_file_path,
     attempt_download_with_candidates_fn=_attempt_download_with_candidates,
     executor=missing_download_executor,
+    monitor=download_monitor,
 )
 
 _init_debug_info(
@@ -21458,6 +21607,29 @@ app.register_blueprint(_bp_sp())
 # Video side API (isolated: reads database/video_library.db only, never music)
 from api.video import create_video_blueprint as _create_video_blueprint
 app.register_blueprint(_create_video_blueprint(), url_prefix='/api/video')
+
+# Podcasts API (isolated: public discovery, RSS parsing, episode downloads)
+from api.podcasts import create_podcasts_blueprint as _create_podcasts_blueprint
+app.register_blueprint(_create_podcasts_blueprint())
+
+# Audiobooks API (isolated: its own database file, its own download category,
+# never touches the music worker pool, wishlist or batches)
+from api.audiobooks import create_audiobooks_blueprint as _create_audiobooks_blueprint
+app.register_blueprint(_create_audiobooks_blueprint())
+
+# NOTE: the audiobook wishlist is NOT started here. It is drained by the shared
+# automation engine as the 'audiobook_process_wishlist' system automation, the same
+# way music and video drain theirs — so it can be paused, rescheduled or run by hand
+# from the Automations page instead of being a thread nobody can see.
+
+# Follow grabbed audiobooks to completion and file them into the library. Without this
+# a grab is fire-and-forget: the download client fetches something the app never
+# notices finishing.
+try:
+    from core.audiobook_download_monitor import ensure_started as _ensure_audiobook_downloads
+    _ensure_audiobook_downloads()
+except Exception as _ab_monitor_err:  # noqa: BLE001
+    logger.warning(f"Audiobook download monitor did not start: {_ab_monitor_err}")
 
 # Resume video downloads at boot: without this the monitor only starts on a grab or
 # when the Downloads page opens, so in-flight downloads (and orphaned 'searching' rows)

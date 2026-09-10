@@ -30,6 +30,7 @@ SOURCE_LABELS = {
     "staging": "Staging",
     "torrent": "Torrent",
     "usenet": "Usenet",
+    "podcast": "Podcast",
     # Auto-import isn't a download source, but flows through the same
     # post-process pipeline. Labeling it avoids mislabeling staging-folder
     # imports as Soulseek downloads.
@@ -127,6 +128,11 @@ def build_live_detail(task: Dict[str, Any], live_info: Optional[Dict[str, Any]],
                                          ("bytesTransferred", "bytes")):
                     if live_info.get(src_key) is not None:
                         detail[dst_key] = live_info[src_key]
+            if task.get("download_source") and "source" not in detail:
+                detail["source"] = str(task["download_source"])
+            for src_key, dst_key in (("speed", "speed"), ("size", "size"), ("bytes", "bytes"), ("bytes_transferred", "bytes")):
+                if dst_key not in detail and task.get(src_key) is not None:
+                    detail[dst_key] = task[src_key]
             _add_shared_history(detail, task)
     except Exception:
         # decoration only — a malformed task must not break the status frame

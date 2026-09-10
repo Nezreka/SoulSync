@@ -414,8 +414,13 @@
                 movies_path: val('video-movies-path'),
                 tv_path: val('video-tv-path'),
                 youtube_path: val('video-youtube-path'),
-                download_mode: _videoMode,
-                hybrid_order: _videoHybrid,
+                // download_mode / hybrid_order are NOT sent from here any more.
+                // The shared download-chain widget owns them and writes them
+                // straight to this endpoint. _videoMode/_videoHybrid only refresh
+                // when this file loads, so sending them meant that changing a
+                // folder path or a seed ratio re-posted a stale chain and silently
+                // undid whatever the widget had just saved. The endpoint only
+                // persists keys that are present, so leaving them out is safe.
                 seed_ratio_goal: parseFloat(val('video-seed-ratio')) || 0,
                 seed_time_goal_hours: parseInt(val('video-seed-hours'), 10) || 0,
                 seed_remove_data: !!(document.getElementById('video-seed-remove-data') || {}).checked,
@@ -735,6 +740,9 @@
 
     function _num(id, dflt) { var el = _byId(id); var v = el ? parseInt(el.value, 10) : NaN; return Number.isFinite(v) ? v : dflt; }
 
+    // nothing calls this any more, on purpose. the Sources tab's Soulseek card
+    // is the only editor now, and these hidden fields hold a stale copy. left
+    // here so the shape of the retired form stays readable, do not re-wire it.
     function saveSlskd(silent) {
         var url = _byId('video-slskd-url');
         if (!url) return Promise.resolve();   // section not in DOM
@@ -762,7 +770,9 @@
             'video-slskd-download-timeout', 'video-slskd-auto-clear'];
         ids.forEach(function (id) {
             var el = _byId(id);
-            if (el && !el._vsWired) { el._vsWired = true; el.addEventListener('change', function () { saveSlskd(true); }); }
+            // retired form: the fields are hidden, so a change event can only come
+            // from code, and any write from here races the music panel's own save
+            if (el && !el._vsWired) { el._vsWired = true; }
         });
     }
 
@@ -1493,8 +1503,15 @@
             if (!e.target.closest('#save-settings')) return;
             e.preventDefault();
             e.stopImmediatePropagation();
+            // saveSlskd is NOT in this list any more. Its form is retired - the
+            // shared Sources tab's Soulseek card is the single editor now - but
+            // the fields are still in the DOM holding whatever they loaded with.
+            // Posting them here overwrote slskd settings that had just been
+            // changed from the music side: edit the URL in Sources, autosave
+            // stores it, then this button writes the stale copy back over it.
+            // The music panel saves through the main settings save.
             Promise.all([saveConn(true), save(true), saveKeys(true), savePrefs(true),
-                         saveDownloads(true), saveQuality(true), saveYtQuality(true), saveSlskd(true)])
+                         saveDownloads(true), saveQuality(true), saveYtQuality(true)])
                 .then(function () { toast('Settings saved', 'success'); })
                 .catch(function () { toast('Some settings could not be saved', 'error'); });
         }, true);

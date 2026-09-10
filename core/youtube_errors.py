@@ -103,6 +103,15 @@ _COOKIES_PATTERNS = (
     "cookie file",
     "login required",
     "account authentication is required",
+    # yt-dlp failing to READ the configured cookie source. Not the same thing as
+    # YouTube rejecting us, and it classified as TRANSIENT — so the settings
+    # test said "the probe failed without a reason yt-dlp could classify, check
+    # app.log" about a fully explained, entirely fixable problem.
+    "cookies database",
+    "unsupported browser",
+    "failed to decrypt",
+    "could not decrypt",
+    "dpapi",
 )
 
 _THROTTLED_PATTERNS = (
@@ -183,10 +192,22 @@ def classify(error: Any) -> str:
     return TRANSIENT
 
 
-def human_reason(error: Any) -> Optional[str]:
+def human_reason(error: Any, *, has_cookies: Optional[bool] = None,
+                 cookie_source: Optional[str] = None) -> Optional[str]:
     """What to show the user instead of a raw yt-dlp traceback, or None when we
     have nothing better to say than the original. The 403 message names yt-dlp on
-    purpose — five identical 'Forbidden' rows tell you nothing actionable."""
+    purpose — five identical 'Forbidden' rows tell you nothing actionable.
+
+    ``has_cookies`` is whether cookies are actually configured, when the caller
+    knows. It changes the BLOCKED advice, and it has to: "update yt-dlp" is the
+    right lever for a server with no cookies at all and the WRONG one for
+    somebody who has already pasted them. fabian42069 was told to update yt-dlp
+    (#1126), re-exported his cookies twice instead, and came back a fortnight
+    later with #1233 saying it had worked for a couple of days and then stopped
+    again — which is the signature of the export itself going stale, not of an
+    old yt-dlp. Left as ``None`` the wording is unchanged, so every existing
+    caller keeps the message it already had.
+    """
     low = _clean(error)
     kind = classify(error)
     if kind == GONE:
@@ -207,6 +228,40 @@ def human_reason(error: Any) -> Optional[str]:
         return ("Age-restricted — YouTube wants a signed-in adult account. Add browser "
                 "cookies in Settings to fetch this one.")
     if kind == COOKIES:
+        # Reading the cookie SOURCE failed, which is a different problem from
+        # YouTube refusing the request and has a different fix.
+        if "cookies database" in low or "unsupported browser" in low or "decrypt" in low:
+            # Deliberately does NOT pick a cause. The first version of this
+            # asserted "SoulSync is running under WSL and your browser is a
+            # Windows install", which was a guess dressed as a diagnosis and
+            # was wrong for the first person who read it — he was running on
+            # Windows with Chrome open in front of him. List what it can be and
+            # let the raw yt-dlp line, which the caller appends, decide.
+            # Prefer what the user CONFIGURED over sniffing the error text: the
+            # DPAPI failure names no browser at all, so sniffing produced "the
+            # browser's cookies" for somebody who had plainly picked Chrome.
+            named = (str(cookie_source).strip().lower() or None) if cookie_source else None
+            if not named:
+                named = next((b for b in ("chrome", "firefox", "edge", "brave", "opera",
+                                          "chromium", "vivaldi", "safari") if b in low), None)
+            whose = f"{named.title()}'s" if named else "the browser's"
+
+            # A DPAPI failure is not one of three maybes. It IS Chromium's
+            # App-Bound Encryption, it cannot be configured around, and closing
+            # the browser does not help — so say that instead of a shrug.
+            if "dpapi" in low:
+                subject = f"{named.title()}'s" if named else "Those"
+                return (f"{subject} cookies are sealed with App-Bound Encryption, which "
+                        f"yt-dlp cannot read (yt-dlp issue 10927). Closing the browser will "
+                        f"not help and there is no setting that changes it. Use "
+                        f"'Paste cookies.txt' in Settings instead — export it with a "
+                        f"'Get cookies.txt LOCALLY' extension.")
+            return (f"SoulSync could not read {whose} cookies. Usually one of: the browser "
+                    f"is open and holding its cookie database (close it and retry); "
+                    f"Chrome and Edge 127+ encrypt cookies in a way yt-dlp cannot read at "
+                    f"all; or the browser is not reachable from wherever SoulSync itself "
+                    f"runs — a container, a headless box, or a Windows browser when "
+                    f"SoulSync runs under WSL. 'Paste cookies.txt' sidesteps all three.")
         return ("YouTube asked us to prove we're not a bot. Add browser cookies in "
                 "Settings; updating yt-dlp alone won't clear this.")
     if kind == THROTTLED:
@@ -217,6 +272,22 @@ def human_reason(error: Any) -> Optional[str]:
     if kind == DISK:
         return "Out of disk space. Free some room and this will go straight through."
     if kind == BLOCKED:
+        if has_cookies:
+            # Do NOT drop the yt-dlp line here. I removed it this morning on the
+            # reasoning that somebody who already has cookies has been sent to
+            # the wrong lever — and then Boulder's own 403s turned out to be a
+            # 92-day-old yt-dlp plus cookies that YouTube wanted a PO token for.
+            # Both mattered, and the advice that would have fixed it was the one
+            # I had just taken away. "Has cookies" says nothing about whether
+            # yt-dlp is current.
+            return ("YouTube refused the download even though cookies are configured. "
+                    "Two things do this. An out-of-date yt-dlp is the common one — "
+                    "update it in Settings -> Advanced -> yt-dlp, and RESTART SoulSync "
+                    "afterwards, because the running process keeps the version it "
+                    "started with. The other is the cookies themselves: signed-in "
+                    "requests need a PO token that YouTube will not always issue, so "
+                    "setting cookies back to None often fixes downloads outright. On a "
+                    "server or VPS it can also simply be the IP being refused.")
         return ("YouTube refused the download. This is almost always an out-of-date "
                 "yt-dlp — update it with: pip install -U yt-dlp")
     return None

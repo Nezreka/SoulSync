@@ -485,6 +485,28 @@ class MusicDatabase:
                     applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Bulk library reorganize used to queue entirely in process memory.
+            # A gunicorn worker recycle - an OOM SIGKILL in the report that found
+            # this - took every queued album with it, silently, while the job
+            # still reported success, leaving the library half-converted with no
+            # error anywhere. Only OUTSTANDING work lives here: a row exists while
+            # an item is queued or running and is deleted when it reaches a
+            # terminal state, so the table stays the size of the backlog rather
+            # than of the history.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS reorganize_queue (
+                    queue_id TEXT PRIMARY KEY,
+                    album_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    enqueued_at REAL NOT NULL,
+                    payload TEXT NOT NULL          -- json snapshot of the QueueItem
+                )
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_reorg_queue_status
+                    ON reorganize_queue(status, enqueued_at)
+            """)
             
             # Wishlist table for storing failed download tracks for retry
             cursor.execute("""
@@ -500,6 +522,19 @@ class MusicDatabase:
                     source_info TEXT  -- JSON of source context (playlist name, album info, etc.)
                 )
             """)
+
+            # Purge any podcast items that erroneously leaked into wishlist_tracks
+            try:
+                cursor.execute("""
+                    DELETE FROM wishlist_tracks
+                    WHERE source_type = 'podcast'
+                       OR spotify_track_id LIKE 'podcast-%'
+                       OR source_info LIKE '%"source_page": "Podcasts"%'
+                       OR source_info LIKE '%"download_source": "Podcast"%'
+                       OR source_info LIKE '%"playlist_id": "podcasts"%'
+                """)
+            except Exception as purge_err:
+                logger.debug("Initial podcast wishlist purge skipped or failed: %s", purge_err)
 
             # Wishlist ignore-list (#874): a TTL'd skip-gate. When a user
             # removes a track from the wishlist or cancels an in-flight
@@ -726,6 +761,53 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_labels_mbid "
                            "ON watchlist_labels (musicbrainz_label_id)")
+
+            # Podcast watchlist (podcasts feature) — follow podcast shows to monitor
+            # their new episodes, mirroring artists and labels. Purely ADDITIVE.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS watchlist_podcasts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    feed_url TEXT UNIQUE NOT NULL,
+                    itunes_id INTEGER,
+                    title TEXT NOT NULL,
+                    author TEXT,
+                    description TEXT,
+                    artwork_url TEXT,
+                    website TEXT,
+                    auto_download INTEGER NOT NULL DEFAULT 1,
+                    retention_days INTEGER NOT NULL DEFAULT 14,
+                    episode_count INTEGER,
+                    date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_scan_timestamp TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    profile_id INTEGER DEFAULT 1
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_podcasts_feed "
+                           "ON watchlist_podcasts (feed_url)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_podcasts_itunes "
+                           "ON watchlist_podcasts (itunes_id)")
+
+            # Downloaded podcast episodes tracker (for auto-download deduplication and retention pruning)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS downloaded_podcast_episodes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    feed_url TEXT NOT NULL,
+                    guid TEXT,
+                    enclosure_url TEXT NOT NULL,
+                    title TEXT,
+                    pub_date TIMESTAMP,
+                    file_path TEXT,
+                    downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    pruned_at TIMESTAMP,
+                    UNIQUE(feed_url, enclosure_url)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_downloaded_podcasts_feed "
+                           "ON downloaded_podcast_episodes (feed_url)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_downloaded_podcasts_guid "
+                           "ON downloaded_podcast_episodes (guid)")
 
             # Create indexes for performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_artist_id ON albums (artist_id)")
@@ -10653,6 +10735,91 @@ class MusicDatabase:
             logger.error(f"Error getting album completion stats for artist '{artist_name}': {e}")
             return {'complete': 0, 'nearly_complete': 0, 'partial': 0, 'missing': 0, 'total': 0}
     
+    # ── reorganize queue durability (issue #1235) ───────────────────────────
+    # The bulk reorganize queue lived only in process memory, so a gunicorn
+    # worker recycle discarded every queued album without a word while the job
+    # reported success. These three keep the OUTSTANDING backlog on disk; the
+    # queue's recent-history list stays in memory because it is only cosmetic.
+
+    def reorganize_queue_save(self, snapshot: dict):
+        """Insert or update one outstanding item."""
+        import json
+        try:
+            with self._get_connection() as conn:
+                conn.cursor().execute("""
+                    INSERT INTO reorganize_queue (queue_id, album_id, status, enqueued_at, payload)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(queue_id) DO UPDATE SET
+                        status = excluded.status,
+                        payload = excluded.payload
+                """, (
+                    snapshot.get('queue_id'),
+                    str(snapshot.get('album_id') or ''),
+                    str(snapshot.get('status') or 'queued'),
+                    float(snapshot.get('enqueued_at') or 0.0),
+                    json.dumps(snapshot),
+                ))
+                conn.commit()
+        except Exception as e:
+            # Never let bookkeeping break the actual reorganize. A lost row means
+            # that one album is not resumable, which is still better than the
+            # whole queue dying because the db hiccuped.
+            logger.error(f"Error persisting reorganize queue item: {e}")
+
+    def reorganize_queue_delete(self, queue_id: str):
+        """Drop an item that reached a terminal state (or was cancelled)."""
+        try:
+            with self._get_connection() as conn:
+                conn.cursor().execute(
+                    "DELETE FROM reorganize_queue WHERE queue_id = ?", (queue_id,))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error deleting reorganize queue item {queue_id}: {e}")
+
+    def reorganize_queue_load_pending(self) -> list:
+        """Every item that never finished, oldest first.
+
+        Anything left in 'running' was interrupted mid-flight - the process that
+        owned it is gone - so it comes back as 'queued' to be tried again.
+        """
+        import json
+        rows = []
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT payload FROM reorganize_queue
+                    WHERE status IN ('queued', 'running')
+                    ORDER BY enqueued_at ASC
+                """)
+                rows = cursor.fetchall()
+        except Exception as e:
+            logger.error(f"Error loading reorganize queue: {e}")
+            return []
+        out = []
+        for row in rows:
+            try:
+                snap = json.loads(row[0])
+            except (TypeError, ValueError):
+                continue
+            if snap.get('status') == 'running':
+                snap['status'] = 'queued'
+                snap['started_at'] = None
+            out.append(snap)
+        return out
+
+    def reorganize_queue_delete_queued(self) -> int:
+        """Drop everything still waiting. Used by the queue's clear action."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM reorganize_queue WHERE status = 'queued'")
+                conn.commit()
+                return cursor.rowcount or 0
+        except Exception as e:
+            logger.error(f"Error clearing reorganize queue: {e}")
+            return 0
+
     def set_metadata(self, key: str, value: str):
         """Set a metadata value"""
         try:
@@ -11741,6 +11908,28 @@ class MusicDatabase:
                     logger.error("Cannot add track to wishlist: missing track ID")
                     return self._wishlist_outcome("rejected", reason="missing track id")
 
+                # Podcast guard: podcast items are not eligible for the music wishlist
+                _is_podcast = False
+                if source_type == 'podcast' or str(track_id).startswith('podcast-'):
+                    _is_podcast = True
+                elif isinstance(source_info, dict):
+                    if (
+                        source_info.get('source_page') == 'Podcasts'
+                        or source_info.get('download_source') == 'Podcast'
+                        or source_info.get('playlist_id') == 'podcasts'
+                    ):
+                        _is_podcast = True
+                elif isinstance(source_info, str) and (
+                    '"source_page": "Podcasts"' in source_info
+                    or '"download_source": "Podcast"' in source_info
+                    or '"playlist_id": "podcasts"' in source_info
+                ):
+                    _is_podcast = True
+
+                if _is_podcast:
+                    logger.info("Skipping wishlist add — podcast items are not eligible for music wishlist: '%s'", track_id)
+                    return self._wishlist_outcome("rejected", track_id, reason="podcast_not_eligible")
+
                 # Blocklist guard (Phase 1): every auto-acquisition path funnels
                 # through here, so one check blocks a banned artist/album/track
                 # (with artist→album→track cascade) before it can be queued.
@@ -11977,6 +12166,30 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error removing track from wishlist: {e}")
             return False
+
+    def purge_podcast_tracks_from_wishlist(self) -> int:
+        """Purge any podcast tracks that leaked into wishlist_tracks."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    DELETE FROM wishlist_tracks
+                    WHERE source_type = 'podcast'
+                       OR spotify_track_id LIKE 'podcast-%'
+                       OR source_info LIKE '%"source_page": "Podcasts"%'
+                       OR source_info LIKE '%"download_source": "Podcast"%'
+                       OR source_info LIKE '%"playlist_id": "podcasts"%'
+                    """
+                )
+                conn.commit()
+                purged = cursor.rowcount
+                if purged > 0:
+                    logger.info("Purged %d podcast tracks from wishlist_tracks", purged)
+                return purged
+        except Exception as e:
+            logger.error("Failed to purge podcast tracks from wishlist: %s", e)
+            return 0
 
     # ── Wishlist ignore-list (#874) ──────────────────────────────────────
     # A TTL'd skip-gate consulted by add_to_wishlist so user-removed /
@@ -13258,6 +13471,389 @@ class MusicDatabase:
                 conn.commit()
         except Exception as e:
             logger.debug("mark_watchlist_label_scanned failed: %s", e)
+
+    # ── Podcast watchlist (podcasts feature) ─────────────────────────────────
+    # Self-contained CRUD on watchlist_podcasts. Additive: no existing method
+    # touches this table, and these touch nothing else.
+
+    def add_watchlist_podcast(
+        self,
+        feed_url: str,
+        title: str,
+        *,
+        itunes_id: Optional[int] = None,
+        author: Optional[str] = None,
+        description: Optional[str] = None,
+        artwork_url: Optional[str] = None,
+        website: Optional[str] = None,
+        auto_download: bool = True,
+        retention_days: int = 14,
+        episode_count: Optional[int] = None,
+        profile_id: int = 1,
+    ) -> bool:
+        """Follow a podcast. Idempotent on feed_url."""
+        feed_url = str(feed_url or '').strip()
+        title = str(title or '').strip()
+        if not feed_url or not title:
+            return False
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "INSERT INTO watchlist_podcasts ("
+                    "feed_url, itunes_id, title, author, description, artwork_url, website, "
+                    "auto_download, retention_days, episode_count, profile_id"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(feed_url) DO UPDATE SET "
+                    "itunes_id=COALESCE(excluded.itunes_id, watchlist_podcasts.itunes_id), "
+                    "title=excluded.title, "
+                    "author=COALESCE(excluded.author, watchlist_podcasts.author), "
+                    "description=COALESCE(excluded.description, watchlist_podcasts.description), "
+                    "artwork_url=COALESCE(excluded.artwork_url, watchlist_podcasts.artwork_url), "
+                    "website=COALESCE(excluded.website, watchlist_podcasts.website), "
+                    "episode_count=COALESCE(excluded.episode_count, watchlist_podcasts.episode_count), "
+                    "updated_at=CURRENT_TIMESTAMP",
+                    (
+                        feed_url,
+                        itunes_id,
+                        title,
+                        author,
+                        description,
+                        artwork_url,
+                        website,
+                        1 if auto_download else 0,
+                        max(0, int(retention_days or 14)),
+                        episode_count,
+                        profile_id,
+                    ),
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error("add_watchlist_podcast failed: %s", e)
+            return False
+
+    def remove_watchlist_podcast(
+        self,
+        feed_url: Optional[str] = None,
+        itunes_id: Optional[int] = None,
+        podcast_id: Optional[int] = None,
+    ) -> bool:
+        """Unfollow a podcast by feed_url, itunes_id, or database id."""
+        try:
+            with self._get_connection() as conn:
+                if feed_url:
+                    cur = conn.execute(
+                        "DELETE FROM watchlist_podcasts WHERE feed_url = ?",
+                        (str(feed_url).strip(),),
+                    )
+                elif itunes_id:
+                    cur = conn.execute(
+                        "DELETE FROM watchlist_podcasts WHERE itunes_id = ?",
+                        (int(itunes_id),),
+                    )
+                elif podcast_id:
+                    cur = conn.execute(
+                        "DELETE FROM watchlist_podcasts WHERE id = ?",
+                        (int(podcast_id),),
+                    )
+                else:
+                    return False
+                conn.commit()
+                return cur.rowcount > 0
+        except Exception as e:
+            logger.error("remove_watchlist_podcast failed: %s", e)
+            return False
+
+    def is_podcast_in_watchlist(
+        self,
+        feed_url: Optional[str] = None,
+        itunes_id: Optional[int] = None,
+    ) -> bool:
+        """Check if a podcast is followed by feed_url or itunes_id."""
+        try:
+            with self._get_connection() as conn:
+                if feed_url:
+                    row = conn.execute(
+                        "SELECT 1 FROM watchlist_podcasts WHERE feed_url = ?",
+                        (str(feed_url).strip(),),
+                    ).fetchone()
+                    if row:
+                        return True
+                if itunes_id:
+                    row = conn.execute(
+                        "SELECT 1 FROM watchlist_podcasts WHERE itunes_id = ?",
+                        (int(itunes_id),),
+                    ).fetchone()
+                    if row:
+                        return True
+                return False
+        except Exception:
+            return False
+
+    def get_watchlist_podcasts(self, profile_id: int = 1) -> List[Dict[str, Any]]:
+        """List all watchlisted podcasts."""
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(
+                    "SELECT id, feed_url, itunes_id, title, author, description, artwork_url, website, "
+                    "auto_download, retention_days, episode_count, date_added, last_scan_timestamp "
+                    "FROM watchlist_podcasts WHERE profile_id = ? "
+                    "ORDER BY title COLLATE NOCASE",
+                    (profile_id,),
+                ).fetchall()
+                out = []
+                for r in rows:
+                    d = dict(r)
+                    d["auto_download"] = bool(d.get("auto_download", 0))
+                    d["retention_days"] = int(d.get("retention_days") or 14)
+                    out.append(d)
+                return out
+        except Exception as e:
+            logger.error("get_watchlist_podcasts failed: %s", e)
+            return []
+
+    def get_watchlist_podcast(
+        self,
+        feed_url: Optional[str] = None,
+        itunes_id: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Get a single watchlisted podcast record by feed_url or itunes_id."""
+        try:
+            with self._get_connection() as conn:
+                row = None
+                if feed_url:
+                    row = conn.execute(
+                        "SELECT id, feed_url, itunes_id, title, author, description, artwork_url, website, "
+                        "auto_download, retention_days, episode_count, date_added, last_scan_timestamp "
+                        "FROM watchlist_podcasts WHERE feed_url = ?",
+                        (str(feed_url).strip(),),
+                    ).fetchone()
+                if not row and itunes_id:
+                    row = conn.execute(
+                        "SELECT id, feed_url, itunes_id, title, author, description, artwork_url, website, "
+                        "auto_download, retention_days, episode_count, date_added, last_scan_timestamp "
+                        "FROM watchlist_podcasts WHERE itunes_id = ?",
+                        (int(itunes_id),),
+                    ).fetchone()
+                if row:
+                    d = dict(row)
+                    d["auto_download"] = bool(d.get("auto_download", 0))
+                    d["retention_days"] = int(d.get("retention_days") or 14)
+                    return d
+                return None
+        except Exception as e:
+            logger.debug("get_watchlist_podcast failed: %s", e)
+            return None
+
+    def update_watchlist_podcast_settings(
+        self,
+        feed_url: str,
+        *,
+        auto_download: Optional[bool] = None,
+        retention_days: Optional[int] = None,
+    ) -> bool:
+        """Update auto_download or retention_days settings for a followed podcast."""
+        feed_url = str(feed_url or '').strip()
+        if not feed_url:
+            return False
+        clauses = []
+        params = []
+        if auto_download is not None:
+            clauses.append("auto_download = ?")
+            params.append(1 if auto_download else 0)
+        if retention_days is not None:
+            clauses.append("retention_days = ?")
+            params.append(max(0, int(retention_days)))
+        if not clauses:
+            return True
+        clauses.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(feed_url)
+        try:
+            with self._get_connection() as conn:
+                cur = conn.execute(
+                    f"UPDATE watchlist_podcasts SET {', '.join(clauses)} WHERE feed_url = ?",
+                    params,
+                )
+                conn.commit()
+                return cur.rowcount > 0
+        except Exception as e:
+            logger.error("update_watchlist_podcast_settings failed: %s", e)
+            return False
+
+    def mark_watchlist_podcast_scanned(self, feed_url: str, episode_count: Optional[int] = None) -> None:
+        try:
+            with self._get_connection() as conn:
+                if episode_count is not None:
+                    conn.execute(
+                        "UPDATE watchlist_podcasts SET last_scan_timestamp = CURRENT_TIMESTAMP, "
+                        "episode_count = COALESCE(?, episode_count) WHERE feed_url = ?",
+                        (episode_count, str(feed_url or '').strip()),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE watchlist_podcasts SET last_scan_timestamp = CURRENT_TIMESTAMP "
+                        "WHERE feed_url = ?",
+                        (str(feed_url or '').strip(),),
+                    )
+                conn.commit()
+        except Exception as e:
+            logger.debug("mark_watchlist_podcast_scanned failed: %s", e)
+
+    def get_watchlist_podcasts_count(self, profile_id: int = 1) -> int:
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) as count FROM watchlist_podcasts WHERE profile_id = ?",
+                    (profile_id,),
+                ).fetchone()
+                return row["count"] if row else 0
+        except Exception:
+            return 0
+
+    def record_downloaded_podcast_episode(
+        self,
+        feed_url: str,
+        enclosure_url: str,
+        guid: Optional[str] = None,
+        title: Optional[str] = None,
+        pub_date: Optional[Any] = None,
+        file_path: Optional[str] = None,
+    ) -> bool:
+        """Record a downloaded podcast episode so it is never re-downloaded."""
+        if not feed_url or not enclosure_url:
+            return False
+        try:
+            pub_date_str = pub_date.isoformat() if hasattr(pub_date, "isoformat") else (str(pub_date) if pub_date else None)
+            with self._get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO downloaded_podcast_episodes
+                        (feed_url, guid, enclosure_url, title, pub_date, file_path, downloaded_at)
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(feed_url, enclosure_url) DO UPDATE SET
+                        guid = COALESCE(excluded.guid, downloaded_podcast_episodes.guid),
+                        title = COALESCE(excluded.title, downloaded_podcast_episodes.title),
+                        pub_date = COALESCE(excluded.pub_date, downloaded_podcast_episodes.pub_date),
+                        file_path = COALESCE(excluded.file_path, downloaded_podcast_episodes.file_path)
+                    """,
+                    (str(feed_url).strip(), str(guid).strip() if guid else None,
+                     str(enclosure_url).strip(), str(title).strip() if title else None,
+                     pub_date_str, str(file_path).strip() if file_path else None),
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error("record_downloaded_podcast_episode failed: %s", e)
+            return False
+
+    def is_podcast_episode_downloaded(
+        self,
+        feed_url: str,
+        enclosure_url: Optional[str] = None,
+        guid: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> bool:
+        """Check if an episode has already been downloaded (or pruned)."""
+        feed_url = str(feed_url or "").strip()
+        enc = str(enclosure_url or "").strip()
+        g = str(guid or "").strip()
+        t = str(title or "").strip()
+        if not feed_url and not enc and not g and not t:
+            return False
+        try:
+            with self._get_connection() as conn:
+                # 1. Check downloaded_podcast_episodes table
+                if enc and g:
+                    row = conn.execute(
+                        "SELECT 1 FROM downloaded_podcast_episodes "
+                        "WHERE (feed_url = ? AND enclosure_url = ?) OR (guid = ?)",
+                        (feed_url, enc, g),
+                    ).fetchone()
+                elif enc:
+                    row = conn.execute(
+                        "SELECT 1 FROM downloaded_podcast_episodes "
+                        "WHERE feed_url = ? AND enclosure_url = ?",
+                        (feed_url, enc),
+                    ).fetchone()
+                elif g:
+                    row = conn.execute(
+                        "SELECT 1 FROM downloaded_podcast_episodes WHERE guid = ?",
+                        (g,),
+                    ).fetchone()
+                else:
+                    row = None
+
+                if row:
+                    return True
+
+                # 2. Check library_history table fallback
+                target_ids = [x for x in (g, enc) if x]
+                if target_ids:
+                    placeholders = ",".join("?" * len(target_ids))
+                    row = conn.execute(
+                        f"SELECT 1 FROM library_history WHERE event_type = 'podcast' "
+                        f"AND source_track_id IN ({placeholders})",
+                        target_ids,
+                    ).fetchone()
+                    if row:
+                        return True
+
+                if t:
+                    row = conn.execute(
+                        "SELECT 1 FROM library_history WHERE event_type = 'podcast' "
+                        "AND title = ?",
+                        (t,),
+                    ).fetchone()
+                    if row:
+                        return True
+
+                return False
+        except Exception as e:
+            logger.debug("is_podcast_episode_downloaded check failed: %s", e)
+            return False
+
+    def get_downloaded_podcast_episodes(
+        self,
+        feed_url: Optional[str] = None,
+        unpruned_only: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Return list of downloaded podcast episode records."""
+        try:
+            with self._get_connection() as conn:
+                clauses = []
+                params = []
+                if feed_url:
+                    clauses.append("feed_url = ?")
+                    params.append(str(feed_url).strip())
+                if unpruned_only:
+                    clauses.append("pruned_at IS NULL")
+                where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+                cursor = conn.execute(
+                    f"SELECT id, feed_url, guid, enclosure_url, title, pub_date, "
+                    f"file_path, downloaded_at, pruned_at "
+                    f"FROM downloaded_podcast_episodes {where} ORDER BY downloaded_at DESC",
+                    params,
+                )
+                return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error("get_downloaded_podcast_episodes failed: %s", e)
+            return []
+
+    def mark_podcast_episode_pruned(self, episode_id: int, pruned_at: Optional[str] = None) -> bool:
+        """Flag a downloaded episode as retention-pruned (file deleted on disk)."""
+        try:
+            with self._get_connection() as conn:
+                stamp = pruned_at or datetime.now().isoformat()
+                cur = conn.execute(
+                    "UPDATE downloaded_podcast_episodes SET pruned_at = ? "
+                    "WHERE id = ? AND pruned_at IS NULL",
+                    (stamp, int(episode_id)),
+                )
+                conn.commit()
+                return cur.rowcount > 0
+        except Exception as e:
+            logger.error("mark_podcast_episode_pruned failed: %s", e)
+            return False
 
     def get_watchlist_artists(self, profile_id: int = 1) -> List[WatchlistArtist]:
         """Get all artists in the watchlist for the given profile"""
@@ -18154,7 +18750,7 @@ class MusicDatabase:
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM library_history WHERE event_type = 'download'")
+            cursor.execute("DELETE FROM library_history WHERE event_type IN ('download', 'podcast')")
             conn.commit()
             return cursor.rowcount
         except Exception as e:
@@ -18198,8 +18794,13 @@ class MusicDatabase:
             clauses = []
             params = []
             if event_type:
-                clauses.append("event_type = ?")
-                params.append(event_type)
+                if isinstance(event_type, (list, tuple, set)):
+                    placeholders = ','.join('?' for _ in event_type)
+                    clauses.append(f"event_type IN ({placeholders})")
+                    params.extend(list(event_type))
+                else:
+                    clauses.append("event_type = ?")
+                    params.append(event_type)
             for src in (exclude_download_sources or ()):
                 clauses.append("COALESCE(download_source, '') != ?")
                 params.append(src)
@@ -18550,19 +19151,21 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT event_type, COUNT(*) as cnt FROM library_history GROUP BY event_type")
-            stats = {'downloads': 0, 'imports': 0}
+            stats = {'downloads': 0, 'imports': 0, 'podcasts': 0}
             for row in cursor.fetchall():
                 if row['event_type'] == 'download':
                     stats['downloads'] = row['cnt']
                 elif row['event_type'] == 'import':
                     stats['imports'] = row['cnt']
+                elif row['event_type'] == 'podcast':
+                    stats['podcasts'] = row['cnt']
 
-            # Per-source breakdown for downloads
+            # Per-source breakdown for downloads and podcasts
             source_counts = {}
             try:
                 cursor.execute("""
                     SELECT download_source, COUNT(*) as cnt FROM library_history
-                    WHERE event_type = 'download' AND download_source IS NOT NULL AND download_source != ''
+                    WHERE event_type IN ('download', 'podcast') AND download_source IS NOT NULL AND download_source != ''
                     GROUP BY download_source ORDER BY cnt DESC
                 """)
                 for row in cursor.fetchall():
@@ -18574,7 +19177,7 @@ class MusicDatabase:
             return stats
         except Exception as e:
             logger.debug(f"Error getting library history stats: {e}")
-            return {'downloads': 0, 'imports': 0, 'source_counts': {}}
+            return {'downloads': 0, 'imports': 0, 'podcasts': 0, 'source_counts': {}}
 
     # ── Sync History ──────────────────────────────────────────────
 

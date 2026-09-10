@@ -4,6 +4,8 @@
 
 const WIZARD_STEPS = ['welcome', 'metadata', 'download-source', 'paths', 'watchlist', 'first-download', 'done'];
 let _wizardStep = 0;
+let _wizardSaving = false;
+let _wizardOpened = false;
 let _wizardSettings = {
     metadata_source: 'deezer',
     download_source: 'soulseek',
@@ -34,6 +36,8 @@ function openSetupWizard() {
     const overlay = document.getElementById('setup-wizard-overlay');
     if (!overlay) return;
     overlay.style.display = 'flex';
+    if (_wizardOpened) { _renderWizard(); return; }
+    _wizardOpened = true;
     _wizardStep = 0;
     _wizardSettings = {
         metadata_source: 'deezer',
@@ -60,12 +64,11 @@ function openSetupWizard() {
 }
 
 function closeSetupWizard() {
+    if (_wizardSaving) return;
     const overlay = document.getElementById('setup-wizard-overlay');
     if (overlay) overlay.style.display = 'none';
 
-    // Mark as complete so it doesn't show again (server + client)
-    localStorage.setItem('soulsync_setup_complete', 'true');
-    fetch('/api/setup/complete', { method: 'POST' }).catch(() => {});
+    // Dismissing postpones setup; only a successful Finish marks completion.
 
     // Continue app initialization if wizard was shown on first run
     if (typeof window._onSetupWizardComplete === 'function') {
@@ -76,19 +79,49 @@ function closeSetupWizard() {
 
 // ---- Navigation ----
 
-function wizardNext() {
-    if (!_validateWizardStep()) return;
+function _wizardSetSaving(saving) {
+    _wizardSaving = saving;
+    const overlay = document.getElementById('setup-wizard-overlay');
+    if (overlay) overlay.setAttribute('aria-busy', String(saving));
+    document.querySelectorAll('#setup-wizard-content .setup-btn').forEach(button => {
+        if (saving) { button.dataset.wasDisabled = String(button.disabled); button.disabled = true; }
+        else { button.disabled = button.dataset.wasDisabled === 'true'; delete button.dataset.wasDisabled; }
+    });
+}
 
-    // Save settings for the current step before advancing
-    _saveWizardStepSettings();
+async function _wizardPost(url, body) {
+    const response = await fetch(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        ...(body ? { body: JSON.stringify(body) } : {})
+    });
+    const data = await response.json();
+    if (!response.ok || data.success !== true) throw new Error(data.error || 'Could not save setup. Please try again.');
+    return data;
+}
 
-    if (_wizardStep < WIZARD_STEPS.length - 1) {
-        _wizardStep++;
-        _renderWizard();
+function _wizardSaveError(error) {
+    const message = error instanceof Error ? error.message : 'Could not save setup. Please try again.';
+    let note = document.getElementById('setup-save-error');
+    if (!note) {
+        note = document.createElement('p'); note.id = 'setup-save-error'; note.setAttribute('role', 'alert');
+        document.getElementById('setup-wizard-content')?.prepend(note);
     }
+    note.textContent = message;
+}
+
+async function wizardNext() {
+    if (_wizardSaving || !_validateWizardStep()) return;
+    _wizardSetSaving(true);
+    try {
+        await _saveWizardStepSettings();
+        if (_wizardStep < WIZARD_STEPS.length - 1) _wizardStep++;
+        _renderWizard();
+    } catch (error) { _wizardSaveError(error); }
+    finally { _wizardSetSaving(false); }
 }
 
 function wizardBack() {
+    if (_wizardSaving) return;
     if (_wizardStep > 0) {
         _wizardStep--;
         _renderWizard();
@@ -96,6 +129,7 @@ function wizardBack() {
 }
 
 function wizardSkipStep() {
+    if (_wizardSaving) return;
     if (_wizardStep < WIZARD_STEPS.length - 1) {
         _wizardStep++;
         _renderWizard();
@@ -158,15 +192,8 @@ async function _saveWizardStepSettings() {
     }
 
     if (Object.keys(settings).length > 0) {
-        try {
-            await fetch('/api/settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(settings)
-            });
-        } catch (e) {
-            console.error('Wizard step save error:', e);
-        }
+        settings.setup = { in_progress: true };
+        await _wizardPost('/api/settings', settings);
     }
 }
 
@@ -996,6 +1023,8 @@ function _renderDone(el) {
 }
 
 async function _wizardFinish() {
+    if (_wizardSaving) return;
+    _wizardSetSaving(true);
     // Final save — all settings were saved per-step, but do a final pass
     const settings = {
         metadata: { fallback_source: _wizardSettings.metadata_source },
@@ -1023,22 +1052,15 @@ async function _wizardFinish() {
     }
 
     try {
-        await fetch('/api/settings', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(settings)
-        });
-    } catch (e) {
-        console.error('Wizard final save error:', e);
+        await _wizardPost('/api/settings', settings);
+        await _wizardPost('/api/setup/complete');
+    } catch (error) {
+        _wizardSaveError(error);
+        _wizardSetSaving(false);
+        return;
     }
-
-    // Mark setup complete on both server and client
-    try {
-        await fetch('/api/setup/complete', { method: 'POST' });
-    } catch (e) {
-        console.error('Failed to mark setup complete on server:', e);
-    }
-    localStorage.setItem('soulsync_setup_complete', 'true');
+    _wizardSetSaving(false);
+    try { localStorage.setItem('soulsync_setup_complete', 'true'); } catch (_) {}
 
     const overlay = document.getElementById('setup-wizard-overlay');
     if (overlay) overlay.style.display = 'none';

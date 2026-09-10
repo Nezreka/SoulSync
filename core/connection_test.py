@@ -51,6 +51,13 @@ def init(
     docker_resolve_path = docker_resolve_path_fn
 
 
+# Prefix on a message that means "this works, but something needs your
+# attention". A test can succeed and still have something worth saying, and
+# collapsing that into pass/fail is how a broken cookie file ended up drawing a
+# red light on a source that downloads perfectly well.
+WARNING_MARKER = "\u26a0"
+
+
 def run_service_test(service, test_config):
     """
     Performs the actual connection test for a given service.
@@ -123,7 +130,13 @@ def run_service_test(service, test_config):
                     server_name = temp_client.server_info.get('ServerName', 'Unknown Server')
                 return True, f"Successfully connected to Jellyfin server: {server_name}"
             else:
-                return False, "Could not connect to Jellyfin. Check URL and API Key."
+                # Say what actually happened. The same generic line for a
+                # 401, a 404 and an unreachable host is why a server that had
+                # simply stopped accepting the old auth header looked like a
+                # mistyped URL (#1232).
+                detail = getattr(temp_client, 'last_error', '') or ''
+                base = "Could not connect to Jellyfin. Check URL and API Key."
+                return False, f"{base} ({detail})" if detail else base
         elif service == "navidrome":
             # Test Navidrome connection using Subsonic API
             base_url = test_config.get('base_url', '')
@@ -510,6 +523,86 @@ def run_service_test(service, test_config):
                 return False, "MusicBrainz returned no results — may be rate-limited or unreachable."
             except Exception as e:
                 return False, f"MusicBrainz connection error: {str(e)}"
+        elif service == "youtube":
+            # There was no branch here at all, and the Settings probe for
+            # YouTube was hardcoded to "true" on the page — so the dot was green
+            # no matter what, while downloads were being bot-blocked (#1233,
+            # a continuation of #1126 from the same reporter).
+            #
+            # The client's own check_connection runs a cookie-authenticated
+            # yt-dlp probe and records a classified reason on failure, which is
+            # the whole point of the work done for #1126. Ask it, then say what
+            # it said.
+            try:
+                import os as _os
+
+                from core.youtube_client import YouTubeClient
+                from core.youtube_cookies import cookie_setup_problem
+
+                # Ask this BEFORE probing. Paste mode with a missing file falls
+                # back to anonymous silently, so the probe would come back with a
+                # bot gate and send the user off to fix cookies that were never
+                # being sent in the first place.
+                _mode = config_manager.get('youtube.cookies_browser', '')
+                _file = config_manager.get('youtube.cookies_file', '')
+                _problem = cookie_setup_problem(
+                    _mode, _file,
+                    cookiefile_exists=bool(_file) and _os.path.exists(_file),
+                )
+                yt = YouTubeClient()
+                if not yt.is_available():
+                    return False, "YouTube unavailable — yt-dlp not installed."
+                if run_async(yt.check_connection()):
+                    # Broken cookies are a WARNING, not a failure. YouTube serves
+                    # anonymous requests perfectly well from most connections, so
+                    # failing the source here painted a red light on something
+                    # that downloads fine — which says "this is broken, go fix
+                    # it" about the one thing that is working. The leading marker
+                    # is what the UI reads to draw the amber dot.
+                    if _problem:
+                        return True, f"{WARNING_MARKER} YouTube works, but {_problem[0].lower()}{_problem[1:]}"
+                    return True, "YouTube download source ready."
+                # It genuinely is not reachable. If cookies are also broken, say
+                # that first — it is the thing they can actually act on.
+                if _problem:
+                    return False, f"YouTube download source not available. {_problem}"
+                # Re-read the classified reason with the browser the user actually
+                # picked. The client cannot always tell from the error text — a
+                # DPAPI failure names no browser at all.
+                reason = yt.last_failure_reason()
+                _raw_for_reason = getattr(yt, "last_failure_raw", None)
+                if callable(_raw_for_reason) and _raw_for_reason() and _mode and _mode != "custom":
+                    from core.youtube_errors import human_reason as _hr
+                    reason = _hr(_raw_for_reason(), has_cookies=True, cookie_source=_mode) or reason
+                if reason:
+                    # Keep yt-dlp's own line alongside our explanation. Replacing
+                    # a specific error with a general one is how the useless
+                    # "check app.log" message happened in the first place, and an
+                    # explanation that turns out to be wrong is only debuggable
+                    # if the thing it was explaining is still on screen.
+                    _raw_fn = getattr(yt, "last_failure_raw", None)
+                    raw = (_raw_fn() if callable(_raw_fn) else "") or ""
+                    while raw.startswith("ERROR: "):
+                        raw = raw[7:]
+                    raw = raw.strip()
+                    if raw and raw[:60].lower() not in reason.lower():
+                        if len(raw) > 160:
+                            raw = raw[:157] + "..."
+                        reason = f"{reason}  (yt-dlp said: {raw})"
+                    return False, f"YouTube download source not available. {reason}"
+                # No classified reason. Show the error itself rather than
+                # sending somebody to a log file for a string we already have.
+                _raw_fn = getattr(yt, "last_failure_raw", None)
+                raw = _raw_fn() if callable(_raw_fn) else None
+                if raw:
+                    while raw.startswith("ERROR: "):
+                        raw = raw[7:]
+                    if len(raw) > 240:
+                        raw = raw[:237] + "..."
+                    return False, f"YouTube download source not available. {raw}"
+                return False, "YouTube download source not available."
+            except Exception as e:
+                return False, f"YouTube connection error: {str(e)}"
         elif service == "soundcloud":
             # Anonymous SoundCloud has no auth, so "test" really means
             # "is yt-dlp installed and can it reach SoundCloud right now."

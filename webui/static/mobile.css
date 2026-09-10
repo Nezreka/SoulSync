@@ -3982,3 +3982,54 @@
     .automation-card.automation-tile .auto-flow-editable { min-height: 30px; }
     .automation-card.automation-tile .auto-tile-badge { min-height: 30px; }
 }
+
+/* #1227: shared by playlist, album, artist-album and wishlist download dialogs.
+   Dynamic viewport sizing also covers Safari with its browser bars visible. */
+html.download-modal-open,
+html.download-modal-open body {
+    overflow: hidden;
+    overscroll-behavior: none;
+}
+.download-missing-modal {
+    height: 100vh;
+    height: 100dvh;
+    overscroll-behavior: contain;
+}
+.download-missing-modal-content {
+    max-height: 95vh;
+    max-height: 95dvh;
+}
+@media (max-width: 768px) {
+    /* One outer scroll area keeps the hero, rows and all footer controls reachable.
+       The bounded inner table scroll still works for very long playlists. */
+    .download-missing-modal .download-missing-modal-content {
+        height: 95vh;
+        height: 95dvh;
+        overflow-y: auto;
+        overscroll-behavior-y: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+    .download-missing-modal-header,
+    .download-missing-modal .download-missing-modal-body,
+    .download-missing-modal-footer {
+        flex: 0 0 auto;
+    }
+    .download-missing-modal .download-missing-modal-body {
+        overflow: visible;
+    }
+    .download-missing-modal .download-tracks-section {
+        flex: 0 0 auto;
+        min-height: 280px;
+    }
+    .download-missing-modal .download-tracks-table-container {
+        flex: 0 0 auto;
+        min-height: 220px;
+        max-height: 50vh;
+        max-height: max(220px, 50dvh);
+        overflow: auto;
+        overscroll-behavior: contain;
+    }
+    .download-missing-modal-footer {
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
+    }
+}

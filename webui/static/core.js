@@ -774,6 +774,7 @@ function initializeWebSocket() {
     }
 
     socket = io({
+        path: window.SoulSyncURL?.resolve('/socket.io') || '/socket.io',
         // Polling-first (Socket.IO default) then upgrade — most compatible behind
         // reverse proxies that don't cleanly forward WebSocket upgrade headers
         // (common in self-hosted setups). websocket-first shaves connect time when

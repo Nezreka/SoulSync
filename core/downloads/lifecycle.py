@@ -403,6 +403,30 @@ class LifecycleDeps:
 
 
 # ---------------------------------------------------------------------------
+# is_music_batch helper
+# ---------------------------------------------------------------------------
+
+def is_music_batch(batch_id: str, batch: Optional[dict] = None) -> bool:
+    """Determine if a batch belongs to the music download pipeline.
+
+    Batches that manage their own lifecycle (such as podcast downloads)
+    must not be picked up by music download workers, batch healers,
+    or the music wishlist failure processor.
+    """
+    if batch_id == "podcasts":
+        return False
+    if batch is None:
+        batch = download_batches.get(batch_id, {})
+    if not isinstance(batch, dict):
+        return True
+    if batch.get("is_music") is False or batch.get("managed_externally") is True:
+        return False
+    if batch.get("source_page") == "Podcasts" or batch.get("batch_type") == "podcast":
+        return False
+    return True
+
+
+# ---------------------------------------------------------------------------
 # start_next_batch_of_downloads
 # ---------------------------------------------------------------------------
 
@@ -423,6 +447,10 @@ def start_next_batch_of_downloads(batch_id: str, deps: LifecycleDeps) -> None:
                 return
 
             batch = download_batches[batch_id]
+            if not is_music_batch(batch_id, batch):
+                logger.info(f"[Batch Manager] Skipping worker dispatch for non-music batch {batch_id}")
+                return
+
             max_concurrent = batch['max_concurrent']
             queue = batch['queue']
             queue_index = batch['queue_index']
@@ -463,7 +491,9 @@ def start_next_batch_of_downloads(batch_id: str, deps: LifecycleDeps) -> None:
             while active_count < max_concurrent and queue_index < len(queue):
                 if global_max is not None:
                     total_active = sum(
-                        b.get('active_count', 0) for b in download_batches.values()
+                        b.get('active_count', 0)
+                        for bid, b in download_batches.items()
+                        if is_music_batch(bid, b)
                     )
                     if total_active >= global_max:
                         logger.info(
@@ -563,6 +593,8 @@ def _wake_waiting_batches(finished_batch_id: str, deps: LifecycleDeps) -> None:
             for other_id, other in download_batches.items():
                 if other_id == finished_batch_id:
                     continue
+                if not is_music_batch(other_id, other):
+                    continue
                 if other.get('phase') in ('complete', 'error', 'cancelled', 'failed'):
                     continue
                 if other.get('queue_index', 0) < len(other.get('queue', [])):
@@ -587,7 +619,11 @@ def _wake_waiting_batches(finished_batch_id: str, deps: LifecycleDeps) -> None:
     for other_id in waiting:
         if global_max is not None:
             with tasks_lock:
-                total_active = sum(b.get('active_count', 0) for b in download_batches.values())
+                total_active = sum(
+                    b.get('active_count', 0)
+                    for bid, b in download_batches.items()
+                    if is_music_batch(bid, b)
+                )
             if total_active >= global_max:
                 break
         try:
@@ -953,15 +989,19 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
                             logger.error(f"[Album Consistency] Failed (non-fatal): {cons_err}")
 
                 # Mark that wishlist processing is starting (prevents premature cleanup)
-                batch['wishlist_processing_started'] = True
+                if is_music_batch(batch_id, batch):
+                    batch['wishlist_processing_started'] = True
 
-                # Process wishlist outside of the lock to prevent threading issues
-                if is_auto_batch:
-                    # For auto-initiated batches, handle completion and schedule next cycle
-                    deps.submit_failed_to_wishlist_with_auto_completion(batch_id)
+                    # Process wishlist outside of the lock to prevent threading issues
+                    if is_auto_batch:
+                        # For auto-initiated batches, handle completion and schedule next cycle
+                        deps.submit_failed_to_wishlist_with_auto_completion(batch_id)
+                    else:
+                        # For manual batches, use standard wishlist processing
+                        deps.submit_failed_to_wishlist(batch_id)
                 else:
-                    # For manual batches, use standard wishlist processing
-                    deps.submit_failed_to_wishlist(batch_id)
+                    logger.info(f"[Batch Manager] Skipping wishlist processing for non-music batch {batch_id}")
+                    batch['wishlist_processing_complete'] = True
             else:
                 logger.warning(f"[Batch Manager] Batch {batch_id} already marked complete - skipping duplicate processing")
 
@@ -1174,12 +1214,16 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
             # to match original v2 behavior. The non-v2 path (on_download_completed)
             # uses the async submit_* deps; v2 calls directly because v2 itself runs
             # from a context where blocking is acceptable.
-            if is_auto_batch:
-                logger.info("[Completion Check V2] Processing auto-initiated batch completion")
-                deps.process_failed_to_wishlist_with_auto_completion(batch_id)
+            if is_music_batch(batch_id, batch):
+                if is_auto_batch:
+                    logger.info("[Completion Check V2] Processing auto-initiated batch completion")
+                    deps.process_failed_to_wishlist_with_auto_completion(batch_id)
+                else:
+                    logger.info("[Completion Check V2] Processing regular batch completion")
+                    deps.process_failed_to_wishlist(batch_id)
             else:
-                logger.info("[Completion Check V2] Processing regular batch completion")
-                deps.process_failed_to_wishlist(batch_id)
+                logger.info(f"[Completion Check V2] Skipping wishlist processing for non-music batch {batch_id}")
+                batch['wishlist_processing_complete'] = True
 
             return True  # Batch was completed
         else:

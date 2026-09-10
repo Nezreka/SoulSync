@@ -45,6 +45,7 @@ interface StubOptions {
   artists?: Record<string, unknown>[];
   globalOverride?: boolean;
   labels?: Record<string, unknown>[];
+  podcasts?: Record<string, unknown>[];
   scanCompletedAt?: string | null;
   /** false = an artist matched on no provider at all, which the server allows. */
   configProviderIds?: boolean;
@@ -64,6 +65,7 @@ function stubFetch(options: StubOptions = {}) {
     nextRunInSeconds = 3600,
     globalOverride = false,
     labels = [],
+    podcasts = [],
     scanCompletedAt = null,
     configProviderIds = true,
     globalAutoDownload = true,
@@ -126,6 +128,15 @@ function stubFetch(options: StubOptions = {}) {
       }
       if (url.includes('/api/labels/watchlist')) {
         return createResponse({ labels });
+      }
+      if (url.includes('/api/podcasts/watchlist/settings')) {
+        return createResponse({ success: true });
+      }
+      if (url.includes('/api/podcasts/watchlist/remove')) {
+        return createResponse({ success: true, is_watching: false });
+      }
+      if (url.includes('/api/podcasts/watchlist')) {
+        return createResponse({ success: true, count: podcasts.length, podcasts });
       }
       if (url.includes('/link-provider')) {
         return createResponse({ success: true });
@@ -565,6 +576,124 @@ describe('watchlist route', () => {
       expect(screen.getByText('No labels followed yet')).toBeInTheDocument();
     });
     expect(screen.getByText('0 labels')).toBeInTheDocument();
+  });
+
+  it('switches to podcasts tab and renders watchlisted podcasts', async () => {
+    stubFetch({
+      podcasts: [
+        {
+          id: 10,
+          feed_url: 'https://example.com/feed.xml',
+          itunes_id: 998877,
+          title: 'Syntax - Tasty Web Development',
+          author: 'Wes Bos & Scott Tolinski',
+          artwork_url: 'https://example.com/syntax.jpg',
+          auto_download: false,
+          retention_days: 14,
+          episode_count: 700,
+          date_added: '2026-01-01T00:00:00Z',
+          last_scan_timestamp: null,
+        },
+      ],
+    });
+    renderWatchlistRoute(['/watchlist?tab=podcasts']);
+
+    await waitFor(() => {
+      expect(screen.getByText('Syntax - Tasty Web Development')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Wes Bos & Scott Tolinski')).toBeInTheDocument();
+    expect(screen.getByText('1 podcast')).toBeInTheDocument();
+    expect(screen.getByText('👁️ Monitored')).toBeInTheDocument();
+    expect(screen.getByText('⏳ 14d')).toBeInTheDocument();
+    expect(screen.getByText('700 eps')).toBeInTheDocument();
+  });
+
+  it('shows the podcasts empty state when nothing is followed', async () => {
+    stubFetch({ podcasts: [] });
+    renderWatchlistRoute(['/watchlist?tab=podcasts']);
+
+    await waitFor(() => {
+      expect(screen.getByText('No podcasts in watchlist')).toBeInTheDocument();
+    });
+    expect(screen.getByText('0 podcasts')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Explore Podcasts' })).toBeInTheDocument();
+  });
+
+  it('opens podcast settings modal and saves updated retention duration and auto-download', async () => {
+    const calls = stubFetch({
+      podcasts: [
+        {
+          id: 10,
+          feed_url: 'https://example.com/feed.xml',
+          itunes_id: 998877,
+          title: 'Syntax Podcast',
+          author: 'Wes & Scott',
+          auto_download: false,
+          retention_days: 14,
+        },
+      ],
+    });
+    renderWatchlistRoute(['/watchlist?tab=podcasts']);
+
+    await waitFor(() => {
+      expect(screen.getByText('Syntax Podcast')).toBeInTheDocument();
+    });
+
+    // Open menu
+    fireEvent.click(screen.getByRole('button', { name: 'Podcast options' }));
+    // Click Download Settings
+    fireEvent.click(screen.getByRole('button', { name: /Download Settings/ }));
+
+    // Modal opens
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'Podcast Settings' })).toBeInTheDocument();
+    });
+
+    // Select 30 days preset
+    fireEvent.click(screen.getByRole('button', { name: '30 days' }));
+
+    // Toggle auto-download
+    const autoDownloadToggle = screen.getByRole('checkbox', { name: /Auto-download new episodes/ });
+    fireEvent.click(autoDownloadToggle);
+
+    // Save
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => {
+      expect(calls.some((url) => url.includes('/api/podcasts/watchlist/settings'))).toBe(true);
+    });
+  });
+
+  it('removes podcast from watchlist after confirmation dialog', async () => {
+    const calls = stubFetch({
+      podcasts: [
+        {
+          id: 10,
+          feed_url: 'https://example.com/feed.xml',
+          itunes_id: 998877,
+          title: 'Syntax Podcast',
+          author: 'Wes & Scott',
+          auto_download: false,
+          retention_days: 14,
+        },
+      ],
+    });
+    window.showConfirmDialog = vi.fn().mockResolvedValue(true);
+    renderWatchlistRoute(['/watchlist?tab=podcasts']);
+
+    await waitFor(() => {
+      expect(screen.getByText('Syntax Podcast')).toBeInTheDocument();
+    });
+
+    // Open menu
+    fireEvent.click(screen.getByRole('button', { name: 'Podcast options' }));
+    // Click Remove from Watchlist
+    fireEvent.click(screen.getByRole('button', { name: /Remove from Watchlist/ }));
+
+    await waitFor(() => {
+      expect(window.showConfirmDialog).toHaveBeenCalled();
+      expect(calls.some((url) => url.includes('/api/podcasts/watchlist/remove'))).toBe(true);
+    });
   });
 
   it('opens global settings from the URL and saves', async () => {

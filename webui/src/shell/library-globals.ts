@@ -103,6 +103,7 @@ const _ARTIST_DETAIL_BACK_LABELS: Record<string, string> = {
   dashboard: 'Back to Dashboard',
   sync: 'Back to Sync',
   'active-downloads': 'Back to Downloads',
+  podcasts: 'Back to Podcasts',
 };
 
 // Stack of origins for the back-button label. Each entry: {type:'page', pageId}

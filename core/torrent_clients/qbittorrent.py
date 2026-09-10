@@ -53,6 +53,13 @@ _QBIT_STATE_MAP = {
     "moving":          "queued",
     "pausedDL":        "paused",
     "pausedUP":        "completed",
+    # qBittorrent 5.0 renamed paused* to stopped*. Without these a COMPLETED
+    # torrent on 5.x fell through to the "error" default below, so every
+    # finished grab was recorded as failed. Both spellings stay: 5.x can be
+    # configured to keep the old names, and 4.x is still widely run.
+    "stoppedDL":       "paused",
+    "stoppedUP":       "completed",
+    "forcedMetaDL":    "downloading",
     "queuedDL":        "queued",
     "queuedUP":        "queued",
     "stalledDL":       "stalled",
@@ -63,7 +70,18 @@ _QBIT_STATE_MAP = {
 
 
 def _map_state(qbit_state: str) -> str:
-    return _QBIT_STATE_MAP.get(qbit_state, "error")
+    """Map qBittorrent's own state name onto the adapter's vocabulary.
+
+    An UNKNOWN state is not an error. qBittorrent adds and renames states
+    between releases — 5.0's stopped* rename is exactly that — and defaulting
+    to "error" meant the next rename would again cancel healthy downloads and
+    corrupt the history. Unknown now reads as "stalled": the monitor keeps
+    watching, which is recoverable, instead of destroying the transfer.
+
+    The states that genuinely ARE errors ("error", "missingFiles") are mapped
+    explicitly, so nothing real is being softened here.
+    """
+    return _QBIT_STATE_MAP.get(str(qbit_state or ""), "stalled")
 
 
 class QBittorrentAdapter:

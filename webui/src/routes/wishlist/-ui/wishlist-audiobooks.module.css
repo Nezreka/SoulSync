@@ -1,0 +1,361 @@
+/* The audiobooks tab of the wishlist page.
+
+   Its own stylesheet rather than the wishlist page's global wl-* classes: those
+   belong to the nebula, and an audiobook list has nothing in common with it
+   beyond living on the same page. Keeping them apart is also what guarantees a
+   change here cannot move a pixel of the music view. */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+  animation: abFade 0.25s ease both;
+}
+
+@keyframes abFade {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.headText {
+  min-width: 0;
+  max-width: 640px;
+}
+
+.blurb {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.headActions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.lastRun {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.38);
+  white-space: nowrap;
+}
+
+.searchNow {
+  height: 38px;
+  padding: 0 20px;
+  border: none;
+  border-radius: 11px;
+  background: rgba(var(--accent-rgb), 0.95);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 640;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    transform 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.searchNow:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.searchNow:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.notice {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(var(--accent-rgb), 0.14);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 12.5px;
+  font-weight: 560;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.filter:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+}
+
+.filterOn {
+  background: rgba(var(--accent-rgb), 0.95);
+  border-color: transparent;
+  color: #ffffff;
+}
+
+.filterCount {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.72;
+}
+
+/* ── Rows ───────────────────────────────────────────────────────────────── */
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px 12px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-top-color: rgba(255, 255, 255, 0.13);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.06) 0%,
+    rgba(255, 255, 255, 0.025) 100%
+  );
+  transition:
+    border-color 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.row:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.4);
+}
+
+.coverLink {
+  flex-shrink: 0;
+  display: block;
+}
+
+.cover {
+  width: 62px;
+  height: 62px;
+  border-radius: 12px;
+  object-fit: cover;
+  display: block;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.45);
+}
+
+.coverBlank {
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.28), rgba(255, 255, 255, 0.04));
+}
+
+.meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.title {
+  font-size: 14.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: #ffffff;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.title:hover {
+  color: rgba(var(--accent-rgb), 1);
+}
+
+.byline {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.series {
+  font-size: 11.5px;
+  color: rgba(var(--accent-rgb), 0.85);
+}
+
+/* The waiting is the feature, so it says so out loud. */
+.trail {
+  margin-top: 3px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.34);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 11px;
+  font-weight: 620;
+  color: rgba(255, 255, 255, 0.7);
+  white-space: nowrap;
+}
+
+.statusActive {
+  border-color: rgba(var(--accent-rgb), 0.5);
+  background: rgba(var(--accent-rgb), 0.16);
+  color: #ffffff;
+}
+
+.statusDone {
+  border-color: rgba(80, 200, 130, 0.45);
+  background: rgba(80, 200, 130, 0.15);
+  color: #9ff0c2;
+}
+
+.rowActions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.action {
+  padding: 7px 13px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 12px;
+  font-weight: 560;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.action:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+/* ── States ─────────────────────────────────────────────────────────────── */
+
+.skeleton {
+  height: 260px;
+  border-radius: 18px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04),
+    rgba(255, 255, 255, 0.09),
+    rgba(255, 255, 255, 0.04)
+  );
+  background-size: 800px 100%;
+  animation: abShimmer 1.4s linear infinite;
+}
+
+@keyframes abShimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+
+.empty {
+  padding: 56px 24px;
+  text-align: center;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.empty h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.empty p {
+  margin: 0 auto 18px;
+  max-width: 460px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.browseLink {
+  display: inline-flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 20px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.browseLink:hover {
+  background: rgba(255, 255, 255, 0.17);
+}
+
+@media (max-width: 860px) {
+  .row {
+    flex-wrap: wrap;
+  }
+
+  .rowActions {
+    width: 100%;
+  }
+}

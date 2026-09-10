@@ -4,7 +4,7 @@ import { z } from 'zod';
 // Search params
 // ---------------------------------------------------------------------------
 
-export const WATCHLIST_TAB_VALUES = ['artists', 'labels'] as const;
+export const WATCHLIST_TAB_VALUES = ['artists', 'labels', 'podcasts', 'audiobooks'] as const;
 export type WatchlistTab = (typeof WATCHLIST_TAB_VALUES)[number];
 
 // Values match the vanilla <select id="watchlist-sort-select"> exactly, so a
@@ -334,4 +334,31 @@ export interface WatchlistLabel {
  *  with NO `success` key, and answers `{labels: []}` on its own failures. */
 export interface WatchlistLabelsResponse {
   labels?: WatchlistLabel[];
+}
+
+// ---------------------------------------------------------------------------
+// Podcasts
+// ---------------------------------------------------------------------------
+
+export interface WatchlistPodcast {
+  id: number;
+  feed_url: string;
+  itunes_id?: number | null;
+  title: string;
+  author?: string | null;
+  description?: string | null;
+  artwork_url?: string | null;
+  website?: string | null;
+  auto_download: boolean;
+  retention_days: number;
+  episode_count?: number | null;
+  date_added?: string | null;
+  last_scan_timestamp?: string | null;
+}
+
+export interface WatchlistPodcastsResponse {
+  success: boolean;
+  count?: number;
+  podcasts?: WatchlistPodcast[];
+  error?: string;
 }

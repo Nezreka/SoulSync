@@ -33,6 +33,7 @@ export function createAppRouter(
 
   return createRouter({
     routeTree,
+    basepath: document.querySelector<HTMLMetaElement>('meta[name="soulsync-url-base"]')?.content || '/',
     history: options.history,
     context,
     defaultPreload: 'intent',

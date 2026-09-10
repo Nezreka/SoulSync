@@ -8,6 +8,7 @@ import {
   watchlistCountQueryOptions,
   watchlistGlobalConfigQueryOptions,
   watchlistLabelsQueryOptions,
+  watchlistPodcastsQueryOptions,
   watchlistRecentReleasesQueryOptions,
   watchlistScanStatusQueryOptions,
 } from './-watchlist.api';
@@ -33,10 +34,12 @@ export const Route = createFileRoute('/watchlist')({
       queryClient.ensureQueryData(watchlistRecentReleasesQueryOptions(profile.profileId)),
     ];
 
-    // Labels are a separate blueprint and a separate round trip; only pay for
-    // it when the Labels tab is the one being opened.
+    // Labels and Podcasts are separate blueprints and separate round trips;
+    // only pay for them when their tab is the one being opened.
     if (deps.tab === 'labels') {
       pending.push(queryClient.ensureQueryData(watchlistLabelsQueryOptions(profile.profileId)));
+    } else if (deps.tab === 'podcasts') {
+      pending.push(queryClient.ensureQueryData(watchlistPodcastsQueryOptions(profile.profileId)));
     }
 
     // allSettled, not all: this loader WARMS the cache for the first paint, it

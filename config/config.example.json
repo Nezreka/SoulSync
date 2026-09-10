@@ -59,8 +59,12 @@
       "album_path": "$albumartist/$albumartist - $album/$track - $title",
       "single_path": "$artist/$artist - $title/$title",
       "compilation_path": "Compilations/$album/$track - $artist - $title",
-      "playlist_path": "$playlist/$artist - $title"
+      "playlist_path": "$playlist/$artist - $title",
+      "podcast_path": "$show/Season $season/$title"
     }
+  },
+  "podcasts": {
+    "download_path": "/app/podcasts"
   },
   "import": {
     "staging_path": "./Staging",

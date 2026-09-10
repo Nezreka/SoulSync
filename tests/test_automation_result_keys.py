@@ -30,6 +30,8 @@ _HANDLERS = _ROOT / 'core/automation/handlers'
 SENTENCE_SOURCES = {
     'scan_watchlist': ('scan_watchlist.py',
                        ('artists_scanned', 'new_tracks_found', 'tracks_added_to_wishlist')),
+    'scan_watchlist_podcasts': ('scan_watchlist_podcasts.py',
+                                ('podcasts_checked', 'episodes_queued', 'episodes_pruned')),
     'run_duplicate_cleaner': ('duplicate_cleaner.py',
                               ('files_scanned', 'duplicates_found', 'files_deleted',
                                'space_freed_mb')),

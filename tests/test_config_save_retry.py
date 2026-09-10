@@ -14,8 +14,11 @@ ERROR. These tests pin the new behaviour:
 import json
 import logging
 import sqlite3
+import time
+from contextlib import contextmanager
+from threading import Thread
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -55,6 +58,18 @@ def manager(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ConfigManager:
 # ---------------------------------------------------------------------------
 
 
+@contextmanager
+def _mock_settings_sleep():
+    """Replace settings' time reference, never the process-wide time.sleep.
+
+    Background metadata workers also sleep. Patching time.sleep itself records
+    their calls and removes their rate limiting while these assertions run.
+    """
+    with patch("core.settings.time", wraps=time) as settings_time:
+        settings_time.sleep = Mock()
+        yield settings_time.sleep
+
+
 def _fail_n_times_then_succeed(n: int, manager: ConfigManager):
     """Patch ``_save_to_database`` so the first ``n`` calls fail (lock),
     then subsequent calls succeed."""
@@ -80,7 +95,7 @@ def test_save_succeeds_on_first_attempt_emits_no_error_logs(
 ) -> None:
     """Happy path: a successful save should not log at ERROR."""
     caplog.set_level(logging.DEBUG, logger="soulsync.config")
-    with patch("core.settings.time.sleep") as sleep_mock:
+    with _mock_settings_sleep() as sleep_mock:
         with patch.object(manager, "_save_to_database", return_value=True) as save_mock:
             manager._save_config()
     assert save_mock.call_count == 1
@@ -95,7 +110,7 @@ def test_lock_errors_during_retries_log_at_debug_not_error(
     """Three transient locks then success should produce DEBUG noise only."""
     caplog.set_level(logging.DEBUG, logger="soulsync.config")
     stub, state = _fail_n_times_then_succeed(3, manager)
-    with patch("core.settings.time.sleep") as sleep_mock:
+    with _mock_settings_sleep() as sleep_mock:
         with patch.object(manager, "_save_to_database", side_effect=stub):
             with patch.object(manager, "_ensure_database_exists"):
                 manager._save_config()
@@ -109,11 +124,11 @@ def test_save_uses_six_attempts_with_exponential_backoff(
     manager: ConfigManager,
 ) -> None:
     """All six attempts must run, with the documented backoff schedule."""
-    with patch("core.settings.time.sleep") as sleep_mock:
+    with _mock_settings_sleep() as sleep_mock:
         with patch.object(manager, "_save_to_database", return_value=False) as save_mock:
-            with patch("builtins.open"):  # silence the json fallback's filesystem write
-                with patch.object(Path, "mkdir"):
-                    manager._save_config()
+            with patch.object(manager, "_save_config_file_atomic") as fallback:
+                manager._save_config()
+    fallback.assert_called_once_with()
     assert save_mock.call_count == 6
     expected_delays = [0.2, 0.5, 1.0, 2.0, 4.0]
     actual_delays = [c.args[0] for c in sleep_mock.call_args_list]
@@ -126,7 +141,7 @@ def test_all_retries_exhausted_logs_single_error_and_falls_back_to_json(
     """Exhausting retries should produce one ERROR log + one fallback file."""
     caplog.set_level(logging.DEBUG, logger="soulsync.config")
     manager.config_path = tmp_path / "config.json"
-    with patch("core.settings.time.sleep"):
+    with _mock_settings_sleep():
         with patch.object(manager, "_save_to_database", return_value=False):
             manager._save_config()
     error_logs = [r for r in caplog.records if r.levelno == logging.ERROR]
@@ -187,3 +202,15 @@ def test_connect_db_sets_required_pragmas(manager: ConfigManager) -> None:
     assert busy_timeout == 30000
     # synchronous returns 0=OFF, 1=NORMAL, 2=FULL, 3=EXTRA
     assert synchronous == 1
+
+
+def test_settings_sleep_mock_does_not_capture_background_worker_delays():
+    """Reproduce the unrelated worker sleep that intermittently added a sixth delay."""
+    original_sleep = time.sleep
+    with _mock_settings_sleep() as sleep_mock:
+        worker = Thread(target=lambda: time.sleep(0))
+        worker.start()
+        worker.join(timeout=2)
+        assert not worker.is_alive()
+        assert time.sleep is original_sleep
+        sleep_mock.assert_not_called()
