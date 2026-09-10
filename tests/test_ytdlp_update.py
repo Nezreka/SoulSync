@@ -245,10 +245,27 @@ def _tile() -> str:
 
 def test_the_tile_renders_on_both_sides():
     """Boulder asked for it on both. A data-video-only marker here would silently
-    hide it from the music side, where YouTube is also a download source."""
+    hide it from the music side, where YouTube is also a download source.
+
+    This used to assert data-stg="advanced". The tile has since moved to live
+    inside the YouTube source panel on the Sources tab - "it belongs where
+    somebody debugging YouTube will actually look" - so that assertion was
+    pinning an address it had already left. The Sources tab is shared by both
+    sides, which is what actually delivers the both-sides requirement now.
+    """
     tile = _tile()
     assert "data-video-only" not in tile and "data-music-only" not in tile
-    assert 'data-stg="advanced"' in tile
+
+    import re
+
+    index = _html()
+    at = index.index("<!-- yt-dlp updater")
+    stg = index.rfind('data-stg="', 0, at)
+    tab = re.search(r'data-stg="([a-z]+)"', index[stg:stg + 32]).group(1)
+    assert tab == "sources", f"the updater is on the {tab} tab, not with its source"
+    assert index.rfind('id="youtube-settings-container"', 0, at) != -1, (
+        "no longer inside the YouTube panel - which is the whole reason it moved"
+    )
 
 
 def test_the_tile_states_the_restart_requirement_in_the_markup():

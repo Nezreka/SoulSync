@@ -4281,7 +4281,7 @@
                                             </select>
                                         </div>
                                     </div>
-                                        <!-- yt-dlp lives with YouTube now rather than under Advanced. It is the
+                                        <!-- yt-dlp updater. Lives with YouTube rather than under Advanced. It is the
                                              thing that breaks YouTube downloads when it goes stale, so it belongs
                                              where somebody debugging YouTube will actually look. -->
                                         <h4 class="settings-subheading">yt-dlp <span id="ytdlp-hint-badge" hidden>&#9679;</span></h4>
@@ -4314,7 +4314,7 @@
                                 </div>
                                 <div id="ytdlp-status" style="display: none; margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: 0.85em;"></div>
                                 <pre id="ytdlp-detail" style="display: none; margin-top: 8px; max-height: 220px; overflow: auto; font-size: 0.75em; white-space: pre-wrap;"></pre>
-                            </div>
+                            </div><!-- end yt-dlp body -->
                                 </div>
                                 <!-- Prowlarr - the indexer aggregator torrent and usenet both search through.
                                      Moved off the Downloads tab so every source is set up in one place.
@@ -6583,9 +6583,6 @@
                             </div>
                             </div><!-- end Database Maintenance body -->
 
-                            <!-- yt-dlp updater. Deliberately NOT marked video-only: it is one
-                                 package, used by YouTube downloads on the video side and by
-                                 YouTube-sourced audio on the music side, so both sides get it. -->
 
                             <!-- Import Settings (collapsible tile) — first here so it isn't buried among filters -->
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
