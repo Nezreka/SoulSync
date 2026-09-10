@@ -248,3 +248,58 @@ def test_the_downloads_tab_holds_only_download_settings():
         tab = re.search(r'data-stg="([a-z]+)"', markup[stg:stg + 32]).group(1)
         assert tab == "advanced", f"{stray} is back on the {tab} tab"
 
+
+def test_the_video_save_button_cannot_write_a_retired_form():
+    """A live clobber, and a consequence of making the settings tabs shared.
+
+    On the video side the Save Settings button is a CAPTURE-phase listener that
+    calls stopImmediatePropagation, so only the video savers run - the music
+    save, a bubble-phase listener on the button itself, never fires. That was
+    harmless while the video side could only show video settings.
+
+    Now the Sources tab is shared, so this sequence lost data:
+
+        1. on the video side, open Sources and change the Soulseek URL
+        2. autosave stores it
+        3. click Save Settings
+        4. saveSlskd posts the RETIRED video slskd form, which still holds the
+           value it loaded with, straight over the change from step 2
+
+    The retired form has no business writing anything. Its change-listeners are
+    gone for the same reason: hidden fields can only change from code, and any
+    write from there races the music panel's own save.
+    """
+    js = (_WEBUI / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
+
+    chain = js.split("Promise.all([", 1)[1].split("])", 1)[0]
+    assert "saveSlskd" not in chain, (
+        "the video save button posts the retired slskd form again"
+    )
+    # the savers that legitimately belong to the video side stay
+    for keep in ("saveConn", "saveDownloads", "saveQuality", "saveYtQuality"):
+        assert keep in chain, f"{keep} was dropped from the video save chain"
+
+    wiring = js.split("function wireSlskd", 1)[-1][:1200] if "function wireSlskd" in js else js
+    assert "addEventListener('change', function () { saveSlskd(true); })" not in js, (
+        "a retired hidden field can still trigger a save"
+    )
+
+
+def test_the_ytdlp_card_loads_where_it_actually_lives():
+    """The yt-dlp tile moved into the YouTube panel on the SOURCES tab, but its
+    loader stayed wired to the Advanced tab - so the card sat on "Installed:
+    Loading..." forever unless you happened to open Advanced first, which nobody
+    does to read a version number.
+
+    Predates this session; found while checking nothing else had come unhooked.
+    """
+    js = (_WEBUI / "static" / "settings.js").read_text(encoding="utf-8")
+    trigger = re.search(r"if \(\(?tab === [^)]*\)? && typeof loadYtdlpStatus", js)
+    assert trigger, "the yt-dlp loader is no longer wired to a tab"
+    assert "'sources'" in trigger.group(0), (
+        "the loader still only fires on Advanced, where the tile no longer is"
+    )
+    # and opening the YouTube card refreshes it
+    opener = js.split("function openSourceModal(", 1)[1].split("\n}", 1)[0]
+    assert "loadYtdlpStatus" in opener
+

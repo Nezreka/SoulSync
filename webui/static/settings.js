@@ -1053,7 +1053,12 @@ function switchSettingsTab(tab) {
     if (tab === 'advanced' && typeof loadDbMaintenanceInfo === 'function') {
         try { loadDbMaintenanceInfo(); } catch (e) { }
     }
-    if (tab === 'advanced' && typeof loadYtdlpStatus === 'function') {
+    // The yt-dlp tile moved to the YouTube panel on the SOURCES tab - "it belongs
+    // where somebody debugging YouTube will actually look" - but this trigger
+    // stayed behind on Advanced. So the card sat on "Loading..." forever unless
+    // you happened to visit Advanced first, which is not a thing anyone does to
+    // read a version number. Load it wherever it now lives.
+    if ((tab === 'advanced' || tab === 'sources') && typeof loadYtdlpStatus === 'function') {
         try { loadYtdlpStatus(); } catch (e) { }
     }
     if (tab === 'advanced' && typeof loadImageCacheStatus === 'function') {
@@ -1987,6 +1992,10 @@ async function testOneSource(srcId) {
 window.testOneSource = testOneSource;
 
 function openSourceModal(srcId) {
+    // opening the YouTube card is the moment its yt-dlp version matters
+    if (srcId === 'youtube' && typeof loadYtdlpStatus === 'function') {
+        try { loadYtdlpStatus(); } catch (e) { }
+    }
     const containerId = SOURCE_CONFIG_ID_BY_SRC[srcId];
     const overlay = document.getElementById('source-config-modal');
     const body = document.getElementById('src-modal-body');
