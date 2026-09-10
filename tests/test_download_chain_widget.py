@@ -26,6 +26,19 @@ _ROOT = Path(__file__).resolve().parents[1]
 _KINDS = ("music", "video", "audiobooks")
 
 
+def _rule(css: str, selector: str) -> str:
+    """The body of a TOP-LEVEL rule.
+
+    Anchored to the start of a line, because the mobile overrides repeat these
+    selectors indented inside a media query — and they now sit earlier in the
+    file, so a plain split found the override and reported the base rule as
+    missing its own declarations.
+    """
+    m = re.search(rf"^{re.escape(selector)}\s*{{([^}}]*)}}", css, re.M)
+    assert m, f"no top-level rule for {selector}"
+    return m.group(1)
+
+
 def _read(rel: str) -> str:
     return (_ROOT / rel).read_text(encoding="utf-8", errors="ignore")
 
@@ -198,12 +211,12 @@ def test_the_slot_says_what_goes_in_it_and_why(js):
 def test_the_slot_is_a_target_not_a_divider():
     css = _read("webui/static/style.css")
     block = css.split("/* ── Download chains", 1)[1]
-    slot = block.split(".dlchain-slot {", 1)[1].split("}", 1)[0]
+    css_all = _read("webui/static/style.css")
+    slot = _rule(css_all, ".dlchain-slot")
     assert "min-height" in slot
     assert "dashed" in slot
     # empty chain gets the bigger one, the way the builder's first slot is
-    first = block.split(".dlchain-slot.first {", 1)[1].split("}", 1)[0]
-    assert "min-height" in first
+    assert "min-height" in _rule(css_all, ".dlchain-slot.first")
 
 
 def test_clicking_is_offered_as_well_as_dragging(index):
@@ -235,8 +248,10 @@ def test_the_logo_carries_the_step(js):
     fn = js.split("function _dlchainStep(", 1)[1].split("\n}", 1)[0]
     assert "dlchain-step-art" in fn
     css = _read("webui/static/style.css")
-    art = css.split(".dlchain-step-art {", 1)[1].split("}", 1)[0]
-    assert "42px" in art
+    art = _rule(css, ".dlchain-step-art")
+    # it fills the card and stands in a well of its own
+    assert "flex: 1" in art
+    assert "height: 40px" in art
     assert "border-radius" in art and "background" in art
 
 
@@ -278,12 +293,12 @@ def test_the_flow_borrows_the_builder_vocabulary():
     """Two builders in one app should not look like two apps."""
     css = _read("webui/static/style.css")
     block = css.split("/* ── Download chains", 1)[1]
-    conn = block.split(".dlchain-connector {", 1)[1].split("}", 1)[0]
+    css_all = _read("webui/static/style.css")
+    conn = _rule(css_all, ".dlchain-connector")
     assert "width: 2px" in conn                      # same as .flow-connector
     assert "--accent-rgb" in conn
     assert ".dlchain-connector::after" in block       # the arrowhead
-    slot = block.split(".dlchain-slot {", 1)[1].split("}", 1)[0]
-    assert "dashed" in slot
+    assert "dashed" in _rule(css_all, ".dlchain-slot")
 
 
 def test_the_source_dropdown_is_no_longer_a_control(index):
@@ -324,3 +339,76 @@ def test_the_widget_drives_the_hidden_transports(js):
     spec = js.split("const DLCHAIN_KINDS = {", 1)[1].split("\n};", 1)[0]
     assert "getElementById('download-source-mode')" in spec
     assert "getElementById('audiobook-download-mode')" in spec
+
+
+def test_the_dark_brand_marks_are_inverted(js):
+    """Tidal, Qobuz and SoundCloud ship dark-foreground marks that vanish
+    against the dark UI. `brightness(0) invert(1)` is this app's existing recipe
+    for "render this image as pure white" — the equalizer and auto-sync icons
+    already use it."""
+    marks = js.split("const INVERT_BRAND_MARKS = new Set([", 1)[1].split("]", 1)[0]
+    for brand in ("tidal", "qobuz", "soundcloud"):
+        assert f"'{brand}'" in marks, brand
+    css = _read("webui/static/style.css")
+    rule = _rule(css, ".dlchain-mark.is-inverted")
+    assert "brightness(0) invert(1)" in rule
+
+
+def test_both_the_pool_and_the_chain_invert(js):
+    """A logo that reads in one column and vanishes in the other is worse than
+    either on its own."""
+    for fn_name in ("_dlchainTile", "_dlchainStep"):
+        fn = js.split(f"function {fn_name}(", 1)[1].split("\n}", 1)[0]
+        assert "INVERT_BRAND_MARKS.has(id)" in fn, fn_name
+
+
+def test_a_step_is_the_logo_not_a_row_of_text(js):
+    """A full-width row for one 30px mark was mostly empty space, and the
+    column is already headed "download chain"."""
+    fn = js.split("function _dlchainStep(", 1)[1].split("\n}", 1)[0]
+    assert "dlchain-step-name" not in fn
+    assert "dlchain-step-role" not in fn
+    assert "dlchain-step-art" in fn
+    css = _read("webui/static/style.css")
+    step = _rule(css, ".dlchain-step")
+    assert "width: min(" in step, "the card should not span the column"
+
+
+def test_the_name_still_reaches_a_pointer_and_a_reader(js):
+    """Dropping the visible text cannot mean dropping the information."""
+    fn = js.split("function _dlchainStep(", 1)[1].split("\n}", 1)[0]
+    assert "title=" in fn and "aria-label=" in fn
+    assert "Tried first" in fn and "Fallback" in fn
+
+
+def test_there_are_arrows_as_well_as_dragging(js):
+    """Dragging is precise work on a touchpad and impossible on a phone."""
+    fn = js.split("function _dlchainStep(", 1)[1].split("\n}", 1)[0]
+    assert "dlchainMove(" in fn
+    assert "dlchain-move" in fn
+    move = js.split("function dlchainMove(", 1)[1].split("\nwindow.", 1)[0]
+    assert "_dlchainCommit()" in move
+
+
+def test_the_end_arrows_are_disabled(js):
+    """An arrow that does nothing is worse than no arrow."""
+    fn = js.split("function _dlchainStep(", 1)[1].split("\n}", 1)[0]
+    assert "position === 1 ? ' disabled'" in fn
+    assert "position === total ? ' disabled'" in fn
+
+
+def test_moving_past_either_end_is_a_no_op(js):
+    move = js.split("function dlchainMove(", 1)[1].split("\nwindow.", 1)[0]
+    assert "j < 0 || j >= _dlchainOrder.length" in move
+
+
+def test_it_works_on_a_phone():
+    """Dragging is not realistic on a touch screen, so the arrows are the
+    primary control there and need a real tap target."""
+    css = _read("webui/static/style.css")
+    block = css.split("/* ── Download chains", 1)[1]
+    assert "@media (max-width: 560px)" in block
+    phone = block.split("@media (max-width: 560px)", 1)[1].split("\n}", 1)[0]
+    assert ".dlchain-step { width: 100%" in phone
+    assert ".dlchain-move" in phone and ".dlchain-btn" in phone
+    assert ".dlchain-tabs" in phone

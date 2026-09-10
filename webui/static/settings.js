@@ -1005,8 +1005,9 @@ let _dlchainDragging = null;
 // the thing you drag looks like the thing you configure.
 function _dlchainTile(kind, id) {
     const m = DLCHAIN_KINDS[kind].meta(id);
+    const inv = INVERT_BRAND_MARKS.has(id) ? ' is-inverted' : '';
     const art = m.icon
-        ? `<img src="${m.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${m.emoji}</span>'">`
+        ? `<img class="dlchain-mark${inv}" src="${m.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${m.emoji}</span>'">`
         : `<span class="emoji-icon">${m.emoji}</span>`;
     return `<button type="button" class="dlchain-tile" draggable="true" data-src="${id}" `
          + `onclick="dlchainAdd('${id}')" title="Add ${escapeHtml(m.name)} to the chain">`
@@ -1014,26 +1015,42 @@ function _dlchainTile(kind, id) {
          + `<span class="dlchain-tile-name">${escapeHtml(m.name)}</span></button>`;
 }
 
-// A step in the chain. The logo carries the card — it is the fastest thing to
-// recognise and the only part that differs at a glance — so it gets real size
-// and a tinted well, and the text sits beside it rather than competing.
-function _dlchainStep(kind, id, position) {
+// A step in the chain: the logo, and almost nothing else. The mark identifies
+// the source faster than its name does, and repeating the name in a column
+// already headed "download chain" earned its width back nowhere. The name still
+// reaches a screen reader, and a pointer, through the label.
+function _dlchainStep(kind, id, position, total) {
     const m = DLCHAIN_KINDS[kind].meta(id);
+    const inv = INVERT_BRAND_MARKS.has(id) ? ' is-inverted' : '';
     const art = m.icon
-        ? `<img src="${m.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${m.emoji}</span>'">`
+        ? `<img class="dlchain-mark${inv}" src="${m.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${m.emoji}</span>'">`
         : `<span class="emoji-icon">${m.emoji}</span>`;
     const role = position === 1 ? 'Tried first' : `Fallback ${position - 1}`;
-    return `<div class="dlchain-step" draggable="true" data-src="${id}">`
-         + '<span class="dlchain-step-grip" aria-hidden="true">⠿</span>'
+    const name = escapeHtml(m.name);
+    return `<div class="dlchain-step" draggable="true" data-src="${id}" `
+         + `title="${name} — ${role}" aria-label="${name}, ${role}">`
+         + '<span class="dlchain-step-move">'
+         + `<button type="button" class="dlchain-move" title="Move ${name} up" aria-label="Move ${name} up"`
+         + `${position === 1 ? ' disabled' : ''} onclick="dlchainMove('${id}', -1)">▲</button>`
+         + `<button type="button" class="dlchain-move" title="Move ${name} down" aria-label="Move ${name} down"`
+         + `${position === total ? ' disabled' : ''} onclick="dlchainMove('${id}', 1)">▼</button>`
+         + '</span>'
          + `<span class="dlchain-step-rank">${position}</span>`
          + `<span class="dlchain-step-art">${art}</span>`
-         + '<span class="dlchain-step-text">'
-         + `<span class="dlchain-step-name">${escapeHtml(m.name)}</span>`
-         + `<span class="dlchain-step-role">${role}</span>`
-         + '</span>'
-         + `<button type="button" class="dlchain-btn" title="Remove ${escapeHtml(m.name)} from the chain" `
-         + `onclick="dlchainRemove('${id}')">&times;</button></div>`;
+         + `<button type="button" class="dlchain-btn" title="Remove ${name} from the chain" `
+         + `aria-label="Remove ${name} from the chain" onclick="dlchainRemove('${id}')">&times;</button></div>`;
 }
+
+// Arrows because dragging is precise work on a touchpad and impossible on a
+// phone; the drag stays for people who prefer it.
+function dlchainMove(id, delta) {
+    const i = _dlchainOrder.indexOf(id);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= _dlchainOrder.length) return;
+    [_dlchainOrder[i], _dlchainOrder[j]] = [_dlchainOrder[j], _dlchainOrder[i]];
+    _dlchainCommit();
+}
+window.dlchainMove = dlchainMove;
 
 function renderDownloadChain() {
     const kind = _dlchainKind;
@@ -1059,7 +1076,7 @@ function renderDownloadChain() {
     // worse than a single obvious one. Sized and worded like the automation
     // builder's slots, which is the thing in this app that already gets it
     // right — a big dashed target that says what to put in it and why.
-    const steps = order.map((id, i) => _dlchainStep(kind, id, i + 1));
+    const steps = order.map((id, i) => _dlchainStep(kind, id, i + 1, order.length));
     const lastName = order.length ? spec.meta(order[order.length - 1]).name : '';
     const slotTitle = order.length
         ? `Drag a source here — tried after ${escapeHtml(lastName)}`
@@ -1288,6 +1305,11 @@ function onAudiobookModeChange() {
     if (container) container.style.display = mode === 'hybrid' ? '' : 'none';
     if (mode === 'hybrid') renderAudiobookHybrid();
 }
+
+// Dark-foreground brand marks that vanish against the dark UI. The app's
+// canonical recipe for "render this image as pure white" is
+// `brightness(0) invert(1)` — already used for the equalizer and auto-sync icons.
+const INVERT_BRAND_MARKS = new Set(['tidal', 'qobuz', 'soundcloud']);
 
 const HYBRID_SOURCES = [
     { id: 'soulseek', name: 'Soulseek', icon: '/static/img/brands/slskd.png', emoji: '🎵' },
