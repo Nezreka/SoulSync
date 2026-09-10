@@ -754,3 +754,40 @@ def test_no_settings_selector_is_defined_twice_at_the_top_level():
     dupes = [d for d in dupes if d != "#settings-page"]
     assert not dupes, f"defined more than once at top level: {sorted(set(dupes))}"
 
+
+def test_the_settings_page_sizes_text_from_one_scale():
+    """Type on this page was in three unit systems at once: card titles in px,
+    labels and sub-headings in em, help text in its own em. em compounds - a
+    label two levels deep rendered smaller than the identical label one level
+    up, for no reason anyone chose.
+
+    One rem scale means a label is the same size wherever it sits. The five
+    steps are declared as tokens; every text rule points at one.
+
+    Two families are deliberately NOT on it, listed here so the next person
+    knows it was a decision rather than an oversight:
+
+      * the Connections tab's own components - .stg-service*, .stg-accordion*
+        and .api-service-frame. That tab has its own layout language and has not
+        been through this pass; resizing its text from here would leave it
+        half-converted, which looks worse than leaving it alone.
+      * the page title and the monospace callback URL, which are one-offs.
+
+    Shrink that list as those tabs get done.
+    """
+    css = _read("webui/static/style.css")
+
+    for token in ('--stg-t-section', '--stg-t-body', '--stg-t-label',
+                  '--stg-t-sub', '--stg-t-micro'):
+        assert f'{token}:' in css, f'{token} is not declared'
+
+    leftovers = []
+    for m in re.finditer(r'(?m)^(#settings-page [^{\n]+)\{([^}]*)\}', css):
+        sel = m.group(1).strip()
+        if any(x in sel for x in ('stg-service', 'stg-accordion', 'api-service-frame',
+                                  'header-title', 'callback-url')):
+            continue
+        for size in re.findall(r'font-size:\s*([0-9.]+em)', m.group(2)):
+            leftovers.append((sel[:60], size))
+    assert not leftovers, f"still sizing text in em: {leftovers}"
+

@@ -60955,7 +60955,7 @@ tr.tag-diff-same {
 #settings-page .settings-nav-row .save-button {
     padding: 8px 16px;
     border-radius: 9px;
-    font-size: 0.84em;
+    font-size: var(--stg-t-body, 0.82rem);
     font-weight: 600;
     white-space: nowrap;
 }
@@ -61074,9 +61074,11 @@ tr.tag-diff-same {
 
 /* Section titles — clean, readable, accent bar on hover */
 #settings-page .settings-group > h3 {
-    font-size: 0.8em;
+    /* the sub-heading INSIDE a card. deliberately between the card title and a
+       field label: it groups rows, it does not title the card. */
+    font-size: 0.72rem;
     font-weight: 600;
-    letter-spacing: 0.11em;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
     color: rgba(255, 255, 255, 0.55);
     /* more air above than below, so the label belongs to what follows it */
@@ -61129,9 +61131,9 @@ tr.tag-diff-same {
 #settings-page .form-group[hidden] { display: none !important; }
 
 #settings-page .form-group > label {
-    font-size: 0.9em;
-    color: rgba(255, 255, 255, 0.8);
-    font-weight: 400;
+    font-size: var(--stg-t-label, 0.78rem);
+    color: rgba(255, 255, 255, 0.74);
+    font-weight: 450;
     margin: 0;
     /* Grow to fill the left so the control aligns to a consistent right edge. */
     flex: 1 1 auto;
@@ -61167,7 +61169,7 @@ tr.tag-diff-same {
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 10px;
     color: rgba(255, 255, 255, 0.9);
-    font-size: 0.88em;
+    font-size: var(--stg-t-body, 0.82rem);
     font-family: inherit;
     margin: 0;
     transition: border-color 0.25s, background 0.25s, box-shadow 0.25s;
@@ -61178,7 +61180,7 @@ tr.tag-diff-same {
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 10px;
     color: rgba(255, 255, 255, 0.9);
-    font-size: 0.88em;
+    font-size: var(--stg-t-body, 0.82rem);
     margin: 0;
     resize: vertical;
     transition: border-color 0.25s, background 0.25s, box-shadow 0.25s;
@@ -61212,7 +61214,7 @@ tr.tag-diff-same {
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 10px;
     color: rgba(255, 255, 255, 0.85);
-    font-size: 0.88em;
+    font-size: var(--stg-t-body, 0.82rem);
     font-family: inherit;
     cursor: pointer;
     min-width: 0;
@@ -61284,10 +61286,10 @@ tr.tag-diff-same {
 #settings-page .callback-info .callback-label,
 #settings-page .settings-hint,
 #settings-page .setting-help-text {
-    font-size: 0.8em;
-    color: rgba(255, 255, 255, 0.35);
-    line-height: 1.6;
-    letter-spacing: 0.01em;
+    font-size: var(--stg-t-sub, 0.75rem);
+    color: rgba(255, 255, 255, 0.4);
+    line-height: 1.55;
+    letter-spacing: 0;
 }
 #settings-page .callback-info .callback-url {
     font-size: 0.82em;
@@ -61304,7 +61306,7 @@ tr.tag-diff-same {
 #settings-page .server-toggle-btn {
     border-radius: 10px;
     padding: 10px 20px;
-    font-size: 0.85em;
+    font-size: var(--stg-t-body, 0.82rem);
     font-weight: 500;
     border: 1px solid rgba(255, 255, 255, 0.08);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -61328,7 +61330,7 @@ tr.tag-diff-same {
     padding: 9px 18px;
     min-width: fit-content;
     border-radius: 10px;
-    font-size: 0.84em;
+    font-size: var(--stg-t-body, 0.82rem);
     font-weight: 600;
     font-family: inherit;
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
@@ -61381,7 +61383,7 @@ tr.tag-diff-same {
 
 #settings-page .preset-button {
     border-radius: 8px;
-    font-size: 0.84em;
+    font-size: var(--stg-t-body, 0.82rem);
     padding: 8px 18px;
 }
 #settings-page .quality-presets {
@@ -61398,7 +61400,7 @@ tr.tag-diff-same {
     border-radius: 8px;
     margin: 0 !important;
     cursor: pointer;
-    font-size: 0.9em;
+    font-size: var(--stg-t-label, 0.78rem);
     color: rgba(255, 255, 255, 0.8);
     transition: background 0.2s, color 0.2s;
 }
@@ -61452,13 +61454,13 @@ tr.tag-diff-same {
     border: 1px solid rgba(255, 255, 255, 0.07);
     border-radius: 8px;
     color: #fff;
-    font-size: 0.88em;
+    font-size: var(--stg-t-body, 0.82rem);
     font-family: inherit;
 }
 #settings-page .browse-button {
     padding: 8px 14px;
     border-radius: 8px;
-    font-size: 0.82em;
+    font-size: var(--stg-t-body, 0.82rem);
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.08);
     color: rgba(255, 255, 255, 0.6);
@@ -61476,7 +61478,7 @@ tr.tag-diff-same {
 #settings-page .form-group > small.settings-hint,
 #settings-page .form-group > .settings-hint {
     flex-basis: 100%;
-    font-size: 0.78em;
+    font-size: var(--stg-t-sub, 0.75rem);
     color: rgba(255, 255, 255, 0.25);
     margin-top: -2px;
     padding-bottom: 2px;
@@ -61509,7 +61511,7 @@ tr.tag-diff-same {
     flex-basis: 100%;
     display: block;
     padding: 2px 0 4px;
-    font-size: 0.8em;
+    font-size: var(--stg-t-sub, 0.75rem);
     color: rgba(255, 255, 255, 0.42);
     line-height: 1.55;
     margin: 0;
@@ -61678,7 +61680,7 @@ tr.tag-diff-same {
     background: rgba(var(--accent-rgb), 0.06);
     border-left: 2px solid rgba(var(--accent-rgb), 0.5);
     border-radius: 0 6px 6px 0;
-    font-size: 0.8em;
+    font-size: var(--stg-t-sub, 0.75rem);
     line-height: 1.55;
     color: rgba(255, 255, 255, 0.6);
     letter-spacing: 0.01em;
@@ -62223,7 +62225,7 @@ tr.tag-diff-same {
         mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
     }
     #settings-page .stg-tabbar::-webkit-scrollbar { display: none; }
-    .stg-tab { padding: 8px 14px; font-size: 0.8em; }
+    .stg-tab { padding: 8px 14px; font-size: var(--stg-t-sub, 0.75rem); }
     /* Content fills screen */
     #settings-page .settings-columns { max-width: 100% !important; padding: 0 8px; }
     /* Form rows stack vertically */
