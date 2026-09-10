@@ -3469,22 +3469,25 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.3.3': [
-        { date: 'September 2026 \u00b7 3.3.3' },
-        { title: 'Chat reaches people outside your install', desc: 'messages go both ways with people who are not running soulsync, and the history sticks around. overlay templates can be shared straight into a room, picked from a modal.', page: 'chat' },
-        { title: 'Release parsing reads the evidence first', desc: 'actual bitrate, sample rate and codec, falling back to the uploader title the way lidarr does. a repack wins the tie as the corrected copy. built on #1224 from nick2000713.' },
-        { title: 'Quality survives the source pipeline', desc: 'a complete album can no longer fall back to a worse copy than one already found, and lossless preview clips are caught on import.' },
-        { title: 'Self-hosted MusicBrainz', desc: 'point soulsync at your own musicbrainz server, in settings under Connections.', page: 'settings' },
-        { title: 'Concerts on the artist page', desc: 'upcoming dates and real setlists, via ticketmaster.' },
-        { title: 'Discover play buttons play', desc: 'mix cards and track rows both play, and playback is confirmed by the player before it is reported, so you know when audio actually started.', page: 'discover' },
-        { title: 'A mix starts in about a second', desc: 'it resolves against your library in one query instead of one per track.', page: 'discover' },
-        { title: 'Discover works by keyboard and touch', desc: 'hero controls sit in their own row on both pages, cards and dialogs are real controls, and the taste dial is a real slider.', page: 'discover' },
-        { title: 'Steadier video browsing', desc: 'browsing keeps the newest results, a failed request says so instead of showing an empty shelf, and Not Interested removes every copy of a title with an Undo.', page: 'video-discover' },
-        { title: 'The video dashboard shows what is downloading', desc: 'with posters. continue watching reads your real resume position, and torrent grabs track properly with a reason when one is refused.', page: 'video-dashboard' },
-        { title: 'Tools split into Tools and Operations', desc: 'artist views are named Discography and Your library, and "cleanup recommended" says what it means.', page: 'tools' },
-        { title: 'ntfy and Gotify', desc: 'real notification actions now.' },
-        { title: 'An error page you can report', desc: 'shows the actual error with a copy button, so a bug report has something in it.' },
-        { title: 'Earlier versions', desc: '3.3.2 gave the video side search receipts, rebuilt the downloads page and closed three ways to lose files. 3.3.1 made daily mixes and stations real. 3.3.0 rebuilt discover and imported your listening history.' },
+    '3.4.0': [
+        { date: 'September 2026 \u00b7 3.4.0' },
+        { title: 'Podcasts', desc: 'a whole new section. search itunes, or paste an rss url straight into the search bar and it works out that is what you did. custom, patreon and private feeds all work.', page: 'podcasts' },
+        { title: 'Bring your subscriptions with you', desc: 'OPML 2.0 import and export, with a live checklist preview before anything subscribes.', page: 'podcasts' },
+        { title: 'Podcasts download themselves', desc: 'the watchlist grabs new episodes with retention settings, so a daily show does not eat your disk. library path and organization templates are yours to set, and there is an mp4 option for media servers that only really do video.', page: 'podcasts' },
+        { title: 'Audiobooks', desc: 'audible catalogue, browse, detail, author and narrator pages. acquisition through prowlarr, the shared torrent and usenet clients, and soulseek.', page: 'audiobooks' },
+        { title: 'Narrator search', desc: 'search by narrator, which is the one question nothing else can answer. plus series in reading order, genre charts and sample audio.', page: 'audiobooks' },
+        { title: 'Audiobooks are a real side, not a demo', desc: 'quality profile, blocklist, library scan, recycle bin and author watchlist. a failed download blocks the release it came from, so the wishlist stops grabbing the same broken posting forever.', page: 'audiobooks' },
+        { title: 'Every download source on one tab', desc: 'the torrent client, the usenet client and prowlarr came over from Downloads, and yt-dlp came over from Advanced, three tabs from the youtube source it exists to serve. the download chain replaced the source dropdown.', page: 'settings' },
+        { title: 'Connections is tiles now', desc: '22 services were nested accordions in two API Configuration groups. each tile says whether it is configured without being opened.', page: 'settings' },
+        { title: 'Library and Quality are merged', desc: 'the Quality tab had two cards both called Quality, the music profile and the video ladder. they could never appear on screen together, so nobody had noticed.', page: 'settings' },
+        { title: 'Settings works by keyboard', desc: 'all 31 section toggles are reachable without a mouse, on one type scale, with one grammar per row.', page: 'settings' },
+        { title: 'YouTube says what is actually wrong', desc: 'the probe behind the Test button was hardcoded to return true, so the dot was green no matter what. it reports the real reason now, and names the browsers that cannot work.', page: 'settings' },
+        { title: 'Reverse proxy url base paths', desc: 'soulsync can live at /soulsync behind a proxy instead of needing its own hostname.' },
+        { title: 'Profiles cover podcasts and audiobooks', desc: 'both can be granted or denied per profile, and wishlists and followed authors belong to the person who made them. the download permission reads from the session, so a caller can no longer vote on its own permissions by omitting a header.' },
+        { title: 'Discovery opens again', desc: 'it crashed on open with a wrong-shaped response read during render. the test mocked a contract the server has never had, so it was green the whole time.', page: 'discover' },
+        { title: 'Reorganize survives a restart', desc: 'the bulk queue lived only in memory, so a worker recycle took every queued album with it while the job still logged complete. outstanding work is stored now.' },
+        { title: 'Stations and Because You Listen To', desc: 'shelves repeated the same album under near-identical headings, and a station gave you one click with nothing to inspect, download or sync.', page: 'discover' },
+        { title: 'Earlier versions', desc: '3.3.3 took chat beyond your install and made release parsing read the actual audio. 3.3.2 gave the video side search receipts and rebuilt the downloads page. 3.3.1 made daily mixes and stations real.' },
     ],
 };
 
@@ -3515,7 +3518,29 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.3.3: chat beyond your install, smarter release parsing",
+        title: "3.4.0: podcasts and audiobooks, and a settings page you can read",
+        description: "two new sides to the app. podcasts with itunes search, rss and OPML, and audiobooks built on audible's catalogue with their own database and source chain. the settings page was rebuilt around tiles, and ten reported bugs are fixed.",
+        features: [
+            "podcasts, a whole new section: itunes search or paste an rss url straight into the search bar, with custom, patreon and private feeds supported. browse, show detail with the full episode tracklist, and a player",
+            "OPML 2.0 import and export, so you can bring your subscriptions over from whatever you were using, with a live checklist preview before anything subscribes",
+            "the podcast watchlist auto-downloads new episodes with retention settings so a daily show does not eat your disk, library paths and organization templates are yours, downloads get rich metadata and media-server sidecars, and there is a static mp4 conversion option for servers that only really do video. podcast downloads are isolated from the music worker pool, so a feed with 400 episodes cannot starve your albums",
+            "audiobooks on audible's catalogue: search by keyword, title, author or narrator (narrator search is the one nothing else can answer), series in reading order, genre charts, ratings and sample audio, with browse, detail, author and narrator pages",
+            "audiobook acquisition through prowlarr category 3030, the shared torrent and usenet clients and soulseek, with releases explained and filtered before a download is spent and results streaming in as they arrive",
+            "audiobooks are isolated from music by construction rather than convention: their own database, their own source chain (five of music's sources are streaming services with no audiobooks in them), and a test that reads the real imports and routes of every module and fails if one reaches music state",
+            "the rest of the audiobook side: quality profile, blocklist where a failed download blocks the release it came from, library scan, recycle bin, author watchlist and post-processing. the wishlist drains through the shared automation engine, so it can be paused, rescheduled or run by hand",
+            "settings: 22 services lived in two API Configuration groups as nested accordions, so finding out whether last.fm was even configured meant opening them one at a time. they are tiles now, each one saying whether it is configured without being opened. the forms themselves are not rebuilt, the tile moves the real panel into a modal and puts it back",
+            "every download source is on one Sources tab behind the tile it belongs to. the torrent client, the usenet client and prowlarr came over from Downloads, and yt-dlp came over from Advanced, three tabs away from the youtube source it exists to serve. the download chain replaced the source dropdown and is one editor shared by music, video and audiobooks",
+            "Library and Quality were merged the same way. the Quality tab had two cards both called Quality, the music profile and the video ladder, and the pair could never appear on screen together because the tab hid the music half on the video side",
+            "youtube cookies: the probe behind the Test button was hardcoded to return true, so the dot was green no matter what and the whole cookie diagnosis was unreachable from the button people press. with a real probe, browser cookie mode reports when it cannot work on your setup, names app-bound encryption where that is the cause, and points at Paste cookies.txt",
+            "reverse proxy url base paths, so soulsync can live at /soulsync instead of needing its own hostname",
+            "podcasts and audiobooks are under the profile system now, and the download permission reads from the session instead of the caller's own header, which had let a restricted profile authorise itself by omitting it",
+            "discover: stations and Because You Listen To rebuilt, shelves no longer repeating the same album under near-identical headings, mix durations and download metadata preserved, and a station that fails says so",
+            "ten reported fixes: #1226, #1227, #1228, #1229, #1230, #1231, #1232, #1233, #1234 and #1235. the last one lost about 1,815 albums on a single reorganize run: the bulk queue lived only in process memory, a worker recycle took every queued album with it, and the job still logged complete",
+        ],
+        usage_note: "podcasts and audiobooks are new pages in the sidebar and need nothing configured to browse. downloading audiobooks needs prowlarr plus a torrent or usenet client, the same ones the video side uses. the reverse proxy base path is an environment setting.",
+    },
+    {
+        title: "Earlier in 3.3.3: chat beyond your install, smarter release parsing",
         description: "chat reaches people who are not running soulsync, release parsing reads the actual audio instead of the filename, musicbrainz can be your own server, and discover got a correctness pass.",
         features: [
             "chat works both ways with people outside your install and keeps the history, and overlay templates can be shared straight into a room",
