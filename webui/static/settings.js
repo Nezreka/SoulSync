@@ -1014,19 +1014,24 @@ function _dlchainTile(kind, id) {
          + `<span class="dlchain-tile-name">${escapeHtml(m.name)}</span></button>`;
 }
 
-// A step in the chain. Reads as a flow rather than a list because that is what
-// it is: each source is tried in turn, and the arrow is the "then try".
+// A step in the chain. The logo carries the card — it is the fastest thing to
+// recognise and the only part that differs at a glance — so it gets real size
+// and a tinted well, and the text sits beside it rather than competing.
 function _dlchainStep(kind, id, position) {
     const m = DLCHAIN_KINDS[kind].meta(id);
     const art = m.icon
         ? `<img src="${m.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${m.emoji}</span>'">`
         : `<span class="emoji-icon">${m.emoji}</span>`;
+    const role = position === 1 ? 'Tried first' : `Fallback ${position - 1}`;
     return `<div class="dlchain-step" draggable="true" data-src="${id}">`
+         + '<span class="dlchain-step-grip" aria-hidden="true">⠿</span>'
          + `<span class="dlchain-step-rank">${position}</span>`
          + `<span class="dlchain-step-art">${art}</span>`
+         + '<span class="dlchain-step-text">'
          + `<span class="dlchain-step-name">${escapeHtml(m.name)}</span>`
-         + `<span class="dlchain-step-role">${position === 1 ? 'tried first' : 'then'}</span>`
-         + `<button type="button" class="dlchain-btn" title="Remove from the chain" `
+         + `<span class="dlchain-step-role">${role}</span>`
+         + '</span>'
+         + `<button type="button" class="dlchain-btn" title="Remove ${escapeHtml(m.name)} from the chain" `
          + `onclick="dlchainRemove('${id}')">&times;</button></div>`;
 }
 

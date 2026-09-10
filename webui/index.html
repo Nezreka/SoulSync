@@ -4075,7 +4075,13 @@
 <div class="settings-group source-settings-wrapper" data-stg="downloads">
 
                                 <div class="settings-subcard">
-                                <div class="form-group">
+                                <!-- The chain widget below IS this setting now: one source in the
+                                     chain means "<that source> only", two or more means hybrid. The
+                                     select stays because saveSettings reads it to persist
+                                     download_source.mode and updateDownloadSourceUI reads it back —
+                                     it is the transport, not a control, so it is hidden rather than
+                                     deleted. Two controls for one setting is how they drift. -->
+                                <div class="form-group" hidden>
                                     <label>Download Source:</label>
                                     <select id="download-source-mode" class="form-select"
                                         onchange="updateDownloadSourceUI()">
@@ -5668,7 +5674,10 @@
                                 <h4 class="settings-subheading">Audiobooks</h4>
                                 <small class="settings-hint">Applies to the audiobook library only. Downloads use the same torrent, usenet and Soulseek clients as music &mdash; set those under Downloads.</small>
 
-                                <div class="form-group">
+                                <!-- Same story as the music one: the Audiobooks tab of the chain
+                                     widget (Settings -> Downloads) IS this setting. Kept as the
+                                     transport saveSettings reads, hidden as a control. -->
+                                <div class="form-group" hidden>
                                     <label>Audiobook Download Sources:</label>
                                     <select id="audiobook-download-mode" class="form-select" onchange="onAudiobookModeChange()">
                                         <option value="soulseek">Soulseek Only</option>
@@ -5680,9 +5689,10 @@
                                     <small class="settings-hint setting-help-body" hidden>Which sources a book search asks. Separate from the music chain on purpose &mdash; Tidal, Qobuz, HiFi, Deezer and Amazon carry no audiobooks at all, so a book on the music chain would burn an attempt on each of them before it could succeed. The clients themselves are the same ones music uses; only the order and the category differ.</small>
                                 </div>
 
+                                <!-- The arrow-button list this replaced. renderAudiobookHybrid()
+                                     still writes into it, so it stays in the DOM and stays hidden. -->
                                 <div id="audiobook-hybrid-container" style="display:none;">
-                                    <div class="setting-help-text" style="margin-top:10px;">Use the arrows to order sources. Enable the ones you want &mdash; book searches try each enabled source in order, then rank everything together, so this decides who gets asked rather than who wins.</div>
-                                    <div class="hybrid-source-list" id="audiobook-hybrid-rows"></div>
+                                    <div class="hybrid-source-list" id="audiobook-hybrid-rows" hidden></div>
                                 </div>
 
                                 <div class="form-group">

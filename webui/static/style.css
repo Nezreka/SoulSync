@@ -84091,7 +84091,7 @@ body.src-modal-open { overflow: hidden; }
 /* ── the pool: Sources-tab tiles, shrunk ── */
 .dlchain-pool {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
     gap: 10px;
     padding: 10px;
     border: 1px dashed rgba(255, 255, 255, 0.1);
@@ -84108,7 +84108,7 @@ body.src-modal-open { overflow: hidden; }
     flex-direction: column;
     align-items: center;
     gap: 7px;
-    padding: 14px 8px 11px;
+    padding: 16px 8px 13px;
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.07);
     border-radius: 12px;
@@ -84123,13 +84123,21 @@ body.src-modal-open { overflow: hidden; }
 }
 .dlchain-tile.dragging { opacity: 0.4; cursor: grabbing; }
 .dlchain-tile-art {
-    width: 32px; height: 32px;
+    width: 44px; height: 44px;
     display: flex; align-items: center; justify-content: center;
-    opacity: 0.75;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    opacity: 0.8;
+    transition: opacity 0.18s, background 0.18s, border-color 0.18s;
 }
-.dlchain-tile:hover .dlchain-tile-art { opacity: 1; }
-.dlchain-tile-art img { width: 28px; height: 28px; object-fit: contain; border-radius: 6px; }
-.dlchain-tile-art .emoji-icon { font-size: 24px; line-height: 1; }
+.dlchain-tile:hover .dlchain-tile-art {
+    opacity: 1;
+    background: rgba(var(--accent-rgb), 0.1);
+    border-color: rgba(var(--accent-rgb), 0.2);
+}
+.dlchain-tile-art img { width: 30px; height: 30px; object-fit: contain; }
+.dlchain-tile-art .emoji-icon { font-size: 25px; line-height: 1; }
 .dlchain-tile-name {
     font-size: 0.76em;
     font-weight: 600;
@@ -84155,43 +84163,91 @@ body.src-modal-open { overflow: hidden; }
 .dlchain-step {
     display: flex;
     align-items: center;
-    gap: 11px;
-    padding: 12px 14px;
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    border-radius: 12px;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+    gap: 13px;
+    padding: 13px 14px 13px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018));
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset,
+                0 6px 16px -10px rgba(0, 0, 0, 0.7);
     cursor: grab;
     user-select: none;
-    transition: border-color 0.18s, transform 0.12s;
+    transition: border-color 0.18s, transform 0.14s, box-shadow 0.18s;
+}
+.dlchain-step:hover {
+    border-color: rgba(var(--accent-rgb), 0.32);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset,
+                0 10px 24px -12px rgba(0, 0, 0, 0.85);
+}
+/* The first link is the one that usually answers, so it reads as the primary. */
+.dlchain-step:first-child {
+    border-color: rgba(var(--accent-rgb), 0.3);
+    background:
+        linear-gradient(180deg, rgba(var(--accent-rgb), 0.1), rgba(255, 255, 255, 0.02));
 }
 .dlchain-step.dragging { opacity: 0.4; cursor: grabbing; }
 .dlchain-step.drag-over {
-    border-color: rgba(var(--accent-rgb), 0.6);
-    box-shadow: 0 -2px 0 rgba(var(--accent-rgb), 0.6);
+    border-color: rgba(var(--accent-rgb), 0.65);
+    box-shadow: 0 -3px 0 rgba(var(--accent-rgb), 0.65);
 }
+.dlchain-step-grip {
+    flex-shrink: 0;
+    color: rgba(255, 255, 255, 0.2);
+    font-size: 13px;
+    line-height: 1;
+    letter-spacing: -1px;
+    transition: color 0.18s;
+}
+.dlchain-step:hover .dlchain-step-grip { color: rgba(255, 255, 255, 0.45); }
 .dlchain-step-rank {
     flex-shrink: 0;
-    width: 22px; height: 22px;
-    display: flex; align-items: center; justify-content: center;
-    border-radius: 50%;
-    background: rgba(var(--accent-rgb), 0.18);
-    border: 1px solid rgba(var(--accent-rgb), 0.3);
-    color: #fff;
-    font-size: 0.7em;
+    width: 21px;
+    height: 21px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 7px;
+    background: rgba(var(--accent-rgb), 0.16);
+    border: 1px solid rgba(var(--accent-rgb), 0.28);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 0.68em;
     font-weight: 800;
+    font-variant-numeric: tabular-nums;
 }
-.dlchain-step-art { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.dlchain-step-art img { width: 20px; height: 20px; object-fit: contain; border-radius: 4px; }
-.dlchain-step-art .emoji-icon { font-size: 17px; line-height: 1; }
-.dlchain-step-name { flex: 1; font-size: 0.88em; font-weight: 600; color: rgba(255, 255, 255, 0.92); }
+/* The logo does the identifying, so give it room and a well of its own. */
+.dlchain-step-art {
+    flex-shrink: 0;
+    width: 42px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 11px;
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.dlchain-step-art img { width: 28px; height: 28px; object-fit: contain; }
+.dlchain-step-art .emoji-icon { font-size: 23px; line-height: 1; }
+.dlchain-step:first-child .dlchain-step-art {
+    background: rgba(var(--accent-rgb), 0.1);
+    border-color: rgba(var(--accent-rgb), 0.18);
+}
+.dlchain-step-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.dlchain-step-name {
+    font-size: 0.94em;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    color: rgba(255, 255, 255, 0.94);
+}
 .dlchain-step-role {
-    font-size: 0.66em;
-    font-weight: 700;
+    font-size: 0.68em;
+    font-weight: 600;
     letter-spacing: 0.05em;
     text-transform: uppercase;
     color: rgba(255, 255, 255, 0.3);
-    white-space: nowrap;
 }
+.dlchain-step:first-child .dlchain-step-role { color: rgba(var(--accent-rgb), 0.75); }
 
 /* the "then try" between steps — the automation builder's connector */
 .dlchain-connector {

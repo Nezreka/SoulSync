@@ -220,9 +220,34 @@ def test_the_pool_uses_source_tiles(js):
 
 
 def test_a_step_says_where_it_sits(js):
+    """"Fallback 2" beats "then": it says what the position MEANS, not just
+    that there is one above it."""
     fn = js.split("function _dlchainStep(", 1)[1].split("\n}", 1)[0]
-    assert "tried first" in fn and "then" in fn
+    assert "Tried first" in fn
+    assert "Fallback" in fn
     assert "dlchain-step-rank" in fn
+
+
+def test_the_logo_carries_the_step(js):
+    """It is the fastest thing to recognise and the only part that differs at a
+    glance, so it gets real size and a well of its own rather than sitting in
+    the text line at 20px."""
+    fn = js.split("function _dlchainStep(", 1)[1].split("\n}", 1)[0]
+    assert "dlchain-step-art" in fn
+    css = _read("webui/static/style.css")
+    art = css.split(".dlchain-step-art {", 1)[1].split("}", 1)[0]
+    assert "42px" in art
+    assert "border-radius" in art and "background" in art
+
+
+def test_the_first_link_reads_as_the_primary():
+    """It is the one that usually answers, so it should not look identical to
+    a fallback three deep."""
+    css = _read("webui/static/style.css")
+    block = css.split("/* ── Download chains", 1)[1]
+    assert ".dlchain-step:first-child {" in block
+    first = block.split(".dlchain-step:first-child {", 1)[1].split("}", 1)[0]
+    assert "--accent-rgb" in first
 
 
 def test_dropping_on_a_step_reorders(js):
@@ -259,3 +284,43 @@ def test_the_flow_borrows_the_builder_vocabulary():
     assert ".dlchain-connector::after" in block       # the arrowhead
     slot = block.split(".dlchain-slot {", 1)[1].split("}", 1)[0]
     assert "dashed" in slot
+
+
+def test_the_source_dropdown_is_no_longer_a_control(index):
+    """The chain IS that setting: one source in it means "<that source> only",
+    two or more means hybrid. The select stays because saveSettings reads it to
+    persist download_source.mode — it is the transport, not a control — but two
+    controls for one setting is how they drift apart."""
+    assert 'id="download-source-mode"' in index          # still the transport
+    before = index.split('id="download-source-mode"', 1)[0]
+    group = before[before.rindex('<div class="form-group'):]
+    assert "hidden" in group.split(">", 1)[0], "the dropdown is still on screen"
+
+
+def test_the_audiobook_mode_dropdown_is_hidden_too(index):
+    assert 'id="audiobook-download-mode"' in index
+    before = index.split('id="audiobook-download-mode"', 1)[0]
+    group = before[before.rindex('<div class="form-group'):]
+    assert "hidden" in group.split(">", 1)[0]
+
+
+def test_the_old_audiobook_arrow_list_is_hidden(index):
+    """renderAudiobookHybrid still writes into it, so it stays in the DOM."""
+    assert 'id="audiobook-hybrid-rows"' in index
+    line = next(ln for ln in index.splitlines() if 'id="audiobook-hybrid-rows"' in ln)
+    assert "hidden" in line
+
+
+def test_mode_is_still_persisted(js):
+    """Hiding the select must not stop it being saved — it is how
+    download_source.mode reaches the server at all."""
+    body = js.split("async function saveSettings", 1)[1]
+    assert "mode: document.getElementById('download-source-mode').value" in body
+
+
+def test_the_widget_drives_the_hidden_transports(js):
+    """Both hidden selects are written by the chain adapters; nothing else sets
+    them any more, so a chain change that skipped this would save the old mode."""
+    spec = js.split("const DLCHAIN_KINDS = {", 1)[1].split("\n};", 1)[0]
+    assert "getElementById('download-source-mode')" in spec
+    assert "getElementById('audiobook-download-mode')" in spec
