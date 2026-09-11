@@ -54,6 +54,11 @@ _NARRATOR_MODES = (NARRATOR_EXACT, NARRATOR_ANY)
 # appears for anyone already running.
 _COLUMN_MIGRATIONS = (
     ("audiobook_wishlist", "narrator_mode", f"TEXT DEFAULT '{NARRATOR_EXACT}'"),
+    # When the row last CHANGED STATE, which is not when it was last attempted:
+    # last_attempt_at only moves when count_attempt is passed, and a user action
+    # deliberately does not count as an attempt. Freeing a row stuck on
+    # "grabbed" needs to know how long it has been grabbed, so it needs this.
+    ("audiobook_wishlist", "status_changed_at", "REAL DEFAULT 0"),
     # Why a download is staged rather than imported, in the user's words.
     ("audiobook_downloads", "completeness", "TEXT DEFAULT ''"),
     # The whole book as the catalogue described it AT GRAB TIME. Importing needs
@@ -454,6 +459,55 @@ class AudiobookDatabase:
             logger.warning("Could not free stale searching rows: %s", exc)
             return 0
 
+    def reset_stale_grabbed(self, older_than_seconds: float = 21600.0,
+                            profile_id: int = 1) -> int:
+        """Free rows handed to a download client that nothing is following.
+
+        A row goes to "grabbed" the moment a client accepts the release, and it
+        is the download MONITOR that moves it off again — to done when the book
+        imports, to failed when the client gives up. The monitor only looks at
+        rows with an ACTIVE download, so if that download row never arrives, or
+        is cleared, or the monitor itself stops running, the wishlist row sits
+        on "grabbed" forever. The user sees "sent to downloads" against a book
+        with nothing downloading, and no pass ever picks it up again because the
+        retry query only takes "wanted" and "failed".
+
+        Same shape as reset_stale_searching, and the same reasoning: a state
+        that only something ELSE can clear needs a way back when that something
+        does not run.
+
+        A row is only freed when it has no live download to explain it, so a
+        book genuinely sitting in a slow torrent is left alone however long it
+        takes. The age gate is generous for the same reason — a large audiobook
+        on a thin swarm is normal.
+        """
+        cutoff = _now() - max(0.0, float(older_than_seconds))
+        conn = self._connect()
+        try:
+            cursor = conn.execute("""
+                UPDATE audiobook_wishlist
+                SET status = ?,
+                    last_error = 'Sent to downloads, but nothing was tracking it'
+                WHERE profile_id = ?
+                  AND status = ?
+                  AND status_changed_at > 0
+                  AND status_changed_at <= ?
+                  AND asin NOT IN (
+                      SELECT asin FROM audiobook_downloads
+                      WHERE status NOT IN ('completed', 'failed', 'cancelled')
+                  )
+            """, (STATUS_WANTED, int(profile_id), STATUS_GRABBED, cutoff))
+            conn.commit()
+            if cursor.rowcount:
+                logger.info(
+                    "Freed %d audiobook wishlist rows stuck on grabbed with no live download",
+                    cursor.rowcount,
+                )
+            return cursor.rowcount
+        except sqlite3.Error as exc:
+            logger.warning("Could not free stale grabbed rows: %s", exc)
+            return 0
+
     def mark_wishlist_status(
         self,
         asin: str,
@@ -476,15 +530,18 @@ class AudiobookDatabase:
                 cursor = conn.execute("""
                     UPDATE audiobook_wishlist
                     SET status = ?, last_error = ?, last_attempt_at = ?,
+                        status_changed_at = ?,
                         attempt_count = attempt_count + 1
                     WHERE asin = ? AND profile_id = ?
-                """, (status, str(error or ""), _now(), str(asin or "").strip(), int(profile_id)))
+                """, (status, str(error or ""), _now(), _now(),
+                      str(asin or "").strip(), int(profile_id)))
             else:
                 cursor = conn.execute("""
                     UPDATE audiobook_wishlist
-                    SET status = ?, last_error = ?
+                    SET status = ?, last_error = ?, status_changed_at = ?
                     WHERE asin = ? AND profile_id = ?
-                """, (status, str(error or ""), str(asin or "").strip(), int(profile_id)))
+                """, (status, str(error or ""), _now(),
+                      str(asin or "").strip(), int(profile_id)))
             conn.commit()
             return cursor.rowcount > 0
         except sqlite3.Error as exc:
