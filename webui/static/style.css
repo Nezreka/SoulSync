@@ -85339,3 +85339,197 @@ body.src-modal-open { overflow: hidden; }
     margin: -2px 0 14px;
     max-width: 74ch;
 }
+
+/* ==========================================================================
+   DISCOVER — art-forward cards (the Deezer / Spotify idiom)
+   ==========================================================================
+   The shelves used a portrait tile with the title printed ON the artwork under
+   a black gradient. That reads as a poster: the art is a backdrop for text, and
+   every cover is cropped to 0.85 so nothing is ever shown as it was made.
+
+   Deezer and Spotify both do the opposite, and for the same reason — the art is
+   the product. A square cover at its own aspect, nothing written over it, and
+   the title sitting underneath in plain type. The card itself is invisible
+   until you point at it, so a shelf reads as a row of covers rather than a row
+   of boxes.
+
+   Scoped to .discover-section on purpose. `.ya-card` is shared with the
+   dashboard rails (see the dash-card--rail block), and those are a deliberately
+   different, smaller strip. Everything here stays on the Discover page.
+
+   No play button on the hover, even though both apps have one: these cards open
+   a modal, they do not start playback, and a play triangle would promise
+   something the click does not do.
+   ========================================================================== */
+
+.discover-section .ya-card,
+.discover-section .discover-grid .ya-card {
+    /* height comes from the art plus the caption now, not a fixed ratio */
+    aspect-ratio: auto;
+    height: auto;
+    width: 184px;
+
+    /* the box disappears; the artwork carries the card */
+    background: transparent;
+    border: 1px solid transparent;
+    box-shadow: none;
+    border-radius: 12px;
+    padding: 8px;
+
+    transition: background-color 0.22s ease, border-color 0.22s ease;
+}
+
+.discover-section .ya-card:hover,
+.discover-section .discover-grid .ya-card:hover {
+    /* a tint, not a jump. the lift fought the scroll on a horizontal shelf */
+    transform: none;
+    background: rgba(255, 255, 255, 0.055);
+    border-color: rgba(255, 255, 255, 0.05);
+    box-shadow: none;
+}
+
+/* the artwork: square, in flow, and the only rounded thing on the card */
+.discover-section .ya-card-img {
+    position: relative;
+    inset: auto;
+    aspect-ratio: 1;
+    width: 100%;
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.03);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+
+.discover-section .ya-card-img img {
+    transition: transform 0.45s cubic-bezier(0.2, 0, 0.2, 1);
+}
+
+.discover-section .ya-card:hover .ya-card-img img {
+    transform: scale(1.045);
+}
+
+/* nothing is printed over the art any more, so the scrim has no job */
+.discover-section .ya-card-gradient {
+    display: none;
+}
+
+/* the caption drops below the cover */
+.discover-section .ya-card-info {
+    position: static;
+    padding: 12px 2px 2px;
+    z-index: auto;
+}
+
+.discover-section .ya-card-name {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+    color: #fff;
+    /* the shadow existed to lift text off artwork; there is no artwork under it */
+    text-shadow: none;
+}
+
+.discover-section .ya-card-sub {
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.4;
+    color: rgba(255, 255, 255, 0.55);
+    text-shadow: none;
+    margin-top: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* badges sit on the art, so they move in by the card's new padding */
+.discover-section .ya-card-badges {
+    top: 16px;
+    left: 16px;
+}
+
+/* a grid cell should fill its column; only the shelf card is a fixed width */
+.discover-section .discover-grid .ya-card {
+    width: 100%;
+}
+
+/* the shelf gets room to breathe, the way both apps space a rail */
+.discover-section .discover-section-title {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+
+.discover-section .discover-section-subtitle {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+@media (max-width: 768px) {
+    .discover-section .ya-card {
+        width: 146px;
+        padding: 6px;
+    }
+    .discover-section .ya-card-name { font-size: 13px; }
+    .discover-section .ya-card-sub { font-size: 11px; }
+    .discover-section .ya-card-badges { top: 12px; left: 12px; }
+}
+
+/* the shelf itself: a touch wider and airier, matching the card sizing above.
+   172px was sized for a portrait tile with the title printed inside it; a
+   square cover with the caption underneath wants a little more room. */
+.discover-section .discover-grid {
+    grid-auto-columns: 184px;
+    gap: 20px;
+}
+
+@media (max-width: 768px) {
+    .discover-section .discover-grid {
+        grid-auto-columns: 146px;
+        gap: 14px;
+    }
+}
+
+/* ── Deezer editorial: the genre chips in the section header ── */
+.dz-ed-genres {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.dz-ed-genre {
+    appearance: none;
+    -webkit-appearance: none;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: rgba(255, 255, 255, 0.035);
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    padding: 6px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+
+.dz-ed-genre:hover {
+    background: rgba(255, 255, 255, 0.075);
+    color: #fff;
+}
+
+.dz-ed-genre.is-active {
+    background: var(--accent);
+    border-color: transparent;
+    /* the accent is a bright colour; dark text is what stays readable on it */
+    color: #0b0b0b;
+}
+
+.dz-ed-genre:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.9);
+    outline-offset: 2px;
+}
+
+/* a playlist cover is square art like any other card, so it inherits the
+   shelf card styling above and needs nothing of its own */
