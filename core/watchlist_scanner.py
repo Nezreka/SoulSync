@@ -1461,7 +1461,19 @@ class WatchlistScanner:
                 artist_new_tracks = 0
                 artist_added_tracks = 0
 
+                artist_was_cancelled = False
                 for album_index, album in enumerate(albums):
+                    # The album loop had no cancel point at all, so a cancel
+                    # could only land between ARTISTS. An artist with thirty
+                    # albums is thirty fetches and thirty sleeps first, and a
+                    # slow provider makes that minutes of an unstoppable scan.
+                    if cancel_check and cancel_check():
+                        artist_was_cancelled = True
+                        logger.info(
+                            "Cancel received while checking albums for %s (%s of %s)",
+                            artist.artist_name, album_index, len(albums),
+                        )
+                        break
                     try:
                         album_data = album_fetcher(album.id, getattr(album, 'name', ''))
                         tracks = self._extract_track_items(album_data)
@@ -1606,6 +1618,12 @@ class WatchlistScanner:
                     new_tracks_found=artist_new_tracks,
                     tracks_added_to_wishlist=artist_added_tracks,
                 )
+
+                # a cancelled artist gets no discovery work and no pacing
+                # delay; the loop head handles the cancelled state properly
+                # on the next pass.
+                if artist_was_cancelled:
+                    continue
 
                 try:
                     if scan_state is not None:

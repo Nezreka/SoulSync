@@ -160,3 +160,79 @@ def test_a_backfill_that_answers_nothing_does_not_abort_the_scan(monkeypatch):
 
     assert reached, "the scan aborted before the artist loop"
     assert state.get('status') != 'cancelled'
+
+
+# ---------------------------------------------------------------------------
+# cancelling mid-artist
+# ---------------------------------------------------------------------------
+
+def test_cancel_lands_inside_the_album_loop_not_just_between_artists(monkeypatch):
+    """An artist with many albums used to be unstoppable.
+
+    cancel_check was read once per ARTIST. An artist with thirty albums meant
+    thirty fetches and thirty pacing sleeps before the scan would even look at
+    the request, and a slow provider turned that into minutes of a scan that
+    would not stop (#1240: "I can't cancelled this").
+    """
+    from core.watchlist_scanner import WatchlistScanner
+
+    sc = WatchlistScanner.__new__(WatchlistScanner)
+    sc._database = MagicMock()
+    sc.database_path = ':memory:'
+    sc._database.has_fresh_similar_artists.return_value = True
+    monkeypatch.setattr("core.watchlist_scanner.time.sleep", lambda *_a: None)
+    monkeypatch.setattr(sc, "_apply_global_watchlist_overrides", lambda *_a, **_k: None)
+    monkeypatch.setattr(sc, "_backfill_missing_ids", lambda *_a, **_k: True)
+    monkeypatch.setattr(sc, "_watchlist_source_priority", lambda: [])
+    monkeypatch.setattr(sc, "_get_lookback_period_setting", lambda: 'recent')
+    monkeypatch.setattr(sc, "get_artist_image_url", lambda *_a, **_k: '')
+
+    albums = [types.SimpleNamespace(id=f"al{i}", name=f"Album {i}") for i in range(30)]
+    monkeypatch.setattr(sc, "get_artist_discography_for_watchlist", lambda *_a, **_k: albums)
+
+    fetched = []
+
+    def _fetch(album_id, album_name=''):
+        fetched.append(album_id)
+        return None          # no track data; the loop just moves on
+
+    # lazy property, no setter - fill the backing field
+    sc._metadata_service = types.SimpleNamespace(get_album=_fetch)
+
+    # cancel once three albums have been looked at
+    sc.scan_watchlist_artists(
+        [_artist(1)],
+        scan_state={},
+        cancel_check=lambda: len(fetched) >= 3,
+    )
+
+    assert len(fetched) == 3, (
+        f"kept fetching albums after the cancel: {len(fetched)} of {len(albums)}"
+    )
+
+
+def test_a_cancelled_artist_skips_its_discovery_work(monkeypatch):
+    """No point spending a similar-artists lookup on an artist we abandoned."""
+    from core.watchlist_scanner import WatchlistScanner
+
+    sc = WatchlistScanner.__new__(WatchlistScanner)
+    sc._database = MagicMock()
+    sc.database_path = ':memory:'
+    monkeypatch.setattr("core.watchlist_scanner.time.sleep", lambda *_a: None)
+    monkeypatch.setattr(sc, "_apply_global_watchlist_overrides", lambda *_a, **_k: None)
+    monkeypatch.setattr(sc, "_backfill_missing_ids", lambda *_a, **_k: True)
+    monkeypatch.setattr(sc, "_watchlist_source_priority", lambda: [])
+    monkeypatch.setattr(sc, "_get_lookback_period_setting", lambda: 'recent')
+    monkeypatch.setattr(sc, "get_artist_image_url", lambda *_a, **_k: '')
+
+    albums = [types.SimpleNamespace(id="al0", name="Album 0")]
+    monkeypatch.setattr(sc, "get_artist_discography_for_watchlist", lambda *_a, **_k: albums)
+    sc._metadata_service = types.SimpleNamespace(get_album=lambda *_a, **_k: None)
+
+    similar_calls = []
+    monkeypatch.setattr(sc, "update_similar_artists",
+                        lambda *_a, **_k: similar_calls.append(1))
+
+    sc.scan_watchlist_artists([_artist(1)], scan_state={}, cancel_check=lambda: True)
+
+    assert similar_calls == []
