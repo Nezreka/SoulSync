@@ -111,9 +111,6 @@ export const SECTION_EMPTY_POLICY: Partial<Record<DiscoverSectionId, EmptyPolicy
   'listening-recs-section': HIDE,
   'your-albums-section': HIDE,
   'your-artists-section': HIDE,
-  // Deezer's charts are always populated; an empty row means the api was
-  // unreachable, and an explanation nobody can act on is worse than no row.
-  'deezer-editorial': HIDE,
 
   // hideWhenEmpty absent → the controller default (false): stay and explain.
   'recent-releases': emptyState('No recent releases found'),
@@ -131,7 +128,14 @@ export const SECTION_EMPTY_POLICY: Partial<Record<DiscoverSectionId, EmptyPolicy
 };
 
 /** Sections that render regardless of data — controls, not shelves. */
-export const ALWAYS_VISIBLE: DiscoverSectionId[] = ['adv-wave'];
+export const ALWAYS_VISIBLE: DiscoverSectionId[] = [
+  'adv-wave',
+  // Renders its own loading and empty states. Without this the section is
+  // null for as long as the fetch takes - so the loading row could never
+  // appear, and a slow or unreachable Deezer left no trace of the shelf at
+  // all rather than a row that says what happened.
+  'deezer-editorial',
+];
 
 /**
  * Should this section be in the layout at all?

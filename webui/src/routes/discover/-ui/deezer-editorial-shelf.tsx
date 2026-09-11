@@ -134,6 +134,10 @@ export function DeezerEditorialShelf({ onToast }: { onToast?: (message: string) 
         <div className="discover-empty">
           <p>Loading Deezer playlists…</p>
         </div>
+      ) : playlists.length === 0 ? (
+        <div className="discover-empty">
+          <p>Could not reach Deezer just now.</p>
+        </div>
       ) : (
         <div className="discover-grid">
           {playlists.map((p) => (

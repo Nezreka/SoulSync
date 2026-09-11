@@ -153,10 +153,6 @@ describe('the empty policy is NOT uniform', () => {
       'cache-genre-releases',
       'cache-label-explorer',
       'cache-undiscovered',
-      // NEW since the port. Deezer's charts are always populated, so an empty
-      // row means the api was unreachable - and an explanation the user cannot
-      // act on is worse than no row at all.
-      'deezer-editorial',
       'listening-recs-section',
       'recommended-artists-section',
       'your-albums-section',
@@ -209,5 +205,22 @@ describe('isSectionVisible', () => {
     for (const id of ['lastfm-radio', 'listenbrainz', 'build-a-playlist'] as const) {
       expect(isSectionVisible(id, false, true)).toBe(false);
     }
+  });
+});
+
+describe('the Deezer editorial shelf stays in the layout', () => {
+  // It renders its own loading and empty states. A HIDE policy made the whole
+  // section null until rows arrived, so the loading row was unreachable and a
+  // slow or unreachable Deezer left no trace of the shelf at all.
+  it('is visible before its fetch has returned anything', () => {
+    expect(isSectionVisible('deezer-editorial', false, false)).toBe(true);
+  });
+
+  it('is still visible when the fetch came back empty', () => {
+    expect(isSectionVisible('deezer-editorial', false, true)).toBe(true);
+  });
+
+  it('is not governed by an empty policy', () => {
+    expect(SECTION_EMPTY_POLICY['deezer-editorial']).toBeUndefined();
   });
 });
