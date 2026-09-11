@@ -28,9 +28,11 @@ const DEFAULT_GENRE = 0;
 function PlaylistCard({
   playlist,
   onOpen,
+  busy,
 }: {
   playlist: DeezerEditorialPlaylist;
   onOpen: (p: DeezerEditorialPlaylist) => void;
+  busy?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
   const tracks = playlist.track_count;
@@ -40,7 +42,8 @@ function PlaylistCard({
       className="ya-card discover-album-card"
       title={`${playlist.title} — ${playlist.creator}`}
       aria-label={`${playlist.title} by ${playlist.creator}, ${tracks} tracks`}
-      onClick={() => onOpen(playlist)}
+      onClick={() => void onOpen(playlist)}
+      aria-busy={busy || undefined}
     >
       <div className="ya-card-img">
         {!failed && playlist.image_url && (
@@ -57,8 +60,7 @@ function PlaylistCard({
       <div className="ya-card-info">
         <div className="ya-card-name">{playlist.title}</div>
         <div className="ya-card-sub">
-          {playlist.creator}
-          {tracks ? ` · ${tracks} tracks` : ''}
+          {busy ? 'Adding to Sync…' : `${playlist.creator}${tracks ? ` · ${tracks} tracks` : ''}`}
         </div>
       </div>
     </button>
@@ -95,10 +97,18 @@ export function DeezerEditorialShelf({ onToast }: { onToast?: (message: string) 
     };
   }, [genreId]);
 
+  const [opening, setOpening] = useState<string | null>(null);
+
   const open = useCallback(
-    (playlist: DeezerEditorialPlaylist) => {
-      if (!openDeezerPlaylistInSync(playlist)) {
-        onToast?.('Could not open the Sync page for that playlist');
+    async (playlist: DeezerEditorialPlaylist) => {
+      // a big editorial playlist takes a moment to load and mirror; without
+      // this the card looks like it ignored the click
+      setOpening(playlist.id);
+      try {
+        const error = await openDeezerPlaylistInSync(playlist);
+        if (error) onToast?.(error);
+      } finally {
+        setOpening(null);
       }
     },
     [onToast],
@@ -141,7 +151,12 @@ export function DeezerEditorialShelf({ onToast }: { onToast?: (message: string) 
       ) : (
         <div className="discover-grid">
           {playlists.map((p) => (
-            <PlaylistCard key={p.id} playlist={p} onOpen={open} />
+            <PlaylistCard
+              key={p.id}
+              playlist={p}
+              onOpen={open}
+              busy={opening === p.id}
+            />
           ))}
         </div>
       )}

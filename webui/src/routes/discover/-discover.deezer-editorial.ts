@@ -10,6 +10,8 @@
  */
 
 import { apiClient, readJson } from '@/app/api-client';
+import { postMirrorPlaylist } from '@/routes/sync/-sync.api';
+import { buildMirrorPayload } from '@/routes/sync/-sync.import';
 
 export interface DeezerEditorialPlaylist {
   id: string;
@@ -31,6 +33,15 @@ interface EditorialResponse {
   playlists?: DeezerEditorialPlaylist[];
   count?: number;
   error?: string;
+}
+
+/** What /api/deezer/playlist/<id> answers with. */
+interface DeezerPlaylistResponse {
+  id?: string | number;
+  name?: string;
+  owner?: string;
+  image_url?: string;
+  tracks?: unknown[];
 }
 
 interface GenresResponse {
@@ -68,30 +79,64 @@ export async function fetchDeezerEditorialGenres(): Promise<DeezerEditorialGenre
 }
 
 /**
- * Hand a playlist to the Sync page, the way a user would by pasting its link.
+ * Load a Deezer playlist and put it on the Sync page's mirrored tab.
  *
- * Deliberately NOT a second loader. `loadDeezerPlaylist` reads the url input and
- * runs the whole existing flow — fetch, mirror, render, state — so driving that
- * input is what keeps this one pipeline instead of two. The same handoff idiom
- * the global search widget uses for Soulseek (downloads.js, _gsNavigateToSearchPage).
+ * The first version of this drove `#deezer-url-input` and called the global
+ * `loadDeezerPlaylist`. Both are the RETIRED vanilla sync page: that input does
+ * not exist in index.html any more, and the React sheet's field is a controlled
+ * input, so assigning .value from outside would not update its state even if it
+ * were the right element. The click navigated and did nothing.
  *
- * Returns false when the Sync page is not reachable, so the caller can say so
- * rather than looking like the click did nothing.
+ * What actually makes a playlist appear is POST /api/mirror-playlist, which is
+ * the same call the Sync page makes after parsing a pasted link. So: fetch the
+ * playlist through the loader that already exists, mirror it with the payload
+ * builder that already exists, then show the user where it landed.
+ *
+ * Returns an error string on failure, or null when it worked.
  */
-export function openDeezerPlaylistInSync(playlist: DeezerEditorialPlaylist): boolean {
-  const link = playlist.link || `https://www.deezer.com/playlist/${playlist.id}`;
-  const navigate = window.navigateToPage;
-  if (typeof navigate !== 'function') return false;
-
-  navigate('sync');
-  // the input only exists once the page has mounted
-  window.setTimeout(() => {
-    const input = document.getElementById('deezer-url-input') as HTMLInputElement | null;
-    if (input) {
-      input.value = link;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
+export async function openDeezerPlaylistInSync(
+  playlist: DeezerEditorialPlaylist,
+): Promise<string | null> {
+  let loaded: DeezerPlaylistResponse;
+  try {
+    const response = await fetch(`/api/deezer/playlist/${encodeURIComponent(playlist.id)}`);
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      return body.error || `Could not load that playlist (${response.status})`;
     }
-    void window.loadDeezerPlaylist?.();
-  }, 300);
-  return true;
+    loaded = (await response.json()) as DeezerPlaylistResponse;
+  } catch {
+    return 'Could not reach the server to load that playlist';
+  }
+
+  const tracks = loaded.tracks ?? [];
+  if (tracks.length === 0) return 'That playlist came back empty';
+
+  try {
+    const payload = buildMirrorPayload(
+      'deezer',
+      loaded.id ?? playlist.id,
+      loaded.name ?? playlist.title,
+      tracks as never,
+      {
+        owner: loaded.owner ?? playlist.creator,
+        image_url: loaded.image_url ?? playlist.image_url,
+        description: playlist.link,
+      },
+    );
+    const result = await postMirrorPlaylist(payload);
+    if (result.success === false) return result.error || 'Could not mirror that playlist';
+  } catch {
+    return 'Could not mirror that playlist';
+  }
+
+  // only navigate once it is actually there, so the tab is never opened onto
+  // a playlist that failed to arrive
+  window.SoulSyncWebRouter?.navigateToPage('sync');
+  window.setTimeout(() => {
+    document
+      .querySelector<HTMLElement>('.sync-tab-button[data-tab="mirrored"]')
+      ?.click();
+  }, 200);
+  return null;
 }

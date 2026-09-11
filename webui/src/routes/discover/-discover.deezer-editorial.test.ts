@@ -64,51 +64,84 @@ describe('fetchDeezerEditorialGenres', () => {
 });
 
 describe('openDeezerPlaylistInSync', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    document.body.innerHTML = '<input id="deezer-url-input" />';
-  });
   afterEach(() => {
-    vi.useRealTimers();
     document.body.innerHTML = '';
-    delete (window as { navigateToPage?: unknown }).navigateToPage;
-    delete (window as { loadDeezerPlaylist?: unknown }).loadDeezerPlaylist;
+    delete (window as { SoulSyncWebRouter?: unknown }).SoulSyncWebRouter;
   });
 
-  it('hands the playlist to the existing Sync flow rather than loading it itself', () => {
+  const TRACKS = [{ id: 't1', name: 'A Song', artists: ['An Artist'], duration_ms: 1000 }];
+
+  function stubLoad(
+    playlist: Record<string, unknown>,
+    mirror: Record<string, unknown> = { success: true },
+  ) {
+    const posted: unknown[] = [];
+    server.use(
+      http.get('/api/deezer/playlist/:id', () => HttpResponse.json(playlist)),
+      http.post('/api/mirror-playlist', async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json(mirror);
+      }),
+    );
+    return posted;
+  }
+
+  it('mirrors the playlist and lands the user on the mirrored tab', async () => {
+    // this is the whole fix: the first version drove the RETIRED vanilla
+    // sync page and did nothing at all
+    document.body.innerHTML =
+      '<button class="sync-tab-button" data-tab="mirrored"></button>';
+    const clicked = vi.fn();
+    document.querySelector('.sync-tab-button')!.addEventListener('click', clicked);
     const navigate = vi.fn();
-    const load = vi.fn();
-    window.navigateToPage = navigate;
-    window.loadDeezerPlaylist = load;
+    window.SoulSyncWebRouter = { navigateToPage: navigate } as never;
 
-    expect(openDeezerPlaylistInSync(PLAYLIST)).toBe(true);
+    const posted = stubLoad({
+      id: '123', name: 'Rock Essentials', owner: 'Rod', image_url: 'https://cdn/x.jpg',
+      tracks: TRACKS,
+    });
+
+    await expect(openDeezerPlaylistInSync(PLAYLIST)).resolves.toBeNull();
+
+    expect(posted).toHaveLength(1);
+    expect((posted[0] as { name: string }).name).toBe('Rock Essentials');
     expect(navigate).toHaveBeenCalledWith('sync');
-
-    // the input only exists after the page mounts, hence the deferral
-    vi.runAllTimers();
-    const input = document.getElementById('deezer-url-input') as HTMLInputElement;
-    expect(input.value).toBe(PLAYLIST.link);
-    expect(load).toHaveBeenCalled();
+    await vi.waitFor(() => expect(clicked).toHaveBeenCalled());
   });
 
-  it('builds a link when the api did not send one', () => {
-    window.navigateToPage = vi.fn();
-    window.loadDeezerPlaylist = vi.fn();
-    openDeezerPlaylistInSync({ ...PLAYLIST, link: '' });
-    vi.runAllTimers();
-    const input = document.getElementById('deezer-url-input') as HTMLInputElement;
-    expect(input.value).toBe('https://www.deezer.com/playlist/1306931615');
+  it('does not navigate when the playlist could not be loaded', async () => {
+    const navigate = vi.fn();
+    window.SoulSyncWebRouter = { navigateToPage: navigate } as never;
+    server.use(
+      http.get('/api/deezer/playlist/:id', () =>
+        HttpResponse.json({ error: 'Invalid Deezer playlist ID' }, { status: 400 }),
+      ),
+    );
+
+    await expect(openDeezerPlaylistInSync(PLAYLIST)).resolves.toBe('Invalid Deezer playlist ID');
+    expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('reports failure when the shell cannot navigate', () => {
-    expect(openDeezerPlaylistInSync(PLAYLIST)).toBe(false);
+  it('refuses an empty playlist rather than mirroring nothing', async () => {
+    const navigate = vi.fn();
+    window.SoulSyncWebRouter = { navigateToPage: navigate } as never;
+    stubLoad({ id: '123', name: 'Empty', tracks: [] });
+
+    await expect(openDeezerPlaylistInSync(PLAYLIST)).resolves.toBe('That playlist came back empty');
+    expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('does not throw when the Sync page has no url input', () => {
-    document.body.innerHTML = '';
-    window.navigateToPage = vi.fn();
-    window.loadDeezerPlaylist = vi.fn();
-    expect(openDeezerPlaylistInSync(PLAYLIST)).toBe(true);
-    expect(() => vi.runAllTimers()).not.toThrow();
+  it('reports a refused mirror instead of pretending it worked', async () => {
+    const navigate = vi.fn();
+    window.SoulSyncWebRouter = { navigateToPage: navigate } as never;
+    stubLoad({ id: '1', name: 'X', tracks: TRACKS }, { success: false, error: 'nope' });
+
+    await expect(openDeezerPlaylistInSync(PLAYLIST)).resolves.toBe('nope');
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('survives a transport failure', async () => {
+    server.use(http.get('/api/deezer/playlist/:id', () => HttpResponse.error()));
+    await expect(openDeezerPlaylistInSync(PLAYLIST)).resolves.toBeTruthy();
   });
 });
